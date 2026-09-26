@@ -1336,8 +1336,8 @@
          [:seon.agent/graph-exited])
         failure (ex-info (:seon.error/message diagnostic) diagnostic)
         handle (:seon.turn.loop/cluster entry)]
-    ;; one stored, delivered core fault; under `:panic` it throws the panic
-    ;; (cause: `failure`), under `:record` the refusal still throws
+    ;; one stored, delivered core fault (`fault!` throws, caused by `failure`,
+    ;; only when it cannot be stored); the refusal still throws below
     (fault/fault! (env/of handle) failure
                   {:seon.error/layer :seon.agent/agent-graph
                    :seon.error/operation `disarm!

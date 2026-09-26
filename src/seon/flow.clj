@@ -206,15 +206,14 @@
   sliding buffer, `core.async/.../flow/impl.clj:101-102,312-316`). The writer
   decides occurrence and wake (`seon.fault/fault!`); an agent graph's
   environment names its agent, which attributes the fault to that agent's run.
-  A panic (`:panic`, or the fault not stored) is printed on stderr, its causes
-  through `seon.render.value/floor` when unstored (bounded text; the whole
-  values stay on the throwables), and answers true so the caller stops the
+  A fault that could not be stored is printed on stderr, its causes through
+  `seon.render.value/floor` (bounded text; the whole values stay on the
+  throwables), and answers true so the caller stops the
   graph; the step still returns to Flow, because a stop transition must exit
   for the graph's join to complete (`impl.clj:181,317-320`). Answers false
   when the fault was recorded and the graph continues. A supplied `stop!` is
   the owner's stop request (`:seon.fault/stop-request!`): `fault!` calls it
-  BEFORE recording under `:panic`, so the stop never waits on a stalled or
-  failing write, nor on the printing below."
+  when the recording did not commit, before the printing below."
   {:malli/schema [:function
                   [:=> [:cat ::step-var :map :seon.error/throwable] :boolean]
                   [:=> [:cat ::step-var :map :seon.error/throwable [:maybe :seon.fault/stop-request!]] :boolean]]}
@@ -229,19 +228,16 @@
                                  (select-keys (env/of args) [:seon.agent/id]))
                     stop! (assoc :seon.fault/stop-request! stop!)))
     false
-    (catch Throwable panic
-      (let [receipt (:seon.fault/recorded (ex-data panic))]
-        (binding [*out* *err*]
-          ;; a stored fault's whole cause is its evidence; print it only
-          ;; when no store holds it
-          (prn {:seon.error/message (ex-message panic)
-                :seon.error/operation (symbol step-var)
-                :seon.fault/recorded receipt})
-          (when-not (:seon.fault/committed? receipt)
-            (println (render.value/floor panic))
-            (println (render.value/floor failure)))
-          (flush))
-        true)))))
+    (catch Throwable unrecorded
+      (binding [*out* *err*]
+        ;; no store holds this fault, so its whole cause is printed here
+        (prn {:seon.error/message (ex-message unrecorded)
+              :seon.error/operation (symbol step-var)
+              :seon.fault/recorded (:seon.fault/recorded (ex-data unrecorded))})
+        (println (render.value/floor unrecorded))
+        (println (render.value/floor failure))
+        (flush))
+      true))))
 
 (defn- request-graph-stop!
   "Request the whole graph's stop on a virtual thread, never the panicked proc's.
@@ -323,7 +319,7 @@
    (let [options (assoc options :workload workload)
          ;; every arity dispatches through the Var (hot reload); a throwing
          ;; transition or transform is one fault through `fault!`. A recorded
-         ;; fault keeps the proc's state; a panic stops the graph, except
+         ;; fault keeps the proc's state; an unstorable one stops the graph, except
          ;; while the proc already acknowledges a stop
          ;; a panicked proc reads no further input until the graph's stop
          ;; reaches it: Flow reads control regardless of the filter

@@ -747,8 +747,7 @@
     time-limit-ms :seon.sci.eval/time-limit-ms
     caps :seon.sci.admit/caps
     unbounded? :seon.sci.admit/unbounded?
-    read-evidence-sink :seon.db/read-evidence-sink
-    on-core-error :seon.config/on-core-error}]
+    read-evidence-sink :seon.db/read-evidence-sink}]
   (let [started-at (System/nanoTime)
         arm-state (volatile! nil)]
     (try
@@ -786,7 +785,6 @@
                                              (context-projection ctx))
                  :seon.sci.admit/interrupt-fn interrupt-fn
                  :seon.sci.admit/caps caps
-                 :seon.config/on-core-error on-core-error
                  :seon.sci.admit/record invocation-record}
                  unbounded?
                  (assoc :seon.sci.admit/unbounded? true))))))))
@@ -807,7 +805,6 @@
                                              (context-projection ctx))
               :seon.sci.admit/interrupt-fn (constantly nil)
               :seon.sci.admit/caps caps
-              :seon.config/on-core-error :record
               :seon.sci.admit/record record-value})
             (catch Throwable admission-failure
               {:seon.sci.admit/value

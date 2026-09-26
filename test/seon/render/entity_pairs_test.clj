@@ -42,7 +42,6 @@
                     :seon.render/profile (render/agent-render-profile config/defaults)
                     :seon.sci.admit/caps (config/result-caps config/defaults)
                     :seon.sci.eval/time-limit-ms 5000
-                    :seon.config/on-core-error :panic
                     :seon.render/distance 1
                     :seon.render.walk/lookup [:seon.issue/id "entity-pairs-issue"]}
            acquisition (walk/root-acquisition request)]
@@ -129,8 +128,7 @@
                     (render/agent-render-profile config/defaults)
                     :seon.sci.admit/caps
                     (config/result-caps config/defaults)
-                    :seon.sci.eval/time-limit-ms 5000
-                    :seon.config/on-core-error :panic}
+                    :seon.sci.eval/time-limit-ms 5000}
            namespace-units
            (->> (walk/neighborhood request)
                 (filter #(= :seon.ns/name
@@ -200,7 +198,7 @@
                          :seon.render/output output
                          :seon.render/profile (render/agent-render-profile config/defaults)
                          :seon.sci.admit/caps (config/result-caps config/defaults)
-                         :seon.sci.eval/time-limit-ms 5000 :seon.config/on-core-error :panic})))
+                         :seon.sci.eval/time-limit-ms 5000})))
            faces (fn [value] [(selected value :seon.render/ai) (selected value :seon.render/html)])
            ai-default 'seon.cluster.agent/render-identity-ai
            html-default 'seon.cluster.agent/render-identity-html]
@@ -244,7 +242,7 @@
                                  :seon.render/output output
                                  :seon.render/profile (render/agent-render-profile config/defaults)
                                  :seon.sci.admit/caps (config/result-caps config/defaults)
-                                 :seon.sci.eval/time-limit-ms 5000 :seon.config/on-core-error :panic}
+                                 :seon.sci.eval/time-limit-ms 5000}
                           viewer (assoc :seon.agent/id viewer)))))
            agent-value {:seon.agent/id "someone"}]
        (is (= 'seon.cluster.agent/render-identity-ai (selected nil agent-value :seon.render/ai))
@@ -278,7 +276,7 @@
                           :seon.agent/id "db-viewer"
                           :seon.render/profile (render/agent-render-profile config/defaults)
                           :seon.sci.admit/caps (config/result-caps config/defaults)
-                          :seon.sci.eval/time-limit-ms 5000 :seon.config/on-core-error :panic}))]
+                          :seon.sci.eval/time-limit-ms 5000}))]
          (is (= (str "db:" (:max-tx database)) (rendered {:probe/label "x"}))
              "an omitted declared database is the request's own, supplied")
          (is (= (str "db:" (:max-tx earlier)) (rendered {:probe/label "x" :seon.db/db earlier}))

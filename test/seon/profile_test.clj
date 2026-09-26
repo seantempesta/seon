@@ -44,8 +44,7 @@
         effective (test-support/effective-config)
         contract [:=> [:cat :int] :int]]
     (alter-meta! candidate assoc :malli/schema contract)
-    (let [policy {:seon.config/on-core-error :panic
-                  :seon.config.error/max-evidence-bytes
+    (let [policy {:seon.config.error/max-evidence-bytes
                   (:seon.config.error/max-evidence-bytes effective)}]
       ;; Arm as adoption does: the wrapper compiled once, then installed.
       (#'instrument/arm-var! candidate contract projection
@@ -113,7 +112,7 @@
         caps (config/result-caps (test-support/effective-config))
         install #(instrument/wrap-interpreted
                   'my.agents.profiled/value "[:=> [:cat :int] :int]"
-                  projection :panic caps inc
+                  projection caps inc
                   {:seon.program/definition-digest digest-a})
         one (install)
         other (install)]

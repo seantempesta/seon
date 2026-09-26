@@ -26,8 +26,7 @@
                          :seon.cluster.eval/ns [:seon.ns/name 'user]
                          :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
                          :seon.sci.admit/caps (config/result-caps config/defaults)
-                         :seon.sci.eval/time-limit-ms 5000
-                         :seon.config/on-core-error :panic})]
+                         :seon.sci.eval/time-limit-ms 5000})]
         (is (= 3 (:seon.sci.admit/value evaluation)) (pr-str evaluation)))
       (WeakReference. (.-_storage ^PersistentSortedSet (:eavt @connection)))
       (finally (agent/release-context! handle)))))

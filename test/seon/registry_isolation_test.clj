@@ -80,13 +80,11 @@
           (is (nil? (get (:seon.schema.projection/forms a) ::right-only)))
           (is (thrown? Exception (m/schema ::left-only)))
           (instrument/apply! {:seon.schema/projection a
-                              :seon.config/on-core-error :panic
                               :seon.sci.admit/caps caps})
           (let [roots (into {} (map (juxt identity deref))
                             (instrument/instrumented))]
             (is (contains? roots #'value))
             (instrument/apply! {:seon.schema/projection b
-                                :seon.config/on-core-error :record
                                 :seon.sci.admit/caps caps})
             (is (= 7 (value {:seon.schema/projection a ::value 7})))
             (is (= "right" (value {:seon.schema/projection b ::value "right"})))

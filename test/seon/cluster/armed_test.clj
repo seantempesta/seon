@@ -213,8 +213,6 @@
                   :seon.sci.admit/caps (:seon.sci.admit/caps handle)
                   :seon.sci.eval/time-limit-ms
                   (:seon.config.eval/time-limit-ms handle)
-                  :seon.config/on-core-error
-                  (:seon.config/on-core-error handle)
                   :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
                   :seon.agent/id agent-id}))
               definition

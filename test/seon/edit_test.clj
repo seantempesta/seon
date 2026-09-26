@@ -273,7 +273,6 @@
    :seon.cluster.eval/ordinal ordinal
    :seon.boot/cluster-name "default"
    :seon.sci.admit/caps (config/result-caps config/defaults)
-   :seon.config/on-core-error :record
    ;; Handed explicitly, exactly as `seon.sci.eval` hands it.
    :seon.sci.eval/projection-state
    (atom {:seon.schema/projection (db/carried-projection (db/db connection))})

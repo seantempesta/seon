@@ -53,8 +53,7 @@
      :seon.render/value rendered-value,
      :seon.render/profile render-profile,
      :seon.sci.admit/caps caps,
-     :seon.sci.eval/time-limit-ms 2000,
-     :seon.config/on-core-error :panic}
+     :seon.sci.eval/time-limit-ms 2000}
     owning-namespace
     (assoc :seon.render.call/function (symbol (str owning-namespace) "subject"))))
 
@@ -589,8 +588,7 @@
                      :seon.render.walk/lookup [:seon.agent/id "neighborhood-owner"],
                      :seon.render/output :seon.render/ai,
                      :seon.sci.admit/caps caps,
-                     :seon.sci.eval/time-limit-ms 2000,
-                     :seon.config/on-core-error :panic})]
+                     :seon.sci.eval/time-limit-ms 2000})]
         (is (seq units))
         (is (empty? (keep :seon.error/value units)) (pr-str (keep :seon.error/value units)))
         (is (some #(str/includes? (str (:seon.render/output %)) "\"neighborhood-owner\"") units)
@@ -611,8 +609,7 @@
                      :seon.render.walk/lookup [:seon.ns/name fixture-a],
                      :seon.render/output :seon.render/ai,
                      :seon.sci.admit/caps caps,
-                     :seon.sci.eval/time-limit-ms 2000,
-                     :seon.config/on-core-error :panic}
+                     :seon.sci.eval/time-limit-ms 2000}
             at-zero (flat-units (walk/neighborhood (assoc request :seon.render/distance 0)))
             at-one (flat-units (walk/neighborhood (assoc request :seon.render/distance 1)))
             capped (flat-units
@@ -843,8 +840,7 @@
                           :seon.cluster.eval/ns [:seon.ns/name fixture-a]
                           :seon.cluster.eval/source "1"
                           :seon.sci.admit/caps caps
-                          :seon.sci.eval/time-limit-ms 2000
-                          :seon.config/on-core-error :panic})]
+                          :seon.sci.eval/time-limit-ms 2000})]
          (is (str/includes? (pr-str evaluation)
                             (str "PROGRAM CHANGE replaced your definition of " renderer))
              (pr-str evaluation)))
@@ -961,8 +957,7 @@
                         :seon.db/db database
                         :seon.boot/cluster-name cluster-name
                         :seon.sci.admit/caps caps
-                        :seon.sci.eval/time-limit-ms 2000
-                        :seon.config/on-core-error :panic})]
+                        :seon.sci.eval/time-limit-ms 2000})]
        (is (string? cluster-name))
        (is (keyword? (:seon.render.profile/id named)) (pr-str named))
        (is (= :seon.render/profile (:seon.render/refused-member unnamed)))

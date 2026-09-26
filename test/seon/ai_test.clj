@@ -682,8 +682,7 @@
                              {:seon.sci.eval/ctx ctx
                               :seon.cluster.eval/source (:seon.cluster.eval/source form)
                               :seon.sci.eval/time-limit-ms 2000
-                              :seon.sci.admit/caps (config/result-caps @dials)
-                              :seon.config/on-core-error :panic})]
+                              :seon.sci.admit/caps (config/result-caps @dials)})]
                  (swap! evaluated inc)
                  (is (contains? result :seon.sci.admit/value)
                      (str id " must return an evaluated value: " (pr-str result)))

@@ -1163,8 +1163,7 @@
                 (select-keys admitted [:seon.sci.admit/reason :seon.sci.admit/bytes])
                 :seon.sci.admit/interrupt-fn (fn [])
                 :seon.sci.admit/caps {}
-                :seon.sci.admit/unbounded? true
-                :seon.config/on-core-error :record}))}
+                :seon.sci.admit/unbounded? true}))}
       (:seon.sci.admit/record admitted)
       (assoc :seon.sci.admit/record (:seon.sci.admit/record admitted)))
     (select-keys admitted

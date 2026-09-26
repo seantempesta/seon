@@ -185,8 +185,7 @@
                    (eval/evaluate {:seon.schema/projection (schema/handed-projection)
                                    :seon.cluster.eval/source text
                                    :seon.sci.admit/caps (config/result-caps config/defaults)
-                                   :seon.sci.eval/time-limit-ms 2000
-                                   :seon.config/on-core-error :panic}))]
+                                   :seon.sci.eval/time-limit-ms 2000}))]
       (is (schema/valid-candidate-value? (schema/handed-projection)
                                          :seon.sci.eval/reader-event-count-error refusal) text)
       (is (= [:seon.cluster.eval/source offending]

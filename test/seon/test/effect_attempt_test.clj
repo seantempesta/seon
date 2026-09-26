@@ -12,7 +12,7 @@
                               #(sci.eval/evaluate {:seon.sci.eval/ctx ctx :seon.cluster.eval/source source
                                                    :seon.cluster.eval/ns [:seon.ns/name 'my.catalog]
                                                    :seon.sci.admit/caps (config/result-caps config/defaults)
-                                                   :seon.sci.eval/time-limit-ms 5000 :seon.config/on-core-error :panic})))
+                                                   :seon.sci.eval/time-limit-ms 5000})))
                     ::admitted)]
     (is (nil? (:seon.cluster.eval/error evaluation)) (pr-str evaluation))
     (support/transacted! connection [(program/declaration-row (db/carried-projection (db/db connection))

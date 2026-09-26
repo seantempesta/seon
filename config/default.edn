@@ -297,18 +297,12 @@
  ; fault signatures were delivered to no one (measured 2026-09-25).
  :seon.config.error/escalate-to "root"
 
- ; Unit: categorical core-fault disposition.
- ; Provenance: the 2026-07-27 error ruling requires development to fail
- ; loudly and production to degrade only by explicit configuration.
- :seon.config/on-core-error :panic
-
  ; THE DISK GOVERNOR OBSERVES AND REPORTS; IT NEVER QUOTAS WORK. The warning
  ; boundary is crossed when either absolute or proportional usable space is
  ; low. Provenance: disk-burn-forensics-2026-08-04.md found 144 GiB consumed
  ; by project-owned trees and established 50 GiB / 10% as the operator warning
- ; thresholds. Production logs and continues; the development `:panic` policy
- ; stops the boot after recording the warning so low-space incidents cannot be
- ; silently normalized. Neither path imposes a runtime quota.
+ ; thresholds. The boot logs the warning and continues; it imposes no runtime
+ ; quota.
  ; Unit: usable bytes on the managed root's filesystem.
  :seon.config.maintenance/min-usable-bytes 53687091200
  ; Unit: usable / total filesystem bytes.

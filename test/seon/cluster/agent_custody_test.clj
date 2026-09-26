@@ -116,8 +116,7 @@
               invoked (kernel/invoke {:seon.sci.eval/ctx ctx :seon.db/db (db/db lazy-connection)
                                       :seon.fn/sym (:good lazy) :seon.sci.eval/args [41]
                                       :seon.sci.eval/time-limit-ms 5000
-                                      :seon.sci.admit/caps (config/result-caps config/defaults)
-                                      :seon.config/on-core-error :panic})]
+                                      :seon.sci.admit/caps (config/result-caps config/defaults)})]
           (is (= 42 (:seon.sci.admit/value invoked)) (pr-str (select-keys invoked [:seon.error/message])))
           (is (some? (recorded-refusal lazy-connection (:bad lazy)))))
         (is (= before (db/basis-t (db/db parent-connection))) "the caller's branch is unchanged")

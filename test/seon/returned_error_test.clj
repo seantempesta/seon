@@ -26,8 +26,7 @@
                     :seon.sci.eval/ctx ctx
                     :seon.db/db @connection
                     :seon.sci.admit/caps (config/result-caps configuration)
-                    :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)
-                    :seon.config/on-core-error :panic})
+                    :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)})
            shown (:seon.eval/shown result)
            response (repl/response result)
            diagnostic (:seon.sci.admit/value result)]

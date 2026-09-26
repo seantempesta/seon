@@ -255,7 +255,6 @@
                :seon.cluster.wake/channel
                (clojure.core.async/chan (clojure.core.async/sliding-buffer 1))
              :seon.config.eval/time-limit-ms 2000
-             :seon.config/on-core-error :panic
              ;; a refused transaction is recorded as a durable error
              ;; fact (D3), so the handle carries the dials that
              ;; recording needs. No escalate-to: this fixture has no
@@ -1681,7 +1680,6 @@
                   :seon.agent/id "agent-a"
                   :seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
                   :seon.sci.eval/time-limit-ms 2000
-                  :seon.config/on-core-error :panic
                   :seon.sci.admit/caps (:seon.sci.admit/caps cluster)})]
             (is (= 1 (count evaluations))
                 "every rejected reply leaves one terminal evaluation")
@@ -2649,7 +2647,6 @@
                     :seon.agent/id "agent-a"
                     :seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
                     :seon.sci.eval/time-limit-ms 2000
-                    :seon.config/on-core-error :panic
                     :seon.sci.admit/caps (:seon.sci.admit/caps cluster)})]
               (is (= 6 (count evaluations)))
               (is (= (str "(defn ^{:malli/schema [:=> [:cat :int] :int]}"

@@ -136,7 +136,6 @@
                         :seon.cluster.eval/ordinal 0
                         :seon.sci.admit/caps (config/result-caps dials)
                         :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms dials)
-                        :seon.config/on-core-error (:seon.config/on-core-error dials)
                         :seon.render/profile profile})
            value (:seon.sci.admit/value evaluation)
            result-id (:seon.error/result-id value)
@@ -158,7 +157,6 @@
                                         :seon.sci.eval/ctx ctx
                                         :seon.sci.admit/caps (config/result-caps dials)
                                         :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms dials)
-                                        :seon.config/on-core-error (:seon.config/on-core-error dials)
                                         :seon.schema/projection (db/carried-projection (db/db connection))
                                         :seon.render/profile profile
                                         :seon.render.walk/lookup [:seon.agent/id "error-result-agent"]})]

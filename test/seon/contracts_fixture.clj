@@ -41,8 +41,7 @@
      :seon.sci.eval/time-limit-ms 10000
      :seon.sci.admit/caps (config/result-caps effective)
      :seon.render/profile (render/agent-render-profile effective)
-     :seon.schema/projection (:seon.schema/projection (env/of ctx))
-     :seon.config/on-core-error :panic}))
+     :seon.schema/projection (:seon.schema/projection (env/of ctx))}))
 
 (defn submit {:malli/schema [:=> [:cat :seon.db/connection :seon.sci.eval/ctx :seon.schema/value :string] [:tuple :map :seon.schema/value]]}
   [connection ctx _ source]
@@ -70,8 +69,7 @@
    (fn [connection]
      (support/seed-cluster! connection "contracts-plan")
      (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "contracts-plan"
-                    :seon.config/manifest {:seon.config.ai/no-provider true
-                                           :seon.config/on-core-error :panic}})
+                    :seon.config/manifest {:seon.config.ai/no-provider true}})
      (support/transacted! connection (support/agent-tx @connection "contracts-plan" 'my.agents.juniper))
      (let [database (db/db connection)
            projection (schema/projection-from-database database)

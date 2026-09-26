@@ -44,8 +44,7 @@
                     :seon.db/db @connection
                     :seon.db/connection connection
                     :seon.sci.admit/caps (config/result-caps config/defaults)
-                    :seon.sci.eval/time-limit-ms 2000
-                    :seon.config/on-core-error :panic}
+                    :seon.sci.eval/time-limit-ms 2000}
            result (render/call-with-walk-context
                    request #(evaluation/evaluate request))
            shown (repl/value-text result)]

@@ -58,8 +58,7 @@
     :seon.render/context-channel channel
     :seon.turn.loop/completion channel
     :seon.sci.admit/caps caps
-    :seon.config.eval/time-limit-ms 2000
-    :seon.config/on-core-error :panic}))
+    :seon.config.eval/time-limit-ms 2000}))
 
 (deftest preview-cache-is-memory-only-and-invalidates-on-read-changes
   (support/with-database
@@ -94,7 +93,6 @@
                     :seon.render/captured-calls calls
                     :seon.render/captured-invocations invocations
                     :seon.sci.admit/caps caps :seon.sci.eval/time-limit-ms 2000
-                    :seon.config/on-core-error :panic
                     :seon.agent/id "memory-preview-agent"
                     :seon.turn.loop/cluster cluster}
            preview
@@ -179,8 +177,7 @@
                         {:seon.cluster.eval/source source
                          :seon.sci.eval/ctx ctx
                          :seon.sci.admit/caps caps
-                         :seon.sci.eval/time-limit-ms 2000
-                         :seon.config/on-core-error :panic})))]
+                         :seon.sci.eval/time-limit-ms 2000})))]
        (testing "entity source uses the public omitted-database pull"
          (is (= '(seon.db/pull (quote [*])
                                [:my.plan.item/id "source-provenance"])
@@ -222,8 +219,7 @@
                     :seon.render.call/source-output? true
                     :seon.render.call/id [:source-test/default]
                     :seon.sci.admit/caps caps
-                    :seon.sci.eval/time-limit-ms 2000
-                    :seon.config/on-core-error :panic}
+                    :seon.sci.eval/time-limit-ms 2000}
            decision (render/selection request)]
        (is (= 'seon.render/render-default-ai-source
               (:seon.render.selection/selected decision)))))))
@@ -278,7 +274,6 @@
               :seon.render/captured-calls captured-calls
               :seon.render/captured-invocations captured-invocations
               :seon.sci.admit/caps caps :seon.sci.eval/time-limit-ms 2000
-              :seon.config/on-core-error :panic
               :seon.agent/id "source-contract-agent"
               :seon.turn.loop/cluster cluster
               :seon.agent/routing (atom {})}

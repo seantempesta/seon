@@ -112,8 +112,7 @@
                               [:seon.db/db :seon.db/database-value]
                               [:seon.fn/sym :seon.fn/sym]
                               [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms]
-                              [:seon.sci.admit/caps :seon.sci.admit/caps]
-                              [:seon.config/on-core-error :seon.config/on-core-error]] [:fn malli.core/schema?] :seon.schema/arguments]
+                              [:seon.sci.admit/caps :seon.sci.admit/caps]] [:fn malli.core/schema?] :seon.schema/arguments]
                   [:map [:seon.test.accretion/arguments :seon.schema/arguments]
                    [:seon.test.accretion/actual :seon.schema/value]
                    [:seon.test.accretion/expected :string]
@@ -128,9 +127,7 @@
           :seon.sci.eval/args arguments
           :seon.sci.eval/time-limit-ms
           (:seon.sci.eval/time-limit-ms request)
-          :seon.sci.admit/caps (:seon.sci.admit/caps request)
-          :seon.config/on-core-error
-          (:seon.config/on-core-error request)})
+          :seon.sci.admit/caps (:seon.sci.admit/caps request)})
         returned (:seon.sci.admit/value invocation)
         ;; A call that threw returned nothing to check: its whole error is the
         ;; actual. Only the armed output check's refusal carries the returned

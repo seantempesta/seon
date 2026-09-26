@@ -21,7 +21,6 @@
                     :seon.sci.admit/caps caps
                     :seon.sci.eval/ctx nil
                     :seon.config.eval/time-limit-ms 1000
-                    :seon.config/on-core-error :panic
                     :seon.db.process/id "web-performance-test"}
             state {:seon.turn.loop/cluster handle
                    :seon.render.web/registration

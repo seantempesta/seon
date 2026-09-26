@@ -50,7 +50,7 @@
         source (io/file directory "prospective.clj")]
     (try
       (spit config
-            "{:seon.config/on-core-error :log\n :changed-tests {:enabled false}}\n")
+            "{:changed-tests {:enabled false}}\n")
       (let [result
             (run-process
              {::command [(str (io/file repo-root "bin/seon-hook"))]
@@ -89,7 +89,7 @@
                 (is (hook-exit-honest? result) (::stderr result))
                 (json/parse-string (str/trim (::stdout result)) true)))]
     (try
-      (spit config "{:seon.config/on-core-error :log}\n")
+      (spit config "{}\n")
       (spit source "(ns multi)\n\n(defn f [x]\n  (inc x))\n")
       (let [response (pre [{:old_string "[x]" :new_string "[y]"}
                            {:old_string "(inc x))" :new_string "(inc y)"}])]
@@ -140,7 +140,7 @@
                            :new_string new-string}})}))]
     (try
       (spit config
-            (str "{:seon.config/on-core-error :log\n"
+            (str "{"
                  " :changed-tests {:enabled false}\n"
                  " :review {:enabled false}}\n"))
       (spit source "(ns prospective)\n(def value 1)\n(def other 1)\n")
@@ -185,7 +185,7 @@
             ::input (json/generate-string event)}))]
     (try
       (spit config
-            (str "{:seon.config/on-core-error :log\n"
+            (str "{"
                  " :lint {:enabled false}\n"
                  " :markdown-lint {:enabled false}\n"
                  " :docstring-lint {:enabled false}\n"
@@ -242,7 +242,7 @@
                    "*** End Patch")]
     (try
       (spit config
-            (str "{:seon.config/on-core-error :log\n"
+            (str "{"
                  " :feedback {:max-tokens 10000"
                  " :max-advisory-findings 3}\n"
                  " :docstring-lint {:enabled false}\n"
@@ -297,7 +297,7 @@
       (spit fake-kondo "#!/bin/sh\necho not-edn\n")
       (.setExecutable fake-kondo true)
       (spit config
-            "{:seon.config/on-core-error :log\n :docstring-lint {:enabled false}\n :changed-tests {:enabled false}}\n")
+            "{:docstring-lint {:enabled false}\n :changed-tests {:enabled false}}\n")
       (spit source "(ns valid)\n")
       (let [result
             (run-process
@@ -351,7 +351,7 @@
             "#!/bin/sh\nprintf x >> \"$SEON_REVIEW_TEST_COUNT\"\nexit 1\n")
       (.setExecutable fake-agy true)
       (spit config
-            (str "{:seon.config/on-core-error :log\n"
+            (str "{"
                  " :lint {:enabled false}\n"
                  " :markdown-lint {:enabled false}\n"
                  " :docstring-lint {:enabled false}\n"
@@ -492,7 +492,7 @@
         absent (io/file repo-root "db.clj")]
     (try
       (spit config
-            (str "{:seon.config/on-core-error :log\n"
+            (str "{"
                  " :changed-tests {:enabled false}\n"
                  " :review {:enabled false}}\n"))
       (is (not (.exists absent))
@@ -531,7 +531,7 @@
         source (io/file directory "prospective.clj")]
     (try
       (spit config
-            (str "{:seon.config/on-core-error :log\n"
+            (str "{"
                  " :changed-tests {:enabled false}\n"
                  " :review {:enabled false}}\n"))
       (spit source "(ns prospective)\n(def value 1)\n")
@@ -578,7 +578,7 @@
 (defn- shell-write-config
   "A hook config whose derived scan is scoped to one fixture root."
   [root]
-  (str "{:seon.config/on-core-error :log\n"
+  (str "{"
        " :lint {:enabled true}\n"
        " :markdown-lint {:enabled false}\n"
        " :docstring-lint {:enabled false}\n"

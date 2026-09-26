@@ -71,8 +71,7 @@
                       :seon.render/captured-calls calls
                       :seon.render/candidate-call-ids #{call-id}
                       :seon.sci.admit/caps caps
-                      :seon.sci.eval/time-limit-ms 2000
-                      :seon.config/on-core-error :panic})]
+                      :seon.sci.eval/time-limit-ms 2000})]
        (sci/binding [sci/ns (sci/create-ns namespace-name)]
          (replace-renderer!
           connection ctx
@@ -156,7 +155,6 @@
                       :seon.agent/id "root" :seon.sci.eval/ctx ctx
                       :seon.sci.admit/caps (config/result-caps config/defaults)
                       :seon.sci.eval/time-limit-ms (* 1000 support/event-backstop-seconds)
-                      :seon.config/on-core-error :record
                       :seon.render/profile (render/agent-render-profile config/defaults)})
            invoke kernel/invoke
            calls (atom 0)]

@@ -248,8 +248,7 @@
   ;; connection, SCI ctx, environment or projection) instead of copying it.
   (let [request (cond-> {:seon.sci.admit/value value
                          :seon.sci.admit/interrupt-fn (constantly nil)
-                         :seon.sci.admit/caps caps
-                         :seon.config/on-core-error :record}
+                         :seon.sci.admit/caps caps}
                   projection (assoc :seon.schema/projection projection))
         admitted (admit/admit request)]
     (if-some [marker (admit/missing-marker admitted)]
@@ -309,8 +308,7 @@
   [source failure caps projection]
   (let [request (cond-> {:seon.sci.admit/value source
                          :seon.sci.admit/interrupt-fn (constantly nil)
-                         :seon.sci.admit/caps caps
-                         :seon.config/on-core-error :record}
+                         :seon.sci.admit/caps caps}
                   projection (assoc :seon.schema/projection projection))
         admitted (admit/admit-partitioned
                   request (classifying-error-data source failure))]
@@ -504,8 +502,7 @@
         admitted (admit/admit-value
                   (cond-> {:seon.sci.admit/value value
                            :seon.sci.admit/interrupt-fn (constantly nil)
-                           :seon.sci.admit/caps caps
-                           :seon.config/on-core-error :record}
+                           :seon.sci.admit/caps caps}
                     (:seon.schema/projection request)
                     (assoc :seon.schema/projection (:seon.schema/projection request))))
         shown (render.value/render-ai-data (render.value/prepare unit))
@@ -2419,9 +2416,9 @@
 
 (def config-expectation-present-generator
   (gen/let [base error-base-generator key? gen/boolean]
-    (assoc base :seon.config/error-key :seon.config/on-core-error
+    (assoc base :seon.config/error-key :seon.config.eval/time-limit-ms
            (if key? :seon.error/expected-key :seon.error/expected-shape)
-           (if key? :seon.config/on-core-error (apply str (repeat 64 "0"))))))
+           (if key? :seon.config.eval/time-limit-ms (apply str (repeat 64 "0"))))))
 
 (def stop-target-present-generator
   (gen/let [action (gen/elements [:return :abort-operation :stop-graph]) evidence evidence-complete-generator]

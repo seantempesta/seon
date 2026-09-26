@@ -375,9 +375,7 @@
                  (admit/admit-value
                   (cond-> {:seon.sci.admit/value value
                            :seon.sci.admit/interrupt-fn (fn [])
-                           :seon.sci.admit/caps caps
-                           :seon.config/on-core-error
-                           (:seon.config/on-core-error effective)}
+                           :seon.sci.admit/caps caps}
                     instance-projection
                     (assoc :seon.schema/projection instance-projection)))
                artifact (render.value/artifact admitted)
@@ -849,27 +847,12 @@
                  (< (:seon.operator.footprint/usable-ratio footprint)
                     (:seon.config.maintenance/min-usable-ratio effective)))]
     (when low?
-      (let [message
-            (format
-             (str "LOW DISK SPACE under %s: %.2f GiB usable (%.1f%%); "
-                  (if (= :panic (:seon.config/on-core-error effective))
-                    "the development core-error policy stops this boot."
-                    "production logs the observation and continues."))
-             managed-root
-             (/ (double (:seon.operator.footprint/usable-bytes footprint))
-                1073741824.0)
-             (* 100.0 (:seon.operator.footprint/usable-ratio footprint)))]
-        (log/warn message)
-        (when (= :panic (:seon.config/on-core-error effective))
-          (throw
-           (ex-info message
-                    {:seon.operator/low-disk-space managed-root
-                     :seon.error/message message
-                     :seon.operator/footprint footprint
-                     :seon.config.maintenance/min-usable-bytes
-                     (:seon.config.maintenance/min-usable-bytes effective)
-                     :seon.config.maintenance/min-usable-ratio
-                     (:seon.config.maintenance/min-usable-ratio effective)})))))
+      (log/warn
+       (format "LOW DISK SPACE under %s: %.2f GiB usable (%.1f%%); the boot continues."
+               managed-root
+               (/ (double (:seon.operator.footprint/usable-bytes footprint))
+                  1073741824.0)
+               (* 100.0 (:seon.operator.footprint/usable-ratio footprint)))))
     footprint))
 
 (defn write-advertisement!
@@ -2470,8 +2453,7 @@
         result (schema/call-with-projection
                 projection
                 #(instrument/apply!
-                  (cond-> {:seon.config/on-core-error (:seon.config/on-core-error effective)
-                           :seon.sci.admit/caps (config/result-caps effective)
+                  (cond-> {:seon.sci.admit/caps (config/result-caps effective)
                            :seon.schema/projection projection
                            ;; The cluster's supplied-default rows: each contract's
                            ;; call preparation is decided from them at arming.
@@ -2485,20 +2467,6 @@
               (not (pos? (or (:seon.instrument/instrumented result) 0))))
       (refused! "Boot JVM instrumentation did not arm the loaded program." result))
     result))
-
-(defn- arming-refused?
-  "True when a development adoption's arming failed.
-
-  A registration error always refuses. Under `:panic`, arming nothing refuses
-  only when something was to be armed: a publication that changes no
-  definition (a comment, a submodule pin) has no arming identities (#63)."
-  {:malli/schema [:=> [:cat :map :seon.reconcile/adopt-identities :map] :boolean]}
-  [effective arming-identities result]
-  (boolean
-   (or (:seon.instrument/registration-observation result)
-       (and (= :panic (:seon.config/on-core-error effective))
-            (seq arming-identities)
-            (not (pos? (or (:seon.instrument/instrumented result) 0)))))))
 
 (defn- development-arming-identities
   "Reloaded Vars and functions whose contracts refer to changed schemas."
@@ -2692,9 +2660,7 @@
                          (refused! "Development instrumentation configuration is unavailable."
                                    effective))
                      result (instrument/apply!
-                             {:seon.config/on-core-error
-                              (:seon.config/on-core-error effective)
-                              :seon.flow/commit-fault!
+                             {:seon.flow/commit-fault!
                               (:seon.flow/commit-fault! @(:seon.sci.kernel/program-snapshot ctx))
                               :seon.sci.admit/caps (config/result-caps effective)
                               :seon.config.error/max-evidence-bytes
@@ -2708,7 +2674,9 @@
                                                   (into [] (comp (filter #(= :seon.fn/sym (first %)))
                                                                  (map second))
                                                         arming-identities))})]
-                 (when (arming-refused? effective arming-identities result)
+                 ;; a registration error refuses; arming nothing (a publication
+                 ;; changing no definition) is not a refusal (#63)
+                 (when (:seon.instrument/registration-observation result)
                    (refused! "Development JVM instrumentation did not restore contracts."
                              result)))))
             ;; The record commits before the loaded identity names it, so no
@@ -3335,8 +3303,7 @@
                                      :seon.render.web/render-channel
                                      :seon.db.process/id
                                      :seon.sci.eval/ctx
-                                     :seon.config.eval/time-limit-ms
-                                     :seon.config/on-core-error])))]
+                                     :seon.config.eval/time-limit-ms])))]
     (if-let [unavailable (:seon.render.web/wanted-port served)]
       (log/warn (str "seon " cluster-name " view: port " unavailable
                      " was taken, serving on "
@@ -3391,7 +3358,6 @@
               :seon.sci.admit/caps (config/result-caps dials)
               :seon.config.eval/time-limit-ms
               (:seon.config.eval/time-limit-ms dials)
-              :seon.config/on-core-error (:seon.config/on-core-error dials)
               :seon.config.error/recurrence-limit
               (:seon.config.error/recurrence-limit dials)
               ;; the fault family's own bound rides with the loop's other
@@ -3524,8 +3490,6 @@
               :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
               :seon.config.eval/time-limit-ms
               (:seon.config.eval/time-limit-ms handle)
-              :seon.config/on-core-error
-              (:seon.config/on-core-error handle)
               ;; Execution provenance for web effects.
               :seon.db.process/id (:seon.db.process/id handle)}
         {graph :seon.flow/graph

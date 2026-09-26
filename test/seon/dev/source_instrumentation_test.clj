@@ -52,12 +52,11 @@
                   #'config/effective
                   (fn [_ _]
                     (is (identical? projection (schema/handed-projection)))
-                    {:seon.config/on-core-error :panic})
+                    {})
                   #'instrument/remove!
                   (fn [] (swap! events conj :unstrument))
                   #'instrument/apply!
                   (fn [request]
-                    (is (= :panic (:seon.config/on-core-error request)))
                     (is (identical? projection (schema/handed-projection)))
                     (swap! events conj :restore)
                     {:seon.instrument/registered 1

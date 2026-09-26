@@ -161,8 +161,7 @@
     :seon.cluster.eval/ns [:seon.ns/name 'user]
     :seon.sci.eval/ctx ctx
     :seon.sci.admit/caps caps
-    :seon.sci.eval/time-limit-ms 5000
-    :seon.config/on-core-error :panic}))
+    :seon.sci.eval/time-limit-ms 5000}))
 
 (deftest indexed-custody-returning-surface-is-derived-and-exact
   (test-support/with-database

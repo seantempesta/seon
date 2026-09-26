@@ -35,8 +35,7 @@
                                       :seon.cluster.eval/ns [:seon.ns/name 'my.agents.plan-api]
                                       :seon.cluster.eval/source source
                                       :seon.sci.admit/caps (config/result-caps (support/effective-config))
-                                      :seon.sci.eval/time-limit-ms 5000
-                                      :seon.config/on-core-error :panic})]
+                                      :seon.sci.eval/time-limit-ms 5000})]
                          (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
                          (:seon.sci.admit/value result)))
             item-id (id/id "Verify total")

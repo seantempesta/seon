@@ -205,7 +205,6 @@
       {:seon.db/connection connection :seon.agent/id agent-id :seon.turn/id turn-id
        :seon.cluster.eval/ordinal 0 :seon.boot/cluster-name cluster-name
        :seon.sci.admit/caps (config/result-caps effective)
-       :seon.config/on-core-error (:seon.config/on-core-error effective)
        :seon.sci.eval/projection-state (:seon.sci.eval/projection-state (meta connection))
        :seon.env/environment (env/scope (env/of ctx) {:seon.agent/id agent-id :seon.turn/id turn-id
                                                       :seon.cluster.eval/ordinal 0})
@@ -2183,8 +2182,7 @@
         (schema/call-with-projection
          projection
          #(instrument/apply!
-           (cond-> {:seon.config/on-core-error (:seon.config/on-core-error effective)
-                    :seon.sci.admit/caps (config/result-caps effective)
+           (cond-> {:seon.sci.admit/caps (config/result-caps effective)
                     :seon.schema/projection projection
                     ;; The request's supplied-default rows the contracts plan from.
                     :seon.db/db database
@@ -2329,8 +2327,8 @@
                 ;; exit writes, on this thread and the exit watcher's: a declared
                 ;; caller mistake (admission evidence disagreed, or a recording
                 ;; connection outside the caller's custody) is returned; any other
-                ;; refusal is a stored, delivered core fault, which throws under
-                ;; :panic and leaves the request unsuccessful under :record.
+                ;; refusal is a stored, delivered core fault, which leaves the
+                ;; request unsuccessful (it throws only when it cannot be stored).
                 core-fault! #(fault/fault!
                               (env/environment {:seon.boot/cluster-name cluster :seon.db/connection recording
                                                 :seon.sci.admit/caps (config/result-caps effective)})

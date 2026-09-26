@@ -534,8 +534,7 @@
                     evaluation
                     (binding [db/*read-evidence-sink* captured]
                       (sci.eval/evaluate
-                       (merge (select-keys cluster [:seon.sci.admit/caps
-                                                   :seon.config/on-core-error])
+                       (merge (select-keys cluster [:seon.sci.admit/caps])
                               {:seon.cluster.eval/source source
                                :seon.cluster.eval/ns [:seon.ns/name namespace-name]
                                :seon.sci.eval/ctx ctx
@@ -1845,7 +1844,7 @@
             (doseq [[name metadata expected] [["runtime-observed" (str "^{:seon.test/fixture-observation " (pr-str reason) "} ") reason]
                                              ["runtime-ordinary" "" nil]]]
               (let [evaluation (sci.eval/evaluate
-                                (merge (select-keys cluster [:seon.sci.admit/caps :seon.config/on-core-error])
+                                (merge (select-keys cluster [:seon.sci.admit/caps])
                                        {:seon.cluster.eval/source (str "(clojure.test/deftest " metadata name " (clojure.test/is true))")
                                         :seon.cluster.eval/ns [:seon.ns/name namespace-name]
                                         :seon.sci.eval/ctx ctx :seon.sci.eval/time-limit-ms 10000

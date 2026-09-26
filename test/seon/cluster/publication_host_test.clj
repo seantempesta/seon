@@ -45,7 +45,7 @@
                                (assoc-in [:schema-admission :enabled] true)
                                (assoc-in [:current-source :root]
                                          (str (.relativize (.toPath repository) (.toPath root)))))))
-             (spit (io/file root "invalid.edn") "{:seon.config/on-core-error :invalid}")
+             (spit (io/file root "invalid.edn") "{:seon.config.eval/time-limit-ms :invalid}")
              (with-redefs [schema/projection-from-database
                            (fn [database & arguments]
                              (when (= (registry/cluster-branch fork-name)

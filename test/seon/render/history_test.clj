@@ -20,8 +20,7 @@
    :seon.render/value value
    :seon.render/output :seon.render/form
    :seon.sci.admit/caps caps
-   :seon.sci.eval/time-limit-ms 5000
-   :seon.config/on-core-error :record})
+   :seon.sci.eval/time-limit-ms 5000})
 
 (deftest form-is-the-third-output-of-the-existing-selection-chain
   (support/with-database

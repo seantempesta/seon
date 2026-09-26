@@ -1002,10 +1002,9 @@
 ;; found that day were found by thread dump. R41 says development must be
 ;; unable to miss it. The mechanism is the stderr line `seon.instrument/apply!`
 ;; already uses (`instrument.clj:411-414`), which is the only one available
-;; here: this namespace sits below `seon.db`, so the
-;; `:seon.config/on-core-error` fact is unreadable, and a panic would be wrong
-;; regardless — the fallback is the LEGITIMATE bootstrap path before any
-;; projection exists, so panicking would make boot impossible. Loud therefore
+;; here: this namespace sits below `seon.db`, so no fault can be recorded, and
+;; a throw would be wrong regardless — the fallback is the LEGITIMATE bootstrap
+;; path before any projection exists, so throwing would make boot impossible. Loud therefore
 ;; means NAMED AND COUNTED, and production-bounded means one line per calling
 ;; function per decade of occurrences: the 2026-08-07 loop would have printed
 ;; six lines, not a quarter of a million.

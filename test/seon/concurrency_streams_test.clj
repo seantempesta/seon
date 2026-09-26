@@ -36,7 +36,6 @@
    :seon.db/connection connection
    :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)
    :seon.sci.eval/time-limit-ms 1000
-   :seon.config/on-core-error :record
    :seon.agent/id agent-id
    :seon.sci.admit/caps render-caps})
 

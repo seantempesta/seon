@@ -21,7 +21,6 @@
                     :seon.cluster.eval/source source
                     :seon.sci.admit/caps (config/result-caps config/defaults)
                     :seon.sci.eval/time-limit-ms 5000
-                    :seon.config/on-core-error :panic
                     :seon.sci.eval/loaded-identity identity-atom})))
 
 (defn- on-another-thread!

@@ -22,8 +22,7 @@
            environment (env/environment
                         {:seon.boot/cluster-name "uncaught-world"
                          :seon.db/connection connection
-                         :seon.sci.admit/caps (config/result-caps (support/effective-config))
-                         :seon.config/on-core-error :record})
+                         :seon.sci.admit/caps (config/result-caps (support/effective-config))})
            before (exception-errors connection)
            thread (.unstarted (Thread/ofVirtual)
                               (fn [] (throw (ex-info message {:seon.env/environment environment}))))]

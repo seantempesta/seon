@@ -42,8 +42,7 @@
                                :seon.cluster.eval/ns [:seon.ns/name 'fixture.core-functions]
                                :seon.cluster.eval/source (pr-str (list 'seon.schema/register! schema-key form))
                                :seon.sci.eval/time-limit-ms 10000
-                               :seon.sci.admit/caps (config/result-caps config/defaults)
-                               :seon.config/on-core-error :panic})]
+                               :seon.sci.admit/caps (config/result-caps config/defaults)})]
                   (is (= schema-key (:seon.sci.admit/value result)) (pr-str result))
                   (when-let [row (:seon.program/row result)]
                     (let [written (db/transact! connection [(program/canonical-row row)])]
@@ -58,8 +57,7 @@
                                    :seon.cluster.eval/source source
                                    :seon.test.accretion/gate-set []
                                    :seon.sci.eval/time-limit-ms 10000
-                                   :seon.sci.admit/caps (config/result-caps config/defaults)
-                                   :seon.config/on-core-error :panic}
+                                   :seon.sci.admit/caps (config/result-caps config/defaults)}
                           candidate
                           (evaluation/evaluate-candidate
                            (assoc request :seon.test.accretion/evaluation (evaluation/evaluate request)))]
@@ -70,8 +68,7 @@
                         :seon.config.test/auto-check-cases 25
                         :seon.test.accretion/seed 424242
                         :seon.sci.eval/time-limit-ms 10000
-                        :seon.sci.admit/caps (config/result-caps config/defaults)
-                        :seon.config/on-core-error :panic})))
+                        :seon.sci.admit/caps (config/result-caps config/defaults)})))
             original (check run-two-definition)
             valid (check "(defn row-count {:malli/schema [:=> [:cat [:vector :example/order-row]] :int]} [rows] (count rows))")]
         (is (= :failed (:seon.test.accretion/status original)) (pr-str original))

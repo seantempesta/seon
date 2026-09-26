@@ -463,8 +463,7 @@
       :seon.agent/id agent-id
       :seon.sci.admit/caps (config/result-caps settings)
       :seon.sci.eval/time-limit-ms
-      (:seon.config.eval/time-limit-ms settings)
-      :seon.config/on-core-error (:seon.config/on-core-error settings)})))
+      (:seon.config.eval/time-limit-ms settings)})))
 
 (defn- assert-transcripts!
   [instance database specs]

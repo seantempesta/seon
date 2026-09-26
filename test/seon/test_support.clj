@@ -362,9 +362,7 @@
                 :seon.sci.eval/ctx ctx
                 :seon.sci.admit/caps (config/result-caps decisions)
                 :seon.sci.eval/time-limit-ms
-                (:seon.config.eval/time-limit-ms decisions)
-                :seon.config/on-core-error
-                (:seon.config/on-core-error decisions)}
+                (:seon.config.eval/time-limit-ms decisions)}
          namespace-name (assoc :seon.cluster.eval/ns
                                [:seon.ns/name namespace-name])))))))
 
@@ -402,7 +400,6 @@
             :seon.sci.admit/caps (config/result-caps decisions)
             :seon.config.eval/time-limit-ms
             (:seon.config.eval/time-limit-ms decisions)
-            :seon.config/on-core-error (:seon.config/on-core-error decisions)
             :seon.config.error/recurrence-limit
             (:seon.config.error/recurrence-limit decisions)
             :seon.config.error/max-evidence-bytes

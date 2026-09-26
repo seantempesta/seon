@@ -37,7 +37,7 @@
                        (RuntimeException. "wrapper" (ex-info "buried" data)))]
           (doseq [entry entries]
             (let [authored (:malli/schema (meta entry))
-                  policy {:seon.config/on-core-error :panic}]
+                  policy {}]
               (#'instrument/arm-var! entry authored projection
                                      (#'instrument/compiled-wrapper
                                       projection (symbol entry) authored
@@ -189,13 +189,13 @@
            diagnostic (instrument/wrap-interpreted
                        'seon.error.refusal/diagnostic
                        (pr-str (:malli/schema (meta #'error.refusal/diagnostic)))
-                       projection :panic caps error.refusal/diagnostic)
+                       projection caps error.refusal/diagnostic)
            accepted (instrument/wrap-interpreted
                      'x/accepted "[:function [:=> [:cat :map] :x/y-error] [:=> [:cat :inst :qualified-keyword :qualified-symbol :map] :x/y-error]]"
-                     projection :panic caps diagnostic)
+                     projection caps diagnostic)
            refused (instrument/wrap-interpreted
                     'x/refused "[:function [:=> [:cat :map] :x/z-error] [:=> [:cat :inst :qualified-keyword :qualified-symbol :map] :x/z-error]]"
-                    projection :panic caps diagnostic)]
+                    projection caps diagnostic)]
        (doseq [args [[value] [(:seon.error/at value) :x/y 'a/b {:x/member 1}]]]
         (is (= value (apply accepted args)))
         (let [result (test-support/refusal-data #(apply refused args))]

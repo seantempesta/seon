@@ -32,8 +32,7 @@
                       :seon.db/connection connection
                       :seon.cluster.eval/source "(my.program/ns-unmap! 'seon.turn/open?)"
                       :seon.sci.admit/caps (config/result-caps decisions)
-                      :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms decisions)
-                      :seon.config/on-core-error :panic})]
+                      :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms decisions)})]
          (is (= 'seon.turn/open? (get-in result [:seon.sci.admit/value :seon.program/blocked-subject]))
              (pr-str (select-keys result [:seon.cluster.eval/error :seon.eval/shown]))))
        (support/transacted! connection [(support/program-fn-row (db/db connection) (symbol "my.program" "disposable") "(defn disposable [] 42)")])
@@ -65,8 +64,7 @@
                        {:seon.sci.eval/ctx fork :seon.db/db (db/db connection)
                         :seon.db/connection connection :seon.cluster.eval/source source
                         :seon.sci.admit/caps caps
-                        :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms decisions)
-                        :seon.config/on-core-error :panic})
+                        :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms decisions)})
                value (:seon.sci.admit/value result)]
            (is (= expected (:seon.program/advised-operation value)) (pr-str result))
            (is (= expected (get-in value [:seon.error/expected])))

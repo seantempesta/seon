@@ -57,8 +57,7 @@
                         :seon.sci.eval/ctx ctx
                         :seon.render/profile profile
                         :seon.sci.admit/caps caps
-                        :seon.sci.eval/time-limit-ms 30000
-                        :seon.config/on-core-error :panic})
+                        :seon.sci.eval/time-limit-ms 30000})
            ai (transcript/render-run-ai unit)
            html (transcript/render-run-html unit)
            request {:seon.db/db database
@@ -68,8 +67,7 @@
                     :seon.render/value run
                     :seon.render/profile profile
                     :seon.sci.admit/caps caps
-                    :seon.sci.eval/time-limit-ms 30000
-                    :seon.config/on-core-error :panic}]
+                    :seon.sci.eval/time-limit-ms 30000}]
        (is (integer? (:seon.turn/agent unit))
            "generic producer normalization carries the agent as a database ref")
        (is (str/includes? ai "interrupted before the reply arrived"))

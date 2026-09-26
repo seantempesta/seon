@@ -32,8 +32,7 @@
                     :seon.agent/id "supplied-database-agent"
                     :seon.cluster.eval/source source
                     :seon.sci.admit/caps (config/result-caps config/defaults)
-                    :seon.sci.eval/time-limit-ms 5000
-                    :seon.config/on-core-error :panic})
+                    :seon.sci.eval/time-limit-ms 5000})
            values (:seon.sci.admit/value result)]
        (is (nil? (:seon.cluster.eval/error result))
            (:seon.cluster.eval/error result))

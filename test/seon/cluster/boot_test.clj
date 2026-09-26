@@ -503,7 +503,7 @@
    (fn [connection]
      (let [cluster-name (str "status-faulted-" (random-uuid))
            live (some #(when (map? %) %) (vals @runtime/running-instances))
-           _ (support/apply-config! connection cluster-name {:seon.config/on-core-error :record})
+           _ (support/apply-config! connection cluster-name {})
            receipt (fault/fault! (env/environment {:seon.boot/cluster-name cluster-name
                                                    :seon.db/connection connection})
                                  (IllegalStateException. "status regression fault")

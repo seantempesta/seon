@@ -18,7 +18,6 @@
       {:seon.cluster/name (:seon.boot/cluster-name (env/of ctx))
        :seon.db/connection (:seon.db/connection handle)
        :seon.sci.eval/ctx ctx
-       :seon.config/on-core-error :record
        :seon.db.process/id "render-cache-test"})
      :seon.render.web/registration (atom {"root" 1})
      :seon.render.web/latest-packages (atom {})

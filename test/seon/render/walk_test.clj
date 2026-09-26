@@ -24,8 +24,7 @@
    :seon.render/output output
    :seon.render/distance distance
    :seon.sci.admit/caps caps
-   :seon.sci.eval/time-limit-ms 5000
-   :seon.config/on-core-error :record}))
+   :seon.sci.eval/time-limit-ms 5000}))
 
 (defn- seed-agent-and-inbox!
   [connection]

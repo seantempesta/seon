@@ -304,7 +304,7 @@
       (let [environment (recording-environment connection)
             ;; a panic stops the graph after one throw; recording continues
             _ (test-support/apply-config! connection "seon.flow-test"
-                                          {:seon.config/on-core-error :record})
+                                          {})
             in (async/chan work-throws)
             transactions (database-events connection)
             {::sut/keys [graph executor started]}
@@ -354,11 +354,11 @@
    (when (= 1 message) (throw (ex-info "panicking work" {::message message})))
    [state nil]))
 
-(deftest a-panicking-transform-stops-its-graph-and-a-recorded-one-continues
-  (doseq [mode [:panic :record]]
+(deftest ^{:seon/tasks #{"6b8d26a16ce7"}} a-recorded-transform-fault-keeps-its-graph-running
+  (let [mode :record]
     (test-support/with-database
       (fn [connection]
-        (test-support/apply-config! connection "seon.flow-test" {:seon.config/on-core-error mode})
+        (test-support/apply-config! connection "seon.flow-test" {})
         (let [in (async/chan 3)
               seen (atom [])
               _ (async/onto-chan!! in [0 1 2] false)
@@ -376,14 +376,10 @@
                                        :seon.await/bound (join-bound 2000)
                                        :seon.await/diagnostic {:seon.error/layer :flow
                                                                :seon.error/operation ::panicking-work}})]
-          (if (= :panic mode)
-            (do (is (nil? (join!)) "the panicked graph exits without an outside stop")
-                (is (= [0 1] @seen) "the queued input never executes")
-                (is (= 2 (async/poll! in)) "it stays queued"))
-            (do (test-support/await-event! seen ::third-input #(= [0 1 2] %))
-                (is (= [0 1 2] @seen) "a recorded fault keeps the graph running")
-                (flow/stop graph)
-                (is (nil? (join!))))))))))
+          (test-support/await-event! seen ::third-input #(= [0 1 2] %))
+          (is (= [0 1 2] @seen) (str mode ": a recorded fault keeps the graph running"))
+          (flow/stop graph)
+          (is (nil? (join!))))))))
 
 ;;; Lost-error seams P1: a panicked proc must not strand its graph. Flow fans
 ;;; control out through per-proc taps of 10 behind a control channel of 10
@@ -406,7 +402,7 @@
 (deftest a-panicked-proc-with-saturated-control-still-stops-its-graph
   (test-support/with-database
     (fn [connection]
-      (test-support/apply-config! connection "seon.flow-test" {:seon.config/on-core-error :panic})
+      (test-support/apply-config! connection "seon.flow-test" {})
       (let [in (async/chan 3)
             seen (atom [])
             entered (CountDownLatch. 1)

@@ -31,8 +31,7 @@
                    #(admit/admit-value
                      {:seon.sci.admit/value missing
                       :seon.sci.admit/caps {}
-                      :seon.sci.admit/interrupt-fn (fn [])
-                      :seon.config/on-core-error :record}))]
+                      :seon.sci.admit/interrupt-fn (fn [])}))]
       (is ((schema/projection-validator (schema/handed-projection)
                                         :seon.instrument/contract-error) refusal))
       (is (= 'seon.sci.admit/admit-value
@@ -84,8 +83,7 @@
         :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
         :seon.sci.admit/caps (config/result-caps effective)
         :seon.render/profile (render/agent-render-profile effective)
-        :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms effective)
-        :seon.config/on-core-error :panic}))))
+        :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms effective)}))))
 
 (defn- observed-query-shape
   []
@@ -284,7 +282,7 @@
   (support/with-database
    (fn [connection]
      (let [cluster-name (str "mcp-observation-bound-" (random-uuid))
-           _ (support/apply-config! connection cluster-name {:seon.config/on-core-error :record})
+           _ (support/apply-config! connection cluster-name {})
            environment (env/environment {:seon.boot/cluster-name cluster-name :seon.db/connection connection})
            record! (fn [i message]
                      (fault/fault! environment (IllegalStateException. ^String message)

@@ -37,8 +37,7 @@
                :seon.cluster.eval/ns [:seon.ns/name 'my.agents.juniper]
                :seon.sci.eval/ctx (:seon.sci.eval/ctx instance)
                :seon.sci.admit/caps (:seon.sci.admit/caps handle)
-               :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms handle)
-               :seon.config/on-core-error :record})
+               :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms handle)})
              shown (repl/text (assoc evaluation :seon.cluster.eval/source source
                                                :seon.ns/name 'my.agents.juniper))
              committed (db/transact! connection transaction)]

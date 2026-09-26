@@ -42,8 +42,7 @@
    :seon.sci.eval/ctx ctx
    :seon.render/value value
    :seon.sci.admit/caps caps
-   :seon.sci.eval/time-limit-ms 2000
-   :seon.config/on-core-error :panic})
+   :seon.sci.eval/time-limit-ms 2000})
 
 (defn- family-properties
   [schema-key]
@@ -294,7 +293,6 @@
                        :seon.render/output output
                        :seon.sci.admit/caps caps
                        :seon.sci.eval/time-limit-ms 2000
-                       :seon.config/on-core-error :panic
                        :seon.render/distance 2})]
            (is (seq units))
            (is (nil? (walk-output-by-attribute units :seon.agent/cluster))
@@ -378,7 +376,6 @@
                        :seon.render/output output
                        :seon.sci.admit/caps caps
                        :seon.sci.eval/time-limit-ms 2000
-                       :seon.config/on-core-error :panic
                        :seon.render/distance 1})
                face (:seon.render/output (first units))]
            (is (some? face))
@@ -477,7 +474,7 @@
        (instrument/wrap-interpreted 'my.render-probe/contracted
                                     "[:=> [:cat :string] :string]"
                                     (kernel/context-projection ctx)
-                                    :panic caps @contracted)))
+                                    caps @contracted)))
     ctx))
 
 (def ^:private probe-call-id

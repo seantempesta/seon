@@ -40,7 +40,6 @@
            request {:seon.db/db (db/db connection) :seon.db/connection connection
                     :seon.sci.eval/ctx ctx :seon.sci.admit/caps caps
                     :seon.sci.eval/time-limit-ms (* 1000 support/event-backstop-seconds)
-                    :seon.config/on-core-error :panic
                     :seon.render/profile (render/agent-render-profile effective)
                     :seon.render/value pulled
                     :seon.render.call/id [:fault-test/entity]}

@@ -115,8 +115,7 @@
                             :seon.cluster.eval/ns [:seon.ns/name 'my.examples-fixture]
                             :seon.cluster.eval/source source
                             :seon.sci.admit/caps (config/result-caps (support/effective-config))
-                            :seon.sci.eval/time-limit-ms 10000
-                            :seon.config/on-core-error :panic})))
+                            :seon.sci.eval/time-limit-ms 10000})))
                   namespaces (instruction/toolkit-namespaces @connection)
                   rows (mapcat (fn [namespace-name]
                                  (let [directory (:seon.sci.admit/value (run (str "(dir " namespace-name ")")))]

@@ -457,24 +457,22 @@
 (defn wrap-interpreted
   "Apply one committed agent function contract.
 
-  Both core-error dials use the host boundary's per-arity enforcement: every
-  refusal throws, and the evaluation boundary decides what it records."
+  It uses the host boundary's per-arity enforcement: every refusal throws,
+  and the evaluation boundary decides what it records."
   {:malli/schema
    [:function
-    [:=> [:cat :qualified-symbol :string :map :seon.config/on-core-error
-          [:or :seon.sci.admit/caps :seon.config/error :seon.error/base] :seon.instrument/callable]
+    [:=> [:cat :qualified-symbol :string :map [:or :seon.sci.admit/caps :seon.config/error :seon.error/base] :seon.instrument/callable]
      :seon.instrument/callable]
-    [:=> [:cat :qualified-symbol :string :map :seon.config/on-core-error
-          [:or :seon.sci.admit/caps :seon.config/error :seon.error/base] :seon.instrument/callable
+    [:=> [:cat :qualified-symbol :string :map [:or :seon.sci.admit/caps :seon.config/error :seon.error/base] :seon.instrument/callable
           [:map [:seon.config.error/max-evidence-bytes {:optional true}
             :seon.config.error/max-evidence-bytes]
            [:seon.program/definition-digest {:optional true} :seon.program/definition-digest]
            [:seon.profile/context {:optional true} :seon.profile/context]
            [:seon.call-preparation/snapshot {:optional true} :seon.call-preparation/snapshot]]]
      :seon.instrument/callable]]}
-  ([function-symbol spec-edn projection mode caps f]
-   (wrap-interpreted function-symbol spec-edn projection mode caps f {}))
-  ([function-symbol spec-edn projection mode caps f arm-request]
+  ([function-symbol spec-edn projection caps f]
+   (wrap-interpreted function-symbol spec-edn projection caps f {}))
+  ([function-symbol spec-edn projection caps f arm-request]
   (let [original (original-interpreted f)
         callable-identity (merge {:seon.profile/sym function-symbol
                                   :seon.profile/scope :seon.profile/context}
@@ -506,7 +504,6 @@
                       (compiled-wrapper projection function-symbol
                                         (edn/read-string spec-edn) original caps
                                         (assoc arm-request
-                                               :seon.config/on-core-error mode
                                                :seon.sci.admit/caps caps
                                                :seon.config.error/max-evidence-bytes
                                                (or (:seon.config.error/max-evidence-bytes arm-request)
@@ -823,114 +820,100 @@
   Host wrappers capture the supplied admission caps and evidence bound at arm
   time. Calls validate through the wrapper compiled here, against this
   adoption's projection; a call's own projection never re-selects it. Every
-  refusal throws in both core-error modes; recording is the boundary's."
+  refusal throws; recording is the boundary's."
   {:malli/schema
    [:=> [:cat :seon.instrument/request]
     [:or :seon.instrument/applied :seon.instrument/registration-error]]}
-  [{mode :seon.config/on-core-error
-    caps :seon.sci.admit/caps
+  [{caps :seon.sci.admit/caps
     max-evidence-bytes :seon.config.error/max-evidence-bytes
     supplied-projection :seon.schema/projection
     digests :seon.profile/definition-digests
     database :seon.db/db
     :as request}]
-  (cond
-    (not (#{:panic :record} mode))
-    (registration-error 'seon.instrument/apply!
-       {:seon.error/message "Instrumentation requires :panic or :record core-error mode."
+  (let [projection (or supplied-projection (schema/handed-projection))]
+    (if-not projection
+      (registration-error 'seon.instrument/apply!
+       {:seon.error/message "Instrumentation requires a handed schema projection."
         :seon.error/layer :instrumentation
         :seon.error/operation 'seon.instrument/apply!
-        :seon.error/member :seon.config/on-core-error
-        :seon.error/expected [:enum :panic :record]
-        :seon.error/offending (if (nil? mode) ::nil mode)
-        :seon.error/data {:seon.instrument/accepted-modes [:panic :record]}})
-
-    :else
-    (let [projection (or supplied-projection (schema/handed-projection))]
-      (if-not projection
-        (registration-error 'seon.instrument/apply!
-         {:seon.error/message "Instrumentation requires a handed schema projection."
-          :seon.error/layer :instrumentation
-          :seon.error/operation 'seon.instrument/apply!
-          :seon.error/member :seon.schema/projection
-          :seon.error/expected :seon.schema/projection
-          :seon.error/offending :seon.instrument/missing-projection})
-        (let [defaults config/defaults
-              caps (or caps (config/result-caps defaults))
-              ;; The adoption's supplied-default rows, read once: each
-              ;; wrapper's plan is decided from them at arming.
-              current (when database (call-preparation/snapshot database projection))
-              _ (when (db/read-refusal? current)
-                  (throw (ex-info (:seon.error/message current) current)))
-              policy (cond-> {:seon.config/on-core-error mode
-                              :seon.sci.admit/caps caps
-                              :seon.config.error/max-evidence-bytes
-                              (or max-evidence-bytes
-                                  (:seon.config.error/max-evidence-bytes defaults))}
-                       current (assoc :seon.call-preparation/snapshot current))
-              changed (find request :seon.instrument/changed-identities)
-              candidates (when changed
-                           (into #{}
-                                 (keep (fn [[_ function-symbol]]
-                                         (when (find-ns (symbol (namespace function-symbol)))
-                                           (find-var function-symbol))))
-                                 (val changed)))
-              contracts (if changed
-                          (into {}
-                                (keep (fn [candidate]
-                                        (when (and (bound? candidate)
-                                                   (not (primitive-fn? @candidate))
-                                                   (mr/schema (:seon.schema.projection/registry projection)
-                                                              (var-symbol candidate)))
-                                          (when-let [authored (mi/-schema candidate)]
-                                            [candidate authored]))))
-                                candidates)
-                          (collect-contracts! caps))
-              pending (if changed
-                        contracts
-                        (remove (fn [[candidate authored]]
-                                  (current-wrapper? candidate authored projection @candidate policy))
-                                contracts))]
-          (doseq [candidate candidates
-                  :when (and (bound? candidate) (not (find contracts candidate)))]
-            (alter-var-root candidate mi/-f->original))
-          ;; Each Var's wrapper is compiled once and that object installed. A
-          ;; contract that cannot compile leaves its Var on its previous root
-          ;; and becomes a registration error; every other Var still arms.
-          (let [refused
-                (into []
-                      (keep
-                       (fn [[candidate authored]]
-                         (let [function-symbol (var-symbol candidate)
-                               built (try
-                                       (binding [*compiling-contract* true]
-                                         (compiled-wrapper projection function-symbol authored
-                                                           (mi/-f->original @candidate) caps policy))
-                                       (catch Throwable failure failure))]
-                           (if (instance? Throwable built)
-                             (let [data (registration-cause-data built)]
-                               (registration-error function-symbol
-                                {:seon.error/message (str "The loaded function contract " function-symbol
-                                                          " cannot compile: " (ex-message built))
-                                 :seon.error/layer :instrumentation
-                                 :seon.error/operation 'seon.instrument/apply!
-                                 :seon.error/expected authored
-                                 :seon.error/offending (or (:schema data) (get-in data [:data :ref])
-                                                           (get-in data [:data :schema]))
-                                 :seon.error/member function-symbol
-                                 :seon.error/throwable built}))
-                             (do (when changed (alter-var-root candidate mi/-f->original))
-                                 (arm-var! candidate authored projection built policy
-                                           (get digests function-symbol))
-                                 nil)))))
-                      pending)]
-            (if-let [first-refusal (first refused)]
-              (cond-> first-refusal
-                (next refused)
-                (update :seon.error/message str " Also refused: "
-                        (mapv :seon.instrument/fn (rest refused)) "."))
-              {:seon.instrument/registered (count contracts)
-               :seon.instrument/instrumented (count (instrumented))})))))))
+        :seon.error/member :seon.schema/projection
+        :seon.error/expected :seon.schema/projection
+        :seon.error/offending :seon.instrument/missing-projection})
+      (let [defaults config/defaults
+            caps (or caps (config/result-caps defaults))
+            ;; The adoption's supplied-default rows, read once: each
+            ;; wrapper's plan is decided from them at arming.
+            current (when database (call-preparation/snapshot database projection))
+            _ (when (db/read-refusal? current)
+                (throw (ex-info (:seon.error/message current) current)))
+            policy (cond-> {:seon.sci.admit/caps caps
+                            :seon.config.error/max-evidence-bytes
+                            (or max-evidence-bytes
+                                (:seon.config.error/max-evidence-bytes defaults))}
+                     current (assoc :seon.call-preparation/snapshot current))
+            changed (find request :seon.instrument/changed-identities)
+            candidates (when changed
+                         (into #{}
+                               (keep (fn [[_ function-symbol]]
+                                       (when (find-ns (symbol (namespace function-symbol)))
+                                         (find-var function-symbol))))
+                               (val changed)))
+            contracts (if changed
+                        (into {}
+                              (keep (fn [candidate]
+                                      (when (and (bound? candidate)
+                                                 (not (primitive-fn? @candidate))
+                                                 (mr/schema (:seon.schema.projection/registry projection)
+                                                            (var-symbol candidate)))
+                                        (when-let [authored (mi/-schema candidate)]
+                                          [candidate authored]))))
+                              candidates)
+                        (collect-contracts! caps))
+            pending (if changed
+                      contracts
+                      (remove (fn [[candidate authored]]
+                                (current-wrapper? candidate authored projection @candidate policy))
+                              contracts))]
+        (doseq [candidate candidates
+                :when (and (bound? candidate) (not (find contracts candidate)))]
+          (alter-var-root candidate mi/-f->original))
+        ;; Each Var's wrapper is compiled once and that object installed. A
+        ;; contract that cannot compile leaves its Var on its previous root
+        ;; and becomes a registration error; every other Var still arms.
+        (let [refused
+              (into []
+                    (keep
+                     (fn [[candidate authored]]
+                       (let [function-symbol (var-symbol candidate)
+                             built (try
+                                     (binding [*compiling-contract* true]
+                                       (compiled-wrapper projection function-symbol authored
+                                                         (mi/-f->original @candidate) caps policy))
+                                     (catch Throwable failure failure))]
+                         (if (instance? Throwable built)
+                           (let [data (registration-cause-data built)]
+                             (registration-error function-symbol
+                              {:seon.error/message (str "The loaded function contract " function-symbol
+                                                        " cannot compile: " (ex-message built))
+                               :seon.error/layer :instrumentation
+                               :seon.error/operation 'seon.instrument/apply!
+                               :seon.error/expected authored
+                               :seon.error/offending (or (:schema data) (get-in data [:data :ref])
+                                                         (get-in data [:data :schema]))
+                               :seon.error/member function-symbol
+                               :seon.error/throwable built}))
+                           (do (when changed (alter-var-root candidate mi/-f->original))
+                               (arm-var! candidate authored projection built policy
+                                         (get digests function-symbol))
+                               nil)))))
+                    pending)]
+          (if-let [first-refusal (first refused)]
+            (cond-> first-refusal
+              (next refused)
+              (update :seon.error/message str " Also refused: "
+                      (mapv :seon.instrument/fn (rest refused)) "."))
+            {:seon.instrument/registered (count contracts)
+             :seon.instrument/instrumented (count (instrumented))}))))))
 
 (defn remove!
   "Return the shared JVM wrapper count. Cluster teardown cannot remove host contracts."

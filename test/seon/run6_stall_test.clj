@@ -72,7 +72,6 @@
                     :seon.db/connection connection :seon.sci.eval/ctx ctx
                     :seon.sci.admit/caps (config/result-caps (support/effective-config))
                     :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms (support/effective-config))
-                    :seon.config/on-core-error :panic
                     :seon.render/profile (render/agent-render-profile (support/effective-config))}
            snapshot (fn []
                       (let [unit (assoc request :seon.db/db @connection)

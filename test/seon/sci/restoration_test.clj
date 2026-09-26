@@ -19,8 +19,7 @@
    :seon.db/connection connection
    :seon.agent/id "root"
    :seon.sci.admit/caps (config/result-caps config/defaults)
-   :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
-   :seon.config/on-core-error :panic})
+   :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)})
 
 (deftest a-refused-batch-restores-the-context-that-accepted-a-candidate
   ;; The ordinary turn path: the definition evaluates once in the retained

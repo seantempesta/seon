@@ -238,7 +238,6 @@
    :seon.boot/cluster-name "default"
    :seon.sci.admit/caps
    (seon-config/result-caps seon-config/defaults)
-   :seon.config/on-core-error :record
    :seon.sci.eval/ctx (:seon.sci.eval/ctx (support/execution-handle connection))
    :seon.effect/counter (atom -1)})
 

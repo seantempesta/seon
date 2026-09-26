@@ -20,7 +20,6 @@
            request {:seon.sci.eval/ctx fork
                     :seon.sci.admit/caps (config/result-caps config/defaults)
                     :seon.sci.eval/time-limit-ms 10000
-                    :seon.config/on-core-error :panic
                     :seon.cluster.eval/source "(+ 1 2)"}]
        (is (empty? @(::kernel/installed-functions ctx)))
        (is (empty? @(::kernel/installed-functions fork)))
@@ -55,8 +54,7 @@
                     :seon.fn/sym 'seon.id/valid?
                     :seon.sci.eval/args [12 "0123456789ab"]
                     :seon.sci.admit/caps (config/result-caps config/defaults)
-                    :seon.sci.eval/time-limit-ms 10000
-                    :seon.config/on-core-error :panic}]
+                    :seon.sci.eval/time-limit-ms 10000}]
        (is (empty? @(::kernel/installed-functions ctx)))
        (is (nil? (:seon.db/db (evaluation/acquired-program ctx))))
        (let [result (kernel/invoke request)]

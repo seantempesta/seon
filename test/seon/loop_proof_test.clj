@@ -69,8 +69,7 @@
                     :seon.config/manifest
                     ;; a core fault is stored and delivered, and the graph
                     ;; that raised it keeps running for the rest of the scenario
-                    {:seon.config.run/max-episode-runs :seon.config/absent
-                     :seon.config/on-core-error :record}})
+                    {:seon.config.run/max-episode-runs :seon.config/absent}})
      (support/transacted! connection (support/agent-tx @connection "root" 'my.agents.root))
      (cluster/ensure-cluster-entity! connection "running-fixture" cluster/boot-process-identity)
      (let [ctx (support/fork-cluster-ctx connection)

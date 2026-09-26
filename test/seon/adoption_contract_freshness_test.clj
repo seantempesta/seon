@@ -47,8 +47,7 @@
       (pr-str (list 'my.adoption-contract-probe/value
                     {:my.adoption-contract-probe/value value}))
       :seon.sci.admit/caps (config/result-caps configuration)
-      :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)
-      :seon.config/on-core-error :panic})))
+      :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)})))
 
 (defn probe!
   "Executed only in a child JVM with its own complete source checkout."
@@ -63,8 +62,7 @@
           connection (:seon.boot/cluster-connection instance)]
       (try
         (let [projection (schema/projection-from-database @connection)]
-          (instrument/apply! {:seon.config/on-core-error :panic
-                              :seon.schema/projection projection}))
+          (instrument/apply! {:seon.schema/projection projection}))
         (assert (:seon.cluster.eval/error (sci-call instance 42))
                 "The initial contract must actually reject the widened input.")
         (let [previous-source (probe-source :my.adoption-contract-probe/new-request)

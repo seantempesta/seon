@@ -111,7 +111,7 @@
       (fn []
         (require 'my.note)
         (let [projection (db/carried-projection (db/db connection))
-              request {:seon.config/on-core-error :panic :seon.schema/projection projection}
+              request {:seon.schema/projection projection}
               arm (fn [] (schema/call-with-projection projection #(instrument/apply! request)))
               _ (arm)
               unrelated @#'cluster/reload-order

@@ -42,8 +42,7 @@
                     :seon.render/profile profile
                     :seon.render/value {"a" 1 "b" 2}
                     :seon.sci.admit/caps (config/result-caps effective)
-                    :seon.sci.eval/time-limit-ms 2000
-                    :seon.config/on-core-error :record}]
+                    :seon.sci.eval/time-limit-ms 2000}]
        (config/apply! {:seon.db/connection connection
                       :seon.boot/cluster-name cluster-name})
        (swap! running-instances assoc cluster-name

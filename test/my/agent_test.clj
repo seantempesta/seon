@@ -65,8 +65,7 @@
                  :seon.cluster.eval/ns [:seon.ns/name 'user]
                  :seon.cluster.eval/source (pr-str (list 'my.agent/branch {:seon.agent/id agent-id}))
                  :seon.sci.eval/time-limit-ms 5000
-                 :seon.sci.admit/caps (config/result-caps config/defaults)
-                 :seon.config/on-core-error :panic})]
+                 :seon.sci.admit/caps (config/result-caps config/defaults)})]
     (or (:seon.cluster.eval/error result) (:seon.sci.admit/value result))))
 
 (deftest branch-mode-is-the-acquisition-decision-not-a-cluster-label

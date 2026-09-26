@@ -138,8 +138,7 @@
                    :seon.db/connection connection
                    :seon.cluster.eval/source source
                    :seon.sci.admit/caps caps
-                   :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms decisions)
-                   :seon.config/on-core-error :panic}))
+                   :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms decisions)}))
            directory (:seon.sci.admit/value (run "(dir my.program)"))
            documentation (:seon.sci.admit/value (run "(doc my.program/breaks)"))
            read-evaluation (run "(my.program/breaks {:seon.program/subject 'seon.turn/open?})")]

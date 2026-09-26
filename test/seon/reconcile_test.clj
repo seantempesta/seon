@@ -78,8 +78,7 @@
     {:seon.boot/cluster-name cluster
      :seon.config/manifest
      {:seon.config.flow.compute/queue-depth queue-depth
-      :seon.config.flow.compute/concurrency 18
-      :seon.config/on-core-error :panic}})))
+      :seon.config.flow.compute/concurrency 18}})))
 
 (deftest fixture-provenance-is-real-transaction-metadata
   (with-model-database
@@ -232,7 +231,7 @@
                 (test-support/refusal-data
                  #(reconcile/plan
                    @connection
-                   (request [{:seon.config/on-core-error :panic}])))))))
+                   (request [{}])))))))
       (testing "two registered identity attributes"
         (is (= ::reconcile/two-identities
                (::reconcile/rule
@@ -269,7 +268,7 @@
    (fn [entries]
      (mapv (fn [[ordinal queue-depth mode]]
              (assoc (config-row (str "generated-" ordinal) queue-depth)
-                    :seon.config/on-core-error mode))
+                    :seon.config.eval/time-limit-ms mode))
            entries))
    ;; distinct BY IDENTITY ordinal — gen/vector-distinct has no :key
    ;; option; vector-distinct-by is the supported API
@@ -277,7 +276,7 @@
     first
     (gen/tuple (gen/choose 0 40)
                (gen/choose 1 100)
-               (gen/elements [:record :panic]))
+               (gen/elements [1000 2000]))
     {:min-elements 0
      :max-elements 12})))
 

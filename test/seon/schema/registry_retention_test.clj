@@ -14,7 +14,7 @@
         wrapped (instrument/wrap-interpreted
                  'my.agents.contract/value
                  "[:=> [:cat [:fn clojure.core/int?]] :int]"
-                 projection :panic caps
+                 projection caps
                  (fn [value] (when world value)))]
     (is (= 1 (wrapped 1)))
     (java.lang.ref.WeakReference. world)))

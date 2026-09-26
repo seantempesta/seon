@@ -22,8 +22,7 @@
                         :seon.cluster.eval/source
                         "(defn ^{:malli/schema [:=> [:cat :int] :int]} probe [x] (inc x))"
                         :seon.sci.admit/caps (config/result-caps config/defaults)
-                        :seon.sci.eval/time-limit-ms 2000
-                        :seon.config/on-core-error :panic})
+                        :seon.sci.eval/time-limit-ms 2000})
            row (:seon.program/row evaluation)
            database @connection
            projection (db/carried-projection database)]
@@ -46,8 +45,7 @@
                     :seon.schema/projection (schema/handed-projection)
                     :seon.cluster.eval/ns [:seon.ns/name 'sample.repl-settled]
                     :seon.sci.admit/caps (config/result-caps config/defaults)
-                    :seon.sci.eval/time-limit-ms 2000
-                    :seon.config/on-core-error :panic}
+                    :seon.sci.eval/time-limit-ms 2000}
            context-row (:seon.program/row
                         (eval/evaluate (assoc request :seon.cluster.eval/source
                                               "(require '[clojure.string :as string])")))

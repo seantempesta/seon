@@ -33,9 +33,7 @@
      :seon.sci.admit/caps (config/result-caps effective)
      :seon.sci.eval/ctx ctx
      :seon.sci.eval/time-limit-ms
-     (:seon.config.eval/time-limit-ms effective)
-     :seon.config/on-core-error
-     (:seon.config/on-core-error effective)}))
+     (:seon.config.eval/time-limit-ms effective)}))
 
 (defn repl-session
   "Evaluate forms through one live production context and return each face."
@@ -207,7 +205,7 @@
     (fn [connection]
       (config/apply! {:seon.boot/cluster-name "default" :seon.db/connection connection
                       :seon.config/manifest
-                      {:seon.config/on-core-error :record}})
+                      {}})
       (binding [*database* @connection
                 *connection* connection]
         (run-tests)))))

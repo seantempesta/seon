@@ -150,10 +150,7 @@
    (cond-> {:seon.schema/projection (schema/handed-projection)
             :seon.cluster.eval/source source
             :seon.sci.admit/caps caps
-            :seon.sci.eval/time-limit-ms time-limit-ms
-            ;; development disposition: a codec hole must be loud
-            ;; here of all places
-            :seon.config/on-core-error :panic}
+            :seon.sci.eval/time-limit-ms time-limit-ms}
      ctx (assoc :seon.sci.eval/ctx ctx))))
 
 (deftest database-provenance-regenerates-the-base-and-reverts-for-retained-forks
@@ -344,8 +341,7 @@
   ;; the dial is REQUIRED, so a caller cannot forget to decide
   (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.sci.eval/request) {:seon.cluster.eval/source "(+ 1 1)"
         :seon.sci.admit/caps caps
-        :seon.sci.eval/time-limit-ms 1000
-        :seon.config/on-core-error :panic}))
+        :seon.sci.eval/time-limit-ms 1000}))
   (is (not ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.sci.eval/request) {:seon.cluster.eval/source "(+ 1 1)"
              :seon.sci.admit/caps caps
              :seon.sci.eval/time-limit-ms 1000}))
@@ -361,7 +357,7 @@
                 ctx (test-support/fork-cluster-ctx connection)
                 projection (db/carried-projection database)]
             (instrument/apply!
-              {:seon.config/on-core-error :panic, :seon.schema/projection projection})
+              {:seon.schema/projection projection})
             (let [evaluation (eval/evaluate
                                {:seon.sci.eval/ctx ctx,
                                 :seon.db/db database,
@@ -370,8 +366,7 @@
                                 :seon.cluster.eval/source
                                 "; generated opening non-declaration\n:opening-probe",
                                 :seon.sci.admit/caps caps,
-                                :seon.sci.eval/time-limit-ms 2000,
-                                :seon.config/on-core-error :panic})]
+                                :seon.sci.eval/time-limit-ms 2000})]
               (is (nil? (:seon.program/row evaluation)))
               (is (ok? evaluation) (pr-str evaluation))
               (is
@@ -437,8 +432,7 @@
             request {:seon.schema/projection projection
                      :seon.cluster.eval/source "(+ 1 2)"
                      :seon.sci.admit/caps caps
-                     :seon.sci.eval/time-limit-ms 10000
-                     :seon.config/on-core-error :panic}
+                     :seon.sci.eval/time-limit-ms 10000}
             before (eval/evaluate request)]
         (try
           (is (= 3 (:seon.sci.admit/value before))
@@ -452,8 +446,7 @@
             ;; Restoration must not reinstall the superseded roots. Arm the
             ;; definitions the loader just installed, under the handed world.
             (let [report (instrument/apply!
-                          {:seon.config/on-core-error :panic
-                           :seon.schema/projection projection})]
+                          {:seon.schema/projection projection})]
               (is (pos-int? (:seon.instrument/instrumented report)) (pr-str report))
               (is (nil? (:seon.error/at report)) (pr-str report)))))))))
 
@@ -528,8 +521,7 @@
                     :seon.cluster.eval/ns [:seon.ns/name 'user]
                     :seon.sci.eval/ctx ctx
                     :seon.sci.admit/caps caps
-                    :seon.sci.eval/time-limit-ms 5000
-                    :seon.config/on-core-error :panic}))]
+                    :seon.sci.eval/time-limit-ms 5000}))]
             (sci/eval-string* ctx-a "(def fork-private :only-a)")
             (is (= :only-a (sci/eval-string* ctx-a "fork-private")))
             (is (thrown? Throwable
@@ -820,8 +812,7 @@
                                  :seon.cluster.eval/ns [:seon.ns/name 'parity],
                                  :seon.cluster.eval/source source,
                                  :seon.sci.admit/caps caps,
-                                 :seon.sci.eval/time-limit-ms 2000,
-                                 :seon.config/on-core-error :panic}))
+                                 :seon.sci.eval/time-limit-ms 2000}))
                 p12-keys [:seon.fn/arities :seon.fn/arglists-override?]]
             (is (= 'parity/same-facts (:seon.fn/sym runtime-row)))
             (is (= (select-keys static-row p12-keys) (select-keys runtime-row p12-keys)))
@@ -1430,8 +1421,7 @@
               :seon.cluster.eval/ns [:seon.ns/name namespace-name]
               :seon.cluster.eval/source "(dir fixture.empty-agent)"
               :seon.sci.admit/caps caps
-              :seon.sci.eval/time-limit-ms 2000
-              :seon.config/on-core-error :panic})]
+              :seon.sci.eval/time-limit-ms 2000})]
         ;; creation-tx seeds the namespace's own `ns` row (namespace-seed-call),
         ;; and a namespace row is program, so acquisition installs it too.
         (is (some? (sci/find-ns base namespace-name))
@@ -1718,8 +1708,7 @@
             (schema/call-with-projection
               projection
               #(instrument/apply!
-                {:seon.config/on-core-error :panic
-                 :seon.schema/projection projection}))
+                {:seon.schema/projection projection}))
             (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))
                   acquired (eval/acquire! {:seon.sci.eval/ctx ctx
                                            :seon.db/db database
@@ -1754,8 +1743,7 @@
               :seon.agent/id agent-id
               :seon.cluster.eval/source "(ns-name *ns*)"
               :seon.sci.admit/caps caps
-              :seon.sci.eval/time-limit-ms 2000
-              :seon.config/on-core-error :panic})
+              :seon.sci.eval/time-limit-ms 2000})
             external (run-in ctx "(datahike.api/q '[:find ?e :where [?e]])"
                              2000)]
         (let [installed
@@ -1790,8 +1778,7 @@
               (str "(select-keys (seon.env/of (seon.sci.kernel/world-ctx)) "
                    "[:seon.agent/id :seon.turn/id :seon.cluster.eval/ordinal])")
               :seon.sci.admit/caps caps
-              :seon.sci.eval/time-limit-ms 2000
-              :seon.config/on-core-error :panic})]
+              :seon.sci.eval/time-limit-ms 2000})]
         (is (= {:seon.agent/id "scoped-agent"
                 :seon.turn/id "scoped-run"
                 :seon.cluster.eval/ordinal 7}
@@ -1817,8 +1804,7 @@
                               :seon.cluster.eval/ns [:seon.ns/name 'user],
                               :seon.sci.eval/ctx ctx,
                               :seon.sci.admit/caps caps,
-                              :seon.sci.eval/time-limit-ms 5000,
-                              :seon.config/on-core-error :panic}))
+                              :seon.sci.eval/time-limit-ms 5000}))
                 ambient #{"ambient-a" "ambient-b"}
                 cluster-names-source (str
                                        "(seon.db/q "
@@ -1894,7 +1880,6 @@
                      :seon.render/distance 2,
                      :seon.db/db (db/db connection),
                      :seon.sci.eval/ctx ctx,
-                     :seon.config/on-core-error :panic,
                      :seon.sci.admit/caps caps,
                      :seon.db/connection connection,
                      :seon.render/output :seon.render/ai}
@@ -2181,8 +2166,7 @@
                     :seon.fn/sym function-symbol
                     :seon.sci.eval/args arguments
                     :seon.sci.eval/time-limit-ms time-limit-ms
-                    :seon.sci.admit/caps caps
-                    :seon.config/on-core-error :record}))))
+                    :seon.sci.admit/caps caps}))))
 
 (deftest a-re-entrant-evaluation-inherits-the-governing-arm
   ;; Before the merge this threw :seon.sci.kernel/already-armed straight out
@@ -2243,8 +2227,7 @@
                      :seon.render/value {:probe/label "value"},
                      :seon.render.call/function 'seon.sci.eval-test/probe-subject,
                      :seon.sci.admit/caps caps,
-                     :seon.sci.eval/time-limit-ms 5000,
-                     :seon.config/on-core-error :record}
+                     :seon.sci.eval/time-limit-ms 5000}
             unarmed (render/render-ai request)
             armed (let [{stop! :seon.sci.kernel/stop!} (kernel/arm wrapped-ctx 5000)]
                     (try (render/render-ai request) (finally (stop!))))
@@ -2434,8 +2417,7 @@
                       :seon.fn/sym 'user/never-defined
                       :seon.sci.eval/args []
                       :seon.sci.eval/time-limit-ms 1000
-                      :seon.sci.admit/caps caps
-                      :seon.config/on-core-error :record}))]
+                      :seon.sci.admit/caps caps}))]
        (is (schema/valid-candidate-value? (schema/handed-projection)
                                          :seon.sci.eval/reader-event-count-error evaluated)
            "the reader's refusal is not flattened into evaluation-failed")
@@ -2614,7 +2596,7 @@
       connection
       (test-support/replacement-tx
        (db/db connection) '[:seon.fn/sym seon.id/valid?]
-       "(defn valid? [length id] (and (java.util.Date.) (string? id)))"
+       "(defn valid? [length id] (and (reify Runnable (run [_] nil)) (string? id)))"
        {:seon.schema.admission/source :agent}))
      (is (true? (:seon.fn/host-bound?
                  (db/pull (db/db connection) [:seon.fn/host-bound?] [:seon.fn/sym 'seon.id/valid?])))
@@ -2648,7 +2630,6 @@
                                  :seon.cluster.eval/source source
                                  :seon.sci.admit/caps caps
                                  :seon.sci.eval/time-limit-ms 10000
-                                 :seon.config/on-core-error :panic
                                  :seon.sci.eval/ctx ctx
                                  :seon.db/db database}))
            required (run entering "(require '[malli.core :as m])")]

@@ -25,8 +25,7 @@
                  (evaluation/evaluate
                   {:seon.sci.eval/ctx ctx :seon.cluster.eval/source source
                    :seon.sci.admit/caps (config/result-caps config/defaults)
-                   :seon.sci.eval/time-limit-ms 10000
-                   :seon.config/on-core-error :panic}))
+                   :seon.sci.eval/time-limit-ms 10000}))
            runtime-source (transcript/render-runtime-ai
                            {:seon.db/db @connection
                             :seon.render/value

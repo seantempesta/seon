@@ -202,7 +202,6 @@
     :seon.db/connection connection
     :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
     :seon.sci.eval/time-limit-ms 1000
-    :seon.config/on-core-error :record
     :seon.agent/id agent-id
     :seon.sci.admit/caps render-caps}))
 
@@ -217,7 +216,6 @@
          :seon.render/distance 2
          :seon.sci.eval/ctx (sci.eval/cluster-ctx db)
          :seon.sci.eval/time-limit-ms 1000
-         :seon.config/on-core-error :record
          :seon.sci.admit/caps caps})
        (keep :seon.render/output)
        (clojure.string/join "\n")))
@@ -1153,8 +1151,7 @@
                            :seon.render/context-channel channel
                            :seon.turn.loop/completion channel
                            :seon.sci.admit/caps (config/result-caps defaults)
-                           :seon.config.eval/time-limit-ms 5000
-                           :seon.config/on-core-error :record})
+                           :seon.config.eval/time-limit-ms 5000})
            reply (str ";; a definition worth keeping\n"
                       "(def x 1)\n"
                       "(do (println \"hi\") 41)\n"
@@ -1244,7 +1241,6 @@
                  :seon.render/distance 2
                  :seon.sci.admit/caps (config/result-caps defaults)
                  :seon.sci.eval/time-limit-ms 5000
-                 :seon.config/on-core-error :record
                  :seon.render/captured-calls (atom {})})
                prompt-text (str/join "\n\n"
                                      (map :seon.render.history/bytes
@@ -1392,7 +1388,7 @@
 (defn- core-fault!
   "Record one core fault on `connection`'s branch through the production writer."
   [connection cluster-name message]
-  (support/apply-config! connection cluster-name {:seon.config/on-core-error :record})
+  (support/apply-config! connection cluster-name {})
   (let [receipt (fault/fault! (env/environment
                                {:seon.boot/cluster-name cluster-name
                                 :seon.db/connection connection

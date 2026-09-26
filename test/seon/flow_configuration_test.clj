@@ -88,7 +88,6 @@
                       :seon.sci.eval/ctx
                       (test-support/fork-cluster-ctx connection)
                       :seon.config.eval/time-limit-ms 1000
-                      :seon.config/on-core-error :record
                       :seon.config.error/recurrence-limit 3
                       :seon.config.message/max-chain 64})
                     :seon.agent/id "census"})]]

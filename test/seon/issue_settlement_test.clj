@@ -28,7 +28,6 @@
                     :seon.sci.eval/ctx ctx
                     :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms effective)
                     :seon.sci.admit/caps (config/result-caps effective)
-                    :seon.config/on-core-error (:seon.config/on-core-error effective)
                     :seon.db/db (db/db connection) :seon.db/connection connection})
         analysis (functions/analyze-forms
                   (db/db connection)

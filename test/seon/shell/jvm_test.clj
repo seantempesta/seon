@@ -399,7 +399,6 @@
                  :seon.cluster.eval/ordinal 0
                  :seon.boot/cluster-name "shell-test"
                  :seon.sci.admit/caps (config/result-caps effective-map)
-                 :seon.config/on-core-error :record
                  :seon.sci.eval/ctx (:seon.sci.eval/ctx (support/execution-handle connection))
                  :seon.effect/counter (atom -1)}
                 result

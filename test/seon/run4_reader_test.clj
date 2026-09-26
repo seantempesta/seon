@@ -10,8 +10,7 @@
   (eval/evaluate {:seon.sci.eval/ctx ctx
                   :seon.cluster.eval/source source
                   :seon.sci.admit/caps (config/result-caps config/defaults)
-                  :seon.sci.eval/time-limit-ms time-limit-ms
-                  :seon.config/on-core-error :panic}))
+                  :seon.sci.eval/time-limit-ms time-limit-ms}))
 
 (deftest run4-reader-errors-name-the-reply-and-do-not-imply-retained-input
   (test-support/with-database

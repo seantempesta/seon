@@ -153,7 +153,6 @@
                      :seon.cluster/name "web-test"
                      :seon.sci.admit/caps caps
                      :seon.sci.eval/ctx ctx
-                     :seon.config/on-core-error :record
                      :seon.db.process/id process
                      :seon.turn.loop/stream-channel stream-channel
 })
@@ -200,7 +199,6 @@ handle))}}
                            :seon.config.eval/time-limit-ms
                            (:seon.config.eval/time-limit-ms
                             config/defaults)
-                           :seon.config/on-core-error :record
                            :seon.db.process/id process
                            :seon.render.web/pages-mult pages-mult
                            :seon.render.web/registration registration
@@ -1881,8 +1879,7 @@ handle))}}
       (let [stored (-> (admit/admit-value
                         {:seon.sci.admit/value {:alpha [1 2 3]}
                          :seon.sci.admit/interrupt-fn (fn [])
-                         :seon.sci.admit/caps caps
-                         :seon.config/on-core-error :record})
+                         :seon.sci.admit/caps caps})
                        value/artifact
                        value/artifact-edn)
             digest (blob/put! connection stored)
@@ -1951,8 +1948,7 @@ handle))}}
                       :seon.render.call/id [::ai-bound namespace-name]
                       :seon.sci.admit/caps
                       (config/result-caps config/defaults)
-                      :seon.sci.eval/time-limit-ms 20000
-                      :seon.config/on-core-error :record}
+                      :seon.sci.eval/time-limit-ms 20000}
              ai (render/render-ai request)
              html (render/render-html request)
              html-string (hiccup/->string html)]
@@ -2097,7 +2093,6 @@ handle))}}
           :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
           :seon.config.eval/time-limit-ms
           (:seon.config.eval/time-limit-ms config/defaults)
-          :seon.config/on-core-error :record
           :seon.db.process/id process
           :seon.render.web/pages-mult
           (async/mult (async/chan (async/sliding-buffer 1)))
@@ -2264,7 +2259,6 @@ handle))}}
     :seon.sci.admit/caps caps
     :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
     :seon.config.eval/time-limit-ms 1000
-    :seon.config/on-core-error :record
     :seon.db.process/id "web-fault-test"})
    :seon.agent/routing (atom {})
    :seon.render.web/registration (atom {"agent-a" 1})

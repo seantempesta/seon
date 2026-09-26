@@ -386,8 +386,7 @@
                         "(clojure.test/deftest fileless-selection (clojure.test/is (string? (seon.id/id))))"
                         :seon.cluster.eval/ns [:seon.ns/name 'seon.test.selection-test]
                         :seon.sci.admit/caps (config/result-caps config/defaults)
-                        :seon.sci.eval/time-limit-ms 10000
-                        :seon.config/on-core-error :panic})
+                        :seon.sci.eval/time-limit-ms 10000})
            _ (when-not (:seon.program/row evaluation)
                (throw (ex-info "SCI test declaration did not produce a program row." evaluation)))
            declaration (program/declaration-row (seon.schema/handed-projection) (:seon.program/row evaluation) :all :agent)]

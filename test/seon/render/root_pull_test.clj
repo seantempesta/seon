@@ -43,8 +43,7 @@
    :seon.render.walk/lookup [::root-id "root"]
    :seon.render/distance 1
    :seon.sci.admit/caps caps
-   :seon.sci.eval/time-limit-ms 5000
-   :seon.config/on-core-error :record})
+   :seon.sci.eval/time-limit-ms 5000})
 
 (defn- acquire
   [connection]
@@ -101,7 +100,6 @@
              :seon.render/distance 1
              :seon.sci.admit/caps caps
              :seon.sci.eval/time-limit-ms 5000
-             :seon.config/on-core-error :record
              :seon.render/captured-calls (atom {})
              :seon.render.walk/root-acquisition acquisition})]
        (is (= current-selector temporal-selector)
@@ -128,8 +126,7 @@
                     [:seon.agent/id "historical-walk-agent"]
                     :seon.render/distance 1
                     :seon.sci.admit/caps caps
-                    :seon.sci.eval/time-limit-ms 5000
-                    :seon.config/on-core-error :record}
+                    :seon.sci.eval/time-limit-ms 5000}
            acquisition (walk/root-acquisition render-request)
            result
            (within-event-backstop
@@ -154,7 +151,6 @@
                   (assoc acquisition-request
                          :seon.render/output :seon.render/ai
                          :seon.sci.eval/time-limit-ms 5000
-                         :seon.config/on-core-error :panic
                          :seon.render.walk/root-acquisition acquisition))]
        (is (not (contains? acquisition-request :seon.render/output)))
        (is ((schema/projection-validator (schema/handed-projection) :seon.render.walk/acquisition-request) acquisition-request))

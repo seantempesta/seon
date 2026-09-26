@@ -79,14 +79,14 @@
   ;; worker's wrappers back afterwards.
   (instrument/remove!)
   (let [result ((mi/-f->original instrument/apply!)
-                {:seon.config/on-core-error nil})]
+                {})]
     (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/registration-error) result))
     (is ((schema/projection-validator (schema/handed-projection)
                                      :seon.instrument/registration-error) result)))
   ;; and armed, the contract owns the same refusal at the same crossing
-  (instrument/apply! {:seon.config/on-core-error :panic})
+  (instrument/apply! {})
   (let [refusal (test-support/refusal-data
-                 #(instrument/apply! {:seon.config/on-core-error :degrade}))]
+                 #(instrument/apply! {}))]
     (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) refusal))
     (is (= 'seon.instrument/apply!
            (:seon.error/operation refusal)))))
@@ -95,7 +95,7 @@
   "Run `body` with instrumentation on, and always take it back off."
   [body]
   (try
-    (body (instrument/apply! {:seon.config/on-core-error :panic}))
+    (body (instrument/apply! {}))
     (finally
       (instrument/remove!))))
 
@@ -154,8 +154,7 @@
   the root afterwards."
   []
   (let [result (instrument/apply!
-                {:seon.config/on-core-error :panic
-                 :seon.schema/projection (schema/handed-projection)
+                {:seon.schema/projection (schema/handed-projection)
                  :seon.instrument/changed-identities
                  #{[:seon.fn/sym 'seon.instrument-test/prefix-contract]}})]
     (is (= 1 (:seon.instrument/registered result)) (pr-str result))))
@@ -198,8 +197,7 @@
          ;; wrapper records nothing: the owning boundary decides that.
          (doseq [mode [:panic :record]]
            (arm-with! candidate contract projection caps
-                      {:seon.config/on-core-error mode
-                       :seon.config.error/max-evidence-bytes
+                      {:seon.config.error/max-evidence-bytes
                        (:seon.config.error/max-evidence-bytes
                         (test-support/effective-config))})
            (let [before @calls
@@ -239,7 +237,7 @@
   ;; the evaluation boundary's one normalizer, directly or wrapped, never
   ;; turned into an ordinary evaluation value.
   (let [receipt {:seon.boot/cluster-name "seon-instrument-test"
-                 :seon.fault/committed? true :seon.fault/policy :panic
+                 :seon.fault/committed? true
                  :seon.error/layer :seon.instrument-test/receipt
                  :seon.error/operation 'seon.instrument-test/receipt}
         panic (ex-info "SEON CORE FAULT (panic): recorded" {:seon.fault/recorded receipt}
@@ -336,7 +334,7 @@
         (instrument/wrap-interpreted
          'my.agents.contract/value
          "[:=> [:cat [:fn clojure.core/int?]] :int]"
-         projection :panic caps original)
+         projection caps original)
         failure (try (wrapped "wrong")
                      (catch Exception thrown thrown))]
     (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) (ex-data failure)))
@@ -346,7 +344,7 @@
     (let [recorded (instrument/wrap-interpreted
                     'my.agents.contract/value
                     "[:=> [:cat [:fn clojure.core/int?]] :int]"
-                    projection :record caps original)]
+                    projection caps original)]
       (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error)
            (test-support/refusal-data #(recorded "wrong")))
           ":record arms without a recorder, and its refusal throws as :panic's does"))))
@@ -356,7 +354,7 @@
    (fn [connection]
      (doseq [mode [:panic :record]]
        (test-support/seed-cluster! connection "sci-wrapper"
-                                   {:seon.config/on-core-error mode})
+                                   {})
        (let [database (db/db connection)
              projection (schema/projection-from-database database)
              ctx (sci.eval/base-ctx database)
@@ -421,7 +419,7 @@
                   (meta @(sci/resolve base 'seon.id/valid?)))
                  "The source context holds a real interpreted wrapper.")
            _ (test-support/apply-config! connection "sci-fork-recorder"
-                                         {:seon.config/on-core-error :record})
+                                         {})
            database (db/db connection)
            projection (schema/projection-from-database database)
            state (sci.eval/projection-state database projection "sci-fork-recorder")
@@ -452,8 +450,8 @@
         interpreted (instrument/wrap-interpreted
                      'my.agents.guarded/result
                      "[:=> [:cat :int] :int [:fn {:error/message \"The guard was evaluated.\"} clojure.core/map?]]"
-                     projection :panic caps identity)]
-    (instrument/apply! {:seon.config/on-core-error :panic :seon.schema/projection projection})
+                     projection caps identity)]
+    (instrument/apply! {:seon.schema/projection projection})
     (doseq [call [#(guarded-result 1) #(interpreted 1)]]
       (let [failure (test-support/refusal-data call)]
         (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) failure))
@@ -546,8 +544,7 @@
            wrapped (instrument/wrap-interpreted
                     function-symbol
                     "[:=> [:cat [:vector :map]] :map]"
-                    projection :panic
-                    ;; the declared admission caps, like every production
+                    projection ;; the declared admission caps, like every production
                     ;; caller hands
                     (config/result-caps (test-support/effective-config))
                     identity)
@@ -574,8 +571,7 @@
                     :seon.config.eval.result/max-nodes 64)]
     (doseq [policy [{:seon.sci.admit/caps caps} {}]]
       (instrument/apply!
-       (merge {:seon.config/on-core-error :panic
-               :seon.schema/projection (schema/handed-projection)
+       (merge {:seon.schema/projection (schema/handed-projection)
                :seon.instrument/changed-identities #{[:seon.fn/sym 'seon.error/value]}}
               policy))
       (let [data (try (error/value "not a fact")
@@ -609,8 +605,7 @@
                     :seon.config.eval.result/max-string 4096
                     :seon.config.eval.result/max-nodes 1024)]
     (try
-      (instrument/apply! {:seon.config/on-core-error :panic
-                          :seon.sci.admit/caps caps
+      (instrument/apply! {:seon.sci.admit/caps caps
                           :seon.instrument/changed-identities
                           #{[:seon.fn/sym 'seon.instrument-test/declared-map-input]}
                           :seon.schema/projection
@@ -649,8 +644,7 @@
                     :seon.config.eval.result/max-nodes 64)
         offending (many-invalid-values)]
     (try
-      (instrument/apply! {:seon.config/on-core-error :panic
-                          :seon.sci.admit/caps caps})
+      (instrument/apply! {:seon.sci.admit/caps caps})
       (doseq [[expected-arm expected-kind function-name invoke]
               [[:input :malli.core/invalid-input
                 "seon.instrument-test/many-problem-input"
@@ -691,8 +685,7 @@
         raw (concat (range 8) [member])
         wrapped (instrument/wrap-interpreted
                  'my.agents.audit/vector-input "[:=> [:cat [:vector :int]] :int]"
-                 (schema/handed-projection) :panic
-                 (config/result-caps (test-support/effective-config)) (constantly 1))
+                 (schema/handed-projection) (config/result-caps (test-support/effective-config)) (constantly 1))
         refusal (try (wrapped raw) (catch Exception failure (ex-data failure)))
         offending (get-in refusal [:seon.error/problems 0 :seon.error/offending])
         checked (get-in refusal [:seon.error/offending])
@@ -737,8 +730,7 @@
     (when-not (.isThreadAllocatedMemoryEnabled thread-bean)
       (.setThreadAllocatedMemoryEnabled thread-bean true))
     (try
-      (instrument/apply! {:seon.config/on-core-error :panic
-                          :seon.sci.admit/caps caps})
+      (instrument/apply! {:seon.sci.admit/caps caps})
       ;; Projection acquisition is deliberately per test. Exercise the
       ;; instrumented boundary once so this measurement isolates violation
       ;; construction rather than first-use registry realization.
@@ -782,8 +774,7 @@
        (try
          (doseq [candidate candidates]
            (alter-meta! candidate assoc :malli/schema [:=> [:cat :int] :int]))
-           (instrument/apply! {:seon.config/on-core-error :panic
-                               :seon.schema/projection projection
+           (instrument/apply! {:seon.schema/projection projection
                                :seon.instrument/changed-identities identities})
            (let [roots (mapv deref candidates)
                  policy (:seon.instrument/policy (meta (first roots)))
@@ -815,12 +806,12 @@
              (doseq [function-symbol ['my.agents.policy/first 'my.agents.policy/second]]
                (let [wrapped (instrument/wrap-interpreted
                               function-symbol "[:=> [:cat :int] :int]"
-                              projection :panic caps identity arm-request)]
+                              projection caps identity arm-request)]
                  (is (= 9 (wrapped 9)))
                  (is (thrown? Exception (wrapped "not an integer")))))
              (let [wrapped (instrument/wrap-interpreted
                             'my.agents.policy/standalone "[:=> [:cat :int] :int]"
-                            projection :panic caps identity)]
+                            projection caps identity)]
                (is (= 9 (wrapped 9)))
                (is (thrown? Exception (wrapped "not an integer")))))
          (finally
@@ -829,7 +820,7 @@
 (deftest applying-twice-is-applying-once
   (instrumented!
    (fn [first-result]
-     (let [second-result (instrument/apply! {:seon.config/on-core-error :panic})]
+     (let [second-result (instrument/apply! {})]
        (is (pos? (:seon.instrument/instrumented first-result))
            "a :panic apply! that instruments zero vars is a bug")
        (is (= (:seon.instrument/instrumented first-result)
@@ -852,13 +843,11 @@
        projection
        (fn []
          (alter-meta! candidate assoc :malli/schema [:=> [:cat old-key] :map])
-         (instrument/apply! {:seon.config/on-core-error :panic
-                             :seon.schema/projection projection})
+         (instrument/apply! {:seon.schema/projection projection})
          (let [before @candidate]
            (is (thrown? Exception (candidate {::value "new input"})))
            (alter-meta! candidate assoc :malli/schema [:=> [:cat new-key] :map])
-           (instrument/apply! {:seon.config/on-core-error :panic
-                               :seon.schema/projection projection})
+           (instrument/apply! {:seon.schema/projection projection})
            (is (not (identical? before @candidate)))
            (is (identical? (mi/-f->original before) (mi/-f->original @candidate))
                "Only the contract changed; the loaded function was not replaced.")
@@ -868,8 +857,7 @@
              (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) (ex-data failure)))
              (is (str/includes? (ex-message failure) (str new-key))))
            (let [current @candidate]
-             (instrument/apply! {:seon.config/on-core-error :panic
-                                 :seon.schema/projection projection})
+             (instrument/apply! {:seon.schema/projection projection})
              (is (identical? current @candidate))))))
       (finally (ns-unmap 'seon.instrument-test var-name)))))
 
@@ -890,8 +878,7 @@
         arm (fn [projection]
               (schema/call-with-projection
                projection
-               #(instrument/apply! {:seon.config/on-core-error :panic
-                                    :seon.schema/projection projection})))]
+               #(instrument/apply! {:seon.schema/projection projection})))]
     (try
       (alter-meta! candidate assoc :malli/schema [:=> [:cat alias-key] :map])
       (alter-meta! unrelated assoc :malli/schema [:=> [:cat :int] :int])
@@ -942,8 +929,7 @@
            changed-projection (schema/build-projection
                                (assoc forms request-key [:map [::value :string]]))
            candidate (intern namespace-name 'content-keyed identity)
-           arm! #(instrument/apply! {:seon.config/on-core-error :panic
-                                     :seon.schema/projection %})]
+           arm! #(instrument/apply! {:seon.schema/projection %})]
        (alter-meta! candidate assoc :malli/schema [:=> [:cat request-key] :map])
        (is (not (identical? first-projection equal-projection)))
        (arm! first-projection)
@@ -979,8 +965,7 @@
                                 {function-symbol (m/schema contract {:registry %})} %))
            arm (fn []
                  (let [applied (instrument/apply!
-                                {:seon.config/on-core-error :panic
-                                 :seon.schema/projection projection
+                                {:seon.schema/projection projection
                                  :seon.instrument/changed-identities #{[:seon.fn/sym function-symbol]}})]
                    {:seon.instrument/registered (:seon.instrument/registered applied)
                     :seon.instrument/definitions
@@ -1043,7 +1028,7 @@
       (alter-meta! broken assoc :malli/schema unresolvable)
       (alter-meta! healthy assoc :malli/schema contract)
       (let [refusal (instrument/apply!
-                     {:seon.config/on-core-error :panic :seon.schema/projection projection
+                     {:seon.schema/projection projection
                       :seon.instrument/changed-identities
                       #{[:seon.fn/sym broken-sym] [:seon.fn/sym healthy-sym]}})]
         (is (= broken-sym (:seon.error/member refusal) (:seon.instrument/fn refusal)))
@@ -1091,7 +1076,7 @@
                   (#'instrument/compiled-wrapper
                    (update projection :seon.schema.projection/registry
                            #(mr/composite-registry {function-symbol (m/schema form lazy)} %))
-                   function-symbol form body caps {:seon.config/on-core-error :panic}))
+                   function-symbol form body caps {}))
         refusal (fn [call] (try (call) nil (catch clojure.lang.ExceptionInfo thrown (ex-data thrown))))
         unhashable (reify Object
                      (hashCode [_] (throw (ex-info "unhashable" {})))
@@ -1158,7 +1143,7 @@
      (is (= 4.0 (doubled 2.0))
          "after a plain re-eval the wrapper is gone and the bad call
           runs — silently, which is the whole problem")
-     (instrument/apply! {:seon.config/on-core-error :panic})
+     (instrument/apply! {})
      (is (thrown? Exception (doubled 2.0))
          "and apply! is the explicit re-application that restores it"))))
 
@@ -1177,7 +1162,7 @@
              projection-state
              #(do
                 (instrument/apply!
-                 {:seon.config/on-core-error :panic})
+                 {})
                 (schema/snapshot)))]
         (is (contains? observed schema-key)))
 
@@ -1206,7 +1191,7 @@
                [])}
             (fn []
               (instrument/apply!
-               {:seon.config/on-core-error :panic})))))]
+               {})))))]
     (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/registration-error) result))
     (is (false? @collected?)
         "a missing projection must refuse before Malli collects contracts")))
@@ -1216,7 +1201,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest cluster-policy-and-removal-preserve-the-jvm-wrappers
-  (instrument/apply! {:seon.config/on-core-error :panic})
+  (instrument/apply! {})
   (let [before (into {} (map (juxt identity deref)) (instrument/instrumented))]
     (is (pos? (count before)))
     (is (= (count before) (instrument/remove!)))
@@ -1242,8 +1227,7 @@
            (fn [phase]
              (let [started (System/nanoTime)
                    result (instrument/apply!
-                           {:seon.config/on-core-error :panic
-                            :seon.schema/projection projection})]
+                           {:seon.schema/projection projection})]
                {:seon.instrument-test/phase phase
                 :seon.instrument-test/elapsed-ms
                 (/ (double (- (System/nanoTime) started)) 1000000.0)
@@ -1430,8 +1414,7 @@
                     projection 'seon.instrument-test/needs-db
                     [:=> [:cat [:map [:seon.db/db :seon.db/database-value]]] :any]
                     (fn [_] :ran) (config/result-caps config/defaults)
-                    {:seon.config/on-core-error :panic
-                     :seon.config.error/max-evidence-bytes 8192})
+                    {:seon.config.error/max-evidence-bytes 8192})
            refusal (test-support/refusal-data #(wrapped {:seon.db/connection :absent}))
            message (:seon.error/message refusal)
            printed (pr-str refusal)]
@@ -1481,7 +1464,7 @@
                (instrument/wrap-interpreted
                 'seon.instrument-test/precise-error-output
                 (pr-str [:=> [:cat :map] output])
-                projection :panic caps identity))
+                projection caps identity))
         data (wrap :map)
         declared (wrap [:or [:map [::success :boolean]] :seon.agent/error])
         base {:seon.error/at #inst "2026-09-19T00:00:00Z"
@@ -1511,7 +1494,7 @@
         caps (config/result-caps (test-support/effective-config))
         wrapped (instrument/wrap-interpreted
                  'seon.instrument-test/refusal-drift
-                 "[:=> [:cat :int] :int]" projection :panic caps identity)
+                 "[:=> [:cat :int] :int]" projection caps identity)
         thrown (try (wrapped "wrong") (catch Throwable failure failure))
         options (kernel/context-options)
         ctx (assoc (sci/init {:interrupt-fn (:interrupt-fn options)})
@@ -1553,8 +1536,7 @@
         wrapped (instrument/wrap-interpreted
                  'seon.instrument-test/reporting-boundary
                  "[:=> [:cat [:fn {:error/fn seon.instrument-test/reporting-failure} clojure.core/int?]] :int]"
-                 projection :panic
-                 (config/result-caps (test-support/effective-config)) identity)
+                 projection (config/result-caps (test-support/effective-config)) identity)
         failure (try (wrapped "wrong") (catch Throwable thrown thrown))]
     ;; The humanizer's failure is the root of the minimal base's chain, with
     ;; its own evidence; the base is a core fault, not a contract violation.
@@ -1573,7 +1555,7 @@
         projection (reduce #(schema/projection-with-function-contract
                              %1 %2 contract {:seon.schema.admission/source :core})
                            (schema/handed-projection) symbols)
-        request {:seon.config/on-core-error :panic :seon.schema/projection projection
+        request {:seon.schema/projection projection
                  :seon.instrument/changed-identities (set (map #(vector :seon.fn/sym %) symbols))}]
     (try
       (doseq [candidate candidates] (alter-meta! candidate assoc :malli/schema contract))
@@ -1601,7 +1583,7 @@
         base (schema/handed-projection)
         projection (schema/projection-with-function-contract
                     base sym contract {:seon.schema.admission/source :core})
-        request {:seon.config/on-core-error :panic :seon.schema/projection projection
+        request {:seon.schema/projection projection
                  :seon.instrument/changed-identities #{[:seon.fn/sym sym]}}]
     (try
       (alter-meta! candidate assoc :malli/schema contract)
@@ -1617,8 +1599,7 @@
   (doseq [candidate (instrument/instrumented)]
     (alter-var-root candidate mi/-f->original))
   (let [population (instrument/armable (map ns-name (all-ns)))
-        applied (instrument/apply! {:seon.config/on-core-error :panic
-                                    :seon.schema/projection (schema/handed-projection)})]
+        applied (instrument/apply! {:seon.schema/projection (schema/handed-projection)})]
     (is (pos? (count population)))
     (is (= population (instrument/instrumented)))
     (is (= (count population) (:seon.instrument/registered applied)
@@ -1635,7 +1616,7 @@
            result (cluster/arm-host-program!
                    {:seon.profile/definition-digests (cluster/definition-digests database)
                     :seon.cluster/program-namespaces []}
-                   (assoc (test-support/effective-config) :seon.config/on-core-error :panic)
+                   (test-support/effective-config)
                    nil)
            armed (instrument/instrumented)
            digests (cluster/definition-digests database ['seon.id/valid?])]
@@ -1676,8 +1657,7 @@
     (try
       (alter-meta! candidate assoc :malli/schema contract)
       (arm-with! candidate contract loaded (config/result-caps effective)
-                 {:seon.config/on-core-error :panic
-                  :seon.config.error/max-evidence-bytes
+                 {:seon.config.error/max-evidence-bytes
                   (:seon.config.error/max-evidence-bytes effective)})
       (is (nil? (find (:seon.schema.projection/forms handed) request-key)))
       (is (= {::value 1} (schema/call-with-projection handed #(candidate {::value 1}))))
@@ -1685,16 +1665,3 @@
                    (schema/call-with-projection handed #(candidate {::value "one"})))
           "the loaded declarations still refuse an invalid input")
       (finally (ns-unmap 'seon.instrument-test var-name)))))
-
-(deftest an-adoption-that-changes-no-definition-is-not-an-arming-failure
-  ;; #63: a comment-only or pin-only publication has no arming identities, so
-  ;; arming nothing under :panic is the wanted outcome, not a refusal.
-  (let [refused? #'cluster/arming-refused?
-        panic {:seon.config/on-core-error :panic}
-        none {:seon.instrument/registered 0 :seon.instrument/instrumented 0}]
-    (is (false? (refused? panic #{} none)) "comment-only or pin-only change adopts")
-    (is (true? (refused? panic #{[:seon.fn/sym 'seon.id/valid?]} none))
-        "a changed definition that armed nothing still refuses")
-    (is (false? (refused? {:seon.config/on-core-error :record}
-                          #{[:seon.fn/sym 'seon.id/valid?]} none)))
-    (is (true? (refused? panic #{} {:seon.instrument/registration-observation {}})))))

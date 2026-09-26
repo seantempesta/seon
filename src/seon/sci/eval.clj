@@ -1264,8 +1264,7 @@
   (let [cluster-name
         (db/q '[:find ?cluster .
                :where
-               [?config :seon.config/cluster ?cluster]
-               [?config :seon.config/on-core-error _]]
+               [_ :seon.config/cluster ?cluster]]
              db)]
     (if cluster-name
       (config/effective db cluster-name)
@@ -1276,19 +1275,17 @@
        "seon.sci.eval/database-effective-config requires configuration naming its cluster; this database has none."}))))
 
 (defn- instrumentation-config
-  "Read the contract dial and admission caps from this database value.
+  "Read the evidence bound and admission caps from this database value.
 
-  `:seon.config/on-core-error` is a required dial, so an effective config
-  always names it; its absence means the read refused, and that typed refusal
-  is thrown rather than defaulting the fault policy. The caps member is
+  A refused read is a declared error value carrying its message; it is
+  thrown whole rather than defaulted. The caps member is
   whatever `result-caps` returned; `instrument/wrap-interpreted` decides what
   to do with it."
   [db]
   (let [effective (database-effective-config db)]
-    (when-not (:seon.config/on-core-error effective)
+    (when (:seon.error/message effective)
       (throw (ex-info (:seon.error/message effective) effective)))
-    (merge (select-keys effective [:seon.config/on-core-error
-                                   :seon.config.error/max-evidence-bytes])
+    (merge (select-keys effective [:seon.config.error/max-evidence-bytes])
            {:seon.sci.admit/caps (config/result-caps effective)})))
 
 (defn- install-function-contract!
@@ -1296,7 +1293,7 @@
   (when-let [spec-edn (:seon.fn/spec committed)]
     (let [function-symbol (:seon.fn/sym committed)
           sci-var (sci/resolve ctx function-symbol)
-          {:keys [:seon.config/on-core-error :seon.sci.admit/caps
+          {:keys [:seon.sci.admit/caps
                   :seon.config.error/max-evidence-bytes]}
           (instrumentation-config db)
           ;; The supplied-default rows this arming decides the plan from.
@@ -1306,7 +1303,7 @@
       (sci/bind-root!
        ctx sci-var
        (instrument/wrap-interpreted
-        function-symbol spec-edn projection on-core-error caps @sci-var
+        function-symbol spec-edn projection caps @sci-var
         (cond-> (assoc (select-keys @(::kernel/program-snapshot ctx)
                                     [:seon.flow/commit-fault!])
                        :seon.call-preparation/snapshot current)
@@ -4163,7 +4160,6 @@
     namespace-ref :seon.cluster.eval/ns
     output-prefix :seon.sci.eval/output-prefix
     time-limit-ms :seon.sci.eval/time-limit-ms
-    on-core-error :seon.config/on-core-error
     :as request}]
   (let [form-sink (form-read-sink request)]
   (binding [db/*read-evidence-sink* nil]
@@ -4333,7 +4329,6 @@
                           :seon.flow/work-launcher work-launcher
                           :seon.boot/cluster-name cluster-name
                           :seon.sci.admit/caps caps
-                          :seon.config/on-core-error on-core-error
                           ;; Named so a DETACHED capability handler can rebuild
                           ;; this evaluation's schema frame from data. Without
                           ;; it a background handler resolving any declaration

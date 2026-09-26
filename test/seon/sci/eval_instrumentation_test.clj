@@ -45,8 +45,7 @@
               (try
                 (let [applied
                       (instrument/apply!
-                       {:seon.config/on-core-error :panic
-                        :seon.sci.admit/caps
+                       {:seon.sci.admit/caps
                         (:seon.sci.admit/caps handle)})]
                   (is (pos? (:seon.instrument/instrumented applied)))
                   (is (contains?

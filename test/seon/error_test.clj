@@ -486,7 +486,7 @@
   (test-support/with-database
    (fn [_connection]
      (try
-       (instrument/apply! {:seon.config/on-core-error :panic})
+       (instrument/apply! {})
        (let [thrown (try (wide-return-narrow-violation 1)
                          (catch Throwable throwable throwable))
              prepared (error/prepare (request thrown))

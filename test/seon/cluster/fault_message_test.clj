@@ -67,8 +67,7 @@
   (support/with-database
    (fn [connection]
      (let [cluster "fault-delivery"
-           environment (world connection cluster {:seon.config/on-core-error :record
-                                                  :seon.config.error/escalate-to "root"})
+           environment (world connection cluster {:seon.config.error/escalate-to "root"})
            failure #(ex-info "a delivered core fault" {::fault :delivery})
            first-receipt (fault/fault! environment (failure) (context "delivery-a"))
            recurrence (fault/fault! environment (failure)
@@ -88,14 +87,12 @@
        ;; resolve, then recur with no escalation owner: the old message is not delivery
        (support/transacted! connection [[:db/add [:seon.error/signature signature]
                                          :seon.error/resolved-tx "datomic.tx"]])
-       (let [reopened (fault/fault! (world connection cluster {:seon.config/on-core-error :record
-                                                               :seon.config.error/escalate-to :seon.config/absent})
+       (let [reopened (fault/fault! (world connection cluster {:seon.config.error/escalate-to :seon.config/absent})
                                     (failure) (context "delivery-c"))]
          (is (true? (:seon.fault/committed? reopened)))
          (is (= #{} (:seon.fault/delivered-to reopened))
              "a reopened signature with only the old opening's message is committed but undeliverable"))
-       (let [environment (world connection cluster {:seon.config/on-core-error :record
-                                                    :seon.config.error/escalate-to "root"})
+       (let [environment (world connection cluster {:seon.config.error/escalate-to "root"})
              wake {:seon.error/obligation "fault-delivery-wake-1"}
              first-attempt (fault/fault! environment (failure) (merge (context "delivery-d") wake))
              second-attempt (fault/fault! environment (failure) (merge (context "delivery-e") wake))
@@ -112,8 +109,7 @@
   (support/with-database
    (fn [connection]
      (let [order (atom [])
-           environment (world connection "fault-stop-request" {:seon.config/on-core-error :panic
-                                                                :seon.config.error/escalate-to "root"})
+           environment (world connection "fault-stop-request" {:seon.config.error/escalate-to "root"})
            panic (try (fault/fault! environment (ex-info "a panicking fault" {})
                                     (assoc (context "stop-request")
                                            :seon.fault/stop-request!

@@ -120,7 +120,6 @@
              :seon.boot/cluster-name "default"
              :seon.flow/work-launcher launcher
              :seon.sci.admit/caps (config/result-caps config/defaults)
-             :seon.config/on-core-error :record
              :seon.sci.eval/ctx (:seon.sci.eval/ctx (support/execution-handle connection))
              :seon.effect/counter (atom -1)}]
         (try

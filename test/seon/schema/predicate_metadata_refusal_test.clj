@@ -9,8 +9,7 @@
             [seon.test-support :as support]))
 
 (def ^:private policy
-  {:seon.config/on-core-error :panic
-   :seon.config.error/max-evidence-bytes 8192})
+  {:seon.config.error/max-evidence-bytes 8192})
 
 (defn- refusal-of
   "Arm `authored` for `operation` around `body` and call it with `arguments`."
@@ -66,7 +65,7 @@
            wrapped (instrument/wrap-interpreted
                     'seon.schema.predicate-metadata-refusal-test/interpreted
                     "[:=> [:cat [:fn clojure.core/ifn?] :int] :any]"
-                    projection :panic (config/result-caps config/defaults)
+                    projection (config/result-caps config/defaults)
                     (fn [f x] (f x)))
            thrown (try (wrapped 1 2) nil (catch clojure.lang.ExceptionInfo failure failure))
            refusal (ex-data thrown)]

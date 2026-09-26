@@ -16,8 +16,7 @@
     :seon.cluster.eval/ns [:seon.ns/name 'scratch.entry-gate]
     :seon.sci.eval/ctx ctx
     :seon.sci.admit/caps caps
-    :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)
-    :seon.config/on-core-error :panic})))
+    :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)})))
 
 (deftest every-program-namespace-carries-its-stored-aliases
   (support/with-database

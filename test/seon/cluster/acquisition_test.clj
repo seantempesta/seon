@@ -34,8 +34,7 @@
                  :seon.cluster.eval/ns [:seon.ns/name 'seon.sci.eval-test]
                  :seon.cluster.eval/source source
                  :seon.sci.eval/time-limit-ms 5000
-                 :seon.sci.admit/caps (config/result-caps config/defaults)
-                 :seon.config/on-core-error :panic})]
+                 :seon.sci.admit/caps (config/result-caps config/defaults)})]
     (when (:seon.cluster.eval/error result)
       (throw (ex-info "Evaluation refused." result)))
     result))
@@ -97,7 +96,6 @@
                    :seon.sci.eval/ctx ctx :seon.agent/routing (agent/routing)
                    :seon.sci.admit/caps (config/result-caps config/defaults)
                    :seon.config.eval/time-limit-ms 5000
-                   :seon.config/on-core-error :panic
                    :seon.env/environment (env/of ctx) :seon.store/store held}
            handles (atom [])]
        (try

@@ -114,8 +114,7 @@
               :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection "message-test")
               :seon.sci.admit/caps
               (config/result-caps (test-support/effective-config))
-              :seon.sci.eval/time-limit-ms 5000
-              :seon.config/on-core-error :panic})]
+              :seon.sci.eval/time-limit-ms 5000})]
         (is (= 1 (count planned)))
         (is (= (message/read "message-1" @connection)
                (:seon.sci.admit/value evaluated)))
@@ -142,8 +141,7 @@
                 :seon.sci.eval/ctx ctx
                 :seon.sci.admit/caps
                 (config/result-caps (test-support/effective-config))
-                :seon.sci.eval/time-limit-ms 5000
-                :seon.config/on-core-error :panic}))
+                :seon.sci.eval/time-limit-ms 5000}))
             indexed
             (db/pull @connection
                      '[{:seon.fn/arities

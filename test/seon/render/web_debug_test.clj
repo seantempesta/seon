@@ -385,8 +385,7 @@
                     :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
                     :seon.render.walk/lookup agent-eid
                     :seon.sci.admit/caps (config/result-caps config/defaults)
-                    :seon.sci.eval/time-limit-ms 5000
-                    :seon.config/on-core-error :record}
+                    :seon.sci.eval/time-limit-ms 5000}
            history (walk/history request)]
        (is (instance? Long agent-eid))
        (is (instance? Long component-eid))
@@ -452,7 +451,6 @@
                     :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
                     :seon.sci.admit/caps (config/result-caps config/defaults)
                     :seon.sci.eval/time-limit-ms 5000
-                    :seon.config/on-core-error :record
                     :seon.render/value saved
                     :seon.render.call/id [lookup]}
            html (render/render-call
@@ -607,7 +605,6 @@
                         :seon.sci.eval/ctx ctx
                         :seon.sci.admit/caps caps
                         :seon.sci.eval/time-limit-ms (* 1000 support/event-backstop-seconds)
-                        :seon.config/on-core-error :panic
                         :seon.render/profile (render/agent-render-profile effective)
                         :seon.render/captured-calls (atom {})
                         :seon.render/captured-invocations (atom {})}
@@ -647,7 +644,6 @@
                     :seon.sci.eval/ctx ctx
                     :seon.sci.admit/caps (config/result-caps effective)
                     :seon.sci.eval/time-limit-ms (* 1000 support/event-backstop-seconds)
-                    :seon.config/on-core-error :panic
                     :seon.render/profile (render/agent-render-profile effective)
                     :seon.render/captured-calls (atom {})
                     :seon.render/captured-invocations (atom {})}
@@ -718,7 +714,6 @@
                     :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
                     :seon.sci.admit/caps (config/result-caps effective)
                     :seon.sci.eval/time-limit-ms (* 1000 support/event-backstop-seconds)
-                    :seon.config/on-core-error :panic
                     :seon.render/profile (render/agent-render-profile effective)
                     :seon.render/captured-calls (atom {})
                     :seon.render/captured-invocations (atom {})}
@@ -780,7 +775,6 @@
                     :seon.agent/id "root" :seon.sci.eval/ctx (:ctx context)
                     :seon.sci.admit/caps (config/result-caps config/defaults)
                     :seon.sci.eval/time-limit-ms (* 1000 support/event-backstop-seconds)
-                    :seon.config/on-core-error :record
                     :seon.render/profile (render/agent-render-profile config/defaults)}
            calls (atom {:directory 0 :render 0})
            directory sci.eval/directory-value
@@ -836,7 +830,6 @@
                     :seon.agent/id "root" :seon.sci.eval/ctx (:ctx context)
                     :seon.sci.admit/caps (config/result-caps config/defaults)
                     :seon.sci.eval/time-limit-ms (* 1000 support/event-backstop-seconds)
-                    :seon.config/on-core-error :record
                     :seon.render/profile (render/agent-render-profile config/defaults)}
            calibration-var (requiring-resolve 'seon.cluster.prompt/agent-calibration)
            calibration @calibration-var
@@ -955,8 +948,7 @@
      :seon.cluster/name "debug-outline"
      :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
      :seon.sci.admit/caps (config/result-caps config/defaults)
-     :seon.sci.eval/time-limit-ms 5000
-     :seon.config/on-core-error :record}))
+     :seon.sci.eval/time-limit-ms 5000}))
 
 (defn- outline-nodes [rendered predicate]
   (filter #(and (vector? %) (map? (second %)) (predicate (second %)))

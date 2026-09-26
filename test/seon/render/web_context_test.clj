@@ -31,7 +31,6 @@
                     :seon.sci.eval/ctx ctx
                     :seon.sci.admit/caps (config/result-caps config/defaults)
                     :seon.sci.eval/time-limit-ms (* 1000 support/event-backstop-seconds)
-                    :seon.config/on-core-error :record
                     :seon.render/distance 1
                     :seon.render/profile (render/agent-render-profile config/defaults)}]
        (with-open [executor (Executors/newVirtualThreadPerTaskExecutor)]

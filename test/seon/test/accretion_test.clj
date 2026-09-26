@@ -184,8 +184,7 @@
                        :seon.cluster.eval/source source
                        :seon.test.accretion/gate-set ['fixture.candidate/green-test 'fixture.candidate/red-test]
                        :seon.sci.eval/time-limit-ms 2000
-                       :seon.sci.admit/caps (config/result-caps config/defaults)
-                       :seon.config/on-core-error :panic})
+                       :seon.sci.admit/caps (config/result-caps config/defaults)})
             held (sci/resolve parent 'fixture.candidate/target)
             wrapped (request (str "(do (defn ^{:malli/schema [:=> [:cat :int] :int]} "
                                   "target [x] (inc x)) (target 1))"))
@@ -245,8 +244,7 @@
               :seon.test.accretion/gate-set
               ['fixture.custody/reads-its-own-cluster]
               :seon.sci.eval/time-limit-ms 2000
-              :seon.sci.admit/caps (config/result-caps config/defaults)
-              :seon.config/on-core-error :panic})
+              :seon.sci.admit/caps (config/result-caps config/defaults)})
             gate (first (:seon.test.accretion/results result))]
         (is (= 'fixture.custody/reads-its-own-cluster
                (:seon.test/sym gate))
@@ -281,8 +279,7 @@
                 :seon.test.accretion/gate-set []
                 :seon.sci.eval/time-limit-ms 2000
                 :seon.sci.admit/caps
-                (config/result-caps config/defaults)
-                :seon.config/on-core-error :panic}))
+                (config/result-caps config/defaults)}))
             check-request
             (fn [candidate row]
               {:seon.sci.eval/ctx candidate
@@ -292,8 +289,7 @@
                :seon.test.accretion/seed 424242
                :seon.sci.eval/time-limit-ms 2000
                :seon.sci.admit/caps
-               (config/result-caps config/defaults)
-               :seon.config/on-core-error :panic})
+               (config/result-caps config/defaults)})
             bad
             (candidate-request
              (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
@@ -368,16 +364,14 @@
                                       :seon.db/connection connection :seon.agent/id "world-author"
                                       :seon.cluster.eval/source source :seon.test.accretion/gate-set []
                                       :seon.sci.eval/time-limit-ms 2000
-                                      :seon.sci.admit/caps (config/result-caps config/defaults)
-                                      :seon.config/on-core-error :panic})]
+                                      :seon.sci.admit/caps (config/result-caps config/defaults)})]
                       (sci.eval/auto-check-candidate
                        {:seon.sci.eval/ctx (:seon.test.accretion/candidate-ctx candidate)
                         :seon.db/db @connection
                         :seon.program/row (get-in candidate [:seon.test.accretion/evaluation :seon.program/row])
                         :seon.config.test/auto-check-cases 25 :seon.test.accretion/seed 424242
                         :seon.sci.eval/time-limit-ms 2000
-                        :seon.sci.admit/caps (config/result-caps config/defaults)
-                        :seon.config/on-core-error :panic})))
+                        :seon.sci.admit/caps (config/result-caps config/defaults)})))
             reader (check (str "(defn ^{:malli/schema [:=> [:cat :seon.db/database-value] [:int {:min 1}]]} "
                                "agent-count [db] (count (seon.db/q '[:find [?id ...] :where [_ :seon.agent/id ?id]] db)))"))
             entry (check (str "(defn ^{:malli/schema [:=> [:cat [:map [:seon.db/db :seon.db/database-value]]] [:int {:min 1}]]} "

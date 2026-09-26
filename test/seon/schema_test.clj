@@ -1234,8 +1234,7 @@
                        (get contracts function-symbol)
                        (fn [& _] nil)
                        (config/result-caps configuration)
-                       (select-keys configuration [:seon.config/on-core-error
-                                                   :seon.config.error/max-evidence-bytes]))))))
+                       (select-keys configuration [:seon.config.error/max-evidence-bytes]))))))
        (testing "call preparation's argument validators compile"
          (let [arities (#'call-preparation/contract-arities bare)
                arguments (for [[_ function-arities] arities

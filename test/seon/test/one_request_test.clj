@@ -39,8 +39,7 @@
                        :seon.cluster.eval/source source
                        :seon.cluster.eval/ns [:seon.ns/name namespace-name]
                        :seon.sci.admit/caps (config/result-caps config/defaults)
-                       :seon.sci.eval/time-limit-ms 5000
-                       :seon.config/on-core-error :panic})))
+                       :seon.sci.eval/time-limit-ms 5000})))
                     ::agent-test-defined)
         row (program/declaration-row (db/carried-projection (db/db connection))
                                      (:seon.program/row evaluation) :all :agent)]

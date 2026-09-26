@@ -56,7 +56,6 @@
                :seon.sci.eval/ctx (evaluation-context connection)
                :seon.sci.admit/caps caps
                :seon.sci.eval/time-limit-ms 2000
-               :seon.config/on-core-error :panic
                :seon.boot/cluster-name "receipt-write-carrier-test"
                :seon.agent/id agent-id
                :seon.turn/id run-id

@@ -25,7 +25,6 @@
                      :seon.render.web/view
                      {:seon.sci.eval/ctx (support/fork-cluster-ctx connection)
                       :seon.config.eval/time-limit-ms 5000
-                      :seon.config/on-core-error :record
                       :seon.db.process/id "web-binding-process"
                       :seon.render.web/pages-mult (async/mult pages)
                       :seon.render.web/registration (atom {})

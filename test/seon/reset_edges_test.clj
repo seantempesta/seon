@@ -171,8 +171,7 @@
                     :seon.cluster.eval/source
                     "(seon.db/transact! [[:db/retractEntity [:seon.fn/sym 'seon.turn/open?]]])"
                     :seon.sci.admit/caps (config/result-caps decisions)
-                    :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms decisions)
-                    :seon.config/on-core-error :panic})
+                    :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms decisions)})
            refusal (:seon.sci.admit/value result)]
        (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str result))
        (is (seq (:seon.program/referrers refusal)))

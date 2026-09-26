@@ -65,8 +65,7 @@
                            :seon.render/context-channel channel
                            :seon.turn.loop/completion channel
                            :seon.sci.admit/caps (config/result-caps defaults)
-                           :seon.config.eval/time-limit-ms 2000
-                           :seon.config/on-core-error :panic})
+                           :seon.config.eval/time-limit-ms 2000})
            raw-source (str "(seon.db/pull [:seon.agent/id] [:seon.agent/id \"later-agent\"])\n"
                          "(in-ns 'preview.batch-next)\n"
                          "(+ 1 2)\n"
@@ -246,8 +245,7 @@
                            :seon.render/context-channel channel
                            :seon.turn.loop/completion channel
                            :seon.sci.admit/caps (config/result-caps defaults)
-                           :seon.config.eval/time-limit-ms 2000
-                           :seon.config/on-core-error :panic})
+                           :seon.config.eval/time-limit-ms 2000})
            sources (mapv (fn [ordinal]
                            {:seon.cluster.eval/source (str "(+ 1 " ordinal ")")})
                          (range 6))

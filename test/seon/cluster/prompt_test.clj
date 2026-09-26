@@ -87,8 +87,7 @@
    :seon.sci.admit/caps caps
    :seon.sci.eval/ctx ctx
    :seon.sci.eval/time-limit-ms (* 1000 support/event-backstop-seconds)
-   :seon.render/profile (render/agent-render-profile config/defaults)
-   :seon.config/on-core-error :panic})
+   :seon.render/profile (render/agent-render-profile config/defaults)})
 
 (deftest prompt-prices-the-exact-retained-history
   (planted

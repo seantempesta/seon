@@ -22,8 +22,7 @@
                         "(clojure.test/deftest bounded-test (loop [] (recur)))"
                         :seon.cluster.eval/ns [:seon.ns/name 'seon.test-test]
                         :seon.sci.admit/caps (config/result-caps config/defaults)
-                        :seon.sci.eval/time-limit-ms 10000
-                        :seon.config/on-core-error :panic})
+                        :seon.sci.eval/time-limit-ms 10000})
            result (sci.eval/run-test
                    {:seon.sci.eval/ctx ctx
                     :seon.test/var (:seon.sci.admit/value evaluation)
@@ -51,8 +50,7 @@
                         :seon.cluster.eval/source source
                         :seon.cluster.eval/ns [:seon.ns/name 'seon.test-test]
                         :seon.sci.admit/caps (config/result-caps config/defaults)
-                        :seon.sci.eval/time-limit-ms 10000
-                        :seon.config/on-core-error :panic})
+                        :seon.sci.eval/time-limit-ms 10000})
            declaration (program/declaration-row (seon.schema/handed-projection) (:seon.program/row evaluation) :all :agent)]
        (is (nil? (:seon.cluster.eval/error evaluation)) (pr-str evaluation))
        (is (string? (:seon.program/analyzed-source-digest declaration)))

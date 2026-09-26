@@ -29,7 +29,6 @@
          (let [decision (render/selection {:seon.db/db database :seon.sci.eval/ctx ctx
                                            :seon.sci.admit/caps (config/result-caps (support/effective-config))
                                            :seon.sci.eval/time-limit-ms 10000
-                                           :seon.config/on-core-error :panic
                                            :seon.render/value component :seon.render/output output
                                            ;; A component renders as its attribute's value.
                                            :seon.render.walk/attribute :seon.agent/settings})]
@@ -101,7 +100,7 @@
                   :seon.db/connection connection :seon.agent/id "juniper"}))
            request {:seon.sci.eval/ctx ctx :seon.agent/id "juniper"
                     :seon.sci.admit/caps (config/result-caps config/defaults)
-                    :seon.sci.eval/time-limit-ms 10000 :seon.config/on-core-error :panic}
+                    :seon.sci.eval/time-limit-ms 10000}
            evaluate (fn [source]
                       (evaluation/evaluate (assoc request :seon.db/db @connection
                                                  :seon.cluster.eval/source source)))

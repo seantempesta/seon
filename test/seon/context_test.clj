@@ -19,6 +19,6 @@
 (use-fixtures :each preserving-instrumentation-state)
 
 (deftest message-custody-accepts-an-absent-run-when-instrumented
-  (instrument/apply! {:seon.config/on-core-error :panic})
+  (instrument/apply! {})
   (is (= :seon.context/history
          (context/message-custody (db/db *connection*) nil "agent" 1))))

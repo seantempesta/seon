@@ -82,8 +82,7 @@
                    :seon.sci.admit/caps {}
                    :seon.sci.admit/unbounded? true
                    :seon.sci.admit/interrupt-fn (fn [])
-                   :seon.schema/projection projection
-                   :seon.config/on-core-error :record}))))
+                   :seon.schema/projection projection}))))
        (with-redefs [schema/projection-from-database
                      (fn [& _] (swap! rebuilds inc)
                        (throw (ex-info "Unexpected projection construction" {})))
@@ -100,8 +99,7 @@
                        {:seon.sci.admit/value database
                         :seon.sci.admit/caps {}
                         :seon.sci.admit/unbounded? true
-                        :seon.sci.admit/interrupt-fn (fn [])
-                        :seon.config/on-core-error :record}))))
+                        :seon.sci.admit/interrupt-fn (fn [])}))))
               (doseq [value [database (:db-after report)
                              (db/history database)
                              (db/as-of database (:max-tx database))

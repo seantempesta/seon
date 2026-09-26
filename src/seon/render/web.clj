@@ -480,8 +480,6 @@
                     :seon.sci.eval/ctx (:seon.sci.eval/ctx request)
                     :seon.sci.eval/time-limit-ms
                     (:seon.config.eval/time-limit-ms request)
-                    :seon.config/on-core-error
-                    (:seon.config/on-core-error request)
                     :seon.db/connection connection}
              (:seon.agent/routing request)
              (assoc :seon.agent/routing (:seon.agent/routing request)))))
@@ -1747,7 +1745,6 @@
             :seon.sci.admit/caps caps
             :seon.sci.eval/time-limit-ms
             (:seon.config.eval/time-limit-ms handle)
-            :seon.config/on-core-error (:seon.config/on-core-error handle)
             :seon.turn.loop/cluster handle
             :seon.agent/routing
             (:seon.agent/routing handle)
@@ -2096,8 +2093,6 @@
                      :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
                      :seon.config.eval/time-limit-ms
                      (:seon.config.eval/time-limit-ms handle)
-                     :seon.config/on-core-error
-                     (:seon.config/on-core-error handle)
                      :seon.render/profile profile
                      :seon.db/connection connection
                      :seon.render.web/retained-fragments
@@ -2250,16 +2245,16 @@
 (defn- entrance-fault!
   "Record one core fault from a web entrance whose thread is its own execution
   owner (a feed writer, one HTTP request): there is no graph to stop, and the
-  entrance ends with its declared response. A panic carrying its receipt is
-  therefore disposed here; any other throw propagates."
+  entrance ends with its declared response. An unrecorded fault's throw
+  carrying its receipt is therefore disposed here; any other throw propagates."
   {:malli/schema [:=> [:cat :seon.env/environment :seon.error/throwable :qualified-keyword :qualified-symbol]
                   [:or :nil :seon.fault/recorded]]}
   [environment failure layer operation]
   (try (fault/fault! environment failure
                      {:seon.error/layer layer :seon.error/operation operation
                       :seon.db.process/id (process/id (process/current-identity))})
-       (catch clojure.lang.ExceptionInfo panic
-         (when-not (fault/carried-receipt panic) (throw panic)))))
+       (catch clojure.lang.ExceptionInfo unrecorded
+         (when-not (fault/carried-receipt unrecorded) (throw unrecorded)))))
 
 (defn- failed-page-result
   "One page whose derivation threw: a committed fault and a visible section.
@@ -2270,7 +2265,7 @@
   committer inbox; the page shows the flat diagnostic where its content would
   have been; and the proc goes on to the next page. The fault is recorded on
   the render proc's own thread through `seon.fault/fault!`, which delivers it;
-  under `:panic` its throw reaches `var-process`, which stops the graph.
+  a fault it cannot store throws to `var-process`, which stops the graph.
 
   ONE FAULT PER FAILURE, NOT ONE PER PASS. A page that throws every pass used
   to commit an identical fault every pass — six in ninety seconds, observed
@@ -3155,9 +3150,7 @@
              :seon.sci.admit/caps caps
              :seon.sci.eval/ctx (:seon.sci.eval/ctx render-context)
              :seon.sci.eval/time-limit-ms
-             (:seon.config.eval/time-limit-ms render-context)
-             :seon.config/on-core-error
-             (:seon.config/on-core-error render-context)}
+             (:seon.config.eval/time-limit-ms render-context)}
       (contains? render-context :seon.render/profile)
       (assoc :seon.render/profile (:seon.render/profile render-context))
 
@@ -3323,7 +3316,7 @@
         captured-calls (atom {})
         request {:seon.db/db database :seon.db/connection (:seon.store/connection-object service) :seon.sci.eval/ctx (:seon.sci.eval/ctx service)
                  :seon.sci.admit/caps (:seon.sci.admit/caps service) :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms service)
-                 :seon.config/on-core-error (:seon.config/on-core-error service) :seon.agent/id agent-id
+                 :seon.agent/id agent-id
                  ;; Calls, not invocations: with captured invocations a source-producing AI face defers its forms to the caller.
                  :seon.render/retained-calls (get-in @cache [::graph-calls cache-key] {}) :seon.render/captured-calls captured-calls}
         graph (if (and (vector? lookup) (= 2 (count lookup)) (qualified-keyword? (first lookup)))
@@ -3712,9 +3705,7 @@
                :seon.db/db db
                :seon.sci.eval/ctx (:seon.sci.eval/ctx service)
                :seon.sci.eval/time-limit-ms
-               (:seon.config.eval/time-limit-ms service)
-               :seon.config/on-core-error
-               (:seon.config/on-core-error service)}
+               (:seon.config.eval/time-limit-ms service)}
                (not (:seon.config/missing-effective effective))
                (assoc :seon.render/profile
                       (render/agent-render-profile effective)))

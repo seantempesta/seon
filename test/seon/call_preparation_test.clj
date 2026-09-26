@@ -653,8 +653,7 @@
   decided from the fixture's supplied-default rows."
   [database]
   (let [result (instrument/apply!
-                {:seon.config/on-core-error :panic
-                 :seon.schema/projection (db/carried-projection database)
+                {:seon.schema/projection (db/carried-projection database)
                  :seon.db/db database
                  :seon.instrument/changed-identities
                  (into #{} (map (fn [probe-var] [:seon.fn/sym (symbol probe-var)])) (vals probe-vars))})]

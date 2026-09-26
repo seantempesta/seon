@@ -143,9 +143,8 @@
                              (fn [{written :key}]
                                (when (and (uuid? written) (compare-and-set! armed true false))
                                  (throw (AssertionError. "injected Error in one store write")))))
-          ;; A bare store declares no :seon.config/on-core-error, so the
-          ;; mode decides only HOW the failure surfaces (a throw, or the
-          ;; outcome-unknown refusal); either way it is never a report.
+          ;; The failure surfaces as a throw or the outcome-unknown
+          ;; refusal; either way it is never a report.
           (let [outcome (try (db/transact! connection [{:seon.store.test/marker "lost"}])
                              (catch Throwable failure failure))]
             (is (or (instance? Throwable outcome)

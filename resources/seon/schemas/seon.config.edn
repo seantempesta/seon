@@ -37,8 +37,6 @@
                [:seon.config/desired-row :seon.config/entity]
                [:seon.config/resolved-attributes
                 [:set :qualified-keyword]]],
-              :on-core-error
-              [:enum #:seon.config{:dial true} :record :panic],
               :rule :keyword,
               :path [:string {:min 1}],
               :key :qualified-keyword,

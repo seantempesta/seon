@@ -38,8 +38,7 @@
                   :seon.cluster.eval/ns [:seon.ns/name 'seon.cluster.entrance-supplier-test]
                   :seon.cluster.eval/source "(+ 20 22)"
                   :seon.sci.eval/time-limit-ms 5000
-                  :seon.sci.admit/caps (config/result-caps config/defaults)
-                  :seon.config/on-core-error :panic})
+                  :seon.sci.admit/caps (config/result-caps config/defaults)})
                 supplied (program/supplied-context
                           (env/scope (env/of (:seon.sci.eval/ctx execution))
                                      {:my.program/executing-ctx (:seon.sci.eval/ctx execution)}))]

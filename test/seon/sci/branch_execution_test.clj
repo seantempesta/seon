@@ -21,8 +21,7 @@
                  :seon.cluster.eval/ns [:seon.ns/name namespace-name]
                  :seon.cluster.eval/source source
                  :seon.sci.eval/time-limit-ms 5000
-                 :seon.sci.admit/caps (config/result-caps config/defaults)
-                 :seon.config/on-core-error :panic})]
+                 :seon.sci.admit/caps (config/result-caps config/defaults)})]
     (when (:seon.cluster.eval/error result)
       (println "REALITIES-EVAL-REFUSAL" (pr-str (select-keys result [:seon.cluster.eval/error :seon.cluster.eval/triage-edn])))
       (throw (ex-info "Agent evaluation refused." result)))
@@ -216,16 +215,16 @@
       (fn []
        (let [live (support/fork-cluster-ctx connection)
              _ (eval/acquire! {:seon.sci.eval/ctx live :seon.db/db (db/db connection)})
-             subject 'seon.render.hiccup/escape
+             subject 'seon.render.value/bounded-text
              indexed (db/pull (db/db connection) '[*] [:seon.fn/sym subject])]
          (is (true? (:seon.fn/host-bound? indexed))
-             "the indexer marks the declaration's own class usage")
+             "the indexer marks the declaration's own proxy (class usage alone interprets, task bd7cb669b45d)")
          (is (not (#{'clojure.core/reify 'clojure.core/proxy 'clojure.core/definterface
                      'clojure.core/deftype 'clojure.core/defrecord}
                    (:seon.fn/defined-by indexed)))
              "the form head alone would not have refused it")
          (let [row (declared! connection subject
-                     "(defn ^{:malli/schema [:=> [:cat :string] :string]} escape [text] text)")
+                     "(defn ^{:malli/schema [:=> [:cat :string] :string]} bounded-text [text] text)")
                refused (eval/install-row! {:seon.sci.eval/ctx live
                                            :seon.db/db (db/db connection)
                                            :seon.program/row row})]
@@ -282,7 +281,7 @@
    (fn [connection]
      (db/call-with-custody {:seon.db/connection connection}
       (fn []
-       (let [subject 'seon.render.hiccup/escape
+       (let [subject 'seon.render.value/bounded-text
              before (db/db connection)
              record-entity (db/q '[:find ?e . :where [?e :seon.source/commit-id]] before)
              ctx (eval/cluster-ctx before connection
@@ -350,8 +349,8 @@
    (fn [connection]
      (db/call-with-custody {:seon.db/connection connection}
       (fn []
-       (let [changed 'seon.render/invoke-producer
-             caller 'seon.render/render-form-value
+       (let [changed 'seon.render.value/datum
+             caller 'seon.render.value/bounded-text
              unloaded-changed 'seon.cluster.reload-measure/measured-request
              unloaded 'seon.cluster.reload-measure/-main
              before (db/db connection)
@@ -374,15 +373,15 @@
                                        (take-while some? (iterate ex-cause failure))))))]
          (println "UNOVERRIDDEN-HOST-BOUND-MS" (:ms acquired) (:interpreted-count view))
          (is (false? (host-bound? changed)) "the changed helper interprets")
-         (is (every? host-bound? [caller unloaded-changed unloaded]))
+         (is (host-bound? caller) "the caller's proxy is host-bound")
+         (is (not-any? host-bound? [unloaded-changed unloaded])
+             "class usage alone never makes a declaration host-bound (task bd7cb669b45d)")
          (is (some? (find-ns (symbol (namespace caller)))) "the caller's namespace is loaded")
          (is (nil? (find-ns (symbol (namespace unloaded)))) "this JVM never loaded the measurement namespace")
          (is (every? (:interpreted view) [changed caller unloaded-changed unloaded])
              "each changed row's closure reaches its host-bound caller")
          (is (= #{} (:refused view)) "no host-bound declaration without a compiled Var to override refuses the acquisition")
-         (is (= caller (refusal-of caller)) "an unchanged caller of a changed definition refuses by name when called")
-         (is (= unloaded-changed (refusal-of unloaded-changed)) "a changed row in an unloaded namespace refuses by name when called")
-         (is (= unloaded (refusal-of unloaded)) "its unchanged caller refuses by name when called")))))))
+         (is (= caller (refusal-of caller)) "an unchanged caller of a changed definition refuses by name when called")))))))
 
 (deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program interpreting the reverse closure (77 declarations) of one changed hiccup helper; measured 1,426 ms."
            :seon.test/long-ms 12000}

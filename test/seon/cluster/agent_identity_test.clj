@@ -112,7 +112,6 @@
                 :seon.sci.admit/caps
                 (config/result-caps (test-support/effective-config))
                 :seon.sci.eval/time-limit-ms 5000
-                :seon.config/on-core-error :panic
                 :seon.cluster.eval/source source
                 :seon.cluster.eval/ns [:seon.ns/name namespace-name]}))]
         (is (= [1] (mapv :seon.fn.arity/argument-count arities))

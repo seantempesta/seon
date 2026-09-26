@@ -45,8 +45,7 @@
 (defn- render-request
   [connection raw]
   (assoc (registered-unit connection raw)
-         :seon.sci.eval/time-limit-ms 2000
-         :seon.config/on-core-error :panic))
+         :seon.sci.eval/time-limit-ms 2000))
 
 (defn- tree-cuts
   "The cuts of one prepared projection's tree: the floor's elided nodes,
@@ -159,8 +158,7 @@
                          :seon.render/profile profile :seon.repl/handle handle
                          :seon.render.value/options {:seon.render.value/structural? true}
                          :seon.sci.admit/caps (config/result-caps configuration)
-                         :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)
-                         :seon.config/on-core-error :panic})
+                         :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)})
                shown (:seon.eval/shown result)
                tree-projection (value/prepare
                                 (assoc (render-request connection raw)
@@ -222,8 +220,7 @@
                      :seon.sci.eval/ctx ctx :seon.db/db database
                      :seon.render/profile (render/agent-render-profile configuration)
                      :seon.sci.admit/caps (config/result-caps configuration)
-                     :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)
-                     :seon.config/on-core-error :panic})
+                     :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)})
            shown (:seon.eval/shown result)]
        (is (= 'seon.db/q (:seon.fn/sym raw)) (pr-str lookup raw))
        (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
@@ -275,8 +272,7 @@
                               :seon.render/profile profile
                               :seon.repl/handle 'result/e0123456789ab
                               :seon.sci.admit/caps (config/result-caps configuration)
-                              :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)
-                              :seon.config/on-core-error :panic})
+                              :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)})
                     shown (:seon.eval/shown result)]
                 (is (:db-after written) (pr-str written))
                 (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
@@ -442,8 +438,7 @@
   (let [admitted (admit/admit
                   {:seon.sci.admit/value {:alpha [1 2 3]}
                    :seon.sci.admit/interrupt-fn (fn [])
-                   :seon.sci.admit/caps caps
-                   :seon.config/on-core-error :record})
+                   :seon.sci.admit/caps caps})
         artifact (value/artifact admitted)
         stored (value/artifact-edn artifact)
         restored (value/read-artifact stored)]
@@ -703,8 +698,7 @@
                     "(seon.db/pull '[:seon.agent/id {:seon.agent/namespace [:seon.ns/name {:seon.ns/steward [:seon.agent/id]}]}] [:seon.agent/id \"shape\"])"
                     :seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
                     :seon.sci.admit/caps (config/result-caps configuration)
-                    :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)
-                    :seon.config/on-core-error :panic})
+                    :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)})
            shown (:seon.eval/shown result)
            parsed (edn/read-string shown)]
        (is (not (:seon.cluster.eval/error result)) (pr-str result))
@@ -786,8 +780,7 @@
                      :seon.repl/handle 'result/e0123456789ab
                      :seon.sci.admit/caps (config/result-caps configuration)
                      :seon.sci.eval/time-limit-ms
-                     (:seon.config.eval/time-limit-ms configuration)
-                     :seon.config/on-core-error :panic})
+                     (:seon.config.eval/time-limit-ms configuration)})
            shown (:seon.eval/shown result)
            cut (elision-in shown (:seon.sci.admit/value result) profile)]
        (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
@@ -875,8 +868,7 @@
                      :seon.repl/handle 'result/e0123456789ab
                      :seon.sci.admit/caps (config/result-caps configuration)
                      :seon.sci.eval/time-limit-ms
-                     (:seon.config.eval/time-limit-ms configuration)
-                     :seon.config/on-core-error :panic})
+                     (:seon.config.eval/time-limit-ms configuration)})
            shown (:seon.eval/shown result)
            rendered (repl/render-directory-ai (:seon.sci.admit/value result))]
        (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
@@ -893,7 +885,7 @@
            refusal (try ((instrument/wrap-interpreted
                           'my.agents.audit/vector-input
                           "[:=> [:cat [:vector :int]] :int]"
-                          projection :panic caps (constantly 1))
+                          projection caps (constantly 1))
                          "not-a-vector")
                         (catch Exception failure (ex-data failure)))]
        (is ((seon.schema/projection-validator projection :seon.instrument/contract-error) refusal)
@@ -1106,7 +1098,7 @@
    (fn [connection]
      (let [original {:t (into (sorted-map) (map (fn [i] [i (str i)])) (range 100))}
            artifact (value/artifact (admit/admit {:seon.sci.admit/value original :seon.sci.admit/interrupt-fn (fn [])
-                                                  :seon.sci.admit/caps caps :seon.config/on-core-error :record}))
+                                                  :seon.sci.admit/caps caps}))
            digest ((requiring-resolve 'seon.blob/put!) connection (value/artifact-edn artifact))
            backing (value/artifact-value artifact)
            request (fn [path offset]

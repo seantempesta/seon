@@ -41,8 +41,7 @@
   (:seon.sci.admit/print-node
     (admit/admit-value {:seon.sci.admit/value value
                   :seon.sci.admit/interrupt-fn (fn [])
-                  :seon.sci.admit/caps admission-caps
-                  :seon.config/on-core-error :record})))
+                  :seon.sci.admit/caps admission-caps})))
 
 (defn- admitted-member-node
   "The print node for a value admitted as a MEMBER of an ordinary collection.
@@ -368,8 +367,7 @@
              (:seon.sci.admit/reason
               (admit/admit {:seon.sci.admit/value (atom 1)
                             :seon.sci.admit/interrupt-fn (fn [])
-                            :seon.sci.admit/caps admission-caps
-                            :seon.config/on-core-error :record})))))))
+                            :seon.sci.admit/caps admission-caps})))))))
 
 (deftest ^{:seon.test/long "Two sequential fresh JVMs prove process-independent object bytes. Measured 2026-09-22: 17754, 18512, 19419 ms including jcmd samples; each child was compiling seon.schema dependencies at five seconds. The 20000 ms bound rounds the largest observation to the next second."
            :seon.test/long-ms 20000}
@@ -389,8 +387,7 @@
              ":seon.sci.admit/caps "
              (pr-str
               (config/result-caps (test-support/effective-config)))
-             " "
-             ":seon.config/on-core-error :record}))))] "
+             "}))))] "
              "(print/emit-text node " (pr-str no-cuts) "))) values)] "
              "(print (pr-str rendered)))")
         run #(shell/sh "java" "-cp" (System/getProperty "java.class.path")

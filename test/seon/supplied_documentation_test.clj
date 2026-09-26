@@ -18,8 +18,7 @@
     :seon.db/connection connection :seon.agent/id "supplied-docs"
     :seon.cluster.eval/source source
     :seon.sci.admit/caps (config/result-caps (support/effective-config))
-    :seon.sci.eval/time-limit-ms 10000
-    :seon.config/on-core-error :panic}
+    :seon.sci.eval/time-limit-ms 10000}
       turn? (assoc :seon.turn/id "supplied-docs-turn"
                    :seon.cluster.eval/ordinal 0
                    :seon.boot/cluster-name "supplied-docs")))))

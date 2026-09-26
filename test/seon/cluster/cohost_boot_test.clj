@@ -73,8 +73,7 @@
   (schema/call-with-projection-state
    (projection-state-of instance)
    (fn []
-     (instrument/apply! {:seon.config/on-core-error :panic
-                         :seon.sci.admit/caps caps}))))
+     (instrument/apply! {:seon.sci.admit/caps caps}))))
 
 (defn- evaluate-in
   [instance source]
@@ -83,8 +82,7 @@
     :seon.cluster.eval/ns [:seon.ns/name 'user]
     :seon.sci.eval/ctx (:seon.sci.eval/ctx instance)
     :seon.sci.admit/caps caps
-    :seon.sci.eval/time-limit-ms 5000
-    :seon.config/on-core-error :panic}))
+    :seon.sci.eval/time-limit-ms 5000}))
 
 (deftest ^{:seon.test/fixture-observation "The subject is a second complete boot under the first live cluster instrumentation, not an ordinary branch transaction."
            :seon.test/long "Two real cold cluster boots verify independent instrumentation and SCI custody."

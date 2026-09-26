@@ -28,8 +28,7 @@
                       {:seon.cluster.eval/source source
                        :seon.sci.eval/ctx ctx :seon.db/db @connection
                        :seon.sci.admit/caps (config/result-caps configuration)
-                       :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)
-                       :seon.config/on-core-error :panic})))
+                       :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)})))
            initial (read! "(dir my.agents.directory)")
            evidence (db/read-evidence @captured)]
        (is (not (:seon.cluster.eval/error initial)) (pr-str initial))

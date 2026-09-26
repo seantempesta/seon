@@ -69,7 +69,7 @@
 (deftest a-capped-core-fault-is-recoverable-in-full-from-its-blob
   (support/with-database
    (fn [connection]
-     (support/apply-config! connection "evidence-fault" {:seon.config/on-core-error :record})
+     (support/apply-config! connection "evidence-fault" {})
      (let [operation 'seon.error-evidence-test/core-boundary
            environment (env/environment
                         {:seon.boot/cluster-name "evidence-fault"

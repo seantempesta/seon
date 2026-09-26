@@ -15,7 +15,7 @@
 
 (defn- world
   [connection cluster-name]
-  (test-support/apply-config! connection cluster-name {:seon.config/on-core-error :record})
+  (test-support/apply-config! connection cluster-name {})
   (env/environment {:seon.boot/cluster-name cluster-name
                     :seon.db/connection connection
                     :seon.sci.admit/caps (config/result-caps
@@ -43,8 +43,7 @@
 (defn- commit!
   "One committed report through the production config writer."
   [connection cluster-name limit]
-  (test-support/apply-config! connection cluster-name {:seon.config/on-core-error :record
-                                                        :seon.config.db/write-time-limit-ms limit}))
+  (test-support/apply-config! connection cluster-name {:seon.config.db/write-time-limit-ms limit}))
 
 (defn- await-recorded!
   [connection n]

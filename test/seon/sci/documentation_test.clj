@@ -59,8 +59,7 @@
                   {:seon.sci.eval/ctx ctx
                    :seon.cluster.eval/source source
                    :seon.sci.admit/caps (config/result-caps config/defaults)
-                   :seon.sci.eval/time-limit-ms 2000
-                   :seon.config/on-core-error :panic}))
+                   :seon.sci.eval/time-limit-ms 2000}))
            directory (run "(dir my.agent)")
            documentation (run "(doc my.agent/settings!)")
            missing (run "(doc my.agent/does-not-exist)")
@@ -118,8 +117,7 @@
                      :seon.cluster.eval/ns [:seon.ns/name 'fixture.own-functions]
                      :seon.cluster.eval/source source
                      :seon.sci.admit/caps (config/result-caps configuration)
-                     :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)
-                     :seon.config/on-core-error :panic})))
+                     :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)})))
            initial (run "(dir fixture.own-functions)")
            evidence (db/read-evidence @captured)
            defined (run "(defn identity-number \"Return the number.\nA durable function.\" {:malli/schema [:=> [:cat :int] :int]} [number] number)")
@@ -198,8 +196,7 @@
                     :seon.cluster.eval/ns [:seon.ns/name 'fixture.bare-tests]
                     :seon.cluster.eval/source "(deftest durable-arithmetic (is (= 2 (+ 1 1))))"
                     :seon.sci.admit/caps (config/result-caps (support/effective-config))
-                    :seon.sci.eval/time-limit-ms 10000
-                    :seon.config/on-core-error :panic})
+                    :seon.sci.eval/time-limit-ms 10000})
            row (:seon.program/row result)]
        (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
        (is (= 'fixture.bare-tests/durable-arithmetic (:seon.test/sym row)))
@@ -246,7 +243,7 @@
        ;; copies core JVM callables. Cluster configuration alone cannot repair
        ;; a callable already copied into the cached base.
        (support/seed-cluster! connection "documentation"
-                              {:seon.config/on-core-error :panic})
+                              {})
        (let [ctx (support/fork-cluster-ctx connection)
              run (fn [source]
                    (evaluation/evaluate
@@ -254,8 +251,7 @@
                      :seon.db/connection connection :seon.agent/id "documentation"
                      :seon.cluster.eval/source source
                      :seon.sci.admit/caps (config/result-caps config/defaults)
-                     :seon.sci.eval/time-limit-ms 10000
-                     :seon.config/on-core-error :panic}))
+                     :seon.sci.eval/time-limit-ms 10000}))
              documentation (:seon.sci.admit/value (run "(doc my.message/send)"))
              failed (run "(my.message/send {:my.message/to 42 :my.message/content \"Hello\"})")
              value (:seon.sci.admit/value failed)]
@@ -321,8 +317,7 @@
                    :seon.cluster.eval/ns [:seon.ns/name 'fixture.clojure-test]
                    :seon.cluster.eval/source source
                    :seon.sci.admit/caps (config/result-caps config/defaults)
-                   :seon.sci.eval/time-limit-ms 10000
-                   :seon.config/on-core-error :panic}))]
+                   :seon.sci.eval/time-limit-ms 10000}))]
        (sci/binding [sci/ns (sci/create-ns 'fixture.clojure-test)]
          (sci/eval-string* ctx "(deftest a-failing-test (is (= 1 2)))")
          (sci/eval-string* ctx "(deftest a-passing-test (is (= 1 1)) (is (= 2 2)))"))
@@ -347,8 +342,7 @@
                   {:seon.sci.eval/ctx ctx
                    :seon.cluster.eval/source source
                    :seon.sci.admit/caps (config/result-caps config/defaults)
-                   :seon.sci.eval/time-limit-ms 2000
-                   :seon.config/on-core-error :panic}))
+                   :seon.sci.eval/time-limit-ms 2000}))
            stored (:seon.fn/source (db/pull (db/db connection) [:seon.fn/source]
                                             [:seon.fn/sym 'my.agent/settings!]))
            qualified (run "(clojure.repl/source my.agent/settings!)")

@@ -67,11 +67,11 @@
                      host (binding [instrument/*compiling-contract* true]
                             (#'instrument/compiled-wrapper
                              projection 'user/benchmark contract identity caps
-                             {:seon.config/on-core-error :panic}))
+                             {}))
                      sci-malli (plain-malli projection contract interpreted)
                      sci-wrapped (instrument/wrap-interpreted
                                   'user/benchmark (pr-str contract) projection
-                                  :panic caps interpreted)]
+                                  caps interpreted)]
                  {::shape label
                   ::malli-us (mean-us #(malli value) 20000)
                   ::host-us (mean-us #(host value) 20000)

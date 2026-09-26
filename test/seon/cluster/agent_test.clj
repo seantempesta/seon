@@ -129,8 +129,7 @@
                    :seon.sci.eval/ctx ctx
                    :seon.config.eval/time-limit-ms
                    @shipped-eval-time-limit-ms
-                   :seon.config/on-core-error :panic
-                  :seon.db.process/id process}})}}
+                   :seon.db.process/id process}})}}
               :conns []
               :io-exec
               (cluster/projection-executor
@@ -181,7 +180,6 @@
    :seon.config.eval/time-limit-ms @shipped-eval-time-limit-ms
    :seon.config.agent/turn-completion-backstop-ms
    (:seon.config.agent/turn-completion-backstop-ms config/defaults)
-   :seon.config/on-core-error :panic
    :seon.config.error/recurrence-limit 3
    :seon.config.message/max-chain 16}))
 

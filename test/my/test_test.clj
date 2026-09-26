@@ -41,8 +41,7 @@
                       :seon.cluster.eval/source source
                       :seon.cluster.eval/ns [:seon.ns/name 'my.agents.owner]
                       :seon.sci.admit/caps (config/result-caps config/defaults)
-                      :seon.sci.eval/time-limit-ms 120000
-                      :seon.config/on-core-error :panic})
+                      :seon.sci.eval/time-limit-ms 120000})
            row (when (:seon.program/row declared)
                  (program/declaration-row (seon.schema/handed-projection) (:seon.program/row declared) :all :agent))]
        (is (nil? (:seon.cluster.eval/error declared)) (pr-str declared))

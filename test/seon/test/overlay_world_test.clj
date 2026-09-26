@@ -37,8 +37,7 @@
                          :seon.cluster.eval/source source
                          :seon.cluster.eval/ns [:seon.ns/name probe-ns]
                          :seon.sci.admit/caps (config/result-caps config/defaults)
-                         :seon.sci.eval/time-limit-ms 5000
-                         :seon.config/on-core-error :panic})))
+                         :seon.sci.eval/time-limit-ms 5000})))
                     ::admitted)]
     (is (nil? (:seon.cluster.eval/error evaluation)) (str (:seon.cluster.eval/error evaluation)))
     (when-let [row (:seon.program/row evaluation)]

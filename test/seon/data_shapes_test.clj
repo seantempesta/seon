@@ -351,8 +351,7 @@
                              :seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
                              :seon.render/profile (seon.render/agent-render-profile configuration)
                              :seon.sci.admit/caps (config/result-caps configuration)
-                             :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)
-                             :seon.config/on-core-error :panic})
+                             :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)})
                [settled] (turn/settlement-projection {:seon.db/connection connection} evaluation)
                facts (turn/evaluation-facts
                       {:seon.turn/id "renderer-facts-turn"

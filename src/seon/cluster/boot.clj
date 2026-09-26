@@ -89,9 +89,7 @@
               :seon.schema/projection
               (:seon.schema/projection @projection-state)
               :seon.db/basis-t (:seon.db/basis-t @projection-state)
-              :seon.sci.admit/caps (config/result-caps boot-dials)
-              :seon.config/on-core-error
-              (:seon.config/on-core-error boot-dials)}))
+              :seon.sci.admit/caps (config/result-caps boot-dials)}))
            work-launcher
            (flow/start-work-launcher!
             {:seon.env/environment pre-graph-environment
@@ -332,10 +330,8 @@
 
   The world is the environment the throwable carries, never a guess: without
   one no cluster is chosen (a probe's throwable is not the sole instance's
-  fault). That failure, and a recording the database refuses, panic in both
-  modes on stderr with every cause.
-  `:panic` also prints a stored fault loudly; `:record` stays quiet once
-  stored and delivered."
+  fault). That failure, and a recording the database refuses, are printed on
+  stderr with every cause; a stored fault is delivered through its record."
   {:malli/schema [:=> [:cat :string :seon.error/throwable] :nil]}
   [thread-name throwable]
   (let [instances (vec (vals @running-instances))
@@ -344,8 +340,7 @@
       (uncaught-emergency! thread-name throwable
                            {:candidates (mapv #(get-in % [:seon.boot/config :seon.boot/cluster-name]) instances)})
       (let [{connection :seon.db/connection cluster-name :seon.boot/cluster-name
-             caps :seon.sci.admit/caps mode :seon.config/on-core-error
-             agent-id :seon.agent/id} environment
+             caps :seon.sci.admit/caps agent-id :seon.agent/id} environment
             [fact outcome]
             (fault/record!
              connection cluster-name (cluster/process-identity (process/current-identity)) caps
@@ -354,19 +349,13 @@
               :seon.error/declared-schema
               (or (:seon.error/declared-schema (meta (ex-data throwable)))
                   :seon.flow/exception-error)})]
-        (cond
-          (not= ::flow/committed outcome)
+        (when (not= ::flow/committed outcome)
           (uncaught-emergency! thread-name throwable
                                {:cluster cluster-name
                                 :signature (:seon.error/signature fact)
                                 :outcome (if (instance? Throwable outcome)
                                            (render.value/floor outcome)
-                                           outcome)})
-          (= :panic mode)
-          (binding [*out* *err*]
-            (println "SEON CORE FAULT (dev panic, uncaught on" (str thread-name "):")
-                     "[signature" (str (:seon.error/signature fact) "]\n") (render.value/floor throwable))
-            (flush))))))
+                                           outcome)})))))
   nil)
 
 (defn- install-uncaught-handler!
