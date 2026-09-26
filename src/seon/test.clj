@@ -267,8 +267,11 @@
                            (fn [] (if (var? test-var)
                               ;; A host body runs unarmed (it may evaluate its own SCI
                               ;; contexts, which another arm on this thread would
-                              ;; refuse), under the custody of its member branch only.
-                              (binding [*member* member]
+                              ;; refuse), under the custody of its member branch only,
+                              ;; as its member's agent: its calls receive their
+                              ;; supplied defaults from the member's world.
+                              (binding [*member* member
+                                        kernel/*host-world* (:seon.sci.eval/ctx custody)]
                                 (runner/run-var! test-var (select-keys member [:seon.db/connection])))
                               ;; The SCI arm interrupts interpreted bodies at the
                               ;; declared per-test bound; `duration-failures` fails

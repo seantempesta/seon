@@ -448,8 +448,16 @@
       (finally
         ((::stop! armed))))))
 
+(def ^:dynamic *host-world*
+  "The context a host body runs as when no evaluation arms its thread: a JVM
+  test body is its member's agent (`seon.test/bounded-result` binds it), so a
+  call it makes receives its supplied defaults exactly as that agent's
+  evaluation would. An arm always governs over it."
+  nil)
+
 (defn world-ctx
-  "The context of the evaluation governing this thread, or nil when none runs.
+  "The context of the evaluation governing this thread, else the host body's
+  world (`*host-world*`), or nil when neither runs.
 
   Every entrance arms (`with-arm`: an evaluation, a named invocation, a test
   run), and the arm names the context it evaluates for its extent, nested work
@@ -459,7 +467,8 @@
   CALLING evaluation's world. Reading does not mark the arm travelled."
   {:malli/schema [:=> [:cat] [:or :nil :seon.sci.eval/ctx]]}
   []
-  (::ctx (.get ^ThreadLocal (::thread-arm @process-guard))))
+  (or (::ctx (.get ^ThreadLocal (::thread-arm @process-guard)))
+      *host-world*))
 
 (defn with-world-ctx
   "Run `work` with `ctx` as the governing arm's context for its extent.
