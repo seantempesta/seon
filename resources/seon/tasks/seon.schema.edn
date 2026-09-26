@@ -48,4 +48,10 @@
              :kind :function
              :intent "Malli's :map validator looks each declared key up (malli core.cljc:1276); a sorted map whose comparator cannot compare that key with its own keys throws ClassCastException instead of answering false (fault fa60ad84, seon.schema/valid-candidate-value? from turn-step, 17:13Z). The producer site was fixed in seon.turn/disposition (f83931226) by validating only maps that name the discriminator, and seon.render.value/keyword-lookup? guards the same class in render: two copies of one guard. Validating an arbitrary value against a candidate schema belongs to one owner; decide there, once, so callers delete their guards."
              :must-read #{seon.schema/valid-candidate-value? seon.turn/disposition seon.render.value/keyword-lookup?}
-             :evidence #{"docs/research/agent-platform/landing/perf-boot-opus-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/perf-boot-opus-2026-09-26.md"}}
+ #:seon.task{:name "a-function-contract-changes-the-schema-projection"
+             :kind :function
+             :intent "Function contract rows are a projection range (seon.schema/projection-ranges :function-contract-rows), so every contracted defn makes a new projection value: load-projection (36-50 ms, ~94 MB) and every projection-keyed derivation re-walks ~3,550 forms. Measured 2026-09-26 on pid 89341: (defn f [x] (inc x)) 134 ms, 157 MB, 26k armed calls; the same defn with {:malli/schema [:=> [:cat :int] :int]} 757 ms, 1.21 GB, 190k armed calls. Root ruling 2026-09-27: contracts leave the projection; design in docs/research/agent-platform/contracts-out-of-projection-design-2026-09-27.md."
+             :must-read #{seon.schema/projection-ranges seon.schema/build-projection seon.db/carried-projection}
+             :evidence #{"docs/research/agent-platform/landing/defn-scan-opus-2026-09-26.md"
+                         "docs/research/agent-platform/contracts-out-of-projection-design-2026-09-27.md"}}]
