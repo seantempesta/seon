@@ -1165,8 +1165,8 @@
            (render.value/artifact-edn (render.value/artifact admitted))
            inline-ceiling
            (:seon.config.eval.result/blob-threshold effective)]
-       (is (= #{:db-name :t :datahike/commit-id} (set (keys before))))
-       (is (= #{:db-name :t :datahike/commit-id} (set (keys after))))
+       (is (= #{:db-name :t :datahike/commit-id} (set (keys before))) (pr-str before))
+       (is (= #{:db-name :t :datahike/commit-id} (set (keys after))) (pr-str after))
        (is (uuid? (:datahike/commit-id before)))
        (is (uuid? (:datahike/commit-id after)))
        (is (not-any? db/database-value?
