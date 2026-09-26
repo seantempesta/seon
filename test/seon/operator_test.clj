@@ -52,3 +52,23 @@
     (is (= "seon.config/effective-in refused return value." (:seon.error/message value)))
     (is (= '(var clojure.core/map?)
            (second (get-in value [:seon.error/cause :data :seon.error/expected]))))))
+
+(deftest heap-dumps-are-read-from-the-managed-roots-heap-directory
+  ;; The 2026-09-26 OOM dump was written under the pruned program archive
+  ;; (a relative -XX:HeapDumpPath) and lost on the restart that recovered.
+  ;; The operator names <root>/data/heap at launch and reports its dumps.
+  (let [root (.getCanonicalFile (java.io.File. (str "tmp/operator-heap-test-" (random-uuid))))
+        heap (java.io.File. root "data/heap")
+        dump (fn [filename modified]
+               (let [file (java.io.File. heap filename)]
+                 (spit file "")
+                 (.setLastModified file modified)
+                 (.getCanonicalPath file)))]
+    (try
+      (is (= [] (#'operator/heap-dumps (str root))) "no directory, no dumps")
+      (.mkdirs heap)
+      (let [older (dump "java_pid1.hprof" 1000)
+            newer (dump "java_pid2.hprof" 2000)]
+        (dump "notes.txt" 3000)
+        (is (= [newer older] (#'operator/heap-dumps (str root)))))
+      (finally (test-support/delete-recursively! root)))))

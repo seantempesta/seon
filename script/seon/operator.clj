@@ -542,16 +542,31 @@
         (fs/move candidate target {:replace-existing true :atomic-move true}))))
   nil)
 
+(defn- heap-dumps
+  "The heap dumps under the managed root's `data/heap`, newest first. The JVM
+  writes `java_pid<pid>.hprof` inside an existing directory named by
+  `-XX:HeapDumpPath` (a missing one is taken as the file name)."
+  {:malli/schema [:=> [:cat :string] [:vector :string]]}
+  [root]
+  (into [] (comp (filter #(str/ends-with? (.getName ^java.io.File %) ".hprof"))
+                 (map #(.getCanonicalPath ^java.io.File %)))
+        (sort-by #(- (.lastModified ^java.io.File %)) (.listFiles (io/file root "data/heap")))))
+
 (defn- launch-child!
   "Launch one JVM whose program is the checkout at `source` and return its
   terminal boot value with the coordinates it advertised. A nuke passes
-  `reuse-classes?` false: it rebuilds reading no prior derived state."
+  `reuse-classes?` false: it rebuilds reading no prior derived state. Its
+  heap dump lands in the managed root's `data/heap`, never in the program
+  directory, which the next move prunes (`prune-archives!`)."
   [request source reuse-classes?]
   (let [root (:seon.operator/managed-root request)
         name (:seon.boot/cluster-name request)
         log (io/file root "data/clusters" name "logs/seon.log")
+        heap (doto (io/file root "data/heap") .mkdirs)
         bound (operator-silence-backstop-ms (:seon.config/manifest request))]
     (io/make-parents log)
+    (when-let [dumps (seq (heap-dumps root))]
+      (binding [*out* *err*] (println "HEAP-DUMPS" (pr-str (vec dumps)))))
     (with-open [callback (ServerSocket. 0 1 (java.net.InetAddress/getLoopbackAddress))]
       (let [environment (child-environment root)
             classes (if reuse-classes?
@@ -563,6 +578,7 @@
                    classpath (into ["-Scp" classpath])
                    true (into [(str "-J-Dseon.operator.root=" root)
                                (str "-J-Dseon.repository.root=" source)
+                               (str "-J-XX:HeapDumpPath=" (.getCanonicalPath heap))
                                "-M:dev:test" "-e" (launch-form request (.getLocalPort callback))]))
             builder (doto (ProcessBuilder. ^java.util.List argv)
                       (.directory (io/file source))
@@ -570,6 +586,8 @@
                       (.redirectOutput (java.lang.ProcessBuilder$Redirect/appendTo log)))
             _ (.putAll (.environment builder) environment)
             child (.start builder)
+            ;; `clojure` execs java, so the child's pid names its dump.
+            dump (io/file heap (str "java_pid" (.pid child) ".hprof"))
             exited (.thenApply (.onExit child) (reify Function (apply [_ _] ::exited)))
             accepted (CompletableFuture/supplyAsync (reify Supplier (get [_] (.accept callback))))
             event (try (.get (CompletableFuture/anyOf (into-array CompletableFuture [accepted exited]))
@@ -580,7 +598,8 @@
           (let [accept (joined callback accepted bound)]
             (some-> ^Socket (:seon.operator/task-value accept) .close)
             (fail! "Child exited or opened no REPL within its bound."
-                   {:seon.operator/log (str log) :seon.operator/event event :seon.operator/accept accept})))
+                   (cond-> {:seon.operator/log (str log) :seon.operator/event event :seon.operator/accept accept}
+                     (.isFile dump) (assoc :seon.operator/heap-dump (str dump))))))
         (with-open [socket event reader (java.io.BufferedReader. (io/reader socket))]
           (.setSoTimeout socket bound)
           (let [coordinates (edn/read-string (.readLine reader))
@@ -613,7 +632,8 @@
                      (cond-> {:seon.operator/event value :seon.operator/log (str log)
                               :seon.operator/read (joined socket terminal bound)
                               :seon.boot/advertisement coordinates}
-                       heads (assoc :seon.operator/captured-heads heads))))
+                       heads (assoc :seon.operator/captured-heads heads)
+                       (.isFile dump) (assoc :seon.operator/heap-dump (str dump)))))
             (when (some #(and (map? %)
                               (= :seon.cluster.store/held-elsewhere (:seon.cluster.store/rule %)))
                         (tree-seq coll? seq value))

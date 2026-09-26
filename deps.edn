@@ -159,8 +159,10 @@
               "-XX:+UseG1GC" "-XX:MaxRAMPercentage=8"
               "-XX:G1PeriodicGCInterval=30000"
               ;; A heap failure ends the JVM instead of limping into the store.
+              ;; The operator names the dump directory (<root>/data/heap) at
+              ;; launch; this JVM's working directory may be a pruned archive.
               "-XX:+ExitOnOutOfMemoryError"
-              "-XX:+HeapDumpOnOutOfMemoryError" "-XX:HeapDumpPath=data/heap"]}
+              "-XX:+HeapDumpOnOutOfMemoryError"]}
 
   :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.5"}}
           :ns-default build}
