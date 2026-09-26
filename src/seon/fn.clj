@@ -11,7 +11,6 @@
             [seon.error.refusal :as error.refusal]
             [seon.fn.analyzer :as analyzer]
             [sci.impl.namespaces :as sci.namespaces]
-            [sci.impl.opts :as sci.opts]
             [seon.fn.signature :as signature]
             [seon.id :as id]
             [seon.fs :as fs]
@@ -1045,14 +1044,15 @@
       (into (map ::analyzer/name) (::analyzer/namespace-definitions analysis))))
 
 (defn- host-bound-callers
-  "Declarations whose own body uses an unadmitted class or a host-bound operation.
+  "Declarations whose own body uses an operation SCI cannot interpret.
+   Class usage is never one: the configured interpreter resolves every class
+   on the classpath (`seon.sci.eval/build-base-ctx` `:classes {:allow :all}`;
+   fork `interop/host-class-opts`), so a copied class list cannot decide it.
    Import calls remain host-bound under the program declaration rule. A JVM
    macro from a namespace SCI does not interpret is host-bound: SCI hands it
    SCI's `&env`, which `clojure.core.async/go` reads as compiler locals.
    Macro status is clj-kondo's `:macro` from the dependency's analysis, never
-   the loaded JVM; a call into a namespace kondo never analyzed refuses by name.
-   Kondo supplies resolved class names and declaration ownership in one pass;
-   this is membership in SCI's admitted classes and interpreted namespaces, never another resolver."
+   the loaded JVM; a call into a namespace kondo never analyzed refuses by name."
   {:malli/schema [:=> [:cat :map [:set :qualified-symbol] :seon.schema/projection]
                   [:set :qualified-symbol]]}
   [analysis first-party-functions projection]
@@ -1065,12 +1065,6 @@
                      (filter #(contains? unanalyzed (symbol (namespace %)))))
            (::analyzer/var-usages analysis)))
     (-> #{}
-        (into
-         (comp
-          (remove #(contains? sci.opts/default-classes (symbol (::analyzer/class %))))
-          (remove #(#{"java.lang.Throwable" "java.lang.Error"} (::analyzer/class %)))
-          (keep usage-caller))
-         (::analyzer/java-class-usages analysis))
         (into
          (comp
           (filter #(some? (::analyzer/arity %)))

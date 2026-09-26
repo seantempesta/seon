@@ -3044,7 +3044,7 @@
         (is (seq (:seon.fn/findings refusal))))
       (finally (test-support/delete-recursively! root)))))
 
-(deftest host-binding-is-a-declaration-fact-not-a-caller-closure
+(deftest ^{:seon/tasks #{"bd7cb669b45d"}} host-binding-is-a-declaration-fact-not-a-caller-closure
   (let [root (fixture-root)
         text (str "(ns sample.host-bound)\n"
                   "(defn clock [] (System/currentTimeMillis))\n"
@@ -3066,16 +3066,18 @@
             facts (into {} (keep (fn [row]
                                   (when-let [sym (:seon.fn/sym row)]
                                     [sym (:seon.fn/host-bound? row)]))) rows)]
-        (is (= {'sample.host-bound/clock true
-                'sample.host-bound/constructor true
-                'sample.host-bound/literal true
+        ;; task bd7cb669b45d: the interpreter resolves every class, so class
+        ;; usage (clock, constructor, literal, hinted) is interpretable
+        (is (= {'sample.host-bound/clock false
+                'sample.host-bound/constructor false
+                'sample.host-bound/literal false
                 'sample.host-bound/allowed false
                 'sample.host-bound/throwable false
                 'sample.host-bound/admitted-import true
                 'sample.host-bound/refused-import true
                 'sample.host-bound/implementation true
                 'sample.host-bound/caller false
-                'sample.host-bound/hinted true
+                'sample.host-bound/hinted false
                 'sample.host-bound/quoted false
                 'sample.host-bound/method false
                 'sample.host-bound/->Record true
@@ -3158,7 +3160,12 @@
         (is (pos? (get census false 0)))
         (is (true? (:seon.fn/host-bound?
                     (db/pull database [:seon.fn/host-bound?]
-                             [:seon.fn/sym 'seon.id/sha-256]))))
+                             [:seon.fn/sym 'seon.render.value/bounded-text])))
+            "a proxy is an operation SCI cannot interpret")
+        (is (false? (:seon.fn/host-bound?
+                     (db/pull database [:seon.fn/host-bound?]
+                              [:seon.fn/sym 'seon.id/sha-256])))
+            "class usage alone is interpretable (task bd7cb669b45d)")
         (is (false? (:seon.fn/host-bound?
                      (db/pull database [:seon.fn/host-bound?]
                               [:seon.fn/sym 'seon.id/id]))))))))
