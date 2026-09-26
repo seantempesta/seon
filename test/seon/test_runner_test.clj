@@ -12,7 +12,6 @@
             [sci.core :as sci]
             [seon.error :as error]
             [seon.operator.runtime]
-            [seon.program :as program]
             [seon.test :as sut]
             [seon.test.runner :as runner]
             [seon.test-support :as test-support]))
@@ -353,11 +352,9 @@
             _ (test-support/transacted!
                connection [(test-support/namespace-row database (symbol (namespace test-symbol))) row])
             before (get (runner/reach-digests (db/db connection) [test-symbol]) test-symbol)
-            changed (program/declaration-row
-                     (db/carried-projection database)
-                     (assoc (dissoc row :seon.program/definition-digest :seon.schema.admission/source)
-                            :seon.test/fixture "a fixture-only change")
-                     :all :agent)]
+            ;; The writer's digest owner, with the namespace row this test stored.
+            changed (test-support/revised-row (db/db connection) row
+                                              {:seon.test/fixture "a fixture-only change"})]
         (is (string? before))
         (is (= source (:seon.test/source changed)))
         (is (not= (:seon.program/definition-digest row) (:seon.program/definition-digest changed))

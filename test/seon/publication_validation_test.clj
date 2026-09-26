@@ -17,11 +17,13 @@
                     wrappers
                     #(support/transacted!
                       connection
-                      [{:seon.fn/sym 'seon.id/id
-                        :seon.fn/doc "Publication validation documentation edit."}]))]
+                      ;; A doc is an owned attribute: the revision carries the
+                      ;; digest of the row it leaves.
+                      [(support/revision (db/db connection) '[:seon.fn/sym seon.id/id]
+                                         {:seon.fn/doc "Publication validation documentation edit."})]))]
        (is (:db-after report))
        (is (empty? @calls))
-       (is (= #{:seon.fn/doc :db/txInstant}
+       (is (= #{:seon.fn/doc :seon.program/definition-digest :db/txInstant}
               (set (map :a (:tx-data report)))))))))
 
 (deftest ^{:seon.test/long "Canonical fixture plus final arity/default validation measured 5.078 s; the current exported base refuses supplier coherence before the intended arity diagnostic."

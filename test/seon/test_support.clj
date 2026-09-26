@@ -753,18 +753,28 @@
   [database agent-ids]
   (into [] (mapcat #(agent-tx database %)) agent-ids))
 
+(defn- digest-namespace-row
+  "The namespace row the writer digests a declaration of `namespace-name` with:
+   the stored row as the writer reads it (`seon.db/declaration-value`), else the
+   canonical row a fixture writes beside the declaration (`namespace-row`)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.ns/name] :map]}
+  [database namespace-name]
+  (if-let [stored (db/q '[:find ?e . :in $ ?n :where [?e :seon.ns/name ?n]] database namespace-name)]
+    (@#'seon.db/declaration-value database (db/identity-attributes database) stored)
+    (namespace-row database namespace-name)))
+
 (defn revised-row
   "`row` with `overrides` merged, digested from that FINAL row through the one
-   digest owner `seon.db/definition-digest-of` with its namespace's stored row
-   in `database`, the digest `seon.db/write-digest-error` reproduces. Never
-   assoc onto a row."
+   digest owner `seon.db/definition-digest-of` with the namespace row the write
+   leaves (`digest-namespace-row`), the digest `seon.db/write-digest-error`
+   reproduces. Never assoc onto a row."
   {:malli/schema [:function
                   [:=> [:cat :seon.db/database-value :map :map] :map]
                   [:=> [:cat :seon.db/database-value :map :map [:maybe :map]] :map]]}
   ([database row overrides]
-   (let [namespace-name (second (or (:seon.fn/ns row) (:seon.test/ns row)))]
-     (revised-row database row overrides
-                  (some->> namespace-name (vector :seon.ns/name) (db/pull database '[*])))))
+   (revised-row database row overrides
+                (some->> (or (:seon.fn/ns row) (:seon.test/ns row)) second
+                         (digest-namespace-row database))))
   ([database row overrides namespace-row]
    ;; The writer digests with the namespace row the SAME transaction stores, so a
    ;; fixture that writes its namespace beside the row hands that row in.
@@ -798,13 +808,7 @@
    (let [projection (db/carried-projection database)
          [attribute declaration-symbol] identity
          namespace-name (symbol (namespace declaration-symbol))
-         ;; The writer digests with the namespace row the transaction leaves
-         ;; stored: the stored row when the namespace exists, else the one the
-         ;; fixture writes beside it.
-         stored (db/q '[:find ?e . :in $ ?n :where [?e :seon.ns/name ?n]] database namespace-name)
-         ns-row (if stored
-                  (@#'seon.db/declaration-value database (db/identity-attributes database) stored)
-                  (namespace-row database namespace-name))
+         ns-row (digest-namespace-row database namespace-name)
          rows (seon.fn/source-rows
                database (program/shapes-in projection) ns-row
                source (set (keys (:seon.schema.projection/forms projection))))]
