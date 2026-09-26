@@ -43,6 +43,8 @@ callers to an existing component/function/test that does the same thing better (
   `(require '[my.program :as program])` then `dir`/`doc` with contracts, so the wrapper API is explained, never magic. The
   floor printer lays out results; its provenance budget applies to the printed transcript. Dogfooding requires this API to
   be working and intuitive: every valid SCI form at the REPL, not only `defn`.
+  Rendering evaluates through the SAME one REPL path (reader, `seon.sci.eval/evaluate`, shown-result, run owners) — no
+  second parse, eval, printer, cache or store; a missing capability is a stage value supplied to that pipeline (owner).
 - **Store references, never copies:** errors/facts carry a db value as commit id/basis, an SCI ctx as agent/branch identity,
   a request as its evaluation/turn ref, a large value as one blob digest. Opaque world objects are typed identities at the
   admission edge, never walked.
