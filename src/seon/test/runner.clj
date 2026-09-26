@@ -10,6 +10,7 @@
             [clojure.test :as test]
             [clojure.test.check.generators :as gen]
             [malli.core :as m]
+            [malli.instrument :as mi]
             [sci.core :as sci]
             [sci.impl.utils :as sci.utils]
             [seon.blob :as blob]
@@ -622,15 +623,23 @@
   the wrappers malli actually installed, the contracts it actually holds, the
   clusters actually running, and the shared SCI base each fork inherits."
   []
-  (let [snapshot
+  (let [wrapped (instrument/instrumented)
+        ;; A wrapper holding its Var's own declared contract is the program's
+        ;; arming, which any request of this JVM (a first load's
+        ;; `arm-first-loads!`, a development adoption) installs concurrently:
+        ;; its appearance is no test's change, so only its removal (a Var
+        ;; left unarmed) counts. A wrapper with any other contract is a test's.
+        own? (fn [^clojure.lang.Var candidate]
+               (= (mi/-schema candidate)
+                  (:seon.instrument/authored (meta (.getRawRoot candidate)))))
+        var-symbol (fn [candidate]
+                     (let [{namespace-object :ns var-name :name} (meta candidate)]
+                       (symbol (str (ns-name namespace-object)) (str var-name))))
+        snapshot
         {::snapshot-instrumented
-         (into #{}
-               (map (fn [candidate]
-                      (let [{namespace-object :ns var-name :name}
-                            (meta candidate)]
-                        (symbol (str (ns-name namespace-object))
-                                (str var-name)))))
-               (instrument/instrumented))
+         (into #{} (comp (remove own?) (map var-symbol)) wrapped)
+         ::snapshot-armed
+         (into #{} (comp (filter own?) (map var-symbol)) wrapped)
          ::snapshot-registered
          (into #{}
                (mapcat (fn [[namespace-symbol entries]]
@@ -675,8 +684,12 @@
   calling `apply!` collects every loaded namespace's contracts, including its
   own, and reporting those 47 rows as a defect is noise that buries the one
   line that matters. A cluster that appeared is one nobody stopped; a cluster
-  that disappeared is a test stopping something it did not start."
+  that disappeared is a test stopping something it did not start. A wrapper
+  holding its Var's own contract that appeared is the program's arming, which
+  concurrent requests install (2026-09-27: a first test after a restart was
+  blamed for another request's first-load arming of seon.test-support)."
   {::snapshot-instrumented #{::drift-added ::drift-removed}
+   ::snapshot-armed #{::drift-removed}
    ::snapshot-registered #{::drift-removed}
    ::snapshot-live-clusters #{::drift-added ::drift-removed}})
 

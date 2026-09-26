@@ -338,6 +338,37 @@
         (is (str/includes? message ":the-member") "the ex-data survives"))
       (finally (remove-ns (ns-name (:ns (meta test-var))))))))
 
+(deftest the-programs-own-arming-is-no-tests-drift
+  ;; 2026-09-27: the first test after a restart (program-classes-test, which
+  ;; loads nothing of ours) was blamed for the seon.test-support wrappers a
+  ;; concurrent request's first-load arming installed. A wrapper holding its
+  ;; Var's own declared contract is the program's arming; only a wrapper with
+  ;; another contract is a test's change. The Vars live in a throwaway namespace.
+  (let [namespace-object (create-ns (symbol (str "runner.arming" (random-uuid))))
+        schema [:=> [:cat :int] :int]
+        wrapped (fn [candidate authored]
+                  (alter-var-root candidate
+                                  (fn [f] (with-meta (fn [& arguments] (apply f arguments))
+                                            {:seon.instrument/var candidate
+                                             :seon.instrument/authored authored}))))
+        own (intern namespace-object (with-meta 'own {:malli/schema schema}) inc)
+        foreign (intern namespace-object (with-meta 'foreign {:malli/schema schema}) inc)
+        symbol-of #(symbol (str (ns-name namespace-object)) (name %))]
+    (try
+      (let [before (#'runner/ambient-snapshot)]
+        (wrapped own schema)
+        (let [after (#'runner/ambient-snapshot)
+              drift (#'runner/ambient-drift before after)]
+          (is (contains? (::runner/snapshot-armed after) (symbol-of 'own)))
+          (is (not (some #{(symbol-of 'own)} (tree-seq coll? seq drift)))
+              "the program's own arming appearing is not drift"))
+        (wrapped foreign [:=> [:cat :any] :any])
+        (let [drift (#'runner/ambient-drift before (#'runner/ambient-snapshot))]
+          (is (contains? (get-in drift [::runner/snapshot-instrumented ::runner/drift-added])
+                         (symbol-of 'foreign))
+              "a wrapper with another contract is a test's change")))
+      (finally (remove-ns (ns-name namespace-object))))))
+
 (deftest the-drift-snapshot-names-the-running-clusters
   (let [running (set (keys @seon.operator.runtime/running-instances))]
     (is (seq running) "a running cluster is the subject")
