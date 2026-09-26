@@ -56,7 +56,6 @@
             [seon.problems :as problems]
             [seon.render :as render]
             [seon.render.data :as render.data]
-            [seon.print :as print]
             [seon.program :as program]
             [seon.render.value :as render.value]
             [seon.schedule :as schedule]
@@ -403,9 +402,12 @@
                         (if artifact-backed?
                           "the cluster has no database connection"
                           "the value has no durable MCP artifact")))
+               ;; The floor selects the held value itself (one-render-path
+               ;; §3g): admission only decides and writes the stored artifact;
+               ;; nothing is reconstructed from it before printing.
                projection
                (render.value/prepare
-                {:seon.render/value (render.value/artifact-value artifact)
+                {:seon.render/value value
                  :seon.render/profile profile
                  :seon.render.value/root [:seon.blob/digest content-digest]
                  :seon.sci.admit/caps caps})
@@ -503,34 +505,41 @@
                    {:seon.render.data/path path
                     :seon.render.data/offset offset})
             effective (mcp-effective cluster-name nil)]
-        (if (or (:seon.config/error-key effective)
-                 (:seon.db/invalid-read effective) (:seon.schema/expected-value effective))
+        (cond
+          (or (:seon.config/error-key effective)
+              (:seon.db/invalid-read effective) (:seon.schema/expected-value effective))
           effective
-          (if (contains? found :seon.render.data/value)
-            (let [value (:seon.render.data/value found)
-                  collection-size
-                  (:seon.render.value/max-collection effective)]
-              (if (string? value)
-                (let [total (count value)
-                      offset (max 0 offset)
-                      available
-                      (max collection-size
-                           (:seon.print/width (print/default-options)))
-                      start (if (pos? total)
-                              (min offset (dec total))
-                              0)
-                      end (min total (+ start available))
-                      window (subs value start end)]
-                  {:seon.render.value/window window
-                   :seon.render.value/steps []
-                   :seon.render.value/offset offset
-                   :seon.render.value/shown (count window)
-                   :seon.render.value/total total
-                   :seon.render.value/beyond-end?
-                   (and (pos? total) (>= offset total))
-                   :seon.render.value/more? (< end total)})
-                (render.value/window value offset collection-size)))
-            found)))
+
+          (not (contains? found :seon.render.data/value)) found
+
+          ;; A page is the floor's selection of the value at the path, from
+          ;; the absolute offset, under the MCP profile (design §3g): the
+          ;; same text an agent reads, with the cut's coordinates beside it.
+          :else
+          (let [value (:seon.render.data/value found)
+                profile (assoc (render/agent-render-profile effective)
+                               :seon.render.profile/id :seon.render.profile/mcp
+                               :seon.print/requery-refusal "continue with get_value at this digest and path from the next-offset")
+                projection (render.value/prepare
+                            {:seon.render/value value
+                             :seon.render/profile profile
+                             :seon.render.value/root [:seon.blob/digest content-digest]
+                             :seon.render.data/cursor {:seon.render.data/path path
+                                                       :seon.render.data/offset offset}
+                             :seon.sci.admit/caps (config/result-caps effective)})
+                tree (:seon.render.value/tree projection)
+                cut (some #(when (and (map? %) (= :seon.print/elided (:seon.print/face %))
+                                      (= path (:seon.render.data/path %)))
+                             %)
+                          (tree-seq coll? seq tree))
+                total (cond (string? value) (count value)
+                            (counted? value) (count value))]
+            (cond-> {:seon.dev.mcp/text (:seon.render.value/text projection)
+                     :seon.render.data/path path
+                     :seon.render.data/offset offset
+                     :seon.render.value/beyond-end? (boolean (and total (>= offset total) (pos? total)))}
+              total (assoc :seon.render.data/total total)
+              cut (assoc :seon.render.data/next-offset (:seon.render.data/next-offset cut))))))
       {:seon.dev.mcp/value-not-found content-digest
        :seon.error/at (java.util.Date.)
        :seon.error/layer :seon.cluster/operation

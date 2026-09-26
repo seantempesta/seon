@@ -241,7 +241,9 @@
             retained-message
             (cluster/mcp-get-value
              cluster-name (:seon.blob/digest oversized-result) [:cause] 0)]
-        (doseq [part ["The wrapper." root-message ":seon.probe/member"
+        ;; `pr-str` of the reply lifts a one-namespace map to `#:seon.probe{…}`,
+        ;; so the member is searched by its namespace; its data is asserted below.
+        (doseq [part ["The wrapper." root-message "seon.probe"
                       "clojure.lang.ExceptionInfo" "java.lang.IllegalArgumentException"]]
           (is (str/includes? shown part)
               (str "the reply keeps every cause link: " part)))
@@ -251,11 +253,12 @@
         (is (= root-message (:cause whole)) "the root cause is the value's own member")
         (is (true? (:seon.dev.mcp/windowed? oversized-result)))
         (is (true? (:seon.dev.mcp/retrievable? oversized-result)))
-        (is (= (subs oversized-message 0 72)
-               (:seon.render.value/window retained-message))
+        ;; A page is the floor's selection at the path (one-render-path §3g).
+        (is (str/starts-with? (:seon.dev.mcp/text retained-message)
+                              (pr-str (subs oversized-message 0 16)))
             "an oversized cause pages by digest")
         (is (= (count oversized-message)
-               (:seon.render.value/total retained-message))))
+               (:seon.render.data/total retained-message))))
       (finally
         (swap! running-instances dissoc cluster-name)))))
 
@@ -378,10 +381,12 @@
                       cluster-name content-digest [] 9000)]
         (is (= (:seon.blob/digest storeless) content-digest))
         (is (true? (:seon.dev.mcp/retrievable? stored)))
-        (is (= [7 8 9 10 11 12 13 14]
-               (:seon.render.value/window drilled)))
-        (is (= 9000 (:seon.render.value/offset past-end)))
-        (is (= 2000 (:seon.render.value/total past-end)))
+        (is (str/starts-with? (:seon.dev.mcp/text drilled) "[7 8 9 10 11 12 13 14")
+            (:seon.dev.mcp/text drilled))
+        (is (< 7 (:seon.render.data/next-offset drilled) 2000)
+            "the page names its absolute continuation")
+        (is (= 9000 (:seon.render.data/offset past-end)))
+        (is (= 2000 (:seon.render.data/total past-end)))
         (is (true? (:seon.render.value/beyond-end? past-end))))
       (finally
         (swap! running-instances dissoc cluster-name)))))
@@ -405,17 +410,14 @@
             (cluster/mcp-get-value cluster-name digest [] page-size)
             past-end
             (cluster/mcp-get-value cluster-name digest [] (count value))]
-        (is (= (subs value 0 page-size)
-               (:seon.render.value/window first-page)))
-        (is (= (subs value page-size (* 2 page-size))
-               (:seon.render.value/window next-page)))
-        (is (= page-size (:seon.render.value/shown first-page)))
-        (is (= (count value) (:seon.render.value/total first-page)))
-        (is (seq (:seon.render.value/window first-page))
-            "a non-empty stored string has a non-empty first window")
-        (is (= (subs value (dec (count value)))
-               (:seon.render.value/window past-end))
-            "a past-end page of a non-empty string remains non-empty")
+        ;; A string pages by absolute character offset: each page is the
+        ;; floor's selection of the characters from that offset.
+        (is (str/starts-with? (:seon.dev.mcp/text first-page) (str "\"" (subs value 0 page-size))))
+        (is (str/starts-with? (:seon.dev.mcp/text next-page)
+                              (str "\"" (subs value page-size (* 2 page-size)))))
+        (is (= (count value) (:seon.render.data/total first-page)))
+        (is (= "\"\"" (:seon.dev.mcp/text past-end))
+            "past the end the page is the empty remainder, named beyond the end")
         (is (true? (:seon.render.value/beyond-end? past-end))))
       (finally
         (swap! running-instances dissoc cluster-name)))))
@@ -474,10 +476,8 @@
                     cluster-name (:seon.blob/digest nested-stored)
                     [:alpha] 7)
             projected-root (projected cluster-name effective root)]
-        (is (= [0 1 2 3 4 5 6 7]
-               (:seon.render.value/window root)))
-        (is (= [7 8 9 10 11 12 13 14]
-               (:seon.render.value/window nested)))
+        (is (str/starts-with? (:seon.dev.mcp/text root) "[0 1 2 3 4 5 6 7") (:seon.dev.mcp/text root))
+        (is (str/starts-with? (:seon.dev.mcp/text nested) "[7 8 9 10 11 12 13 14") (:seon.dev.mcp/text nested))
         (is (false? (:seon.dev.mcp/windowed? projected-root))
             "reading the result root must not mint another artifact")
         (is (not (contains? projected-root :seon.blob/digest))))

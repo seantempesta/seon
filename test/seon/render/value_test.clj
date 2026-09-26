@@ -546,39 +546,14 @@
            (value/render-ai (unit (atom {:private/value 42}))))
         "a live reference is named even when no serialization exists")))
 
-(deftest a-window-of-one-shows-one-item-not-an-empty-claim-of-more
-  (let [window (value/window [:a :b :c] 0 1)]
-    (is (= 1 (:seon.render.value/shown window)))
-    (is (= [:a] (:seon.render.value/window window)))
-    (is (true? (:seon.render.value/more? window)))))
-
-(deftest a-window-beyond-a-counted-value-states-the-offset-and-length
-  (let [window (value/window [:a :b :c] 9 2)]
-    (is (= [] (:seon.render.value/window window)))
-    (is (= 9 (:seon.render.value/offset window)))
-    (is (= 3 (:seon.render.value/total window)))
-    (is (true? (:seon.render.value/beyond-end? window)))))
-
-(deftest realization-failure-is-visible-data
-  ;; A value whose realization throws is not silence and not an exception
-  ;; escaping the render: admission projected no data, so the answer is the
-  ;; typed marker, in both projections. `window` — the paging owner the
-  ;; stored-value route still calls — stays total over the same value and
-  ;; keeps the failure's own message.
+(deftest an-unrealized-poison-seq-is-a-pending-tail
   ;; The printer never realizes (design §3a): an unrealized seq is its
   ;; pending tail, in both projections, and nothing runs the poison.
   (let [poison (fn [] (map (fn [_] (throw (ex-info "poison" {}))) [1]))
         text (value/render-ai (unit (poison)))
-        html (hiccup/->string (value/render-html (unit (poison))))
-        window (value/window (poison) 0 3)]
+        html (hiccup/->string (value/render-html (unit (poison))))]
     (is (str/starts-with? text "(…?)") text)
-    (is (str/includes? html "…?"))
-    (is (= 0 (:seon.render.value/window-offset
-              (:seon.render.value/window window))))
-    (is (= 'seon.render.value/window
-           (:seon.error/operation (:seon.render.value/window window))))
-    (is (= "poison" (:seon.error/message (:seon.render.value/window window))))
-    (is (zero? (:seon.render.value/shown window)))))
+    (is (str/includes? html "…?"))))
 
 (def ^:private probe-profile
   {:seon.render.profile/id :seon.render.profile/test

@@ -305,77 +305,6 @@
       :else (assoc profile :seon.print/requery-refusal
                    "the value has no result handle"))))
 
-(defn- stable-entries
-  [value]
-  (cond
-    (map? value) (sort-by (comp pr-str first) (seq value))
-    (set? value) (map (fn [entry] [entry entry]) (sort-by pr-str value))
-    (vector? value) (map-indexed vector value)
-    (sequential? value) (map-indexed vector value)
-    :else nil))
-
-(defn- counted-size
-  [value]
-  (when (counted? value)
-    (try (count value) (catch Throwable _ nil))))
-
-(defn window
-  "Return one stable structural page from an ordinary bounded value."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}] :int :int] :map]}
-  [value offset size]
-  (try
-    (if-let [entries (stable-entries value)]
-      (let [available (max 0 size)
-            total (counted-size value)
-            head (into [] (comp (drop offset) (take (inc available))) entries)
-            more? (> (count head) available)
-            page (subvec head 0 (min available (count head)))
-            page-value (cond
-                         (map? value) (into {} page)
-                         (set? value) (into #{} (map second) page)
-                         :else (mapv second page))]
-        {:seon.render.value/window page-value
-         :seon.render.value/steps (mapv first page)
-         :seon.render.value/offset offset
-         :seon.render.value/shown (count page)
-         :seon.render.value/total total
-         :seon.render.value/beyond-end?
-         (and (some? total) (> offset total))
-         :seon.render.value/more? more?})
-      {:seon.render.value/window value
-       :seon.render.value/steps []
-       :seon.render.value/offset 0
-       :seon.render.value/shown 0
-       :seon.render.value/total nil
-       :seon.render.value/beyond-end? false
-       :seon.render.value/more? false})
-    (catch Throwable failure
-      {:seon.render.value/window
-       (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.value/window 'seon.render.value/window
-        {:seon.error/message (or (ex-message failure) "Window realization failed.")
-         :seon.error/fix "Inspect the source value and request a realizable window."
-         :seon.render.value/window-offset offset
-         :seon.error/expected "a realizable value window"
-         :seon.error/offending value
-         :seon.error/data {:seon.render.value/offset offset}})
-       :seon.render.value/steps []
-       :seon.render.value/offset offset
-       :seon.render.value/shown 0
-       :seon.render.value/total nil
-       :seon.render.value/beyond-end? false
-       :seon.render.value/more? false})))
-
-(defn- display-value
-  [unit]
-  (let [raw (:seon.render/value unit)
-        total (counted-size raw)]
-    {:seon.render.value/window raw
-     :seon.render.value/steps []
-     :seon.render.value/offset 0
-     :seon.render.value/shown (or total 0)
-     :seon.render.value/total total
-     :seon.render.value/more? false}))
-
 ;;; THE FLOOR'S SELECTION (design one-render-path §3a–§3d). Every reached
 ;;; object is classified by its EXACT class into a row of permitted operations
 ;;; before anything else touches it; an unlisted class is opaque. Members are
@@ -839,6 +768,12 @@
         ;; A continuation starts the root collection at its absolute offset
         ;; (design §3g); its members keep their absolute ordinals.
         root (cond-> root
+               (and (pos? offset) (= :string (:kind root)))
+               (as-> node (let [start (min offset (:total node))
+                                shown (min chunk-width (- (:total node) start) (:max-string context))]
+                            (assoc node :value (subs (:value node) start) :total (- (:total node) start)
+                                   :shown shown :shown-width (escaped-width (subs (:value node) start) 0 shown)
+                                   :base start)))
                (and (pos? offset) (#{:map :coll} (:kind root)))
                (-> (assoc :base offset) (update :pending #(seq (drop offset %))))
                true (as-> node (assoc node :flat (flat-width node))))
@@ -876,8 +811,8 @@
        (:string :name) (assoc request ::print/omitted (- (:total node) (:shown node))
                               ::print/elision-unit :characters
                               ::print/prefix (subs (if (= :name (:kind node)) (:text node) (:value node)) 0 (:shown node))
-                              :seon.render.data/next-offset (:shown node)
-                              :seon.render.data/total (:total node))
+                              :seon.render.data/next-offset (+ (:base node 0) (:shown node))
+                              :seon.render.data/total (+ (:base node 0) (:total node)))
        (if (:pending? node)
          (assoc request ::print/elision-unit :pending :seon.render.data/next-offset (+ (:base node 0) (:n node)))
          (assoc request ::print/omitted (- (:total node) (:base node 0) (:n node)) ::print/elision-unit :children
@@ -927,20 +862,6 @@
                        (pr-str (nth path index)) "seon-data-crumb"))
           (range (count path)))]))
 
-(defn- pager
-  [unit path {:seon.render.value/keys [offset shown total more?]}]
-  (when (:seon.render.value/route-base unit)
-    [:div {:class "seon-data-pager"}
-       (when (pos? offset)
-         (path-link unit path 0
-                    "← previous" "seon-data-page"))
-       [:span {:class "seon-data-range"}
-        (str "showing " (if (zero? shown) 0
-                            (str (inc offset) "–" (+ offset shown)))
-             (when total (str " of " total)))]
-       (when more?
-         (path-link unit path (+ offset shown) "next →" "seon-data-page"))]))
-
 (defn- legend-text
   "The one line that follows a cut text: what `…N` means and how to read on."
   {:malli/schema [:=> [:cat :map] :string]}
@@ -972,8 +893,7 @@
          id (node-id unit path)]
      (if (:seon.render.value/root-description id)
        id
-       (let [display (display-value unit)
-             profile (render-profile unit)
+       (let [profile (render-profile unit)
              ai? (= output :seon.render/ai)
              options (cond-> (assoc (print-options unit)
                                     :seon.print/length nil
@@ -1014,14 +934,11 @@
              (throw (ex-info (:seon.error/message refusal) refusal))))
          (cond-> {:seon.render.value/tree selected
                   :seon.render.value/options options
-                  :seon.render.value/truncated?
-                  (boolean (or cut? (:seon.render.value/more? display)
-                               (pos? (:seon.render.value/offset display))))
+                  :seon.render.value/truncated? (boolean (or cut? (pos? (:offset context))))
                   :seon.render.value/text text
                   :seon.render.value/html
                   [:div {:id id :class "seon-data-panel"}
                    (breadcrumbs unit path)
-                   (pager unit path display)
                    (:seon.print/hiccup emitted)]}
            (:seon.render.call/selected-producer selected)
            (assoc :seon.render.call/selected-producer
