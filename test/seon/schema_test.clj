@@ -1814,3 +1814,11 @@
              (verdict #(schema/build-projection
                         population {} {:seon.schema/projection base})))
           (str "an existing population builds " (pr-str form))))))
+
+(deftest equal-inputs-answer-the-built-projection
+  ;; A packaged build cost ~390 ms and ~570 MB allocated, and callers asked
+  ;; again for the same inputs within one operation (perf-profile 2026-09-26).
+  (let [forms (schema.edn/packaged-forms)]
+    (is (identical? (schema/build-projection forms) (schema/build-projection forms)))
+    (is (identical? (schema/declaration-projection forms)
+                    (schema/declaration-projection forms)))))
