@@ -25,6 +25,7 @@ const readModel = (script) => {
       id: requiredString(data?.id, 'node data.id'),
       label: requiredString(data?.label, 'node data.label'),
       href: requiredString(data?.href, 'node data.href'),
+      ...(Number.isInteger(data?.level) ? { level: data.level } : {}),
     },
   }))
   const edges = elements.edges.map(({ data } = {}) => ({
@@ -33,6 +34,7 @@ const readModel = (script) => {
       source: requiredString(data?.source, 'edge data.source'),
       target: requiredString(data?.target, 'edge data.target'),
       attribute: requiredString(data?.attribute, 'edge data.attribute'),
+      reverse: data?.reverse === true,
     },
   }))
   const selected = requiredString(model['seon.graph/selected'], 'seon.graph/selected')
@@ -112,6 +114,13 @@ const graphStyle = (section) => {
   const base = color('--color-base-800')
   const text = color('--color-text-100')
 
+  // A walk model's nodes carry their level; the page declares one colour per level.
+  const levels = [0, 1, 2, 3].flatMap((level) => {
+    const value = css.getPropertyValue(`--seon-graph-level-${level}`).trim()
+    // A walk's rings are unlabelled; the selected node names itself.
+    return value ? [{ selector: `node[level = ${level}]`, style: { 'background-color': value, label: '' } }] : []
+  })
+
   return [
     {
       selector: 'node',
@@ -144,6 +153,8 @@ const graphStyle = (section) => {
         width: 1.5,
       },
     },
+    ...levels,
+    { selector: 'edge[?reverse]', style: { 'line-style': 'dashed' } },
     {
       selector: ':selected',
       style: {
@@ -153,6 +164,7 @@ const graphStyle = (section) => {
         'target-arrow-color': text,
       },
     },
+    { selector: 'node[level]:selected', style: { label: 'data(label)', 'z-index': 10 } },
     {
       selector: 'edge:selected',
       style: {
@@ -211,14 +223,17 @@ const reconcile = (cy, model, canvas, firstModel) => {
     if (!restored) cy.getElementById(model.selected).select()
   })
 
+  const walk = model.nodes.every(({ data }) => Number.isInteger(data.level))
   if (firstModel && cy.elements().nonempty()) {
     cy.layout({
       name: 'concentric',
       fit: true,
       padding: 32,
       animate: false,
-      nodeDimensionsIncludeLabels: true,
-      concentric: (node) => node.id() === model.selected ? 1 : 0,
+      // A walk model is one ring per level around its root; labels would push the rings apart.
+      nodeDimensionsIncludeLabels: !walk,
+      minNodeSpacing: walk ? 6 : 10,
+      concentric: (node) => node.id() === model.selected ? 9 : (walk ? 8 - node.data('level') : 0),
       levelWidth: () => 1,
     }).run()
   } else {
@@ -280,14 +295,19 @@ attribute({
         const selectedEdge = cy.edges().filter((edge) => edge.selected()).first()
         show(selectedEdge.nonempty()
           ? edgeDescription(selectedEdge)
-          : 'Select a reference assertion for details.')
+          : 'Select a node or a reference assertion for details.')
       } catch (error) {
         show(`Graph unavailable: ${error.message}`, true)
       }
     }
     const onNodeTap = (event) => {
       const href = event.target.data('href')
-      if (href) window.location.assign(href)
+      const block = href.startsWith('#') && document.getElementById(href.slice(1))
+      if (block) {
+        block.open = true
+        block.scrollIntoView({ block: 'start' })
+        show(event.target.data('label'))
+      } else if (href) window.location.assign(href)
     }
     const onEdgeTap = (event) => {
       show(edgeDescription(event.target))
@@ -295,6 +315,8 @@ attribute({
 
     cy.on('tap', 'node', onNodeTap)
     cy.on('tap', 'edge', onEdgeTap)
+    const onNodeOver = (event) => show(event.target.data('label'))
+    cy.on('mouseover', 'node', onNodeOver)
     const observer = new MutationObserver(update)
     observer.observe(script, { childList: true, characterData: true, subtree: true })
     update()
@@ -303,6 +325,7 @@ attribute({
       observer.disconnect()
       cy.off('tap', 'node', onNodeTap)
       cy.off('tap', 'edge', onEdgeTap)
+      cy.off('mouseover', 'node', onNodeOver)
       cy.destroy()
     }
   },

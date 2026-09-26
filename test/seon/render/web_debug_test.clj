@@ -1,6 +1,7 @@
 (ns seon.render.web-debug-test
   "Schema-authored block metadata and honest unavailable dependencies."
   (:require [clojure.core.async :as async]
+            [clojure.data.json :as json]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.render.web :as web]
@@ -1098,7 +1099,7 @@
                                   :seon.render/distance n :seon.sci.admit/caps (:seon.sci.admit/caps service)})
                order (:seon.render.walk/graph-order graph)
                level #(get-in graph [:seon.render.walk/nodes % :seon.render.walk/node-level])
-               page (#'web/graph-debug-html service "root" (str n))
+               page (#'web/graph-debug-html service "root" (str n) nil)
                classed (fn [tree wanted] (filter #(and (vector? %) (map? (second %))
                                                       (some #{wanted} (str/split (str (:class (second %))) #" ")))
                                                 (tree-seq coll? seq tree)))
@@ -1113,4 +1114,11 @@
            (is (= 200 (:status response)))
            (is (str/includes? (:body response) "seon-graph-page"))
            (is (not (str/includes? (:body response) "seon.render.unknown"))
-               "every face renders: the agent's HTML face reads the connection the page carries")))))))
+               "every face renders: the agent's HTML face reads the connection the page carries")
+           (is (= (count order) (count (get-in (json/read-str (second (re-find #"data-graph-model=\"\"[^>]*>(.*?)</script>" (:body response)))) ["elements" "nodes"])))
+               "the graph view draws one node per walked node")
+           (is (= (count order) (count (classed page "seon-graph-why"))) "every node says which path included it")))
+       (let [rooted (#'web/debug-response service 'my.agents.root "root" {:query-string "n=1&root=%5B%3Aseon.ns%2Fname%20my.agents.root%5D" :headers {}})
+             malformed (#'web/debug-response service 'my.agents.root "root" {:query-string "n=1&root=nope" :headers {}})]
+         (is (str/includes? (:body rooted) "seon.ns/ns") "a lookup in `root` roots the walk at that entity")
+         (is (str/includes? (:body malformed) "The root must be an EDN lookup") "a malformed root is refused by name"))))))

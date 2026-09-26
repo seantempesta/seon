@@ -3232,29 +3232,111 @@ details.tool-call-details[open] .tool-preview {
 .seon-graph-html dl:has(> dt) > dt {
   color: var(--color-text-400);
 }
-.seon-graph-skipped table {
+.seon-graph-summary {
+  width: 100%;
+  margin-top: 0.75rem;
   border-collapse: collapse;
 }
-.seon-graph-skipped th, .seon-graph-skipped td {
-  padding: 0.15rem 1rem 0.15rem 0;
+.seon-graph-summary :is(th, td) {
+  padding: 0.15rem 0.75rem 0.15rem 0;
   text-align: left;
   border-bottom: 1px solid var(--color-base-850);
+  overflow-wrap: anywhere;
 }
-.seon-graph-skipped th {
+.seon-graph-summary th {
   font-weight: 400;
   color: var(--color-text-400);
 }
-.seon-graph-skipped td + td {
+.seon-graph-summary td:is(:nth-child(3), :nth-child(4)) {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+.seon-graph-skipped-row {
+  color: var(--color-text-500);
+}
+.seon-graph-page {
+  --seon-graph-level-0: var(--color-signal);
+  --seon-graph-level-1: var(--color-info);
+  --seon-graph-level-2: var(--color-eval);
+  --seon-graph-level-3: var(--color-success);
+}
+.seon-graph-body {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: 1rem;
+  align-items: start;
+}
+.seon-graph-panel {
+  position: sticky;
+  top: 5.5rem;
+  max-height: calc(100vh - 6rem);
+  overflow-y: auto;
+  min-width: 0;
+}
+.seon-graph-canvas-section {
+  margin-top: 1.25rem;
+}
+.seon-graph-canvas-section .seon-debug-graph-canvas {
+  height: 55vh;
+  min-height: 22rem;
+}
+.seon-graph-node {
+  scroll-margin-top: 6rem;
+}
+.seon-graph-node:target {
+  border-color: var(--color-inspection);
+}
+.seon-graph-why {
+  margin: 0;
+  padding: 0.3rem 0.75rem;
+  color: var(--color-text-400);
+  overflow-wrap: anywhere;
+  border-bottom: 1px solid var(--color-base-800);
+}
+.seon-graph-root {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+.seon-graph-root input[name="root"] {
+  width: 32rem;
+  max-width: 100%;
+  font: inherit;
+  padding: 0.1rem 0.4rem;
+  color: var(--color-text-100);
+  background: var(--color-base-900);
+  border: 1px solid var(--color-base-700);
+  border-radius: 0.2rem;
+}
+.seon-graph-sent {
+  margin-top: 0.75rem;
+}
+.seon-graph-sent > summary {
+  cursor: pointer;
+  color: var(--color-signal);
+}
+.seon-graph-prompt {
+  margin: 0.4rem 0 0;
+  padding: 0.5rem 0.75rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  color: var(--color-text-100);
+  background: var(--color-base-900);
+  border: 1px solid var(--color-base-800);
+  border-radius: 0.25rem;
 }
 .seon-graph-level > p {
   margin: 0;
   color: var(--color-text-300);
 }
 @media (max-width: 62rem) {
-  .seon-graph-faces {
+  .seon-graph-body, .seon-graph-faces {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .seon-graph-panel {
+    position: static;
+    max-height: none;
   }
   .seon-graph-face + .seon-graph-face {
     border-left: 0;
