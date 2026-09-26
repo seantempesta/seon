@@ -791,6 +791,14 @@
                                                  :seon.error/offending run-id}
                          :seon.await/port-operations [reply]})]
             (cond
+              ;; A pass whose settlement the writer refused before the run was
+              ;; opened (admission closed at retirement) wrote no run: its
+              ;; refusal is the answer, not an id that names nothing.
+              (and (:seon.turn.loop/refusal answer)
+                   (nil? (db/q '[:find ?run . :in $ ?id :where [?run :seon.turn/id ?id]]
+                               @(:seon.db/connection handle) run-id)))
+              (assoc (:seon.turn.loop/refusal answer) :seon.agent/refused-source-agent agent-id)
+
               (:seon.turn.loop/outcome answer) {:seon.turn/id run-id}
               (:seon.await/config-attribute answer) (assoc answer :seon.turn/id run-id)
               :else (assoc answer :seon.agent/refused-source-agent agent-id))))))))

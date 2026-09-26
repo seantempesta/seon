@@ -93,7 +93,9 @@
                          [:seon.fn/sym :seon.fn/sym]
                          [:seon.test.accretion/results
                           :seon.test.accretion/results]
+                         ;; absent when the gate ran no seeded check (no cases configured)
                          [:seon.test.accretion/auto-check
+                          {:optional true}
                           :seon.test.accretion/auto-check]],
                         :function-sym [:qualified-symbol {:description "The function name observed by an install refusal; never an upsert identity."}]
                         :install-refused-error

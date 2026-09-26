@@ -10,10 +10,15 @@
 (deftest ^{:seon/tasks #{"361088de3d56"}} a-batched-report-does-not-advance-the-acquired-program
   (support/with-database
    (fn [connection]
+     ;; Notes carry no program identity, so an exact report of them is covered;
+     ;; the agent row (with its seeded namespace, a program row) is setup.
+     (support/transacted! connection (support/agent-tx @connection "report-writer"))
      (let [covers? #'sci.eval/installation-covers-program-change?
+           note #(vector {:my.note/id (str "report-note-" %) :my.note/agent [:seon.agent/id "report-writer"]
+                          :my.note/content "x"})
            before (db/db connection)
-           own (support/transacted! connection (support/agent-tx @connection "report-own"))
-           later (support/transacted! connection (support/agent-tx @connection "report-later"))
+           own (support/transacted! connection (note "own"))
+           later (support/transacted! connection (note "later"))
            projection (db/carried-projection (:db-after own))]
        (is (true? (covers? before own [] projection))
            "a report whose after-value is its own transaction names every change")

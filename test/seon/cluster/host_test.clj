@@ -454,7 +454,8 @@
             connection (:seon.db/connection execution)]
         (try
           (db/call-with-custody {:seon.db/connection connection}
-            #(do (support/transacted! connection
+            #(do (support/transacted! connection [(support/namespace-row (db/db connection) host-ns)])
+                 (support/transacted! connection
                    [(support/program-fn-row (db/db connection) 'my.agents.host-probe/dropped-callee
                                             "(defn dropped-callee \"Add one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")])
                  ;; A file-less core test: neither agent-authored, under a test root, nor named.
