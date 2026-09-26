@@ -59,25 +59,30 @@
     (require 'seon.schema.datahike)
     (ns-resolve 'seon.schema.datahike 'value-schema)))
 
-(defn- direct-references*
+(defn compiled-references
   "Canonical registry keys directly referenced by one compiled schema.
 
-   Malli's own walker distinguishes references from keyword data. Canonical
-   refs are recorded but not followed; local property-registry refs are
-   followed so canonical refs nested behind them are still visible."
+   A fold over Malli's own walker (`malli.core/walk` returns the callback's
+   result), which distinguishes references from keyword data. Canonical refs
+   are recorded but not followed; local property-registry refs are followed
+   so canonical refs nested behind them are still visible. Each node answers
+   `{::references set}`; a map entry's walked child is the third member of its
+   `[key properties child]` triple (`malli.core/-inner-entries`), and a leaf or
+   an unfollowed ref hands its raw children, which carry no such key."
+  {:malli/schema [:=> [:cat [:fn malli.core/schema?] [:set :keyword]] [:set :keyword]]}
   [compiled canonical-keys]
-  (let [!references (volatile! #{})]
-    (m/walk
-      compiled
-      (fn [schema _path _children _options]
-        (when (m/-ref-schema? schema)
-          (let [reference (m/-ref schema)]
-            (when (contains? canonical-keys reference)
-              (vswap! !references conj reference))))
-        schema)
-      {::m/walk-schema-refs #(not (contains? canonical-keys %))
-       ::m/walk-refs #(not (contains? canonical-keys %))})
-    @!references))
+  (::references
+   (m/walk
+    compiled
+    (fn [schema _path children _options]
+      {::references
+       (into (let [reference (when (m/-ref-schema? schema) (m/-ref schema))]
+               (if (contains? canonical-keys reference) #{reference} #{}))
+             (mapcat (fn [child]
+                       (::references (if (and (vector? child) (= 3 (count child))) (peek child) child))))
+             children)})
+    {::m/walk-schema-refs #(not (contains? canonical-keys %))
+     ::m/walk-refs #(not (contains? canonical-keys %))})))
 
 (defn- reference-cycle
   "First deterministic cycle in `graph` reachable from `roots`, or nil."
@@ -795,7 +800,7 @@
       (fn [[schema-key definition]]
         [schema-key
          (try
-           (direct-references*
+           (compiled-references
             (m/schema
              (compilable-form definition predicate-functions)
              options)
@@ -819,7 +824,7 @@
   (let [registry-for-references
         (reference-registry canonical-keys fallback)]
     (try
-      (direct-references*
+      (compiled-references
        (m/schema (compilable-form definition predicate-functions)
                  {:registry registry-for-references})
        canonical-keys)
@@ -966,7 +971,7 @@
         (m/schema
          (compilable-form form (predicate-functions-in projection))
          compile-options)]
-    (direct-references* compiled (set (keys forms)))))
+    (compiled-references compiled (set (keys forms)))))
 
 (defn dependent-schema-keys
   "Changed schema keys plus their reverse transitive dependents.
@@ -1663,7 +1668,7 @@
                     (if (and (keyword? row-identity)
                              (contains? schema-dependencies row-identity))
                       (get schema-dependencies row-identity)
-                      (direct-references* schema canonical-keys))]
+                      (compiled-references schema canonical-keys))]
                 (into advisories
                       (mapcat
                        (fn [reference]
@@ -2295,7 +2300,7 @@
         function-dependencies
         (into (sorted-map)
               (map (fn [[sym _form]]
-                     [sym (direct-references*
+                     [sym (compiled-references
                            (get compiled-function-contracts sym)
                            canonical-keys)]))
               function-contracts)
@@ -2725,7 +2730,7 @@
             function-dependencies
             (reduce (fn [dependencies function-symbol]
                       (assoc dependencies function-symbol
-                             (direct-references* (mr/schema registry function-symbol)
+                             (compiled-references (mr/schema registry function-symbol)
                                                  canonical-keys)))
                     (apply dissoc old-function-dependencies removed-fns)
                     affected-fns)

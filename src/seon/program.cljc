@@ -932,25 +932,6 @@
                 :seon.error/member :seon.fn.binding/form
                 :seon.error/expected :seon.fn.binding/row}))))
 
-(defn- schema-reference-keys
-  [compiled canonical-keys]
-  (let [!references (volatile! #{})]
-    (m/walk
-     compiled
-     (fn [schema _path _children _options]
-       (when (m/-ref-schema? schema)
-         (let [reference (m/-ref schema)]
-           (when (contains? canonical-keys reference)
-             (vswap! !references conj reference))))
-       schema)
-     {::m/walk-schema-refs #(not (contains? canonical-keys %))
-      ::m/walk-refs #(not (contains? canonical-keys %))})
-    @!references))
-
-(defn- schema-references
-  [compiled canonical-keys]
-  (schema-reference-keys compiled canonical-keys))
-
 (defn- signature-key
   [signature]
   (if (:seon.fn.signature/variadic? signature)
@@ -1031,10 +1012,10 @@
 
 (defn- arity-row
   [function-symbol order info canonical-keys source-signature]
-  (let [input-refs (schema-references (:input info) canonical-keys)
-        output-refs (schema-references (:output info) canonical-keys)
+  (let [input-refs (schema/compiled-references (:input info) canonical-keys)
+        output-refs (schema/compiled-references (:output info) canonical-keys)
         guard-refs (when-let [guard (:guard info)]
-                     (schema-references guard canonical-keys))
+                     (schema/compiled-references guard canonical-keys))
         slots (input-slots (:input info))
         expected-count (count (:seon.fn.signature/bindings source-signature))
         _ (when-not (= expected-count (count slots))
