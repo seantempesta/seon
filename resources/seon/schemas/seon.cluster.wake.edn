@@ -19,8 +19,11 @@
                      [:seon.cluster.wake/armer-channel
                       :seon.flow/channel]
                      [:seon.cluster.wake/render-channel
+                      {:optional true
+                       :description "Where render wakes go; a route without one (a hosted branch) delivers none."}
                       :seon.flow/channel]
                      [:seon.render.web/interest
+                      {:optional true}
                       :seon.render.web/interest]
                      [:seon.cluster.wake/key :seon.cluster.wake/key]],
                     :unlisten-request

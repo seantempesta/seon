@@ -1514,12 +1514,20 @@
            routing (:seon.agent/routing state)
            connection (:seon.db/connection handle)
            db @connection
-           agents (db/q '[:find [?id ...]
-                         :where [_ :seon.agent/id ?id]]
-                       db)
+           ;; An armer arms the agents whose custody is its own execution's
+           ;; branch: a branch inherits rows that name its parent's, and those
+           ;; agents belong to the parent's armer. A row naming no branch still
+           ;; reaches `arm!`, whose acquisition refuses it by name.
+           own-branch (get-in db [:config :branch])
+           agents (into [] (keep (fn [[id branch]] (when (#{own-branch ::none} branch) id)))
+                        (db/q '[:find ?id ?branch
+                                :where [?agent :seon.agent/id ?id]
+                                [(get-else $ ?agent :seon.agent/branch ::none) ?branch]]
+                              db))
            unarmed (remove #(contains? (:seon.agent/armed @routing) %) agents)
            non-root-agents (remove #{"root"} agents)
-           first-agent (when (= 1 (count non-root-agents))
+           ;; First-agent supervision is root's, so only root's own armer runs it.
+           first-agent (when (and (some #{"root"} agents) (= 1 (count non-root-agents)))
                          (first non-root-agents))]
        (doseq [agent-id (sort (agents-to-arm db (set unarmed)))]
          (arm! {:seon.turn.loop/cluster handle

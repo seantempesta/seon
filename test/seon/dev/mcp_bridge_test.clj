@@ -637,8 +637,8 @@
     (is (string? (:seon.dev.mcp/reader-error decoded)) "the reader's failure rides beside it")))
 
 (deftest a-lane-owns-its-branch-create-define-call-retire
-  ;; The wanted behaviour: a lane's branch holds its defs across evaluations
-  ;; and retiring it leaves the cluster's shared context and roster untouched.
+  ;; The wanted behaviour: a lane's hosted agent keeps its defs across runs on
+  ;; its branch, and retiring it leaves the cluster's context and roster untouched.
   (let [instances @@(ns-resolve 'seon.cluster (symbol "running-instances"))
         cluster (first (sort (keys instances)))
         store (:seon.store/store (get instances cluster))
@@ -647,20 +647,21 @@
         branch (str "lane-mcp-test-" (random-uuid))
         run (fn [action b] (eval (read-string ((bridge-var 'branch-form) cluster action b))))
         sci (fn [source & [on-branch]]
-              (let [form ((bridge-var 'sci-evaluation-form) source cluster 'user false on-branch)]
-                (try (:seon.eval/shown (eval (read-string form))) (finally (consume)))))
+              (let [form ((bridge-var 'run-form) source cluster nil false on-branch "bridge-test")]
+                (try (-> (eval (read-string form)) :seon.dev.mcp/evaluations last :seon.eval/shown)
+                     (finally (consume)))))
         held #(some? (get-in @roster [:seon.agent/children (keyword branch)]))]
     (is (some? store) "a running cluster supplies the store")
     (try
       (is (:seon.cluster/created? (run "create" branch)))
       (is (:seon.error/message (run "create" branch)) "an existing name refuses; never shared silently")
       (is (= "#'user/lane-mcp-probe" (sci "(defn lane-mcp-probe \"Add 41.\" {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 41))" branch)))
-      (is (= "42" (sci "(lane-mcp-probe 1)" branch)) "the retained branch context keeps the def")
+      (is (= "42" (sci "(lane-mcp-probe 1)" branch)) "the hosted agent's next run on the branch calls the def")
       (is (nil? ((requiring-resolve 'sci.core/resolve) (:seon.sci.eval/ctx (get instances cluster)) 'user/lane-mcp-probe))
           "the shared context never sees it")
       (is (contains? (set (:seon.dev.mcp/branches (run "list" nil))) (keyword branch)))
       (is (:seon.dev.mcp/retired? (run "retire" branch)))
-      (is (not (held)) "retire released the retained context")
+      (is (not (held)) "retire released the host's execution")
       (is (not (contains? (set (:seon.dev.mcp/branches (run "list" nil))) (keyword branch))))
       (is (:seon.error/message (run "retire" (name (get-in @(:seon.db/connection (:seon.turn.loop/cluster (get instances cluster))) [:config :branch]))))
           "the cluster's own branch refuses")
@@ -711,7 +712,7 @@
     (try
       (is (not (:isError (execute "create"))))
       (let [fork (get @@(bridge-var 'window-bases) [root cluster branch])
-            _ (eval (read-string ((bridge-var 'sci-evaluation-form) "1" cluster 'user false branch)))
+            _ (eval (read-string ((bridge-var 'run-form) "1" cluster nil false branch "bridge-test")))
             _ (consume)
             first-window (window fork)
             connection ((requiring-resolve 'seon.cluster.registry/active-branch-connection)

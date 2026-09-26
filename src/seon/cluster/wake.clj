@@ -474,7 +474,8 @@
   The existing datom pass records whether any changed attribute
   intersects that value, then offers at most one payload-free render
   wake. There is no query, report payload, call-id routing, or second
-  registration.
+  registration. A route with no render channel (a hosted branch, which
+  serves no page) makes no second delivery.
 
   A route refusing delivery THROWS and becomes a stored fault — a
   swallowed failure nobody hears about is an invisible one. Only an exact mailbox route the agent owner derives as fenced is
@@ -500,7 +501,7 @@
      connection
      key
      (fn [report]
-       (let [published-interest @interest
+       (let [published-interest (some-> interest deref)
              render? (volatile! (= :all published-interest))]
          ;; Rebuild once before dispatch, including deletions and changes
          ;; in the same transaction as a matching datom.
@@ -533,7 +534,7 @@
                    (deliver! key ::mailbox channel
                              #(fenced? agent-eid channel))
                    (async/offer! armer-channel ::wake))))))
-         (when @render?
+         (when (and @render? render-channel)
            (deliver! key ::render render-channel
                      (constantly false)))))))
   key)
