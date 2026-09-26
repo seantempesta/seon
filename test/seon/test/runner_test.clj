@@ -325,3 +325,15 @@
     (is (string? (:seon.test.runner/schema-authority-unavailable (first report))))
     (is (empty? (runner/schema-restore-drift report))
         "an unavailable observation is not a test failure")))
+
+(deftest worker-drift-names-every-changed-member-as-native-data
+  ;; Audit site 19: drift carries the whole native set, never a first-10
+  ;; string cut; the floor printer is the one place that bounds the shown text.
+  (let [wrapped (into #{} (map #(symbol "probe.ns" (str "f" %))) (range 12))
+        drift (#'runner/ambient-drift {::runner/snapshot-instrumented #{}
+                                       ::runner/snapshot-registered wrapped}
+                                      {::runner/snapshot-instrumented wrapped
+                                       ::runner/snapshot-registered #{}})]
+    (is (= {::runner/snapshot-instrumented {::runner/drift-added wrapped}
+            ::runner/snapshot-registered {::runner/drift-removed wrapped}}
+           drift))))

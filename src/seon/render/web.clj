@@ -89,7 +89,6 @@
             [taoensso.timbre :as log])
   (:import [java.net URI URLDecoder]
            [java.nio.charset StandardCharsets]
-           [java.util Date]
            [java.util.concurrent Executors]))
 
 ;;; ---------------------------------------------------------------------------
@@ -601,64 +600,15 @@
 
 (defn- generic-entity
   "Every direct attribute of one entity, with refs left as drill handles.
-
-  Reverse refs are intentionally present as well: `walk/refs` derives concrete
-  per-family selectors and excludes apparatus for context, while this view must
-  expose blocks, transaction entities, and unknown/family-less attributes.
-  This is therefore the one permitted generic read. It runs only for an open
-  debug tab and pays that wider wake/read cost honestly. Its newest-first cap
-  and flat error-valued elision match the walk's settled semantics."
-  [db eid caps reverse?]
-  (let [attributes (into (sorted-set-by #(compare (str %1) (str %2)))
-                         (map :a)
-                         (db/datoms db :eavt eid))
-        direct
-        (into {:db/id eid}
-              (map (fn [attribute]
-                     [attribute (direct-attribute db eid attribute)]))
-              attributes)
-        width (admit/required-cap
-               caps :seon.config.eval.result/max-collection)
-        reverse-groups
-        (when reverse?
-          (->> (db/q '[:find ?source ?attribute
-                      :in $ ?target
-                      :where [?source ?attribute ?target]]
-                    db eid)
-               (filter (fn [[_source attribute]]
-                         (ref-attribute? db attribute)))
-               (group-by second)
-               (sort-by (comp str key))
-               (into {}
-                     (map (fn [[attribute pairs]]
-                            (let [sources (->> pairs (map first) distinct sort reverse)
-                                  shown (mapv (fn [source] {:db/id source})
-                                              (sort (take width sources)))
-                                  elided (- (count sources) (count shown))]
-                              [attribute
-                               (cond-> shown
-                                 (pos? elided)
-                                 (conj
-                                  (let [observation
-                                        {:seon.error/at (java.util.Date.)
-                                         :seon.error/layer :seon.render.web/render
-                                         :seon.error/operation 'seon.render.web/generic-entity
-                                         :seon.error/message (str "elided " elided " reverse " attribute
-                                                                                             " connection"
-                                                                                             (when-not (= 1 elided) "s")
-                                                                                             " at the configured collection cap")
-                                         :seon.error/fix "Supply the expected member and repeat the requested operation."
-                                         :seon.print/bound-by :seon.config.eval.result/max-collection
-                                         :seon.render.walk/limit width
-                                         :seon.render.walk/continuation-subject [eid attribute]
-                                         :seon.error/member :seon.render.walk/lookup
-                                         :seon.error/expected "connections within the requested collection bound"
-                                         :seon.error/offending sources
-                                         :seon.error/data {:seon.render.walk/shown (count shown) :seon.render.walk/omitted elided}}]
-                                    observation)))]))))))]
-    (cond-> direct
-      (and reverse? (seq reverse-groups))
-      (assoc :seon.render.debug/reverse-refs reverse-groups))))
+  The one permitted generic read: it runs only for an open debug tab and
+  pays that wider read cost honestly."
+  [db eid]
+  (into {:db/id eid}
+        (map (fn [attribute]
+               [attribute (direct-attribute db eid attribute)]))
+        (into (sorted-set-by #(compare (str %1) (str %2)))
+              (map :a)
+              (db/datoms db :eavt eid))))
 
 (defn- reverse-attribute?
   [attribute]
@@ -670,10 +620,6 @@
   (if (reverse-attribute? attribute)
     (keyword (namespace attribute) (subs (name attribute) 1))
     attribute))
-
-(defn- reverse-attribute
-  [attribute]
-  (keyword (namespace attribute) (str "_" (name attribute))))
 
 (defn- projection-form
   "The authored Malli form one schema key carries in `projection`."
@@ -3660,7 +3606,7 @@
           (when-let [eid (some-> (when entity
                                    (db/pull db [:db/id] entity))
                                  :db/id)]
-            (generic-entity db eid caps false))
+            (generic-entity db eid))
 
           :else
           (schema/canonical-database-attributes

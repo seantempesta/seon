@@ -212,24 +212,18 @@
      connected-attributes)))
 
 (defn- connection-observation
-  "One elision value naming WHICH bound cut an attribute's connections.
-
-  Two bounds cut here and both must be reported. The pull asks for one value
-  beyond its query-work limit, so a returned count past that limit is the
-  pull's own truncation — and it is reported whether or not the request
-  carried a presentation profile. Reading `Integer/MAX_VALUE` as \"nothing was
-  cut\" was this project's named failure class, a check reporting health from
-  absence of signal: with no profile the observation could never fire even
-  though the pull had already stopped at 8,193 (measured 2026-09-07,
-  research/verify-storage-bound-2026-09-07.md B5)."
+  "One elision value naming the bound that cut an attribute's connections:
+  the pull's own query-work limit. The pull asks for one value beyond it, so
+  a returned count past it is the pull's truncation, reported always; reading
+  absence of signal as \"nothing was cut\" was this project's named failure
+  class (research/verify-storage-bound-2026-09-07.md B5). Presentation width
+  belongs to the value renderer, never the walk."
   {:malli/schema
-   [:=> [:cat :qualified-keyword :boolean :int :int :int]
+   [:=> [:cat :qualified-keyword :boolean :int]
     [:map [:seon.render.walk/attribute :qualified-keyword]
      [:seon.error/value :seon.render.walk/elided-error]]]}
-  [attribute reverse? shown query-limit presentation-limit]
-  (let [bound-by (if (<= (long query-limit) (long presentation-limit))
-                   :seon.config.eval.result/max-collection
-                   :seon.render.profile/max-children)]
+  [attribute reverse? shown]
+  (let [bound-by :seon.config.eval.result/max-collection]
     {:seon.render.walk/attribute attribute
      :seon.error/value
      (let [observation
@@ -252,7 +246,7 @@
        observation)}))
 
 (defn- acquisition-members
-  [projection database root distance width query-width]
+  [projection database root distance query-width]
   (let [installed (installed-attributes database)
         refs (into []
                    (keep (fn [[attribute properties]]
@@ -261,7 +255,6 @@
                              attribute)))
                    installed)
         identities (db/populated-identity-attributes database)
-        width (long width)
         query-width (long query-width)]
     (letfn [(connection-values [entity attribute reverse?]
               (let [display (if reverse?
@@ -300,11 +293,7 @@
                                          values (if reverse?
                                                   (sort-by :db/id > values)
                                                   values)
-                                         ;; THE TIGHTER OF THE TWO BOUNDS
-                                         ;; decides what is shown, and the
-                                         ;; observation names which one it
-                                         ;; was.
-                                         shown (min width query-width)
+                                         shown query-width
                                          kept (take shown values)
                                          kept (if reverse?
                                                 (sort-by :db/id kept)
@@ -320,8 +309,7 @@
                                             kept)
                                        elided?
                                        (conj (connection-observation
-                                              attribute reverse? shown
-                                              query-width width)))))
+                                              attribute reverse? shown)))))
                                  declared-connections))]
                       (if (pos? remaining)
                         (reduce-kv
@@ -566,10 +554,8 @@
                 ;; would hand the second caller the first caller's profile.
                 (acquisition-members projection database root
                                      (bounded-acquisition-distance distance caps)
-                                     ;; No presentation width here: the
-                                     ;; value renderer elides, the pull's
-                                     ;; query-work bound is the only cut.
-                                     (pull-width caps)
+                                     ;; The pull's query-work bound is the
+                                     ;; only cut; the value renderer elides.
                                      (pull-width caps))))))))
 
 (defn- forward-refs

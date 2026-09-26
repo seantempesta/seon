@@ -649,17 +649,15 @@
          }]
     snapshot))
 
-(defn- bounded-drift
+(defn- set-drift
+  "The whole native members added to and removed from one snapshot set;
+  the floor printer is the one place that bounds what is shown."
   [before after]
   (let [added (set/difference after before)
         removed (set/difference before after)]
     (cond-> {}
-      (seq added) (assoc ::drift-added
-                         (vec (take 10 (sort (map str added))))
-                         ::drift-added-count (count added))
-      (seq removed) (assoc ::drift-removed
-                           (vec (take 10 (sort (map str removed))))
-                           ::drift-removed-count (count removed)))))
+      (seq added) (assoc ::drift-added added)
+      (seq removed) (assoc ::drift-removed removed))))
 
 (def ^:private drift-directions
   "Which direction of change is a LEAK, per member — derived from what the
@@ -682,23 +680,12 @@
 
   Each member's declared leak directions decide what counts as drift."
   [before after]
-  (let [set-drift
-        (into {}
-              (keep (fn [[member directions]]
-                      (let [drift (select-keys
-                                   (bounded-drift (get before member #{})
-                                                  (get after member #{}))
-                                   (into #{}
-                                         (mapcat (fn [direction]
-                                                   [direction
-                                                    (keyword
-                                                     (namespace direction)
-                                                     (str (name direction)
-                                                          "-count"))]))
-                                         directions))]
-                        (when (seq drift) [member drift]))))
-              drift-directions)]
-    set-drift))
+  (into {}
+        (keep (fn [[member directions]]
+                (let [drift (select-keys (set-drift (get before member #{}) (get after member #{}))
+                                         directions)]
+                  (when (seq drift) [member drift]))))
+        drift-directions))
 
 (def ^:private reach-attributes
  [:seon.fn/sym :seon.fn/source :seon.fn/spec :seon.fn/calls :seon.fn/references :seon.fn/keywords
