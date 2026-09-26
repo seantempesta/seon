@@ -34,9 +34,25 @@ Red it causes: `seon.turn-test/settlement-refuses-a-divergent-program-change-sin
 The divergent row commits and replaces the source. On the round-1 JVM (2c9d6aa3b) the same REPL
 probe refused it.
 
-## Owner
+## Cause (verified 2026-09-26, lane fix-datahike-history-query-opus)
 
-The Datahike fork's planner/executor (`datahike.query.execute/execute-fused-scan-rel`; the fork's
-`620721d6`/`f4614c9d` changed variable-attribute scans). Fix the engine, add its regression in the fork, then
-rerun the turn-test member. Reordering turn.clj's clauses would hide an engine defect every other query
-can hit.
+Not a clause-order or bound-input defect, and not introduced by `620721d6`/`f4614c9d`; upstream main
+(`249930ac`) has the same code. When an upstream relation binds a scan's entity, the executor seeks
+per bound entity instead of reading the planned slice. The planned slice for
+`[?run :seon.turn/id "defs-run-b"]` is AVET, whose bounds carry the value, so `build-ground-filter`
+(`reference-code/datahike/src/datahike/query/execute.cljc:358` at `4157916b`) omits the value check;
+the probe-driven seek then drops it. On a temporal value `execute-group-direct` takes the probe
+whenever the probe set is smaller than the estimate (`:1943-1944`) and its entity seek even reads the
+AVET index with entity bounds (`:1962`), slicing the whole attribute; a current value takes it past the
+2,500x break-even (`:584`, `:215`). An inclusive range pushdown (`[(>= ?n 5)]`) is lost the same way.
+Minimal reproduction: 10 entities `:run/kind "x"` (indexed), one `"y"` with a receipt;
+`[?r :rcpt/run ?run] [?run :run/kind "x"]` on history answers the `"y"` receipt.
+
+## Fix
+
+Fork `f3a3cb59`: `slice-bounds-filter` re-applies the planned slice's own bounds on probe-driven reads,
+and the temporal entity seek reads EAVT. Regression
+`datahike.test.query-planner-test/test-probe-driven-read-keeps-the-planned-value-bounds` (14 of 21
+assertions red at `4157916b`, green at `f3a3cb59`). Close after root restarts default and
+`seon.turn-test/settlement-refuses-a-divergent-program-change-since-opening` passes. Reordering
+turn.clj's clauses would have hidden an engine defect every other query can hit.
