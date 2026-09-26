@@ -858,9 +858,17 @@
                   [:or :seon.ai/partial :seon.ai/unparseable-body-error]]}
   [lines sink]
   (reduce (fn [snapshot line]
-            (let [next-snapshot (stream-event snapshot line)]
-              (if (contains? next-snapshot :seon.ai/unreadable-response-member)
+            (let [next-snapshot (when-not (map? line) (stream-event snapshot line))]
+              (cond
+                ;; The transport's terminal event: the read failure that
+                ;; ended the line source, beside everything that arrived.
+                (map? line)
+                (reduced (assoc snapshot ::read-failure (::read-failure line)))
+
+                (contains? next-snapshot :seon.ai/unreadable-response-member)
                 (reduced next-snapshot)
+
+                :else
                 (do
                   (when (and sink
                              (or (not= (:seon.ai/text snapshot)
@@ -1145,22 +1153,21 @@
          (take-while some? (iterate ex-cause failure)))))
 
 (defn- interruptible-lines
-  "Lines from `reader`, recording a read failure in `failure` rather
-  than throwing it.
+  "Lines from `reader`; a read failure ends the sequence as its last element,
+  `{::read-failure throwable}`, rather than throwing.
 
   This is the whole reason a truncated stream can keep what arrived: the
-  fold above consumes an ordinary sequence, and a sequence that ENDS on
-  a transport failure leaves the accumulated snapshot in the caller's
-  hands instead of unwinding past it. The atom is invocation-local
-  coordination between this seq and its one consumer, nothing durable."
-  [^BufferedReader reader failure]
+  fold consumes an ordinary sequence, and a sequence that ENDS on a
+  transport failure leaves the accumulated snapshot, with the failure as its
+  terminal event, in the caller's hands instead of unwinding past it."
+  [^BufferedReader reader]
   (lazy-seq
    (let [line (try (.readLine reader)
                    (catch Throwable read-failure
-                     (reset! failure read-failure)
-                     nil))]
-     (when (some? line)
-       (cons line (interruptible-lines reader failure))))))
+                     {::read-failure read-failure}))]
+     (cond
+       (map? line) (list line)
+       (some? line) (cons line (interruptible-lines reader))))))
 
 (defn- truncation
   "ONE flat `::stream-truncated` error value for a stream that ended
@@ -1254,11 +1261,12 @@
   {:malli/schema [:=> [:cat :seon.blob/input-stream [:maybe :seon.ai/sink]] [:or :seon.ai/parsed-completion :seon.ai/stream-truncated-error]]}
   [body sink]
   (with-open [reader (BufferedReader. (InputStreamReader. body "UTF-8"))]
-    (let [failure (atom nil)
-          snapshot (stream-fold (interruptible-lines reader failure) sink)]
+    (let [ended (stream-fold (interruptible-lines reader) sink)
+          failure (::read-failure ended)
+          snapshot (dissoc ended ::read-failure)]
       (cond
         (contains? snapshot :seon.ai/unreadable-response-member) snapshot
-        (some? @failure) (truncated-completion snapshot @failure)
+        (some? failure) (truncated-completion snapshot failure)
         :else
         (parsed-completion
          (:seon.ai/text snapshot)
