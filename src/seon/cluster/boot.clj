@@ -60,14 +60,11 @@
                                       connection cluster-name compiled-config process)))]
                 (cluster/seed-root-agent! connection cluster-name process)
                 [instance process])))
-           boot-dials (config/effective (db/db connection) cluster-name)
-           ;; The process cache's byte budget: a process setting, acquired
-           ;; like `:seon.config.db/keep-history?` from the compiled config
-           ;; this boot just applied. The store's own dials (`boot-dials`)
-           ;; follow its program, which adopts the checkout's declarations
-           ;; only after boot, so a dial the checkout added is absent there.
-           _ (cache/configure! (get-in compiled-config [:seon.config/effective
-                                                        :seon.config.cache/max-bytes]))
+           ;; Boot's dials are the compiled config it just applied: the store's
+           ;; own program adopts the checkout's declarations only after boot,
+           ;; so a dial the checkout added is absent from its effective config.
+           boot-dials (:seon.config/effective compiled-config)
+           _ (cache/configure! (:seon.config.cache/max-bytes boot-dials))
            arm-request {:seon.flow/commit-fault!
                         #(fault/record! connection cluster-name process
                                         (config/result-caps boot-dials) %)
@@ -126,9 +123,8 @@
                      (assoc instance :seon.flow/work-launcher work-launcher))
            instance (publish!
                      (merge instance
-                            (cluster/arm-agents! instance connection cluster-name)))
-           dials (config/effective (db/db connection) cluster-name)]
-       (publish! (cluster/serve! instance dials))))))
+                            (cluster/arm-agents! instance connection cluster-name)))]
+       (publish! (cluster/serve! instance boot-dials))))))
 
 (defn- changed-source-paths
   "Inputs whose bytes differ from the published program's digests, including
