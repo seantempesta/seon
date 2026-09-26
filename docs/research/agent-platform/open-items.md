@@ -121,6 +121,10 @@ EXISTING store (prove adoption on a branch of the live store, never only on a fr
   `handed-projection` 18 sites/10 files, `call-with-projection` 42/16, `call-with-projection-state` 12/7, plus
   `call-with-forms`/`current-projection`/`registered-schemas` and the registration-delta atom (`schema.clj:3549`) — as one
   scripted sweep once cluster.clj, sci/eval.clj, render/walk.clj and program.cljc are released; then delete the dynamic Vars.
+- **C2 test snapshot/restore deletion** waits on test confinement: instrumentation and Malli function-schema registration
+  local to each test member's context (instrument + harness owners), so no member can touch JVM-wide wrappers; then the
+  snapshot/drift/restore family (runner.clj, test.clj:1943-1963, test_support.clj:915-919) goes in one cut. The drift
+  detector stays until then: it catches real shared-Var damage (landing delete-r8-r6-r10 §C2).
 - **Atom audit cuts** (atom-audit-2026-09-26.md when it lands): file-disjoint DELETE/MOVE/COLOCATE slices.
 - Render-dispatch reds in web-debug-test (`repl/render-ai` returns the raw evaluation map), fault card nil kicker/message,
   fixture writes refused (`unowned-entity`, "only the creator may remove tests"), `turn-details` 34 s.
