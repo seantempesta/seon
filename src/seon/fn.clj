@@ -313,15 +313,17 @@
             (str (::analyzer/from-var usage)))))
 
 (defn- call-target
+  "The target a var usage exercises: an invocation, a macro use (its expansion
+  runs in the caller), a var quote, or a value handed on (`apply`, `partial`,
+  `comp`, a syntax-quoted body). A quoted symbol only names its target."
   [usage]
-  (when (and (not (::analyzer/macro usage))
-             (or (contains? usage ::analyzer/arity) (::analyzer/var-quote usage)))
+  (when-not (::analyzer/reference usage)
     (usage-symbol usage)))
 
 (defn- references-by-caller
-  "Resolved target identities without a resolved call shape.
-  Quoted symbols are references, never invented arities. A nil caller is
-  retained when this analysis has no declaration to own the reference."
+  "Quoted target symbols: named, not exercised (`call-target`). A nil caller
+  is retained, with every usage it holds, when this analysis has no
+  declaration to own it."
   ([analysis first-party-functions]
    (references-by-caller analysis first-party-functions first-party-functions))
   ([analysis _first-party-functions declared-callers]
@@ -330,8 +332,7 @@
       (let [caller (usage-caller usage)
             target (usage-symbol usage)]
         (if (and target
-                 (or (::analyzer/macro usage)
-                     (not (contains? usage ::analyzer/arity))
+                 (or (::analyzer/reference usage)
                      (not (declared-callers caller))))
           (update references (when (declared-callers caller) caller)
                   (fnil conj #{}) target)
@@ -1848,9 +1849,55 @@
   [{database :seon.db/db seeds :seon.fn/seeds}]
   (gate-sets-in database (vec seeds) true))
 
+(defn- call-reach
+  "The tests exercising `seeds`: each test calling a seed or calling a function
+  that calls one (owner 2026-09-26: the tests of A and of A's callers), and a
+  seed that is itself a test. The edges are `:seon.fn/calls` (a capability
+  owner's handler is one, `var-row`), the declared invocation edges
+  (`declared-reference-edges`) and `:seon.test/subject`. A symbol mention
+  (`:seon.fn/references`, a file's unresolved references) calls nothing, so it
+  selects nothing: a test quoting `'a/b` is not a test of `a/b`."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :seon.fn/sym]]
+                  [:or [:vector :seon.test/sym] :seon.db/invalid-read-error]]}
+  [database seeds]
+  (try
+    (let [read! (fn [value] (if (db/read-refusal? value) (throw (ex-info "Call reach unavailable." value)) value))
+          ;; `[attribute symbol]` of each identity entity, in one bound query.
+          named (fn [entities]
+                  (into {} (map (fn [[entity attribute symbol]] [entity [attribute symbol]]))
+                        (read! (db/q '[:find ?entity ?attribute ?symbol :in $ [?entity ...] [?attribute ...]
+                                       :where [?entity ?attribute ?symbol]]
+                                     database (vec entities) [:seon.fn/sym :seon.test/sym]))))
+          declared (let [edges (read! (declared-reference-edges database))
+                         names (named (mapcat identity edges))]
+                     (reduce (fn [incoming [caller target]]
+                               (update incoming (second (names target)) (fnil conj #{}) caller))
+                             {} edges))
+          ;; Entities naming each target by `attribute`, one index read per pair.
+          referrers (fn [attribute targets]
+                      (into #{} (mapcat #(map :e (read! (db/datoms database :avet attribute %)))) targets))
+          seed-callers (into (referrers :seon.fn/calls seeds) (mapcat declared) seeds)
+          callers (into #{} (keep (fn [[_ [attribute symbol]]] (when (= :seon.fn/sym attribute) symbol)))
+                        (named seed-callers))
+          added (remove (set seeds) callers)
+          frontier (into (set seeds) callers)
+          reaching (-> seed-callers
+                       (into (referrers :seon.fn/calls added))
+                       (into (mapcat declared) added)
+                       (into (referrers :seon.test/subject frontier)))]
+      (vec (sort (into (into #{} (keep (fn [[_ [attribute symbol]]] (when (= :seon.test/sym attribute) symbol)))
+                             (named reaching))
+                       (read! (db/q '[:find [?symbol ...] :in $ [?symbol ...] :where [_ :seon.test/sym ?symbol]]
+                                    database (vec seeds)))))))
+    (catch clojure.lang.ExceptionInfo failure
+      (if (db/read-refusal? (ex-data failure)) (ex-data failure) (throw failure)))))
+
 (defn gate-sets
-  "Select tests through the shared reverse graph. The map arity seeds one
-  frontier with all changed symbols; the positional arity retains per-seed results."
+  "Select the tests exercising changed definitions (`call-reach`).
+  The map arity seeds one frontier with all changed symbols. The positional arity
+  answers, per seed, the conservative reverse closure through calls,
+  references and declared edges that destructive isolation reads
+  (`seon.test/destructive-reach`), never selection."
   {:malli/schema
    [:function
     [:=> [:cat :seon.fn/gate-request]
@@ -1858,8 +1905,7 @@
     [:=> [:cat :seon.db/database-value [:sequential :seon.fn/sym]]
      [:or [:map-of :seon.fn/sym [:vector :seon.test/sym]] :seon.db/invalid-read-error]]]}
   ([{database :seon.db/db seeds :seon.fn/seeds}]
-   (let [result (reverse-closure {:seon.db/db database :seon.fn/seeds seeds})]
-     (if (:seon.db/invalid-read result) result (:seon.fn/tests result))))
+   (call-reach database (vec seeds)))
   ([database function-symbols]
    (let [result (gate-sets-in database function-symbols false)]
      (if (:seon.db/invalid-read result)
@@ -1906,16 +1952,13 @@
                (sort-by pr-str rows))})))
 
 (defn gate-set
-  "Tests gating one function identity. Unknown identities match only an
-  explicitly pending subject; unresolved file references select that file's
-  tests. Use gate-sets when one operation asks about several identities."
+  "The tests exercising one function identity (`call-reach`).
+  Use gate-sets when one operation asks about several identities."
   {:seon/tasks #{"300aca1ad57c"}
    :malli/schema [:=> [:cat :seon.db/database-value :seon.fn/sym]
                   [:or [:vector :seon.test/sym] :seon.db/invalid-read-error]]}
   [database function-symbol]
-  (let [result (gate-sets database [function-symbol])]
-    (if (:seon.db/invalid-read result)
-      result (get result function-symbol))))
+  (call-reach database [function-symbol]))
 
 (defn tests-reaching
   "Compatibility spelling for the shared gate-set derivation."

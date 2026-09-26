@@ -2818,24 +2818,43 @@
                         #(analyze (str "(defn invalid {:seon.fn/invokes " (pr-str invalid) "} [x] x)")))]
            (is (true? (:seon.fn/index-refused refusal)) (pr-str refusal))))))))
 
-(deftest unresolved-call-shapes-preserve-reference-edges-and-reach
+(deftest value-uses-are-calls-and-quoted-symbols-select-nothing
+  ;; Selection by call reach (owner 2026-09-26): a function handed on as a
+  ;; value (`apply`, `partial`, `comp`), a syntax-quoted body a macro expands
+  ;; and the macro use itself exercise their target; a quoted symbol only
+  ;; names it, in a function body or in a test (the host test quoting the
+  ;; symbol its hosted agent defines selected itself without bound).
   (with-provenance-file
     "sample/call_references.clj"
     (slurp (io/resource "test/fixtures/call_graph_fidelity/references.txt"))
     (fn [connection _ rows]
       (test-support/transacted! connection (seon.fn/reconcile-tx (db/db connection) rows []))
-      (doseq [[caller target] [["applied" "apply-target"] ["partialled" "partial-target"]
-                               ["composed" "comp-target"] ["expanded" "macro-target"]
-                               ["resolved" "resolve-target"]]]
-        (let [caller (symbol "sample.call-references" caller)
-              target (symbol "sample.call-references" target)
-              row (db/pull @connection
-                           '[:seon.fn/call-arities :seon.fn/references]
-                           [:seon.fn/sym caller])]
-          (is (contains? (set (:seon.fn/references row)) target))
-          (is (not-any? #(= target (first %)) (:seon.fn/call-arities row)))
-          (is (= [(quote sample.call-references/reaches-references)]
-                 (seon.fn/tests-reaching @connection target))))))))
+      (let [row (fn [caller]
+                  (db/pull @connection '[:seon.fn/calls :seon.fn/call-arities :seon.fn/references]
+                           [:seon.fn/sym (symbol "sample.call-references" caller)]))]
+        (doseq [[caller target] [["applied" "apply-target"] ["partialled" "partial-target"]
+                                 ["composed" "comp-target"] ["expanded" "macro-target"]]]
+          (let [target (symbol "sample.call-references" target)
+                edges (row caller)]
+            (is (contains? (set (:seon.fn/calls edges)) target))
+            (is (not (contains? (set (:seon.fn/references edges)) target)))
+            (is (not-any? #(= target (first %)) (:seon.fn/call-arities edges)))
+            (is (= [(quote sample.call-references/reaches-references)]
+                   (seon.fn/tests-reaching @connection target)))))
+        (let [target (quote sample.call-references/resolve-target)
+              edges (row "resolved")]
+          (is (contains? (set (:seon.fn/references edges)) target))
+          (is (not (contains? (set (:seon.fn/calls edges)) target)))
+          (is (= [] (seon.fn/tests-reaching @connection target))
+              "a quoted symbol in a function body names its target; it selects nothing"))
+        (is (contains? (set (:seon.fn/references
+                             (db/pull @connection '[:seon.fn/references]
+                                      [:seon.test/sym (quote sample.call-references/quotes-only)])))
+                       (quote sample.call-references/apply-target))
+            "the test's quoted mention is stored")
+        (is (not (contains? (set (seon.fn/tests-reaching @connection (quote sample.call-references/apply-target)))
+                            (quote sample.call-references/quotes-only)))
+            "a test quoting a symbol is not a test of it")))))
 
 (deftest analyzer-edges-are-readable-symbols-or-no-edge
   (let [source
@@ -2915,8 +2934,9 @@
                       (:seon.fn.file/rows partial)))
             (test-support/transacted! connection
                                       (seon.fn/reconcile-tx (db/db connection) (:seon.fn.file/rows partial) []))
-            (is (contains? (set (seon.fn/tests-reaching @connection target))
-                           (quote sample.cross-implementation/unrelated))))))
+            (is (not (contains? (set (seon.fn/tests-reaching @connection target))
+                                (quote sample.cross-implementation/unrelated)))
+                "a file's unresolved mention calls nothing, so it selects nothing"))))
       (finally (test-support/delete-recursively! root)))))
 
 (defn- assert-scoped-reference-selection [database]
@@ -2945,33 +2965,18 @@
                             (swap! queries inc))
                           (derive-edges db))}
                        #(seon.fn/gate-sets projected (keys expected)))]
-        (is (= #{(quote sample.scoped-tests/indirect)}
-               (set (db/q '[:find [?symbol ...]
-                            :in $ ?target
-                            :where
-                            [?caller :seon.fn/references ?target]
-                            [?caller :seon.test/sym ?symbol]] projected (symbol "sample.scoped-target" "target"))))
-            "the separate reference-only caller really is stored")
-        (is (= #{(quote sample.scoped-tests/direct)}
+        (is (= #{(quote sample.scoped-tests/direct) (quote sample.scoped-tests/indirect)}
                (set (db/q '[:find [?symbol ...]
                             :in $ ?target
                             :where
                             [?caller :seon.fn/calls ?target]
                             [?caller :seon.test/sym ?symbol]] projected (symbol "sample.scoped-target" "target"))))
-            "the resolved caller coexists with the reference-only caller")
+            "an invocation and a value handed to `partial` are both calls")
         (is (= expected selected))
         (is (= 1 @queries) "one declaration relation per bulk operation")
         (doseq [[target tests] expected]
-          (is (= tests (seon.fn/tests-reaching projected target)))
-          (is (= (set tests)
-                 (set (db/q '[:find [?caller-symbol ...]
-                              :in $ % ?target-symbol
-                              :where
-                              [?target :seon.fn/sym ?target-symbol]
-                              (call-edge ?caller ?target)
-                              [?caller :seon.test/sym ?caller-symbol]]
-                            projected (var-get (ns-resolve 'seon.fn 'test-reach-rules)) target)))
-              "coverage rules use the same scoped incoming relation")))
+          (is (= tests (seon.fn/tests-reaching projected target))
+              "call reach selects what the conservative closure selects here")))
       (finally (test-support/delete-recursively! root)))))
 
 (deftest reference-selection-includes-resolved-and-reference-only-callers

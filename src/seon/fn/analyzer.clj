@@ -140,7 +140,7 @@
     (present-values
      entry
      [:from :from-var :to :name :alias :refer :arity :macro :private
-      :fixed-arities :varargs-min-arity :defmethod :dispatch-val-str :var-quote :lang]))))
+      :fixed-arities :varargs-min-arity :defmethod :dispatch-val-str :var-quote :reference :lang]))))
 
 ;; clj-kondo's analysis README documents `:keywords` without naming `:from`
 ;; or `:from-var`, but the implementation emits both for every keyword read

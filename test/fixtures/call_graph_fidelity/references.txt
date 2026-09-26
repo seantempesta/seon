@@ -16,3 +16,5 @@
   (is (= 1 ((composed) 1)))
   (is (= 1 (expanded 1)))
   (is (= 1 (resolved))))
+(deftest quotes-only
+  (is (= 'sample.call-references/apply-target (symbol "sample.call-references" "apply-target"))))
