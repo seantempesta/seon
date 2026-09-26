@@ -53,6 +53,13 @@ callers to an existing component/function/test that does the same thing better (
 - **Docs live in the codebase and the database** (owner 2026-09-26): move away from external docs; parse, store and link doc data
   in Datahike so docs are integrated with code and refs (language plan §1/§5a/§7; 7.11 issues→tasks). Out-of-date external docs are
   triaged (migrate / evidence / delete), not hand-updated. Design + options: docs-in-code-design-2026-09-26.md (owner decides).
+- **Rulings 2026-09-26 evening (owner):** (1) *Arity clash*: the declared form wins whenever its own contract accepts the call;
+  defaults are supplied only when it does not (reverses #41's first-argument shortcut). (2) *Structured docstrings*: do NOT roll
+  out at once — experiment on the namespaces we are working in, verify the indexing is right, the content is useful and not
+  repetitive of the code, and it pulls relevant context where no direct reference (require / call) already links it; settle a
+  workable format before telling agents; everything migrates eventually. Pages (vocabulary, cross-cutting prose) use the same
+  parser. (3) *Durability of mined tasks/reviews*: not now — writing back to files is a root operation done only when we like
+  the updates and want to advance the git branch. (4) *Merge*: build B per merge-task-design-2026-09-26.md (91ba2e3f0, 8 cuts).
 - **AI renders are REPL entries, evaluated; HTML renders are hiccup** (owner 2026-09-26, refining the same-day "text"
   ruling). An AI render returns `;;` comments and forms; the one REPL path evaluates each form read-only in the viewing
   agent's SCI world (disposable fork, cached by content digest) and prints form + result — the context is a `clojure.main`
@@ -141,6 +148,10 @@ EXISTING store (prove adoption on a branch of the live store, never only on a fr
 | floor §3, function face, query+render block, derived contracts | older; floor/face/block now converge on the graph render — re-read before starting |
 
 ### Queued (root's ordered backlog, rewritten 2026-09-26 ~17:40Z; lanes take the top ready item on free files)
+**NEXT (root 2026-09-26 22:00Z, launch in order as lanes free; ≤3 editing lanes):** (1) merge cut 1 — runtime task writer
+seon.task/create! (7.8), assignment, proposal gate on the task's tests; (2) arity rule — declared form wins (call_preparation);
+(3) docs experiment — parser + stored structure + surfacing on 2–3 namespaces being worked, measured for usefulness; (4) error
+slices 2/5/6/7/8 as files free; (5) M1 remainder (namespace meaning from SCI state; fork-point diff) + M5 eval follow-ups.
 **A. Dogfood milestone (primary).**
 1. Green the path: host-test, mcp-bridge (operator discovery via archive root → seams), write-back (merge gate "named run
    not recorded on the tested branch"), agent-test's 8 pre-existing reds, custody-stability (stale, fixture lane).
