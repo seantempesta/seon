@@ -2,7 +2,7 @@
 type: landing
 lane: one-commit-a-opus
 date: 2026-09-26
-status: host/evaluate-source regressions triaged (5ac650725); RESET NEEDED; several reds are other owners' (below)
+status: audit F1/F2/F7 fixed (6e925b607) on top of 5ac650725; unproven by tests (the gate refuses checkout paths); RESET NEEDED
 ---
 
 # Landing: one durable commit per form (A), then reply-when-applied (B) (2026-09-26)
@@ -23,6 +23,34 @@ refusals, e.g. `agent-already-running`, answer the caller), evaluates on that va
 commits open + evaluations + close as ONE transaction (`with-submission` prepends the open; the
 run-dependent writer calls after it see the run mid-transaction, `datahike/db/transaction.cljc:1171`).
 The pass answers the reply port with its report; a pass that ends without settling closes the port.
+
+## Audit F1, F2, F7 (6e925b607)
+
+The audit is `docs/research/agent-platform/audit-landings-2026-09-26.md` (afb449f0c).
+- **F1:** the program-change fast path requires the report's `:db-after` to end at the report's own
+  transaction, on the acquired value's branch. Datahike's writer hands a batch's final value to every
+  report in the batch (writer.cljc:229-264). The live check on default: after two empty
+  transactions on a hosted branch, `basis-t(:db-after)` equals the report's tx. The committed predicate,
+  evaluated in a throwaway namespace, returned true for the exact report, nil for a synthesized batched
+  report, and nil for a report whose before-value is not the acquired one. Regression:
+  `seon.sci.program-change-report-test`.
+- **F2, auto-check:** `seon.test.accretion/observation` stored `:explanation nil` for a thrown generated
+  call, and the armed output check replaced the real failure. An absent explanation is now no key.
+- **F2, host_test:** the parent head is read after hosting, and hosting's one parent write (the home row)
+  is asserted separately. A form's elided `seon.db/transact!` must land on the branch with its receipt,
+  and never on the parent.
+- **F7:** the preflight catches only `:seon.turn/rule` refusals; any other `ExceptionInfo` escapes whole.
+- F6 (P1's failure-reply timing) is not addressed.
+
+**Proof gap.** `bin/test-check default --gate --changed-path …` refused every checkout path:
+"Changed paths lie outside the JVM's source directory". Default runs the archive
+`data/source/bb07fdf08…`, so the save gate cannot prove checkout edits against it.
+
+Root runs after the restart:
+`seon.sci.program-change-report-test`, `seon.cluster.host-test` (all members),
+`seon.cluster.evaluate-source-test --include-long`, `seon.test.accretion-test`,
+`seon.settlement-receipt-provenance-test`, `seon.sci.entry-gate-test/a-top-level-do-admits-each-child-before-the-next-runs`,
+`seon.program-test`, `seon.test-test`.
 
 ## Regressions on bb07fdf08 (host-test 37/15/3, evaluate-source-test 29/1/1): triage
 
