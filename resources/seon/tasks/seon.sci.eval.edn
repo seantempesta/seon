@@ -149,4 +149,29 @@
              :kind :function
              :intent "installation-covers-program-change? (install-evaluated-rows!, every defining batch) finds the entities written since the context's acquired program with [:find [?entity ...] :where [?entity]] over (db/since (db/history after) basis): an unbound pattern, so Datahike scans the whole EAVT history and filters by transaction (no transaction index exists). On default (pid 70849, 2026-09-26) the same query found 10 entities written in the last 3 transactions in 2,025 ms. It cost 1,636 ms of a 3,735 ms first contracted defn on a fresh MCP branch (pid 75849), 303-800 ms on warm branches, and 1,646-4,160 ms per test request whose members define functions. Cost must follow the written datoms: derive the program change from the settled reports' tx-data, or from attribute-bound reads of the program partition only."
              :must-read #{seon.sci.eval/install-evaluated-rows!}
-             :evidence #{"docs/research/agent-platform/landing/perf-admit-tests-opus-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/perf-admit-tests-opus-2026-09-26.md"}}
+ #:seon.task{:name "definition-identity-is-derived-from-the-runtime-value-type"
+             :kind :function
+             :intent "Whether an evaluated Var is a program definition is decided by program-value? (fn? root or :test metadata, with the absent-intern sentinel), while publication decides by clj-kondo's seon.fn/function-definition? (every def, defonce, defmulti). Live on default pid 89341: kondo gives rows for (def m {:a 1}), (def a (atom 0)), (defmulti mm :k) and (def g (partial + 1)); program-value? says false, false, false, true. So a data def is a program row from a file and a private binding at the REPL, and the unindexed-change text's point-free example is stale (kondo matches it; it is refused as uncontracted). One authority: the analyzed rows, looked up by name, with one predicate shared by files and REPL."
+             :must-read #{seon.sci.eval/program-value? seon.sci.eval/program-definitions seon.sci.eval/program-change seon.fn/function-definition?}
+             :evidence #{"docs/research/agent-platform/eval-path-audit-2026-09-26.md"}}
+ #:seon.task{:name "a-defn-arms-its-contract-up-to-four-times"
+             :kind :function
+             :intent "One contracted defn is wrapped by instrument/wrap-interpreted at admission (admit-program-change!), again on the gate's disposable copy (install-candidate-function! from evaluate-candidate), again on the agent ctx (accept-candidate!), and again at settlement install (install-row! evaluated branch). Arm once when the declaring child has evaluated; install carries the armed root it already transfers."
+             :must-read #{seon.sci.eval/admit-program-change! seon.sci.eval/install-candidate-function! seon.sci.eval/accept-candidate! seon.sci.eval/install-row! seon.sci.eval/install-function-contract!}
+             :evidence #{"docs/research/agent-platform/eval-path-audit-2026-09-26.md"}}
+ #:seon.task{:name "the-projection-is-advanced-at-five-sites"
+             :kind :function
+             :intent "A row's effect on the schema projection is computed in definition-row (projection-with-function-contract, result discarded), declared-row, evaluate (schema and deletion rows), install-evaluated-rows! and install-candidate-function!. One row-to-projection function, called once per admitted row."
+             :must-read #{seon.sci.eval/definition-row seon.sci.eval/declared-row seon.sci.eval/evaluate seon.sci.eval/install-evaluated-rows! seon.sci.eval/install-candidate-function!}
+             :evidence #{"docs/research/agent-platform/eval-path-audit-2026-09-26.md"}}
+ #:seon.task{:name "program-movement-is-checked-three-ways-per-form"
+             :kind :function
+             :intent "Each form asks whether its program moved three ways: trusted-evaluation over the loaded-identity atom, acquired-database? with loaded-program-current? over the program-identity cache (and reacquires inside evaluate), and installation-covers-program-change? after settlement. The JVM loaded-identity check is the ruled one; the branch-program check belongs once to the turn fork, never inside evaluate."
+             :must-read #{seon.sci.eval/trusted-evaluation seon.sci.eval/acquired-database? seon.sci.eval/installation-covers-program-change? seon.sci.eval/evaluate}
+             :evidence #{"docs/research/agent-platform/eval-path-audit-2026-09-26.md"}}
+ #:seon.task{:name "a-result-handle-is-bound-at-three-sites"
+             :kind :function
+             :intent "An evaluation's value is interned under its result handle by shown-result, again by seon.turn/evaluate-sources (commented ONE BIND SITE), and through the ::bind-result! callable seon.error carries. The print stage, which needs the handle, is the one bind."
+             :must-read #{seon.sci.eval/shown-result seon.sci.eval/bind-result! seon.turn/evaluate-sources}
+             :evidence #{"docs/research/agent-platform/eval-path-audit-2026-09-26.md"}}]

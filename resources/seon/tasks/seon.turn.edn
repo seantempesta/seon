@@ -55,4 +55,9 @@
              :kind :function
              :intent "Each agent pass derives next-agent-work on a fresh database value, runs the turn, then derives it again for the rewake (more-agent-work?); with episode-exhausted! (turns-left: episode-runs + max-episode-runs, four history queries) and opening-deferred? a trivial form spends ~12 ms and ~59 seon.db/q in turn derivations (2 ms for the same derivation on a held value). The rewake answer is decidable from the pass's own report (a closed run with no unanswered wake) without re-deriving from scratch; the budget reads scan the agent's whole turn history since assignment."
              :must-read #{seon.turn/step seon.turn/next-agent-work seon.turn/more-agent-work? seon.turn/turns-left}
-             :evidence #{"docs/research/agent-platform/landing/perf-eval-overhead-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/perf-eval-overhead-2026-09-26.md"}}
+ #:seon.task{:name "an-agent-form-is-read-again-by-each-consumer"
+             :kind :function
+             :intent "After the plan reads a reply, its source is read again by evaluable-source?, read-source, source-events (source-key and read-only-evaluation?, which also re-derives declarations with program/declaration-row), seon.sci.eval/one-event and install-row!'s test and deletion replays, besides the clj-kondo parse. A form is parsed once: carry the plan's events and the analyzed rows on the evaluation."
+             :must-read #{seon.turn/source-events seon.turn/read-only-evaluation? seon.turn/evaluable-source? seon.sci.eval/one-event}
+             :evidence #{"docs/research/agent-platform/eval-path-audit-2026-09-26.md"}}]
