@@ -1031,11 +1031,11 @@
       (some? label) (merge (label-facts label)))))
 
 (defn- arity-row
-  [function-symbol order info canonical-keys source-signature]
-  (let [input-refs (schema/compiled-references (:input info) canonical-keys)
-        output-refs (schema/compiled-references (:output info) canonical-keys)
-        guard-refs (when-let [guard (:guard info)]
-                     (schema/compiled-references guard canonical-keys))
+  "One stored arity row. `references` are this arity's `[input output guard]`
+   reference sets, derived with the compiled contract in its own compilation
+   world ([[seon.schema/contract-references]]); they are never re-derived here."
+  [function-symbol order info references source-signature]
+  (let [[input-refs output-refs guard-refs] references
         slots (input-slots (:input info))
         expected-count (count (:seon.fn.signature/bindings source-signature))
         _ (when-not (= expected-count (count slots))
@@ -1125,12 +1125,13 @@
                   :seon.error/expected source-keys})))
     (cond->
      {:seon.fn/arities
-      (mapv (fn [order arity]
+      (mapv (fn [order arity references]
               (let [info (m/-function-info arity)]
-                (arity-row function-symbol order info canonical-keys
+                (arity-row function-symbol order info references
                            (get source-by-key (malli-arity-key info)))))
             (range)
-            arities)}
+            arities
+            (schema/arity-references (:registry compile-options) canonical-keys compiled))}
       override? (assoc :seon.fn/arglists-override? true))))
 
 (defn with-contract-facts

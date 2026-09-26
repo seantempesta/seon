@@ -61,22 +61,72 @@
     (require 'seon.schema.datahike)
     (ns-resolve 'seon.schema.datahike 'value-schema)))
 
-(defn compiled-references
-  "Canonical registry keys directly referenced by one compiled schema.
+(defn- reference-children
+  "The compiled schemas directly under `node`: plain children, and the schema
+   of each map entry (`[key properties schema]`)."
+  {:malli/schema [:=> [:cat [:fn malli.core/schema?]] [:sequential [:fn malli.core/schema?]]]}
+  [node]
+  (keep (fn [child]
+          (cond (m/schema? child) child
+                (and (vector? child) (m/schema? (peek child))) (peek child)))
+        (m/children node)))
 
-   A fold over Malli's own walker (`internal/fold-walk`), which distinguishes
-   references from keyword data. Canonical refs are recorded but not
-   followed; local property-registry refs are followed so canonical refs
-   nested behind them are still visible."
-  {:malli/schema [:=> [:cat [:fn malli.core/schema?] [:set :keyword]] [:set :keyword]]}
-  [compiled canonical-keys]
-  (set (internal/fold-walk
-        compiled
-        (fn [schema _path]
-          (let [reference (when (m/-ref-schema? schema) (m/-ref schema))]
-            (if (contains? canonical-keys reference) [reference] [])))
-        {::m/walk-schema-refs #(not (contains? canonical-keys %))
-         ::m/walk-refs #(not (contains? canonical-keys %))})))
+(defn contract-references
+  "Canonical registry keys `compiled` depends on, in the world it was compiled in.
+
+   `registry` is the registry `compiled` was compiled against and
+   `canonical-keys` its canonical declarations. A ref is canonical only when its
+   OWN scope resolves the name to the object `registry` answers for it: a local
+   `:registry` shadowing a canonical name is followed, not recorded. Any other
+   ref is followed through `m/deref` under a recursion guard keyed by
+   `[scope-registry name]`, so a local recursive registry, or nested scopes
+   reusing one recursive name, terminate. Callers pass the registry of the
+   compilation world; a set of names alone cannot tell a shadow from its target.
+
+   ## Examples
+
+   `[:schema {:registry {:a/x :a/y}} :a/x]` in a world declaring both answers
+   `#{:a/y}`.
+
+   ## Costs
+
+   Proportional to the compiled value's nodes; each canonical ref is a leaf."
+  {:malli/schema [:=> [:cat [:fn malli.registry/registry?] [:set :keyword] [:fn malli.core/schema?]]
+                  [:set :keyword]]}
+  [registry canonical-keys compiled]
+  (letfn [(walk-node [node seen found]
+            (if (m/-ref-schema? node)
+              (let [reference (m/-ref node)
+                    scope (:registry (m/options node))]
+                (cond
+                  (nil? reference)
+                  (reduce #(walk-node %2 seen %1) found (reference-children node))
+
+                  (and (contains? canonical-keys reference)
+                       (some? (mr/schema registry reference))
+                       (identical? (mr/schema scope reference) (mr/schema registry reference)))
+                  (conj found reference)
+
+                  (contains? seen [scope reference]) found
+
+                  :else (walk-node (m/deref node) (conj seen [scope reference]) found)))
+              (reduce #(walk-node %2 seen %1) found (reference-children node))))]
+    (walk-node compiled #{} #{})))
+
+(defn arity-references
+  "Per arity of the function schema `compiled`, in Malli's arity order, its
+   `[input output guard]` canonical reference sets ([[contract-references]]
+   in the world `registry` names). An absent guard is `#{}`."
+  {:malli/schema [:=> [:cat [:fn malli.registry/registry?] [:set :keyword] [:fn malli.core/schema?]]
+                  [:vector [:tuple [:set :keyword] [:set :keyword] [:set :keyword]]]]}
+  [registry canonical-keys compiled]
+  (mapv (fn [arity]
+          (let [info (m/-function-info arity)]
+            (mapv #(if-let [role (get info %)]
+                     (contract-references registry canonical-keys role)
+                     #{})
+                  [:input :output :guard])))
+        (m/-function-schema-arities compiled)))
 
 (defn- reference-cycle
   "First deterministic cycle in `graph` reachable from `roots`, or nil."
@@ -729,11 +779,11 @@
       (fn [[schema-key definition]]
         [schema-key
          (try
-           (compiled-references
+           (contract-references
+            registry-for-references canonical-keys
             (m/schema
              (compilable-form definition predicate-functions)
-             options)
-            canonical-keys)
+             options))
            (catch Exception _
              ;; The ordinary compilation gate owns malformed and unresolved
              ;; forms. This preflight owns only the reference graph needed to
@@ -753,10 +803,10 @@
   (let [registry-for-references
         (reference-registry canonical-keys fallback)]
     (try
-      (compiled-references
+      (contract-references
+       registry-for-references canonical-keys
        (m/schema (compilable-form definition predicate-functions)
-                 {:registry registry-for-references})
-       canonical-keys)
+                 {:registry registry-for-references}))
       (catch Exception failure
         (refuse-unresolved-reference!
          {:seon.error/operation operation
@@ -897,7 +947,7 @@
         (m/schema
          (compilable-form form (predicate-functions-in projection))
          compile-options)]
-    (compiled-references compiled (set (keys forms)))))
+    (contract-references (:registry compile-options) (set (keys forms)) compiled)))
 
 (defn dependent-schema-keys
   "Changed schema keys plus their reverse transitive dependents.
@@ -1601,7 +1651,7 @@
                     (if (and (keyword? row-identity)
                              (contains? schema-dependencies row-identity))
                       (get schema-dependencies row-identity)
-                      (compiled-references schema canonical-keys))]
+                      (contract-references (:registry compile-options) canonical-keys schema))]
                 (into advisories
                       (mapcat
                        (fn [reference]
@@ -2208,9 +2258,9 @@
         function-dependencies
         (into (sorted-map)
               (map (fn [[sym _form]]
-                     [sym (compiled-references
-                           (get compiled-function-contracts sym)
-                           canonical-keys)]))
+                     [sym (contract-references
+                           registry canonical-keys
+                           (get compiled-function-contracts sym))]))
               function-contracts)
         reverse-function-dependencies
         (reduce-kv
@@ -2686,8 +2736,8 @@
             function-dependencies
             (reduce (fn [dependencies function-symbol]
                       (assoc dependencies function-symbol
-                             (compiled-references (mr/schema registry function-symbol)
-                                                 canonical-keys)))
+                             (contract-references registry canonical-keys
+                                                  (mr/schema registry function-symbol))))
                     (apply dissoc old-function-dependencies removed-fns)
                     affected-fns)
             reverse-function-dependencies

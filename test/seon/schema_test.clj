@@ -1821,3 +1821,43 @@
     (is (identical? (schema/build-projection forms) (schema/build-projection forms)))
     (is (identical? (schema/declaration-projection forms)
                     (schema/declaration-projection forms)))))
+
+(deftest contract-references-follow-each-node's-own-scope
+  ;; Astra's shadow (review of contracts-out-of-projection, R4): a local
+  ;; `:registry` reusing a canonical name means its local target, so the
+  ;; canonical dependency is the target. The walker reads each ref's own scope.
+  (let [canonical {:review/a (m/schema :int) :review/b (m/schema :string)
+                   :review/m (m/schema [:map [:x :int]])}
+        registry (mr/composite-registry canonical (m/default-schemas))
+        keys* (set (keys canonical))
+        refs #(schema/contract-references registry keys* (m/schema % {:registry registry}))]
+    (is (= #{:review/b} (refs [:schema {:registry {:review/a :review/b}} :review/a]))
+        "a shadowing local name records what it resolves to")
+    (is (= #{:review/a :review/m} (refs [:tuple :review/a [:map [:y :review/m]]])))
+    (is (= #{:review/b} (refs [:schema {:registry {"loc" :review/b}} "loc"])) "local alias")
+    (is (= #{:review/b} (refs [:map [:z [:ref :review/b]]])) "explicit ref")
+    (is (= #{:review/a :review/b} (refs [:or :review/a [:and :review/b [:fn string?]]])) "unions")
+    (is (= #{:review/a}
+           (refs [:schema {:registry {:review/cons [:maybe [:tuple :review/a [:ref :review/cons]]]}}
+                  :review/cons]))
+        "a local recursive registry terminates")
+    (is (= #{:review/a :review/b}
+           (refs [:schema {:registry {:review/cons [:maybe [:tuple :review/b
+                                                            [:schema {:registry {:review/cons [:maybe [:tuple :review/a [:ref :review/cons]]]}}
+                                                             :review/cons]]]}}
+                  :review/cons]))
+        "nested scopes reusing one recursive name terminate")
+    (is (= #{} (refs [:tuple :int :string])) "no canonical ref")
+    (testing "per arity and role, in Malli's arity order"
+      (is (= [[#{:review/a} #{:review/b} #{}] [#{:review/a :review/m} #{:review/b} #{}]]
+             (schema/arity-references
+              registry keys*
+              (m/function-schema [:function [:=> [:cat :review/a] :review/b]
+                                  [:=> [:cat :review/a :review/m] :review/b]]
+                                 {:registry registry})))))
+    (testing "a target from another, equal world is not this world's canonical object"
+      (let [other (mr/composite-registry {:review/a (m/schema :int)} (m/default-schemas))
+            compiled (m/schema [:tuple :review/a] {:registry other})]
+        (is (= #{:review/a} (schema/contract-references other #{:review/a} compiled)))
+        (is (= #{} (schema/contract-references registry #{:review/a} compiled))
+            "references are derived only in the world the value was compiled in")))))
