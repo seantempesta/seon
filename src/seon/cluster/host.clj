@@ -124,7 +124,7 @@
     (when (and row (not (:seon.agent/admission-closed-tx row)))
       (let [result (db/call-with-custody {}
                      #(db/transact! connection
-                        [[:db/add (:db/id row) :seon.agent/admission-closed-tx :db/current-tx]]))]
+                        [[:db/add (:db/id row) :seon.agent/admission-closed-tx "datomic.tx"]]))]
         (when-not (:db-after result) (throw (ex-info "Closing the host's admission was refused." result)))))
     (cluster/disarm-agents! host)
     (swap! roster dissoc ::host)

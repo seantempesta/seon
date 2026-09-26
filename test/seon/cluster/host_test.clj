@@ -63,13 +63,21 @@
   (host/host! {:seon.turn.loop/cluster handle :seon.agent/branch branch
                :seon.agent/id agent-id :seon.ns/name host-ns}))
 
+(defn- as-host
+  "Call `f` as the hosted branch's own work: under a test member's custody the
+  writer refuses a write naming another branch, as the bridge's prepl, which
+  binds none, never sees."
+  [hosted f]
+  (db/call-with-custody {:seon.db/connection (get-in hosted [:seon.turn.loop/cluster :seon.db/connection])} f))
+
 (defn- hosted-run!
   "One ordinary run of the hosted agent: its evaluations' shown text, in order,
   or the refusal the submission answered."
   [hosted source]
   (let [custody (select-keys hosted [:seon.turn.loop/cluster :seon.agent/routing :seon.agent/id])
-        result (agent/evaluate-source! (assoc custody :seon.agent/segmenter 'seon.cluster.reply/code-sources
-                                              :seon.cluster.reply/text source))]
+        result (as-host hosted
+                 #(agent/evaluate-source! (assoc custody :seon.agent/segmenter 'seon.cluster.reply/code-sources
+                                                 :seon.cluster.reply/text source)))]
     (if-let [run-id (:seon.turn/id result)]
       (mapv #(or (:seon.eval/shown %) (:seon.cluster.eval/error %))
             (drive/run-receipts @(get-in hosted [:seon.turn.loop/cluster :seon.db/connection]) [run-id]))
@@ -98,6 +106,21 @@
         (is (identical? (:seon.agent/routing hosted)
                         (get-in @(:seon.agent/routing handle) [:seon.agent/children branch]))
             "the host lives in the child roster the parent records")))))
+
+(deftest a-host-retires-after-it-has-run
+  ;; The live-host path: before the fix `retire!` wrote the admission ref as
+  ;; `:db/current-tx`, which seon.db/transact! refuses, so a lane that had run
+  ;; on its branch could never release it.
+  (with-host-world {}
+    (fn [{:keys [handle branch!]}]
+      (let [branch (branch!)
+            hosted (host-on! handle branch "mcp/retiring")
+            connection (get-in hosted [:seon.turn.loop/cluster :seon.db/connection])]
+        (is (= ["1"] (hosted-run! hosted "1")))
+        (is (nil? (host/retire! hosted)))
+        (is (some? (:seon.agent/admission-closed-tx
+                    (db/pull @connection [:seon.agent/admission-closed-tx] [:seon.agent/id "mcp/retiring"]))))
+        (is (nil? (host/hosted handle branch)) "the parent roster no longer records the host")))))
 
 (deftest colliding-sibling-hosts-deliver-independently-and-one-retires-while-the-other-runs
   (with-host-world {}
@@ -170,10 +193,10 @@
     (fn [{:keys [handle branch!]}]
       (let [hosted (host-on! handle (branch!) "mcp/busy")
             custody (select-keys hosted [:seon.turn.loop/cluster :seon.agent/routing :seon.agent/id])
-            first-run (agent/submit-source! (assoc custody :seon.agent/segmenter 'seon.cluster.reply/code-sources
-                                                   :seon.cluster.reply/text "(loop [] (recur))"))
-            second-run (agent/submit-source! (assoc custody :seon.agent/segmenter 'seon.cluster.reply/code-sources
-                                                    :seon.cluster.reply/text "1"))
+            submit! #(as-host hosted (fn [] (agent/submit-source! (assoc custody :seon.agent/segmenter 'seon.cluster.reply/code-sources
+                                                                        :seon.cluster.reply/text %))))
+            first-run (submit! "(loop [] (recur))")
+            second-run (submit! "1")
             connection (get-in hosted [:seon.turn.loop/cluster :seon.db/connection])]
         (is (:seon.turn/id first-run) (pr-str first-run))
         (is (refused-by? :seon.turn/agent-already-running second-run) "the live run still owns the agent")
