@@ -525,3 +525,55 @@ bin/test-check default --ns seon.render-coverage-test
 bin/test-check default --ns seon.render-test
 bin/test-check default --ns seon.sci.eval-test
 ```
+
+## Round 6: `9bc140eb5`, `d97994b43`, `97f4d1f90`
+
+- **`9bc140eb5`**:
+  - `floor`/`bounded-text` keep Seon frames on panics and test failures
+    (root ruling), stated in their docstrings.
+  - Three foreign tests (`instrument_test.clj`, `test/runner_test.clj`,
+    `test_runner_test.clj`) now assert the one cut face.
+- **`d97994b43` (my defect, fixed)**: 260fed262 declared
+  `:seon.render.walk/node` a second time, and clojure.edn refused
+  `seon.render.walk.edn`. The designator is now
+  `:seon.render.walk/continuation-node`. The class regression
+  `every-packaged-schema-resource-reads-as-edn` is in
+  `seon.schema.edn-test`, and every file under `seon/schemas` reads today.
+- **`97f4d1f90`**:
+  - MCP hands the floor the held value; admission only writes the stored
+    artifact.
+  - `get_value` returns the floor's page at the path and absolute offset:
+    text, total and next-offset.
+  - Deleted: `window`, `display-value`, `pager`, `stable-entries`,
+    `counted-size` and the MCP string window (source +48/−122).
+
+### Open
+
+- **`cluster/mcp_test` `retrievable-artifacts-commit-no-transaction`** stays
+  red. Its fixture hands `running-instances` a hand-built map that
+  `seon.cluster.boot/selected-instance`'s `:seon.boot/instance` contract
+  refuses. It needs a canonical instance constructor, which test-support and
+  boot own, not a patch in the test.
+- **Dead declarations** remain in `seon.render.value.edn`:
+  `:window-failed`, `:window-failed-error`, `:window-offset` and
+  `:window-realization-failed-error`, with no producer since `window` went.
+  They are `:seon.db/attributes` schemas, so their removal is the schema
+  owner's call.
+- **2(i) items not done:**
+  - the MCP stored artifact is still the admission print node; the design's
+    stored selection tree is not built;
+  - `render.data/at` still navigates raw key paths (no typed steps);
+  - the page expanders are row 2(iii).
+- **Measurement is pending.** Armed cost and adoption proof wait for root's
+  next adoption, measured with `tmp/impl-floor-on-fipp/battery.clj`.
+
+### Root runs
+
+```
+bin/test-check default --ns seon.schema.edn-test
+bin/test-check default --ns seon.cluster.mcp-test
+bin/test-check default --ns seon.render.value-test
+bin/test-check default --ns seon.instrument-test
+bin/test-check default --ns seon.test.runner-test
+bin/test-check default --ns seon.test-runner-test
+```
