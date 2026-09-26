@@ -40,15 +40,11 @@
                                                                      flow/flow-workload-attributes)})
                              flow/stop-work-launcher!)]
          (let [handle (support/cluster-handle
-                       (merge
                        {:seon.env/environment environment :seon.db/connection connection
                         :seon.cluster/name cluster-name :seon.sci.eval/ctx ctx
                         :seon.flow/work-launcher @launcher :seon.store/store store
                         :seon.flow/executor (cluster/projection-executor (:seon.sci.eval/projection-state ctx))
-                        :seon.db.process/id cluster/boot-process-identity}
-                       ;; A host inherits its cluster handle's dials; the manifest's
-                       ;; evaluation bound reaches the hosted agent through it.
-                       (select-keys manifest [:seon.config.eval/time-limit-ms])))
+                        :seon.db.process/id cluster/boot-process-identity})
                branch! (fn []
                          (let [branch (keyword (str "host-test-" (id/id)))]
                            (registry/branch! {:seon.store/store store :seon.store/branch branch
@@ -269,3 +265,17 @@
         (is (re-find #"install refused" (str (nth shown 2))) "the gate ran the earlier test and refused the break")
         (is (= "16" (last shown)) "the first body stays installed within the run")
         (is (= ["16"] (hosted-run! hosted "(run-square 4)")) "and after it settles")))))
+
+(deftest ^{:seon.test/long "One nested seon.test/run (checkpoint world + one member); 60 s is merge-test's measured bound for one nested run."
+           :seon.test/long-ms 60000}
+  an-agents-check-runs-the-tests-reaching-its-change
+  ;; Before, (my.test/check {}) on a branch was an :incremental request with no
+  ;; all-green run: a first run, widened to every test and loading every test file.
+  (with-host-world {}
+    (fn [{:keys [handle branch!]}]
+      (let [hosted (host-on! handle (branch!) "mcp/checker")]
+        (hosted-run! hosted "(defn check-square \"Square x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* x x))")
+        (hosted-run! hosted "(clojure.test/deftest check-square-test (clojure.test/is (= 16 (check-square 4))))")
+        (let [shown (first (hosted-run! hosted "(let [r (my.test/check {})] [(:seon.test/passed? r) (mapv :seon.test/sym (:seon.test/results r))])"))]
+          (is (= "[true [my.agents.host-probe/check-square-test]]" shown)
+              "exactly the test reaching the change runs, green"))))))
