@@ -56,16 +56,20 @@ duplicates deleted. Unverified commits are debt. Two lessons from 2026-09-25: a 
 real values against the declared contract before committing); a new attribute must install before its first write on an
 EXISTING store (prove adoption on a branch of the live store, never only on a fresh one).
 
-### Platform state (2026-09-26 ~02:00Z)
-- Default: pid 39484, fresh store since the 22:05Z nuke (old store 124 GB, ≥8.76 GB of world copies), ready 33 s from zero,
-  no-provider true, adopted at 6ab70139 (+ later commits pending adoption). Store 3.5 GB — watch it.
-- Boot from zero works again: boot fills a missing clj-kondo dependency analysis itself (71f14d1d4; ~26 s one-time, only on an
-  empty cache, root-authorized under owner delegation; ordinary boots pay a 6.4 ms check); call reach on a store without
-  functions fixed 58e341cf3. Open: `boot/stop!` marks running-instances with a bare Object that projection readers refuse (issue filed).
-- Adoption blockers met today, each fixed: `[:= {}]` read as properties (db51da2e7); reload refuses a retargeted alias (root
-  ns-unaliased; issue filed); deleted paths in `--changed` (pass existing paths only); schema retirement against old row
-  schemas (A/B two-step); attribute written before its schema (config re-land installs first).
-- Hook publication loads edited files into default mid-edit; runs overlapping it produce false reds — the harness design removes this.
+### Platform state (2026-09-26 ~04:00Z)
+- Default: pid 76020, booted from the checkout at 8fa430cc6 on the existing store (all layers, ready 21 s — over the 10 s
+  start target; owed a profile row), no-provider true. Health "faulted" from 8 faults recorded before this boot (14c6292e,
+  f6d16919 and two `seon.db/transact!` signatures lead); none new.
+- P2-A (every top-level def a declaration) reverted (8fa430cc6, 39dae4235): boot's indexing tx referenced a declaration first
+  written in the same tx by lookup ref (`[:seon.fn/sym seon.cluster/*boot-progress!*]`). Re-land must use tempids at the one
+  producer and prove boot on a branch of the live store first.
+- Boot reads the working tree: a lane's half-edited file blocks boot ("Static program analysis found blocking errors").
+  Root parks uncommitted lane edits to `tmp/orchestrator/parked/<stamp>/` before a restart; lanes keep files analyzable.
+- Boot from zero works: boot fills a missing clj-kondo dependency analysis (71f14d1d4); call reach without functions 58e341cf3.
+  Open: `boot/stop!` marks running-instances with a bare Object that projection readers refuse (issue filed).
+- Adoption blockers seen, each fixed: `[:= {}]` read as properties (db51da2e7); reload refuses a retargeted alias (issue
+  filed); deleted paths in `--changed` (pass existing paths only); schema retirement (A/B two-step); attribute before schema.
+- Hook publication no longer publishes (`bin/seon-hook:12`).
 
 ### Component status
 | Component | State |
@@ -86,16 +90,13 @@ EXISTING store (prove adoption on a branch of the live store, never only on a fr
 ### Running lanes (read their landing notes)
 | Lane | Doing | Files |
 |---|---|---|
-| design-fast-harness-opus | harness redesign (prepared worlds, one fixture system for us and agents, baseline diff, clean runs) | design doc only |
-| design-one-reader-opus | implementing one-reader option A S1–S3 (Astra accepted after fixes) | reader.cljc, eval.clj one-event |
-| design-one-pipeline-opus | implementing P5 (branch refusals) + S5 (one-file write-back: agent defn → merge → write-back → reindex) | registry, source, mcp.clj, tests |
-| design-lost-error-seams-opus | implementing P0 then ordered cuts (Astra accepted after fixes) | instrument, sci/kernel, fault, ai, background |
-| design-references-as-refs-opus | folding rulings Q1–Q4, then Astra re-review, then implement | design doc |
-| impl-render-pairs-opus | graph-node pairs: task, schema, function, ns, agent, runtime, turn | pair files named in its landing |
-| impl-index-point-free-defs-opus | P2-A: every top-level def a declaration (uses kondo's defined-by) | fn.clj classification |
-| fix-boot-dependency-analysis-opus | boot fills a missing dependency analysis | operator nuke/start, analyzer, boot |
-| impl-seams-s-process-opus | process race: freeze then kill | process.clj |
-| delete-duplicates-opus | classifying R4/R5 reds (mcp-test 9f, turn-test 21f, program-test 10f, batched turn 3f) | its R4/R5 files |
+| design-fast-harness-opus | harness S1 acquire-once landed (1985849f4); Astra review, then next slices | harness files in its landing |
+| design-one-pipeline-opus | P1 print-once landed (19fbb7901); committing P2a (reply splitter keeps `#?`, regex, `#inst` as code); P2 ruled: keep two passes, documented | reply.clj, turn_test, design doc |
+| design-lost-error-seams-opus | P0/P2 landed; escalate-to root default (178a67487); converting three tests; then P1 production: fault port + stop from a separate thread (Flow stop deadlock) | flow.clj, seon.flow.edn, flow/fault/armed/error tests |
+| design-references-as-refs-opus | Astra re-review of the reference design | design doc |
+| impl-index-point-free-defs-opus | P2-A re-land with tempid-safe references, proven on the live store | fn.clj indexing, entry-gate test |
+| impl-floor-fipp-opus | floor printer on fipp (one clipper; giant values as blob refs) | print.cljc, seon.print.edn, render/value.clj |
+| audit-face-concept (Astra) | eliminate "face" from code/schemas/docs; grounded rename where a concept is needed | face-concept-audit-2026-09-26.md |
 
 ### Designs (authorities; each revised in place)
 | Design | Verdict |
