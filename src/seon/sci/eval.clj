@@ -251,16 +251,24 @@
   exposed as itself, each public Var copied at its root, so an agent requires
   `malli.core` or `datahike.api` as a Clojure REPL does. Program namespaces are
   acquired into the context before any form runs, so none reaches here; an
-  unloaded namespace answers nil and SCI reports it as not found."
+  unloaded namespace answers nil and SCI reports it as not found.
+
+  The copies are born in the requiring context, so they carry its SCI
+  generation as a `def` there does (`sci.impl.utils/generation-meta`, `utils.cljc:359`): the
+  agent's private layer, which `regenerate-agent-context!` carries across turns
+  by generation, keeps them with the namespace and alias SCI registered."
   {:malli/schema [:=> [:cat [:map [:namespace :symbol] [:ctx :map]]] [:maybe :map]]}
   [{namespace-name :namespace ctx :ctx}]
   (when-let [host (find-ns namespace-name)]
-    (let [sci-namespace (sci/create-ns namespace-name)]
+    (let [sci-namespace (sci/create-ns namespace-name)
+          env @(:env ctx)]
       (sci/add-namespace!
        ctx namespace-name
        (into {:obj sci-namespace}
              (map (fn [[intern-name host-var]]
-                    [intern-name (copy-host-var host-var sci-namespace)]))
+                    (let [copied (copy-host-var host-var sci-namespace)]
+                      (alter-meta! copied #(sci.utils/generation-meta env %))
+                      [intern-name copied])))
              (ns-publics host)))
       {})))
 

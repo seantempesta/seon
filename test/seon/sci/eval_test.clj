@@ -2637,3 +2637,17 @@
                  (:seon.sci.eval/load-results acquisition)))
        (is (and (string? call) (str/includes? call "seon.id/valid?")) (pr-str call))
        (is (= 2 (sci/eval-string* ctx "(+ 1 1)")))))))
+
+(deftest a-namespace-an-agent-requires-keeps-its-vars-at-the-next-turn
+  ;; The dependency Vars `load-host-namespace` copies are the agent's own, as a
+  ;; def is: the turn after the require still resolves the alias's Vars.
+  (test-support/with-database
+   (fn [connection]
+     (let [request {:seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)
+                    :seon.db/db (db/db connection) :seon.agent/id "requires"}
+           entering (:seon.sci.eval/ctx (eval/fork-for-turn request))]
+       (sci/eval-string* entering "(require '[malli.core :as m])")
+       (let [next-turn (:seon.sci.eval/ctx
+                        (eval/fork-for-turn (assoc request :seon.sci.eval/agent-ctx entering)))]
+         (is (some? (sci/resolve next-turn 'malli.core/validate)))
+         (is (true? (sci/eval-string* next-turn "(m/validate int? 1)"))))))))
