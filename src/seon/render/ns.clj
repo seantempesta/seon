@@ -279,15 +279,33 @@
                [:dl (row "Calls" callees) (row "Called by" callers)]))])))
 
 (defn- public-functions
-  "The public functions a namespace declares, by name, under the unit's read bounds."
+  "The public functions a namespace declares, by name: one reverse pull from
+  the namespace row, unlimited, so a large namespace is read whole and the AI
+  pair shows less (`shown-functions`). A query joining every function row
+  exceeded the read budget even for an empty namespace (0.2 ms here, measured
+  on default 2026-09-26)."
   {:malli/schema [:=> [:cat :seon.render/unit :symbol] [:or [:vector :symbol] :seon.db/invalid-read-error]]}
   [unit namespace-name]
-  (let [found (db/q (merge (read-bounds unit)
-                           {:query '[:find [?sym ...] :in $ ?name
-                                     :where [?ns :seon.ns/name ?name] [?f :seon.fn/ns ?ns]
-                                            [?f :seon.fn/private? false] [?f :seon.fn/sym ?sym]]
-                            :args [(:seon.db/db unit) namespace-name]}))]
-    (if (read-refusal? found) found (mapv (comp symbol name) found))))
+  (let [found (db/pull (:seon.db/db unit)
+                       [{[:seon.fn/_ns :limit nil] [:seon.fn/sym :seon.fn/private?]}]
+                       [:seon.ns/name namespace-name])]
+    (if (read-refusal? found)
+      found
+      (into [] (comp (filter #(false? (:seon.fn/private? %)))
+                     (map (comp symbol name :seon.fn/sym)))
+            (:seon.fn/_ns found)))))
+
+(defn- shown-functions
+  "The public function names the AI face shows: all of them, or the first
+  `max-collection` by name with the total and `dir` as the continuation."
+  {:malli/schema [:=> [:cat :seon.render/unit [:vector :symbol]] :string]}
+  [unit members]
+  (let [limit (get-in unit [:seon.sci.admit/caps :seon.config.eval.result/max-collection])
+        ordered (sort-by str members)]
+    (if (and (pos-int? limit) (< limit (count ordered)))
+      (str " (first " limit " of " (count ordered) " by name; `dir` below lists every one): "
+           (names (take limit ordered)))
+      (str ": " (names ordered)))))
 
 (defn render-ai
   "Render a namespace node: its declaration, public functions by name, `dir`."
@@ -301,7 +319,7 @@
       (nil? members) header
       (read-refusal? members) members
       :else (str header "\n" (or source (repl/source-text (ns-form namespace-name (sort requires))))
-                 "\n;; public functions: " (names members)
+                 "\n;; public functions" (shown-functions unit members)
                  "\n" (repl/source-text (list 'dir namespace-name))))))
 
 (defn render-html

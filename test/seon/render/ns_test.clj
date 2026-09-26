@@ -56,26 +56,21 @@
          :seon.render/profile
          {:seon.render.profile/token-budget token-budget}))
 
-(deftest bounded-read-refusals-remain-flat-errors
+(deftest a-large-namespace-renders-less-and-names-how-to-continue
+  ;; Root ruling 2026-09-26: a pair must not fail on a large namespace. The
+  ;; members are one reverse pull; the AI face shows the first
+  ;; max-collection names with the total and `dir`; HTML shows them all.
   (support/with-database
     (fn [connection]
-      (let [effective (support/effective-config)
-            caps (assoc (config/result-caps effective)
-                        :seon.config.eval.result/max-nodes 1
+      (let [caps (assoc (config/result-caps (support/effective-config))
                         :seon.config.eval.result/max-collection 1)
             unit (assoc (namespace-unit @connection 'seon.flow 1 100000)
                         :seon.sci.admit/caps caps)
-            ai (sut/render-ai unit)
-            html (sut/render-html unit)]
-        ;; The occurrence time and cause-chain frames name each call site; the
-        ;; refusal itself (operation, member, message, data) is one value.
-        (is (= (dissoc ai :seon.error/at :seon.error/chain)
-               (dissoc html :seon.error/at :seon.error/chain))
-            "both projections return the same refusal from the owning read")
-        (is (true? (:seon.db/invalid-read ai)))
-        (is (= :seon.db/database-read (:seon.error/layer ai)))
-        (is (= 'seon.db/q (:seon.db/refused-read-operation ai)))
-        (is (string? (:seon.error/message ai)))))))
+            ai (sut/render-ai unit)]
+        (is (string? ai) (pr-str ai))
+        (is (re-find #"\n;; public functions \(first 1 of \d+ by name; `dir` below lists every one\): \S+\n" ai) ai)
+        (is (str/includes? ai "(dir seon.flow)"))
+        (is (vector? (sut/render-html unit)))))))
 
 (deftest a-namespace-renders-as-one-graph-node
   ;; Class regression (the namespace page dump): the node is its declaration,
