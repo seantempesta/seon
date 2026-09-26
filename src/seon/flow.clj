@@ -23,11 +23,9 @@
             [seon.schema :as schema]
             [seon.sci.kernel :as kernel]
             [seon.schema.edn :as schema.edn])
-  (:import [clojure.lang Counted IBlockingDeref]
-           [java.util LinkedList]
+  (:import [clojure.lang IBlockingDeref]
            [java.util.concurrent Executor Executors ExecutorService Future FutureTask
-            ThreadFactory TimeUnit]
-           [java.util.concurrent.atomic AtomicLong]))
+            ThreadFactory TimeUnit]))
 
 ;;; OPTIONAL LATE DEPENDENCY. `seon.operator.runtime` lives in
 ;;; `resources/seon/operator/runtime.clj`, off the source path, and is loaded
@@ -407,59 +405,6 @@
     :seon.error/expected "available submission capacity"
     :seon.error/data {::submission-id submission-id ::workload workload}}))
 
-(defn- acquire-admission!
-  [^AtomicLong admitted capacity]
-  (loop [current (.get admitted)]
-    (cond
-      (>= current capacity)
-      false
-
-      (.compareAndSet admitted current (inc current))
-      true
-
-      :else
-      (recur (.get admitted)))))
-
-(deftype RefusingBuffer
-  [^LinkedList buffer ^long capacity ^AtomicLong admitted refuse!]
-  async.impl/UnblockingBuffer
-  async.impl/Buffer
-  (full? [_]
-    false)
-  (remove! [_]
-    (.removeLast buffer))
-  (add!* [this value]
-    (when (= ::queued @(::status value))
-      (if (acquire-admission! admitted capacity)
-        (.addFirst buffer value)
-        (refuse! value)))
-    this)
-  (close-buf! [_])
-  Counted
-  (count [_]
-    (.size buffer))
-  async.impl/Capacity
-  (capacity [_]
-    (inc capacity))
-  core.protocols/Datafiable
-  (datafy [_]
-    {:type 'RefusingBuffer
-     :count (.size buffer)
-     :admitted (.get admitted)
-     :capacity capacity}))
-
-(defn- refusing-buffer
-  [capacity refuse!]
-  (RefusingBuffer.
-   (LinkedList.)
-   (long capacity)
-   (AtomicLong.)
-   refuse!))
-
-(defn- release-admission!
-  [^RefusingBuffer buffer]
-  (.decrementAndGet ^AtomicLong (.-admitted buffer)))
-
 ;;; Settle one io submission exactly once. UNTRACKED settlement — a
 ;;; refusal that never entered `active-work` and has no completion
 ;;; channel — takes the three-argument arity, so there is no tracking
@@ -491,14 +436,6 @@
                    ::work
                    (dissoc work ::work-fn ::complete! ::status
                            ::active? ::task)))))))))
-
-(defn- refuse-io-submission!
-  [submissions work]
-  (io-terminal!
-   submissions
-   work
-   {::started-at (System/nanoTime)
-    ::value (submission-capacity-error (::submission-id work) :io)}))
 
 (defn- execute-io-work!
   [task-executor completion active-work submissions
@@ -580,9 +517,7 @@
        [state nil])
 
      ::completion
-     (do
-       (release-admission! (::io-admission-buffer state))
-       [(with-submission-filter
+     [(with-submission-filter
           (update state ::io-active-count dec))
         (if-let [throwable (::throwable message)]
           (proc-failed! #'work-launcher-step state throwable)
@@ -590,7 +525,7 @@
            [{::pid (::flow/pid state)
              ::event ::work-complete
              ::submission-id (::submission-id message)
-             ::value (::value message)}]})]))))
+             ::value (::value message)}]})])))
 
 (defn- work-launcher-proc
   [request]
@@ -622,11 +557,10 @@
 (defn- work-launcher-graph-definition
   [{::keys [active-work task-executor io-parallelism io-queue-depth io-submissions]
     :as request}]
-  (let [io-admission-buffer
-        (refusing-buffer
-         (+ io-parallelism io-queue-depth)
-         (partial refuse-io-submission! io-submissions))]
-    {:procs
+  ;; `submit!` admits at most parallelism + queue-depth unsettled
+  ;; submissions, and queued work is a subset of them, so core.async's own
+  ;; fixed buffer of that size never blocks an injection.
+  {:procs
      {::work-launcher
       {:proc
        (work-launcher-proc
@@ -634,12 +568,11 @@
          {::active-work active-work
           ::task-executor task-executor
           ::io-parallelism io-parallelism
-          ::io-submissions io-submissions
-          ::io-admission-buffer io-admission-buffer}
+          ::io-submissions io-submissions}
          (env/of request)))
        :chan-opts
-       {::io-submission {:buf-or-n io-admission-buffer}}}}
-     :conns []}))
+       {::io-submission {:buf-or-n (+ io-parallelism io-queue-depth)}}}}
+     :conns []})
 
 (defn start-work-launcher!
   "Start one cluster-owned bounded work launcher from acquired config facts."
@@ -764,7 +697,8 @@
   [work-launcher submission]
   (env/refuse-absent-environment! submission ::submit!)
   (let [{::keys [submission-id complete!]} submission
-        {::keys [graph accepting? io-submissions]} work-launcher
+        {::keys [graph accepting? io-submissions configuration]} work-launcher
+        {:seon.config.flow.io/keys [concurrency queue-depth]} configuration
         work
         (assoc submission
                ::status (atom ::queued)
@@ -772,12 +706,28 @@
                ::task (atom nil))
         completion complete!]
     (if (and graph @accepting?)
-      (do
-        (swap! io-submissions assoc submission-id work)
-        (if @accepting?
+      ;; Admission is decided where unsettled work is held: a submission
+      ;; enters only while fewer than concurrency + queue-depth are unsettled.
+      (let [[before]
+            (swap-vals! io-submissions
+                        #(cond-> %
+                           (< (count %) (+ concurrency queue-depth))
+                           (assoc submission-id work)))]
+        (cond
+          (>= (count before) (+ concurrency queue-depth))
+          (do
+            (io-terminal!
+             io-submissions work
+             {::started-at (System/nanoTime)
+              ::value (submission-capacity-error submission-id :io)})
+            false)
+
+          @accepting?
           (do
             (flow/inject graph [::work-launcher ::io-submission] [work])
             true)
+
+          :else
           (do
             (io-terminal!
              io-submissions work

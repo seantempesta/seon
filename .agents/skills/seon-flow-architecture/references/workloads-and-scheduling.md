@@ -71,9 +71,8 @@ Do not flatten the roles below into "the executor":
 | each agent graph | `:io-exec` = the handle's `:seon.flow/executor` | `src/seon/cluster/agent.clj:579-580` |
 | the cluster graph (armer, render) | `:io-exec` = the same handle executor | `src/seon/cluster.clj:3347` |
 | that handle executor | `seon.cluster/projection-executor`: root `:io`, binding the cluster's projection state around each task | `src/seon/cluster.clj:3307-3322`, assigned `:3370-3379` |
-| the fault-committer graph | `:io-exec` = `seon.flow/projection-executor` over root `:io` | `src/seon/flow.clj:1123-1135`, `:1183-1189` |
-| the work-launcher graph | `:compute-exec` = root `:compute`, and no `:io-exec` | `src/seon/flow.clj:616-654` |
-| launcher compute and I/O submissions | root `:io` as the task executor | `src/seon/flow.clj:685-701`, dispatched `:530-556` |
+| the work-launcher graph | its own `graph-executor`: a virtual thread per proc task, the graph's join | `src/seon/flow.clj:80-100`, started by `start-graph!` `:101` |
+| launcher I/O submissions | root `:io` as the task executor | `src/seon/flow.clj:610`, dispatched in `execute-io-work!` `:440` |
 | capability handlers | root `:io` | `src/seon/effect.clj:490-492` |
 
 Flow's resolver uses core.async's defaults exactly when a graph omits the
@@ -112,27 +111,26 @@ their live state.
 
 ## The bounded submission owner
 
-The work launcher accepts two submission kinds: `seon.flow/submit!!` for
-compute work awaited to a terminal value (`src/seon/flow.clj:836-904`) and
-`seon.flow/submit!` for detached I/O work (`:771-835`). The turn path does not
-enter either: the turn proc evaluates SCI inline (`evaluate-sources`,
-`src/seon/turn.clj:4668`, called at `:4815` and `:4871`) and calls the model
-inline (`ai/complete`, `:4525`). The one `submit!!` caller,
-`submit-evaluation!!` (`src/seon/turn.clj:3315-3328`), has no caller. This
+The work launcher accepts one submission kind: `seon.flow/submit!` for
+detached I/O work (`src/seon/flow.clj:679`); its one production caller is a
+background effect (`src/seon/effect.clj:865`). The turn path does not enter
+it: the turn proc evaluates SCI inline and calls the model inline. This
 boundary is recorded in
 `docs/seon/issues/turn-evaluations-bypass-work-submission.md`.
 
 The launcher owns:
 
-- a `RefusingBuffer` per submission kind that refuses at admission instead of
-  blocking (`src/seon/flow.clj:304-342`);
-- an active-count gate per kind, bounded by the configured concurrency
-  (`with-submission-filter`, `:497-507`);
-- the root `:io` task executor;
-- task completion routed back to the launcher proc; and
-- capacity observation through the `:compute` observer proc.
+- admission at `submit!`: a submission enters the map of unsettled
+  submissions only while fewer than concurrency + queue-depth are unsettled,
+  otherwise its `complete!` receives `:seon.flow/submission-capacity-error`
+  and `submit!` returns false; the proc's input channel is core.async's own
+  fixed buffer of that size, which admission keeps from ever blocking;
+- an active-count gate bounded by the configured concurrency
+  (`with-submission-filter`, `:482`);
+- the root `:io` task executor; and
+- task completion routed back to the launcher proc.
 
-Inspect `src/seon/flow.clj:291-588` before changing admission. The active
+Inspect `src/seon/flow.clj:482-759` before changing admission. The active
 count spans each submission's complete lifetime. If work parks inside a host
 call, its logical slot remains occupied even though the virtual thread may
 have released its carrier.
@@ -164,7 +162,7 @@ lines 20-42). Do not turn those host measurements into universal constants.
 
 ## What a capability boundary changes
 
-`seon.effect/request!` (`src/seon/effect.clj:941`) is the one system-side owner
+`seon.effect/request!` (`src/seon/effect.clj:920`) is the one system-side owner
 for capability requests. It commits the request receipt before the protected
 JVM handler runs on the process-root `:io` executor, bounds terminal data,
 commits settlement once, and recovery interrupts an open receipt and never

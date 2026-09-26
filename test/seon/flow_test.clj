@@ -476,8 +476,8 @@
       (is (true? (sut/submit! launcher (submission 0))))
       (test-support/await-event! entered ::background-io-entered)
       (is (true? (sut/submit! launcher (submission 1))))
-      (is (true? (sut/submit! launcher (submission 2)))
-          "submission returns after injection rather than after work")
+      (is (false? (sut/submit! launcher (submission 2)))
+          "a submission past concurrency + queue-depth is refused at submit!, without waiting for work")
       (let [refused
             (test-support/await-event!
              (future @(nth terminals 2))
