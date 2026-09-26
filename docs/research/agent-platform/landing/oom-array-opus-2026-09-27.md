@@ -20,6 +20,30 @@
   lane did not adopt onto default. Root has to adopt, then run
   `bin/test-check default --ns seon.error.refusal-test`.
 
+## Follow-ups (same lane)
+
+- **556cd021d.** The refusal-test helper `printed-bytes` called
+  `(pr value writer)`, which prints both arguments to `*out*`. It always
+  answered 0 and printed whole worlds into the harness's captured output: the
+  OOM red in `every-producer-references-the-worlds-it-was-handed`, from
+  09fe1d064. The helper now binds the writer as `*out*`. Proven on default
+  pid 34618 (fa4e4bccf): `bin/test-check default --ns seon.error.refusal-test`
+  gives 83 pass / 0 fail / 0 error in 3,772 ms (`tmp/oom-array-opus/refusal-test-2.out`).
+- **ffa4e6982, `seon.error/commit-call`.** The agent a fault happened to is
+  never its own notification's recipient: the recipients are the steward or the
+  escalation owner, minus that agent. The guard `(not= escalate-to agent-id)`
+  had been lost in 9c9b50e3c. A message is a wake, and self-mail is the
+  2026-08-08 self-feeding loop (nine paid calls). turn-loop-test
+  `a-refused-phase-escalates…` now expects the D13 delivery: once per opening,
+  on the first occurrence. 9c9b50e3c ruled this on 2026-09-19 and retired the
+  recurrence limit from delivery (`docs/prds/steward-platform/research/error-family-1a-2026-09-19.md`).
+  The test's old wait-for-the-third-refusal expectation was stale. **RESET
+  NEEDED**: default pid 34618 predates this commit. Next, run
+  `bin/test-check default --ns seon.turn-loop-test` once.
+- The `:seon.config.error/recurrence-limit` dial is still required, but no
+  recorder reads it for delivery. It should be retired or given a reader; not
+  done in this cut.
+
 ## Evidence
 
 - Heap dump: `data/heap/java_pid12212.hprof`, 6,964,021,613 bytes (6.5 GiB on
