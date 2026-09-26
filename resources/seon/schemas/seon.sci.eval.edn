@@ -113,6 +113,11 @@
                  [:seon.boot/cluster-name {:optional true} :seon.boot/cluster-name]
                  [:seon.sci.admit/caps {:optional true} :seon.sci.admit/caps]
                  [:seon.cluster.eval/source {:optional true} :seon.cluster.eval/source]],
+                :evaluate-source
+                [:and {:description "The one REPL path as a value on a render request: (evaluate request source) answers a render's REPL entries with each form's shown result, {:seon.render/source text}, or {:seon.error/value refusal} naming the form that failed (seon.sci.eval/evaluated-source)."}
+                 :seon.instrument/callable],
+                :rendering?
+                [:boolean {:description "Present on a form evaluated for a render: its own result renders without evaluating further entries."}],
                 :shown
                 [:map
                  [:seon.sci.admit/value

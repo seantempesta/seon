@@ -1831,12 +1831,16 @@
 ;;; the floor prints. Without a handle the pair says only bounded scalars.
 
 (defn held-reference
-  "The symbol naming the rendered value in the viewer's world, its result
-  handle (`seon.sci.admit/result-handle`), or nil."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :qualified-symbol]]}
+  "The form naming the rendered value in the viewer's world, or nil: its
+  result handle (`seon.sci.admit/result-handle`), or for a value nested in a
+  held result `(seon.print/value-at result/eN path)` (`seon.render/declared-projection`)."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe [:or :qualified-symbol :seon.repl/expression]]]}
   [unit]
-  (let [root (or (:seon.repl/handle unit) (:seon.render.value/root unit))]
-    (when (and (qualified-symbol? root) (= "result" (namespace root))) root)))
+  (let [root (or (:seon.repl/handle unit) (:seon.render.value/root unit))
+        held? #(and (qualified-symbol? %) (= "result" (namespace %)))]
+    (cond
+      (held? root) root
+      (and (seq? root) (= 'seon.print/value-at (first root)) (held? (second root))) root)))
 
 (defn source-entries
   "REPL entries in order: a string is a `;;` comment (one per line), any

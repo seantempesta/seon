@@ -3900,6 +3900,58 @@
                                    {:seon.error/throwable failure})
     failure))
 
+(declare evaluate)
+
+(defn- evaluated-source
+  "A render's REPL entries as the viewing agent's REPL shows them: each form
+  read once and evaluated through `evaluate` in `request`'s SCI world, then
+  `;=> ` and its shown result; comments keep their place. Answers
+  `{:seon.render/source text}`, or `{:seon.error/value refusal}` naming the
+  first form that could not be read or evaluated, so the floor prints the
+  value beside that one diagnostic: a form is never shown without its result."
+  {:malli/schema [:=> [:cat :seon.sci.eval/shown-request :seon.render/unit :string]
+                  [:or [:map [:seon.render/source :seon.render/source]]
+                   [:map [:seon.error/value :seon.error/base]]]]}
+  [request _unit source]
+  (let [ctx (:seon.sci.eval/ctx request)
+        namespace-name (or (second (:seon.cluster.eval/ns request)) 'user)
+        refused (fn [offending message]
+                  {:seon.error/value
+                   (seon.error.refusal/diagnostic
+                    (java.util.Date.) :seon.render/invocation 'seon.sci.eval/evaluated-source
+                    {:seon.error/message message
+                     :seon.error/member :seon.render/source
+                     :seon.error/expected :seon.sci.eval/evaluation
+                     :seon.error/offending offending})})
+        events (sci/binding [sci/ns (sci/create-ns namespace-name)]
+                 (reader/read (assoc (reader-context ctx namespace-name)
+                                     :seon.sci.reader/ctx ctx
+                                     :seon.sci.reader/text source
+                                     :seon.config.eval.result/max-source (count source))))]
+    (if-not (vector? events)
+      (refused source (str "The render's entries could not be read: " (:seon.error/message events)))
+      (loop [[event & more] events offset 0 shown []]
+        (if-not event
+          {:seon.render/source (apply str (conj shown (subs source offset)))}
+          (let [end (:seon.sci.reader/source-end event)
+                evaluation (when-not (:seon.sci.reader/error event)
+                             (evaluate
+                              (-> request
+                                  (dissoc :seon.turn/id :seon.cluster.eval/ordinal :seon.repl/handle
+                                          :seon.render.call/function :seon.sci.eval/output-prefix
+                                          :seon.render.value/options)
+                                  (assoc :seon.cluster.eval/source (:seon.sci.reader/source event)
+                                         :seon.cluster.eval/ns [:seon.ns/name namespace-name]
+                                         :seon.sci.eval/event event
+                                         ::rendering? true))))]
+            (if (or (nil? evaluation) (:seon.cluster.eval/error evaluation))
+              (refused (:seon.sci.reader/source event)
+                       (str "A render form failed: "
+                            (or (:seon.cluster.eval/error evaluation)
+                                (get-in event [:seon.sci.reader/error :seon.error/message]))))
+              (recur more end (conj shown (subs source offset end) "\n;=> "
+                                    (:seon.eval/shown evaluation))))))))))
+
 (defn shown-result
   "The one print of a final value: its admitted value and exact shown text.
 
@@ -3907,13 +3959,18 @@
   value that replaces a result after it was printed (a disposition refusal, a
   completed disposition's delivery, a settlement refusal): the earlier bytes
   are discarded, never stored, and the final value is rendered by this owner.
+  The value is printed as it is: a declared pair selects what shows.
+
+  A pair that returns REPL entries is evaluated here, once, as the saved
+  observation the MCP reply and the agent's next context both read: the
+  value is bound under its handle, each form is evaluated through `evaluate`
+  (`evaluated-source`) and shown with its result. A form evaluated for a
+  render renders its own result without evaluating further entries.
 
   TOTAL: printing never replaces or fails the value. A failure preparing the
-  print (profile, contract explanation, documentation read) or a renderer
-  failure the floor survived is a flat diagnostic beside the value,
-  `:seon.cluster.eval/diagnostics`, printed by the floor. A caller printing
-  an error it produced passes `:seon.render.value/options` structural, so
-  the error's whole data is its shown text."
+  print (profile) or a renderer failure the floor survived is a flat
+  diagnostic beside the value, `:seon.cluster.eval/diagnostics`, printed by
+  the floor."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
                                   :seon.schema.admission/reason "Any evaluated or replacing value is printed here."
                                   :gen/elements [nil false 0 "" :k [] {}]}]
@@ -3921,8 +3978,7 @@
                   :seon.sci.eval/shown]}
   [value request record]
   (let [ctx (:seon.sci.eval/ctx request)
-        connection (or (:seon.db/connection request)
-                       (get-in ctx [::custody :seon.db/connection]))
+        handle (:seon.repl/handle request)
         profile (render/request-profile request)
         ;; A refused profile is a diagnostic; the value prints under the
         ;; floor's defaults, never under the refusal read as a profile.
@@ -3930,44 +3986,17 @@
         request (if (:seon.render/refused-member profile)
                   (dissoc request :seon.render/profile)
                   (assoc request :seon.render/profile profile))
-        enrich
-        (fn [value]
-          ;; Read only through the floor's classification (one-render-path
-          ;; §3g): an exact small persistent map, keys compared by identity.
-          (let [checked? (some? (render.value/keyword-entry value :seon.instrument/check))
-                value (if (and connection
-                               checked?
-                               ((schema/projection-validator (render/request-projection request)
-                                                             :seon.instrument/contract-error) value)
-                               (not (:seon.error/result-id value)))
-                        (merge value
-                               (error/prepare-result
-                                (cond-> {:seon.error/source value
-                                         :seon.schema/projection (render/request-projection request)
-                                         :seon.db/connection connection}
-                                  (not (:seon.render/refused-member profile)) (assoc :seon.render/profile profile)
-                                  ctx (assoc :seon.sci.eval/ctx ctx)
-                                  (:seon.sci.admit/caps request)
-                                  (assoc :seon.sci.admit/caps (:seon.sci.admit/caps request)))))
-                        value)
-                function-name (when checked? (:seon.instrument/fn value))
-                database (when function-name
-                           (or (:seon.db/db request)
-                               (some-> (get-in request [:seon.sci.eval/ctx ::custody :seon.db/connection]) db/db)))
-                function-row (when (and function-name database)
-                               (db/pull database program-documentation-selector
-                                        [:seon.fn/sym function-name]))]
-            (if (:seon.fn/sym function-row)
-              (assoc value :seon.error/doc (function-doc-map database function-row))
-              value)))
-        [value failures] (try [(enrich value) failures]
-                              (catch Throwable failure [value (conj failures failure)]))
+        ;; The render's forms read the value by its handle.
+        _ (when (and ctx handle) (bind-result! ctx handle value))
         projection (render.value/prepare
-                    (assoc request
-                           :seon.render/value value
-                           :seon.render.call/id
-                           [:seon.cluster.eval/source
-                            (:seon.cluster.eval/source request)]))
+                    (cond-> (assoc request
+                                   :seon.render/value value
+                                   :seon.render.call/id
+                                   [:seon.cluster.eval/source
+                                    (:seon.cluster.eval/source request)])
+                      (and ctx (:seon.sci.eval/time-limit-ms request) (:seon.sci.admit/caps request)
+                           (not (::rendering? request)))
+                      (assoc :seon.sci.eval/evaluate-source (partial evaluated-source request))))
         shown (if (contains? projection :seon.render.value/root-description) projection
                   (or (:seon.render.value/value-text projection)
                       (render.value/render-ai-data projection)))
@@ -4058,6 +4087,8 @@
                    :seon.sci.admit/record record}
             (contains? admitted :seon.sci.admit/value)
             (assoc :seon.sci.admit/value (:seon.sci.admit/value admitted))
+            (:seon.eval/renderer admitted)
+            (assoc :seon.eval/renderer (:seon.eval/renderer admitted))
             (:seon.eval/shown admitted)
             (assoc :seon.eval/shown
                    (:seon.eval/shown admitted))
@@ -4414,11 +4445,11 @@
                            throwable record)
                         arity-message
                         (assoc :seon.error/message arity-message))
-                ;; The agent's failure is its whole flat error, printed as
-                ;; the data it is: the saved observation MCP and the next
-                ;; context both read (AGENTS.md, one error shape).
-                admitted (shown-result value (assoc request :seon.render.value/options
-                                                    {:seon.render.value/structural? true})
+                ;; The agent's failure is its whole flat error; its declared
+                ;; pair selects what shows, like any value's: a refusal's own
+                ;; declaration, else its producer's return.
+                admitted (shown-result value (assoc request :seon.render.call/function
+                                                    'seon.sci.kernel/failure-value)
                                        record)]
           (failed-evaluation
            (cond-> {:seon.sci.eval/admitted admitted
@@ -4733,8 +4764,7 @@
   (when-let [unavailable ((:seon.sci.eval/restore evaluation) nil (ex-info (:seon.error/message refusal) refusal))]
     (throw (ex-info (:seon.error/message unavailable) unavailable)))
   (merge (dissoc evaluation :seon.program/row :seon.sci.eval/bindings :seon.eval/renderer)
-         (shown-result refusal (assoc request :seon.render.value/options
-                                      {:seon.render.value/structural? true})
+         (shown-result refusal request
                        (assoc (:seon.sci.admit/record evaluation)
                               :seon.eval/outcome :error))))
 

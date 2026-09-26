@@ -133,7 +133,8 @@
                     value (:seon.sci.admit/value failed)
                     documented (:seon.sci.admit/value (run "(doc my.note/add!)"))]
                 (is (= :input (:seon.instrument/check value)) (pr-str failed))
-                (is (= documented (:seon.error/doc value)))
+                (is (map? documented))
+                (is (not (find value :seon.error/doc)) "printing never enriches the refusal")
                 (is (str/includes? (:seon.error/message value "") "my.note/add!"))
                 (is (str/includes? (:seon.error/message value "") ":my.note/content"))
                 (is (some? (get-in value [:seon.error/expected])))

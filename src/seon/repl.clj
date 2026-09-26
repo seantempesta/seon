@@ -457,11 +457,11 @@
                 (:seon.sci.eval/agent-ctx unit))
         objects (some-> (:seon.sci.eval/result-objects ctx) deref)]
     (when-let [entry (find objects (:seon.cluster.eval/id emission))]
+      ;; The live value selects its HTML face now; a saved AI renderer (or
+      ;; its absence) is a past observation, not this face's policy.
       (value/prepare
-       (cond-> (assoc unit :seon.render/value (val entry)
-                           :seon.render.value/root [:seon.cluster.eval/id (:seon.cluster.eval/id emission)])
-         (not (:seon.eval/renderer emission))
-         (assoc-in [:seon.render.value/options :seon.render.value/structural?] true))
+       (assoc unit :seon.render/value (val entry)
+                   :seon.render.value/root [:seon.cluster.eval/id (:seon.cluster.eval/id emission)])
        :seon.render/html))))
 
 (defn render-html

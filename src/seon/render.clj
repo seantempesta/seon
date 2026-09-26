@@ -1260,13 +1260,18 @@
   ;; AN ATTRIBUTE SCOPES THE REQUEST'S SUBJECT, NOT THE VALUES BENEATH IT: a
   ;; nested value answers for its own declared shape.
   ;; A NESTED VALUE IS ITS OWN SUBJECT AT DISTANCE ZERO: its renderer
-  ;; expands no edges of its own inside another value, and the root's
-  ;; reference (`:seon.repl/handle`, `:seon.render.value/root`) names the
-  ;; root, never this value.
-  (let [request (cond-> (assoc request :seon.render/value value :seon.render/output output)
-                  (seq (:seon.render.data/path request))
+  ;; expands no edges of its own inside another value. The root's handle
+  ;; names the root, never this value; a held root reaches this value as
+  ;; `(seon.print/value-at result/eN path)`, its reference (`seon.error/held-reference`).
+  (let [path (:seon.render.data/path request)
+        root (or (:seon.repl/handle request) (:seon.render.value/root request))
+        request (cond-> (assoc request :seon.render/value value :seon.render/output output)
+                  (seq path)
                   (-> (dissoc :seon.render.walk/attribute :seon.repl/handle :seon.render.value/root)
-                      (assoc :seon.render/distance 0)))
+                      (assoc :seon.render/distance 0))
+                  (and (seq path) (qualified-symbol? root) (= "result" (namespace root)))
+                  (assoc :seon.render.value/root (list 'seon.print/value-at root
+                                                             (if (some #(or (symbol? %) (coll? %)) path) (list 'quote path) path))))
         ;; A RENDER UNIT NEED NOT CARRY A CTX OR A DATABASE: no projection
         ;; anywhere means nothing is declared, and nothing is selected.
         projection (request-projection request)
@@ -1288,18 +1293,34 @@
                          :seon.render/output output
                          :seon.print/value (inline-rendered request output selected)}}
       :else
-      ;; A source producer's REPL entries are its face: the REPL path that
-      ;; prints this value evaluates their forms, told so by the node.
+      ;; A source producer's REPL entries reach the face only evaluated: the
+      ;; request's `:seon.sci.eval/evaluate-source` (the one REPL path, as a
+      ;; value) prints each form with its result. Without it, or when a form
+      ;; fails, the floor prints the value beside that one diagnostic; a form
+      ;; is never shown without its result.
       (let [{face :face failure :failure :as answer} (produce request output selected)
-            blocks (:seon.render/source-blocks face)]
-        (if (contains? answer :face)
+            blocks (:seon.render/source-blocks face)
+            text (if blocks (clojure.string/join "\n\n" (map :seon.render/source blocks)) face)
+            source? (and (contains? answer :face) (= output :seon.render/ai)
+                         (source-producer? projection selected [(producer-argument request)]))
+            evaluated (when source?
+                        (if-let [evaluate (:seon.sci.eval/evaluate-source request)]
+                          (evaluate request text)
+                          {:seon.error/value
+                           (seon.error.refusal/diagnostic
+                            (java.util.Date.) :seon.render/invocation 'seon.render/declared-projection
+                            {:seon.error/message (str selected " returned REPL entries and this view has no evaluator.")
+                             :seon.error/member :seon.sci.eval/evaluate-source
+                             :seon.error/expected :seon.sci.eval/evaluate-source})}))]
+        (cond
+          (not (contains? answer :face)) {:seon.error/value failure}
+          (:seon.error/value evaluated) evaluated
+          :else
           {:seon.print/node (cond-> {:seon.print/face :seon.print/projected
                                      :seon.render/output output
-                                     :seon.print/value (if blocks (clojure.string/join "\n\n" (map :seon.render/source blocks)) face)}
+                                     :seon.print/value (if source? (:seon.render/source evaluated) text)}
                               (qualified-symbol? selected) (assoc :seon.render.call/selected-producer selected)
-                              (and (= output :seon.render/ai) (source-producer? projection selected [(producer-argument request)]))
-                              (assoc :seon.render.call/source-output? true))}
-          {:seon.error/value failure})))))
+                              source? (assoc :seon.render.call/source-output? true))})))))
 
 (defn- raw-output
   {:malli/schema [:=> [:cat :seon.render/call-request :seon.render/output :seon.schema/value]

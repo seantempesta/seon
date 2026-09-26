@@ -6,16 +6,15 @@
             [seon.db :as db]
             [seon.schema :as schema]))
 
-(defn- missing-note-id-names-the-key-and-the-docstring-example
+(defn- missing-note-id-names-the-key-and-the-fix
   [connection handle routing]
   (let [[saved refusal] (fixture/submit connection handle routing
                                         "(my.note/add! {:my.note/content \"A verified observation.\"})")
         shown (:seon.eval/shown saved)]
     (is ((schema/projection-validator (schema/handed-projection)
                                       :seon.instrument/contract-error) refusal))
-    (doseq [fragment ["my.note/add! refused request at [:my.note/id]"
-                      "missing :my.note/id" "Fix: Supply :my.note/id with a string"
-                      "Example: (my.note/add!" "A verified observation."]]
+    ;; The contract pair's reads, each with its result (seon.error/render-contract-ai).
+    (doseq [fragment ["my.note/add!" ":my.note/id" "Supply :my.note/id with a string" ";=> "]]
       (is (str/includes? shown fragment) shown))))
 
 (deftest installed-contract-refusal-names-the-run5-failing-coordinate
@@ -30,9 +29,9 @@
         (is ((schema/projection-validator (schema/handed-projection)
                                           :seon.instrument/contract-error) refusal))
         (doseq [fragment ["refused argument 0 (0-based) at []" "expected a vector" "got a lazy sequence" "Fix: Convert the sequence with vec"]]
-          (is (str/includes? message fragment) message)
-          (is (str/includes? (:seon.eval/shown saved) fragment) (:seon.eval/shown saved)))
-        (is (map? (:seon.error/doc refusal))))
+          (is (str/includes? message fragment) message))
+        (is (str/includes? (:seon.eval/shown saved) "Convert the sequence with vec") (:seon.eval/shown saved))
+        (is (not (find refusal :seon.error/doc)) "printing never enriches the refusal"))
       (let [[saved value] (fixture/submit connection handle routing
                                   (str/replace fixture/run5-lazy-call "(largest-customer order-rows)"
                                                "(largest-customer (vec order-rows))"))]
@@ -48,7 +47,7 @@
     (is (qualified-keyword? (:seon.sci.reader/unreadable-member refusal)))
     (doseq [fragment ["my.plan/current! refused source at"
                       "expected readable Clojure source"
-                      ":my.plan/item/id" "Fix: Use :my.plan.item/id." "Example:"]]
+                      ":my.plan/item/id" "Fix: Use :my.plan.item/id."]]
       (is (str/includes? shown fragment) shown))))
 
 (defn- run11-about-refusal-names-the-attribute-and-reference-shape
@@ -58,8 +57,7 @@
         shown (:seon.eval/shown saved)]
     (is ((schema/projection-validator (schema/handed-projection)
                                       :seon.instrument/contract-error) refusal))
-    (doseq [fragment ["my.note/add! refused request at [:my.note/about]"
-                      "an entity id or a lookup ref" "[:my.note/id" "Fix:" "largest-customer-original"]]
+    (doseq [fragment ["my.note/add!" "[:my.note/about]" "largest-customer-original" ";=> "]]
       (is (str/includes? shown fragment) shown))
     (is (= 1 (count (:seon.error/problems refusal))))))
 
@@ -80,7 +78,7 @@
         executed (atom [])
         install fixture/install-orders!
         acquire fixture/with-grammar-agent
-        cases [[:note-id missing-note-id-names-the-key-and-the-docstring-example]
+        cases [[:note-id missing-note-id-names-the-key-and-the-fix]
                [:reader run7-reader-refusal-uses-the-shared-grammar]
                [:about run11-about-refusal-names-the-attribute-and-reference-shape]
                [:symbol unresolved-symbol-shows-the-correction-without-the-evidence-map]]]

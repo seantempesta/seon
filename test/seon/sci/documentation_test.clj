@@ -234,7 +234,7 @@
            (sci/eval-string* updated "(deftest retained-arithmetic (is (= 4 (* 2 2))))")
            (is (fn? (:test (meta (sci/resolve updated 'retained-arithmetic)))))))))))
 
-(deftest a-contract-mistake-carries-the-same-documentation-as-doc
+(deftest a-contract-mistake-offers-its-documentation-as-a-read
   (support/preserving-instrumentation-state
    (fn []
     (support/with-database
@@ -260,17 +260,15 @@
              "SCI must acquire the canonical armed host callable, not a pre-arming copy")
          (is (= :input (:seon.instrument/check value)) (pr-str failed))
          (is (= 'my.message/send (:seon.instrument/fn value)))
-         (is (= documentation (:seon.error/doc value)) (pr-str failed))
+         ;; The refusal is never enriched; its pair offers the contract as a
+         ;; read, `(doc my.message/send)`, which answers the same documentation.
+         (is (not (find value :seon.error/doc)) (pr-str failed))
+         (is (str/includes? (:seon.eval/shown failed) "(doc my.message/send)") (:seon.eval/shown failed))
          (doseq [term ["nonempty string subject identity token"
                        ":my.message/assignment" ":seon.message/from"]]
            (is (str/includes? (:body documentation) term)))
          (is ((schema/projection-validator (schema/handed-projection) :seon.error/value) value))
-         (is (str/includes? (:seon.eval/shown failed) "Example:"))
-         (is (str/includes? (:seon.eval/shown failed) (:example documentation)))
-         (is (empty? (db/q '[:find ?m :where [?m :seon.message/id]] (db/db connection))))
-         (let [unrelated (run "(/ 1 0)")]
-           (is (:seon.cluster.eval/error unrelated))
-           (is (not (find (:seon.sci.admit/value unrelated) :seon.error/doc))))))))))
+         (is (empty? (db/q '[:find ?m :where [?m :seon.message/id]] (db/db connection))))))))))
 
 (deftest an-absent-declaration-is-a-typed-statement-not-an-empty-one
   ;; `doc` and `dir` used to render an absent :seon.fn/spec as [], absent
