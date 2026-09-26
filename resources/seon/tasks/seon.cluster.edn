@@ -36,4 +36,10 @@
              :name "adoption-write-costs-sixteen-seconds"
              :kind :function
              :intent "start --head spends 15.9 s in the adoption write, mostly seon.db with-declarations x18,794; over the one-second rule. Cost must follow the changed declarations."
-             :evidence #{"docs/research/agent-platform/landing/fix-dial-retirement-adoption-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/fix-dial-retirement-adoption-2026-09-26.md"}}
+ #:seon.task{:id "17027736987a"
+             :name "boot-publication-phases-are-invisible"
+             :kind :function
+             :intent "A boot resume publication runs before arm-host-program!, so no profile cell observes it and refresh-source!'s explain-slow says nothing; *source-progress!* is bound nowhere (report-source-progress! is a no-op outside tests), so its phase lines vanish. The 132 s store->branch layer of the e405f51be boot could only be split by replaying the publication on a scratch branch (tmp/perf-boot-opus/replay.clj). Carry the boot publication's phase milliseconds in its result and the instance's readiness."
+             :must-read #{seon.cluster/refresh-source! seon.cluster/populate-source!}
+             :evidence #{"docs/research/agent-platform/landing/perf-boot-opus-2026-09-26.md"}}]

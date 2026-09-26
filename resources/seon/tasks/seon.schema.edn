@@ -48,4 +48,10 @@
              :kind :function
              :intent "seon.schema/build-projection (schema.clj:2344), seon.schema/declaration-projection (:1326) and seon.schema.edn/packaged-population (edn.clj:385) call clojure.core.cache.wrapped/lookup-or-miss with an undelayed derivation. That function builds one delay per CALLER, not per key (core.cache 1.1.234 wrapped.clj), so N concurrent misses of one key derive N times: measured 8 derivations for 8 concurrent misses (tmp/cache-central-design-opus/bench.clj), at about 390 ms and 570 MB allocated per projection build. It also swap!s the atom on every hit: 400-860 ns per hit single-threaded and 760-1,800 ns under 8 threads, against 14-23 ns for cache/lookup. Derive once per key (a stored delay, as seon.db/arity-base already does) and read hits without a swap."
              :must-read #{seon.schema/build-projection seon.schema/declaration-projection seon.schema.edn/packaged-population}
-             :evidence #{"docs/research/agent-platform/cache-central-design-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/cache-central-design-2026-09-26.md"}}
+ #:seon.task{:id "5c8cf0549616"
+             :name "map-validation-throws-on-sorted-maps-with-foreign-keys"
+             :kind :function
+             :intent "Malli's :map validator looks each declared key up (malli core.cljc:1276); a sorted map whose comparator cannot compare that key with its own keys throws ClassCastException instead of answering false (fault fa60ad84, seon.schema/valid-candidate-value? from turn-step, 17:13Z). The producer site was fixed in seon.turn/disposition (f83931226) by validating only maps that name the discriminator, and seon.render.value/keyword-lookup? guards the same class in render: two copies of one guard. Validating an arbitrary value against a candidate schema belongs to one owner; decide there, once, so callers delete their guards."
+             :must-read #{seon.schema/valid-candidate-value? seon.turn/disposition seon.render.value/keyword-lookup?}
+             :evidence #{"docs/research/agent-platform/landing/perf-boot-opus-2026-09-26.md"}}]

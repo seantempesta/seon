@@ -2318,23 +2318,71 @@
                            [?function :seon.program/definition-digest ?digest]]
                   database symbols))))
 
+(defn- loaded-namespace-paths
+  "The path, relative to the source directory, of the file behind each
+  first-party namespace loaded now."
+  {:malli/schema [:=> [:cat] [:vector :string]]}
+  []
+  (let [root (str (.getCanonicalPath (io/file (fs/source-directory))) java.io.File/separator)]
+    (vec (for [namespace-object (all-ns)
+               :let [base (.. (str (ns-name namespace-object)) (replace \- \_) (replace \. \/))
+                     url (some #(io/resource (str base %)) [".clj" ".cljc"])]
+               :when (and url (= "file" (.getProtocol url)))
+               :let [path (.getCanonicalPath (io/file (.toURI url)))]
+               :when (str/starts-with? path root)]
+           (subs path (count root))))))
+
 (defonce ^:private launched-source-digests
   ;; The bytes of each first-party source file this JVM loaded at launch: the
   ;; namespaces loaded before this one read these files moments ago, and a
   ;; later reload leaves this record alone because adoption names what it
   ;; reloads (`sci.eval/loaded-identity`). The same digests the publication
   ;; captures (`source/path-digests`).
-  (let [directory (fs/source-directory)
-        root (str (.getCanonicalPath (io/file directory)) java.io.File/separator)]
-    (source/path-digests
-     directory
-     (vec (for [namespace-object (all-ns)
-                :let [base (.. (str (ns-name namespace-object)) (replace \- \_) (replace \. \/))
-                      url (some #(io/resource (str base %)) [".clj" ".cljc"])]
-                :when (and url (= "file" (.getProtocol url)))
-                :let [path (.getCanonicalPath (io/file (.toURI url)))]
-                :when (str/starts-with? path root)]
-            (subs path (count root)))))))
+  (source/path-digests (fs/source-directory) (loaded-namespace-paths)))
+
+(defn loaded-commit
+  "The loaded identity naming `commit-id` when `loaded` has its published bytes.
+
+  `loaded` maps each first-party file a JVM loaded to its bytes' digest; the
+  answer is `{:seon.source/commit-id commit-id}` when every one of those files
+  that `database` (that commit's value) publishes carries the published digest,
+  else nil. A loaded file the commit does not publish is no program of it.
+
+  Costs: one indexed read per loaded file (about 500 at boot)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.source/commit-id
+                       :seon.source/relative-file-digests]
+                  [:maybe [:map [:seon.source/commit-id :seon.source/commit-id]]]]}
+  [database commit-id loaded]
+  (let [stored (source/stored-path-digests database (vec (keys loaded)))]
+    (when (and (seq stored) (= stored (select-keys loaded (keys stored))))
+      {:seon.source/commit-id commit-id})))
+
+(defn name-loaded-program!
+  "Name `commit-id` as the JVM's loaded program once its loaded bytes match.
+
+  Sets `sci.eval/loaded-identity` when no adoption has named one yet and
+  [[loaded-commit]] holds for the files this JVM loaded; answers the loaded
+  identity either way. A JVM launched on the files a boot publication just
+  indexed, and armed by `arm-host-program!` against that commit, already runs
+  it: the adoption that follows writes the cluster's rows and record and never
+  reloads or re-arms what the JVM loaded moments ago. Launch bytes win over the
+  disk for namespaces loaded before this one; later loads are read now."
+  {:malli/schema [:=> [:cat :seon.store/store :seon.source/commit-id] :map]}
+  [store commit-id]
+  (let [database (when (empty? @sci.eval/loaded-identity)
+                   (source/commit-database store commit-id))]
+    (if-not database
+      @sci.eval/loaded-identity
+      (try
+        (if-let [loaded (loaded-commit database commit-id
+                                       (merge (source/path-digests
+                                               (fs/source-directory)
+                                               (filterv #(not (contains? launched-source-digests %))
+                                                        (loaded-namespace-paths)))
+                                              launched-source-digests))]
+          (sci.eval/advance-loaded-identity! sci.eval/loaded-identity loaded)
+          @sci.eval/loaded-identity)
+        (finally (d/release-materialized-db database))))))
 
 (defn- analyzer-reach
   "The declarations reached from `seon.fn/analyze-rows` through `calls`."
@@ -2631,7 +2679,13 @@
         projection (db/carried-projection published-database)
         changed-identities (adoption-identities program-identities)
         deleted-identities (filterv #(empty? (db/pull published-database '[*] %)) changed-identities)
-        namespaces (development-namespaces previous-database published-database changed-identities)]
+        ;; Reload and arming are the JVM's, rows and record the cluster's: a
+        ;; JVM already running the published commit (booted on it, or adopted
+        ;; for another cluster) only writes this cluster's rows and record.
+        loaded? (= (:seon.source/commit-id published)
+                   (:seon.source/commit-id @sci.eval/loaded-identity))
+        namespaces (if loaded? #{}
+                       (development-namespaces previous-database published-database changed-identities))]
     ;; `require :reload` reads the disk, so every namespace it will reload must
     ;; hold its published bytes FIRST: another lane's unpublished edit to a
     ;; dependent never enters this JVM. The check after reload catches an
@@ -2641,8 +2695,29 @@
     (report-source-progress! "development loaded definitions")
     ;; Unmap, reload and arm wait for no one: a member or evaluation spanning
     ;; them reads a changed loaded identity at its end and refuses its result.
-    (let [{reloaded :seon.source/reloaded-namespaces arming-identities :seon.source/arming-identities}
-          (call-with-program-change
+    (let [;; The record commits before the loaded identity names it, so no
+          ;; member starting between arming and the record reads it as converged.
+          record!
+          (fn [reloaded arming-identities]
+            (report-source-progress! "development adoption record")
+            (require-committed!
+             (db/transact! connection
+                           {:tx-data [[:db.fn/call adoption-guard-tx held-store cluster-ref
+                                       prior-commit (:seon.source/commit-id published)]
+                                      {:db/id cluster-ref
+                                       :seon.source/commit-id (:seon.source/commit-id published)}
+                                      {:db/id :db/current-tx
+                                       :seon.test/adoption-cluster cluster-ref
+                                       :seon.test/adoption-identities (set/difference (set changed-identities)
+                                                                                     (set deleted-identities))
+                                       :seon.test/adoption-inputs (set changed-paths)}]})
+             {:seon.boot/population :seon.source/commit-id})
+            {:seon.source/reloaded-namespaces reloaded
+             :seon.source/arming-identities arming-identities})
+          {reloaded :seon.source/reloaded-namespaces arming-identities :seon.source/arming-identities}
+          (if loaded?
+           (record! [] #{})
+           (call-with-program-change
            sci.eval/loaded-identity (:seon.source/commit-id published)
            (fn []
           ;; Clojure reload leaves removed interns behind. Remove only definitions
@@ -2688,23 +2763,7 @@
                  (when (:seon.instrument/registration-observation result)
                    (refused! "Development JVM instrumentation did not restore contracts."
                              result)))))
-            ;; The record commits before the loaded identity names it, so no
-            ;; member starting between arming and the record reads it as converged.
-            (report-source-progress! "development adoption record")
-            (require-committed!
-             (db/transact! connection
-                           {:tx-data [[:db.fn/call adoption-guard-tx held-store cluster-ref
-                                       prior-commit (:seon.source/commit-id published)]
-                                      {:db/id cluster-ref
-                                       :seon.source/commit-id (:seon.source/commit-id published)}
-                                      {:db/id :db/current-tx
-                                       :seon.test/adoption-cluster cluster-ref
-                                       :seon.test/adoption-identities (set/difference (set changed-identities)
-                                                                                     (set deleted-identities))
-                                       :seon.test/adoption-inputs (set changed-paths)}]})
-             {:seon.boot/population :seon.source/commit-id})
-            {:seon.source/reloaded-namespaces reloaded
-             :seon.source/arming-identities arming-identities})))]
+            (record! reloaded arming-identities)))))]
       (let [database (db/db connection)]
         (env/advance-projection! (get ctx env/state-carrier)
                                  (db/basis-t database) (schema/projection-from-database database)))

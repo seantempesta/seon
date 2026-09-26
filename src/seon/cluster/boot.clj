@@ -73,6 +73,11 @@
                         (assoc (cluster/published-program (:seon.store/store instance))
                                :seon.db/db (db/db connection))
                         boot-dials (:seon.flow/commit-fault! arm-request))
+           ;; Launched on the published files and armed against them: the JVM
+           ;; runs that commit, so the adoption after boot writes rows only.
+           _ (cluster/name-loaded-program!
+              (:seon.store/store instance)
+              (:seon.source/commit-id (source/current (:seon.store/store instance))))
            instance (publish! (assoc instance :seon.instrument/applied host-arming))
            bare-ctx
            (if base-ctx

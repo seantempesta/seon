@@ -40,3 +40,11 @@ from boot.clj:197). A separate `bin/seon init --dev` adoption of 38 paths took 3
 ## Sighting 2026-09-25 23:50Z (impl-debug-page-ui landing)
 `bin/seon init --dev default --changed src/seon/render/web.clj` took 2.4–14 s per iteration; the profile shows
 `seon.cluster/refresh-source!` three times plus `full-source-refresh!` — whole-program work for a one-file change.
+
+## Cause 2026-09-26 (perf-boot-opus)
+A replay of the a34078273 boot publication (7 changed files, 4 changed schema keys) on a scratch branch took 15.2 s
+warm: analysis 1.0 s, reconciliation transaction 3.2 s, then **10.7 s re-linting 241 caller files** — the whole
+program. `seon.fn/caller-files` selects the callers of every function whose contract references a changed schema
+(57 consumers → 241 files); true signature changes selected 3 files, all already reconciled. Publication lints with
+every type-derived linter off, so no contract change can alter a caller's findings. Patch and task `ff74379b6565`
+(seon.fn); landing `docs/research/agent-platform/landing/perf-boot-opus-2026-09-26.md`.

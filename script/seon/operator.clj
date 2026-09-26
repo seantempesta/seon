@@ -1259,7 +1259,7 @@
                                               (:seon.operator/heads-after result))
                                          :restored :failed)
                :seon.operator/captured-heads captured))
-      (catch clojure.lang.ExceptionInfo cause
+      (catch Exception cause
         (assoc (diagnostic "Restoring the branch heads failed; the store may be ahead of older programs."
                            {:seon.operator/captured-heads captured} :client-failed cause)
                :seon.operator/rollback :failed)))))
@@ -1358,7 +1358,7 @@
                                                 :seon.boot/cluster-name "default")
                                    capture? (assoc :seon.operator/capture-heads store-dir))
                                  source-root true)
-                  (catch clojure.lang.ExceptionInfo cause
+                  (catch Exception cause
                     (let [evidence (:seon.error/offending (ex-data cause))]
                       {:seon.operator/value
                        (diagnostic (ex-message cause) (or (ex-data cause) {}) :client-failed cause)
@@ -1406,7 +1406,7 @@
                                        (launch-child! (assoc request :seon.operator/command :start
                                                              :seon.boot/cluster-name "default")
                                                       previous-source true))
-                                      (catch clojure.lang.ExceptionInfo cause
+                                      (catch Exception cause
                                         (diagnostic (ex-message cause) (or (ex-data cause) {})
                                                     :client-failed cause)))
                             back-missing (get-in back [:seon.boot/readiness :seon.boot/missing-layers])

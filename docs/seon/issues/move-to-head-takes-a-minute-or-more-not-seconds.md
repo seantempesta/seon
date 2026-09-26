@@ -57,3 +57,9 @@ A move after one committed definition change completes in seconds with every
 phase over 1 s justified: a class-cache hit from committed inputs, a
 sub-second one-file publication and resume comparison, and an adoption that
 does not reload namespaces the fresh JVM loaded from the same bytes.
+
+## 2026-09-26 (perf-boot-opus)
+Boot now names the published commit as the JVM's loaded program when every published file it loaded has the
+published bytes (`seon.cluster/name-loaded-program!`), and `development-source-refresh!` then only writes the
+cluster's rows and record: no `require :reload`, no re-arming (3.9 s at the a34078273 move, 11.6 s at e405f51be).
+The store→branch layer's cost is the caller re-lint of task `ff74379b6565` (seon.fn).

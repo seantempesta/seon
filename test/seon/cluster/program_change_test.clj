@@ -136,3 +136,22 @@
           (is (= (builder program) (builder program)) "nothing failed was cached"))))
     (is (= jvm-loaded @sci.eval/loaded-identity) "the JVM's loaded identity is untouched")
     (remove-ns (symbol scratch))))
+
+(deftest a-jvm-running-the-published-bytes-names-that-commit
+  ;; Boot names its published commit as the loaded program only when every
+  ;; published file it loaded carries the published bytes; the adoption after
+  ;; boot then writes rows and never reloads what the JVM just loaded.
+  (let [database (db/db (:seon.db/connection (support/execution-handle nil)))
+        published (into {} (take 3) (db/q '[:find ?path ?digest
+                                           :where [?file :seon.fn.file/relative-path ?path]
+                                                  [?file :seon.fn.file/digest ?digest]]
+                                         database))
+        commit (random-uuid)
+        named {:seon.source/commit-id commit}]
+    (is (= 3 (count published)) "the fixture publishes files")
+    (is (= named (cluster/loaded-commit database commit published)))
+    (is (= named (cluster/loaded-commit database commit (assoc published "src/not/published.clj" "x")))
+        "a loaded file the commit does not publish is no program of it")
+    (is (nil? (cluster/loaded-commit database commit (assoc published (key (first published)) "other bytes")))
+        "one loaded file with other bytes names nothing: adoption reloads")
+    (is (nil? (cluster/loaded-commit database commit {})) "nothing loaded names nothing")))
