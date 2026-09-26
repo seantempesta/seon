@@ -706,51 +706,68 @@
 (deftest a-new-branch-window-opens-at-its-fork-basis
   ;; Requirement 8.3: a new branch's first evaluation shows none of the errors
   ;; it inherited; one written on it afterwards shows once, then never again.
+  ;; The inherited error is the test's own: it is written on a lane branch P the
+  ;; bridge created, and the window is read on a child C forked from P.
   (let [instances @@(ns-resolve 'seon.cluster (symbol "running-instances"))
         cluster (first (sort (keys instances)))
         store (:seon.store/store (get instances cluster))
         ;; the managed root the bridge resolves, never the program directory
         root (.getCanonicalPath (io/file @(bridge-var 'project-root)))
-        branch (str "lane-mcp-window-" (random-uuid))
+        parent (str "lane-mcp-window-" (random-uuid))
+        child (keyword (str parent "-child"))
         consume (ns-resolve 'seon.cluster 'consume-mcp-projection!)
         window (fn [since]
-                 (try (eval (read-string ((bridge-var 'window-form) cluster branch since)))
+                 (try (eval (read-string ((bridge-var 'window-form) cluster (name child) since)))
                       (finally (consume))))
         operations #(set (map :seon.error/operation (:seon.dev.mcp/errors %)))
-        execute #((bridge-var 'execute-branch) {:root root :cluster cluster :action % :name branch})]
+        execute #((bridge-var 'execute-branch) {:root root :cluster cluster :action % :name parent})
+        call (fn [sym & args] (apply (requiring-resolve sym) args))
+        commit-error! (fn [connection operation]
+                        (call 'seon.db/call-with-custody
+                              {:seon.db/connection connection}
+                              #(seon.test-support/transacted!
+                                connection
+                                (call 'seon.error/commit-tx (call 'seon.db/db connection)
+                                      {:seon.schema/projection (call 'seon.schema/handed-projection)
+                                       :seon.error/source {:seon.error/at (java.util.Date.) :seon.error/layer ::probe
+                                                           :seon.error/operation operation :seon.error/message "A window probe."}
+                                       :seon.error/declared-schema :seon.error/normalization-error
+                                       :seon.error/id (str (random-uuid)) :seon.error/at (java.util.Date.)
+                                       :seon.error/process "mcp-window-4242-1753650000000"
+                                       :seon.sci.admit/caps (seon.config/result-caps seon.config/defaults)
+                                       :seon.config.error/recurrence-limit 100
+                                       :seon.config.error/max-evidence-bytes 16384}))))
+        ;; Each branch is acquired through the agent entrance, which carries its
+        ;; projection for the writer; the bridge's retire releases P's.
+        acquire! #(call 'seon.cluster.agent/acquire-context!
+                        (assoc (:seon.turn.loop/cluster (get instances cluster)) :seon.store/store store)
+                        nil {:seon.agent/branch %})
+        parent-connection (atom nil)
+        child-execution (atom nil)
+        child-connection #(:seon.db/connection @child-execution)]
     (try
       (is (not (:isError (execute "create"))))
-      (let [fork (get @@(bridge-var 'window-bases) [root cluster branch])
-            _ ((requiring-resolve 'seon.db/call-with-custody) {}
-               #(eval (read-string ((bridge-var 'run-form) "1" cluster nil false branch "bridge-test"))))
-            _ (consume)
-            first-window (window fork)
-            connection ((requiring-resolve 'seon.cluster.registry/active-branch-connection)
-                        {:seon.store/store store :seon.store/branch (keyword branch)})]
-        (is (int? fork) "create records the fork basis for the branch's window")
-        (is (pos? (count ((requiring-resolve 'seon.error/occurred-since)
-                          ((requiring-resolve 'seon.db/db) connection) 0)))
-            "the parent's history is inherited, so a window from 0 would list it")
+      (is (int? (get @@(bridge-var 'window-bases) [root cluster parent]))
+          "create records the fork basis for the branch's window")
+      (reset! parent-connection (:seon.db/connection (acquire! (keyword parent))))
+      (commit-error! @parent-connection `inherited)
+      (call 'seon.cluster.registry/branch!
+            {:seon.store/store store :seon.store/branch child
+             :seon.cluster.registry/from (call 'seon.db/commit-id (call 'seon.db/db @parent-connection))})
+      (reset! child-execution (acquire! child))
+      (let [fork (call 'seon.db/basis-t (call 'seon.db/db (child-connection)))
+            first-window (window fork)]
+        (is (= #{`inherited} (set (map :seon.error/operation
+                                        (call 'seon.error/occurred-since (call 'seon.db/db (child-connection)) 0))))
+            "the child inherits the parent's error, so a window from 0 would list it")
         (is (= 0 (:seon.dev.mcp/count first-window)) (pr-str first-window))
-        ((requiring-resolve 'seon.db/call-with-custody)
-         {:seon.db/connection connection}
-         #(seon.test-support/transacted!
-           connection
-           ((requiring-resolve 'seon.error/commit-tx)
-            ((requiring-resolve 'seon.db/db) connection)
-            {:seon.schema/projection ((requiring-resolve 'seon.schema/handed-projection))
-             :seon.error/source {:seon.error/at (java.util.Date.) :seon.error/layer ::probe
-                                 :seon.error/operation `probe :seon.error/message "A window probe."}
-             :seon.error/declared-schema :seon.error/normalization-error
-             :seon.error/id (str (random-uuid)) :seon.error/at (java.util.Date.)
-             :seon.error/process "mcp-window-4242-1753650000000"
-             :seon.sci.admit/caps (seon.config/result-caps seon.config/defaults)
-             :seon.config.error/recurrence-limit 100
-             :seon.config.error/max-evidence-bytes 16384})))
+        (commit-error! (child-connection) `probe)
         (let [second-window (window (:seon.db/basis-t first-window))]
           (is (= #{`probe} (operations second-window)) (pr-str second-window))
           (is (= 0 (:seon.dev.mcp/count (window (:seon.db/basis-t second-window))))
               "the next window does not repeat it")))
       (finally
+        (some->> @child-execution (call 'seon.cluster.agent/release-context!))
+        (call 'seon.cluster.registry/retire-branch! {:seon.store/store store :seon.store/branch child})
         (execute "retire")
-        (is (nil? (get @@(bridge-var 'window-bases) [root cluster branch])))))))
+        (is (nil? (get @@(bridge-var 'window-bases) [root cluster parent])))))))
