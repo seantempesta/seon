@@ -236,8 +236,13 @@
       (let [member (:seon.test/member custody)
             ;; A development adoption spanning this body makes it unknown.
             task (FutureTask.
+                  ;; The body thread is the member branch's own work from its
+                  ;; first step (resolution, seeds, the body): the custody its
+                  ;; creator's bindings carried is replaced, never inherited.
                   (bound-fn []
-                    (sci.eval/call-detecting-program-change
+                    (db/call-with-custody
+                     (select-keys custody [:seon.db/connection])
+                     (fn [] (sci.eval/call-detecting-program-change
                      loaded `bounded-result since
                      #(let [test-var (resolve!)
                             ;; Seeds prepare under the body's program-change detection.
@@ -268,7 +273,7 @@
                                       :seon.sci.eval/time-limit-ms
                                       (or (:seon.test/long-ms
                                            (program/test-markers (meta test-var) (meta (:ns (meta test-var)))))
-                                          5000))))))))))))
+                                          5000))))))))))))))
             thread (.unstarted (Thread/ofVirtual) task)
             failed (fn [message exited?]
                      {:seon.test/sym test-symbol

@@ -302,3 +302,16 @@
                  (let [content (read-string (:seon.message/content message))]
                    [(:seon.agent/branch content) (:seon.issue/id content)
                     (contains? (set (:seon.test/changed content)) [:seon.fn/sym 'my.agents.host-probe/proposed-square])]))))))))
+
+(deftest ^{:seon.test/long "One nested seon.test/run (checkpoint world + one member); 60 s is merge-test's measured bound for one nested run."
+           :seon.test/long-ms 60000}
+  a-branch-agents-test-member-writes-its-own-world
+  ;; Before, the member's body thread inherited the calling agent's custody, so
+  ;; a file test's fixture write on its member world was refused as a write
+  ;; naming another branch than the agent's.
+  (with-host-world {}
+    (fn [{:keys [handle branch!]}]
+      (let [hosted (host-on! handle (branch!) "mcp/member-custody")
+            shown (first (hosted-run! hosted (str "(let [r (my.test/check {:seon.test/changed ['my.plan-test/a-changed-title-is-an-ordinary-fact-update]})] "
+                                                  "[(:seon.test/passed? r) (mapv (juxt :seon.test/sym :seon.test/error-count :seon.test/failure-message) (:seon.test/results r))])")))]
+        (is (= "[true [[my.plan-test/a-changed-title-is-an-ordinary-fact-update 0 nil]]]" shown) shown)))))
