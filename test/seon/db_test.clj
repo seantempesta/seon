@@ -24,6 +24,7 @@
             [seon.fn :as seon.fn]
             [seon.id :as id]
             [seon.instrument :as instrument]
+            [seon.issue :as issue]
             [seon.program :as program]
             [seon.render :as render]
             [seon.render.value :as render.value]
@@ -2040,6 +2041,34 @@
               (:seon.error/member
                (db/transact! connection [[:db/add [:seon.test/sym test-symbol] :seon.test/long "An owned attribute."]])))
            "an owned attribute is still checked")))))
+
+(deftest an-issue-deletion-by-its-creator-is-not-an-authority-change
+  ;; Issue authority is retained (`seon.db/retention-check`): no writer changes
+  ;; it. Retracting the whole issue as its creator is a deletion, so it
+  ;; commits; another writer's deletion or authority change is refused.
+  (test-support/with-database
+   (fn [connection]
+     (test-support/transacted! connection (test-support/agents-tx @connection ["issue-creator" "issue-other"]))
+     (let [test-symbol (first (db/q '[:find [?s ...] :where [_ :seon.test/sym ?s]] @connection))
+           added (issue/add! {:seon.db/connection connection :seon.agent/id "issue-creator"
+                              :seon.issue/title "Deletable" :seon.issue/problem "Its creator may delete it."
+                              :seon.issue/severity :cleanup
+                              :seon.issue/tests #{[:seon.test/sym test-symbol]}})
+           lookup [:seon.issue/id (:seon.issue/id added)]
+           as (fn [agent-id tx-data]
+                (db/transact! connection {:tx-data tx-data
+                                          :tx-meta {:seon.db/user [:seon.agent/id agent-id]}}))]
+       (is (symbol? test-symbol) "the issue holds a real test")
+       (is (= 1 (count (:seon.issue/tests (db/pull @connection [:seon.issue/tests] lookup)))))
+       (testing "another writer is refused"
+         (doseq [tx-data [[[:db/retractEntity lookup]]
+                          [[:db/add lookup :seon.issue/created-by [:seon.agent/id "issue-other"]]]]]
+           (let [refused (as "issue-other" tx-data)]
+             (is (:seon.db/transaction-refused refused) (pr-str tx-data))
+             (is (= :seon.issue/tests (:seon.error/member refused))))))
+       (testing "the creator deletes the whole issue"
+         (is (:db-after (as "issue-creator" [[:db/retractEntity lookup]])))
+         (is (nil? (db/pull @connection [:seon.issue/id] lookup))))))))
 
 (deftest a-store-without-program-schema-admits-its-writes
   ;; CLASS: the digest check read `:seon.fn/sym` on every write, and Datahike

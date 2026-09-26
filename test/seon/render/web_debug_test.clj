@@ -1070,7 +1070,9 @@
           [[:db/add [:seon.cluster.eval/id "outline-e0"] :seon.eval/origin issue-id]])
         (doseq [delete? [false true]]
           (when delete?
-            (support/transacted! connection [[:db/retractEntity [:seon.issue/id issue-id]]]))
+            ;; Its creator deletes it: a deletion, not an authority change.
+            (support/transacted! connection {:tx-data [[:db/retractEntity [:seon.issue/id issue-id]]]
+                                             :tx-meta {:seon.db/user [:seon.agent/id "outline-probe"]}}))
           (let [rendered (transcript/render-outline (assoc request :seon.db/db @connection))
                 opening (first (outline-nodes rendered #(= "outline-e0" (:data-evaluation-id %))))]
             (is (some? opening) (pr-str rendered))

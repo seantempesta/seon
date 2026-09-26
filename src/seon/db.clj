@@ -4485,11 +4485,14 @@
    refusal; nil accepts. It returns rather than throws: Datahike's report
    validator rejects on any returned value (`validate-report`,
    datahike/db/transaction.cljc:1224-1234) and `transact-call` returns that
-   `:datahike/validation-refusal`, whereas a throw becomes an unknown outcome."
-  {:malli/schema [:=> [:cat :map :map [:or :nil :int]] [:or :nil :seon.error/base]]}
-  [before after actor]
+   `:datahike/validation-refusal`, whereas a throw becomes an unknown outcome.
+   Retracting the whole entity as its authority (its creator) is a deletion,
+   not an authority change, so it is admitted; `deleted` holds the entities
+   this write left with no datoms."
+  {:malli/schema [:=> [:cat :map :map [:or :nil :int] [:set :int]] [:or :nil :seon.error/base]]}
+  [before after actor deleted]
   (some
-   (fn [key]
+   (fn [[_ entity :as key]]
     (let [prior (get before key) current (get after key)
           creator (or (:seon.db/creator prior) (:seon.db/creator current))
           authorized? (and actor creator (= actor creator))
@@ -4507,11 +4510,12 @@
           changed-assignment? (and (:seon.db/active? prior)
                                    (not= (:seon.db/assignment prior #{})
                                          (:seon.db/assignment current #{})))]
-      (when (or (and active? (seq (:seon.db/values prior))
-                     (empty? (:seon.db/values current)))
-                (and active? (not authorized?) (or (seq removed) (seq erased) changed-assignment?))
-                (and (:seon.db/creator prior) changed-authority?)
-                (and (:seon.db/active? prior) (not authorized?) changed-authority?))
+      (when (and (not (and authorized? (deleted entity)))
+                 (or (and active? (seq (:seon.db/values prior))
+                          (empty? (:seon.db/values current)))
+                     (and active? (not authorized?) (or (seq removed) (seq erased) changed-assignment?))
+                     (and (:seon.db/creator prior) changed-authority?)
+                     (and (:seon.db/active? prior) (not authorized?) changed-authority?)))
         (diagnostic
          {::transaction-refused true
           :seon.error/message
@@ -4556,7 +4560,8 @@
         user (get-in report [:tx-meta :seon.db/user])
         actor (when user (db.utils/entid before user))]
     (retention-check (retention-snapshot before rules entities)
-                     (retention-snapshot after rules entities) actor)))
+                     (retention-snapshot after rules entities) actor
+                     (into #{} (remove #(first (d/datoms after :eavt %))) entities))))
 
 (defn- write-observation
   "Carry the actual refused request and immutable pre-write basis as data.
