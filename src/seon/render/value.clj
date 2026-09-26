@@ -571,7 +571,7 @@
   [node]
   (case (:kind node)
     (:string :name) (str "…+" (- (:total node) (:shown node)))
-    (if (:pending? node) "…?" (str "…" (- (:total node) (:n node))))))
+    (if (:pending? node) "…?" (str "…" (- (:total node) (:base node 0) (:n node))))))
 
 (defn- more?
   {:malli/schema [:=> [:cat :map] :boolean]}
@@ -799,7 +799,7 @@
         shell (max (:shell work) depth ordinal)
         indent (+ (:indent parent) (nest parent))
         next-id (:next-id state)
-        index (dec ordinal)
+        index (+ (:base parent 0) (dec ordinal))
         [added kid]
         (if (= :map (:kind parent))
           (let [entry-id next-id
@@ -826,7 +826,14 @@
   "Shell-order selection of `value` under the context's budget."
   {:malli/schema [:=> [:cat :seon.schema/value :map] :map]}
   [value context]
-  (let [root (make-node context value 0 0 [] nil {:indent 0 :outside nil})
+  (let [offset (:offset context 0)
+        root (make-node context value 0 0 (:root-path context []) nil {:indent 0 :outside nil})
+        ;; A continuation starts the root collection at its absolute offset
+        ;; (design §3g); its members keep their absolute ordinals.
+        root (cond-> root
+               (and (pos? offset) (#{:map :coll} (:kind root)))
+               (-> (assoc :base offset) (update :pending #(seq (drop offset %))))
+               true (as-> node (assoc node :flat (flat-width node))))
         state {:nodes {0 root} :queue (sorted-map) :seq 0 :next-id 1 :extras 0
                :rendered (if (:rendered? root) (:width root) 0) :reserve (:legend context)}
         state (settle {:nodes {}} state 0 (:width context))]
@@ -864,9 +871,9 @@
                               :seon.render.data/next-offset (:shown node)
                               :seon.render.data/total (:total node))
        (if (:pending? node)
-         (assoc request ::print/elision-unit :pending :seon.render.data/next-offset (:n node))
-         (assoc request ::print/omitted (- (:total node) (:n node)) ::print/elision-unit :children
-                :seon.render.data/next-offset (:n node) :seon.render.data/total (:total node)))))))
+         (assoc request ::print/elision-unit :pending :seon.render.data/next-offset (+ (:base node 0) (:n node)))
+         (assoc request ::print/omitted (- (:total node) (:base node 0) (:n node)) ::print/elision-unit :children
+                :seon.render.data/next-offset (+ (:base node 0) (:n node)) :seon.render.data/total (:total node)))))))
 
 (defn- tree
   "The selected nodes as one print-node tree, built with an explicit stack."
@@ -977,6 +984,8 @@
                       :max-children (if ai? (:seon.render.profile/max-children profile) Long/MAX_VALUE)
                       :max-depth (if ai? (:seon.render.profile/max-depth profile) Long/MAX_VALUE)
                       :max-string (or (when ai? (:seon.render.profile/max-string-length profile)) Long/MAX_VALUE)
+                      :offset (max 0 (long (get-in unit [:seon.render.data/cursor :seon.render.data/offset] 0)))
+                      :root-path path
                       :ceiling (tokens/estimate-chars (or (:seon.print/rendered-token-ceiling profile)
                                                           (:seon.print/rendered-token-ceiling (print/default-options))))}
              state (select-nodes (:seon.render/value unit) context)

@@ -128,6 +128,22 @@
 
  :continuation-subject :seon.render.walk/lookup
 
+ ; A cut's continuation over the walk's nodes (one-render-path design §3g):
+ ; a node designator, the cut's path and absolute offset, the caller's custody.
+ :seon.render.walk/node [:or :qualified-symbol :seon.render.walk/lookup]
+ :seon.render.walk/continuation-reason [:enum :stale :gone :unavailable :malformed]
+ :seon.render.walk/continue-request
+ [:map
+  [:seon.render.walk/node :seon.render.walk/node]
+  [:seon.render.data/cursor :seon.render.data/cursor]
+  [:seon.db/db {:optional true} :seon.db/db]
+  [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx]]
+ :seon.render.walk/continuation-error
+ [:and :seon.error/base
+  [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+   [:seon.render.walk/continuation-reason :seon.render.walk/continuation-reason]
+   [:seon.render.walk/node :seon.render.walk/node]]]
+
  ; The linked graph (task-context S1): structure per projection, levels, nodes, edges, order and cuts.
  :seon.render.walk/ref-attributes [:vector :qualified-keyword]
  :seon.render.walk/value-attributes [:vector [:tuple :qualified-keyword :qualified-keyword]]

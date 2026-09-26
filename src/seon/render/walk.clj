@@ -39,6 +39,8 @@
             [seon.eval :as evaluation]
             [seon.error :as error]
             [seon.render :as render]
+            [seon.render.data :as data]
+            [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [malli.registry :as mr]
@@ -823,6 +825,46 @@
 ;;; ---------------------------------------------------------------------------
 ;;; The agent's history
 ;;; ---------------------------------------------------------------------------
+
+(defn continue
+  "One cut's continuation: the walk node it names, navigated by the cut's
+  path and selected again from its absolute offset (one-render-path §3g).
+
+  A result handle names an evaluation's live object in the caller's SCI
+  context (`:gone` once evicted or after a restart); a lookup ref names an
+  entity at the caller's database value. The same floor selects the value,
+  so the answer is an ordinary prepared projection."
+  {:malli/schema [:=> [:cat :seon.render.walk/continue-request]
+                  [:or :seon.render.value/projection :seon.render.value/missing-root-identity-error
+                   :seon.render.walk/continuation-error :seon.render.data/no-such-path-error :seon.db/error-result]]}
+  [{node :seon.render.walk/node cursor :seon.render.data/cursor database :seon.db/db ctx :seon.sci.eval/ctx
+    :as request}]
+  (let [refusal (fn [reason message]
+                  (assoc (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.walk/continue 'seon.render.walk/continue
+                          {:seon.error/message message :seon.error/member :seon.render.walk/node
+                           :seon.error/expected "a retained walk node" :seon.error/offending node})
+                         :seon.render.walk/continuation-reason reason :seon.render.walk/node node))
+        resolved
+        (cond
+          (qualified-symbol? node)
+          (if-some [entry (some-> (:seon.sci.eval/result-objects ctx) deref (find (subs (name node) 1)))]
+            {:value (val entry)}
+            (refusal :gone "The result is no longer retained by this context."))
+          database
+          (let [pulled (db/pull database '[*] node)]
+            (cond (:seon.db/invalid-read pulled) pulled
+                  (:db/id pulled) {:value pulled}
+                  :else (refusal :gone "No entity has this identity in this database.")))
+          :else (refusal :unavailable "An entity continuation needs the database value it reads."))]
+    (if-not (contains? resolved :value)
+      resolved
+      (let [found (data/at (:value resolved) cursor)]
+        (if-not (contains? found :seon.render.data/value)
+          found
+          (render.value/prepare
+           (assoc (dissoc request :seon.render.walk/node)
+                  :seon.render/value (:seon.render.data/value found)
+                  :seon.render.value/root node)))))))
 
 (defn history
   "Render saved evaluations in chronological order through their schema pair.
