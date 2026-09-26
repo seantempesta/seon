@@ -13,24 +13,24 @@ cluster. Use [the turn PRD](../../../docs/prds/context-generation/plan/agent-rec
 
 Declare each namespaced dial once in its owning schema family.
 Config composites derive from those leaves
-(`derive-config-forms`, `src/seon/schema/edn.clj:62`).
+(`derive-config-forms`, `src/seon/schema/edn.clj:63`).
 `seon.config/default-decisions` validates the shipped decisions
-(`src/seon/config.clj:418`, through `validate-default-decisions` `:378`).
+(`src/seon/config.clj:415`, through `validate-default-decisions` `:375`).
 
-`compile-manifest` (`src/seon/config.clj:521`) combines defaults, a sparse
+`compile-manifest` (`src/seon/config.clj:529`) combines defaults, a sparse
 overlay, and an explicit typed environment map in that order. Required
 absence refuses; the absence marker is removed from the effective map
-(`compile-settings`, `:468-519`). This explicit input is not permission
+(`compile-settings`, `:476-527`). This explicit input is not permission
 for running consumers to fetch process environment state.
 
 ## Apply and inspect
 
 Use `bin/seon config apply [CLUSTER] PATH`; its parser is
-`script/seon/operator.clj:1352-1354`, `:1378-1382`, and the live operation is
+`script/seon/operator.clj:1483-1485`, `:1513-1517`, and the live operation is
 the `:config-apply` branch of `seon.cluster.boot/request!`
-(`src/seon/cluster/boot.clj:611-616`). `seon.config/apply!` compiles and
-reconciles the selected document (`src/seon/config.clj:725`); `effective`
-reads from the database (`:754`).
+(`src/seon/cluster/boot.clj:704-709`). `seon.config/apply!` compiles and
+reconciles the selected document (`src/seon/config.clj:780`); `effective`
+reads from the database (`:819`).
 
 Verify both the resulting datoms and the consumer behavior. An applied
 row does not by itself rebuild a graph, executor, or server. For each
@@ -41,8 +41,8 @@ acquisition table whose referenced mechanisms are being deleted.
 ## Context and result contract
 
 Each turn forks the agent's SCI context from the cluster base and carries its
-private layer over (`fork-for-turn`, `src/seon/sci/eval.clj:2287`); defs,
-atoms, and result objects stay in memory (`AGENTS.md:175`). The evaluation stores
+private layer over (`fork-for-turn`, `src/seon/sci/eval.clj:3156`); defs,
+atoms, and result objects stay in memory (`AGENTS.md:127-128`). The evaluation stores
 shown text produced under the render profile once, plus out and error.
 Do not restore a def-blob threshold, result serializer, or separate
 result storage cap as a config requirement.
