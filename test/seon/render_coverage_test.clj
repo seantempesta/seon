@@ -25,6 +25,9 @@
 (def ^:private agent-id "render-coverage-agent")
 (def ^:private run-id "render-coverage-run")
 (def ^:private owner-symbol 'my.fs/read)
+;; The handler my.fs/read declares (src/my/fs.clj), which an effect records as
+;; the one it dispatched (:seon.effect/capability is required on a receipt).
+(def ^:private capability-symbol 'seon.fs.jvm/read)
 (def ^:private opened-at (Date. 1000))
 (def ^:private settled-at (Date. 1012))
 (def ^:private interrupted-at (Date. 1015))
@@ -46,7 +49,8 @@
   [schema-key]
   (-> (schema.edn/packaged-forms)
       (get schema-key)
-      (comp seon.schema.internal/entity-properties seon.schema/structural-schema)))
+      seon.schema/structural-schema
+      seon.schema.internal/entity-properties))
 
 (defn- card?
   [css-class value]
@@ -97,6 +101,7 @@
      [{:seon.effect/id "effect-pending"
        :seon.effect/run [:seon.turn/id run-id]
        :seon.effect/owner [:seon.fn/sym owner-symbol]
+       :seon.effect/capability capability-symbol
        :seon.effect/form-ordinal 3
        :seon.effect/ordinal 0
        :seon.effect/request-edn request-edn
@@ -104,6 +109,7 @@
       {:seon.effect/id "effect-returned"
        :seon.effect/run [:seon.turn/id run-id]
        :seon.effect/owner [:seon.fn/sym owner-symbol]
+       :seon.effect/capability capability-symbol
        :seon.effect/form-ordinal 3
        :seon.effect/ordinal 1
        :seon.effect/request-edn request-edn
@@ -116,6 +122,7 @@
       {:seon.effect/id "effect-interrupted"
        :seon.effect/run [:seon.turn/id run-id]
        :seon.effect/owner [:seon.fn/sym owner-symbol]
+       :seon.effect/capability capability-symbol
        :seon.effect/form-ordinal 3
        :seon.effect/ordinal 2
        :seon.effect/request-edn request-edn
