@@ -293,7 +293,12 @@
            [:db-after :seon.db/database-value]
            [:tx-data [:vector :seon.db/transaction-report-datom]]
            [:tempids [:map-of :seon.schema/value :int]]
-           [:tx-meta {:optional true} [:map-of :keyword :seon.schema/value]]],
+           [:tx-meta {:optional true} [:map-of :keyword :seon.schema/value]]
+           [:seon.db/durable {:optional true} :seon.db/durable]],
+          :durable
+          [:and
+           {:description "An applied write's pending commit (seon.db/transact-applied!): deref blocks until Datahike commits the batch holding it, answering the committed report or the writer's failure."}
+           :seon.await/blocking-deref],
           :user [:and #:seon.db{:index true} :seon.db/ref],
           :conflict-attribute :qualified-keyword,
           :conflict-value :seon.schema/value,
