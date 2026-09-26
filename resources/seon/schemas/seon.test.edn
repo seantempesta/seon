@@ -192,6 +192,7 @@
   :seon.test/execution-error :seon.test/unknown-error
   :seon.test/resolution-error :seon.test/not-runnable-error
   :seon.test.run/unavailable-error :seon.test.run/immutable-error
+  :seon.test.run/retracted-definition-error
   :seon.db/invalid-read-error :seon.schema/missing-projection-error
   :seon.db.write/error :seon.db.write/validation-refusal
   :seon.instrument/contract-error]

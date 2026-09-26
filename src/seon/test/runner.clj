@@ -1533,12 +1533,12 @@
         (let [failure (seon.error.refusal/diagnostic (java.util.Date.) :seon.test/recording 'seon.test.runner/record-tx
                         {:seon.error/message (str "Test completion names " (count missing)
                                                   " test definition(s) retracted before recording; nothing was recorded.")
-                         :seon.test/symbols missing
+                         :seon.test.run/retracted-definitions missing
+                         :seon.db/basis-t (db/basis-t database)
                          :seon.error/member :seon.test/sym
                          :seon.error/expected "a surviving test definition for every recorded result"
                          :seon.error/offending missing
-                         :seon.error/data {:seon.test.run/id run-id
-                                           :seon.db/basis-t (db/basis-t database)}})]
+                         :seon.error/data {:seon.test.run/id run-id}})]
           (throw (ex-info (:seon.error/message failure) failure)))))
     (into [(assoc run :db/id "test-run")]
      (mapcat
@@ -1721,7 +1721,7 @@
   "Commit captured test results and return those exact committed facts."
   {:malli/schema
    [:=> [:cat :seon.db/connection :seon.test.run/completion]
-    [:or :seon.test/results :seon.db/error-result]]}
+    [:or :seon.test/results :seon.test.run/retracted-definition-error :seon.db/error-result]]}
   [connection {results :seon.test.runner/results :as completion}]
   (let [database (db/db connection)
         completion (prepare-failures! connection database completion)

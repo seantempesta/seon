@@ -76,6 +76,13 @@
                 :immutable [:and {:seon.db/identity false} :seon.test.run/id],
                 :immutable-error
                 [:and :seon.error/base [:map [:seon.test.run/immutable :seon.test.run/immutable]]],
+                :retracted-definitions
+                [:vector {:min 1 :description "The test symbols a completion recorded results for whose test definitions the writer's database no longer holds."}
+                 :seon.test/sym],
+                :retracted-definition-error
+                [:and :seon.error/base
+                 [:map [:seon.test.run/retracted-definitions :seon.test.run/retracted-definitions]
+                  [:seon.db/basis-t :seon.db/basis-t]]],
                 :unavailable [:= true],
                 :provenance-failure [:string {:min 1}],
                 :unavailable-error

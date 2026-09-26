@@ -186,7 +186,8 @@
                      [[:db.fn/retractEntity [:seon.test/sym test-symbol]]])
         (let [before (db/basis-t @connection)
               recorded (runner/commit-results! connection completion)]
-          (is (= [test-symbol] (:seon.test/symbols recorded)))
+          (is (= [test-symbol] (:seon.test.run/retracted-definitions recorded)))
+          (is (= before (:seon.db/basis-t recorded)) "the refusal names the writer's basis")
           (is (= before (db/basis-t @connection))
               "a refused completion changes no database facts")
           (is (nil? (:db/id (db/pull @connection [:db/id] [:seon.test/sym test-symbol])))
