@@ -595,13 +595,16 @@
                 capture-began (System/nanoTime)
                 heads (when (:seon.operator/capture-heads request)
                         (assoc (if-let [line (.readLine reader)]
-                                 (edn/read-string {:default tagged-literal} line)
+                                 (read-prepl-val line)
                                  {:seon.error/message "Child closed its boot channel before stating the branch heads."})
                                ;; Includes requiring seon.cluster, which boot needs next anyway.
                                :seon.operator/capture-ms (quot (- (System/nanoTime) capture-began) 1000000)))
+                ;; The child prints its boot result, or a failed boot's
+                ;; `Throwable->map`, whose refusal data carries Vars (`#'v`):
+                ;; the same trusted reader as a prepl value, never EDN's.
                 terminal (CompletableFuture/supplyAsync
                           (reify Supplier (get [_] (if-let [line (.readLine reader)]
-                                                    (edn/read-string {:default tagged-literal} line) ::eof))))
+                                                    (read-prepl-val line) ::eof))))
                 value (try (.get (CompletableFuture/anyOf (into-array CompletableFuture [terminal exited]))
                                  boot-bound TimeUnit/MILLISECONDS)
                            (catch java.util.concurrent.TimeoutException _ ::timeout))]

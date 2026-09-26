@@ -1,5 +1,6 @@
 (ns seon.operator-test
   (:require [clojure.core.server :as server]
+            [clojure.edn :as edn]
             [clojure.test :refer [deftest is]]
             [seon.operator :as operator]
             [seon.test-support :as test-support]))
@@ -35,3 +36,19 @@
         (is (nil? (:seon.operator/reader-error (ex-data thrown))))
         (is (map? (get-in (ex-data thrown) [:seon.error/offending :val]))))
       (finally (server/stop-server server-name)))))
+
+(deftest a-failed-boot-result-line-arrives-whole
+  ;; A failed boot writes `{:seon.error/message … :seon.error/cause
+  ;; (Throwable->map cause)}` on the child's boot channel. An armed contract's
+  ;; refusal carries its `[:fn … #'predicate]` explanation, which EDN rejects
+  ;; ("No dispatch macro for: '") and so hid the boot's own cause (2026-09-26).
+  (let [refusal (ex-info "seon.config/effective-in refused return value."
+                         {:seon.error/expected [:fn #'clojure.core/map?]
+                          :seon.error/offending (Object.)})
+        line (pr-str {:seon.error/message (ex-message refusal)
+                      :seon.error/cause (Throwable->map refusal)})
+        value (#'operator/read-prepl-val line)]
+    (is (thrown? RuntimeException (edn/read-string {:default tagged-literal} line)))
+    (is (= "seon.config/effective-in refused return value." (:seon.error/message value)))
+    (is (= '(var clojure.core/map?)
+           (second (get-in value [:seon.error/cause :data :seon.error/expected]))))))
