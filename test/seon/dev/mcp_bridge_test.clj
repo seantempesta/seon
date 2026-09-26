@@ -787,3 +787,18 @@
                                            {:seon.eval/shown "2" :seon.cluster.eval/ordinal 1}]})}])]
     (is (= [[:out "hi\n" 0] [:ret "nil" 0] [:ret "2" 1]]
            (mapv (juxt :tag :val :seon.cluster.eval/ordinal) events)))))
+
+(deftest a-refused-settlement-shows-its-refusal-beside-the-value
+  ;; rc-m4: a refused batch keeps each form's shown value and records the
+  ;; refusal as the evaluation's error. MCP prints both: the refusal as its own
+  ;; :err event, the value as the flagged :ret. An error that IS the shown text
+  ;; (an ordinary evaluation error) is printed once.
+  (let [events ((bridge-var 'run-events)
+                [{:tag :ret :val (pr-str {:seon.turn/id "r"
+                                          :seon.dev.mcp/evaluations
+                                          [{:seon.eval/shown "42" :seon.cluster.eval/error "refused: probe"
+                                            :seon.cluster.eval/ordinal 0}
+                                           {:seon.eval/shown "Divide by zero" :seon.cluster.eval/error "Divide by zero"
+                                            :seon.cluster.eval/ordinal 1}]})}])]
+    (is (= [[:err "refused: probe" 0 nil] [:ret "42" 0 true] [:ret "Divide by zero" 1 true]]
+           (mapv (juxt :tag :val :seon.cluster.eval/ordinal :exception) events)))))

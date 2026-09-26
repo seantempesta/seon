@@ -439,7 +439,10 @@
 
 (defn- run-events
   "The prepl events of a root run: one per settled evaluation, its stored shown
-  text as the value, and an error flagged as the event's exception."
+  text as the value, and an error flagged as the event's exception. A recorded
+  error whose text is not the shown text (a refused settlement keeps each
+  form's value and records the refusal beside it) is its own `:err` event, so
+  the refusal is never hidden behind the value."
   {:malli/schema [:=> [:cat [:vector :map]] [:vector :map]]}
   [events]
   (let [terminal (some #(when (= :ret (:tag %)) %) events)
@@ -452,6 +455,8 @@
                           ordinal :seon.cluster.eval/ordinal}]
                       (cond-> []
                         output (conj {:tag :out :val output :seon.cluster.eval/ordinal ordinal})
+                        (and error shown (not= error shown))
+                        (conj {:tag :err :val error :seon.cluster.eval/ordinal ordinal})
                         true (conj (cond-> {:tag :ret :val (or shown error) :seon.cluster.eval/ordinal ordinal
                                             :seon.turn/id (:seon.turn/id value)}
                                      error (assoc :exception true))))))
