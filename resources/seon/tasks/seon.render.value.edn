@@ -11,4 +11,9 @@
              :must-read #{seon.render.value/prepare seon.render.value/select-nodes}
              :evidence #{"docs/research/agent-platform/dogfood-dogfood-analyst-astra-2026-09-26.md"
                          "docs/research/agent-platform/dogfood-dogfood-newcomer-astra-2026-09-26.md"
-                         "docs/seon/issues/a-raw-pull-inlines-nested-declared-render-text-past-the-floor.md"}}]
+                         "docs/seon/issues/a-raw-pull-inlines-nested-declared-render-text-past-the-floor.md"}}
+ #:seon.task{:name "test-messages-print-whole-worlds"
+             :kind :function
+             :intent "pr-str outside the floor printer copies whole values. clojure.test evaluates an is message even when the assertion passes, so (is ... (pr-str outcomes)) printed hosted agents (their cluster handle's roster atom holds every context's projection) and a candidate result with its SCI context: seon.cluster.host-test/one-identity-is-homed-on-one-branch-decided-by-the-writer and seon.test.accretion-test/a-gate-test-runs-with-its-authors-cluster-custody each died after 20 s with OutOfMemoryError in a StringWriter. Test messages and failure-path text print through bounded-text (or name the fields they assert); production sites that print arbitrary values: web.clj create-owner-response and context-action-response 422 bodies, db.clj value-type-error and pull-call messages, problems.clj ai-prose offending, cluster.clj mcp-plain."
+             :must-read #{seon.render.value/bounded-text}
+             :evidence #{"docs/research/agent-platform/landing/oom-array-opus-2026-09-27.md"}}]

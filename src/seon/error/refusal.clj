@@ -97,9 +97,15 @@
           :projector (requiring-resolve 'seon.schema/identity-only-projector)}))
 
 (defn- operation-projection
-  "The projection handed to the operation running now, or nil."
+  "The projection handed to the operation running now, or nil.
+
+  Only `seon.schema` hands one, so where it is not loaded (the operator
+  under babashka, which has no Malli) no operation holds one: nil is the
+  answer, and resolving the seam there threw instead of the error it was
+  building."
   []
-  ((:handed @schema-seam)))
+  (when (find-ns 'seon.schema)
+    ((:handed @schema-seam))))
 
 (defn- identity-projector
   [projection]
@@ -112,6 +118,14 @@
   (if-some [declared (project value)]
     (referenced project (:seon.schema/identity-value declared))
     (cond
+      ;; A PLACE IS ITS NAME. An atom, delay or promise prints its CURRENT
+      ;; STATE (`core_print.clj` deref-as-map), so an error holding the agent
+      ;; roster printed every context's projection: 2 GB, default's OOM of
+      ;; 2026-09-26. Named, never entered, as value admission names it
+      ;; (`seon.sci.admit`, "reference types ... named, never entered").
+      (and (instance? clojure.lang.IDeref value) (not (var? value)))
+      (symbol (str "#object[" (.getName (class value)) " 0x"
+                   (Integer/toHexString (System/identityHashCode value)) "]"))
       (record? value) value
       (or (map? value) (vector? value))
       (reduce-kv (fn [held k v]
@@ -131,7 +145,9 @@
   a database is its name and basis-t, a connection its id, a projection its
   fingerprint, an environment or SCI context the references it holds. Maps,
   vectors and sets are entered; records, sequences and other objects are
-  not. Without a projection nothing is recognized and `value` is returned."
+  not. A place (atom, delay, promise: any deref-able but a Var) becomes the
+  symbol `#object[Class 0xhash]`, since printing it copies its state. Without
+  a projection no world is recognized; places are still named."
   {:malli/schema [:=> [:cat [:maybe :map]
                        [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Error evidence is arbitrary producer data; only registry-declared worlds inside it are replaced.", :gen/elements [nil false 0 "" :k [] {}]}]]
                   [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Returns the supplied data with its worlds referenced.", :gen/elements [nil false 0 "" :k [] {}]}]]}

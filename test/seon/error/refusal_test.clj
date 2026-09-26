@@ -262,6 +262,25 @@
                            [:db-name :t]))
            "a cause link's database is its name and basis")))))
 
+(deftest ^{:seon/tasks #{"480378b94c9b"}} a-place-in-an-error-is-named-never-printed-through
+  ;; Default OOMed (2026-09-26, heap dump java_pid12212): an instrument
+  ;; refusal's offending web request held the agent roster atom, whose state
+  ;; is every context's projection; http-kit printed the ex-data to 2 GB.
+  (let [state (vec (range 100000))
+        roster (atom {:seon.agent/contexts {"a" state}})
+        realized (doto (delay state) deref)
+        carrier {:seon.agent/routing roster :seon.probe/memo realized
+                 :seon.probe/var #'error.refusal/diagnostic}
+        error (error.refusal/diagnostic
+               (assoc base :seon.error/offending carrier
+                      :seon.error/throwable (ex-info "refused" {:seon.probe/request carrier})))]
+    (is (nil? (printed-bytes carrier 16384)) "the place's state is over the bound")
+    (is (printed-bytes error 16384) "the error prints in kilobytes")
+    (is (= #'error.refusal/diagnostic (get-in error [:seon.error/offending :seon.probe/var]))
+        "a Var is its name already and stays")
+    (is (every? symbol? (map (:seon.error/offending error) [:seon.agent/routing :seon.probe/memo]))
+        "each place is its #object name")))
+
 (deftest constructor-output-keeps-the-producing-contract
   (let [projection (-> (schema/handed-projection)
                           (schema/projection-with-schema :x/member :int
