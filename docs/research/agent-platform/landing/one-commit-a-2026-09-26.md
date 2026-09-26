@@ -2,7 +2,7 @@
 type: landing
 lane: one-commit-a-opus
 date: 2026-09-26
-status: A kept (1df3d5769 + fix c672188e6); B measured faster but lost the value at the MCP entrance, deleted whole (de67fdd1a); RESET NEEDED onto de67fdd1a
+status: STOPPED for a root decision — A breaks every durable write a form makes that names its run or evaluation (task c9e0cde3edb3); three priced options below
 ---
 
 # Landing: one durable commit per form (A), then reply-when-applied (B) (2026-09-26)
@@ -24,19 +24,52 @@ commits open + evaluations + close as ONE transaction (`with-submission` prepend
 run-dependent writer calls after it see the run mid-transaction, `datahike/db/transaction.cljc:1171`).
 The pass answers the reply port with its report; a pass that ends without settling closes the port.
 
-## Broken / open first
+## Broken / open first — STOP: A breaks writes made during a form (task c9e0cde3edb3)
 
-1. **A as first committed was a 5.5x regression.** Measured on default (pid 59671, e405f51be), probe
-   `docs/research/agent-platform/landing/one-commit-probe-2026-09-26.clj` (20 trivial forms through
-   `evaluate-source!` on branch `one-commit-a`'s hosted agent): **p50 856 ms, p95 1028 ms** (min 701), one
-   commit at every answer (the one-commit property held). Cause, measured: `evaluate-sources` read the
-   `seon.db/with` value holding the run's open; a with'd value has no program identity
-   (`seon.sci.eval/program-identity` → nil), so `base-ctx` missed its cache and re-derived the SCI base on
-   every form: **241 ms per derivation against 8.6 ms cached** (same JVM, same probe form); the profile
-   showed `derive-base-ctx` 645 ms over 3 forms. Fix c672188e6: evaluation reads the committed value; the
-   open serves only the pass's fold reads and the writer's refusal; a submitted run mints its handles as a
-   written run (`:seon.turn/write?`) and binds at the one site in `evaluate-sources` (system-turn's
-   post-commit bind loop deleted). **Unmeasured until the restart.**
+Under A a source run's rows (the run and its evaluations) exist only from its settlement, but a form's own
+durable writes during evaluation reference them:
+
+| write during a form | reference | file:line |
+|---|---|---|
+| every write in custody (`stamp-receipt`) | `:seon.db/receipt [:seon.cluster.eval/id …]` | src/seon/sci/eval.clj:4397, src/seon/db.clj:3221 |
+| a declared effect's durable open | `:seon.effect/run [:seon.turn/id …]` | src/seon/effect.clj:820 |
+| a fault recorded during the form | `:seon.error/run [:seon.turn/id …]` | src/seon/error.clj:672 (also :1443, :1903) |
+| a context capture | `:seon.context.capture/run [:seon.turn/id …]` | src/seon/context.clj:393 |
+
+Each refuses "Nothing found for entity id"; a refused fault recording is a storage failure, which panics.
+Only the first was reported (merge-cut1-opus); the other three are read from source, not reproduced.
+
+Options (simplest viable constraint first):
+
+1. **Restore the submission commit (two commits per form).** Delete A's request-as-value path. Guarantee:
+   every reference resolves, as before. Cost: ~−150 lines back to 36a3714b4's shape. Sacrifice: +one
+   commit per form (the settlement commit alone now measures ~118 ms in `transact-call`, so ~250 ms per
+   form).
+2. **Recommended: the form's first durable write carries the run's open.** Custody already stamps every
+   write (`stamp-receipt`); it also prepends the pending submission's open (`system-run-tx`, which
+   writes the run and its evaluation rows), wrapped in a writer call that is a no-op once the run exists;
+   the settlement's open is wrapped the same way. Guarantee: every reference resolves; a form that writes
+   nothing still costs one commit, a form that writes pays nothing extra (its write commits anyway).
+   Cost: ~+40 lines (db.clj stamp, one writer fn, the staged reply blob published with that first write).
+   Sacrifice: a form that wrote and then crashed leaves an open run, which boot recovery closes.
+3. **Provenance as values at every site.** Receipt as the evaluation id string (patch ready:
+   `tmp/one-commit-a/receipt-as-value.patch`, +39/−48, new `:seon.db/evaluation`), and the same for effect,
+   error and capture run refs. Cost: four schema accretions and every reader's join. Sacrifice: ref
+   integrity for provenance.
+
+**Numbers on 8e4ac24c9 (pid 75849; A with the base-context fix, B deleted).** 20 trivial forms on a branch's
+hosted agent: **p50 144.1 ms, p95 155.5 ms**, one commit at each answer. Per form: `transact-call` 118 ms
+(the settlement commit, including writer-side transaction functions' queries: `seon.db/q` ×55 and
+`with-declarations` ×196 per form), `seon.db/with` (the pass's open) 10.7 ms, `next-agent-work` 6 ms,
+`fork-for-turn` 5.7 ms, `evaluate-sources` 3.9 ms.
+
+**Owner question 2 (the with'd open).** It costs 10.7 ms of 144 per form. The plain path (evaluate on the
+committed value; the settlement carries the open; the writer refuses there) needs, in the pass, the busy
+check, the starting-namespace rule (`system-run-call`'s requested / previous-ending / assigned) and the
+source folding that the with'd value gives from the writer's own functions. That is more code for about
+9 ms, so it stays for now. Under option 2 it goes: the pass would read the run the first write created, or
+build the fold from the submission.
+
 2. **Tests not run** (load cap; root runs them). Reds root should expect and how to read them:
    - `test/seon/program_test.clj:1352` drives a submitted run by hand (`next-agent-work` + `turn/turn`
      without a graph). Under A a submission exists only as a value on the armed graph's port, so that
