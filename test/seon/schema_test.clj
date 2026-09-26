@@ -1297,47 +1297,45 @@
 ;;; A declaration is compiled against its predicate's SOURCE
 ;;; ---------------------------------------------------------------------------
 
-(deftest a-declaration-compiles-against-a-predicate-its-loaded-owner-lacks
-  ;; CLASS: a long-lived JVM holds the copy of a namespace it loaded at boot.
-  ;; A source edit that adds a predicate AND the schema resource declaring it
-  ;; lands on disk together, but the publication that would adopt the edit
-  ;; compiles the resource BEFORE its adoption reloads the owner — so the
-  ;; predicate resolves to nothing and EVERY publication and adoption in that
-  ;; process is refused, including the one that would have fixed it. Measured
-  ;; 2026-09-16 on `default` for a newly declared core predicate, which wedged every
-  ;; agent (`logs/current-source-failure.log`); filed as
-  ;; `docs/seon/issues/a-new-core-predicate-and-its-schema-cannot-be-adopted-in-place.md`.
-  ;;
-  ;; The wedge is a pre-read the authority re-decides: the var table is a
-  ;; MIRROR of the source the publication is about to publish. Compilation
-  ;; therefore converges on the source instead of refusing to it.
+(deftest a-declaration-naming-a-predicate-its-loaded-owner-lacks-refuses-without-reloading
+  ;; CLASS: compilation reloaded the predicate's namespace to look for a
+  ;; missing predicate (`converged-predicate-var`, `require :reload`, errors
+  ;; swallowed). A reload replaces every root of the namespace, so writing
+  ;; `[:fn seon.schema/typo?]` into any declaration stripped every armed
+  ;; contract wrapper of `seon.schema` (0 of 103 armed at 052552039) and still
+  ;; refused. Compilation now refuses by name and never reloads; the
+  ;; namespace's adoption reloads its owner.
   (require 'seon.schema.predicate-owner-probe)
   (let [owner 'seon.schema.predicate-owner-probe
         predicate 'seon.schema.predicate-owner-probe/probe-handle?
         form [:fn {:error/message "must be the probe handle"} predicate]
         compiled #(schema/compilable-form form {})]
     (is (var? (get (compiled) 2))
-        "a loaded owner supplies its predicate Var without any convergence")
+        "a loaded owner supplies its predicate Var")
     (testing "a loaded owner whose copy lacks the declared predicate"
-      ;; Exactly the live state: the namespace IS loaded, so `require` is a
-      ;; no-op, and only a reload replays its registration forms.
       (ns-unmap (find-ns owner) 'probe-handle?)
-      (is (nil? (ns-resolve (find-ns owner) 'probe-handle?))
-          "the probe reproduces the stale-owner state before compiling")
-      (require owner)
-      (is (nil? (ns-resolve (find-ns owner) 'probe-handle?))
-          "and a plain require cannot leave it — this is why it wedged")
-      (let [bound (get (compiled) 2)]
-        (is (var? bound)
-            "compilation converges on the predicate's source rather than
-             refusing the declaration")
-        (is (true? (bound :seon.schema.predicate-owner-probe/handle)))
-        (is (false? (bound :something-else)))
-        (is (some? (ns-resolve (find-ns owner) 'probe-handle?))
-            "and the owner is left loaded from its own source")))
-    (testing "an unloaded namespace is still never loaded — the stale MIRROR
-              is the case, and `canonical-definition-keeps-admitted-predicate-symbols`
-              owns the guarantee this must not weaken"
+      (try
+        (is (nil? (ns-resolve (find-ns owner) 'probe-handle?))
+            "the probe reproduces the stale-owner state before compiling")
+        (let [data (ex-data (refusal compiled))]
+          (is (= :seon.schema/unresolved-predicate (:seon.schema/error data)))
+          (is (= predicate (:seon.schema/unresolved-predicate data)))
+          (is (= owner (:seon.schema/predicate-namespace data))
+              "the refusal names the namespace whose adoption must reload it"))
+        (is (nil? (ns-resolve (find-ns owner) 'probe-handle?))
+            "compilation did not reload the owner")
+        (finally
+          ;; The probe's own adoption: the reload replays its registration.
+          (require owner :reload))))
+    (testing "the armed roots of a loaded namespace survive a refused compile"
+      (let [root @#'seon.schema/compilable-form
+            data (ex-data (refusal #(schema/compilable-form
+                                     [:fn 'seon.schema/no-such-predicate-for-this-regression?] {})))]
+        (is (= 'seon.schema (:seon.schema/predicate-namespace data)))
+        (is (identical? root @#'seon.schema/compilable-form)
+            "seon.schema was not reloaded, so its wrappers are the same objects")))
+    (testing "an unloaded namespace is never loaded
+              (`canonical-definition-keeps-admitted-predicate-symbols` owns the guarantee)"
       (is (nil? (find-ns 'seon.schema-test.no-such-probe)))
       (is (instance? clojure.lang.ExceptionInfo
                      (refusal

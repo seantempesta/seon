@@ -26,7 +26,26 @@ namespaces at a time: `seon.turn` 0/94, `seon.oversight` 0/17,
 A control adoption of `my/note.clj` alone on the same JVM (9,608 ms) kept
 1,800/1,800 and replaced no watched original.
 
+## One reloader proven (2026-09-26, lane fix-eval-schema-reds-opus)
+
+`seon.schema/converged-predicate-var` reloaded any loaded namespace whose copy
+lacked a declared predicate, with every error swallowed, whenever a compile
+named one. Reproduction on default (pid 25654), with a scratch namespace
+`fixevalreds.probe` loaded from a scratch classloader root: its Var root was
+replaced by a marker (as arming does). Compiling
+`[:fn fixevalreds.probe/absent?]` then refused anyway ("no admitted callable"),
+and the Var afterwards held its source root, not the marker: the wrapper was
+gone. At HEAD 052552039 (pid 19443), `seon.schema` had 0 of 103 contracted Vars
+armed while every other src namespace was fully armed, and all 103 had profile
+cells with calls, so they had been armed at boot. The function is deleted:
+compilation refuses by name (`:seon.schema/predicate-namespace`) and never
+reloads (landing fix-eval-schema-reds-2026-09-26). Whether it was also the
+reloader in the 2026-09-23 observation above is not established. The
+recommended regression below still stands.
+
 ## Unknown
+
+
 
 The cause is not identified. Candidates to check first: a reload the
 adoption's reported list omits (the whole-namespace pattern suggests a
