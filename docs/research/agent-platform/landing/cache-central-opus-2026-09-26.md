@@ -11,6 +11,47 @@ design: docs/research/agent-platform/cache-central-design-2026-09-26.md (option 
 
 ## Broken or unproven first
 
+- **The seeded-cluster turn-test reds are not caused by config. They are call-time defaults filling an optional map
+  entry. Root's ruling is needed; no code was changed.**
+  - **Affected tests** (`seon.turn-test`):
+    - `a-forms-read-evidence-is-only-what-the-form-read`;
+    - `generated-read-evidence-rejects-turn-activity`;
+    - `a-refused-generated-form-records-its-refusal`.
+  - **Evidence** (`tmp/shrink-turn-opus/seon.turn-test-final.out`):
+    - The error is thrown at `seon.turn/evaluate-sources` (`turn.clj:4912`). The caller reaches it through the armed
+      wrapper: the Malli `-=>` frame, then `apply`.
+    - `:seon.config/missing` lists every required dial, not only the new one. So the row is absent from the
+      database read. It is not a row missing one dial.
+    - `:seon.config/available ["default"]` means the database read is not the fixture's connection.
+    - The fixture's own `support/cluster-handle` read `config/effective` on that connection for the same cluster a
+      moment earlier and succeeded; it throws otherwise.
+  - **Cause:**
+    - `evaluate-sources` computes `basis (or snapshot (db/db connection))`, where `snapshot` is the request's
+      optional `:seon.db/db` (`seon.turn.loop.edn:172`).
+    - The tests omit it, which is a deliberate absence: "each form sees the connection's current value".
+    - Call preparation (M2b, `1b77876af`) supplies optional map entries by schema name
+      (`call_preparation.clj:585–592`, `value-for` at `:1008`). It filled `:seon.db/db` from the calling
+      evaluation's world, which is the test runner's member branch. That branch holds only `default`, not the
+      fixture's seeded cluster.
+    - My `558446356` and `b6913c392` do not enter into it. The same read answers correctly with the right database.
+  - **Three options (simplest first):**
+    1. **(Recommended.) Call preparation never supplies an optional entry the caller omitted.** The omission is the
+       caller's declared absence; only required inputs are supplied. This is a change of a few lines in
+       `call_preparation.clj`. Eight optional `:seon.db/db` entries are affected, in `seon.test`, `render.walk`,
+       `instrument`, `render` and `sci.eval`. Callers that relied on the supply must pass the value.
+    2. `evaluate-sources` names its snapshot with a key that is not the database schema (for example
+       `:seon.turn/snapshot`), so nothing supplies it. This fixes one site and leaves the class open.
+    3. The supplier takes a request's database from the request's own world (its `:seon.turn.loop/cluster`
+       connection) rather than from the calling evaluation. That is more machinery, and it duplicates what the
+       callee already derives.
+  - **Regression, for whoever owns the fix:** from inside a test run whose member branch lacks the cluster, call the
+    armed `turn/evaluate-sources` on a `with-database` world with a seeded cluster and no `:seon.db/db`. Assert that
+    the basis is the fixture connection's value. My
+    `config-test/a-seeded-cluster-reads-its-own-row-on-the-member-branch` stays as the config-level half. It passes
+    by construction and does not reproduce this.
+  - **Why no reproduction was run:** the root cause was read from recorded evidence. Default restarted three times
+    during the attempts. Reproducing through the fixture needs a test request, and I was told not to start any.
+
 - **Fixed in `b6913c392`: `558446356` over-reached (Astra F5, and the turn tests' "requires a matching cluster
   row").**
   - **The failure:** every reader was made to require the JVM's newest dials. A retained branch, or a test world
