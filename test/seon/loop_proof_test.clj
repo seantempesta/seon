@@ -95,11 +95,7 @@
                                         #'agent/armer-step :io
                                         (env/carry {:seon.turn.loop/cluster handle
                                                     :seon.agent/routing routing} environment))}}
-                        :conns [] :io-exec (:seon.flow/executor handle)}
-                       ::flow/joins
-                       {::faults #(flow/join-error-fanout!
-                                  {::flow/started (::flow/started %)
-                                   ::flow/fault-channel faults ::flow/tag {}})}})
+                        :conns [] :io-exec (:seon.flow/executor handle)}})
                settled? #(and (seq (evaluation/of-agent @connection "juniper"))
                                (nil? (turn/open-for-agent @connection [:seon.agent/id "juniper"]))
                                (empty? (turn/unanswered-wakes @connection "juniper" {})))

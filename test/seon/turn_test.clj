@@ -2026,8 +2026,17 @@
       (let [cluster-name "bounded-write-refusals-cluster"
             agent-id "bounded-write-refusals"
             bound 2
-            fault-channel (async/chan 8)
-            completion (async/chan 1)]
+            completion (async/chan 1)
+            ;; the bound's fault is one stored occurrence, found by its message
+            faults #(db/q '[:find [?o ...] :in $ ?prefix
+                            :where [?o :seon.error.occurrence/message ?m]
+                                   [(clojure.string/starts-with? ?m ?prefix)]]
+                          (db/db connection)
+                          (str "Agent " (pr-str agent-id)))]
+        ;; the fault is recorded through `seon.fault/fault!` in the cluster's
+        ;; world: record mode, so the step returns, with root to deliver to
+        (support/seed-cluster! connection cluster-name {:seon.config/on-core-error :record})
+        (cluster/seed-root-agent! connection cluster-name cluster/boot-process-identity)
         (checked-transact! connection (support/agent-tx @connection agent-id))
         (async/>!! completion :seon.agent/ready)
         ;; The dial rides the handle exactly as the turn completion allowance
@@ -2035,6 +2044,7 @@
         (let [cluster (assoc (support/cluster-handle
                               {:seon.db/connection connection
                                :seon.cluster/name cluster-name
+                               :seon.env/environment (support/environment cluster-name connection)
                                :seon.sci.eval/ctx
                                (support/fork-cluster-ctx connection)
                                :seon.db.process/id
@@ -2048,7 +2058,6 @@
                              :seon.flow/executor
                              (java.util.concurrent.Executors/newVirtualThreadPerTaskExecutor)
                              :seon.turn.loop/completion completion
-                             :seon.agent/fault-channel fault-channel
                              :seon.agent/turn-backstop-state (atom nil))
               wake-channel (:seon.cluster.wake/channel cluster)
               ;; A REAL refused durable write: closing a turn that is not a
@@ -2089,15 +2098,14 @@
                         (:seon.turn.loop/parked parked))))
           (is (nil? (async/poll! wake-channel))
               "a parked proc offers no self-rewake")
-          (let [fault (support/await-event! fault-channel ::write-refusal-fault)]
-            (is (= bound (:seon.turn.loop/write-refusals (ex-data (:clojure.core.async.flow/ex fault)))))
-            (is (= agent-id (:seon.agent/id fault)))
-            (is (str/includes? (ex-message (:clojure.core.async.flow/ex fault))
-                               (str bound)))
-            (is (nil? (async/poll! fault-channel))
-                "the bound fires exactly once, never once per attempt"))
+          (let [[occurrence :as found] (faults)]
+            (is (= 1 (count found)) "the bound fires exactly once, never once per attempt")
+            (is (str/includes? (:seon.error.occurrence/message
+                                (db/pull (db/db connection) [:seon.error.occurrence/message] occurrence))
+                               (str "(bound " bound ")"))))
           ;; THE MEASUREMENT THAT MATTERS: the store stops growing.
-          (let [before (:max-tx (db/db connection))
+          (let [recorded (count (faults))
+                before (:max-tx (db/db connection))
                 after-state (reduce (fn [state _] (pass! state))
                                     parked
                                     (range 5))]
@@ -2105,7 +2113,7 @@
                 "a parked agent transacts nothing on any later wake")
             (is (some? (:seon.turn.loop/parked after-state))
                 "the park survives every later wake")
-            (is (nil? (async/poll! fault-channel))
+            (is (= recorded (count (faults)))
                 "a parked agent commits no further faults")))))))
 
 (deftest settlement-claims-covered-messages-without-removing-their-wakes

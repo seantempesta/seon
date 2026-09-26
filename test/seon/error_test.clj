@@ -199,28 +199,6 @@
             (error/render-ai (first errors)))
         (is (= [] (error/for-agent database "root")))))))
 
-(deftest dropped-fault-counts-accumulate-in-the-occurrence
-  (test-support/with-database
-    (fn [connection]
-      (doseq [n [3 5]]
-        (let [request (commit-request {:seon.error/message "dropped deliveries"} {})
-              fact (assoc (error/normalize request)
-                          :seon.error/dropped-fault-count n
-                          :seon.error/dropped-fault-digest (apply str (repeat 64 "a")))
-              result (db/transact! connection
-                                  (error/commit-tx (db/db connection) (assoc request :seon.error/fact fact)))]
-          (is (:db-after result))))
-      (let [database (db/db connection)
-            row (first (db/q '[:find [(pull ?o [*]) ...]
-                              :where [?o :seon.error/dropped-fault-count]] database))]
-        (is (= 2 (:seon.error.occurrence/count row)))
-        (is (= 8 (:seon.error/dropped-fault-count row)))
-        (is (= (apply str (repeat 64 "a")) (:seon.error/dropped-fault-digest row)))))))
-
-
-
-
-
 ;;; ---------------------------------------------------------------------------
 ;;; Fixtures — the three families, plus arbitrary observed values
 ;;; ---------------------------------------------------------------------------

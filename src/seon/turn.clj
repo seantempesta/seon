@@ -5409,7 +5409,6 @@
          process :seon.db.process/id
          completion :seon.turn.loop/completion
          executor :seon.flow/executor
-         fault-channel :seon.agent/fault-channel
          backstop-state :seon.agent/turn-backstop-state}
         (:seon.turn.loop/cluster state)
         agent-id (:seon.agent/id state)
@@ -5430,7 +5429,8 @@
        :seon.agent/connection connection
        :seon.agent/process process
        :seon.agent/executor executor
-       :seon.agent/fault-channel fault-channel
+       ;; the world a firing bound records its fault in, carried, not a channel
+       :seon.env/environment (env/of (:seon.turn.loop/cluster state))
        :seon.agent/backstop-state backstop-state
        :seon.agent/agent-id agent-id
        :seon.agent/timeout-ms timeout-ms
@@ -5496,52 +5496,41 @@
      :seon.error/data {:seon.error/operation :seon.turn.loop/step}})
      run-id (assoc :seon.turn/id run-id)))
 
-(defn- offer-write-refusal-fault!
-  "Commit ONE fault for a bound that fired, through the cluster's committer.
+(defn- record-write-refusal-fault!
+  "Record ONE core fault for a bound that fired, on the turn proc's own thread.
 
   §2.3: the bound firing IS the bug report. It names the refusal, the agent,
   the consecutive count and the declared bound; the proc stops re-firing, so
   the storm that filled the store a gigabyte a minute becomes one durable
-  fact on the problems surface."
+  fact on the problems surface. `seon.fault/fault!` stores and delivers it;
+  under `:panic` its throw reaches `var-process`, which stops the graph."
   [cluster agent-id run-id refusal refusals bound]
-  (let [diagnostic (write-refusal-error agent-id run-id refusal refusals bound)
-        failure (ex-info (:seon.error/message diagnostic) diagnostic)
-        fault-channel (:seon.agent/fault-channel cluster)
-        fault (cond->
-               {::flow/pid :seon.agent/turn
-                ::flow/status :running
-                ::flow/op :seon.turn.loop/write-refusals-exhausted
-                ::flow/ex failure
-                :seon.agent/id agent-id}
-                run-id (assoc :seon.turn/id run-id))]
-    (when-not (and fault-channel (async/offer! fault-channel fault))
-      (binding [*out* *err*]
-        (println "SEON CORE FAULT (agent write refusals exhausted):"
-                 (:seon.error/message diagnostic))
-        (flush)))
+  (let [diagnostic (write-refusal-error agent-id run-id refusal refusals bound)]
+    (fault/fault! (env/of cluster) (ex-info (:seon.error/message diagnostic) diagnostic)
+                  {:seon.error/layer :seon.turn.loop/write-refusals-exhausted
+                   :seon.error/operation 'seon.turn/step
+                   :seon.db.process/id (:seon.db.process/id cluster)
+                   :seon.agent/id agent-id})
     diagnostic))
 
-(defn- offer-turn-backstop-fault!
-  [{:seon.agent/keys [fault-channel agent-id timeout-ms expected] armed-run :seon.agent/run-id}]
+(defn- record-turn-backstop-fault!
+  "Record the fault of a turn whose completion bound fired, on the backstop's
+  thread. That thread has no caller, and disarm joins the failure it returns, so
+  a recorded panic ends here with its receipt; any other throw propagates."
+  [{:seon.agent/keys [agent-id timeout-ms expected process] armed-run :seon.agent/run-id :as bound}]
   (let [run-id @armed-run
         failure
         (turn-completion-backstop-failure
          agent-id run-id timeout-ms :seon.agent/turn-transform
          (or expected :seon.agent/turn-terminal)
-         [:seon.turn.loop/completion])
-        fault
-        (cond->
-         {::flow/pid :seon.agent/turn
-          ::flow/status :running
-          ::flow/op :seon.agent/turn-completion-backstop
-          ::flow/ex failure
-          :seon.agent/id agent-id}
-          run-id (assoc :seon.turn/id run-id))]
-    (when-not (and fault-channel (async/offer! fault-channel fault))
-      (binding [*out* *err*]
-        (println "SEON CORE FAULT (agent turn backstop):"
-                 (ex-message failure))
-        (flush)))
+         [:seon.turn.loop/completion])]
+    (try (fault/fault! (env/of bound) failure
+                       {:seon.error/layer :seon.agent/turn-completion-backstop
+                        :seon.error/operation 'seon.turn/arm-turn-completion-backstop!
+                        :seon.db.process/id process
+                        :seon.agent/id agent-id})
+         (catch clojure.lang.ExceptionInfo panic
+           (when-not (fault/carried-receipt panic) (throw panic))))
     failure))
 
 (defn- arm-turn-completion-backstop!
@@ -5586,7 +5575,7 @@
              (= selected parts) (recur part)
              (= selected timeout)
              ;; Disarm joins this same failure, including its admitted part.
-             (async/put! failure-channel (offer-turn-backstop-fault! bound))
+             (async/put! failure-channel (record-turn-backstop-fault! bound))
              :else
              (do
                (when backstop-state
@@ -5703,7 +5692,7 @@
                       ;; bound removes exactly it — no retry, no sleep, no
                       ;; tuned backoff.
                       (when parked?
-                        (offer-write-refusal-fault!
+                        (record-write-refusal-fault!
                          cluster agent-id (:seon.turn/id report)
                          refusal refusals bound))
                       (when (and (not parked?)

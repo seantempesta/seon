@@ -72,9 +72,6 @@
               {:optional true}
               :seon.turn.loop/cluster]
              [:seon.flow/graph {:optional true} :seon.flow/graph]
-             [:seon.flow/error-fanout
-              {:optional true}
-              :seon.flow/error-fanout]
              [:seon.render.web/view
               {:optional true}
               :seon.render.web/view]

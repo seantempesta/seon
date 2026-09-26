@@ -114,7 +114,6 @@
              :message [:string {:min 1}],
              :refusal-shape :qualified-keyword,
              :proc :keyword,
-             :dropped-fault-digest [:string {:min 64, :max 64}],
              :cid :keyword,
              :fact
              [:map
@@ -150,12 +149,6 @@
               [:seon.error/proc {:optional true} :seon.error/proc]
               [:seon.error/op {:optional true} :seon.error/op]
               [:seon.error/cid {:optional true} :seon.error/cid]
-              [:seon.error/dropped-fault-count
-               {:optional true}
-               :seon.error/dropped-fault-count]
-              [:seon.error/dropped-fault-digest
-               {:optional true}
-               :seon.error/dropped-fault-digest]
               [:seon.error/basis-t
                {:optional true}
                :seon.error/basis-t]
@@ -282,7 +275,6 @@
              :throwable-class [:string {:min 1}],
              :notification-limit [:int {:min 1}],
              :notification [:enum :final],
-             :dropped-fault-count [:int {:min 1}],
              :signature [:string {:min 64 :max 64 :seon.db/identity true :seon.program/row-schema :seon.error/error}],
              :frame [:tuple :symbol :symbol :string :int],
              :frames [:vector {:min 1 :description "A throwable's own first-party (seon.*/my.*) complete stack frames, outermost first."} :seon.error/frame],

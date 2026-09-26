@@ -7,33 +7,31 @@
             [seon.db :as db]
             [seon.env :as env]
             [seon.fault :as fault]
-            [seon.flow :as flow]
             [seon.test-support :as support]))
 
-(deftest a-recording-refusal-still-prints-the-source-fault
+(deftest a-refused-recording-panics-naming-the-source-fault
   (support/with-database
    (fn [connection]
      ;; The absent cluster has no recording dials. The real preparation
      ;; contract refuses before a durable fact exists; no writer is mocked.
-     (doseq [fault [{:seon.error/message "original map fault"}
-                    {::async.flow/ex (ex-info "original flow fault" {})}
-                    (ex-info "original throwable fault" {})]
-             :let [message (or (:seon.error/message fault)
-                               (ex-message (if (instance? Throwable fault)
-                                             fault (::async.flow/ex fault))))
-                   [fact outcome]
-                   (fault/record! connection "absent-fault-cluster"
-                    "fault-message-test" (config/result-caps config/defaults)
-                    {:seon.error/source fault
-                     :seon.error/declared-schema :seon.flow/exception-error})
-                   output (java.io.StringWriter.)]]
-       (is (not= ::flow/committed outcome))
-       (binding [*err* output]
-         (#'cluster/emit-core-fault!
-          {} {::flow/fault-fact fact ::flow/commit-outcome outcome
-              ::flow/core-error-mode :panic}))
-       (is (str/includes? (str output) message))
-       (is (str/includes? (str output) "durable record refused:"))))))
+     ;; The panic names the original fault and keeps the recording failure.
+     (doseq [fault [(ex-info "original throwable fault" {})
+                    {:seon.error/at #inst "2026-09-26T00:00:00Z"
+                     :seon.error/layer ::source :seon.error/operation `source
+                     :seon.error/message "original map fault"}]
+             :let [message (if (instance? Throwable fault) (ex-message fault) (:seon.error/message fault))
+                   panic (try (fault/fault! (env/environment {:seon.boot/cluster-name "absent-fault-cluster"
+                                                              :seon.db/connection connection
+                                                              :seon.sci.admit/caps (config/result-caps config/defaults)})
+                                            fault
+                                            {:seon.error/layer ::boundary :seon.error/operation `boundary
+                                             :seon.db.process/id "fault-message-test"})
+                              nil
+                              (catch clojure.lang.ExceptionInfo thrown thrown))
+                   receipt (:seon.fault/recorded (ex-data panic))]]
+       (is (some? panic) "a refused recording panics")
+       (is (false? (:seon.fault/committed? receipt)))
+       (is (str/includes? (ex-message panic) message) "the panic names the source fault")))))
 
 (defn- world
   "The environment a boundary already holds, for one fixture cluster."

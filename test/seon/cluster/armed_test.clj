@@ -154,10 +154,8 @@
                    (:clojure.core.async.flow/status
                     (flow/ping-proc (:seon.flow/graph entry)
                                     :seon.agent/turn))))))
-        (testing "and the fault path exists — this is D4"
-          (is (some? (:seon.flow/error-fanout instance)))
-          (is (some? (:seon.flow/fault-channel
-                      (:seon.flow/error-fanout instance)))))
+        (testing "there is no fault channel: each proc records its own faults"
+          (is (not (contains? instance :seon.flow/error-fanout))))
         (testing "the handle retains identity while AI settings stay live"
           (let [handle (:seon.turn.loop/cluster instance)]
             (is (seon.schema/valid-candidate-value? (seon.schema/handed-projection) :seon.turn.loop/cluster
@@ -424,11 +422,7 @@
           (is (= :running
                  (:clojure.core.async.flow/status
                   (flow/ping-proc graph :seon.agent/turn
-                                  :timeout-ms 5000))))
-          (is (empty? (filter #(= :seon.flow/fault-channel-overflow
-                                  (:clojure.core.async.flow/op %))
-                              (errors @connection)))
-              "and no overflow fact was needed on the way"))))))
+                                  :timeout-ms 5000)))))))))
 
 (deftest ^{:seon.test/fixture-observation "The failure is injected at the first real boot resume transition, before an ordinary branch fixture has any running proc."} the-first-cluster-proc-fault-at-resume-becomes-a-fact
   (let [name "first-cluster-fault"

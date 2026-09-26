@@ -1437,7 +1437,6 @@
                                    :seon.error/result-id :seon.error/shown
                                    :seon.error/cid :seon.error/throwable-class
                                    :seon.error/data-edn :seon.error/data-size :seon.error/capped?
-                                   :seon.error/dropped-fault-count :seon.error/dropped-fault-digest
                                    :seon.instrument/fn :seon.instrument/arm
                                    :seon.instrument/expected :seon.instrument/args
                                    :seon.instrument/actual
@@ -1456,10 +1455,6 @@
                                   :seon.error.occurrence/branch
                                   (or (:seon.error.occurrence/branch request)
                                       (get-in database [:config :branch]))})
-                     (:seon.error/dropped-fault-count fact)
-                     (assoc :seon.error/dropped-fault-count
-                            (+ (or (:seon.error/dropped-fault-count old) 0)
-                               (:seon.error/dropped-fault-count fact)))
                      agent-id (assoc :seon.error.occurrence/agent [:seon.agent/id agent-id])
                      turn-id (assoc :seon.error.occurrence/turn [:seon.turn/id turn-id])
                      digest (assoc :seon.error.occurrence/data-blob

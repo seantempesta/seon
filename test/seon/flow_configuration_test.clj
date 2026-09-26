@@ -1,6 +1,5 @@
 (ns seon.flow-configuration-test
-  (:require [clojure.core.async :as async]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [clojure.core.async.flow.spi :as flow.spi]
             [clojure.test :refer [deftest is]]
             [seon.cluster]
@@ -58,9 +57,7 @@
     (fn [connection]
       (let [environment (test-support/environment
                          "seon.flow-configuration-test" connection)
-            projection (:seon.schema/projection environment)
-            task-executor (Executors/newVirtualThreadPerTaskExecutor)
-            fault-channel (async/chan)]
+            task-executor (Executors/newVirtualThreadPerTaskExecutor)]
         (try
           (let [graph-definitions
                 [[:work-launcher
@@ -71,17 +68,6 @@
                     ::sut/io-parallelism 1
                     ::sut/io-queue-depth 1
                     ::sut/io-submissions (atom {})})]
-                 [:fault
-                  ((private-var 'seon.flow 'fault-graph-definition)
-                   ;; every declared member, exactly like the production
-                   ;; caller (`start-error-fanout!`), the projection included
-                   {:seon.env/environment environment
-                    ::sut/fault-channel fault-channel
-                    ::sut/projection projection
-                    ::sut/read-core-error-mode (constantly :record)
-                    ::sut/commit-fault! identity
-                    ::sut/commit-drop! identity
-                    ::sut/panic! identity})]
                  [:cluster
                   ;; the render proc joins the census automatically: it is
                   ;; built through `var-process`, which refuses `:mixed` at
@@ -124,5 +110,4 @@
                         proc-facts)
                 (pr-str proc-facts)))
           (finally
-            (async/close! fault-channel)
             (.shutdownNow ^ExecutorService task-executor)))))))

@@ -3361,37 +3361,6 @@
           (web/stop! served)
           (throw cause))))))
 
-(defn- single-line-fault-text
-  [value]
-  (-> (str value)
-      (str/replace "\r" " ")
-      (str/replace "\n" " ")))
-
-(defn- emit-core-fault!
-  [_configuration reported]
-  (let [fact (::flow/fault-fact reported)
-        outcome (::flow/commit-outcome reported)
-        mode (::flow/core-error-mode reported)
-        message (or (:seon.error/message fact)
-                    "A core fault could not be normalized.")
-        failure-message
-        (when-not (= ::flow/committed outcome)
-          (or (when (map? outcome) (:seon.error/message outcome))
-              (when (instance? Throwable outcome) (ex-message outcome))
-              (str outcome)))]
-    (binding [*out* *err*]
-      (println
-       (str "SEON CORE FAULT"
-            (when (= :panic mode) " (dev panic)")
-            ": " (single-line-fault-text message)
-            " [signature " (:seon.error/signature fact)
-            (when failure-message
-              (str "; durable record refused: "
-                   (single-line-fault-text failure-message)))
-            "]"))
-      (flush)))
-  nil)
-
 (defn- loop-handle
   "The process resources and structural dials the loop proc carries.
 
@@ -3486,18 +3455,6 @@
                                 environment))}}
      :conns []}))
 
-(defn- core-error-mode
-  "The cluster's `:seon.config/on-core-error` dial, never a default. A config
-  read refusal is printed whole and answers nil, which `seon.fault/policy`
-  turns into a panic: an unreadable dial cannot select record mode."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.boot/cluster-name]
-                  [:or :nil :seon.config/on-core-error]]}
-  [db cluster-name]
-  (let [effective (config/effective db cluster-name)]
-    (or (:seon.config/on-core-error effective)
-        (binding [*out* *err*]
-          (println (str "SEON CORE-ERROR MODE UNREADABLE (panic): " (pr-str effective)))
-          (flush)))))
 
 (defn arm-agents!
   "Arm the cluster's shared graph, fan-out, routing listener and prime.
@@ -3568,36 +3525,7 @@
           :seon.flow/graph-definition
           (cluster-graph-definition handle routing view)
           :seon.flow/joins
-          {::error-fanout
-           (fn [{started :seon.flow/started
-                 graph :seon.flow/graph}]
-             (flow/start-error-fanout!
-              {:seon.env/environment (env/of handle)
-               :seon.flow/graph graph
-               :seon.flow/started started
-               :seon.flow/fault-buffer-capacity 64
-               :seon.flow/monitor-buffer-capacity 64
-               :seon.flow/read-core-error-mode
-               #(core-error-mode (db/db connection) cluster-name)
-               :seon.flow/commit-fault!
-               (fn [fault]
-                 (fault/record! connection cluster-name process
-                                (:seon.sci.admit/caps handle) fault))
-               :seon.flow/commit-drop!
-               (fn [dropped]
-                 ;; The buffer converts overflow into a bounded synthetic
-                 ;; fault. This callback runs on the committer proc, never
-                 ;; on the thread that faulted.
-                 (fault/record! connection cluster-name process
-                                (:seon.sci.admit/caps handle) dropped))
-               :seon.flow/panic!
-               (fn [reported]
-                 ;; FAIL LOUD IS NOT FALL DOWN (owner ruling): Flow calls
-                 ;; this only for the first occurrence of a signature. The
-                 ;; same callback reports a refused durable write once,
-                 ;; including in record mode, without a second trace path.
-                 (emit-core-fault! handle reported))}))
-           ::pages-mult
+          {::pages-mult
            (fn [_]
              (async/mult pages-channel))
            ;; A Flow proc has no handle on its own graph (core.async
@@ -3608,14 +3536,8 @@
            ::routing-graph
            (fn [{graph :seon.flow/graph}]
              (swap! routing assoc :seon.flow/graph graph))}})
-        fanout (::error-fanout joins)
         pages-mult (::pages-mult joins)]
-    ;; the fault channel joins the routing entry so every later arm
-    ;; can tap its agent graph's errors into the ONE committer inbox
-    (swap! routing assoc :seon.agent/fault-channel
-           (:seon.flow/fault-channel fanout))
-    ;; THE ROUTING DELIVERY (F1 §4): one listener per cluster, and its
-    ;; own faults ride the same path as every other fault
+    ;; THE ROUTING DELIVERY (F1 §4): one listener per cluster
     (wake/route! {:seon.cluster.wake/connection connection
                   :seon.cluster.wake/channels
                   (fn [] (cluster.agent/channels routing))
@@ -3625,8 +3547,6 @@
                   :seon.cluster.wake/armer-channel armer-channel
                   :seon.cluster.wake/render-channel render-channel
                   :seon.render.web/interest render-interest
-                  :seon.cluster.wake/fault-channel
-                  (:seon.flow/fault-channel fanout)
                   :seon.cluster.wake/key :seon.agent/route})
     ;; BOOT IS ONE WAKE through the ordinary render path. The listener is
     ;; already registered and the cold interest is `:all`, so commits before
@@ -3646,7 +3566,6 @@
     {:seon.turn.loop/cluster handle
      :seon.flow/graph graph
      :seon.flow/executor executor
-     :seon.flow/error-fanout fanout
      :seon.agent/routing routing
      ;; the view half `serve!` hands to the web service: one mult over
      ;; the proc's pages out-port, the shared registration, and the
@@ -3735,8 +3654,7 @@
                        :seon.await/diagnostic {:seon.error/layer :seon.cluster/stop
                                                :seon.error/operation `disarm-agents!
                                                :seon.error/expected ::cluster-graph-exited}}))))
-    (when-let [fanout (:seon.flow/error-fanout instance)]
-      (refuse! ::fault-graph-exited (flow/stop-error-fanout! fanout bound))))
+)
   (when-let [handle (:seon.turn.loop/cluster instance)]
     (some-> (:seon.turn.loop/stream-channel handle) async/close!))
   ;; the render pipeline's own ports, after the proc that reads them has

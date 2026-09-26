@@ -3,9 +3,8 @@
 
   `record!` commits one escaped failure through `seon.error`'s recording
   (signature, occurrence identity and the writer-decided wake are its own);
-  `fault!` applies the one policy to that committed outcome. Moved from
-  `seon.cluster/commit-fault!` (M4 step 0); the Flow committer still calls
-  `record!` through its `:seon.flow/commit-fault!` callback until its slice."
+  `fault!` applies the one policy to that committed outcome. Every producer
+  calls `fault!` on its own thread: there is no fault channel or committer."
   (:require [clojure.core.async.flow :as-alias flow.core]
             [seon.blob :as blob]
             [seon.cluster.branch :as cluster.branch]
@@ -88,7 +87,6 @@
           source-fault (:seon.error/source observation)
           agent-id (:seon.agent/id source-fault)
           run-id (when agent-id (tagged-run db agent-id))
-          dropped-count (:seon.flow/dropped-fault-count source-fault)
           request
           (cond-> {:seon.schema/projection (db/carried-projection db)
                    :seon.error/source source-fault
@@ -122,11 +120,6 @@
           ;; `error/evidence-stage` and published below with its commit.
           {prepared-fact :seon.error/fact staged :seon.blob/staged-writes}
           (error/evidence-stage connection (error/prepare request))
-          prepared-fact (cond-> prepared-fact
-                          (pos-int? dropped-count)
-                          (assoc :seon.error/dropped-fault-count dropped-count
-                                 :seon.error/dropped-fault-digest
-                                 (:seon.flow/dropped-fault-digest source-fault)))
           recording (error/recording db (assoc request :seon.error/fact prepared-fact))
           fact (:seon.error/fact recording)]
       (try
