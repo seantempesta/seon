@@ -2203,6 +2203,12 @@
                        (db/db refusal)]]
          (is (true? (:seon.db/invalid-read result)))
          (is (= refusal (dissoc result :seon.db/invalid-read :seon.db/refused-read-operation))))
+       ;; A read refusal handed on keeps the read that produced it, verbatim.
+       (let [refused (db/q refusal '[:find ?e :where [?e :seon.agent/id]])]
+         (is (= 'seon.db/q (:seon.db/refused-read-operation refused)))
+         (doseq [result [(db/pull refused [:db/id] 1) (db/datoms refused :eavt) (db/as-of refused 0)
+                         (db/db refused) (db/q refused '[:find ?e :where [?e :seon.agent/id]])]]
+           (is (= refused result))))
        (let [result (db/transact! refusal {:tx-data []})]
          (is (true? (:seon.db/transaction-refused result)))
          (is (= refusal (dissoc result :seon.db/transaction-refused :seon.db.write.attempt/request-id))))))))

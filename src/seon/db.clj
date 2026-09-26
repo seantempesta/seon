@@ -187,6 +187,16 @@
        (:seon.db/invalid-read request)
        (assoc :seon.db/refused-read-operation operation))))
 
+(defn- refused-read
+  "`value` as the refusal of the read `operation` was handed it in place of a
+  database. A read refusal passes on unchanged, still naming the read that
+  produced it; any other error value is stamped as refused here."
+  {:malli/schema [:=> [:cat :seon.db/error-result :qualified-symbol] :seon.db/error-result]}
+  [value operation]
+  (if (:seon.db/invalid-read value)
+    value
+    (assoc value :seon.db/invalid-read true :seon.db/refused-read-operation operation)))
+
 (defn- schema-refusal
   "Return the actual unavailable value and the declared shape it cannot satisfy."
   {:malli/schema
@@ -2223,7 +2233,7 @@
    (current-database-value))
   ([connection]
    (if-not (connection-object? connection)
-     (assoc connection :seon.db/invalid-read true :seon.db/refused-read-operation 'seon.db/db)
+     (refused-read connection 'seon.db/db)
      (resolve-database-value connection))))
 
 ;;; ---------------------------------------------------------------------------
@@ -2414,7 +2424,7 @@
   [query-or-database & arguments]
   (if-not (or (db.utils/db? query-or-database) (vector? query-or-database) (string? query-or-database)
                 (:find query-or-database) (:query query-or-database))
-    (assoc query-or-database :seon.db/invalid-read true :seon.db/refused-read-operation 'seon.db/q)
+    (refused-read query-or-database 'seon.db/q)
     (let [explicit-database? (db.utils/db? query-or-database)
         query-input
         (if explicit-database?
@@ -2437,7 +2447,7 @@
                (:query normalized)
                (:args normalized)))]
         (if-not (vector? aligned)
-          (assoc aligned :seon.db/invalid-read true :seon.db/refused-read-operation 'seon.db/q)
+          (refused-read aligned 'seon.db/q)
           (let [request (assoc normalized :args aligned)
                 parsed-query (query/memoized-parse-query (:query request))]
             (or (malformed-query-pattern-error request parsed-query)
@@ -2567,7 +2577,7 @@
   {:malli/schema [:=> [:cat [:or :seon.db/database-value :seon.db/error-result] [:sequential :seon.schema/value] [:function [:=> [:cat :seon.db/database-value :map] :map] [:=> [:cat :seon.db/database-value :seon.db/pull-selector :seon.schema/value] :map]] :keyword :qualified-keyword :qualified-symbol] [:or :nil :seon.db/pulled-entity [:vector [:or :nil :seon.db/pulled-entity]] :seon.db/error-result :seon.db/pull-budget-error]]}
   [database arguments operation operation-key result-key public-operation]
   (if-not (db.utils/db? database)
-    (assoc database :seon.db/invalid-read true :seon.db/refused-read-operation public-operation)
+    (refused-read database public-operation)
     (or (missing-pull-selector-error public-operation arguments)
         (let [many? (= :pull-many operation-key)
               options (first arguments)
@@ -2816,7 +2826,7 @@
   {:malli/schema [:=> [:cat [:or :seon.db/database-value :seon.error/value] [:or :nil [:sequential :seon.schema/value]]] [:or :seon.db/datoms :seon.db/invalid-read-error]]}
   [database arguments]
   (if-not (db.utils/db? database)
-    (assoc database :seon.db/invalid-read true :seon.db/refused-read-operation 'seon.db/datoms)
+    (refused-read database 'seon.db/datoms)
     (try
       ;; Datahike's index cursor is lazy and each element is a host Datom.
       ;; Realize both layers here so no process-local cursor escapes to SCI.
@@ -2908,7 +2918,7 @@
   [operation database arguments]
   (cond
     (not (db.utils/db? database))
-    (assoc database :seon.db/invalid-read true :seon.db/refused-read-operation 'seon.db/database-view)
+    (refused-read database 'seon.db/database-view)
 
     (not (dbi/-temporal-index? database))
     (do
