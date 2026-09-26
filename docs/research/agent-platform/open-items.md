@@ -58,7 +58,7 @@ callers to an existing component/function/test that does the same thing better (
   out at once — experiment on the namespaces we are working in, verify the indexing is right, the content is useful and not
   repetitive of the code, and it pulls relevant context where no direct reference (require / call) already links it; settle a
   workable format before telling agents; everything migrates eventually. Pages (vocabulary, cross-cutting prose) use the same
-  parser. (3) *Durability of mined tasks/reviews*: not now — writing back to files is a root operation done only when we like
+  parser. (2b) *Doc format settled after exploration (docs-exploration-2026-09-26.md)*: Markdown docstrings with a few fixed headings (Examples, Edge cases, Costs, Recommendations, Errors, Known issues) + Markdown pages with [[sym]] links for cross-cutting knowledge; context shows EVERY doc item that links the subject; costs are prose stating armed/unarmed and when measured; every Known-issues item links its task/issue id; anything derivable from the call graph is not authored. First slice pilots seon.fault, seon.render.value (+ my.program when free) and vocabulary.md. (3) *Durability of mined tasks/reviews*: not now — writing back to files is a root operation done only when we like
   the updates and want to advance the git branch. (4) *Merge*: build B per merge-task-design-2026-09-26.md (91ba2e3f0, 8 cuts).
 - **AI renders are REPL entries, evaluated; HTML renders are hiccup** (owner 2026-09-26, refining the same-day "text"
   ruling). An AI render returns `;;` comments and forms; the one REPL path evaluates each form read-only in the viewing
