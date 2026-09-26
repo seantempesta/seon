@@ -159,8 +159,10 @@ root.
 - **Pass the world explicitly.** Carry database/connection, projection, environment, render profile, proc and
   settlement inputs, including profiling and test ownership. Custody elides only the agent's db/conn; it authorizes
   no other ambient service.
-- **Supply defaults by declared schema name.** Inputs a function declares but the caller omits (the database, the
-  unit) are supplied by declared schema name; caller arguments always win; structural resemblance is not identity.
+- **Supply defaults by declared schema name.** REQUIRED inputs a function declares but the caller omits (the database,
+  the unit) are supplied by declared schema name; an omitted optional input stays absent, because its absence has
+  meaning; a call already matching a declared arity is never prefixed; caller arguments always win; structural
+  resemblance is not identity.
   See the [data guide](docs/seon/architecture/data-modeling-guide.md).
 - **Decide at the authority.** Derive at the writer or supply its decision; validate a pre-read's basis there if it
   could change. Mirrors are derived, drift-checked or explicitly historical, never silently current state.
