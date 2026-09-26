@@ -818,16 +818,14 @@
   "One matched analyzed row made FINAL: runtime contract, workload and test
   markers from the Var, contract facts, and the digest from
   `seon.db/definition-digest-of` with the namespace row its transaction
-  leaves stored (an earlier form's row in this settlement, else the
-  database's, else SCI's for a namespace not yet stored), the digest the
-  writer recomputes."
+  leaves stored (the database's, which holds the run's earlier forms, else
+  SCI's for a namespace not yet stored), the digest the writer recomputes."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection :map
-                       [:maybe :seon.sci.eval/settled-namespaces] :map :seon.sci.eval/sci-var]
+                       :map :seon.sci.eval/sci-var]
                   :map]}
-  [database projection namespace-row settled-namespaces analysed-row sci-var]
+  [database projection namespace-row analysed-row sci-var]
   (let [namespace-name (:seon.ns/name namespace-row)
-        digest-namespace (or (get settled-namespaces namespace-name)
-                             (db/pull database '[*] [:seon.ns/name namespace-name])
+        digest-namespace (or (db/pull database '[*] [:seon.ns/name namespace-name])
                              namespace-row)
         metadata (meta sci-var)
         qualified (or (:seon.fn/sym analysed-row) (:seon.test/sym analysed-row))
@@ -874,7 +872,7 @@
     start :seon.sci.eval/form-start
     before :seon.sci.eval/before-owned before-namespaces :seon.sci.eval/before-namespaces
     reader-row :seon.sci.eval/reader-row namespace-row :seon.sci.eval/namespace-row
-    settled :seon.sci.eval/settled-namespaces restore! :seon.sci.eval/restore
+    restore! :seon.sci.eval/restore
     namespace-unmap? :seon.sci.eval/namespace-unmap?}]
   (try
     (let [definitions (program-definitions before-namespaces before (turn-interns ctx))
@@ -896,7 +894,7 @@
         (or (< 1 (count declared)) (and (seq declared) (seq removed)))
         (refuse! (multiple-declarations declared removed))
         (seq removed) (refuse! (unindexed-change removed)))
-      (let [rows (mapv #(definition-row database projection namespace-row settled
+      (let [rows (mapv #(definition-row database projection namespace-row
                                         (::row %) (::var %))
                        matched)]
       (when-let [missing (first (sort-by str (for [row rows
@@ -2307,7 +2305,11 @@
       (or (:seon.ns/name namespace-row) present? (seq functions))
       (let [functions (sort-by (juxt #(get % :seon.fn/doc-order Long/MAX_VALUE)
                                     :seon.fn/sym) functions)]
-        {:schemas (into (into (sorted-map) (mapcat #(documentation-schemas database %)) functions)
+        ;; `dir` is a macro, so its call names no producer; the directory
+        ;; carries its own pair (the render law's master override).
+        {:seon.render/ai 'seon.repl/render-directory-ai
+         :seon.render/html 'seon.repl/render-directory-html
+         :schemas (into (into (sorted-map) (mapcat #(documentation-schemas database %)) functions)
                         (map (fn [row]
                                [(:seon.schema/key row)
                                 (edn/read-string (:seon.schema/form row))]))
@@ -4358,10 +4360,7 @@
                 (assoc (binding-rows before-reader-context) :seon.ns/name namespace-name)
                 :seon.sci.eval/restore restore!
                 :seon.sci.eval/namespace-unmap? (boolean namespace-unmap?)}
-               reader-row (assoc :seon.sci.eval/reader-row reader-row)
-               (:seon.sci.eval/settled-namespaces request)
-               (assoc :seon.sci.eval/settled-namespaces
-                      (:seon.sci.eval/settled-namespaces request)))))
+               reader-row (assoc :seon.sci.eval/reader-row reader-row))))
             var-row (first var-rows)
             row (or var-row reader-row)
             next-projection
