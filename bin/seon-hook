@@ -9,8 +9,8 @@
 ;; 4. Runs the canonical Markdown/docstring linters after an edit
 ;; 5. Schedules one bounded asynchronous Gemini review batch
 ;;
-;; It never publishes: program changes reach default only through root's
-;; integration (`bin/seon init --dev default --changed ...`, D1).
+;; It never publishes: every JVM runs a committed archive (owner 2026-09-26),
+;; so program changes reach default only as commits, by `bin/seon start --head`.
 ;;
 ;; It has no running Seon-process dependency. Pure linter namespaces load
 ;; directly into Babashka only for the file type that needs them.

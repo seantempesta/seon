@@ -6,8 +6,9 @@
 ;; the contract compile check (`:contract-compile`, on unless declared
 ;; off): a src/ or test/ Clojure edit asks the running root at
 ;; `:current-source` to compile its contracts, and reports it unavailable
-;; when no root answers. The hook never publishes: program changes reach
-;; default only through root integration (D1). The only automatic fix is
+;; when no root answers. The hook never publishes: every JVM runs a
+;; committed archive, so program changes reach default only as commits, by
+;; `bin/seon start --head` (owner 2026-09-26). The only automatic fix is
 ;; Markdown formatting (whitespace, blank lines, final newline), which the
 ;; hook rewrites in place and reports; Clojure is refused, never repaired.
 ;; The review sizes and call bound below refuse by key path when absent;
@@ -36,8 +37,8 @@
  {:enabled true
   :roots ["src" "test" "resources" "script" "bin"]}
 
- ;; Publication happens only through root integration (D1); these two keys
- ;; select the live root and cluster that schema/contract lint queries.
+ ;; These two keys select the live root and cluster that schema/contract
+ ;; lint queries; the hook publishes nothing into it.
  :current-source
  {:root "."
   :cluster "default"}

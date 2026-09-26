@@ -46,7 +46,8 @@ belongs to other owners:
   until someone runs `clojure -T:dev-cache ensure-cache` (111 s cold build).
   61d207c3e also missed because the key digested `deps.edn`'s bytes, including
   a `:jvm-opts` HeapDumpPath change (c2b757cb3); the key now omits launch
-  options (`dependency-declarations`).
+  options (`dependency-declarations`), and a start fills a miss before the old
+  JVM stops (`filled-classes!`, root ruling option A).
 - Adoption after readiness (6.4–9.9 s: `development-source-refresh!` 5.2 s,
   `adopt-rows!` 2.8 s) still re-adopts what the fresh JVM loaded.
 

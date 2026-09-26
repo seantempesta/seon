@@ -8,20 +8,23 @@ Commit f9183ee43. Net source +104 lines (184 added, 80 deleted in `operator.clj`
 - **RESET NEEDED.** Nothing here ran against a live boot. Lanes may not stop
   default, so the new plain `start`, the new output and the exit codes are
   unproven on a real JVM. Root must run the steps under "What root must run".
-- **The dependency-class cache misses on the next restart whatever happens.**
-  The key changed in this commit, and the SCI pin moved at 5bed888d0. The fill
-  takes 111 s (`duration-ms` in the 7a89… manifest). Nothing fills the cache
-  during a restart; the owner has to choose a fill option below.
-- **Hook publication into default is now always a no-op.** Every JVM runs an
-  archive, so `bin/seon-hook`'s `init --dev --changed` meets "Changed paths lie
-  outside the JVM's source directory". Retiring the hook's publication step
-  needs the owner of `bin/seon-hook`.
-- **Stale documents I do not own:**
-  - AGENTS.md:324-326 (`start` wording).
-  - `.agents/skills/seon-flow-architecture/references/degraded-start.md` §3 says
-    `start` launches the checkout. A patch is ready at
-    `tmp/inv-boot-operator-opus/degraded-start-skill.patch`, and
-    `git apply --check` passes.
+- **The next restart pays the class-cache fill once.** The key changed, and the
+  SCI pin moved at 5bed888d0. Option A fills it before the old JVM stops:
+  about 111 s added to that one `start --head`, while default keeps serving.
+- **`init --dev --changed` is inert against an archive JVM.** Changed checkout
+  paths lie outside its source directory and are refused
+  (`cluster.clj:2921`). `bin/seon-hook` never published; it only lints and asks
+  the live root to compile contracts. So there was no hook publication step to
+  delete, and the `.codex/hooks.json` and `.claude/settings.json` entries stay
+  because they run the linters. I corrected the hook's and `seon-hook.edn`'s
+  comments. Still stale, not mine:
+  - `.agents/skills/repl/SKILL.md:159` teaches adoption by `init --dev --changed`.
+  - `bin/test-check` sends `--changed` (see `operator.clj` `parse-argv`); its
+    use against archive JVMs needs its owner's ruling.
+- **Docs corrected (root-granted):**
+  - AGENTS.md:326 (the `start` sentence).
+  - `.agents/skills/seon-flow-architecture/references/degraded-start.md` §3
+    (the patch applied there; `SKILL.md` itself has no `start` claim).
 - **The REPL static check failed on other lanes' work.** I ran
   `seon.contracts-compile-test/check` over the checkout with my `boot.clj`. It
   threw "A stored error member must have a storable registered attribute" for
@@ -147,22 +150,17 @@ printer is bound so babashka and the JVM print identically. Checked:
 
 **Regression:** `the-class-cache-key-ignores-launch-options`.
 
-**Fill options (new decision; I made no production edit):**
-- **A (recommended, simplest).** In `prepared-source!`, select the classes, and
-  on `:miss` run `clojure -T:dev-cache ensure-cache` in the archive before
-  stopping the old JVM.
-  - Size: about 6 lines.
-  - Guarantee: every boot hits.
-  - Cost: 111 s once per dependency set, while the old JVM keeps serving.
-    Downtime drops by 6–9 s.
-  - Sacrifice: a `start --head` after a pin bump takes about 2.5 min end to
-    end, and two compile JVMs load the machine while default serves.
-- **B.** Root runs the fill as a written restart step. No code, but it depends
-  on discipline, which is how today's misses happened.
-- **C.** Per-library cache directories keyed by each library and its
-  dependents, so a SCI bump recompiles only SCI and what depends on it.
-  - Cost: hours, and a `dev_cache.clj` redesign.
-  - Result: cuts the refill to about the changed library.
+**Fill (root ruling: option A, implemented).** `filled-classes!` runs after
+`prepared-source!` in both `launch!` and `move-to-head!`, before `down!`. On a
+`:no-matching-cache` miss it runs `clojure -T:dev-cache ensure-cache` in the
+archive. The archive's `target` links the checkout's, so the fill lands in the
+one shared cache. It then selects again, and the result carries
+`:seon.operator/class-fill {:before … :after …}` and phase `class-fill-ms`. The
+old JVM serves throughout. A failed fill refuses the start before anything
+stops. Bound: 300 s (a measured 111 s cold build plus room). `:pins-unavailable`
+does not fill, and a nuke reads no derived state. The outcome line shows
+`class-fill-ms` and the class status. No unit test covers the fill: a real
+fill is a 111 s two-JVM build, so root verifies it at the restart.
 
 ## Defect 3: a failed move reads like success
 
@@ -227,11 +225,24 @@ with the existing move and nuke tests: 12 tests, 63 assertions, 0 failures,
 
 ## What root must run
 
-1. `bb --config bb.edn --deps-root . --classpath script:src:resources -e "(require 'seon.operator-outcome-test 'seon.operator-move-test 'seon.operator-nuke-test) (clojure.test/run-tests 'seon.operator-outcome-test 'seon.operator-move-test 'seon.operator-nuke-test)"`
-2. Optional, to measure a hit: `clojure -T:dev-cache ensure-cache` (about 111 s, while default serves).
-3. `bin/seon start --head; echo exit $?`. Read line 1, then `bin/seon status`.
-   Record the `:seon.operator/phases` total-ms and `:seon.boot/layers` as the
-   after row.
-4. After the restart: `bin/test-check default --ns seon.dev.dependency-cache-test`.
-5. Rule on the fill options (A/B/C), the hook-publication retirement and the
-   skill patch.
+1. Operator tests (babashka, about 2 s):
+   `bb --config bb.edn --deps-root . --classpath script:src:resources -e "(require 'seon.operator-outcome-test 'seon.operator-move-test 'seon.operator-nuke-test) (clojure.test/run-tests 'seon.operator-outcome-test 'seon.operator-move-test 'seon.operator-nuke-test)"`
+   Expect 12 tests, 0 failures.
+2. The move, with the fill:
+   `bin/seon start --head > tmp/orchestrator/start-head-after.out 2> tmp/orchestrator/start-head-after.err; echo "exit $?"`
+   - Expect exit 0.
+   - The first line of `.err` should read
+     `SEON start --head OK <sha> total-ms … class-fill-ms … ready-ms … classes hit`.
+   - With the fill, total-ms rises by about 111 s once. Downtime is launch-ms
+     plus adopt-ms.
+3. `bin/seon status 2>&1 | head -1`: expect `SEON status OK`. Then
+   `bin/seon status | grep -o ':seon.operator/source-root "[^"]*"'` should name
+   `data/source/<HEAD sha>`.
+4. A second `bin/seon start --head` on the same HEAD should show no
+   `class-fill-ms` and `classes hit`. Record its total-ms, ready-ms,
+   launch-ms minus ready-ms, and `:seon.boot/layers` as the steady-state row.
+5. Failure output on an empty root:
+   `mkdir -p tmp/inv-boot-empty && bin/seon --root tmp/inv-boot-empty status; echo "exit $?"`
+   Expect `SEON status FAILED (exit 5, no JVM runs)` and exit 5. Then
+   `rm -r tmp/inv-boot-empty`.
+6. After the restart: `bin/test-check default --ns seon.dev.dependency-cache-test`.

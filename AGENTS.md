@@ -323,7 +323,7 @@ Private experiments remain possible; local green never implies shared acceptance
 ## Operate and collaborate without crossing ownership
 
 Use installed `bin/seon` help for start/status/open/init/config apply/stop/down/reset/nuke,
-never deleted internals. `start --head` moves to committed HEAD retaining store/caches;
+never deleted internals. Every JVM runs a committed archive, never the working tree (`start` launches HEAD); `start --head` replaces a live root with HEAD retaining store/caches, filling a class-cache miss before the old JVM stops;
 reset unlinks and forks from program rows, retaining caches. Nuke replaces one JVM, holds
 the sibling store lock through deletion of store/all derived caches and rebuild/boot from
 committed inputs, reports full failures and falls back to the newest booting commit rather

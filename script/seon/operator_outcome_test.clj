@@ -50,14 +50,14 @@
 (deftest a-successful-outcome-is-one-line-and-keeps-its-codes
   (let [ready {:seon.boot/readiness {:seon.boot/missing-layers [] :seon.boot/ready-ms 9000}
                :seon.operator/source {:seon.source/git-sha "abc"}
-               :seon.operator/phases {:seon.operator/total-ms 12000}
+               :seon.operator/phases {:seon.operator/total-ms 12000 :seon.operator/class-fill-ms 111000}
                :seon.dev-cache/dependency-classes {:seon.dev-cache/status :miss
                                                    :seon.dev-cache/reason :no-matching-cache}}]
     (is (= 0 (operator/exit-code ready true)))
     (is (= 3 (operator/exit-code (assoc ready :seon.operator/fallback-from "def") true)))
-    (is (= "SEON start --head OK abc total-ms 12000 ready-ms 9000 classes miss no-matching-cache"
+    (is (= "SEON start --head OK abc total-ms 12000 class-fill-ms 111000 ready-ms 9000 classes miss no-matching-cache"
            (operator/headline move-request ready nil 0))
-        "a class-cache miss is visible on the outcome line")))
+        "a class-cache fill and a miss are visible on the outcome line")))
 
 (deftest a-failure-diagnostic-is-written-whole-to-the-file-its-line-names
   (let [root (fs/create-temp-dir {:prefix "seon-outcome"})]

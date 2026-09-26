@@ -406,8 +406,9 @@
 ;;; the caches"). `dev_cache.clj` builds immutable, content-keyed directories
 ;;; under the MAIN checkout's `target/dev-dependency-classes/<digest>`; this
 ;;; reads that cache for every launched source (a committed archive, a nuke
-;;; archive, a scratch snapshot) and never builds one: a miss starts from
-;;; source and says so, with the command that fills the cache.
+;;; archive, a scratch snapshot). A start fills a miss in `prepared-source!`
+;;; before any JVM stops (root ruling 2026-09-26, option A); a nuke reads no
+;;; derived state and starts from source.
 
 (def ^:private dependency-cache-root "target/dev-dependency-classes")
 (def ^:private dependency-cache-selection "target/dev-dependency-cache-current.edn")
@@ -416,6 +417,11 @@
 (def ^:private runtime-probe-bound-ms
   "Measured 2026-09-23: `java -XshowSettings:properties -version` 28 ms."
   10000)
+(def ^:private dependency-fill-bound-ms
+  "The bound on one cold `ensure-cache` fill: measured 111 s (the 7a89… cache's
+  manifest `:duration-ms` 111270, 2026-09-25), once per dependency set, while
+  the old JVM still serves; five minutes leaves room for a loaded machine."
+  300000)
 
 (defn- child-java
   "The `java` the `clojure` launcher will run under `environment`."
@@ -1285,15 +1291,38 @@
                                   :seon.operator/share-ms share-ms
                                   :seon.operator/classpath-ms (- source-ms archive-ms share-ms)})))
 
+(defn- filled-classes!
+  "`source` with its dependency-class cache filled when it misses (root ruling
+  2026-09-26, option A): run before any JVM stops, so the old program keeps
+  serving and the replacement boots on a hit. The fill runs in the archive,
+  whose `target` links the checkout's, so it lands in the one shared cache;
+  the re-selection after it is the observed outcome the launch reuses."
+  {:malli/schema [:=> [:cat :string :map] :map]}
+  [root source]
+  (let [began (System/nanoTime)
+        source-root (:seon.operator/source-root source)
+        classes (dependency-classes (repository-root) source-root (child-environment root))]
+    (if (= :no-matching-cache (:seon.dev-cache/reason classes))
+      (do (command! ["clojure" "-T:dev-cache" "ensure-cache"] source-root dependency-fill-bound-ms)
+          (-> source
+              (assoc :seon.operator/class-fill
+                     {:seon.operator/before classes
+                      :seon.operator/after (dependency-classes (repository-root) source-root
+                                                               (child-environment root))})
+              (assoc-in [:seon.operator/phases :seon.operator/class-fill-ms] (elapsed-ms began))))
+      source)))
+
 (defn launch!
   "Start the root's JVM on committed HEAD (owner 2026-09-26: boot reads the
   committed archive, never the working tree), keeping the store and caches."
   {:malli/schema [:=> [:cat :map] :map]}
   [request]
-  (let [source (prepared-source! (:seon.operator/managed-root request) "HEAD" nil)
+  (let [root (:seon.operator/managed-root request)
+        source (filled-classes! root (prepared-source! root "HEAD" nil))
         outcome (launch-child! request (:seon.operator/source-root source) true)]
     (merge (:seon.operator/value outcome)
-           {:seon.operator/source (dissoc source :seon.operator/phases)}
+           {:seon.operator/source (dissoc source :seon.operator/phases)
+            :seon.operator/phases (:seon.operator/phases source)}
            (program-source (:seon.boot/advertisement outcome)))))
 
 (defn move-to-head!
@@ -1313,7 +1342,8 @@
         ;; The replaced JVM's program directory seeds this root's analyzer cache.
         previous-source (some-> (advertisement root nil) program-source :seon.operator/source-root)
         {source-root :seon.operator/source-root :as source}
-        (prepared-source! root (get request :seon.source/revision "HEAD") previous-source)
+        (filled-classes! root (prepared-source! root (get request :seon.source/revision "HEAD")
+                                                previous-source))
         began-down (System/nanoTime)
         stopped (down! request (selected-processes root))
         down-ms (elapsed-ms began-down)
@@ -1569,6 +1599,7 @@
            (str (if (= 3 code) "READY ON AN OLDER PROGRAM (exit 3)" "OK")
                 (some->> (get-in result [:seon.operator/source :seon.source/git-sha]) (str " "))
                 (some->> (get-in result [:seon.operator/phases :seon.operator/total-ms]) (str " total-ms "))
+                (some->> (get-in result [:seon.operator/phases :seon.operator/class-fill-ms]) (str " class-fill-ms "))
                 (some->> (get-in result [:seon.boot/readiness :seon.boot/ready-ms]) (str " ready-ms "))
                 (when classes (str " classes " (name (:seon.dev-cache/status classes))
                                    (some->> (:seon.dev-cache/reason classes) name (str " ")))))))))

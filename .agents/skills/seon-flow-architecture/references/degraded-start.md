@@ -9,7 +9,7 @@ tags: [reference, flow]
 Use this runbook when a scratch cluster fails during startup, especially while
 other lanes are changing the shared tree. Do not restart, stop or mutate
 another lane's cluster to obtain a cleaner signal; lanes never stop, refork or
-reset `default` (`AGENTS.md:438`). A boot longer than ten seconds needs the
+reset `default` (`AGENTS.md:333-334`). A boot longer than ten seconds needs the
 owner's explicit authorization (`AGENTS.md:113-114`).
 
 ## 1. Separate launch failure from degraded boot
@@ -30,7 +30,7 @@ in that JVM is reachable, ask the owning function for the same answer:
  (get @seon.operator.runtime/running-instances "scratch-name"))
 ```
 
-`readiness` (`src/seon/cluster/boot.clj:441-456`) returns the advertisement,
+`readiness` (`src/seon/cluster/boot.clj:489-504`) returns the advertisement,
 `:seon.boot/missing-layers` (each required layer absent from the instance), the
 agent count, `seon.problems/problems` and `:seon.boot/ready-ms`. The registry
 atom is `resources/seon/operator/runtime.clj:11`.
@@ -60,7 +60,7 @@ or open socket alone.
 
 The per-cluster advertisement is `<bootstrap-root>/<cluster-name>/prepl.edn`
 (`cluster-paths`, `src/seon/cluster.clj:765-782`); the operator reads
-`<operator-root>/data/clusters/*/prepl.edn` (`script/seon/operator.clj:106-119`).
+`<operator-root>/data/clusters/*/prepl.edn` (`script/seon/operator.clj:123-131`).
 Boot writes it once the store stands (`src/seon/cluster/boot.clj:164-167`),
 and `serve!` rewrites it with the web URL (`src/seon/cluster.clj:3019`). JVM
 process identity is only `(pid, start-instant)`
@@ -81,7 +81,7 @@ exact `-Dseon.operator.root=<root>` JVM argument, never a command substring
 
 A file's mere presence is not proof of a live cluster: an advertisement counts
 only when its `(pid, start-instant)` matches a live process
-(`matching-handle`, `script/seon/operator.clj:93-104`;
+(`matching-handle`, `script/seon/operator.clj:110-121`;
 `seon.cluster/read-advertisement`, `src/seon/cluster.clj:3584`). A JVM that the
 scan finds but whose endpoint is unreadable makes `status` fail with "An
 exact-root JVM is alive but its endpoint is unavailable."
@@ -93,12 +93,13 @@ remains.
 
 `bin/seon start <name>` does **not** promise a new JVM. When the operator
 finds any live process under its root, it asks that JVM to start the cluster;
-only a root with no live process launches `clojure -M:dev:test` in a new
-process (`request!`, `script/seon/operator.clj:1312-1318`; `launch-child!`,
-`:501-568`, called by `launch!` `:570`).
+only a root with no live process launches a new JVM, and its program is the
+committed archive of HEAD under `data/source/<sha>`, never the working tree
+(`request!` → `launch!` → `prepared-source!` in `script/seon/operator.clj`).
+Uncommitted edits never reach any JVM; commit, then `bin/seon start --head`.
 
-A long-lived JVM can therefore still hold old Var roots even when the checkout
-is correct. A failure in a newly added cluster does not prove the current file
+A long-lived JVM can therefore still hold old Var roots even when HEAD is
+correct. A failure in a newly added cluster does not prove the current file
 still fails. For boot-sensitive proof, use a lane-owned operator root with no
 live process, after the owner authorizes the boot's duration:
 
@@ -108,9 +109,9 @@ mkdir -p "$operator_root"
 bin/seon --root "$operator_root" start scratch-name
 ```
 
-The launched JVM runs the checkout's code (`.directory` is the repository
-root, `script/seon/operator.clj:524`); the operator root holds only its
-`data/` tree, logs and an optional `.env` (`:279-294`, `:505-507`). Use the
+The launched JVM runs HEAD's committed archive, built under the operator
+root's `data/source/<sha>` (`prepared-source!`); the operator root also holds
+its store, logs and an optional `.env` (`script/seon/operator.clj:323-338`). Use the
 same `--root` option with `status`, `logs scratch-name` and
 `stop scratch-name` so discovery and cleanup stay inside that root. MCP
 discovery defaults to the project root and lists another root only when it is
