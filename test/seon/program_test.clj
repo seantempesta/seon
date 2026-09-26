@@ -280,22 +280,23 @@
     (fn [connection-a]
       (let [base-map (program/digest-map (db/db connection-a) {:seon.program/max-datoms 1000000})
             [branch-identity head-identity]
-            (take 2 (sort-by pr-str (keys base-map)))]
+            (take 2 (sort-by pr-str (filter #(= :seon.fn/sym (first %)) (keys base-map))))]
         (is (every? some? [branch-identity head-identity]))
         ;; File and lint rows are derived and carry no definition digest.
         (is (not-any? #{:seon.lint/id :seon.fn.file/relative-path}
                       (map first (keys base-map))))
+        ;; A real revision: the writer refuses a digest its row does not produce.
         (test-support/transacted!
-         connection-a [{(first branch-identity) (second branch-identity)
-                        :seon.program/definition-digest digest-a}])
+         connection-a [(test-support/revision (db/db connection-a) branch-identity
+                                              {:seon.fn/doc "Changed on the branch."})])
         (let [branch-map (program/digest-map (db/db connection-a) {:seon.program/max-datoms 1000000})]
           (test-support/with-database
             (fn [connection-b]
               (is (= base-map (program/digest-map (db/db connection-b) {:seon.program/max-datoms 1000000}))
                   "the second fixture branches from the same commit")
               (test-support/transacted!
-               connection-b [{(first head-identity) (second head-identity)
-                              :seon.program/definition-digest digest-b}])
+               connection-b [(test-support/revision (db/db connection-b) head-identity
+                                                    {:seon.fn/doc "Changed on the head."})])
               (let [head-map (program/digest-map (db/db connection-b) {:seon.program/max-datoms 1000000})
                     comparison (program/three-way base-map branch-map head-map)]
                 (is (= #{branch-identity}
@@ -372,13 +373,17 @@
   (assoc row :seon.program/definition-digest (program/definition-digest row)))
 
 (defn- analyzed-row-tx
-  "Runtime settlement receives the analyzer's completed row, as production does."
+  "Runtime settlement receives the analyzer's completed row, digested by the
+  writer's digest owner as SCI's definition row is, as production does."
   [database options row]
   (let [source (or (:seon.fn/source row) (:seon.test/source row))
         analyzed (if source
-                   (second (seon.fn/analyze-form database source
-                                                (or (:seon.fn/ns row) (:seon.test/ns row))
-                                                row))
+                   (test-support/revised-row
+                    database
+                    (second (seon.fn/analyze-form database source
+                                                  (or (:seon.fn/ns row) (:seon.test/ns row))
+                                                  row))
+                    {})
                    row)]
     ((ns-resolve 'seon.turn 'row-tx) database options analyzed)))
 
@@ -1008,11 +1013,12 @@
                                    :seon.cluster/name "registration-test"})))
         (test-support/transacted!
          connection
-         (into [(test-support/program-fn-row (db/db connection) function-sym
-                  "(defn same-name {:malli/schema [:=> [:cat] :int]} [] 1)")]
-               (seon.fn/source-rows (db/db connection) (program/shapes)
-                                     (test-support/namespace-row (db/db connection) namespace-name)
-                                     "(clojure.test/deftest same-name)" #{})))
+         [(test-support/program-fn-row (db/db connection) function-sym
+            "(defn same-name {:malli/schema [:=> [:cat] :int]} [] 1)")
+          ;; The canonical producer digests with the namespace row the
+          ;; agent's creation stored, not a fresh one.
+          (test-support/program-row (db/db connection) [:seon.test/sym function-sym]
+                                    "(clojure.test/deftest same-name)")])
         (test-support/transacted!
                      connection
                      (turn/open-tx {:seon.turn/id "registration-delete" :seon.turn/agent [:seon.agent/id "registration-test"] :seon.turn/opened-tx "datomic.tx"}))
