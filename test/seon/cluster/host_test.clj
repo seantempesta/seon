@@ -130,22 +130,45 @@
                     (db/pull (branch-db handle branch) [:seon.agent/admission-closed-tx] [:seon.agent/id "mcp/retiring"]))))
         (is (nil? (host/hosted handle branch)) "the parent roster no longer records the host")))))
 
-(deftest colliding-sibling-hosts-deliver-independently-and-one-retires-while-the-other-runs
+(deftest one-identity-is-homed-on-one-branch-decided-by-the-writer
+  ;; Astra H2: two hosts of one new agent on sibling branches both pre-read an
+  ;; absent cluster row; the cluster writer now decides, so exactly one homes it.
+  (with-host-world {}
+    (fn [{:keys [handle branch! connection]}]
+      (let [branches [(branch!) (branch!)]
+            start (java.util.concurrent.CountDownLatch. 1)
+            racing (mapv (fn [branch]
+                           (async/thread
+                             (support/await-event! start ::start)
+                             (try (host-on! handle branch "mcp/twin")
+                                  (catch clojure.lang.ExceptionInfo refusal (ex-data refusal)))))
+                         branches)
+            _ (.countDown start)
+            outcomes (mapv #(support/await-event! % ::hosted) racing)
+            [winner] (filter :seon.flow/graph outcomes)
+            [loser] (remove :seon.flow/graph outcomes)
+            home (:seon.agent/branch (db/pull (db/db connection) [:seon.agent/branch] [:seon.agent/id "mcp/twin"]))]
+        (is (some? winner) (pr-str outcomes))
+        (is (= :seon.agent/branch (:seon.error/member loser)) (pr-str loser))
+        (is (= home (get-in winner [:seon.turn.loop/cluster :seon.agent/branch]))
+            "the cluster row names the branch whose host was admitted")
+        (is (= ["1"] (hosted-run! winner "1")))
+        (host/retire! winner)
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"admission is closed"
+                              (host-on! handle home "mcp/twin"))
+            "a retired agent cannot be hosted again")))))
+
+(deftest a-branch-answers-only-for-the-agent-it-hosts
+  ;; Astra H3: the running host answered any requested agent id.
   (with-host-world {}
     (fn [{:keys [handle branch!]}]
-      (let [a (host-on! handle (branch!) "mcp/twin")
-            b (host-on! handle (branch!) "mcp/twin")
-            eid #(db/q '[:find ?e . :where [?e :seon.agent/id "mcp/twin"]]
-                       @(get-in % [:seon.turn.loop/cluster :seon.db/connection]))]
-        (is (= (eid a) (eid b)) "siblings forked from one commit give the new agent one entity id")
-        (is (= "1" (last (hosted-run! a "(def twin-side 1) twin-side"))))
-        (is (= "2" (last (hosted-run! b "(def twin-side 2) twin-side"))))
-        (host/retire! a)
-        (is (nil? (host/hosted handle (get-in a [:seon.turn.loop/cluster :seon.agent/branch]))))
-        (is (= ["2"] (hosted-run! b "twin-side")) "the sibling still runs after the other retired")
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"admission is closed"
-                              (host-on! handle (get-in a [:seon.turn.loop/cluster :seon.agent/branch]) "mcp/twin"))
-            "a retired agent cannot be hosted again")))))
+      (let [branch (branch!)
+            hosted (host-on! handle branch "mcp/first")]
+        (is (identical? hosted (host-on! handle branch "mcp/first")))
+        (is (= :seon.agent/id
+               (:seon.error/member (try (host-on! handle branch "mcp/other") nil
+                                        (catch clojure.lang.ExceptionInfo refusal (ex-data refusal)))))
+            "another agent id on a hosted branch refuses by name")))))
 
 (deftest an-ordinary-message-wakes-the-idle-hosted-agent
   (with-host-world {}
