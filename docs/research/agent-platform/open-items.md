@@ -125,6 +125,12 @@ EXISTING store (prove adoption on a branch of the live store, never only on a fr
   local to each test member's context (instrument + harness owners), so no member can touch JVM-wide wrappers; then the
   snapshot/drift/restore family (runner.clj, test.clj:1943-1963, test_support.clj:915-919) goes in one cut. The drift
   detector stays until then: it catches real shared-Var damage (landing delete-r8-r6-r10 §C2).
+- **Commit floor (write-cost landing 2026-09-26):** a trivial run is 3 commits × ~20 ms, each 4 ordered fsyncs (commit
+  record, then branch head; Datahike already batches queued txs, `writer.cljc:224-230`). Next, in order: fold the turn close
+  into settlement (hunk in fix-write-cost landing; turn.clj after R1) saves ~30 ms; then a datahike/konserve fork change so
+  the branch head points at the already-durable commit record (one barrier for the ordered pair), durability unchanged.
+- **Boot's `loaded-builder` Object fault** on every start (`boot/stop!` marks running-instances with a bare Object; issue
+  filed): boot.clj after the seams lane releases it.
 - **Atom audit cuts** (atom-audit-2026-09-26.md when it lands): file-disjoint DELETE/MOVE/COLOCATE slices.
 - Render-dispatch reds in web-debug-test (`repl/render-ai` returns the raw evaluation map), fault card nil kicker/message,
   fixture writes refused (`unowned-entity`, "only the creator may remove tests"), `turn-details` 34 s.
