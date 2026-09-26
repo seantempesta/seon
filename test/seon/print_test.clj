@@ -24,20 +24,17 @@
   {:seon.print/length nil
    :seon.print/level nil
    :seon.print/width 0
-   :seon.print/namespace-maps? true
-   :seon.print/table? false})
+   :seon.print/namespace-maps? true})
 
 (def ^:private options-generator
   (gen/let [length (gen/one-of [(gen/return nil) (gen/choose 0 8)])
             level (gen/one-of [(gen/return nil) (gen/choose 0 8)])
             width (gen/choose 0 80)
-            namespace-maps? gen/boolean
-            table? (gen/elements [:derived true false])]
+            namespace-maps? gen/boolean]
     {:seon.print/length length
      :seon.print/level level
      :seon.print/width width
-     :seon.print/namespace-maps? namespace-maps?
-     :seon.print/table? table?}))
+     :seon.print/namespace-maps? namespace-maps?}))
 
 (def ^:private admission-caps
   (config/result-caps config/defaults))
@@ -290,7 +287,7 @@
         "every print summary owns a visible label without CSS")))
 
 (defn- emitted-both
-  "Emit one value through the tee sink WITHOUT the public node contract.
+  "Emit one value through the operation stream WITHOUT the public node contract.
 
   `seon.print/emit-both` declares `:seon.print/node`, and an undeclared or
   absent face is not one — under the armed contracts every cluster runs
@@ -299,11 +296,9 @@
   whatever face arrives, both sinks answer with the same flat diagnostic
   rather than a second exception."
   [node options]
-  (let [text (print/text-sink options)
-        hiccup (print/hiccup-sink)]
-    (#'print/emit-node node (print/tee-sink text hiccup) options 0 [])
-    {:seon.print/text (#'print/sink-result text)
-     :seon.print/hiccup (#'print/sink-result hiccup)}))
+  (let [ops (#'print/node-ops node options)]
+    {:seon.print/text (#'print/ops-text ops (:seon.print/width options))
+     :seon.print/hiccup (#'print/ops-hiccup ops)}))
 
 (deftest terminal-emission-is-total-for-an-unknown-or-absent-face
   (doseq [node [{:seon.print/face :fixture/unknown
@@ -312,7 +307,7 @@
     (let [{:seon.print/keys [text hiccup]}
           (emitted-both node no-cuts)
           error (edn/read-string text)]
-      (is (str/includes? text ":seon.print/unknown-face"))
+      (is (str/includes? text ":seon.print/unknown-kind"))
       (is (str/includes? text (pr-str (:seon.print/face node))))
       (is (= (vec (sort-by str (keys node)))
              (get-in error [:seon.error/data :seon.print/node-keys])))
@@ -544,23 +539,6 @@
     (is (str/starts-with? text "#error "))
     (is (= (Throwable->map failure)
            (edn/read-string {:readers {'error identity}} text)))))
-
-(deftest derived-table-is-one-text-and-html-face
-  (let [node (admitted-node [{:a 1 :b 'x} {:a 22 :b 'yy}])
-        options (assoc no-cuts :seon.print/table? :derived)
-        {:seon.print/keys [text hiccup]} (print/emit-both node options)
-        nested-text
-        (print/emit-text
-         (admitted-node {:rows [{:a 1 :b 'x} {:a 22 :b 'yy}]})
-         options)]
-    (is (= "\n| :a | :b |\n|----+----|\n|  1 |  x |\n| 22 | yy |\n"
-           text))
-    (is (= text (lexical-hiccup-text hiccup)))
-    (is (hiccup/hiccup? hiccup))
-    (is (str/includes? (hiccup/->string hiccup) "<table"))
-    (is (= :table (-> hiccup (get-in [3 0]))))
-    (is (= "{:rows [{:a 1, :b x} {:a 22, :b yy}]}" nested-text))
-    (is (not (str/includes? nested-text "| :a |")))))
 
 (deftest whole-value-elision-preserves-count-and-requery
   (let [text (apply str (repeat 512 "z"))

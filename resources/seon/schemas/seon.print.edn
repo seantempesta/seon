@@ -50,7 +50,7 @@
               {:error/message "must be a print node"
                :gen/gen seon.print/node-generator}
               seon.print/node-child?],
-             :node-face
+             :node-kind
              [:multi
               {:dispatch :seon.print/face}
               [:seon.print/nil
@@ -164,7 +164,7 @@
                  [:= :seon.print/object]]
                 ;; ADMISSION MINTS `class`; a node read back
                 ;; from storage may name the same string under
-                ;; the `name` key the other named faces use.
+                ;; the `name` key the other named kinds use.
                 ;; The emitter reads either and says so when a
                 ;; node names neither, so the contract admits
                 ;; every node that emitter is total over.
@@ -258,7 +258,7 @@
              :node
              ;; THE WHOLE TREE, validated one node at a time by
              ;; `seon.print/node?`. Its own generator is declared because the
-             ;; face table above is deliberately not recursive.
+             ;; kind table above is deliberately not recursive.
              [:fn
               {:error/message "must be a print node"
                :gen/gen seon.print/node-generator}
@@ -382,7 +382,7 @@
                 :seon.print/requery-refusal]]],
              :sink
              [:fn
-              {:error/message "must implement seon.print/Sink"
+              {:error/message "must satisfy seon.print/Sink"
                :gen/gen seon.print/sink-generator}
               seon.print/sink?],
              :table?
@@ -392,5 +392,4 @@
               true
               false],
              :width [:int {:min 0, :seon.print/default 72}],
-             :unknown-face :seon.print/face
-             :unknown-face-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the requested print face that is not declared"} [:seon.print/unknown-face :seon.print/unknown-face] [:seon.error/message :seon.error/message]]}
+             :unknown-kind [:maybe :keyword]}

@@ -317,26 +317,17 @@
            (is (= raw (edn/read-string shown)))
            (is (not (str/includes? shown "seon.render/ambiguous")))))))))
 
-(deftest ai-values-never-wrap-at-a-display-width
+(deftest ai-values-are-laid-out-by-fipp-at-their-width
+  ;; fipp breaks between tokens at the caller's width; the laid-out text
+  ;; still reads back whole.
   (let [raw [{:example/title (apply str (repeat 180 "x"))
               :example/count 2 :example/nested {:example/value [1 2 3]}}]
         request (assoc (unit raw) :seon.print/options {:seon.print/width 10})
         shown (value/render-ai request)]
     (is (= raw (edn/read-string shown)))
-    (is (not (str/includes? shown "\n")))
+    (is (< 3 (count (str/split-lines shown))) shown)
     (is (str/includes? (hiccup/->string (value/render-html request))
                        (apply str (repeat 180 "x"))))))
-
-(deftest collection-cardinality-never-changes-values-into-text-tables
-  (doseq [n [0 1 2 3]
-          choice [:derived true false]]
-    (let [rows (mapv (fn [i] {:my.message/id (str i)
-                             :my.message/content "Read this message."}) (range n))
-          projection (value/prepare
-                      (assoc (unit rows) :seon.print/options {:seon.print/table? choice}))
-          shown (value/render-ai-data projection)]
-      (is (= rows (edn/read-string shown)) shown)
-      (is (false? (get-in projection [:seon.render.value/options :seon.print/table?]))))))
 
 (deftest component-members-render-in-declared-position-order
   (support/with-database

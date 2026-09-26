@@ -198,8 +198,7 @@
   #{:seon.print/length
     :seon.print/level
     :seon.print/width
-    :seon.print/namespace-maps?
-    :seon.print/table?})
+    :seon.print/namespace-maps?})
 
 (defn- identity-address
   "The value's OWN address, when the caller supplied none.
@@ -641,19 +640,19 @@
        (let [display (display-value unit)
              profile (render-profile unit)
              raw (:seon.render/value unit)
+             ;; The AI text is laid out by fipp at the options' width and
+             ;; fitted on that same laid-out text, so the budget is charged
+             ;; on exactly the text that is saved.
+             options (cond-> (assoc (print-options unit)
+                                    :seon.print/length nil
+                                    :seon.print/level nil)
+                       (= :single-line (:seon.render.profile/composition profile))
+                       (assoc :seon.print/width 0))
              initial-tree
              (value-node raw unit profile output 0 []
                          (volatile! (:seon.render.profile/token-budget profile)))
              tree (cond-> initial-tree
-                    (= output :seon.render/ai) (print/fit profile))
-             options (cond-> (assoc (print-options unit)
-                                    :seon.print/length nil
-                                    :seon.print/level nil
-                                    :seon.print/table? false)
-                       (or (= output :seon.render/ai)
-                           (= :single-line
-                              (:seon.render.profile/composition profile)))
-                       (assoc :seon.print/width 0))
+                    (= output :seon.render/ai) (print/fit profile options))
              emitted (print/emit-both tree options)
              truncated? (boolean
                          (or (:seon.render.value/more? display)

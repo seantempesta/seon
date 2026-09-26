@@ -1,7 +1,8 @@
 (ns seon.print
-  "Emits admitted print nodes through text and hiccup sinks."
+  "Emits admitted print nodes as fipp-laid-out text and structural hiccup."
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
+            [fipp.engine :as fipp]
             [clojure.test.check.generators :as gen]
             [seon.ai.tokens :as tokens]
             [seon.schema :as schema]
@@ -16,25 +17,40 @@
     (pr-str value)))
 
 (defprotocol Sink
-  (-open [sink node] "Enter one structural node.")
-  (-token [sink face text] "Emit one lexical token.")
-  (-fragment [sink output value] "Emit one terminal producer projection.")
-  (-close [sink node] "Leave one structural node."))
+  "RETAINED ONLY as the measured subject of
+  `seon.instrument-test/restoring-instrumentation-state-never-reinstalls-a-replaced-definition`
+  (`test/seon/instrument_test.clj:1404`). Emission uses no sink: delete this
+  protocol, `text-sink`, `sink?` and `:seon.print/sink` with that assertion."
+  (-options [sink] "The print options the sink was made with."))
+
+(deftype ^:private TextSink [options]
+  Sink
+  (-options [_] options))
 
 (defn sink?
-  "True when a value consumes the admitted emitter event stream."
+  "True when a value satisfies the retained sink protocol."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (satisfies? Sink value))
 
+(defn text-sink
+  "The retained sink over explicit print options."
+  {:malli/schema [:=> [:cat :seon.print/options] :seon.print/sink]}
+  [options]
+  (TextSink. options))
+
+(def sink-generator
+  "A concrete sink for opaque sink-schema generation."
+  (gen/fmap (fn [_] (text-sink {})) (gen/return nil)))
+
 (defn print-number?
-  "True for a number with a stock Clojure print face."
+  "True for a number with a stock Clojure printed form."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (number? value))
 
 (def number-generator
-  "Numbers spanning the stock printer's distinct suffix and special faces."
+  "Numbers spanning the stock printer's distinct suffix and special forms."
   (gen/one-of
    #?(:clj
       [gen/small-integer
@@ -50,20 +66,14 @@
       [gen/small-integer gen/double])))
 
 (defn print-char?
-  "True for a character with a stock Clojure print face."
+  "True for a character with a stock Clojure printed form."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (char? value))
 
 (def char-generator
-  "Characters spanning named and escaped stock print faces."
+  "Characters spanning named and escaped stock printed forms."
   (gen/elements [\a \space \newline \tab \return \backspace \formfeed]))
-
-(declare text-sink)
-
-(def sink-generator
-  "A concrete text sink for opaque sink-schema generation."
-  (gen/fmap (fn [_] (text-sink {})) (gen/return nil)))
 
 (def projected-node-generator
   "A readable terminal projection for recursive print-node generation."
@@ -125,15 +135,15 @@
            nodes)))
 
 (def node-generator
-  "Whole print-node trees spanning every declared face.
+  "Whole print-node trees spanning every declared kind.
 
   `:seon.print/node` is validated by a predicate rather than a recursive
   Malli ref (see `node?`), so the domain declares its own generator instead
-  of inheriting one from a recursive reference. Every face the emitter is
+  of inheriting one from a recursive reference. Every kind the emitter is
   total over appears here, and containers recur under test.check's own
   depth bound."
-  (let [named (fn [face]
-                (gen/fmap (fn [name] {::face face ::name name})
+  (let [named (fn [kind]
+                (gen/fmap (fn [name] {::face kind ::name name})
                           gen/string-alphanumeric))
         scalar
         (gen/one-of
@@ -189,154 +199,6 @@
            (gen/fmap (fn [value] {::face ::throwable ::value value}) inner)])))
      scalar)))
 
-(defn- append-chunk!
-  [state text]
-  (let [text (str text)
-        last-newline (str/last-index-of text "\n")]
-    (vswap! state
-            (fn [current]
-              (-> current
-                  (update ::chunks conj text)
-                  (assoc ::column
-                         (if last-newline
-                           (- (count text) last-newline 1)
-                           (+ (::column current) (count text))))))))
-  nil)
-
-(defn- soft-separator
-  [state width text]
-  (if (and (pos? width) (>= (::column @state) width))
-    (let [punctuation (str/trimr text)
-          indent (apply str (repeat (* 2 (::depth @state)) " "))]
-      (str punctuation "\n" indent))
-    text))
-
-(deftype ^:private TextSink [state options]
-  Sink
-  (-open [_ node]
-    (append-chunk! state (::begin node))
-    (vswap! state update ::depth inc))
-  (-token [_ face text]
-    (append-chunk! state
-                   (if (= ::separator face)
-                     (soft-separator state (::width options) text)
-                     text)))
-  (-fragment [_ output value]
-    (append-chunk! state
-                   (if (= :seon.render/ai output)
-                     value
-                     (literal value))))
-  (-close [_ node]
-    (vswap! state update ::depth dec)
-    (append-chunk! state (::end node))))
-
-(defn text-sink
-  "Create a text sink using explicit print options."
-  {:malli/schema [:=> [:cat :seon.print/options] :seon.print/sink]}
-  [options]
-  (TextSink. (volatile! {::chunks [] ::column 0 ::depth 0}) options))
-
-(defn- face-class
-  [face]
-  (str "seon-print-" (name face)))
-
-(defn- hiccup-token
-  [face text]
-  [:span {:class (face-class face)} text])
-
-(defn- append-hiccup!
-  [state child]
-  (vswap! state
-          (fn [{::keys [stack] :as current}]
-            (if (seq stack)
-              (update-in current [::stack (dec (count stack)) ::children]
-                         conj child)
-              (update current ::roots conj child))))
-  nil)
-
-(defn- close-frame
-  [{::keys [node children]}]
-  (if-let [{::keys [columns rows]} (::table node)]
-    [:div
-     {:class "seon-print-node seon-print-table"
-      :data-seon-path (literal (::path node))}
-     (into [:span {:class "seon-print-content" :hidden "hidden"}] children)
-     [:table {:class "seon-print-visual"}
-      [:thead
-       (into [:tr] (map (fn [column] [:th column])) columns)]
-      (into [:tbody]
-            (map (fn [row]
-                   (into [:tr] (map (fn [cell] [:td cell])) row)))
-            rows)]]
-    [:details
-     {:class (str "seon-print-node " (face-class (::kind node)))
-      :data-seon-path (literal (::path node))}
-     [:summary {:class "seon-print-summary"}
-      (::summary node)]
-     (into [:span {:class "seon-print-content"}] children)]))
-
-(deftype ^:private HiccupSink [state]
-  Sink
-  (-open [_ node]
-    (vswap! state update ::stack conj
-            {::node node
-             ::children [(hiccup-token ::delimiter (::begin node))]}))
-  (-token [_ face text]
-    (append-hiccup! state (hiccup-token face text)))
-  (-fragment [_ output value]
-    (append-hiccup! state
-                    (if (= :seon.render/html output)
-                      value
-                      (hiccup-token ::projected value))))
-  (-close [_ node]
-    (append-hiccup! state (hiccup-token ::delimiter (::end node)))
-    (let [frame (peek (::stack @state))]
-      (vswap! state update ::stack pop)
-      (append-hiccup! state (close-frame frame)))))
-
-(defn hiccup-sink
-  "Create a structural hiccup sink."
-  {:malli/schema [:=> [:cat] :seon.print/sink]}
-  []
-  (HiccupSink. (volatile! {::stack [] ::roots []})))
-
-(deftype ^:private TeeSink [left right]
-  Sink
-  (-open [_ node]
-    (-open left node)
-    (-open right node))
-  (-token [_ face text]
-    (-token left face text)
-    (-token right face text))
-  (-fragment [_ output value]
-    (-fragment left output value)
-    (-fragment right output value))
-  (-close [_ node]
-    (-close left node)
-    (-close right node)))
-
-(defn tee-sink
-  "Create one sink that forwards every event to two sinks."
-  {:malli/schema
-   [:=> [:cat :seon.print/sink :seon.print/sink] :seon.print/sink]}
-  [left right]
-  (TeeSink. left right))
-
-(defn- sink-result
-  [sink]
-  (cond
-    (instance? TextSink sink)
-    (apply str (::chunks @(.-state ^TextSink sink)))
-
-    (instance? HiccupSink sink)
-    (let [roots (::roots @(.-state ^HiccupSink sink))]
-      (case (count roots)
-        0 [:span {:class "seon-print-empty"} ""]
-        1 (first roots)
-        (into [:span {:class "seon-print-root"}] roots)))
-
-    :else nil))
-
 (def ^:private shipped-option-defaults
   (delay
     (let [forms #?(:clj (schema.edn/packaged-forms)
@@ -373,32 +235,6 @@
 (defn- effective-options
   [options]
   (merge (option-defaults) options))
-
-(defn- structural-cut?
-  [options depth]
-  (let [level (::level options)]
-    (and (some? level) (>= depth level))))
-
-(defn- visible-items
-  [items options]
-  (let [length (::length options)]
-    (if (or (nil? length) (<= (count items) length))
-      [items false]
-      [(subvec (vec items) 0 length) true])))
-
-(defn- node-description
-  [node path begin end separator _summary]
-  {::kind (::face node)
-   ::path path
-   ::begin begin
-   ::end end
-   ::separator separator
-   ::summary (str (name (::face node)) " "
-                  (or (:seon.render.data/total node)
-                      (count (or (::items node) (::entries node))))
-                  " items, depth " (count path))})
-
-(declare emit-node emit-text)
 
 (defn value-at
   "Read a path through maps, sets, vectors, and lists without changing keys."
@@ -488,305 +324,275 @@
              (assoc :seon.ai.tokens/estimate
                     (max 1 (tokens/estimate-of-characters (::omitted unit)))))))))
 
-(def ^:private scalar-faces
+;;; EMISSION: one explicit-stack walk turns a node tree into fipp's own
+;;; operation maps (`reference-code/fipp/src/fipp/engine.cljc:12–65`), so
+;;; depth never uses the call stack. Text is fipp's own three stages over that
+;;; stream (`engine.cljc:68–223`); hiccup is a fold over the same stream, so
+;;; the two outputs cannot disagree about a token. A `:text` op carries its
+;;; CSS class and, for a terminal projection, the hiccup it stands for; a
+;;; structural `:begin`/`:end` carries the node it opens.
+
+(def ^:private scalar-kinds
   #{::nil ::boolean ::number ::keyword ::symbol ::char ::string
     ::inst ::uuid ::var ::type ::class ::object ::truncated-string
     ::failed ::elided ::pruned})
 
-(defn- table-row
+(def ^:private structural-kinds
+  #{::vector ::list ::set ::map ::record ::throwable})
+
+(def ^:private nest-depth
+  ;; Indentation stops growing past this many open collections, so a deep
+  ;; value's laid-out text grows linearly with depth, not quadratically.
+  6)
+
+(def ^:private line {:op :line :inline " " :terminate ""})
+
+(defn- css-class
+  [kind]
+  (str "seon-print-" (name kind)))
+
+(defn- text-op
+  ([css text] {:op :text :text text ::class css})
+  ([css text hiccup] {:op :text :text text ::class css ::hiccup hiccup}))
+
+(defn- object-class-text
+  "The class an object node names, under either key it may carry.
+
+  Admission mints `:seon.print/class`; nodes stored before that spelling carry
+  the same string under `:seon.print/name`."
   [node]
-  (when (and (= ::map (::face node))
-             (every? vector? (::entries node)))
-    (into {} (::entries node))))
+  (let [named (or (::class node) (::name node))]
+    (when (and (string? named) (not (str/blank? named)))
+      named)))
 
-(defn- table-data
-  [node options]
-  (let [choice (::table? options)
-        row-maps (mapv table-row (::items node))
-        maps? (every? some? row-maps)
-        columns (when maps? (vec (sort-by #(emit-text % generated-item-options)
-                                         (map first (::entries (first (::items node)))))))
-        same-columns? (and maps?
-                           (every? #(= (set columns) (set (keys %))) row-maps))
-        scalar-values? (and maps?
-                            (every? #(every? (comp scalar-faces ::face val) %)
-                                    row-maps))
-        eligible? (case choice
-                    false false
-                    true (and (seq row-maps) maps? scalar-values?)
-                    :derived (and (<= 2 (count row-maps))
-                                  same-columns? scalar-values?)
-                    false)]
-    (when eligible?
-      (let [render #(emit-text % (assoc options ::width 0 ::table? false))]
-        {::columns (mapv render columns)
-         ::rows (mapv (fn [row]
-                        (mapv #(render (get row % {::face ::nil ::value nil}))
-                              columns))
-                      row-maps)}))))
+(defn- diagnostic-text
+  [message node & {:as extra}]
+  (literal (merge {:seon.error/message message
+                   :seon.error/data {::kind (::face node)
+                                     ::node-keys (vec (sort-by str (keys node)))}}
+                  extra)))
 
-(defn- pad-left
-  [width text]
-  (str (apply str (repeat (- width (count text)) " ")) text))
-
-(defn- table-text
-  [{::keys [columns rows]}]
-  (let [widths (mapv (fn [index]
-                       (apply max
-                              (count (nth columns index))
-                              (map #(count (nth % index)) rows)))
-                     (range (count columns)))
-        line (fn [cells]
-               (str "| "
-                    (str/join " | "
-                              (mapv pad-left widths cells))
-                    " |\n"))]
-    (str "\n"
-         (line columns)
-         "|" (str/join "+" (map #(apply str (repeat (+ % 2) "-")) widths))
-         "|\n"
-         (apply str (map line rows)))))
-
-(defn- emit-table
-  [node table sink path]
-  (let [descriptor (assoc (node-description node path "" "" "" "table")
-                          ::kind ::table
-                          ::table table)]
-    (-open sink descriptor)
-    (-token sink ::table (table-text table))
-    (-close sink descriptor)))
-
-(defn- emit-separated
-  [children sink options depth path separator child-emitter]
-  (doseq [[index child] (map-indexed vector children)]
-    (when (pos? index)
-      (-token sink ::separator separator))
-    (child-emitter child sink options (inc depth) (conj path index))))
-
-(defn- emit-sequential
-  [node sink options depth path begin end separator]
-  (if (structural-cut? options depth)
-    (-token sink ::prune "#")
-    (let [items (::items node)
-          [visible cut?] (visible-items items options)
-          descriptor (node-description node path begin end separator
-                                       (str begin end " " (count items) " items"))]
-      (-open sink descriptor)
-      (emit-separated visible sink options depth path separator emit-node)
-      (when cut?
-        (when (seq visible) (-token sink ::separator separator))
-        (-token sink ::elision "..."))
-      (-close sink descriptor))))
+(defn- leaf-ops
+  [node depth]
+  (let [value (::value node)]
+    (case (::face node)
+      ::nil [(text-op ::nil "nil")]
+      (::boolean ::number ::keyword ::symbol ::char ::string)
+      [(text-op (::face node) (literal value))]
+      (::inst ::uuid) [(text-op ::tag (literal value))]
+      ::var [(text-op ::symbol (str "#'" (::name node)))]
+      (::type ::class) [(text-op ::symbol (::name node))]
+      ::object [(text-op ::object
+                         (if-some [class-text (object-class-text node)]
+                           (str "#object[" class-text
+                                (when-some [rep (::rep node)] (str " " rep)) "]")
+                           ;; An empty `#object[]` would read as content.
+                           (diagnostic-text "The object print node names no class." node)))]
+      ::truncated-string [(text-op ::string (literal (str value "…")))]
+      ::failed [(text-op ::object (str "#object[" (::class node) " "
+                                       (literal (str "projection failed: " (::message node))) "]"))]
+      ::elided [(text-op ::elision (render-elision-ai node))]
+      ::pruned [(text-op ::prune "#")]
+      ::projected (let [output (:seon.render/output node)]
+                    (cond
+                      (and (pos? depth) (= :seon.render/ai output))
+                      [(text-op ::string (literal value))]
+                      (= :seon.render/ai output)
+                      [(text-op ::projected value [:span {:class (css-class ::projected)} value])]
+                      :else [(text-op ::projected (literal value) value)]))
+      ;; The walk is the terminal outward boundary: an undeclared or absent
+      ;; kind is one flat diagnostic value, never a second exception.
+      [(text-op ::object (diagnostic-text "The admitted value has no declared print kind." node
+                                          ::unknown-kind (::face node)))])))
 
 (defn- same-key-namespace
   [entries]
-  (when (seq entries)
+  (when (< 1 (count entries))
     (let [key-nodes (map first entries)
-          values (map ::value key-nodes)
-          namespaces (map namespace values)]
-      (when (and (every? #(contains? #{::keyword ::symbol} (::face %))
-                         key-nodes)
+          namespaces (map (comp namespace ::value) key-nodes)]
+      (when (and (every? #(contains? #{::keyword ::symbol} (::face %)) key-nodes)
                  (every? some? namespaces)
                  (apply = namespaces))
         (first namespaces)))))
 
 (defn- unqualified-key-node
   [node]
-  (let [value (::value node)]
-    (assoc node ::value
-           (if (= ::keyword (::face node))
-             (keyword (name value))
-             (symbol (name value))))))
+  (update node ::value (if (= ::keyword (::face node))
+                         #(keyword (name %))
+                         #(symbol (name %)))))
 
-(defn- emit-entry
-  [entry sink options depth path]
-  (if (= ::elided (::face entry))
-    ;; An elision is ordinary data with count, path, profile, and requery
-    ;; evidence. Emitting a bare marker here discarded every one of those
-    ;; facts specifically when a map was cut.
-    (emit-node entry sink options depth path)
-    (let [[key-node value-node] entry]
-      (emit-node key-node sink options (inc depth) (conj path 0))
-      (-token sink ::separator " ")
-      (emit-node value-node sink options (inc depth) (conj path 1)))))
+(declare flat-text)
 
-(defn- emit-map-like
-  [node sink options depth path begin summary]
-  (if (structural-cut? options depth)
-    (-token sink ::prune "#")
-    (let [entries (::entries node)
-          length (::length options)
-          visible-count (if (nil? length) (count entries)
-                            (min length (count entries)))
-          visible (subvec (vec entries) 0 visible-count)
-          cut? (< visible-count (count entries))
-          keys-present (into #{} (keep #(when (vector? %) (::value (first %)))) visible)
-          elision-key (first (remove keys-present
-                                     (map #(keyword "seon.print"
-                                                    (str "elision" (when (pos? %) (str "-" %))))
-                                          (range))))
-          visible (mapv #(if (= ::elided (::face %))
-                           [{::face ::keyword ::value elision-key} %]
-                           %) visible)
-          data-entries (filterv vector? visible)
-          lifted-ns (when (::namespace-maps? options)
-                      (same-key-namespace data-entries))
-          visible (if lifted-ns
-                    (mapv (fn [entry]
-                            (if (vector? entry)
-                              (update entry 0 unqualified-key-node)
-                              entry))
-                          visible)
-                    visible)
-          begin (str (when lifted-ns (str "#:" lifted-ns)) begin)
-          descriptor (node-description node path begin "}" ", " summary)]
-      (-open sink descriptor)
-      (emit-separated visible sink options depth path ", " emit-entry)
-      (when cut?
-        (when (seq visible) (-token sink ::separator ", "))
-        (-token sink ::elision "..."))
-      (-close sink descriptor))))
-
-(defmulti ^:private emit
-  (fn [node _sink _options _depth _path]
-    (::face node)))
-
-(defmethod emit ::nil
-  [_ sink _ _ _]
-  (-token sink ::nil "nil"))
-
-(doseq [[face token-face]
-        [[::boolean ::boolean]
-         [::number ::number]
-         [::keyword ::keyword]
-         [::symbol ::symbol]
-         [::char ::char]
-         [::string ::string]
-         [::inst ::tag]
-         [::uuid ::tag]]]
-  (defmethod emit face
-    [node sink _ _ _]
-    (-token sink token-face (literal (::value node)))))
-
-(defmethod emit ::vector
-  [node sink options depth path]
-  (emit-sequential node sink options depth path "[" "]" " "))
-
-(defmethod emit ::list
-  [node sink options depth path]
-  (emit-sequential node sink options depth path "(" ")" " "))
-
-(defmethod emit ::set
-  [node sink options depth path]
-  (if (structural-cut? options depth)
-    (-token sink ::prune "#")
-    (let [items (::items node)
-          [visible cut?] (visible-items items options)
-          descriptor (node-description node path "#{" "}" " "
-                                       (str "#{} " (count items) " members"))]
-      (-open sink descriptor)
-      (emit-separated visible sink options depth path " " emit-node)
-      (when cut?
-        (when (seq visible) (-token sink ::separator " "))
-        (-token sink ::elision "..."))
-      (-close sink descriptor))))
-
-(defmethod emit ::map
-  [node sink options depth path]
-  (emit-map-like node sink options depth path "{"
-                 (str "{} " (count (::entries node)) " keys")))
-
-(defmethod emit ::record
-  [node sink options depth path]
-  (emit-map-like node sink options depth path
-                 (str "#" (::name node) "{")
-                 (str "#" (::name node))))
-
-(defmethod emit ::var
-  [node sink _ _ _]
-  (-token sink ::symbol (str "#'" (::name node))))
-
-(defmethod emit ::type
-  [node sink _ _ _]
-  (-token sink ::symbol (::name node)))
-
-(defmethod emit ::class
-  [node sink _ _ _]
-  (-token sink ::symbol (::name node)))
-
-(defn- object-class-text
-  "The class an object node names, under either key it may carry.
-
-  Admission mints `:seon.print/class`; nodes stored before that spelling — and
-  the other named faces this grammar shares brackets with — carry the same
-  string under `:seon.print/name`. Reading both is what stops a node that
-  KNOWS its class from printing as `#object[]`."
+(defn- ordered-children
+  "A node's children in canonical order: map keys and unordered set members
+  by their flat text, elisions last."
   [node]
-  (let [named (or (::class node) (::name node))]
-    (when (and (string? named) (not (str/blank? named)))
-      named)))
+  (case (::face node)
+    (::map ::record)
+    (sort-by #(if (vector? %) [0 (flat-text (first %))] [1 ""]) (::entries node))
+    ::set (if (::ordered? node)
+            (::items node)
+            (sort-by #(if (= ::elided (::face %)) [1 ""] [0 (flat-text %)]) (::items node)))
+    (::items node)))
 
-(defmethod emit ::object
-  [node sink _ _ _]
-  (-token sink ::object
-          (if-some [class-text (object-class-text node)]
-            (str "#object[" class-text
-                 (when-some [rep (::rep node)] (str " " rep)) "]")
-            ;; AN EMPTY `#object[]` IS THE ABSENCE-READS-AS-CONTENT CLASS: the
-            ;; reader cannot tell an unrenderable value from an empty one. A
-            ;; node that names no class says so, in the same flat diagnostic
-            ;; shape the unknown face uses.
-            (literal
-             {:seon.error/message "The object print node names no class."
-              :seon.error/data
-              {::face (::face node)
-               ::node-keys (vec (sort-by str (keys node)))}}))))
+(defn- summary
+  [node path]
+  (str (name (::face node)) " "
+       (or (:seon.render.data/total node)
+           (count (or (::items node) (::entries node))))
+       " items, depth " (count path)))
 
-(defmethod emit ::truncated-string
-  [node sink _ _ _]
-  (-token sink ::string (literal (str (::value node) "…"))))
+(defn- collection-work
+  "The work one collection expands to: its open group, members and close."
+  [node options depth path]
+  (let [children (vec (ordered-children node))
+        length (::length options)
+        shown (if (and length (< length (count children))) (into [] (take length) children) children)
+        cut? (< (count shown) (count children))
+        map-like? (contains? #{::map ::record} (::face node))
+        lifted (when (and (= ::map (::face node)) (::namespace-maps? options))
+                 (same-key-namespace (filterv vector? shown)))
+        shown (if lifted (mapv #(if (vector? %) (update % 0 unqualified-key-node) %) shown) shown)
+        open (case (::face node)
+               ::vector "[" ::list "(" ::set "#{"
+               ::map (str (when lifted (str "#:" lifted)) "{")
+               ::record (str "#" (::name node) "{"))
+        close (case (::face node) ::vector "]" ::list ")" "}")
+        indent (fn [offset] {:op :nest :offset (if (< depth nest-depth) offset 0)})
+        d (inc depth)
+        fill? (and (not map-like?) (every? (comp scalar-kinds ::face) shown))
+        member (fn [index child]
+                 (let [child-path (conj path index)]
+                   (cond
+                     (and map-like? (vector? child))
+                     [{:op :begin} [(first child) d (conj child-path 0)] (indent 2)
+                      line [(second child) d (conj child-path 1)] {:op :outdent} {:op :end}]
+                     (or (zero? index) map-like? (not fill?)) [[child d child-path]]
+                     :else [{:op :begin} line [child d child-path] {:op :end}])))
+        separator (fn [index]
+                    (cond (zero? index) []
+                          map-like? [(text-op ::separator ",") line]
+                          fill? []
+                          :else [line]))]
+    (-> (reduce-kv (fn [work index child]
+                     (reduce conj! work (into (separator index) (member index child))))
+                   (transient [{:op :begin ::open (assoc node ::path path)}
+                               (text-op ::delimiter open)
+                               (indent (if (= ::set (::face node)) 2 1))])
+                   shown)
+        (cond-> cut? (as-> work (reduce conj! work
+                                        (conj (if (seq shown)
+                                                (if fill? [line] (separator (count shown)))
+                                                [])
+                                              (text-op ::elision "...")))))
+        (conj! {:op :outdent})
+        (conj! (text-op ::delimiter close))
+        (conj! {:op :end ::close node})
+        persistent!)))
 
-(defmethod emit ::failed
-  [node sink _ _ _]
-  (-token sink ::object
-          (str "#object[" (::class node) " "
-               (literal (str "projection failed: " (::message node))) "]")))
+(defn- node-work
+  [node options depth path]
+  (let [level (::level options)]
+    (cond
+      (and (contains? structural-kinds (::face node)) level (>= depth level))
+      [(text-op ::prune "#")]
 
-(defmethod emit ::throwable
-  [node sink options depth path]
-  (if (structural-cut? options depth)
-    (-token sink ::prune "#")
-    (do
-      (-token sink ::tag "#error ")
-      (emit-node (::value node) sink options depth (conj path ::throwable)))))
+      (= ::throwable (::face node))
+      [(text-op ::tag "#error ") [(::value node) depth (conj path ::throwable)]]
 
-(defmethod emit ::elided
-  [node sink _ _ _]
-  (-token sink ::elision (render-elision-ai node)))
+      (contains? structural-kinds (::face node))
+      (collection-work node options depth path)
 
-(defmethod emit ::projected
-  [node sink _ depth _]
-  (if (and (pos? depth) (= :seon.render/ai (:seon.render/output node)))
-    (-token sink ::string (literal (::value node)))
-    (-fragment sink (:seon.render/output node) (::value node))))
+      :else (leaf-ops node depth))))
 
-(defmethod emit ::pruned
-  [_ sink _ _ _]
-  (-token sink ::prune "#"))
+(defn- node-ops
+  "One node tree as fipp operation maps, walked with an explicit stack."
+  [node options]
+  (loop [stack (list [node 0 []])
+         ops (transient [])]
+    (if-some [work (first stack)]
+      (if (map? work)
+        (recur (rest stack) (conj! ops work))
+        (let [[node depth path] work]
+          (recur (into (rest stack) (rseq (node-work node options depth path))) ops)))
+      (persistent! ops))))
 
-(defmethod emit :default
-  [node sink _ _ _]
-  ;; The emitter is the terminal outward boundary and therefore cannot turn a
-  ;; diagnostic value into a second exception. An undeclared or absent face is
-  ;; rendered as the same flat error value in both sinks, naming the observed
-  ;; face and node keys. Admission should make this branch rare; totality makes
-  ;; it safe and diagnosable when an old artifact or host caller reaches it.
-  (-token sink ::object
-          (literal
-           {:seon.error/message "The admitted value has no declared print face."
-            :seon.error/data
-            {::face (::face node)
-             ::node-keys (vec (sort-by str (keys node)))} :seon.print/unknown-face (:?_current-ns_?/face node)})))
+(defn- ops-text
+  "Lay operations out to `width` with fipp's own stages; width 0 is one line."
+  [ops width]
+  (let [out #?(:clj (StringBuilder.) :cljs (goog.string.StringBuffer.))
+        append #?(:clj (fn ([result] result)
+                         ([^StringBuilder result ^String text] (.append result text)))
+                  :cljs (fn ([result] result) ([result text] (.append result text))))]
+    (if (pos? width)
+      (let [layout {:width width}]
+        (transduce (comp fipp/annotate-rights (fipp/annotate-begins layout) (fipp/format-nodes layout))
+                   append out ops))
+      (transduce (keep #(case (:op %) :text (:text %) :line (:inline %) nil)) append out ops))
+    (str out)))
+
+(defn- flat-text
+  [node]
+  (case (::face node)
+    (::boolean ::number ::keyword ::symbol ::char ::string) (literal (::value node))
+    (ops-text (node-ops node generated-item-options) 0)))
+
+(defn- close-frame
+  [{::keys [node children]}]
+  [:details
+   {:class (str "seon-print-node " (css-class (::face node)))
+    :data-seon-path (literal (::path node))}
+   [:summary {:class "seon-print-summary"} (summary node (::path node))]
+   (into [:span {:class "seon-print-content"}] children)])
+
+(defn- ops-hiccup
+  "The same operations as structural hiccup: a `<details>` per collection."
+  [ops]
+  (let [append (fn [{::keys [stack] :as state} child]
+                 (if (seq stack)
+                   (update-in state [::stack (dec (count stack)) ::children] conj child)
+                   (update state ::roots conj child)))
+        {::keys [roots]}
+        (reduce (fn [state {:keys [op] :as event}]
+                  (cond
+                    (::open event) (update state ::stack conj {::node (::open event) ::children []})
+                    (::close event) (let [frame (peek (::stack state))]
+                                      (append (update state ::stack pop) (close-frame frame)))
+                    (= :text op) (append state (or (::hiccup event)
+                                                   [:span {:class (css-class (::class event))} (:text event)]))
+                    (= :line op) (append state [:span {:class (css-class ::separator)} (:inline event)])
+                    :else state))
+                {::stack [] ::roots []}
+                ops)]
+    (case (count roots)
+      0 [:span {:class "seon-print-empty"} ""]
+      1 (first roots)
+      (into [:span {:class "seon-print-root"}] roots))))
+
+(defn emit-text
+  "Emit one admitted node as REPL-faithful text laid out to its width."
+  {:malli/schema
+   [:=> [:cat :seon.print/node :seon.print/options] :string]}
+  [node options]
+  (let [options (effective-options options)]
+    (ops-text (node-ops node options) (::width options))))
+
+(defn emit-hiccup
+  "Emit one admitted node as structural hiccup."
+  {:malli/schema
+   [:=> [:cat :seon.print/node :seon.print/options] :seon.render/hiccup]}
+  [node options]
+  (ops-hiccup (node-ops node (effective-options options))))
+
+(defn emit-both
+  "Emit text and hiccup from one operation stream."
+  {:malli/schema
+   [:=> [:cat :seon.print/node :seon.print/options] :seon.print/result]}
+  [node options]
+  (let [options (effective-options options)
+        ops (node-ops node options)]
+    {::text (ops-text ops (::width options))
+     ::hiccup (ops-hiccup ops)}))
 
 (defn- scalar-node-value
   [node]
@@ -853,76 +659,15 @@
                  lookup (conj lookup))))
       found)))
 
-(defn- emit-node
-  [node sink options depth path]
-  (let [order-key #(emit-text % generated-item-options)
-        node (case (::face node)
-               (::map ::record)
-               (update node ::entries
-                       #(vec (sort-by (fn [entry]
-                                        (if (vector? entry)
-                                          [0 (order-key (first entry))] [1 ""])) %)))
-               ::set
-               (if (::ordered? node) node
-                 (update node ::items
-                       #(vec (sort-by (fn [item]
-                                        (if (= ::elided (::face item))
-                                          [1 ""] [0 (order-key item)])) %))))
-               node)]
-   (if (and (contains? #{::vector ::list} (::face node))
-           (zero? depth)
-           (not (structural-cut? options depth)))
-    (if-let [table (table-data node options)]
-      (emit-table node table sink path)
-      (emit node sink options depth path))
-    (emit node sink options depth path)))
-  sink)
-
-(defn emit-text
-  "Emit one admitted node as REPL-faithful text."
-  {:malli/schema
-   [:=> [:cat :seon.print/node :seon.print/options] :string]}
-  [node options]
-  (let [options (effective-options options)
-        sink (text-sink options)]
-    (emit-node node sink options 0 [])
-    (sink-result sink)))
-
-(defn emit-hiccup
-  "Emit one admitted node as structural hiccup."
-  {:malli/schema
-   [:=> [:cat :seon.print/node :seon.print/options] :seon.render/hiccup]}
-  [node options]
-  (let [options (effective-options options)
-        sink (hiccup-sink)]
-    (emit-node node sink options 0 [])
-    (sink-result sink)))
-
-(defn emit-both
-  "Emit text and hiccup from one traversal through a tee sink."
-  {:malli/schema
-   [:=> [:cat :seon.print/node :seon.print/options] :seon.print/result]}
-  [node options]
-  (let [options (effective-options options)
-        text (text-sink options)
-        hiccup (hiccup-sink)
-        sink (tee-sink text hiccup)]
-    (emit-node node sink options 0 [])
-    {::text (sink-result text)
-     ::hiccup (sink-result hiccup)}))
-
-(def ^:private structural-faces
-  #{::vector ::list ::set ::map ::record ::throwable})
-
 (defn node-child?
   "True when `value` occupies one print node's child slot."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (and (map? value) (keyword? (::face value))))
 
-(def ^:private node-face-validator*
-  ;; THE FACE TABLE IS CORE-OWNED AND SHIPPED: no cluster, agent or delta
-  ;; registers a `:seon.print/node-face`, so one validator compiled from the
+(def ^:private node-kind-validator*
+  ;; THE KIND TABLE IS CORE-OWNED AND SHIPPED: no cluster, agent or delta
+  ;; registers a `:seon.print/node-kind`, so one validator compiled from the
   ;; packaged declaration population is the same answer every projection
   ;; would give — and compiling it per call (or reading the declaration
   ;; population per call, which is what asking the ambient registry costs)
@@ -931,22 +676,11 @@
     (schema/projection-validator
      (schema/declaration-projection
       #?(:clj (schema.edn/packaged-forms) :cljs {}))
-     ::node-face)))
+     ::node-kind)))
 
-(defn- node-face-validator
+(defn- node-kind-validator
   []
-  @node-face-validator*)
-
-(defn- node-children
-  [node]
-  (case (::face node)
-    (::vector ::list ::set) (::items node)
-    (::map ::record) (into []
-                           (mapcat (fn [entry]
-                                     (if (vector? entry) entry [entry])))
-                           (::entries node))
-    ::throwable [(::value node)]
-    nil))
+  @node-kind-validator*)
 
 (defn node?
   "True when `value` is a print node, one node at a time.
@@ -956,18 +690,18 @@
   value answered `java.lang.StackOverflowError` — an `Error` escaping a
   total operation at exactly the boundary law 2.4 requires a flat value
   from, and the walk that produced the node is iterative. Each node is
-  checked against the declared per-face shape (`:seon.print/node-face`)
-  and its children are handed back to this loop, so the face table is
+  checked against the declared per-kind shape (`:seon.print/node-kind`)
+  and its children are handed back to this loop, so the kind table is
   declared once and the depth a contract admits is the depth admission
   admits."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
-  (let [valid? (node-face-validator)]
+  (let [valid? (node-kind-validator)]
     (loop [pending (list value)]
       (if-some [remaining (seq pending)]
         (let [node (first remaining)]
           (if (valid? node)
-            (recur (into (rest remaining) (node-children node)))
+            (recur (into (rest remaining) (child-nodes node)))
             false))
         true))))
 
@@ -1206,7 +940,7 @@
         path (or (:seon.render.data/path node) path)]
     (cond
       (and (>= depth (:seon.render.profile/max-depth profile))
-           (contains? structural-faces face)
+           (contains? structural-kinds face)
            (seq (or (::items node) (::entries node))))
       (structural-elision node profile path)
 
@@ -1251,13 +985,17 @@
   exceed the budget; that is the honest answer, and the cut it carries says
   which bound it hit."
   {:malli/schema
-   [:=> [:cat :seon.print/node :seon.render.profile/profile]
-    :seon.print/node]}
-  [node profile]
+   [:function
+    [:=> [:cat :seon.print/node :seon.render.profile/profile] :seon.print/node]
+    [:=> [:cat :seon.print/node :seon.render.profile/profile :seon.print/options]
+     :seon.print/node]]}
+  ([node profile] (fit node profile (default-options)))
+  ([node profile options]
   (let [budget (:seon.render.profile/token-budget profile)
         initial-children (:seon.render.profile/max-children profile)
         initial-depth (:seon.render.profile/max-depth profile)
-        options (assoc (default-options) ::length nil ::level nil)
+        ;; Measured on the text the caller will save: the same width and cuts.
+        options (assoc options ::length nil ::level nil)
         initial-strings (or (:seon.render.profile/max-string-length profile)
                             (tokens/estimate-chars budget))]
     (loop [child-limit initial-children
@@ -1296,7 +1034,7 @@
           (> depth-limit 1)
           (recur child-limit (dec depth-limit) string-limit)
 
-          :else candidate)))))
+          :else candidate))))))
 
 (schema/register-core-predicate! 'seon.print/sink? sink?)
 (schema/register-core-predicate! 'seon.print/node? node?)
