@@ -50,7 +50,12 @@
     ;; These ordinary public functions are therefore visible to the derived
     ;; custody census and require the same explicit review as prior members.
     ['seon.cluster.boot/connection :seon.db/connection]
-    ['seon.sci.eval/fork-candidate-ctx :seon.sci.eval/ctx]
+    ;; The install gate's disposable copy: a fresh isolated branch of the
+    ;; agent's commit (the agent entrance) and the evaluating context forked
+    ;; onto it. It returns only the custody it just acquired; the gate
+    ;; releases it.
+    ['seon.sci.eval/disposable-copy :seon.sci.eval/ctx]
+    ['seon.sci.eval/disposable-copy :seon.db/connection]
     ;; Reviewed 2026-09-26. `seon.db/branch-connection` borrows the
     ;; connection Datahike's registry already holds for a branch, as
     ;; `active-branch-connection` does; it opens nothing.

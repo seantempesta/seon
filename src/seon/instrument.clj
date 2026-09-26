@@ -469,7 +469,8 @@
           [:map [:seon.config.error/max-evidence-bytes {:optional true}
             :seon.config.error/max-evidence-bytes]
            [:seon.program/definition-digest {:optional true} :seon.program/definition-digest]
-           [:seon.profile/context {:optional true} :seon.profile/context]]]
+           [:seon.profile/context {:optional true} :seon.profile/context]
+           [:seon.call-preparation/snapshot {:optional true} :seon.call-preparation/snapshot]]]
      :seon.instrument/callable]]}
   ([function-symbol spec-edn projection mode caps f]
    (wrap-interpreted function-symbol spec-edn projection mode caps f {}))
@@ -576,6 +577,16 @@
                :seon.error/expected-shape (seon.id/digest 64 [(:fn-name data) (::arity-ordinal data) check])
                :seon.error/location {:seon.error.location/length 0})))))
 
+(defn calling-environment
+  "The world of the evaluation calling now: its context's environment, naming
+  that context for suppliers that act on it, or nil when none runs."
+  {:malli/schema [:=> [:cat] [:or :nil :seon.env/environment]]}
+  []
+  ;; Called on every prepared call, so it reads the arm and scopes unarmed.
+  (when-let [ctx ((mi/-f->original kernel/world-ctx))]
+    (when-let [environment ((mi/-f->original env/of) ctx)]
+      ((mi/-f->original env/scope) environment {:my.program/executing-ctx ctx}))))
+
 (defn- compiled-wrapper
   {:malli/schema [:=> [:cat :seon.schema/projection :qualified-symbol :seon.schema/value :seon.instrument/callable :seon.sci.admit/caps [:? [:or :nil :map]]] :seon.instrument/callable]}
   [projection function-symbol authored original caps & [policy]]
@@ -673,12 +684,19 @@
                       (let [[declared-schema value] (refusal kind data)]
                         (throw (ex-info (:seon.error/message value)
                                         (with-meta value {:seon.error/declared-schema declared-schema}))))))}
-         original options)]
+         original options)
+        current (:seon.call-preparation/snapshot policy)
+        plan (when current
+               ((mi/-f->original call-preparation/arm-plan) current projection function-symbol))]
     ;; Malli's instrumented function IS the wrapper: every refusal throws, in
     ;; both core-error modes, so no value outside the arity's declared output
     ;; can escape. Who is responsible, and whether it is stored, is decided by
     ;; the boundary that owns the evaluation's world, never here.
-    wrapped))
+    ;; A contract declaring a supplied default composes the preparation step
+    ;; outside it; every other contract gets none (`arm-plan` is nil).
+    (if plan
+      (call-preparation/preparing current plan calling-environment wrapped)
+      wrapped)))
 
 (defn- contract-definitions
   "Canonical declarations closed over by a function contract, following Malli refs."
@@ -814,6 +832,7 @@
     max-evidence-bytes :seon.config.error/max-evidence-bytes
     supplied-projection :seon.schema/projection
     digests :seon.profile/definition-digests
+    database :seon.db/db
     :as request}]
   (cond
     (not (#{:panic :record} mode))
@@ -838,11 +857,17 @@
           :seon.error/offending :seon.instrument/missing-projection})
         (let [defaults config/defaults
               caps (or caps (config/result-caps defaults))
-              policy {:seon.config/on-core-error mode
-                      :seon.sci.admit/caps caps
-                      :seon.config.error/max-evidence-bytes
-                      (or max-evidence-bytes
-                          (:seon.config.error/max-evidence-bytes defaults))}
+              ;; The adoption's supplied-default rows, read once: each
+              ;; wrapper's plan is decided from them at arming.
+              current (when database (call-preparation/snapshot database projection))
+              _ (when (db/read-refusal? current)
+                  (throw (ex-info (:seon.error/message current) current)))
+              policy (cond-> {:seon.config/on-core-error mode
+                              :seon.sci.admit/caps caps
+                              :seon.config.error/max-evidence-bytes
+                              (or max-evidence-bytes
+                                  (:seon.config.error/max-evidence-bytes defaults))}
+                       current (assoc :seon.call-preparation/snapshot current))
               changed (find request :seon.instrument/changed-identities)
               candidates (when changed
                            (into #{}

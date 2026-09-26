@@ -19,7 +19,6 @@
             [sci.core :as sci]
             [sci.impl.utils :as sci.utils]
             [sci.interrupt :as sci.interrupt]
-            [seon.call-preparation :as call-preparation]
             [seon.db :as db]
             [seon.error :as error]
             [seon.error.refusal :as error.refusal]
@@ -330,7 +329,7 @@
      ::measurable (not (neg? allocated-at-start))}))
 
 (defn- own-arm
-  [guard time-limit-ms]
+  [guard ctx time-limit-ms]
   ;; THE ONE ADMISSION: only an outer execution owns an arm (nested work
   ;; inherits it), so pressure refuses new work and cuts none admitted. The
   ;; unpressured path is one volatile read, before any contracted call.
@@ -345,6 +344,7 @@
         ;; how an interrupted `my.shell/run` left its child running for its
         ;; natural lifetime while its receipt stayed open.
         armed (assoc base
+                     ::ctx ctx
                      ::deadline-nanos
                      (+ (::started-at base) (* (long time-limit-ms) 1000000)))]
     (.set thread-arm armed)
@@ -388,11 +388,16 @@
                  {:seon.error.evidence/attribute ::guard
                   :seon.error.evidence/value :seon.error/unknown}}))))
     (if-let [armed (current-thread-arm guard)]
-      {:interrupt-fn (::interrupt-fn guard)
-       ::built-in-calls (fn [] @(::built-in-calls armed))
-       ::stop! (constantly nil)
-       ::record #(record armed %)}
-      (own-arm guard time-limit-ms))))
+      ;; Nested work shares the governing arm's deadline and counters (the
+      ;; same objects), and is the evaluation of ITS context for its extent:
+      ;; the arm names the context whose world a call receives (`world-ctx`).
+      (let [^ThreadLocal thread-arm (::thread-arm guard)]
+        (.set thread-arm (assoc armed ::ctx ctx))
+        {:interrupt-fn (::interrupt-fn guard)
+         ::built-in-calls (fn [] @(::built-in-calls armed))
+         ::stop! #(.set thread-arm armed)
+         ::record #(record armed %)})
+      (own-arm guard ctx time-limit-ms))))
 
 (defn arm
   "Arm `ctx` on this thread and return its stop, record, and observers.
@@ -442,6 +447,36 @@
       (work armed)
       (finally
         ((::stop! armed))))))
+
+(defn world-ctx
+  "The context of the evaluation governing this thread, or nil when none runs.
+
+  Every entrance arms (`with-arm`: an evaluation, a named invocation, a test
+  run), and the arm names the context it evaluates for its extent, nested work
+  included; `current-arm`/`adopt-arm` carry it across threads. The context's
+  environment is the world a call receives its supplied defaults from, so a
+  closure made in one context and called in another evaluation uses the
+  CALLING evaluation's world. Reading does not mark the arm travelled."
+  {:malli/schema [:=> [:cat] [:or :nil :seon.sci.eval/ctx]]}
+  []
+  (::ctx (.get ^ThreadLocal (::thread-arm @process-guard))))
+
+(defn with-world-ctx
+  "Run `work` with `ctx` as the governing arm's context for its extent.
+
+  For work inside an evaluation that acts on another context than the one
+  evaluating (an admitted program operation on a fork or base). Unarmed work
+  runs unchanged: there is no evaluation whose world it could name."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx [:fn clojure.core/ifn?]]
+                  [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The caller's body determines its return type; scoping the arm's context preserves that exact result."}]]}
+  [ctx work]
+  (let [^ThreadLocal thread-arm (::thread-arm @process-guard)
+        armed (.get thread-arm)]
+    (if-not armed
+      (work)
+      (try (.set thread-arm (assoc armed ::ctx ctx))
+           (work)
+           (finally (.set thread-arm armed))))))
 
 (defn arm?
   "True for a live arm value as handed out by `current-arm`."
@@ -524,9 +559,12 @@
                   :seon.sci.kernel/arm]}
   [time-limit-ms]
   (let [base (new-armed)
-        armed (assoc base
-                     ::deadline-nanos
-                     (+ (::started-at base) (* (long time-limit-ms) 1000000)))]
+        world (world-ctx)
+        armed (cond-> (assoc base
+                             ::deadline-nanos
+                             (+ (::started-at base) (* (long time-limit-ms) 1000000)))
+                ;; The detached work serves the submitting evaluation's world.
+                world (assoc ::ctx world))]
     ;; It exists only to be carried, so it is travelled from birth.
     (.set ^AtomicBoolean (::travelled armed) true)
     (assoc armed
@@ -737,22 +775,9 @@
                            :seon.error.evidence/value function-symbol}
                           :seon.fn/sym function-symbol
                           :seon.error/expected :seon.sci.eval/invocation-result})))
-            (let [;; The SECOND of the two ruled call-preparation
-                  ;; entrances. SCI's analyzed call path hooks itself; a
-                  ;; named invocation applies the Var directly, so it
-                  ;; consults the same hook here rather than growing a
-                  ;; second preparation implementation. A `reduced`
-                  ;; return is preparation refusing — the callee body is
-                  ;; never entered and the flat value is the result,
-                  ;; admitted like any other.
-                  ;; A function value is an inline agent function: no Var,
-                  ;; so no named call preparation; its arguments are applied.
-                  prepared (if function-value
-                             (vec arguments)
-                             (call-preparation/hook ctx sci-var (vec arguments)))
-                  value (if (reduced? prepared)
-                          (deref prepared)
-                          (apply sci-var prepared))
+            (let [;; The callee's own armed wrapper supplies its declared
+                  ;; defaults from this arm's context (`world-ctx`).
+                  value (apply sci-var arguments)
                   invocation-record (record-fn :ok)]
               (admit/admit-value
                (cond->

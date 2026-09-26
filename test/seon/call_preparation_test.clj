@@ -1,6 +1,7 @@
 (ns seon.call-preparation-test
   "Recurring proof for P17 S1: declared supplied defaults, the plan derived
-  from program facts, and the cluster-local cache's basis boundary."
+  from program facts, and the armed wrapper preparing a call from the calling
+  evaluation's world."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
@@ -10,9 +11,11 @@
             [seon.db :as db]
             [seon.env :as env]
             [seon.error :as error]
+            [seon.instrument :as instrument]
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
+            [seon.sci.kernel :as kernel]
             [seon.test-support :as test-support]))
 
 ;;; ---------------------------------------------------------------------------
@@ -228,13 +231,12 @@
      (fn [connection]
        (test-support/transacted! connection (synthetic-population (db/db connection) :sample/marker))
        (let [database @connection
-             current (cp/snapshot database (projection))
-             call-state (cp/state)]
+             current (cp/snapshot database (projection))]
          (is (empty? (:seon.call-preparation/refusals current))
              "the synthetic supplier's declared return agrees with its row")
          (is (contains? (:seon.call-preparation/supplied-defaults current)
                         :sample/marker))
-         (let [plan (cp/plan call-state database current 'sample/target)]
+         (let [plan (cp/plan-for database current 'sample/target)]
            (is (false? (:seon.call-preparation/empty? plan)))
            (is (= [{:seon.fn.argument/index 1
                     :seon.call-preparation/key :sample/marker
@@ -246,9 +248,8 @@
            (is (= [] (get-in plan [:seon.call-preparation/by-supplied-count 2
                                    :seon.call-preparation/inserts]))
                "the exact two-argument call invokes unchanged")
-           (is (identical? plan (cp/plan call-state database current
-                                         'sample/target))
-               "the compiled plan is cached, not recompiled per call")))))))
+           (is (= plan (cp/arm-plan current (db/carried-projection database) 'sample/target))
+               "arming decides the same plan from the contract alone")))))))
 
 (deftest an-undeclared-function-gets-an-empty-plan
   (test-support/with-database
@@ -256,9 +257,11 @@
      (test-support/transacted! connection (synthetic-population (db/db connection) :sample/marker))
      (let [database @connection
            current (cp/snapshot database (projection))
-           plan (cp/plan (cp/state) database current 'sample/supply-marker)]
+           plan (cp/plan-for database current 'sample/supply-marker)]
        (is (true? (:seon.call-preparation/empty? plan))
-           "the supplier itself declares no supplied default")))))
+           "the supplier itself declares no supplied default")
+       (is (nil? (cp/arm-plan current (db/carried-projection database) 'sample/supply-marker))
+           "so its armed wrapper gets no preparation step")))))
 
 (defn- with-program-less-connection
   "Call `body` with a history-less connection whose schema declares no
@@ -279,24 +282,16 @@
 (deftest an-unreadable-program-graph-is-not-an-uncontracted-function
   (test-support/with-database
    (fn [connection]
-     (let [current (cp/snapshot @connection (projection))
-           call-state (cp/state)]
+     (let [current (cp/snapshot @connection (projection))]
        (testing "a function absent from a readable program graph has no plan"
-         (is (nil? (cp/plan-for @connection current 'sample/absent-function)))
-         (is (nil? (cp/plan call-state @connection current 'sample/absent-function))))
+         (is (nil? (cp/plan-for @connection current 'sample/absent-function))))
        (with-program-less-connection
         (fn [unreadable-connection]
           (let [unreadable @unreadable-connection
                 refused (cp/plan-for unreadable current 'seon.db/pull)]
             (is (true? (:seon.db/invalid-read refused))
                 "the read error is returned, never nil \"not contracted\"")
-            (is (= 'seon.db/q (:seon.db/refused-read-operation refused)))
-            (is (true? (:seon.db/invalid-read
-                        (cp/plan call-state unreadable current 'seon.db/pull)))
-                "plan passes it on")
-            (is (not (contains? (:seon.call-preparation/plans @call-state)
-                                'seon.db/pull))
-                "and caches nothing, so the next call reads again"))))))))
+            (is (= 'seon.db/q (:seon.db/refused-read-operation refused))))))))))
 
 (deftest the-row-basis-reads-history-or-refuses
   (let [basis #'cp/newest-row-transaction
@@ -344,7 +339,7 @@
                              :sample/marker))
              "and it is not installed, so it can never supply a value")
          (is (true? (:seon.call-preparation/empty?
-                     (cp/plan (cp/state) database current 'sample/target)))
+                     (cp/plan-for database current 'sample/target)))
              "the target therefore has nothing to inject"))))))
 
 (deftest a-row-naming-an-absent-supplier-is-refused
@@ -380,10 +375,9 @@
             callback, so the basis comparison alone must refresh"
     (test-support/with-database
      (fn [connection]
-       (let [call-state (cp/state)
-             cold @connection
+       (let [cold @connection
              before (cp/snapshot cold (projection))
-             warm (cp/plan call-state cold before 'sample/target)]
+             warm (cp/plan-for cold before 'sample/target)]
          (is (nil? warm) "sample/target is not in the program graph yet")
          (test-support/transacted! connection (synthetic-population (db/db connection) :sample/marker))
          ;; No sleep and no listener: read the connection, compare the basis.
@@ -396,8 +390,8 @@
            (is (contains? (:seon.call-preparation/supplied-defaults after)
                           :sample/marker))
            (is (= [:sample/marker]
-                  (slot-keys (cp/plan call-state after-database after
-                                      'sample/target)
+                  (slot-keys (cp/plan-for after-database after
+                                          'sample/target)
                              1))
                "and the plan compiled against the new row")))))))
 
@@ -405,12 +399,11 @@
   (test-support/with-database
    (fn [connection]
      (test-support/transacted! connection (synthetic-population (db/db connection) :sample/marker))
-     (let [call-state (cp/state)
-           first-database @connection
+     (let [first-database @connection
            first-snapshot (cp/snapshot first-database
                                                (projection))
-           first-plan (cp/plan call-state first-database first-snapshot
-                               'sample/target)]
+           first-plan (cp/plan-for first-database first-snapshot
+                                   'sample/target)]
        (test-support/transacted! connection [(test-support/namespace-row @connection 'unrelated)])
        (let [next-database @connection
              next-snapshot (cp/snapshot next-database
@@ -423,24 +416,22 @@
                 (:seon.call-preparation/basis-t next-snapshot))
              "but the row basis did not move")
          (is (= first-plan
-                (cp/plan call-state next-database next-snapshot
-                         'sample/target))
+                (cp/plan-for next-database next-snapshot
+                             'sample/target))
              "so the compiled plan survives unchanged"))))))
 
 (deftest a-redefined-contract-replaces-its-held-plan
-  ;; A contract change leaves the row basis where it was. The plan is held
-  ;; against the snapshot derivation, which that change replaces, so the next
-  ;; call plans from the new contract instead of the held one.
+  ;; A contract change leaves the row basis where it was; the plan is a
+  ;; function of the contract, so the new contract plans its own slot.
   (test-support/with-database
    (fn [connection]
      (test-support/transacted! connection (synthetic-population (db/db connection) :sample/marker))
-     (let [call-state (cp/state)
-           fixed-projection (projection)
+     (let [fixed-projection (projection)
            inserted (fn [plan] (mapv :seon.fn.argument/index
                                      (get-in plan [:seon.call-preparation/by-supplied-count 1
                                                    :seon.call-preparation/inserts])))
            first-snapshot (cp/snapshot @connection fixed-projection)
-           first-plan (cp/plan call-state @connection first-snapshot 'sample/target)]
+           first-plan (cp/plan-for @connection first-snapshot 'sample/target)]
        (is (= [1] (inserted first-plan)))
        (test-support/transacted!
         connection
@@ -451,7 +442,7 @@
          (is (= (:seon.call-preparation/basis-t first-snapshot)
                 (:seon.call-preparation/basis-t next-snapshot))
              "the row basis did not move")
-         (is (= [0] (inserted (cp/plan call-state @connection next-snapshot 'sample/target)))
+         (is (= [0] (inserted (cp/plan-for @connection next-snapshot 'sample/target)))
              "the redefined contract's slot is the one supplied"))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -460,7 +451,6 @@
 
 (def ^:private program-members
   [:seon.call-preparation/supplied-defaults
-   :seon.call-preparation/prepared-symbols
    :seon.call-preparation/validators])
 
 (defn- unrelated-row
@@ -532,9 +522,9 @@
   ;; CLASS (issue call-preparation-snapshot-answers-an-older-database-with-a-newer-program):
   ;; one call-state atom held the LATEST snapshot and answered every value at
   ;; or below its basis with it, so an older value, or a branch sharing the
-  ;; cluster context, read a newer program's prepared symbols. REPL at
-  ;; 052552039: both read the newer snapshot. A snapshot is a function of the
-  ;; value it answers.
+  ;; cluster context, read a newer program's plans. REPL at 052552039: both
+  ;; read the newer snapshot. A snapshot and a plan are functions of the
+  ;; value they answer.
   (test-support/with-database
    (fn [connection]
      (let [database-0 @connection
@@ -546,18 +536,20 @@
                 @connection 'probe.cp/f
                 "(defn f {:malli/schema [:=> [:cat :seon.db/database-value :int] :int]} [db x] x)")])
            database-1 @connection
-           prepared? #(contains? (:seon.call-preparation/prepared-symbols %) 'probe.cp/f)
+           prepared? (fn [database current]
+                       (false? (:seon.call-preparation/empty?
+                                (cp/plan-for database current 'probe.cp/f))))
            newer (cp/snapshot database-1 (db/carried-projection database-1))
            older (cp/snapshot database-0 (db/carried-projection database-0))]
-       (is (prepared? newer) "the newer program prepares the added function")
-       (is (not (prepared? older)) "the older value is answered by its own program")
+       (is (prepared? database-1 newer) "the newer program prepares the added function")
+       (is (not (prepared? database-0 older)) "the older value is answered by its own program")
        (is (= (db/basis-t database-0) (:seon.call-preparation/checked-through-t older)))
        (is (identical? newer (cp/snapshot database-1 (db/carried-projection database-1)))
            "a committed value's second read is the held snapshot")
        (test-support/with-database
         (fn [sibling]
           (let [sibling-snapshot (cp/snapshot @sibling (db/carried-projection @sibling))]
-            (is (not (prepared? sibling-snapshot))
+            (is (not (prepared? @sibling sibling-snapshot))
                 "a sibling branch at the earlier commit reads its own program"))))))))
 
 (deftest a-report-changing-no-read-attribute-reads-its-committed-parent
@@ -588,15 +580,14 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest a-second-cluster-compiles-from-its-own-facts
-  (testing "warming a plan for one identity in cluster A never lets cluster B
-            reuse it; B is a sovereign branch with its own state"
+  (testing "a plan for one identity in cluster A is never cluster B's; B
+            compiles from its own facts"
     (test-support/with-database
      (fn [connection-a]
        (test-support/transacted! connection-a (synthetic-population (db/db connection-a) :sample/marker))
-       (let [state-a (cp/state)
-             database-a @connection-a
+       (let [database-a @connection-a
              snapshot-a (cp/snapshot database-a (projection))
-             plan-a (cp/plan state-a database-a snapshot-a 'sample/target)]
+             plan-a (cp/plan-for database-a snapshot-a 'sample/target)]
          (is (= [:sample/marker] (slot-keys plan-a 1)))
          (test-support/with-database
           (fn [connection-b]
@@ -606,12 +597,11 @@
                                       (filterv #(not (contains?
                                                       % :seon.call-preparation/key))
                                                (synthetic-population (db/db connection-b) :sample/marker)))
-            (let [state-b (cp/state)
-                  database-b @connection-b
+            (let [database-b @connection-b
                   snapshot-b (cp/snapshot database-b
                                                   (projection))
-                  plan-b (cp/plan state-b database-b snapshot-b
-                                  'sample/target)]
+                  plan-b (cp/plan-for database-b snapshot-b
+                                      'sample/target)]
               (is (not (contains? (:seon.call-preparation/supplied-defaults
                                    snapshot-b)
                                   :sample/marker))
@@ -622,7 +612,7 @@
                   "and A's plan is untouched")))))))))
 
 ;;; ---------------------------------------------------------------------------
-;;; The suppliers, and the sci hook they compose with
+;;; The suppliers, and the armed wrapper that calls them
 ;;; ---------------------------------------------------------------------------
 
 (defn- environment-for
@@ -646,58 +636,78 @@
            (is (= 'seon.db/unsupplied-custody-error (:seon.error/operation refusal)))
            (is (nil? (:seon.db/binding (:seon.error/data refusal))))))))))
 
-(defn- probe-ctx
-  "A scratch ctx binding this namespace's probes the way a cluster does.
+(def ^:private probe-vars
+  {'probe-received-database? #'probe-received-database?
+   'probe-received-connection? #'probe-received-connection?
+   'probe-received-both #'probe-received-both
+   'probe-nilable-second #'probe-nilable-second
+   'probe-repeated-database #'probe-repeated-database
+   'probe-untouched #'probe-untouched
+   'probe-current-database #'probe-current-database
+   'probe-shortcut #'probe-shortcut
+   'probe-connection-name #'probe-connection-name})
 
-  RAW host Vars, deliberately. `seon.sci.eval/bind-first-party-namespaces!`
-  installs a compiled first-party function as its real `clojure.lang.Var`
-  unless some namespace row REFERS it, so a raw host Var in a callee
-  position is the ordinary production shape rather than an exotic one.
-  Binding `sci/new-var` forwarders here instead would have made every
-  assertion below pass while every real first-party call stayed
-  unprepared — which is exactly the defect this slice exists to kill."
-  [connection]
-  (-> (sci/init
-       {:namespaces
-        {'seon.call-preparation-test
-         {'probe-received-database? #'probe-received-database?
-          'probe-received-connection? #'probe-received-connection?
-          'probe-received-both #'probe-received-both
-          'probe-nilable-second #'probe-nilable-second
-          'probe-repeated-database #'probe-repeated-database
-          'probe-untouched #'probe-untouched
-          'probe-current-database #'probe-current-database
-          'probe-shortcut #'probe-shortcut
-          'probe-connection-name #'probe-connection-name}}
-        :call-preparation-hook cp/hook})
-      (assoc :seon.schema/projection (projection))
-      (env/carry (environment-for connection))
-      (cp/install)))
+(defn- arm-probes!
+  "Arm the probes as a cluster arms its loaded program (`instrument/apply!`):
+  each contract compiled in the fixture's projection, each call preparation
+  decided from the fixture's supplied-default rows."
+  [database]
+  (let [result (instrument/apply!
+                {:seon.config/on-core-error :panic
+                 :seon.schema/projection (db/carried-projection database)
+                 :seon.db/db database
+                 :seon.instrument/changed-identities
+                 (into #{} (map (fn [probe-var] [:seon.fn/sym (symbol probe-var)])) (vals probe-vars))})]
+    (is (nil? (:seon.instrument/registration-observation result)) (pr-str result))))
+
+(defn- probe-ctx
+  "A scratch ctx binding this namespace's probes the way a cluster does, whose
+  evaluations run in `world-connection`'s world.
+
+  RAW host Vars, deliberately: `seon.sci.eval/bind-first-party-namespaces!`
+  installs a compiled first-party function as its real `clojure.lang.Var`, so
+  the call reaches the Var's armed root, which prepares it from the world of
+  the evaluation calling (`armed-eval`)."
+  [rows-connection world-connection]
+  (arm-probes! @rows-connection)
+  (-> (sci/init {:namespaces {'seon.call-preparation-test probe-vars}})
+      (assoc :seon.schema/projection (projection)
+             ::kernel/guard (::kernel/guard (kernel/context-options)))
+      (env/carry (environment-for world-connection))))
+
+(defn- armed-eval
+  "Evaluate `source` in `ctx` as an evaluation: under the kernel arm naming it."
+  [ctx source]
+  (kernel/with-arm ctx 5000 (fn [_] (sci/eval-string* ctx source))))
 
 (defn- probe
   [ctx source]
-  (sci/eval-string* ctx (str "(seon.call-preparation-test/" source ")")))
+  (armed-eval ctx (str "(seon.call-preparation-test/" source ")")))
 
-(deftest unreadable-custody-refuses-the-call-instead-of-running-it-unprepared
-  ;; The outer branch hands the projection the probe context is built with.
+(deftest unavailable-custody-refuses-the-call-instead-of-running-it-unprepared
+  ;; The world's connection is released: its supplier cannot read a database.
   (test-support/with-database
-   (fn [_]
+   (fn [connection]
+     (test-support/transacted! connection database-rows)
      (with-program-less-connection
-      (fn [connection]
-        (let [ctx (probe-ctx connection)]
-          (d/release connection)
+      (fn [released]
+        (let [ctx (probe-ctx connection released)]
+          (d/release released)
           (reset! entered 0)
           (let [refused (probe ctx "probe-received-database? \"a\"")]
-            (is (true? (:seon.db/invalid-read refused))
-                "the call's result is the database read error")
-            (is (= 'seon.db/db (:seon.db/refused-read-operation refused)))
+            (is (= :seon.db/db (:seon.call-preparation/unavailable-key refused))
+                "the call's result names the default its world could not supply")
             (is (= (symbol #'probe-received-database?)
                    (:seon.call-preparation/target-symbol refused))
                 "naming the call it refused")
             (is (zero? @entered) "the body never ran without its database"))
-          (testing "a context without call-preparation state is still inert"
-            (is (= "ab" (sci/eval-string* (sci/init {:call-preparation-hook cp/hook})
-                                          "(str \"a\" \"b\")"))))))))))
+          (testing "outside any evaluation there is no world: a call that needs
+                    one refuses by name instead of running unprepared"
+            (reset! entered 0)
+            (is (= :seon.db/db
+                   (:seon.call-preparation/unavailable-key
+                    ((var probe-received-database?) "a"))))
+            (is (zero? @entered)))))))))
 
 (deftest a-compiled-first-party-call-is-prepared
   (testing "positional, map-key, caller-wins, supplied-nil, undeclared and
@@ -705,7 +715,7 @@
     (test-support/with-database
      (fn [connection]
        (test-support/transacted! connection database-rows)
-       (let [ctx (probe-ctx connection)]
+       (let [ctx (probe-ctx connection connection)]
          (testing "positional: the elided slot arrives at its recorded index"
            (is (true? (probe ctx "probe-received-database? \"a\""))))
          (testing "map key: an absent REQUIRED key is filled"
@@ -751,7 +761,7 @@
          (testing "an undeclared function is untouched"
            (is (= "a" (probe ctx "probe-untouched \"a\""))))
          (testing "nested: an interpreted caller's direct call is prepared too"
-           (is (true? (sci/eval-string*
+           (is (true? (armed-eval
                        ctx
                        (str "(do (defn outer [q] "
                             "(seon.call-preparation-test/probe-received-database?"
@@ -763,10 +773,10 @@
     (test-support/with-database
      (fn [connection]
        (test-support/transacted! connection database-rows)
-       (let [ctx (probe-ctx connection)
+       (let [ctx (probe-ctx connection connection)
              current (cp/snapshot @connection (projection))
-             plan (cp/plan (cp/state) @connection current
-                           'seon.call-preparation-test/probe-received-both)]
+             plan (cp/plan-for @connection current
+                               'seon.call-preparation-test/probe-received-both)]
          (is (= #{1 3} (set (keys (:seon.call-preparation/by-supplied-count
                                    plan))))
              "partial placements are decided from values, never enumerated")
@@ -776,14 +786,14 @@
          (is (= [true true] (probe ctx "probe-received-both \"a\""))
              "the one-argument call receives both declared values")
          (is (= [true true]
-                (sci/eval-string*
+                (armed-eval
                  ctx
                  (str "(seon.call-preparation-test/probe-received-both \"a\" "
                       "(seon.call-preparation-test/probe-current-database))")))
              "an explicit trailing database survives a leading omission")
          (reset! entered 0)
          (let [refusal
-               (sci/eval-string*
+               (armed-eval
                 ctx
                 (str "(seon.call-preparation-test/probe-repeated-database "
                      "(seon.call-preparation-test/probe-current-database))"))]
@@ -800,12 +810,12 @@
     (test-support/with-database
      (fn [connection]
        (test-support/transacted! connection database-rows)
-       (let [ctx (probe-ctx connection)]
+       (let [ctx (probe-ctx connection connection)]
          (is (= :supplied-database (probe ctx "probe-shortcut \"a\" \"b\""))
              "two non-database arguments mean the three-arity with its
               leading database elided")
          (is (= :explicit-database
-                (sci/eval-string*
+                (armed-eval
                  ctx
                  (str "(seon.call-preparation-test/probe-shortcut "
                       "(seon.call-preparation-test/probe-current-database)"
@@ -813,7 +823,7 @@
              "an explicit database value at the same count keeps the DECLARED
               two-arity — the caller always wins")
          (is (= :supplied-database
-                (sci/eval-string*
+                (armed-eval
                  ctx
                  (str "(seon.call-preparation-test/probe-shortcut "
                       "(seon.call-preparation-test/probe-current-database)"
@@ -897,24 +907,45 @@
 
 (deftest two-clusters-supply-their-own-custody
   (testing "two sovereign contexts live in one JVM; each call is supplied the
-            connection of the context it ran under, and neither shares the
-            other's plan cache"
+            connection of the evaluation it ran under, through one armed Var"
     (test-support/with-database
      (fn [connection-a]
        (test-support/transacted! connection-a database-rows)
        (test-support/with-database
         (fn [connection-b]
           (test-support/transacted! connection-b database-rows)
-          (let [ctx-a (probe-ctx connection-a)
-                ctx-b (probe-ctx connection-b)
+          (let [ctx-a (probe-ctx connection-a connection-a)
+                ctx-b (probe-ctx connection-b connection-b)
                 name-a (probe ctx-a "probe-connection-name")
                 name-b (probe ctx-b "probe-connection-name")]
             (is (string? name-a))
             (is (not= name-a name-b)
-                "each context supplied its OWN cluster's connection")
-            (is (not (identical? (get ctx-a cp/carrier)
-                                 (get ctx-b cp/carrier)))
-                "and the plan caches are separate state"))))))))
+                "each evaluation supplied its OWN world's connection"))))))))
+
+(deftest ^{:seon/tasks #{"d6fa80e274ac" "0261d4d9bbe6"}}
+  a-function-made-in-one-context-uses-the-calling-evaluations-world
+  ;; CLASS: a closure's call read its defaults from the context it was CREATED
+  ;; in (SCI's captured ctx), so a function acquired from rows into a
+  ;; connection-less base, or made in the agent's context and called from a
+  ;; disposable copy, ran with no world or the wrong one. The world is the
+  ;; calling evaluation's.
+  (test-support/with-database
+   (fn [connection-a]
+     (test-support/transacted! connection-a database-rows)
+     (test-support/with-database
+      (fn [connection-b]
+        (let [made-in (probe-ctx connection-a connection-a)
+              _ (armed-eval made-in
+                            (str "(defn connection-name [] "
+                                 "(seon.call-preparation-test/probe-connection-name))"))
+              copy (-> (sci/fork made-in)
+                       (assoc ::kernel/guard (::kernel/guard made-in))
+                       (env/carry (environment-for connection-b)))
+              name-a (armed-eval made-in "(user/connection-name)")
+              name-b (armed-eval copy "(user/connection-name)")]
+          (is (= (pr-str (db/connection-identity connection-a)) name-a))
+          (is (= (pr-str (db/connection-identity connection-b)) name-b)
+              "the same closure, called from the copy's evaluation, used the copy's world")))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The class this slice kills: a mechanism green on a scratch ctx and inert
@@ -940,21 +971,17 @@
                                 :seon.db/connection connection
                                 :seon.schema/projection acquired-projection}))
              live (env/carry-state ctx (env/environment-state environment))]
-         (is (cp/state? (get ctx cp/carrier))
-             "acquisition installs the call-preparation state; without this
-              the hook reads nil and is silently inert at every call site")
-         (is (some? (:call-preparation-hook ctx))
-             "and the acquired context carries the hook itself")
+         (arm-probes! @connection)
          (testing "a contracted first-party function outside seon.db, called
                    with its declared connection elided, receives it"
            (is (true?
-                (sci/eval-string*
+                (armed-eval
                  live
                  (str "(seon.call-preparation-test/probe-received-connection?"
                       " {})")))))
          (testing "and an elided positional database value arrives too"
            (is (true?
-                (sci/eval-string*
+                (armed-eval
                  live
                  (str "(seon.call-preparation-test/probe-received-database?"
                       " \"a\")"))))))))))
@@ -981,20 +1008,14 @@
                                 :seon.db/connection connection
                                 :seon.agent/id "missing"
                                 :seon.schema/projection acquired-projection}))
-             observed (atom nil)
-             live (-> (env/carry-state ctx (env/environment-state environment))
-                      (assoc :call-preparation-hook
-                             (fn [runtime callee arguments]
-                               (reset! observed (cp/callee-identity callee))
-                               (cp/hook runtime callee arguments))))
+             live (env/carry-state ctx (env/environment-state environment))
              current (cp/snapshot @connection acquired-projection)
-             invocation-plan
-             (cp/plan (get ctx cp/carrier) @connection current 'my.plan/plan)
+             invocation-plan (cp/plan-for @connection current 'my.plan/plan)
              omitted (try
-                       (sci/eval-string* live "(my.plan/plan)")
+                       (armed-eval live "(my.plan/plan)")
                        (catch Throwable cause cause))
              explicit
-             (sci/eval-string*
+             (armed-eval
               live
               (str "(my.plan/plan {:seon.db/db "
                    "(seon.call-preparation-test/probe-current-database), "
@@ -1007,8 +1028,6 @@
            (is (db/database-value? (:seon.db/db (first prepared))))
            (is (= "missing"
                   (:seon.agent/id (first prepared)))))
-         (is (= 'my.plan/plan @observed)
-             "SCI hands the hook the indexed callee identity")
          (is (not (instance? Throwable omitted))
              (some-> ^Throwable omitted ex-message))
          (is (= "missing" (:my.plan/missing-agent-id omitted)))
@@ -1020,13 +1039,12 @@
    (fn [connection]
      (test-support/transacted! connection database-rows)
      (let [captured (atom [])
-           call-state (cp/state)
            sym 'seon.call-preparation-test/probe-current-database
            invocation-plan
            (binding [db/*read-evidence-sink* captured]
              (let [current (cp/snapshot @connection
                                                 (projection))]
-               (cp/plan call-state @connection current sym)))
+               (cp/plan-for @connection current sym)))
            evidence (db/read-evidence
                      @captured {:seon.db/retain-read-results? true})
            attributes
@@ -1060,7 +1078,7 @@
              (binding [db/*read-evidence-sink* warm-captured]
                (let [current (cp/snapshot @connection
                                                   (projection))]
-                 (cp/plan call-state @connection current sym)))
+                 (cp/plan-for @connection current sym)))
              warm-evidence (db/read-evidence @warm-captured)]
          (is (= invocation-plan warm-plan))
          (test-support/transacted! connection [(test-support/namespace-row @connection 'unrelated-evidence-two)])

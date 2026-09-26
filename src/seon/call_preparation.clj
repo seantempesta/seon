@@ -2,13 +2,14 @@
   "Call preparation: declared supplied defaults, and the invocation plan
   derived from the program graph.
 
-  `call preparation` is sci's own name for the seam
-  (`:call-preparation-hook`, `reference-code/sci/src/sci/core.cljc:309`) and
-  the owner-ruled name for this mechanism (seon-env PRD ruling 5). A
-  SUPPLIED DEFAULT is a value the runtime hands to a call for an argument
-  the callee's contract DECLARES and the caller OMITTED. The function's own
-  `:malli/schema` is the complete request; there is no function-side
-  injection metadata, no annotation, and no roster.
+  The callee's armed contract wrapper prepares its own calls: at arming,
+  `arm-plan` decides from the contract and the supplied-default rows whether
+  the function declares anything suppliable, and only then composes
+  `preparing` outside the Malli wrapper. A SUPPLIED DEFAULT is a value the
+  runtime hands to a call for an argument the callee's contract DECLARES and
+  the caller OMITTED. The function's own `:malli/schema` is the complete
+  request; there is no function-side injection metadata, no annotation, and
+  no roster.
 
   Three facts make a value suppliable, and they live in the database as
   ordinary initialization rows: `:seon.call-preparation/key`,
@@ -18,10 +19,11 @@
   row plus one ordinary contracted function.
 
   Suppliers read the ENVIRONMENT, never a dynamic var (seon-env PRD ruling
-  2, amending the r2 draft's sealed `seon.db/*conn*` invariant). The hook
-  receives the RUNTIME ctx, the environment rides that ctx, and the
-  supplier is called with it — so a closure handed to a virtual thread
-  still resolves its own cluster's custody.
+  2). The environment is the CALLING evaluation's: the kernel arm names the
+  context each evaluation runs (`seon.sci.kernel/world-ctx`) and travels with
+  its work across threads, so a function made in one context and called from
+  another evaluation (a test member, a disposable check) supplies that
+  evaluation's world.
 
   Two modes of database temporality fall out of this with no mode flag
   (PRD ruling 6): a caller that omits `:seon.db/db` gets `(d/db
@@ -29,10 +31,9 @@
   caller that passes a database value keeps it unchanged through the whole
   call. Elide for current, pass for consistent.
 
-  The acquired context installs this hook and its cluster-local plan
-  state. Full arities and the cached all-default shape retain precedence;
-  other shorter calls require a unique placement under the declared slot
-  schemas before any missing value is supplied."
+  Full arities and the all-default shape retain precedence; other shorter
+  calls require a unique placement under the declared slot schemas before any
+  missing value is supplied."
   (:require [clojure.core.cache.wrapped :as cache]
             [clojure.test.check.generators :as gen]
             [datahike.api :as d]
@@ -41,7 +42,6 @@
             [malli.registry :as mr]
             [malli.instrument :as mi]
             [seon.db :as db]
-            [seon.env :as env]
             [seon.error.refusal :as error]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
@@ -49,51 +49,22 @@
 (set! *warn-on-reflection* true)
 
 ;;; ---------------------------------------------------------------------------
-;;; The cluster-local state
+;;; The snapshot memo's holder type
 ;;; ---------------------------------------------------------------------------
 
 (defn state?
-  "True for the atom holding one cluster's supplied defaults and plans."
+  "True for the atom a projection holds its snapshot memo in."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (instance? clojure.lang.IAtom value))
 
 (schema/register-core-predicate! 'seon.call-preparation/state? state?)
 
+;; The generator the packaged `:seon.call-preparation/state` declaration names.
 (def state-generator
   (gen/fmap atom (gen/return {})))
 
 (schema.edn/load! {})
-
-(defn state
-  "Create the plan cache owned by ONE acquired cluster context.
-
-  `sci/fork` copies only `:env`, so every fork of a cluster's ctx shares
-  this atom by identity. It holds plans only, each against the snapshot
-  derivation it was compiled from; the snapshot itself is a function of the
-  database value a call runs against (`snapshot`), never a latest one held
-  here, so a fork on another branch or an older value reads its own."
-  {:malli/schema [:=> [:cat] :seon.call-preparation/state]}
-  []
-  (atom {:seon.call-preparation/plans {}}))
-
-(def carrier
-  "The ONE key call-preparation state reads under on a sci ctx."
-  :seon.call-preparation/state)
-
-(defn install
-  "Attach fresh call-preparation state to a cluster's sci ctx.
-
-  `seon.sci.eval/cluster-ctx` calls this beside the projection state, so
-  every acquired cluster context carries it and every per-turn
-  `sci/fork` inherits it. The hook reads exactly this key: a ctx without
-  it is a ctx where call preparation is inert, which is the correct
-  behaviour for a scratch or non-Seon context and the WRONG behaviour for
-  a cluster — an installed hook with no state was silently inert at every
-  live call site until this call landed."
-  {:malli/schema [:=> [:cat :map] :map]}
-  [ctx]
-  (assoc ctx carrier (state) :my.program/base-ctx ctx))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Errors as values
@@ -311,40 +282,12 @@
   (into {} (map (fn [[_ candidate]] [(:seon.call-preparation/schema-key candidate) candidate]))
         supplied-defaults))
 
-(defn- prepared-symbols
-  "Every identity in this cluster whose contract could be prepared.
-
-  THE HOT-PATH GATE: an identity absent here provably declares no
-  suppliable positional slot and no suppliable map entry, inline or named,
-  so the hook returns its arguments after one set lookup — no plan
-  compilation, no supplier call. Derived once per snapshot from the
-  contracts of the database value the snapshot is derived from.
-
-  A conservative SUPERSET: over-including costs one cached empty plan;
-  under-including would silently skip preparation."
-  {:malli/schema [:=> [:cat [:map-of :qualified-symbol [:vector :map]]
-                       [:map-of :qualified-keyword :seon.call-preparation/supplied-default]]
-                  :seon.call-preparation/prepared-symbols]}
-  [contracts by-schema]
-  (into #{}
-        (keep (fn [[sym arities]]
-                (when (some (fn [{schema-key :seon.call-preparation/schema-key entries ::map-entries}]
-                              (or (contains? by-schema schema-key)
-                                  (some (fn [[entry-key _ value]]
-                                          (= entry-key (:seon.call-preparation/key (get by-schema value))))
-                                        entries)))
-                            (mapcat ::arity-arguments arities))
-                  sym)))
-        contracts))
-
 (defn- derive-snapshot
   "The snapshot's program-derived members, from one database value.
 
   Every row is proved against the program graph here; incoherent rows
   become refusals and are NOT installed. `basis-t` is the newest
-  transaction touching any row fact — the third element of every plan
-  cache key. It also carries the hot-path gate: the set of identities that
-  could be prepared at all. `checked-through-t` names one database value,
+  transaction touching any row fact. `checked-through-t` names one database value,
   not the program, so `snapshot` adds it after the memo."
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.schema/projection]
@@ -400,7 +343,6 @@
         (if (db/read-refusal? basis)
           basis
           {:seon.call-preparation/supplied-defaults admitted
-           :seon.call-preparation/prepared-symbols (prepared-symbols contracts (by-schema-key admitted))
            :seon.call-preparation/validators
            (into {}
                  (comp (remove second)
@@ -451,8 +393,8 @@
   so no second key for the projection is needed and none outlives it."
   {:malli/schema [:=> [:cat :seon.schema/projection] [:or :nil [:fn seon.call-preparation/state?]]]}
   [projection]
-  ;; On the hook's path (below `snapshot`), so its callees run unarmed for
-  ;; cost; their contracts hold at every other caller.
+  ;; Below `snapshot`, which arming reads per contract, so its callees run
+  ;; unarmed for cost; their contracts hold at every other caller.
   (let [memo ((mi/-f->original schema/projection-cache-value)
               projection ::snapshot-memo
               #(cache/lru-cache-factory {} :threshold (::snapshot-cache-size snapshot-cache-policy)))]
@@ -516,8 +458,8 @@
   `checked-through-t` is the basis of `database` itself.
 
   The completed snapshot is held first by the value's commit, which fixes
-  its basis: the hook's per-call answer is one identity read and one
-  lookup (`[::snapshot commit]`), run unarmed below `hook`. Every value is
+  its basis: a repeated answer is one identity read and one lookup
+  (`[::snapshot commit]`). Every value is
   answered by its own snapshot, so an older value or another branch sharing
   one cluster context never reads a newer program's members."
   {:malli/schema
@@ -671,10 +613,10 @@
       (assoc :seon.call-preparation/argument-validators (mapv (comp m/validator ::argument-schema) arguments)))))
 
 (defn- planned-arities
-  "`sym`'s carried contract arities planned against `current`, or nil."
-  [database current sym]
+  "`sym`'s contract arities in `projection` planned against `current`, or nil."
+  [projection current sym]
   (let [index (by-schema-key (:seon.call-preparation/supplied-defaults current))]
-    (some->> (get (contract-arities (db/carried-projection database)) sym)
+    (some->> (get (contract-arities projection) sym)
              (mapv #(arity-plan index %)))))
 
 (defn supplied-map-entries
@@ -696,31 +638,10 @@
              sort
              vec))))
 
-(defn plan-for
-  "Compile one function identity's invocation plan from its contract.
-
-  The database value's carried projection holds the compiled contract
-  (`contract-arities`); its slots and map entries, inline or named, are
-  joined to the acquired supplied-default rows by declared schema name.
-  Returns nil when the identity has no contract in this cluster's program
-  graph, and the database owner's read error when its rows could not be
-  read: an unreadable program graph is never \"not contracted\"."
-  {:malli/schema
-   [:=> [:cat :seon.db/database-value :seon.call-preparation/snapshot
-         :seon.fn/sym]
-    [:or :seon.call-preparation/plan :nil :seon.db/error-result]]}
-  [database current sym]
-  ;; The plan is a function of the supplied-default rows and this contract.
-  ;; The snapshot memo and the projection's index record no read, so these
-  ;; two reads are what enter the caller's evidence.
-  (let [reads [(db/q database row-query)
-               (db/q database '[:find ?spec . :in $ ?sym
-                                :where [?function :seon.fn/sym ?sym] [?function :seon.fn/spec ?spec]]
-                     sym)]
-        arity-plans (when-not (some db/read-refusal? reads) (planned-arities database current sym))]
-    (if (or (some db/read-refusal? reads) (nil? arity-plans))
-      (first (filter db/read-refusal? reads))
-      (let [fixed (remove :seon.call-preparation/variadic? arity-plans)
+(defn- compiled-plan
+  "One identity's invocation plan from its planned contract arities."
+  [sym arity-plans]
+  (let [fixed (remove :seon.call-preparation/variadic? arity-plans)
             exact-by-count
             (reduce (fn [acc arity]
                       (update acc (:seon.fn.arity/argument-count arity)
@@ -781,7 +702,34 @@
                    :seon.call-preparation/rest-slot?
                    (:seon.call-preparation/rest-slot? variadic)
                    :seon.call-preparation/entries
-                   (:seon.call-preparation/entries variadic)}))))))
+                   (:seon.call-preparation/entries variadic)}))))
+
+(defn plan-for
+  "Compile one function identity's invocation plan from its contract.
+
+  The database value's carried projection holds the compiled contract
+  (`contract-arities`); its slots and map entries, inline or named, are
+  joined to the acquired supplied-default rows by declared schema name.
+  Returns nil when the identity has no contract in this cluster's program
+  graph, and the database owner's read error when its rows could not be
+  read: an unreadable program graph is never \"not contracted\"."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value :seon.call-preparation/snapshot
+         :seon.fn/sym]
+    [:or :seon.call-preparation/plan :nil :seon.db/error-result]]}
+  [database current sym]
+  ;; The plan is a function of the supplied-default rows and this contract.
+  ;; The snapshot memo and the projection's index record no read, so these
+  ;; two reads are what enter the caller's evidence.
+  (let [reads [(db/q database row-query)
+               (db/q database '[:find ?spec . :in $ ?sym
+                                :where [?function :seon.fn/sym ?sym] [?function :seon.fn/spec ?spec]]
+                     sym)]
+        arity-plans (when-not (some db/read-refusal? reads)
+                      (planned-arities (db/carried-projection database) current sym))]
+    (if (or (some db/read-refusal? reads) (nil? arity-plans))
+      (first (filter db/read-refusal? reads))
+      (compiled-plan sym arity-plans))))
 
 (defn prepared-arities
   "Source argument-count ranges compatible with an invocation plan.
@@ -806,26 +754,26 @@
                       #(get % :seon.fn.arity/max Long/MAX_VALUE)))
        vec))
 
-(defn plan
-  "The cached invocation plan for one function identity in this cluster.
+(defn arm-plan
+  "The invocation plan an armed wrapper of `sym` prepares its calls with, or nil.
 
-  Held one entry per identity against the snapshot derivation it read (its
-  `prepared-symbols` object, replaced by any row, contract or schema change).
-  A read error is returned and never cached, so the next call reads again."
-  {:malli/schema
-   [:=> [:cat :seon.call-preparation/state :seon.db/database-value
-         :seon.call-preparation/snapshot :seon.fn/sym]
-    [:or :seon.call-preparation/plan :nil :seon.db/error-result]]}
-  [call-state database current sym]
-  (let [derivation (:seon.call-preparation/prepared-symbols current)
-        held (get-in @call-state [:seon.call-preparation/plans sym])]
-    (if (identical? derivation (::derivation held))
-      (:seon.call-preparation/plan held)
-      (let [compiled (plan-for database current sym)]
-        (when (and compiled (not (db/read-refusal? compiled)))
-          (swap! call-state assoc-in [:seon.call-preparation/plans sym]
-                 {::derivation derivation :seon.call-preparation/plan compiled}))
-        compiled))))
+  Decided once when the contract is armed, from the contract `projection`
+  compiled and the supplied-default rows `current` admitted: a contract that
+  declares no suppliable slot or entry has no plan, so its wrapper gets no
+  preparation step and its calls pay nothing. A row or contract change takes
+  effect at the next arming, the ordinary path for program rows."
+  {:malli/schema [:=> [:cat :seon.call-preparation/snapshot :seon.schema/projection :seon.fn/sym]
+                  [:or :nil :seon.call-preparation/plan]]}
+  [current projection sym]
+  ;; One contract's arities, not the projection's whole contract index: an
+  ;; agent's definition arms against a projection made for it alone.
+  (let [index (by-schema-key (:seon.call-preparation/supplied-defaults current))
+        compiled (some->> (mr/schema (:seon.schema.projection/registry projection) sym)
+                          arity-facts
+                          (mapv #(arity-plan index %))
+                          (compiled-plan sym))]
+    (when-not (:seon.call-preparation/empty? compiled true)
+      compiled)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Supplying one value
@@ -936,20 +884,6 @@
 ;;; The consumer seam
 ;;; ---------------------------------------------------------------------------
 
-(defn callee-identity
-  "The program identity of a resolved callee, or nil when it has none.
-
-  The database's own `:seon.fn/sym` spelling, because that is what every
-  plan and every gate is keyed by. Both
-  `clojure.lang.Var` and `sci.lang.Var` carry `:ns`/`:name` metadata;
-  anything else — a closure, a computed callee — has no provable identity
-  and is left untouched."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "SCI supplies JVM Vars, SCI Vars and interpreted function objects; an unrecognized callable has no durable identity.", :gen/elements [nil false 0 "" :k [] {}]}]] [:maybe :seon.fn/sym]]}
-  [callee]
-  (let [{ns-value :ns name-value :name} (meta callee)]
-    (when (and ns-value name-value)
-      (symbol (str ns-value) (str name-value)))))
-
 (defn- decided
   "Resolve a predicate dispatch against the call's actual first argument.
 
@@ -1022,6 +956,10 @@
 (defn prepare
   "Prepare one call's arguments against its plan, or refuse as a value.
 
+  `environment` is the calling evaluation's world; nil means no evaluation
+  runs on this thread, so a value that must be supplied is unavailable by
+  name (pass it explicitly) and an optional one stays absent.
+
   An unavailable-error names a supplier that could not produce a value;
   an invalid-supplied-value-error names a value outside its declared schema;
   an ambiguous-call-error names multiple placements at one supplied count.
@@ -1031,7 +969,7 @@
   Caller presence is tested by argument occupancy and `contains?`, never
   truthiness: a supplied nil reaches ordinary Malli input validation."
   {:malli/schema
-   [:=> [:cat :seon.call-preparation/snapshot :seon.env/environment
+   [:=> [:cat :seon.call-preparation/snapshot [:maybe :seon.env/environment]
          [:maybe :seon.call-preparation/plan] :seon.schema/arguments]
     [:or :seon.schema/arguments :seon.call-preparation/ambiguous-call-error :seon.call-preparation/unavailable-error :seon.call-preparation/invalid-supplied-value-error]]}
   [current environment plan-value arguments]
@@ -1068,7 +1006,11 @@
         ;; the argument vector.
         (let [absent (Object.)
               value-for (fn [slot]
-                          (let [produced (supply current environment slot sym)
+                          (let [produced (if environment
+                                           (supply current environment slot sym)
+                                           (unavailable sym slot
+                                                        {:seon.error/message
+                                                         "No evaluation is running on this thread, so no world supplies it; pass it explicitly."}))
                                 unavailable? (and (map? produced) (:seon.call-preparation/unavailable-key produced))]
                             (cond
                               ;; Optional is a declared absence: the call runs without the key.
@@ -1101,71 +1043,23 @@
                     with-inserts
                     (:seon.call-preparation/entries answer))))))))
 
-(defn- refused-call
-  "A read error that stopped preparing a call to `sym`, naming that call."
-  {:malli/schema [:=> [:cat :seon.fn/sym :seon.db/error-result]
-                  :seon.db/error-result]}
-  [sym refusal]
-  (assoc refusal :seon.call-preparation/target-symbol sym))
+(defn preparing
+  "Compose the supplied-default step outside one armed contract wrapper.
 
-(defn hook
-  "The `:call-preparation-hook` sci calls on every direct Var call.
-
-  `(hook ctx var args) -> args | (reduced result)`
-  (`reference-code/sci/src/sci/core.cljc:309`). The ctx is the RUNTIME
-  fork's, so the environment it carries is the one this call actually runs
-  under — including on a virtual thread, because the ctx travels with the
-  code rather than the thread.
-
-  Everything a call needs is read from the ctx: no dynamic var, no cluster
-  lookup, no effect request. A ctx with no call-preparation state, no
-  environment, or no plan for this callee is passed through untouched, so
-  the hook is inert in a non-Seon context. A database, snapshot or plan
-  that cannot be read refuses the call as `(reduced read-error)` naming the
-  callee: it never runs without the defaults it may need. The return is genuinely
-  polymorphic — sci's contract is `args` OR a `reduced` result.
-
-  THE HOOK IS ARMED ON EVERY CALL IN THE CLUSTER, so the path for a
-  callee that declares nothing suppliable is the one that matters. It
-  ends at the snapshot's `prepared-symbols` set: one connection deref,
-  one commit-keyed snapshot lookup, one string, one set lookup — no plan
-  lookup, no Datalog, no supplier, no argument copy."
-  {:malli/schema
-   [:=> [:cat :map :seon.schema/value :seon.schema/arguments] :seon.schema/value]}
-  [ctx callee arguments]
-  ;; The per-call pass-through reads a map member, derefs the connection and
-  ;; reads the value's snapshot by its commit. It calls those three
-  ;; definitions unarmed for cost, not recursion (no armed wrapper re-enters
-  ;; SCI): armed, env/of, db/db and the snapshot read add microseconds each to
-  ;; a ~8.5 us hook that runs on every SCI Var call (default, 2026-09-24).
-  ;; Their other callers stay armed.
-  (let [call-state (get ctx carrier)
-        environment ((mi/-f->original env/of) ctx)
-        projection (:seon.schema/projection ctx)
-        connection (when (and call-state environment projection)
-                     (:seon.db/connection environment))
-        database (when connection ((mi/-f->original db/db) connection))]
-    (if (nil? database)
-      arguments
-      (let [current (if (db/read-refusal? database)
-                      database
-                      ((mi/-f->original snapshot) database projection))
-            sym (callee-identity callee)]
-        (cond
-          ;; A callee with no program identity is never prepared.
-          (nil? sym) arguments
-          ;; Unreadable custody or program rows: whether this call needs a
-          ;; supplied default is unknown, so it never runs without one.
-          (db/read-refusal? current) (reduced (refused-call sym current))
-          (not (contains? (:seon.call-preparation/prepared-symbols current) sym))
-          arguments
-          :else
-          (let [environment (env/scope environment {:my.program/executing-ctx ctx})
-                plan-value (plan call-state database current sym)]
-            (if (db/read-refusal? plan-value)
-              (reduced (refused-call sym plan-value))
-              (let [prepared (prepare current environment plan-value
-                                      (vec arguments))]
-                (if (and (map? prepared) (or (:seon.call-preparation/unavailable-key prepared) (:seon.call-preparation/invalid-key prepared) (:seon.call-preparation/candidate-count prepared)))
-                  (reduced prepared)
-                  prepared)))))))))
+  `world` answers the calling evaluation's environment at call time
+  (`seon.instrument` reads it from the kernel arm), never the environment of
+  the context the function was created in. Prepared arguments enter
+  `wrapped`, whose contract validates them; a refusal is the call's value and
+  the callee is never entered."
+  {:malli/schema [:=> [:cat :seon.call-preparation/snapshot :seon.call-preparation/plan
+                       [:fn clojure.core/ifn?] [:fn clojure.core/ifn?]]
+                  [:fn clojure.core/ifn?]]}
+  [current plan-value world wrapped]
+  ;; The step runs on every call of a prepared function, so it calls
+  ;; `prepare` unarmed; the wrapped contract still validates what it returns.
+  (let [prepare-call (mi/-f->original prepare)]
+    (fn [& arguments]
+      (let [prepared (prepare-call current (world) plan-value (vec arguments))]
+        (if (vector? prepared)
+          (apply wrapped prepared)
+          prepared)))))

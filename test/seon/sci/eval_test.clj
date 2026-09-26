@@ -19,7 +19,6 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [datahike.pull-api :as pull-api]
-            [seon.call-preparation :as call-preparation]
             [seon.config :as config]
             [seon.cluster.agent :as agent]
             [seon.turn :as turn]
@@ -1774,37 +1773,30 @@
         (is (failed? external)
             "loaded dependencies are not first-party merely because loaded")))))
 
-(deftest call-preparation-receives-the-form-scoped-environment
+(deftest the-evaluation-world-is-the-form-scoped-environment
+  ;; Supplied defaults read the world the kernel arm names for the running
+  ;; evaluation (`kernel/world-ctx`), so that world carries this form's turn
+  ;; members.
   (test-support/with-database
     (fn [connection]
-      (let [seen (atom [])
-            ctx (test-support/fork-cluster-ctx connection)
+      (let [ctx (test-support/fork-cluster-ctx connection)
             evaluation
-            (with-redefs [call-preparation/hook
-                          (fn [runtime-ctx _callee arguments]
-                            (swap! seen conj (env/of runtime-ctx))
-                            arguments)]
-              (eval/evaluate
+            (eval/evaluate
              {:seon.sci.eval/ctx ctx
               :seon.agent/id "scoped-agent"
               :seon.turn/id "scoped-run"
               :seon.cluster.eval/ordinal 7
-              :seon.cluster.eval/source "(seon.run/complete \"done\")"
+              :seon.cluster.eval/source
+              (str "(select-keys (seon.env/of (seon.sci.kernel/world-ctx)) "
+                   "[:seon.agent/id :seon.turn/id :seon.cluster.eval/ordinal])")
               :seon.sci.admit/caps caps
               :seon.sci.eval/time-limit-ms 2000
-              :seon.config/on-core-error :panic}))]
-        (is (= {:my.turn/disposition :completed
-                :my.turn/result "done"}
-               (:seon.sci.admit/value evaluation)))
-        (is (some #(= {:seon.agent/id "scoped-agent"
-                       :seon.turn/id "scoped-run"
-                       :seon.cluster.eval/ordinal 7}
-                      (select-keys %
-                                   [:seon.agent/id
-                                    :seon.turn/id
-                                    :seon.cluster.eval/ordinal]))
-                  @seen)
-            "SCI's actual call-preparation hook sees this form's turn members")))))
+              :seon.config/on-core-error :panic})]
+        (is (= {:seon.agent/id "scoped-agent"
+                :seon.turn/id "scoped-run"
+                :seon.cluster.eval/ordinal 7}
+               (:seon.sci.admit/value evaluation))
+            (pr-str (:seon.cluster.eval/error evaluation)))))))
 
 (deftest
   evaluation-custody-is-derived-only-from-the-cluster-context

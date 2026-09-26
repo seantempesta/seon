@@ -324,6 +324,25 @@
          'run-tests agent-run-tests
          'use-fixtures agent-use-fixtures}))
 
+(defn- native-mutation
+  "SCI's own `native` operation, refused by name when it would change a
+  program row outside `my.program`.
+
+  The decision is `my.program/native-call-refusal`'s, over the world of the
+  evaluation calling (`kernel/world-ctx`); an admitted program operation
+  (`evaluate-native!`) and unevaluated host work run the native unchanged."
+  {:malli/schema [:=> [:cat :seon.schema/value] [:fn clojure.core/ifn?]]}
+  [native]
+  (let [operation @native]
+    (fn [& arguments]
+      (let [ctx (kernel/world-ctx)
+            refusal (when (and ctx (not (::native-operation? ctx)))
+                      ((requiring-resolve 'my.program/native-call-refusal)
+                       ctx native (vec arguments)))]
+        (if refusal
+          (unreduced refusal)
+          (apply operation arguments))))))
+
 (defn build-base-ctx
   "Build the minimal interpreter from the projection supplied by its caller."
   {:malli/schema [:=> [:cat :seon.schema/projection] :seon.sci.eval/ctx]}
@@ -364,16 +383,6 @@
         {:interrupt-fn (:interrupt-fn kernel-options)
          :host-interop-observer (:host-interop-observer kernel-options)
          :built-in-call-observer (:built-in-call-observer kernel-options)
-         ;; The one call-preparation seam. It is installed on EVERY
-         ;; context, base and cluster alike, and stays inert until a ctx
-         ;; also carries `seon.call-preparation/install`'s state plus an
-         ;; environment — so a scratch base ctx behaves exactly as it did
-         ;; before, and a cluster ctx prepares every direct Var call.
-         :call-preparation-hook
-         (fn [ctx callee arguments]
-           (or ((requiring-resolve 'my.program/native-call-refusal)
-                ctx callee arguments)
-               (call-preparation/hook ctx callee arguments)))
          ;; the interrupt-aware core: a lazy sequence built by NATIVE
          ;; clojure.core enters no interpreted body, so `(range)` inside
          ;; `reduce` would never hit the interrupt-fn. Sci ships drop-in
@@ -398,11 +407,16 @@
     ;; every namespace receives. Acquisition refreshes the same bindings.
     (sci/add-namespace!
      ctx 'clojure.core
-     {'dir dir-var
-      'doc doc-var
-      'help help-var
-      'deftest (sci/resolve ctx 'clojure.test/deftest)
-      'is (sci/resolve ctx 'clojure.test/is)})
+     (into {'dir dir-var
+            'doc doc-var
+            'help help-var
+            'deftest (sci/resolve ctx 'clojure.test/deftest)
+            'is (sci/resolve ctx 'clojure.test/is)}
+           ;; Native program mutation asks the program's facts first.
+           (map (fn [native-name]
+                  [native-name (native-mutation
+                                (sci/resolve ctx (symbol "clojure.core" (name native-name))))]))
+           '[intern alter-var-root remove-ns ns-unalias]))
     (sci/add-namespace!
      ctx 'seon.bootstrap
      {'dir dir-var
@@ -1284,13 +1298,18 @@
           sci-var (sci/resolve ctx function-symbol)
           {:keys [:seon.config/on-core-error :seon.sci.admit/caps
                   :seon.config.error/max-evidence-bytes]}
-          (instrumentation-config db)]
+          (instrumentation-config db)
+          ;; The supplied-default rows this arming decides the plan from.
+          current (call-preparation/snapshot db (or (db/carried-projection db) projection))
+          _ (when (db/read-refusal? current)
+              (throw (ex-info (:seon.error/message current) current)))]
       (sci/bind-root!
        ctx sci-var
        (instrument/wrap-interpreted
         function-symbol spec-edn projection on-core-error caps @sci-var
-        (cond-> (select-keys @(::kernel/program-snapshot ctx)
-                             [:seon.flow/commit-fault!])
+        (cond-> (assoc (select-keys @(::kernel/program-snapshot ctx)
+                                    [:seon.flow/commit-fault!])
+                       :seon.call-preparation/snapshot current)
           max-evidence-bytes
           (assoc :seon.config.error/max-evidence-bytes max-evidence-bytes)
           ;; The profiling cell's identity is the row it installs.
@@ -1831,9 +1850,11 @@
 
 (defn- evaluate-native!
   "Execute an already-admitted program operation in its supplied SCI context.
-   Only this native operation skips preparation, never an agent evaluation."
+   Only this operation's native mutation skips the program-fact refusal
+   (`native-mutation`), never an agent evaluation."
   [ctx form]
-  (sci/eval-form (assoc ctx :call-preparation-hook nil) form))
+  (kernel/with-world-ctx (assoc ctx ::native-operation? true)
+    #(sci/eval-form ctx form)))
 
 (defn- transfer-evaluated-roots!
   [ctx installations]
@@ -3607,13 +3628,12 @@
                                [:seon.flow/commit-fault! ::loaded-database ::loaded-connection]))
          projection-state (or supplied-projection-state
                               (projection-state db projection (carried-cluster-name connection db)))
-         ctx (call-preparation/install
-              (env/carry-state
-               (assoc ctx :seon.schema/projection projection)
-               projection-state))]
-     ;; Call preparation catches up at invocation through its snapshot memo,
-     ;; keyed by the attribute revisions it reads; only the program identity
-     ;; observer needs the live connection.
+         ctx (env/carry-state
+              (assoc ctx :seon.schema/projection projection)
+              projection-state)
+         ;; `my.program/supplied-context` names the cluster base it mutates.
+         ctx (assoc ctx :my.program/base-ctx ctx)]
+     ;; Only the program identity observer needs the live connection.
      (when connection
        (watch-program-identity! connection))
      ctx))
@@ -3667,8 +3687,7 @@
                   :seon.schema/projection projection)))
          projection-state (env/environment-state receiving-environment)
          _ (db/carry-connection-projection-state! connection projection-state)
-         ctx (call-preparation/install
-              (env/carry-state
+         ctx (env/carry-state
                (assoc (sci/fork base-ctx)
                       ::kernel/installed-functions
                       (atom @(::kernel/installed-functions base-ctx))
@@ -3680,7 +3699,8 @@
                                                  ::loaded-connection])))
                       ::custody {:seon.db/connection connection}
                       :seon.schema/projection projection)
-               projection-state))]
+               projection-state)
+         ctx (assoc ctx :my.program/base-ctx ctx)]
      ;; A sovereign branch must not inherit the source branch's recorder.
      ;; SCI's generation-aware bind-root! changes only this fork's Vars.
      (doseq [function-symbol @(::kernel/installed-functions ctx)
@@ -4622,16 +4642,6 @@
             (throw throwable)
             (failure-result throwable)))))))))))))))
 
-(defn fork-candidate-ctx
-  "Fork the context that evaluated a declaration for its gate's proof.
-
-  This deliberately delegates to `fork-for-turn`; the proof never calls
-  plain `sci/fork`, and its tests' private definitions stay in the fork."
-  {:malli/schema [:=> [:cat :seon.test.accretion/candidate-context-request]
-                  :seon.sci.eval/ctx]}
-  [request]
-  (:seon.sci.eval/ctx (fork-for-turn request)))
-
 (defn- install-candidate-function!
   [ctx database row]
   (let [function-symbol (:seon.fn/sym row)
@@ -4746,23 +4756,77 @@
       (candidate-test-result test-symbol evaluation)
       (let [test-var (sci/resolve ctx (symbol test-symbol))]
           (binding [clojure.test/report (constantly nil)]
-            ;; A gate test is THIS AGENT'S work, exactly like the definition
-            ;; it gates: the candidate request already carries the connection
-            ;; its evaluation runs on, so hand that value down and the test's
-            ;; elided `seon.db` arities reach the agent's own cluster rather
-            ;; than refusing. Same seam, same value, as a `seon.test/run` member.
+            ;; A gate test runs in the disposable copy: the candidate request
+            ;; carries the copy's connection, so the test's elided `seon.db`
+            ;; arities reach the copy's branch, never the agent's. Same seam,
+            ;; same value, as a `seon.test/run` member.
             (run-test
              (assoc (select-keys request [:seon.db/connection :seon.sci.eval/time-limit-ms])
                     :seon.sci.eval/ctx ctx :seon.test/var test-var)))))))
 
+(def ^:private agent-entrance
+  ;; The agent entrance sits above this namespace; realized at first use.
+  (delay {:acquire (requiring-resolve 'seon.cluster.agent/acquire-context!)
+          :release (requiring-resolve 'seon.cluster.agent/release-context!)}))
+
+(defn- disposable-copy
+  "The evaluating context copied onto a fresh branch of the agent's commit.
+
+  An isolated execution off `database`'s commit (the agent entrance a test
+  member uses), and the evaluating context forked onto its connection, so the
+  candidate root and the agent's private definitions are present while every
+  write, generated or tested, lands on the copy. The world keeps the agent's
+  id. The caller releases `:seon.sci.eval/execution`."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :seon.db/connection
+                       [:maybe :seon.agent/id]]
+                  [:map [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+                   [:seon.db/db :seon.db/database-value]
+                   [:seon.db/connection :seon.db/connection]
+                   [:seon.sci.eval/execution :seon.agent/execution-handle]]]}
+  [ctx database connection agent-id]
+  (let [environment (env/of ctx)
+        execution ((:acquire @agent-entrance)
+                   (cond-> {:seon.db/connection connection
+                            :seon.sci.eval/ctx ctx
+                            :seon.cluster/name (:seon.boot/cluster-name environment)
+                            :seon.agent/routing (:seon.agent/routing environment)}
+                     (:seon.store/store environment)
+                     (assoc :seon.store/store (:seon.store/store environment))
+                     (::base-ctx ctx) (assoc :seon.sci.eval/base-ctx (::base-ctx ctx)))
+                   nil
+                   {:seon.agent/isolate? true
+                    :seon.cluster.registry/from (db/commit-id database)})]
+    (try
+      (let [copy-connection (:seon.db/connection execution)
+            copy-database (db/db copy-connection)
+            ;; The copy is its own base: it never names the agent's.
+            copy (dissoc (fork-cluster-ctx
+                          ctx copy-database copy-connection
+                          (projection-state copy-database (context-projection ctx)
+                                            (:seon.boot/cluster-name environment))
+                          {:seon.env/environment environment})
+                         ::base-ctx)]
+        (when agent-id
+          (env/replace-environment! (get copy env/state-carrier)
+                                    (env/scope (env/of copy) {:seon.agent/id agent-id})))
+        {:seon.sci.eval/ctx copy
+         :seon.db/db copy-database
+         :seon.db/connection copy-connection
+         :seon.sci.eval/execution execution})
+      (catch Throwable failure
+        ((:release @agent-entrance) execution)
+        (throw failure)))))
+
 (defn evaluate-candidate
   "Prove one evaluated durable function: its seeded contract check, then every
-  gate test, in one fork of the retained context that evaluated it.
+  gate test, in a disposable copy of the retained context that evaluated it.
 
-  The form ran once (`evaluate`); the fork holds that evaluated root, so the
-  proof runs the value acceptance keeps. The returned test values are exactly
-  `seon.test.runner/run-var!` reports. All tests run even after a red result.
-  The fork and the gate tests' private definitions are never transferred."
+  The form ran once (`evaluate`); the copy holds that evaluated root, so the
+  proof runs the value acceptance keeps. The copy is its own branch of the
+  agent's commit (`disposable-copy`): generated calls and gate test bodies
+  write there, never on the agent's branch, and it is released afterwards.
+  The returned test values are exactly `seon.test.runner/run-var!` reports.
+  All tests run even after a red result. Nothing in the copy is transferred."
   {:malli/schema [:=> [:cat :seon.test.accretion/candidate-request]
                   :seon.test.accretion/candidate-result]}
   [{base-ctx :seon.sci.eval/ctx
@@ -4772,30 +4836,32 @@
     test-symbols :seon.test.accretion/gate-set
     evaluation :seon.test.accretion/evaluation
     :as request}]
-  (let [ctx (fork-candidate-ctx
-             {:seon.sci.eval/ctx base-ctx
-              :seon.db/db database
-              :seon.db/connection connection
-              :seon.agent/id agent-id})
+  (let [{ctx :seon.sci.eval/ctx copy-database :seon.db/db copy-connection :seon.db/connection
+         execution :seon.sci.eval/execution}
+        (disposable-copy base-ctx database connection agent-id)
+        request (assoc request :seon.db/db copy-database :seon.db/connection copy-connection)
         row (or (:seon.program/row request) (:seon.program/row evaluation))]
-    (install-candidate-function! ctx database row)
-    (let [check
-          (when (and (:seon.config.test/auto-check-cases request)
-                     (:seon.test.accretion/seed request))
-            (accretion/auto-check
-             (assoc request
-                    :seon.sci.eval/ctx ctx
-                    :seon.program/row row
-                    :seon.schema/projection (context-projection ctx))))]
-      (cond->
-       {:seon.test.accretion/candidate-ctx ctx
-        :seon.test.accretion/evaluation (assoc evaluation :seon.program/row row)
-        ;; Auto-check is deliberately realized above this expression:
-        ;; the seeded contract probe precedes every example test.
-        :seon.test.accretion/results
-        (mapv (partial run-candidate-test! ctx database request)
-              test-symbols)}
-        check (assoc :seon.test.accretion/auto-check check)))))
+    (try
+      (install-candidate-function! ctx copy-database row)
+      (let [check
+            (when (and (:seon.config.test/auto-check-cases request)
+                       (:seon.test.accretion/seed request))
+              (accretion/auto-check
+               (assoc request
+                      :seon.sci.eval/ctx ctx
+                      :seon.program/row row
+                      :seon.schema/projection (context-projection ctx))))]
+        (cond->
+         {:seon.test.accretion/candidate-ctx ctx
+          :seon.test.accretion/evaluation (assoc evaluation :seon.program/row row)
+          ;; Auto-check is deliberately realized above this expression:
+          ;; the seeded contract probe precedes every example test.
+          :seon.test.accretion/results
+          (mapv (partial run-candidate-test! ctx copy-database request)
+                test-symbols)}
+          check (assoc :seon.test.accretion/auto-check check)))
+      (finally
+        ((:release @agent-entrance) execution)))))
 
 (defn auto-check-candidate
   "Run the seeded contract check against an already evaluated candidate."

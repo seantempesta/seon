@@ -2009,6 +2009,12 @@
                   :seon.test.timing/run-ms executed
                   :seon.test.timing/release-ms @release-ms})]
     (try
+      ;; The member's world is the executing agent's: a call omitting its
+      ;; declared agent id receives this one, on the member's own branch.
+      (when-let [agent-id (:seon.agent/id request-handle)]
+        (let [ctx (:seon.sci.eval/ctx child)]
+          (env/replace-environment! (get ctx env/state-carrier)
+                                    (env/scope (env/of ctx) {:seon.agent/id agent-id}))))
       (let [ctx (:seon.sci.eval/ctx child)
             resolved (volatile! 0.0)
             ;; Resolved on the body thread, inside its program-change detection.
@@ -2180,6 +2186,8 @@
            (cond-> {:seon.config/on-core-error (:seon.config/on-core-error effective)
                     :seon.sci.admit/caps (config/result-caps effective)
                     :seon.schema/projection projection
+                    ;; The request's supplied-default rows the contracts plan from.
+                    :seon.db/db database
                     :seon.instrument/changed-identities (into #{} (map (fn [sym] [:seon.fn/sym sym])) interns)}
              evidence-bytes (assoc :seon.config.error/max-evidence-bytes evidence-bytes)
              (:seon.flow/commit-fault! snapshot)
