@@ -53,3 +53,16 @@ of a typed tally naming the missing namespace BEFORE any load, and the
 exception evidence carrying the whole manifest (UGLY OUTPUT IS A DEFECT).
 Raised to blocker: every namespace-selection typo costs a slot, a run root
 and a 19 MB log.
+
+## 2026-09-26 — the same class in `seon.test/arm-first-loads!`
+
+The in-JVM runner has the same unguarded load. `seon.test/run` → `arm-first-loads!`
+(`src/seon/test.clj:2131` at a1b01c92a) calls `(run! require fresh)` for every
+selected `:core` test namespace that the JVM has not loaded. A file-backed test
+whose root is off the classpath throws `FileNotFoundException` out of
+`seon.test/run` ("Could not locate wbprobe/core_test__init.class …"). It does
+not come back as one of the declared run errors (`:seon.test/not-runnable-error`
+is already in the contract). Reproduced on default with a disposable branch: the
+write-back fixture's test was analyzed from `tmp/…/test` and named through
+`:seon.test/changed`. The owner and the fix shape are the same: the unloadable
+namespace becomes a typed entry naming the symbol and the miss.
