@@ -2285,7 +2285,7 @@
 
 (defn directory-value
   "Return current public function summaries and declared schemas for a namespace."
-  {:malli/schema [:=> [:cat :seon.db/db :symbol :boolean] [:or :map :seon.db/error-result :seon.sci.eval/documentation-unavailable-error]]}
+  {:malli/schema [:=> [:cat :seon.db/db :symbol :boolean] [:or :seon.repl/directory :seon.db/error-result :seon.sci.eval/documentation-unavailable-error]]}
   [database namespace-name present?]
   (let [namespace-row (db/pull database
                              '[:seon.ns/name
