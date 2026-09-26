@@ -3424,8 +3424,8 @@
            (:seon.config.error/recurrence-limit cluster)
            :seon.config.error/max-evidence-bytes
            (:seon.config.error/max-evidence-bytes cluster)}
-          (when-let [escalate-to (:seon.config.error/escalate-to cluster)]
-            {:seon.config.error/escalate-to escalate-to})
+          ;; an agent's own delivery mistake names no escalation owner:
+          ;; it is returned to that agent, never escalated (seon.error/commit-call)
           attribution)))
 
 (defn- asked-value
