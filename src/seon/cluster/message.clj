@@ -706,21 +706,44 @@
 (defn send!
   "Write a message and its permanent recipient atomically; return the stored message.
 
-  The writer resolves recipients, the active turn's cause, and the configured
-  conversation bound against its current database. Subject tokens need no target."
+  The message is written on the recipient's home branch (its row's
+  `:seon.agent/branch`), through this process's connection to it, so an agent
+  on a branch reaches root on the cluster; with no such connection it refuses
+  by name. The writer resolves recipients, the active turn's cause, and the
+  configured conversation bound against its current database. Subject tokens
+  need no target."
   {:malli/schema [:=> [:cat :my.message/message :seon.db/connection :seon.agent/id]
                   [:or :seon.message/message :seon.error/value]]}
   [request connection agent-id]
   (let [candidate (send-value (:my.message/to request) (:my.message/content request)
-                              (some? (:my.message/about request)) (:my.message/about request))]
-    (if (or (:my.message/no-recipient candidate) (:my.message/no-content candidate)
-            (:my.message/no-about candidate))
+                              (some? (:my.message/about request)) (:my.message/about request))
+        database (db/db connection)
+        ;; The recipient's row names its home branch; the message is written
+        ;; there, where the recipient reads and is woken.
+        home (when (string? (:my.message/to candidate))
+               (db/q '[:find ?branch . :in $ ?id :where [?a :seon.agent/id ?id] [?a :seon.agent/branch ?branch]]
+                     database (:my.message/to candidate)))
+        target (if (and (keyword? home) (not= home (get-in database [:config :branch])))
+                 (db/branch-connection database home)
+                 connection)]
+    (cond
+      (or (:my.message/no-recipient candidate) (:my.message/no-content candidate)
+          (:my.message/no-about candidate))
       candidate
+      (nil? target)
+      {:seon.message/unknown-recipient (:my.message/to candidate)
+       :seon.error/at (java.util.Date.)
+       :seon.error/layer :seon.message/delivery
+       :seon.error/operation 'seon.cluster.message/send!
+       :seon.error/message (str (pr-str (:my.message/to candidate)) " lives on branch " (pr-str home)
+                                ", which this process holds no connection to; the message was not sent.")}
+      :else
       (let [candidate (merge candidate (select-keys request [:my.message/assignment :my.message/reason]))
-            result (db/transact!
-                    connection
-                    {:tx-data [[:db.fn/call #'send-call candidate agent-id]]
-                     :tx-meta {:seon.db/user [:seon.agent/id agent-id]}})]
+            write! #(db/transact! target
+                                  {:tx-data [[:db.fn/call #'send-call candidate agent-id]]
+                                   :tx-meta {:seon.db/user [:seon.agent/id agent-id]}})
+            ;; A write to another branch is that branch's own work.
+            result (if (identical? target connection) (write!) (db/call-with-custody {:seon.db/connection target} write!))]
         (if (or (:seon.db.write.attempt/request-id result)
                 (:seon.db/invalid-read result) (:seon.schema/expected-value result)) result
             (read (:seon.message/id candidate) (:db-after result)))))))

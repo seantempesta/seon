@@ -11,7 +11,9 @@
             [clojure.set :as set]
             [seon.error :as error]
             [seon.fn :as function]
-            [seon.issue :as issue]))
+            [seon.issue :as issue]
+            [seon.cluster.message :as message]
+            [seon.test]))
 
 (defn- read-result
   {:malli/schema
@@ -435,6 +437,30 @@
         :seon.error/data {:my.program/executing? (boolean ctx)
                                          :my.program/base? (boolean base)
                                          :my.program/connection? (boolean connection)}}))))
+
+(defn propose-merge!
+  "Ask root to merge my branch's change for an issue, as an ordinary message.
+
+  The message names my branch, the issue and my change: the declarations my
+  program holds at other digests than the published program
+  (`seon.test/changes`). Root prepares it through the gate on a fresh branch
+  of the cluster head and accepts it (`seon.cluster.source/prepare-merge!`,
+  `accept-merge!`); acceptance stays root's. Returns the delivered message,
+  or the refusal reading my change or delivering it gave.
+
+  Example:
+  (my.program/propose-merge! {:seon.issue/id \"my-fix\"})"
+  {:malli/schema [:=> [:cat [:map [:my.program/context :my.program/context] [:seon.db/connection :seon.db/connection]
+                             [:seon.agent/id :seon.agent/id] [:seon.issue/id :seon.issue/id]]]
+                  [:or :seon.message/message :seon.error/value]]}
+  [{context :my.program/context connection :seon.db/connection agent-id :seon.agent/id issue :seon.issue/id}]
+  (let [changed (seon.test/changes context connection)]
+    (if (:seon.error/at changed)
+      changed
+      (message/send! {:my.message/to "root" :my.message/about issue
+                      :my.message/content (pr-str {:seon.agent/branch (get-in (db/db connection) [:config :branch])
+                                                   :seon.issue/id issue :seon.test/changed changed})}
+                     connection agent-id))))
 
 (defn overrides
   "Read current agent-admitted identities under an indexed src root.

@@ -279,3 +279,26 @@
         (let [shown (first (hosted-run! hosted "(let [r (my.test/check {})] [(:seon.test/passed? r) (mapv :seon.test/sym (:seon.test/results r))])"))]
           (is (= "[true [my.agents.host-probe/check-square-test]]" shown)
               "exactly the test reaching the change runs, green"))))))
+
+(deftest a-hosted-agent-proposes-a-merge-and-root-receives-it-on-the-cluster
+  ;; Before, a branch agent's message to root was written on its branch only:
+  ;; root, on the cluster branch, never saw it, and the send answered success.
+  (with-host-world {}
+    (fn [{:keys [handle connection branch!]}]
+      (support/transacted! connection (support/agent-tx @connection "root"))
+      (let [branch (branch!)
+            hosted (host-on! handle branch "mcp/proposer")
+            on-cluster #(db/pull (db/db connection) [:seon.message/content {:seon.message/from [:seon.agent/id]}
+                                                     {:seon.message/to [:seon.agent/id]}]
+                                 [:seon.message/id %])]
+        (is (= branch (:seon.agent/branch (db/pull (db/db connection) [:seon.agent/branch] [:seon.agent/id "mcp/proposer"])))
+            "the hosted agent is a cluster row naming its home branch")
+        (hosted-run! hosted "(defn proposed-square \"Square x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* x x))")
+        (let [sent (first (hosted-run! hosted "(:seon.message/id (my.program/propose-merge! {:seon.issue/id \"proposed-square\"}))"))
+              message (on-cluster (read-string sent))]
+          (is (= {:seon.agent/id "mcp/proposer"} (:seon.message/from message)) (pr-str sent))
+          (is (= {:seon.agent/id "root"} (:seon.message/to message)))
+          (is (= [branch "proposed-square" true]
+                 (let [content (read-string (:seon.message/content message))]
+                   [(:seon.agent/branch content) (:seon.issue/id content)
+                    (contains? (set (:seon.test/changed content)) [:seon.fn/sym 'my.agents.host-probe/proposed-square])]))))))))
