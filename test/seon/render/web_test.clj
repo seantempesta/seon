@@ -1124,9 +1124,6 @@ handle))}}
          {:seon.render.call/basis-transaction 42
           :seon.render.call/read-evidence
           [{:seon.db/source-argument-position 0
-            :seon.db/read-request
-            {:seon.db/read-operation :pull
-             :seon.db/pull-arguments [[:my.plan.item/title] 32011]}
             :datahike.read/dependency-plan
             {:datahike.query.dependency/sources
              [{:datahike.query.source/symbol '$
@@ -1134,16 +1131,12 @@ handle))}}
                :datahike.query.source/attributes #{:my.plan.item/title}}]}
             :datahike.read/revision
             {:datahike.read/attributes #{:my.plan.item/title}
-             :datahike.read/cache-eligible? false}
-            :seon.db/read-result {:my.plan.item/title "retained"}}]})
+             :datahike.read/cache-eligible? false}}]})
         html (hiccup/->string rendered)]
     (is (str/includes? html "database read dependencies · 1 evidence entry"))
     (is (str/includes? html "render basis transaction 42"))
-    (is (str/includes? html ":read-operation :pull"))
     (is (str/includes? html ":datahike.read/dependency-plan"))
-    (is (str/includes? html ":datahike.read/revision"))
-    (is (str/includes? html "retained read result"))
-    (is (str/includes? html "retained"))))
+    (is (str/includes? html ":datahike.read/revision"))))
 
 (deftest debug-read-dependencies-distinguishes-empty-from-absent
   (let [render ((web-private 'debug-read-dependencies-html)

@@ -452,7 +452,7 @@
                    :seon.render.call/output value
                    :seon.render.call/basis-transaction (db/basis-t database)
                    :seon.render.call/read-evidence
-                   (db/read-evidence @captured {:seon.db/retain-read-results? true})}]
+                   (db/read-evidence @captured)}]
         (swap! cache
                (fn [current]
                  (if (> (long (get-in current [cache-key :seon.render.call/basis-transaction] -1))

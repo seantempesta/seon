@@ -1012,14 +1012,8 @@
                      (select-keys
                       read
                       [:seon.db/source-argument-position
-                       :seon.db/read-request
                        :datahike.read/dependency-plan
-                       :datahike.read/revision]))
-                    (if (find read :seon.db/read-result)
-                      [:details
-                       [:summary "retained read result"]
-                       (debug-value-html (:seon.db/read-result read))]
-                      [:p "Read result was not retained."])]]))
+                       :datahike.read/revision]))]]))
                evidence)
          [:p "No database read evidence was retained."])])
     [:details {:class "seon-debug-read-dependencies"}
@@ -1436,7 +1430,7 @@
                      (merge preview)
                      (assoc :seon.turn/id (:seon.render.call/source-run-id preview))))))
             evidence
-            (into (db/read-evidence @observed {:seon.db/retain-read-results? true})
+            (into (db/read-evidence @observed)
                   (mapcat #(get-in % [:seon.sci.eval/evaluation :seon.cluster.eval/read-evidence]))
                   (:seon.turn.loop/evaluated-sources preview))
             ;; ONE STORE OF THE EVALUATION. The invocation entry is the cache
@@ -1493,7 +1487,7 @@
                   #(refresh-retained-read-evidence (:seon.db/db request) %))
           {:seon.render.call/static-evidence static-evidence
            :seon.render.call/read-evidence
-           (db/read-evidence @captured {:seon.db/retain-read-results? true})
+           (db/read-evidence @captured)
            :seon.render.call/basis-transaction
            (db/basis-t (:seon.db/db request))
            :seon.render.call/output inspection})
@@ -1706,8 +1700,7 @@
                         #(refresh-retained-read-evidence database %))
                 {:seon.render.call/static-evidence static-evidence
                  :seon.render.call/read-evidence
-                 (db/read-evidence @captured
-                                   {:seon.db/retain-read-results? true})
+                 (db/read-evidence @captured)
                  :seon.render.call/basis-transaction (db/basis-t database)
                  :seon.render.call/output output})]
     {::debug-data-output output
@@ -1979,7 +1972,7 @@
                              :seon.render/distance])}
       :seon.render.call/read-evidence
       (or (:seon.render.call/read-evidence acquisition)
-          (db/read-evidence @captured {:seon.db/retain-read-results? true}))
+          (db/read-evidence @captured))
       :seon.render.call/basis-transaction
       (db/basis-t (:seon.db/db request))
       :seon.render.call/output acquisition
@@ -2554,7 +2547,7 @@
                                       {:seon.render.call/static-evidence
                                        {:seon.render.call/producer 'seon.render.walk/history}
                                        :seon.render.call/read-evidence
-                                       (db/read-evidence @reads {:seon.db/retain-read-results? true})
+                                       (db/read-evidence @reads)
                                        :seon.render.call/output result})))
                  result)))))))))
 

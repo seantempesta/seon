@@ -18,6 +18,7 @@
             [malli.transform :as mt]
             [sci.core :as sci]
             [seon.ai.tokens :as tokens]
+            [seon.cache]
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
@@ -825,11 +826,37 @@
                            (= row (get-in snapshot [section member]))) rows))
                evidence)))
 
+(defn- call-reach
+  "`db/stored-call-reach` of `selected`, derived once per revision of the two
+  attributes it reads (`:seon.fn/sym`, `:seon.fn/calls`). Datahike's own
+  validity rule for a cached read (`source-context-unchanged?`,
+  `reference-code/datahike/src/datahike/query.cljc:3009-3029`): the same
+  connection and generation, the same conservative revision, the same
+  revision of each attribute read. Unrelated writes keep the key. A value
+  with no connection identity is derived directly.
+
+  ## Costs
+
+  Unarmed miss ~6.6 ms for a 795-symbol reach (default, 2026-09-26); a hit is
+  one cache lookup."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.fn/sym] [:set :symbol]]}
+  [database selected]
+  (let [{:datahike.cache/keys [connection-id generation conservative-revision attribute-revisions]}
+        (:cache-context database)]
+    (if (and connection-id generation)
+      (seon.cache/lookup ::call-reach
+                         [selected connection-id generation conservative-revision
+                          (get attribute-revisions :seon.fn/sym)
+                          (get attribute-revisions :seon.fn/calls)]
+                         #(* 80 (count %))
+                         #(db/stored-call-reach database selected))
+      (db/stored-call-reach database selected))))
+
 (defn- render-program-evidence
   "The program rows a retained call reaches over recorded call edges."
   {:malli/schema [:=> [:cat :seon.db/database-value [:or :nil :map] :seon.fn/sym] :map]}
   [database snapshot selected]
-  (let [symbols (db/stored-call-reach database selected)
+  (let [symbols (call-reach database selected)
         namespaces (set (map #(symbol (namespace %)) symbols))]
     {:functions (into {} (map #(vector % (get (:functions snapshot) %))) symbols)
      :namespaces (into {} (map #(vector % (get (:namespaces snapshot) %))) namespaces)}))
@@ -1506,7 +1533,10 @@
               (vary-meta (assoc selected :seon.render/refused-member :seon.render.call/selected-producer) assoc :seon.error/declared-schema :seon.render/request-error)
               (let [static-evidence (call-static-evidence request decision
                                                           selected)
-                    cache-evidence (call-cache-evidence request selected)
+                    ;; the fast path's evidence already describes this producer
+                    cache-evidence (if (and fast-evidence (= selected previous-selected))
+                                     fast-evidence
+                                     (call-cache-evidence request selected))
                     invocation-key (invocation-cache-key request selected
                                                          cache-evidence)
                     retained-invocations (:seon.render/invocations request)
@@ -1565,8 +1595,7 @@
                        (refresh-read-evidence database retained-invocation)
                        (cond->
                         {:seon.render.call/read-evidence
-                        (db/read-evidence
-                         @captured {:seon.db/retain-read-results? true})
+                        (db/read-evidence @captured)
                         :seon.render.call/basis-transaction
                         (db/basis-t database)
                          :seon.render.call/output
