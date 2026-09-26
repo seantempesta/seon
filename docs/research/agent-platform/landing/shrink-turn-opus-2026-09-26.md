@@ -156,3 +156,36 @@ These are the rows in my files from `docs/research/agent-platform/red-triage-202
   would prove nothing, so it needs its owner's decision on what the test should assert.
 - TIMEBOUND `recovery-preserves-terminal-receipts-exactly` (12.9 s) and `transitions-agree-with-the-model`
   (20.6 s).
+
+### Focused runs on pid 29853
+
+pid 29853 started at 22:47:46Z. It loads P1, P2 and the gate patch. It does NOT load `d231c5f7c`, which was
+committed 4 s later, so these runs are the "before" for the test fixes.
+
+| namespace | on 9bbc3568e (triage) | on pid 29853 |
+|---|---|---|
+| seon.turn-test | 416 / 15 / 1 | 409 / 22 / 8 (88.7 s) |
+| seon.turn-loop-test | 56 / 3 / 6 | 52 / 3 / 7 (11.1 s) |
+
+The columns are pass / fail / error.
+
+**Classes seen on 29853:**
+- **CONFIG.** "Effective configuration requires a matching cluster row with every required dial":
+  - it hits tests that DO seed their cluster first (`generated-read-evidence-rejects-turn-activity`,
+    `a-refused-generated-form-records-its-refusal`, `a-forms-read-evidence…`), via `render/request-profile` in
+    `evaluate-sources`;
+  - `:seon.config/available` is `["default"]`, so the seeded row is not visible to `config/effective`;
+  - it also accounts for every turn-loop error row and for `committed-error-count` reading 0 instead of 6.
+
+  The suspected owner is `558446356` (config: effective reads a cluster's row by the declaration population, not
+  the branch's carried projection), in config.clj, which is not my file. `d231c5f7c` fixes only the fixture-order
+  half, where the handle was built before the seed. The seeded-row visibility is a separate defect for the config
+  owner.
+- **Stale.** The two stale assertions (evaluation-ai, fired-bound) ran from the old test source. `d231c5f7c` fixes
+  them.
+- **TIMEBOUND.** Five tests ran 5.7–14.5 s against a 5 s bound, under concurrent load.
+- **FOREIGN.** `a-refused-settlement-keeps-each-evaluated-value` reported "Worker-global state changed": the test
+  runner's snapshot drift, owned by shrink-test.
+- **UNKNOWN.** `committed-ending-namespace-seeds-a-resumed-fold` (`nil` ending namespace), as in the triage.
+
+After the next restart I run both namespaces once more.
