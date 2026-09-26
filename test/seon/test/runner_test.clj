@@ -48,8 +48,11 @@
            (:seon.test/failing-assertions result)))
     (is (str/includes? output "assertion-report-uses-bounded-value-renderer"))
     (is (str/includes? output "runner_test.clj:99"))
-    (is (re-find #"…\+?\d+" output) "the one cut face names what was omitted")
-    (is (str/includes? output (#'runner/report-value options ctx)))
+    ;; A host object is named by its class, never walked: its internals
+    ;; (a datahike.db.DB is 18.7 KB) are not the claim (render ruling 2026-09-27).
+    (is (str/includes? output "sci.impl.opts.Ctx") "the host object is named by its class")
+    (is (str/includes? output (:seon.test.failure/actual (first (:seon.test.failure/reports result))))
+        "the gate log shows the stored actual text")
     (is (< (count output) 1500) "The small supplied profile bounds the SCI world.")
     (is (not (str/includes? output "value1999")))))
 

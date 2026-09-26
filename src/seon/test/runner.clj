@@ -19,6 +19,7 @@
             [seon.env :as env]
             [seon.instrument :as instrument]
             [seon.id :as id]
+            [seon.ai.tokens :as tokens]
             [seon.program :as program]
             [seon.render :as render]
             [seon.render.value :as value]
@@ -159,6 +160,24 @@
                    ::failure-messages []
                    ::failure-identities #{}}))))
 
+(defn- report-pair
+  "An assertion's expected and actual texts as ONE shown unit: the profile's
+  one token budget is shared, never granted twice (CLAUDE.md \"Apply
+  presentation limits once\"). Expected renders under half of it and actual
+  under the rest, so a small expected leaves its unused share to actual. A
+  thrown value is the floor's text, which the profile does not bound."
+  {:malli/schema [:=> [:cat :map :map] [:tuple [:maybe :string] [:maybe :string]]]}
+  [options event]
+  (let [profile (or (:seon.render/profile options) (:seon.render/profile (report-options)))
+        budget (:seon.render.profile/token-budget profile)
+        under (fn [tokens] (assoc options :seon.render/profile
+                                  (assoc profile :seon.render.profile/token-budget (max 1 tokens))))
+        share (if (and (find event :expected) (find event :actual)) (quot budget 2) budget)
+        expected (when (find event :expected) (report-value (under share) (:expected event)))
+        spent (if expected (min share (tokens/estimate expected)) 0)
+        actual (when (find event :actual) (report-value (under (- budget spent)) (:actual event)))]
+    [expected actual]))
+
 (defn- failure-report
   "One failing assertion as stored evidence. Expected and actual are the text
   `report-value` renders — the text the gate log shows, bounded once by the
@@ -169,14 +188,15 @@
   report for the blob tier; the whole values stay on the event in memory."
   {:malli/schema [:=> [:cat :map :map] :seon.test.failure/report]}
   [options event]
+  (let [[expected actual] (report-pair options event)]
   (cond-> (with-meta {:seon.test.failure/type (:type event)}
             ;; The whole thrown value rides as metadata, in memory only: it is
             ;; no part of the report's value (equality, printing, identity),
             ;; and recording stores it as its error value in the blob tier
             ;; (`prepare-failures!`); `actual` is only its shown text.
             (when (instance? Throwable (:actual event)) {::actual-throwable (:actual event)}))
-    (find event :expected) (assoc :seon.test.failure/expected (report-value options (:expected event)))
-    (find event :actual) (assoc :seon.test.failure/actual (report-value options (:actual event)))
+    (find event :expected) (assoc :seon.test.failure/expected expected)
+    (find event :actual) (assoc :seon.test.failure/actual actual)
     (:message event) (assoc :seon.test.failure/message (str (:message event)))
     (seq test/*testing-contexts*)
     ;; A label prints as `clojure.test/testing-contexts-str` prints it, by `str`
@@ -188,7 +208,7 @@
     (assoc :seon.test.failure/line (:line event))
     (event-signature event) (assoc :seon.test.failure/signature (event-signature event))
     (instance? Throwable (:actual event))
-    (assoc :seon.test.failure/throwable (symbol (.getName (class (:actual event)))))))
+    (assoc :seon.test.failure/throwable (symbol (.getName (class (:actual event))))))))
 
 (defn- report-identity
   "Content identity of one failing assertion from its stored `report`.
