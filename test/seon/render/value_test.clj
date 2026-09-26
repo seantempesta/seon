@@ -280,10 +280,12 @@
                     shown (:seon.eval/shown result)]
                 (is (:db-after written) (pr-str written))
                 (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
-                (is (str/includes? shown ":seon.effect/id \"poll-render-effect\"") shown)
-                (is (str/includes? shown ":seon.effect/duration-ms 12") shown)
+                ;; Clojure's printer lifts the shared namespace (#:seon.effect{...}).
+                (is (str/starts-with? shown "#:seon.effect{") shown)
+                (is (str/includes? shown ":id \"poll-render-effect\"") shown)
+                (is (str/includes? shown ":duration-ms 12") shown)
                 ;; The payload is cut to its prefix; the cut names what remains.
-                (is (re-find (re-pattern (str ":seon.effect/result-edn\\s+\"x+\"…\\+\\d+")) shown) shown)
+                (is (re-find #":result-edn\s+\"x+\"…\+\d+" shown) shown)
                 (is (= payload (get-in result [:seon.sci.admit/value :seon.effect/result-edn])))
                 (is (< (tokens/estimate shown) (:seon.render.profile/token-budget profile)))
                 (tokens/estimate shown)))
