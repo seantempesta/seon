@@ -138,16 +138,21 @@
     (fn [connection]
       (let [database (db/db connection)
             projection (:seon.schema/projection (meta database))
-            staged (d/with database [{:db/id "arity" :seon.fn.arity/min 1 :seon.fn.arity/max 1}])
+            ;; A complete function value (a stored row's own facts and its
+            ;; first arity) rides on the transaction entity: a function root
+            ;; requires every declared key, digests included.
+            schema (:schema database)
+            source (:e (first (d/datoms database :avet :seon.fn/sym 'seon.db/basis-t)))
+            facts (fn [entity] (remove #(or (= :seon.fn/sym (:a %)) (get-in schema [(:a %) :db/isComponent]))
+                                       (d/datoms database :eavt entity)))
+            staged (d/with database (mapv (fn [datom] [:db/add "arity" (:a datom) (:v datom)])
+                                          (facts (:v (first (d/datoms database :eavt source :seon.fn/arities))))))
             arity (get (:tempids staged) "arity")
             report (d/with (:db-after staged)
-                           [[:db/add :db/current-tx :seon.fn/sym `a-transaction-entity-root-reaches-the-arity-gate]
-                            [:db/add :db/current-tx :seon.fn/arities arity]
-                            ;; A function row requires its digest (09-25); the
-                            ;; owning walk validates the root's value, not the
-                            ;; digest's correctness (`write-digest-error`).
-                            [:db/add :db/current-tx :seon.program/definition-digest
-                             (apply str (repeat 64 "0"))]])
+                           (into [[:db/add :db/current-tx :seon.fn/sym `a-transaction-entity-root-reaches-the-arity-gate]
+                                  [:db/add :db/current-tx :seon.fn/arities arity]]
+                                 (map (fn [datom] [:db/add :db/current-tx (:a datom) (:v datom)]))
+                                 (facts source)))
             transaction (get (:tempids report) :db/current-tx)]
         (is (some? projection))
         (is (every? #(= transaction (:e %))
