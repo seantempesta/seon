@@ -168,8 +168,11 @@ Private experiments remain possible; local green never implies shared acceptance
   (its branch connection) is the world its calls default to, so an agent's writes land on its own branch unless it
   deliberately reaches elsewhere — and deliberately opening another branch, calling any program function or grabbing
   the context it needs is allowed. Root tasks and branch-then-merge exist for separation of concerns, not protection.
-  An agent's context executes in the same context the agent runs in: root's in its cluster, an experimental agent's on
-  its own fork by default, so root merges back only what it wants. Do not build refusals, markers or denylists to stop
+  Isolation is the DEFAULT so merging is intentional: every agent gets a scratch space (its own branch and SCI fork) where
+  it may write 50 functions freely, and only what root deliberately merges reaches the cluster. An agent's context
+  executes in the same context the agent runs in: root's in its cluster, every other agent's on its own branch by
+  default. The values each entrant receives (database value, connection, branch, SCI fork, agent id, task, capabilities)
+  and where its writes land are declared once per entrant kind in the owning spec, never implied. Do not build refusals, markers or denylists to stop
   an agent from reaching another context.
 - **Pass the world explicitly.** Carry database/connection, projection, environment,
   render profile, proc and settlement inputs, including profiling/test ownership.
