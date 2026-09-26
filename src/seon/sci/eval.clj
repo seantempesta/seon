@@ -2289,9 +2289,18 @@
   [database namespace-name present?]
   (let [namespace-row (db/pull database
                              '[:seon.ns/name
+                               {:seon.ns/aliases [:seon.ns.alias/local :seon.ns.alias/target-ns]}
                                {:seon.schema/_ns [:seon.schema/key :seon.schema/form]}]
                              [:seon.ns/name namespace-name])
-        functions (program-documentation database namespace-name)]
+        functions (program-documentation database namespace-name)
+        ;; Arglists are source text: the one reader resolves their
+        ;; auto-resolved keywords (`{id ::id}`) in the namespace's own aliases.
+        aliases (into {} (map (juxt :seon.ns.alias/local :seon.ns.alias/target-ns))
+                      (:seon.ns/aliases namespace-row))
+        read-arglists (fn [text]
+                        (let [read (reader/read {::reader/text text ::reader/ns namespace-name ::reader/aliases aliases
+                                                 :seon.config.eval.result/max-source (count text)})]
+                          (if (vector? read) (::reader/form (first read)) read)))]
     (cond
       (or (:seon.db/invalid-read namespace-row) (:seon.schema/expected-value namespace-row)) namespace-row
       (or (:seon.db/invalid-read functions) (:seon.schema/expected-value functions)) functions
@@ -2306,7 +2315,7 @@
          :functions (mapv (fn [row]
                             (merge {:sym (:seon.fn/sym row)
                                     :arglists (if-let [arglists (:seon.fn/arglists row)]
-                                                (edn/read-string arglists)
+                                                (read-arglists arglists)
                                                 (declaration-absent :seon.fn/arglists))
                                     :doc (if-let [doc (:seon.fn/doc row)]
                                            (:summary (docstring-parts doc))
