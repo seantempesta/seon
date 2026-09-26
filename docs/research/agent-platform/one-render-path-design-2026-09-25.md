@@ -228,17 +228,16 @@ and nothing else is called on it. Approval of an outer class never approves its 
 
 Consequences, each a closed trace from the review:
 
-- **Seq cells** (root ruling 2026-09-26, superseding P1-3's closed class list). Every `clojure.lang.ISeq` and every
-  other `Sequential` prints as a list, as Clojure's printer prints it (an `IPersistentVector` as a vector); the
-  class is the interface, not a case list. `seq-cells` steps `first`/`next` up to the node's member limit (offset
-  plus max-children). A realized `LazySeq` is unwrapped to its cached seq; any unrealized `IPending` cell
-  (`LazySeq`, an `Iterate`'s next value) ends the prefix as the pending tail and is never realized by the printer:
-  `(range)` and `(iterate f x)` show `(0 …?)`, `(cycle xs)` `(1 …?)`. A seq longer than the limit shows its
-  total when it is `Counted`, else the pending tail.
-- **Row 9.5** (ruled): the pending tail is the declared "unrealized lazy seq" marker naming the cell's class, never
-  nil. Realizing a page is an explicit, bounded evaluation (§3g), never the printer. The old claim that an agent's
-  top-level lazy result is realized before `shown-result` renders it is withdrawn: the review traced the evaluation
-  path (`sci/eval.clj:3264`, `bind-result!` `:620`) and found no such step. An unrealized result shows pending.
+- **Seq cells** (root rulings 2026-09-26, superseding P1-3's closed class list and "never realize"). Every
+  `clojure.lang.ISeq` and every other `Sequential` prints as a list, as Clojure's printer prints it (an
+  `IPersistentVector` as a vector); the class is the interface, not a case list. `seq-cells` steps `first`/`next`
+  up to the node's member limit (offset plus max-children; admission's max-collection for the complete HTML face),
+  realizing a lazy seq as far as it prints and no further, as Clojure's printer does under `*print-length*`:
+  `(map inc [1 2])` is `(2 3)`; `(range)`, `(iterate f x)` and `(cycle xs)` show their first members then `…?`. A seq
+  longer than the limit shows its total when it is `Counted`, else the pending tail.
+- **Row 9.5** (superseded by root 2026-09-26, dogfood cycle 1): the printer realizes a lazy result as far as it
+  prints, bounded by the member limit; the pending tail `…?` marks only the members past that bound of a seq that is
+  not `Counted`.
 - **Scalars never meet `print-method`** (P1-4). A Symbol with `{:type :user/hostile}` metadata is encoded from its
   final fields; `print-method`'s `:type` dispatch (`core.clj:3693–3695`) is never reached. Numbers whose text is
   unbounded are **bounded first**: ⌈bitLength · log₁₀2⌉ + 1 digits for `BigInteger`, the sum for `Ratio`, and

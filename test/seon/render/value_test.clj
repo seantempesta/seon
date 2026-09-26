@@ -548,14 +548,13 @@
            (value/render-ai (unit (atom {:private/value 42}))))
         "a live reference is named even when no serialization exists")))
 
-(deftest an-unrealized-poison-seq-is-a-pending-tail
-  ;; The printer never realizes (design §3a): an unrealized seq is its
-  ;; pending tail, in both projections, and nothing runs the poison.
-  (let [poison (fn [] (map (fn [_] (throw (ex-info "poison" {}))) [1]))
-        text (value/render-ai (unit (poison)))
-        html (hiccup/->string (value/render-html (unit (poison))))]
-    (is (str/starts-with? text "(…?)") text)
-    (is (str/includes? html "…?"))))
+(deftest a-lazy-result-that-throws-while-printing-throws-as-clojure-prints-it
+  ;; The printer realizes a lazy result as far as it prints (root, dogfood
+  ;; cycle 1), as Clojure's printer does: a member that throws is that
+  ;; evaluation's failure, never a silent pending tail.
+  (let [poison (fn [] (map (fn [_] (throw (ex-info "poison" {}))) [1]))]
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"poison"
+                          (value/render-ai (unit (poison)))))))
 
 (def ^:private probe-profile
   {:seon.render.profile/id :seon.render.profile/test
@@ -647,14 +646,14 @@
          (is (= [:body] (:seon.render.data/path cut)))
          (is (= body (sci/eval-form ctx (:seon.print/requery-form cut)))))))))
 
-(deftest ai-never-visits-the-omitted-tail
-  ;; The printer never realizes (design §3a): an unrealized seq is its
-  ;; pending tail and none of its members run.
+(deftest ai-realizes-only-the-members-it-prints
+  ;; An endless lazy result prints its first max-children members (3 in the
+  ;; probe profile) then …?, and no member past those is realized.
   (let [visits (atom [])
         raw (map (fn [i] (swap! visits conj i) i) (iterate inc 0))
         text (value/render-ai (probe-unit raw))]
-    (is (str/starts-with? text "(…?)") text)
-    (is (empty? @visits) "no member of the omitted tail is realized")))
+    (is (str/starts-with? text "(0 1 2 …?)") text)
+    (is (= [0 1 2] @visits) "no member past the printed ones is realized")))
 
 (deftest strings-are-quoted-and-their-cut-path-is-associative
   (let [raw "a\n\"b\\c\t"
@@ -919,12 +918,14 @@
 
 (deftest every-sequential-prints-as-a-list
   ;; Classified by interface, as Clojure's printer prints them: any ISeq or
-  ;; other Sequential is a list; an unrealized cell stays pending.
+  ;; other Sequential is a list; a lazy result is realized as far as it
+  ;; prints, and an endless one ends at the member bound with …?.
   (let [text #(:seon.render.value/text (value/prepare (unit %)))]
     (is (= "(1 2 3)" (text (sort [3 1 2]))))
     (is (= "(:a :b)" (text (keys {:a 1 :b 2}))))
     (is (= "(1 2)" (text (conj clojure.lang.PersistentQueue/EMPTY 1 2))))
-    (is (str/starts-with? (text (iterate inc 0)) "(0 …?)"))))
+    (is (= "(2 3)" (text (map inc [1 2]))))
+    (is (re-find #"(?s)^\(0 1 2 .*…\?\)" (text (iterate inc 0))))))
 
 (deftest a-value-s-own-rendered-data-is-its-ai-face
   ;; The master override (AGENTS render law): a value's own :seon.render/ai

@@ -363,21 +363,19 @@
 
 (defn- seq-cells
   "A seq's first `limit` members, stepped as Clojure's printer steps any
-  ISeq (`first`, `next`). An unrealized pending cell (a LazySeq, an
-  Iterate's next value) ends the prefix as pending, never realized here;
-  cells past `limit` end it as more."
+  ISeq (`first`, `next`), realizing a lazy seq as far as it prints and no
+  further; cells past `limit` end the prefix as more."
   {:malli/schema [:=> [:cat :seon.schema/value :int] :map]}
   [x limit]
   (loop [cell x out (transient [])]
     (cond
       (or (nil? cell) (identical? (class cell) clojure.lang.PersistentList$EmptyList))
       {:members (persistent! out)}
-      (and (instance? clojure.lang.IPending cell) (not (realized? cell)))
-      {:members (persistent! out) :pending? true}
-      (identical? (class cell) clojure.lang.LazySeq) (recur (.seq ^clojure.lang.LazySeq cell) out)
       (>= (count out) limit) {:members (persistent! out) :more? true}
+      (identical? (class cell) clojure.lang.LazySeq) (recur (.seq ^clojure.lang.LazySeq cell) out)
+      ;; `.more`, not `.next`: the rest stays unrealized until it prints.
       (instance? clojure.lang.ISeq cell)
-      (recur (.next ^clojure.lang.ISeq cell) (conj! out (.first ^clojure.lang.ISeq cell)))
+      (recur (.more ^clojure.lang.ISeq cell) (conj! out (.first ^clojure.lang.ISeq cell)))
       :else {:members (persistent! out) :pending? true})))
 
 (defn- list-row
@@ -683,7 +681,7 @@
                  (assoc base :kind :leaf :node declared :rendered? true))
                (let [children (:max-children context)
                      ;; A root continuation pages from its absolute offset.
-                     limit (if (= Long/MAX_VALUE children) children (+ (:offset context 0) children))
+                     limit (if (= Long/MAX_VALUE children) (:realize-cap context) (+ (:offset context 0) children))
                      c (classify value identity-attributes limit)]
                  (case (:kind c)
                    :scalar (assoc base :kind :leaf :node (:node c))
@@ -929,6 +927,10 @@
                       :max-depth (if ai? (:seon.render.profile/max-depth profile) Long/MAX_VALUE)
                       :max-string (or (when ai? (:seon.render.profile/max-string-length profile)) Long/MAX_VALUE)
                       :offset (max 0 (long (get-in unit [:seon.render.data/cursor :seon.render.data/offset] 0)))
+                      ;; The complete HTML face realizes a lazy seq no further
+                      ;; than admission's collection bound.
+                      :realize-cap (or (get-in unit [:seon.sci.admit/caps :seon.config.eval.result/max-collection])
+                                       (:seon.config.eval.result/max-collection @@config-defaults))
                       :root-path path
                       :ceiling (tokens/estimate-chars (or (:seon.print/rendered-token-ceiling profile)
                                                           (:seon.print/rendered-token-ceiling (print/default-options))))}
