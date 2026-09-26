@@ -1093,10 +1093,14 @@
     canonical-keys :seon.program/schema-keys
     reader-namespace :seon.program/reader-namespace
     reader-aliases :seon.program/reader-aliases}]
-  (let [compiled (m/function-schema
-                  (schema/compilable-form (read-edn spec)
-                                          predicate-functions)
-                  compile-options)
+  (let [;; The compiled contract and its references come as ONE product,
+        ;; derived in the same world (contracts-out §4, pairing rule).
+        {compiled :seon.schema/compiled references :seon.schema/references}
+        (schema/contract-product
+         {:seon.schema.projection/registry (:registry compile-options)
+          :seon.schema.projection/predicate-functions predicate-functions
+          :seon.schema.projection/canonical-keys canonical-keys}
+         {:seon.schema/form (read-edn spec) :seon.schema/mode :shape})
         arities (m/-function-schema-arities compiled)
         {source-signatures :seon.fn.signature/signatures
          override? :seon.fn.signature/arglists-override?}
@@ -1131,7 +1135,7 @@
                            (get source-by-key (malli-arity-key info)))))
             (range)
             arities
-            (schema/arity-references (:registry compile-options) canonical-keys compiled))}
+            references)}
       override? (assoc :seon.fn/arglists-override? true))))
 
 (defn with-contract-facts

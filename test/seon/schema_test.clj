@@ -1887,3 +1887,50 @@
       (let [grown (schema/projection-with-schema overlay :review/other :int
                                                  {:seon.schema.admission/source :core})]
         (is (nil? (record grown)) "an overlaid base leaves provenance unknown")))))
+
+(deftest a-contract-product-is-the-projection's-own-compile-with-its-references
+  ;; Contracts-out §1/§4: the seam compiles an authored contract in the
+  ;; projection's world and returns its references paired with it.
+  (let [projection (seon.db/carried-projection
+                    (seon.db/db (:seon.db/connection (test-support/execution-handle nil))))
+        registry (:seon.schema.projection/registry projection)
+        dependencies (:seon.schema.projection/function-dependencies projection)
+        differing (into []
+                        (keep (fn [[sym form]]
+                                (let [{compiled :seon.schema/compiled
+                                       references :seon.schema/references}
+                                      (schema/contract-product
+                                       projection {:seon.schema/form form :seon.schema/mode :shape})]
+                                  (when-not (and (= (m/form compiled) (m/form (mr/schema registry sym)))
+                                                 (= (reduce into #{} (mapcat identity references))
+                                                    (get dependencies sym #{})))
+                                    sym))))
+                        (:seon.schema.projection/function-contracts projection))]
+    (is (seq (:seon.schema.projection/function-contracts projection)))
+    (is (= [] differing) "every stored contract: same compiled form, same references"))
+  (let [forms {:review/a :int :review/b [:maybe :string]}
+        projection (schema/build-projection
+                    forms {} {:seon.schema/schema-admissions
+                              {:review/a {:seon.schema.admission/source :core}
+                               :review/b {:seon.schema.admission/source :core}}})
+        request {:seon.schema/form [:=> [:cat :review/a] [:maybe :string]]
+                 :seon.schema/mode :shape
+                 :seon.schema/identity 'review/f}]
+    (testing "admission follows the contract's own source, as a projection applies it"
+      (is (map? (schema/function-contract
+                 projection (assoc request :seon.schema/admission {:seon.schema.admission/source :core}))))
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (schema/function-contract
+                    projection (assoc request :seon.schema/admission {:seon.schema.admission/source :agent})))
+          "an agent's nilable output refuses, naming the supplied identity"))
+    (testing "armed binds :error/fn and predicates; an unresolved predicate refuses"
+      (let [{compiled :seon.schema/compiled}
+            (schema/contract-product
+             projection {:seon.schema/form [:=> [:cat [:int {:error/fn 'clojure.core/str}]] :review/a]
+                         :seon.schema/mode :armed})]
+        (is (fn? (-> compiled m/-function-schema-arities first m/-function-info :input
+                     m/children first m/properties :error/fn))))
+      (is (thrown? Exception
+                   (schema/contract-product
+                    projection {:seon.schema/form [:=> [:cat [:fn 'review.none/p?]] :int]
+                                :seon.schema/mode :shape}))))))

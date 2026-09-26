@@ -10,7 +10,6 @@
   {:seon/tasks #{"f985bfc97116" "96ac997dcf2f"}}
   (:require [seon.error.refusal]
             [clojure.edn :as edn]
-            [clojure.walk :as walk]
             [clojure.set :as set]
             [malli.core :as m]
             [malli.instrument :as mi]
@@ -417,46 +416,6 @@
   [f]
   (or (some-> f meta interpreted-original) f))
 
-(defn- predicate-callable
-  {:malli/schema [:=> [:cat :seon.schema/projection :seon.schema/value] [:or :nil :seon.instrument/callable]]}
-  [projection predicate]
-  (or (get ((mi/-f->original schema/predicate-functions-in) projection)
-           predicate)
-      (when (qualified-symbol? predicate)
-        (some-> predicate requiring-resolve deref))))
-
-(defn- bind-contract-predicates
-  "Bind named Malli predicates without opening Malli's code evaluator."
-  {:malli/schema [:=> [:cat :seon.schema/projection :seon.schema/value] :seon.schema/value]}
-  [projection contract]
-  (walk/postwalk
-   (fn [value]
-     (cond
-       (and (map? value) (qualified-symbol? (:error/fn value)))
-       (assoc value :error/fn (predicate-callable projection (:error/fn value)))
-
-       (and (vector? value) (= :fn (first value)))
-       (let [predicate-index (if (map? (second value)) 2 1)
-             predicate (get value predicate-index)
-             callable (when (symbol? predicate)
-                        (predicate-callable projection predicate))]
-         (cond
-           (and (ifn? predicate) (not (symbol? predicate))) value
-           (ifn? callable) (assoc value predicate-index callable)
-           :else
-           (throw
-            (ex-info
-             (str "Contract predicate " (pr-str predicate)
-                  " has no active callable.")
-              {:seon.error/at (java.util.Date.)
-               :seon.error/layer :seon.instrument/registration
-               :seon.error/operation 'seon.instrument/bind-contract-predicates
-               :seon.schema/unresolved-predicate predicate
-               :seon.error/message "The schema predicate is unresolved."
-               :seon.schema/predicate predicate}))))
-       :else value))
-   contract))
-
 (declare compiled-wrapper registration-error ^:dynamic *compiling-contract*)
 
 (defn wrap-interpreted
@@ -596,16 +555,15 @@
   (let [contract (get (:seon.schema.projection/function-contracts projection)
                       function-symbol authored)
         retained (mr/schema (:seon.schema.projection/registry projection) function-symbol)
-        bound (when-not retained
-                (bind-contract-predicates
-                 projection
-                 ((mi/-f->original schema/compilable-form)
-                  contract
-                  ((mi/-f->original schema/predicate-functions-in) projection))))
+        ;; The one armed compile (contracts-out §1): normalize, bind, compile in
+        ;; the registry composed with Malli's var registry.
         options {:registry (mr/composite-registry
                             (:seon.schema.projection/registry projection)
                             (mr/var-registry))}
-        compiled (or retained (m/schema bound options))
+        compiled (or retained
+                     (:seon.schema/compiled
+                      ((mi/-f->original schema/contract-product)
+                       projection {:seon.schema/form contract :seon.schema/mode :armed})))
         arity-schemas (vec (m/-function-schema-arities compiled))
         arities (mapv m/-function-info arity-schemas)
         ;; Malli reports the arity schema that refused (`:schema`), one of

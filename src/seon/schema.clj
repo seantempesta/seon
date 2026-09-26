@@ -4037,3 +4037,123 @@
   [value]
   (let [projection (shape-projection)]
     (matching-shapes-in projection value)))
+
+;;; ---------------------------------------------------------------------------
+;;; Function contracts compiled against a shape projection (contracts-out §1)
+;;; ---------------------------------------------------------------------------
+
+(defn- predicate-callable
+  "The callable `predicate` names: the projection's binding, else the loaded Var's value."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.schema/value] [:or :nil [:fn clojure.core/ifn?]]]}
+  [projection predicate]
+  (or (get (predicate-functions-in projection) predicate)
+      (when (qualified-symbol? predicate)
+        (some-> predicate requiring-resolve deref))))
+
+(defn bind-contract-predicates
+  "Bind a normalized contract's named predicates and `:error/fn` symbols to callables.
+
+   Moved from `seon.instrument` (contracts-out §1): the armed compile binds
+   after [[compilable-form]] normalizes, exactly as the instrument caller did.
+   Malli's code evaluator is never opened. An unresolved predicate refuses by name."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.schema/value] :seon.schema/value]}
+  [projection contract]
+  (walk/postwalk
+   (fn [value]
+     (cond
+       (and (map? value) (qualified-symbol? (:error/fn value)))
+       (assoc value :error/fn (predicate-callable projection (:error/fn value)))
+
+       (and (vector? value) (= :fn (first value)))
+       (let [predicate-index (if (map? (second value)) 2 1)
+             predicate (get value predicate-index)
+             callable (when (symbol? predicate)
+                        (predicate-callable projection predicate))]
+         (cond
+           (and (ifn? predicate) (not (symbol? predicate))) value
+           (ifn? callable) (assoc value predicate-index callable)
+           :else
+           (throw
+            (ex-info
+             (str "Contract predicate " (pr-str predicate)
+                  " has no active callable.")
+             {:seon.error/at (java.util.Date.)
+              :seon.error/layer :seon.instrument/registration
+              :seon.error/operation 'seon.instrument/bind-contract-predicates
+              :seon.schema/unresolved-predicate predicate
+              :seon.error/message "The schema predicate is unresolved."
+              :seon.schema/predicate predicate}))))
+       :else value))
+   contract))
+
+(defn contract-product
+  "Compile one authored function contract against `projection` and derive its references.
+
+   Symbol-free: the product carries the compiled contract and, per Malli arity,
+   its `[input output guard]` canonical references derived in the SAME world
+   ([[arity-references]]), so every consumer takes both together and never
+   re-walks. `:shape` compiles the normalized form ([[compilable-form]]) in the
+   projection registry, as the projection itself compiles contracts; `:armed`
+   also binds predicates and `:error/fn` ([[bind-contract-predicates]]) and
+   compiles in the registry composed with Malli's var registry, as arming does.
+   A host form holding a compiled schema keeps that schema's own options.
+
+   ## Costs
+
+   One Malli compile and one reference walk; nothing is retained here
+   (retention is the population table, §10, disabled until slice 4)."
+  {:malli/schema [:=> [:cat :seon.schema/projection
+                       [:map [:seon.schema/form :seon.schema/value]
+                        [:seon.schema/mode [:enum :shape :armed]]]]
+                  [:map [:seon.schema/compiled [:fn malli.core/schema?]]
+                   [:seon.schema/references
+                    [:vector [:tuple [:set :keyword] [:set :keyword] [:set :keyword]]]]]]}
+  [projection {form :seon.schema/form mode :seon.schema/mode}]
+  (let [registry (:seon.schema.projection/registry projection)
+        normalized (compilable-form form (predicate-functions-in projection))
+        compiled (case mode
+                   :shape (m/function-schema normalized {:registry registry})
+                   :armed (m/schema (bind-contract-predicates projection normalized)
+                                    {:registry (mr/composite-registry registry (mr/var-registry))}))]
+    {:seon.schema/compiled compiled
+     :seon.schema/references
+     (arity-references (:registry (m/options compiled))
+                       (or (:seon.schema.projection/canonical-keys projection)
+                           (set (keys (:seon.schema.projection/forms projection))))
+                       compiled)}))
+
+(defn function-contract
+  "Admit one authored function contract against `projection`: its product
+   ([[contract-product]]) after the same completeness rules a projection
+   applies to a contract ([[assert-complete-contract!]]), or the refusal those
+   rules throw. `identity` names the refused declaration only; it is no input
+   of the product."
+  {:malli/schema [:=> [:cat :seon.schema/projection
+                       [:map [:seon.schema/form :seon.schema/value]
+                        [:seon.schema/mode [:enum :shape :armed]]
+                        [:seon.schema/admission :map]
+                        [:seon.schema/identity :qualified-symbol]]]
+                  [:map [:seon.schema/compiled [:fn malli.core/schema?]]
+                   [:seon.schema/references
+                    [:vector [:tuple [:set :keyword] [:set :keyword] [:set :keyword]]]]]]}
+  [projection {form :seon.schema/form admission :seon.schema/admission
+               identity :seon.schema/identity :as request}]
+  (let [product (contract-product projection request)
+        registry (:seon.schema.projection/registry projection)
+        forms (:seon.schema.projection/forms projection)]
+    (assert-complete-contract!
+     {:seon.schema/identity identity
+      :seon.schema/definition form
+      :seon.schema/direct-predicate-symbols (predicate-symbols-in form)
+      :seon.schema/compiled (:seon.schema/compiled product)
+      :seon.schema/admission admission
+      :seon.schema/forms forms
+      :seon.schema/compiled-schemas (mr/schemas registry)
+      :seon.schema/schema-dependencies (:seon.schema.projection/schema-dependencies projection {})
+      :seon.schema/registry registry
+      :seon.schema/compile-options {:registry registry}
+      :seon.schema/canonical-keys (set (keys forms))
+      :seon.schema/admissions (:seon.schema.projection/schema-admissions projection {})
+      :seon.schema/pure-predicate-symbols (:seon.schema.projection/pure-predicate-symbols projection #{})
+      :seon.schema/predicate-functions (predicate-functions-in projection)})
+    product))
