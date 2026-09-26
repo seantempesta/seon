@@ -39,11 +39,11 @@ PRD §12 requires virtual replies through the ordinary proc.
 ## Context, private layer, and handles
 
 Installed: `base-ctx` derives the program-only base from one database value,
-memoized by program identity (`src/seon/sci/eval.clj:2475`). Each turn,
-`fork-for-turn` (`:3023`) forks the current base and, when the agent's previous
+memoized by program identity (`src/seon/sci/eval.clj:3350`). Each turn,
+`fork-for-turn` (`:3156`) forks the current base and, when the agent's previous
 context is held, carries the private layer in memory, preserving its context
 handle, owned Vars, atoms and result objects (`regenerate-agent-context!`,
-`:2953`). **[TARGET]** B2 makes the fork the context, with no regeneration
+`:3082`). **[TARGET]** B2 makes the fork the context, with no regeneration
 diff (`docs/prds/agent-platform/plan/lane-b2-walk-flow-fork.md` §0). SCI's generation-based isolation
 is supplied by `reference-code/sci/src/sci/core.cljc:345`. Private objects
 never enter the base or another agent; a JVM restart loses them.
@@ -57,7 +57,7 @@ The note generator is `def-note` (`src/seon/repl.clj:119`).
 Results bind actual objects in an evaluation-id map.
 `seon.id/evaluation` derives ids from branch, turn, and ordinal;
 `seon.id/symbol-in` builds `result/e<id>` handles
-(`src/seon/id.clj:55`, `:47`). The evaluation stores shown text
+(`src/seon/id.clj:67`, `:59`). The evaluation stores shown text
 from the value renderer, plus out and error, not the result object.
 
 ## History and inspection
@@ -65,15 +65,15 @@ from the value renderer, plus out and error, not the result object.
 System turns store opening and refreshed read evaluations. Before an agent
 turn, every distinct read form's latest evidence is checked against changes
 since its evaluation `:t` (installed: `system-turn`,
-`src/seon/turn.clj:2120`). Generated and agent-written reads participate;
+`src/seon/turn.clj:2157`). Generated and agent-written reads participate;
 writes and effects never rerun. Compaction wipes evaluations and regenerates
 the opening.
 
 The evaluation schema declares its AI/HTML pair; the walk renders
 evaluations in order through that pair. `seon.repl/text` is the one
-REPL grammar (`src/seon/repl.clj:256`); the render pair enters at
-`render-ai` and `render-html` (`:449`, `:480`), and saved shown text renders
-unchanged through `value-text` (`:142-146`).
+REPL grammar (`src/seon/repl.clj:264`); the render pair enters at
+`render-ai` and `render-html` (`:449`, `:474`), and saved shown text renders
+unchanged through `value-text` (`:143-147`).
 
 **[TARGET]** `my.turn/evals` and `my.turn/eval` (PRD §15; `src/my/turn.clj`
 defines neither):
@@ -91,13 +91,13 @@ A file edit is not a live proof. Reload or adopt the changed definition,
 rerun the same form against the same inputs, and name the mechanism
 exercised. Re-evaluating a contracted Var replaces its wrapper;
 `seon.instrument/apply!` documents re-arming with the supplied projection
-(`src/seon/instrument.clj:839-846`). Without
+(`src/seon/instrument.clj:799-808`). Without
 `:seon.instrument/changed-identities` it collects and re-arms the complete
 loaded program; name the changed identities when you have them.
 
 For the selected development cluster, the complete JVM form is below.
 Choose the namespace to reload; the database supplies both the projection
-and instrumentation mode (`projection-from-database`, `src/seon/schema.clj:3070`;
+and instrumentation mode (`projection-from-database`, `src/seon/schema.clj:3113`;
 `effective`, `src/seon/config.clj:819`).
 
 ```clojure
@@ -122,33 +122,24 @@ prove neither those behaviors nor browser repaint.
 
 Verified at default's REPL on 2026-09-23. Forms and timings are in
 [the landing note](../../../docs/prds/agent-platform/landing/lane-branch-repl-2026-09-23.md).
-Line numbers are for commit `cc9737c1d` plus this lane's diff.
 
 1. **Name your branch.** Call the MCP `branch` tool with `action create` and a
    `name`. It branches off the cluster head's commit through
-   `seon.cluster.registry/branch!` (`src/seon/cluster/registry.clj:193`) and is
-   built in `script/seon/dev/mcp.clj:471` (`branch-form`). There is no default
+   `seon.cluster.registry/branch!` (`src/seon/cluster/registry.clj:192`) and is
+   built in `script/seon/dev/mcp.clj:478` (`branch-form`). There is no default
    name. These refuse as `:seon.error` values: the cluster's own branch, and a
    name that already exists.
 2. **Code by evaluating forms there.** Call `eval_clj` with `mode sci` and
-   `branch <name>`. The context is acquired through
-   `seon.cluster.agent/acquire-context!` (`src/seon/cluster/agent.clj:973`) and
-   retained under `[branch nil]` (`mcp.clj:509-517`). A def is callable in your
-   next evaluation, and in any agent context acquired on that branch, because
-   agent contexts fork from the same branch base.
+   `branch <name>`. The form runs as an ordinary agent run of the branch's
+   hosted agent `mcp/<name>` (`run-form`, `script/seon/dev/mcp.clj:395-438`).
 3. **What the branch context is not, today.**
-   - It is private SCI state, not program rows. A `defn` writes no `:seon.fn/*`
-     row. Rows are written only by a turn's settlement
+   - Rows are written only by a turn's settlement
      (`analyze-settlement`, `src/seon/turn.clj:967`; `gate-function-install`,
-     `src/seon/turn.clj:3284`), and MCP runs no turn.
-   - A redefined file-backed function is interpreted only when you call it
-     directly. Its compiled callers still call the compiled Var (B2 §2a
-     [TARGET]).
-   - Overriding a declaration with `:seon.fn/host-bound?` true does not refuse.
-     The named refusal exists only on the source-adoption path
-     (`src/seon/cluster.clj:2714`). An unadmitted class fails SCI analysis
-     ("Unable to resolve classname").
-4. **Test there.** `seon.test/run` (`src/seon/test.clj:2187`) takes the branch
+     `src/seon/turn.clj:3328`).
+   - Overriding a declaration with `:seon.fn/host-bound?` true refuses by name
+     when called (`src/seon/sci/eval.clj:1722-1737`). An unadmitted class fails
+     SCI analysis ("Unable to resolve classname").
+4. **Test there.** `seon.test/run` (`src/seon/test.clj:2188`) takes the branch
    handle as `:seon.test/execution` and records on its connection. It runs the
    branch's program rows, so it does not test an in-memory def (measured).
 5. **Accept.** Accepting work is D1 §2c's merge:
@@ -161,13 +152,10 @@ Line numbers are for commit `cc9737c1d` plus this lane's diff.
    namespace its file does not require (fully qualify only required namespaces).
    Host-bound declarations always go through the files.
 6. **Retire.** Call `branch` with `action retire`. It releases the retained
-   context (`src/seon/cluster/agent.clj:749`), then calls `retire-branch!`
+   context (`src/seon/cluster/agent.clj:887`), then calls `retire-branch!`
    (`registry.clj:339`). If an agent still holds the branch, retire refuses.
 
 A branch evaluation that persists rows needs an armed agent whose custody is
 the branch. The work then goes through `seon.cluster.agent/submit-source!`
 (`src/seon/cluster/agent.clj:660`), the path a model reply uses. A worker is
-created on a candidate by `seon.issue/start!` (`src/seon/issue.clj:1506`). No
-installed operation arms that worker inside the cluster's JVM:
-`test/seon/namespace_agent_loop_test.clj` composes it by hand. That is D1 §2a's
-owed candidate handle, and it is the gap.
+created on a candidate by `seon.issue/start!` (`src/seon/issue.clj:1506`).
