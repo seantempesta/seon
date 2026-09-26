@@ -3306,7 +3306,14 @@
                          :seon.schema.admission/reason "The final SCI evaluation may return any value; this classifier returns a disposition only when the candidate satisfies my.turn/value."
                          :gen/elements [nil false 0 "" :k [] {}]}]] [:maybe :my.turn/value]]}
   [projection value]
-  (when (schema/valid-candidate-value? projection :my.turn/value value)
+  ;; TOTAL OVER VALID CLOJURE VALUES. Malli's map validator looks each key
+  ;; up (malli core.cljc:1276), and a sorted map whose comparator cannot
+  ;; compare a keyword with its keys throws on that lookup: a symbol-keyed
+  ;; `(sorted-map 'a 1)` wedged its run. Walking a map's entries never calls
+  ;; its comparator, so only a map that names the discriminator is validated.
+  (when (and (map? value)
+             (some #(= :my.turn/disposition (key %)) value)
+             (schema/valid-candidate-value? projection :my.turn/value value))
     value))
 
 (defn- append-output
@@ -3486,7 +3493,8 @@
 (defn- phase
   "Return one phase's value, translating its declared refusal carrier, an
   ExceptionInfo, to flat data. Every other throwable, the stop's interrupt
-  included, propagates unchanged to the turn step that owns it.
+  included, propagates unchanged to `turn`, which closes the run before it
+  reaches the step that owns it.
 
   Callback results are polymorphic and unchecked here; the callback's own
   contract owns them. This boundary does not promise a phase-failed member
@@ -3742,12 +3750,12 @@
            connection (:seon.blob/staged-writes transaction)
            (fn [] (db/transact!
                    connection {:tx-data (:seon.db/tx-data transaction)}))))]
-    (if (or (:seon.turn.loop/phase-failed outcome)
-            (:seon.db.write.attempt/request-id outcome)
-            (:seon.db/invalid-read outcome)
-            (:seon.schema/expected-value outcome))
-      (settle-batch-refusal! cluster requests prepared outcome)
-      {:prepared prepared :outcome outcome})))
+    ;; SUCCESS IS THE WRITER'S TRANSACTION REPORT (`db/transact!` answers
+    ;; `:seon.db/transaction-result` or its refused error); any other value,
+    ;; a refused phase included, is the refusal the arm below settles.
+    (if (:db-after outcome)
+      {:prepared prepared :outcome outcome}
+      (settle-batch-refusal! cluster requests prepared outcome))))
 
 ;;; A REFUSED PHASE ESCALATES THROUGH `seon.error/commit-tx`, LIKE EVERY OTHER
 ;;; FAILURE. This site used to `dissoc` the escalation dial — silencing the one
@@ -3867,36 +3875,24 @@
                             {:seon.agent/id agent-id
                              :seon.turn/id run-id})
         value (:seon.error/value recording)
-        serialized (:seon.eval/shown (final-shown cluster (db/db connection) agent-id value))
-        ;; The form whose declaration the program refuses, found as settlement
-        ;; applies the rows in order (the run's working value); nil when no
-        ;; declaration is refused, and then the refusal is every form's.
-        refused (reduce (fn [database {receipt :seon.turn.loop/receipt}]
-                          (let [value (some->> (:seon.program/row receipt) (settled-value database))]
-                            (cond (nil? value) database
-                                  (:seon.error/at value) (reduced (:seon.cluster.eval/ordinal receipt))
-                                  :else value)))
-                        (db/db connection) prepared)
-        refused (when (int? refused) refused)
+        ;; EVALUATED VALUES ARE NOT PUBLICATION STATUS. Every form keeps the
+        ;; shown text of the value it evaluated; the refused commit is the
+        ;; batch's one publication outcome, so each receipt names it as its
+        ;; error (a form that failed keeps its own). No form is claimed to
+        ;; have returned the refusal, and no failing form is guessed by
+        ;; re-applying rows: the recorded refusal names what it refused.
+        ;; Only identity and text settle: the refused batch may have been
+        ;; refused for any other value its receipts carried (dogfood #4).
+        unpublished (str "Not settled: this run's settlement was refused: "
+                         (:seon.error/message value))
         receipts
         (mapv
-         (fn [entry]
-           ;; THE REFUSAL SETTLES ON THE RECEIPT'S IDENTITY ALONE. The refused
-           ;; batch may have been refused for any value the receipt carried
-           ;; (its read evidence, output, defs); writing them again refuses
-           ;; again and leaves the run open forever (dogfood #4). Each other
-           ;; form keeps its own shown text; the refused form, or every form
-           ;; when none is named, shows the refusal. No declaration settles.
-           (let [receipt (:seon.turn.loop/receipt entry)
-                 own? (and refused (not= refused (:seon.cluster.eval/ordinal receipt)))]
-             (cond-> (select-keys receipt [:seon.turn/id :seon.db.process/id :seon.cluster.eval/ordinal
-                                           :seon.cluster.eval/ns :seon.sci.eval/ending-ns])
-               own? (merge (select-keys receipt [:seon.eval/shown :seon.cluster.eval/error]))
-               (and own? (:seon.program/row receipt))
-               (assoc :seon.cluster.eval/error
-                      (str "Not settled: this run's program change was refused at form " refused "."))
-               (not own?) (assoc :seon.eval/shown serialized
-                                 :seon.cluster.eval/error (:seon.error/message value)))))
+         (fn [{receipt :seon.turn.loop/receipt}]
+           (let [settled (select-keys receipt [:seon.turn/id :seon.db.process/id :seon.cluster.eval/ordinal
+                                               :seon.cluster.eval/ns :seon.sci.eval/ending-ns
+                                               :seon.eval/shown :seon.cluster.eval/error])]
+             (assoc settled :seon.cluster.eval/error
+                    (or (:seon.cluster.eval/error settled) unpublished))))
          prepared)
         transaction
         ;; Same writer decision as `refusal-terminal-data`: the batch's
@@ -3914,9 +3910,7 @@
         outcome (blob/with-publication!
                  connection (vec (:seon.blob/staged-writes recording))
                  #(db/transact! connection transaction))]
-    (when (or (:seon.db.write.attempt/request-id outcome)
-              (:seon.db/invalid-read outcome)
-              (:seon.schema/expected-value outcome))
+    (when-not (:db-after outcome)
       (throw
        (ex-info "Batch refusal settlement was refused."
                 {:seon.turn.loop/settlement outcome
@@ -3973,20 +3967,14 @@
                      connection
                      {:tx-data (:seon.db/tx-data transaction)})))))
         outcome (commit prepared)]
-    (if-not (or (:seon.turn.loop/phase-failed outcome)
-                (:seon.db.write.attempt/request-id outcome)
-                (:seon.db/invalid-read outcome)
-                (:seon.schema/expected-value outcome))
+    (if (:db-after outcome)
       (assoc prepared :seon.turn.loop/outcome outcome)
       (let [refusal
             (refusal-terminal-data
              cluster (db/db connection) now agent-id run-id process ordinal
              (:seon.turn.loop/receipt prepared) outcome)
             refused (commit refusal)]
-        (when (or (:seon.turn.loop/phase-failed refused)
-                  (:seon.db.write.attempt/request-id refused)
-                  (:seon.db/invalid-read refused)
-                  (:seon.schema/expected-value refused))
+        (when-not (:db-after refused)
           (throw
            (ex-info "Terminal refusal settlement was refused."
                     {:seon.turn.loop/terminal-refusal-settlement-refused
@@ -4270,11 +4258,9 @@
            (db/transact! connection
                          (into (conj recording row
                                      [:db/add [:seon.turn/id run-id] :seon.turn/attempts "attempt"]) observation-tx))))]
-    (if (or (:seon.db.write.attempt/request-id outcome)
-            (:seon.db/invalid-read outcome)
-            (:seon.schema/expected-value outcome))
-      outcome
-      (:seon.error/fact failure-recording))))
+    (if (:db-after outcome)
+      (:seon.error/fact failure-recording)
+      outcome)))
 
 (defn- fold-evaluations
   "One run's evaluation entities, ordinal order, in ONE query.
@@ -4955,8 +4941,8 @@
                               {:seon.cluster.eval/ordinal ordinal
                                :seon.turn.loop/admitted-form form
                                :seon.sci.eval/evaluation evaluation})]
-            (if (contains? #{:completed :wait}
-                           (:my.turn/disposition (:seon.sci.admit/value evaluation)))
+            (if (disposition (db/carried-projection database)
+                             (:seon.sci.admit/value evaluation))
               results
               (recur (next remaining) (inc ordinal)
                      (or (:seon.sci.eval/ending-ns evaluation) namespace-name)
@@ -5223,9 +5209,7 @@
                  (:seon.db/connection cluster)
                  (conj (close-tx {:seon.turn/id (:seon.turn/id work) :seon.turn/closed-tx "datomic.tx"})
                        [:db.fn/call #'plan/settle-call (:seon.agent/id work)]))]
-    (if (or (:seon.db.write.attempt/request-id outcome)
-            (:seon.db/invalid-read outcome)
-            (:seon.schema/expected-value outcome))
+    (if-not (:db-after outcome)
       (do (settle! {:seon.turn.loop/cluster cluster :seon.turn.loop/now now
                      :seon.agent/id (:seon.agent/id work)
                      :seon.error/value outcome})
@@ -5393,6 +5377,35 @@
                          :seon.agent/id agent-id}))))
     nil))
 
+(defn- close-escaped-run!
+  "Close `agent-id`'s open run after `escaped` left the turn, and answer
+  `escaped` to propagate whole.
+
+  THE TURN BOUNDARY OWNS THE RUN'S TERMINAL. A Throwable leaving any stage
+  (read, evaluate, gate, settle, record) used to leave the run open, so every
+  later wake of the agent met `agent-already-running` (a symbol-keyed sorted
+  map, 2026-09-26). The writer decides what was unfinished: `recover-call`
+  closes the run and interrupts its unsettled receipts and effects, the same
+  decision boot makes. The throwable itself is the one fault: it continues to
+  the proc's fault route under the declared policy. A failure to close is
+  suppressed onto it, never substituted for it."
+  {:malli/schema [:=> [:cat :seon.turn.loop/cluster :seon.agent/id :seon.error/throwable]
+                  :seon.error/throwable]}
+  [cluster agent-id escaped]
+  (let [connection (:seon.db/connection cluster)
+        suppress! #(.addSuppressed ^Throwable escaped
+                                   (if (instance? Throwable %)
+                                     %
+                                     (ex-info (:seon.error/message % "The escaped run could not be closed.") %)))]
+    (try
+      (let [run-id (open-for-agent (db/db connection) [:seon.agent/id agent-id])]
+        (if (string? run-id)
+          (let [closed (db/transact! connection (recover-tx {::id run-id ::now (Date.)}))]
+            (when-not (:db-after closed) (suppress! closed)))
+          (when (map? run-id) (suppress! run-id))))
+      (catch Throwable failure (suppress! failure)))
+    escaped))
+
 (defn turn
   "Run one turn to its next durable boundary; returns the turn report.
   The sequence is the contract: open → derive prompt → model (`:io`)
@@ -5465,9 +5478,16 @@
                          (report :error 0 refreshed)
                          result))
                      result))))]
-    (if-let [projection-state (:seon.sci.eval/projection-state cluster)]
-      (schema/call-with-projection-state projection-state pass)
-      (pass))))
+    (try
+      (if-let [projection-state (:seon.sci.eval/projection-state cluster)]
+        (schema/call-with-projection-state projection-state pass)
+        (pass))
+      ;; a stop's interrupt is its own terminal: interrupted execution never
+      ;; resumes, and disarm closes the run it interrupted with the same
+      ;; writer decision (`seon.cluster.agent/record-interruption!`)
+      (catch InterruptedException stop (throw stop))
+      (catch Throwable escaped
+        (throw (close-escaped-run! cluster agent-id escaped))))))
 
 (defn turn-completion-error
   "Describe the turn completion event that did not arrive within its bound."
@@ -5741,9 +5761,11 @@
   armed-ready permit: arm publishes it before Flow scheduling, an active
   transform holds it under the completion allowance plus the admitted provider
   schedule or each form's evaluation limit, and
-  `finally` republishes it without an interruptible park. A successful pass
-  then cancels the bound; an escaped pass leaves it armed. Disarm awaits the
-  stop transition or joins that same active bound; a ready permit never
+  `finally` republishes it without an interruptible park. The bound retires
+  there, at the transform's actual exit, and only after its terminal: `turn`
+  closes the run before any throw leaves it (`close-escaped-run!`), so an
+  escaped pass is one closed run plus its one fault. Disarm awaits the stop
+  transition or joins that same active bound; a ready permit never
   substitutes for proc exit."
   {:malli/schema [:function
                   [:=> [:cat] [:map]]

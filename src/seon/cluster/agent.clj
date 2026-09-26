@@ -1378,10 +1378,7 @@
                       connection
                       (turn/recover-tx {:seon.turn/id run-id
                                         :seon.turn/now (Date.)})))]
-        (when (or (:seon.error/at result)
-                  (:seon.db.write.attempt/request-id result)
-                  (:seon.db/invalid-read result)
-                  (:seon.schema/expected-value result))
+        (when-not (:db-after result)
           (throw
            (ex-info "Disarm could not record the interrupted turn."
                     {:seon.error/message

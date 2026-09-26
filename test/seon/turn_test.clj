@@ -2307,3 +2307,90 @@
            (pr-str (ex-data terminal)))
        (when (= :panic (:seon.fault/policy receipt))
          (is (= 1 @stops) "the panic requested the owner's stop once"))))))
+
+(defn- terminal-fixture
+  "A seeded cluster, agent `printer`, and one open run `run-id` whose `sources`
+  are started, unsettled receipts; answers the cluster handle."
+  [connection cluster-name run-id sources]
+  (config/apply! {:seon.db/connection connection :seon.boot/cluster-name cluster-name})
+  (support/seed-cluster! connection cluster-name)
+  (checked-transact! connection (agent/creation-tx {:seon.agent/id "printer" :seon.ns/name 'my.agents.printer
+                                                    :seon.cluster/name cluster-name}))
+  (checked-transact!
+   connection
+   (into [{:seon.turn/id run-id :seon.turn/agent [:seon.agent/id "printer"]
+           :seon.turn/starting-ns [:seon.ns/name 'my.agents.printer] :seon.turn/opened-tx "datomic.tx"}]
+         (map-indexed (fn [ordinal source]
+                        {:seon.cluster.eval/id (id/evaluation run-id ordinal) :seon.cluster.eval/at (java.util.Date.)
+                         :seon.cluster.eval/run [:seon.turn/id run-id] :seon.cluster.eval/ordinal ordinal
+                         :seon.cluster.eval/author :agent :seon.cluster.eval/ns [:seon.ns/name 'my.agents.printer]
+                         :seon.cluster.eval/source source}))
+         sources))
+  (support/cluster-handle
+   {:seon.env/environment (support/environment cluster-name connection)
+    :seon.db/connection connection :seon.cluster/name cluster-name
+    :seon.db.process/id cluster/boot-process-identity :seon.sci.eval/ctx (support/fork-cluster-ctx connection)}))
+
+(defn- settled-receipts [connection run-id]
+  (mapv #(db/pull (db/db connection) [:seon.eval/shown :seon.cluster.eval/error :seon.cluster.eval/interrupted-at]
+                  [:seon.cluster.eval/id (id/evaluation run-id %)])
+        (range 2)))
+
+(deftest ^{:seon/tasks #{"47b64f4cebf4"}} a-throwable-escaping-the-turn-closes-its-run-and-propagates-whole
+  ;; THE CLASS (audit 2026-09-26 M4 L2): a Throwable leaving the turn after
+  ;; its run opened left the run open, so the agent's every later run refused
+  ;; `agent-already-running`. The turn boundary closes it with the writer's
+  ;; recovery decision, then the throwable continues whole as the one fault.
+  (support/with-database
+   (fn [connection]
+     (let [run-id "escaped-run"
+           handle (terminal-fixture connection "escaped-turn" run-id ["(sorted-map 'a 1)" "(+ 1 1)"])
+           escaped (ClassCastException. "a later stage threw")
+           answered (#'turn/close-escaped-run! handle "printer" escaped)
+           database (db/db connection)]
+       (is (identical? escaped answered) "the throwable itself propagates")
+       (is (empty? (.getSuppressed ^Throwable answered)) "closing succeeded, so nothing is suppressed onto it")
+       (is (some? (:seon.turn/closed-tx (db/pull database [:seon.turn/closed-tx] [:seon.turn/id run-id]))))
+       (is (every? :seon.cluster.eval/interrupted-at (settled-receipts connection run-id))
+           "the writer marks each unsettled form interrupted; nothing is replayed")
+       (is (nil? (turn/open-for-agent database [:seon.agent/id "printer"]))
+           "the agent holds no open run, so its next run can open")
+       (is (identical? escaped (#'turn/close-escaped-run! handle "printer" escaped))
+           "with no open run the boundary writes nothing and still answers the throwable")))))
+
+(deftest ^{:seon/tasks #{"023acee5f88d"}} a-refused-settlement-keeps-each-evaluated-value
+  ;; THE CLASS (audit 2026-09-26 M4 L3): a refused batch settlement guessed a
+  ;; failing ordinal by re-applying rows, and every other form's shown text
+  ;; was replaced by the refusal. The evaluated values stay; the refused
+  ;; commit is each receipt's publication status.
+  (support/with-database
+   (fn [connection]
+     (let [run-id "refused-batch"
+           handle (terminal-fixture connection "refused-batch" run-id ["(+ 1 1)" "(* 3 3)"])
+           configuration (support/effective-config)
+           now (java.util.Date.)
+           requests (mapv (fn [ordinal source]
+                            {:seon.turn.loop/cluster handle :seon.turn.loop/now now :seon.agent/id "printer"
+                             :seon.turn/id run-id :seon.cluster.eval/ordinal ordinal
+                             :seon.sci.eval/evaluation
+                             (sci.eval/evaluate
+                              {:seon.cluster.eval/source source
+                               :seon.sci.eval/ctx (:seon.sci.eval/ctx handle) :seon.db/db (db/db connection)
+                               :seon.render/profile (render/agent-render-profile configuration)
+                               :seon.sci.admit/caps (config/result-caps configuration)
+                               :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)
+                               :seon.config/on-core-error :panic})})
+                          (range 2) ["(+ 1 1)" "(* 3 3)"])
+           prepared (mapv (fn [{ordinal :seon.cluster.eval/ordinal evaluation :seon.sci.eval/evaluation}]
+                            {:seon.turn.loop/receipt {:seon.turn/id run-id :seon.cluster.eval/ordinal ordinal
+                                                      :seon.eval/shown (:seon.eval/shown evaluation)}})
+                          requests)
+           refusal (try (#'turn/refuse! `turn/close-call :seon.turn/no-such-run {:seon.turn/id run-id})
+                        (catch clojure.lang.ExceptionInfo failure (ex-data failure)))
+           settled (#'turn/settle-batch-refusal! handle requests prepared refusal)
+           receipts (settled-receipts connection run-id)]
+       (is (some? (:db-after (:outcome settled))) (pr-str (keys settled)))
+       (is (= ["2" "9"] (mapv :seon.eval/shown receipts)) "each form shows the value it evaluated")
+       (is (every? #(str/includes? (str (:seon.cluster.eval/error %)) (:seon.error/message refusal)) receipts)
+           "each receipt names the refused publication")
+       (is (some? (:seon.turn/closed-tx (db/pull (db/db connection) [:seon.turn/closed-tx] [:seon.turn/id run-id]))))))))

@@ -2190,3 +2190,71 @@
                            (answers-by-trigger terminal-db))))))
               (finally
                 (disarm-all! routing)))))))))
+
+(deftest ^{:seon/tasks #{"47b64f4cebf4"}
+           :seon.test/long "Five ordinary agent runs through evaluate-source!, each a run transaction, one Flow turn and its settlement (184-229 ms warm each on default, 2026-09-26, evaluate_source_test), plus arming; the alias batch also analyzes a declaration."
+           :seon.test/long-ms 20000}
+  every-run-reaches-one-terminal-and-the-next-run-works
+  ;; THE CLASS (audit 2026-09-26 M4 L1/L2): a form evaluated, then a later
+  ;; stage threw, and the run stayed open, so every later run of the agent
+  ;; refused `agent-already-running`. `(sorted-map 'a 1)` did it: the
+  ;; disposition classifier looked a keyword up in a symbol-keyed sorted map.
+  ;; Each run here must close with its forms settled, and the next run works.
+  (let [target (test-support/execution-handle nil)
+        connection (:seon.db/connection target)
+        cluster-name (:seon.cluster/name target)
+        agent-id (str "terminal-" (id/id))
+        environment (test-support/environment cluster-name connection)
+        ctx (test-support/fork-cluster-ctx connection cluster-name)
+        routing (test-support/attempt-routing connection)
+        faults (async/chan (async/sliding-buffer 16))]
+    (with-open [launcher (test-support/closeable
+                          (seon.flow/start-work-launcher!
+                           {:seon.env/environment environment
+                            :seon.flow/configuration (select-keys (config/effective (db/db connection) cluster-name)
+                                                                  seon.flow/flow-workload-attributes)})
+                          seon.flow/stop-work-launcher!)]
+      (let [handle (test-support/cluster-handle
+                    {:seon.env/environment environment :seon.db/connection connection :seon.cluster/name cluster-name
+                     :seon.sci.eval/ctx ctx :seon.flow/work-launcher @launcher
+                     :seon.flow/executor (cluster/projection-executor (:seon.sci.eval/projection-state ctx))
+                     :seon.db.process/id cluster/boot-process-identity})
+            request {:seon.turn.loop/cluster handle :seon.agent/routing routing :seon.agent/id agent-id}
+            settle-run (fn [text]
+                   (let [result (agent/evaluate-source! (assoc request :seon.agent/segmenter 'seon.cluster.reply/code-sources
+                                                               :seon.cluster.reply/text text))
+                         run-id (:seon.turn/id result)
+                         database (db/db connection)
+                         receipts (when run-id
+                                    (sort-by :seon.cluster.eval/ordinal
+                                             (db/q '[:find [(pull ?e [:seon.cluster.eval/ordinal :seon.eval/shown
+                                                                      :seon.cluster.eval/error :seon.cluster.eval/interrupted-at]) ...]
+                                                     :in $ ?id
+                                                     :where [?r :seon.turn/id ?id] [?e :seon.cluster.eval/run ?r]]
+                                                   database run-id)))]
+                     (is (string? run-id) (str text " -> " (pr-str result)))
+                     (is (some? (:seon.turn/closed-tx (db/pull database [:seon.turn/closed-tx] [:seon.turn/id run-id])))
+                         (str text ": the run is terminal"))
+                     (is (every? #(some % [:seon.eval/shown :seon.cluster.eval/error :seon.cluster.eval/interrupted-at])
+                                 receipts)
+                         (str text ": every form carries a terminal fact " (pr-str receipts)))
+                     (mapv :seon.eval/shown receipts)))]
+        (swap! routing assoc :seon.agent/fault-channel faults)
+        (test-support/transacted! connection (test-support/agent-tx @connection agent-id))
+        (agent/arm! request)
+        (try
+          (testing "a sorted map is a value: it prints, and classification never compares its keys"
+            (is (= ["{a 1}"] (settle-run "(sorted-map 'a 1)")))
+            (is (= ["{\"a\" 1}"] (settle-run "(sorted-map \"a\" 1)"))))
+          (testing "an evaluation error settles on its form"
+            (let [[shown] (settle-run "(/ 1 0)")]
+              (is (str/includes? (str shown) "Divide by zero") (pr-str shown))))
+          (testing "an alias required earlier in the batch, then a declaration using it, reaches a terminal"
+            (settle-run "(require '[clojure.string :as s])\n(defn shout {:malli/schema [:=> [:cat :string] :string]} [x] (s/upper-case x))"))
+          (testing "after all of them, the agent's next run works"
+            (is (= ["2"] (settle-run "(+ 1 1)"))))
+          (finally
+            (agent/disarm! request)
+            (doseq [channel [faults (:seon.cluster.wake/channel handle)
+                             (:seon.render/context-channel handle) (:seon.turn.loop/completion handle)]]
+              (async/close! channel))))))))
