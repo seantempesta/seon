@@ -598,9 +598,9 @@
         prepared
         (refusal-terminal-data
          (test-support/cluster-handle
-          {:seon.env/environment (test-support/environment "refused-phase" connection)
+          {:seon.env/environment (test-support/environment (:seon.cluster/name (test-support/execution-handle connection)) connection)
           :seon.db/connection connection
-          :seon.cluster/name "refused-phase"
+          :seon.cluster/name (:seon.cluster/name (test-support/execution-handle connection))
           :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)
           :seon.config.error/escalate-to escalate-to
           :seon.db.process/id process
@@ -629,7 +629,6 @@
   (testing "a supervisor hears about a worker's refused phases — once"
     (test-support/with-database
      (fn [connection]
-       (test-support/seed-cluster! connection "refused-phase")
        (test-support/transacted! connection
                                  (test-support/agents-tx @connection ["worker" "supervisor"]))
        (is (= [["supervisor"] [] [] [] [] []]
@@ -642,7 +641,6 @@
   (testing "the failing agent is never mailed about its own refusal"
     (test-support/with-database
      (fn [connection]
-       (test-support/seed-cluster! connection "refused-phase")
        (test-support/transacted! connection (test-support/agent-tx @connection "worker"))
        (is (= [[] [] [] [] [] []]
               (mapv (fn [_] (refuse-phase! connection "worker" "worker"))
@@ -709,7 +707,6 @@
             run-id "undisposed-run"
             message-id "undisposed-trigger"
             terminal-data (private-loop-fn 'evaluation-terminal-data)]
-        (test-support/seed-cluster! connection "undisposed")
         (test-support/transacted!
                      connection
                      (into [(test-support/namespace-row @connection 'my.agents.undisposed-agent)]
@@ -742,9 +739,11 @@
               (terminal-data
                {:seon.turn.loop/cluster
                 (test-support/cluster-handle
-                 {:seon.env/environment (test-support/environment "undisposed" connection)
+                 ;; The world's own cluster: a second cluster row would make
+                 ;; the world name no single cluster for its readers.
+                 {:seon.env/environment (test-support/environment (:seon.cluster/name (test-support/execution-handle connection)) connection)
                   :seon.db/connection connection
-                  :seon.cluster/name "undisposed"
+                  :seon.cluster/name (:seon.cluster/name (test-support/execution-handle connection))
                   :seon.db.process/id process
                   :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)})
                 :seon.turn.loop/now now
@@ -917,13 +916,12 @@
       (commit-run! connection
                    {:held? true
                     :planned? true})
-      (test-support/seed-cluster! connection "install-refusal")
       ;; The freeze already minted ordinal 0 with its start instant; there is
       ;; no separate receipt to start.
       (let [cluster (test-support/cluster-handle
-                    {:seon.env/environment (test-support/environment "install-refusal" connection)
+                    {:seon.env/environment (test-support/environment (:seon.cluster/name (test-support/execution-handle connection)) connection)
                      :seon.db/connection connection
-                     :seon.cluster/name "install-refusal"
+                     :seon.cluster/name (:seon.cluster/name (test-support/execution-handle connection))
                      :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)
                      :seon.db.process/id process
                      :seon.config.error/recurrence-limit 3})
