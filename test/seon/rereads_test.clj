@@ -203,3 +203,31 @@
          (is (contains? (:seon.turn/generated-read-attributes fault)
                         :seon.cluster.eval/source)
              "Turn activity is refused using the captured dependencies alone."))))))
+
+(deftest a-read-bound-to-one-existing-entity-names-turn-taking-only-through-what-that-entity-holds
+  ;; Class (2026-09-26): root's declared opening read `(seon.error/for-agent
+  ;; (seon.db/db) "root")` resolved an error message's ref to its identity by
+  ;; probing every identity attribute of that one message entity, and read the
+  ;; whole entity. Its evidence named `:seon.turn/id`; the refusal carried no
+  ;; declared schema, so recording it panicked root's turn step at every boot.
+  (support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           entity (:e (first (db/datoms database :aevt :seon.fn/sym)))
+           evidence (fn [reading]
+                      (let [captured (atom [])]
+                        (binding [db/*read-evidence-sink* captured] (reading))
+                        (db/read-evidence @captured)))
+           fault #(#'turn/generated-read-fault database {:seon.cluster.eval/source "(read)"}
+                                               {:seon.cluster.eval/read-evidence %})]
+       (is (nil? (fault (evidence #(db/q '[:find ?v . :in $ ?e :where [?e :seon.turn/id ?v]]
+                                         database entity))))
+           "one existing entity's identity never changes with turn-taking")
+       (is (nil? (fault (evidence #(db/datoms database :eavt entity))))
+           "the whole of an entity holding no turn-taking attribute")
+       (let [refused (fault (evidence #(db/q '[:find ?v . :where [_ :seon.turn/id ?v]] database)))]
+         (is (= #{:seon.turn/id} (:seon.turn/generated-read-attributes refused))
+             "an unbound turn pattern still refuses")
+         (is (= :seon.turn/generated-read-depends-on-turns-error
+                (:seon.error/declared-schema (meta refused)))
+             "the refusal declares the schema its recording validates"))))))

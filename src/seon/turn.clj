@@ -2087,6 +2087,7 @@
                   [:or :nil :seon.turn/generated-read-depends-on-turns-error]]}
   [database source dependencies]
   (let [inert (wake/inert-attributes database)
+        identities (set (db/identity-attributes database))
         evidence (:seon.cluster.eval/read-evidence dependencies)
         offending (into (sorted-set)
                         (mapcat (fn [read]
@@ -2097,8 +2098,28 @@
                                         patterns (:seon.db/read-index-patterns source)
                                         ;; Freshness uses these complete patterns before
                                         ;; the conservative attribute revision as well.
-                                        attributes (if (and patterns (every? :seon.db/pattern-attribute patterns))
-                                                     (map :seon.db/pattern-attribute patterns)
+                                        ;; A pattern bound to one existing entity sees only that
+                                        ;; entity's datoms, and turn-taking asserts new entities
+                                        ;; (turns, evaluations, attempts). Such a pattern names
+                                        ;; turn-taking only through an attribute that entity can
+                                        ;; change: a non-identity attribute it names, or, bound to
+                                        ;; the entity alone, an attribute the entity holds (the
+                                        ;; agent's `:my.agent/turns-left`). An identity names the
+                                        ;; entity and never changes; resolving a message ref to
+                                        ;; its identity probes every identity attribute (root's
+                                        ;; `seon.error/for-agent` opening read, 2026-09-26).
+                                        attributes (if (and patterns
+                                                            (every? #(or (:seon.db/pattern-attribute %)
+                                                                         (:seon.db/pattern-entity %))
+                                                                    patterns))
+                                                     (mapcat (fn [{entity :seon.db/pattern-entity
+                                                                   attribute :seon.db/pattern-attribute}]
+                                                               (cond
+                                                                 (nil? entity) [attribute]
+                                                                 (nil? attribute) (map :a (db/datoms database :eavt entity))
+                                                                 (identities attribute) []
+                                                                 :else [attribute]))
+                                                             patterns)
                                                      (get-in read [:datahike.read/revision
                                                                    :datahike.read/attributes]))]
                                     ;; `:all` is the UNKNOWN attribute set of a
@@ -2123,13 +2144,15 @@
                                       (filter inert attributes)))))
                         evidence)]
     (when (and (seq offending) (not (issue-origin-read? database source)))
-      (seon.error.refusal/diagnostic (Date.) :seon.turn/evaluation `system-turn
+      (with-meta
+       (seon.error.refusal/diagnostic (Date.) :seon.turn/evaluation `system-turn
        {:seon.turn/generated-read-attributes offending
         :seon.error/message "A generated context read depends on the agent's own turn-taking."
         :seon.error/member :seon.cluster.eval/source
         :seon.error/expected :seon.wake/context-inert
         :seon.error/offending (:seon.cluster.eval/source source)
-        :seon.error/data (merge {:datahike.read/attributes offending} {:seon.error/layer :seon.turn})}))))
+        :seon.error/data (merge {:datahike.read/attributes offending} {:seon.error/layer :seon.turn})})
+       {:seon.error/declared-schema :seon.turn/generated-read-depends-on-turns-error}))))
 
 (defn system-turn
   "Project the declared opening and every distinct retained read form.
