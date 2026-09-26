@@ -44,7 +44,10 @@
                       :seon.render.value/truncated?]
                      [:seon.render.value/text :seon.render.value/text]
                      [:seon.render.value/html :seon.render.value/html]
-                     [:seon.render.value/options :seon.print/options]],
+                     [:seon.render.value/options :seon.print/options]
+                     [:seon.render.value/diagnostics {:optional true} :seon.render.value/diagnostics]],
+                    :diagnostics [:vector {:min 1 :description "Presentation failures shown once beside the value they did not replace; the caller records each as a core fault."}
+                                  [:or :seon.error/throwable :seon.error/base]],
                     :text :string,
                     :tree :seon.print/node,
                     :truncated? :boolean,
