@@ -68,6 +68,8 @@ Those rows are listed for root in §1.6 and are not in this lane's slices.
 
 ### 1.1 `admit-run` checks for a program change twice inside the writer (S1, recommended first)
 
+**Landed in e6b5470e8** (with the per-test hold for unexited members; unproven until root's restart).
+
 **What it does.** `src/seon/test.clj:1192` sets the digest to the tested one only when
 `(false? (runner/program-written-since? database basis))`. Otherwise it calls `runner/program-digest`,
 which on the writer's in-transaction value (no commit id) returns its refusal. Any value other than
