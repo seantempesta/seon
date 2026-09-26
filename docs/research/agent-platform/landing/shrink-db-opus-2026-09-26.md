@@ -147,6 +147,43 @@ costs 8 µs against 120 µs.
 
 **Branches retired:** `shrink-db-p1-before`, `-before2`, `-before3`, `root-p1-after` and `shrink-db-settle-1`.
 
+## Red triage for db-test and owned-value-test (f8534c501)
+
+**Before.** The store's latest runs had 13 of 94 db-test members red (listed below), plus owned-value
+`a-transaction-entity-root-reaches-the-arity-gate`. A before run on the current archive was not possible:
+`test-check` refused `:seon.test/program-mismatch`, then default restarted twice.
+
+**Fixed:** 259bd59d9 and 4998d3fa1. Each test now follows the commit that changed its rule.
+
+| Test | Cause | Change |
+|---|---|---|
+| `one-owner-digests-a-definition-with-its-stored-namespace` | 9b6df1ff4: the digest keeps only the resolver context the definition uses | The definition now uses the refer; also asserts that an unused refer leaves the digest unchanged |
+| `a-namespace-row-change-re-derives-its-declarations-digests` | 9b6df1ff4 | `f` uses `clojure.set`; asserts that `g`, which uses nothing, keeps its digest |
+| `durable-pull-digests-replay-without-retaining-read-results` | b96d6e684: stored evidence holds no request, result or digest | Digests asserted on retained evidence; stored evidence asserted to carry none |
+| `wildcard-pull-digests-cover-empty-large-and-canonical-results` | b96d6e684 | Same; the stored-digest codec round trip is removed, because the stored value no longer exists |
+| `every-database-value-reader-answers-for-all-four-view-shapes` | b96d6e684: since and history views have no revision, so only replay proves them current, and replay needs retained evidence | `current?` asserted on retained evidence |
+| `an-entity-pull-is-checked-only-on-the-attributes-that-changed` | b96d6e684 (it counts replays) | Retained evidence |
+| `a-pattern-over-an-uninstalled-attribute-witnesses-no-change` | `test-support/revision` writes only the attributes it changes, so `:seon.fn/sym` never moved | A new function row moves `:seon.fn/sym` |
+| `a-write-naming-another-clusters-branch-is-refused-naming-both` | Since 07ed79283 the elided arity answers `::db/tx` / `::db/datoms`, never `:db-after` | Asserts `(int? (::db/tx elided))` |
+| `an-unknown-read-operation-refuses-naming-the-attribute` | Member is top-level since 9bf22ecd9; the producer lacked `:seon.error/offending` | Producer adds offending (db.clj +1); the test reads the flat refusal |
+| `render-declarations-require-their-final-function-row` | e6b559711: the final value's projection refuses a renderer with no contract first (`render-contract-refusal!`, probed) | Asserts the renderer the refusal names |
+| `uncarried-read-reports-one-projection-fallback-per-call` | A value that declares its program derives its projection with nothing handed (probed on default: rows, no WARN) | Asserts that rule, plus a bare in-memory store with no declaration rows refusing once per call (probed: valid refusal, one WARN line per call) |
+| owned-value `a-transaction-entity-root-reaches-the-arity-gate` | A function root requires `:seon.program/definition-digest` (probed refusal) | The fixture root carries a digest |
+
+**Not fixed:**
+
+- `nested-native-reports-admit-bounded-reference-identities`. Admission turns the report's db values into
+  `#{::opaque ::projection-error}`, which comes from `seon.sci.admit/semantic-leaf`: the print node failed. A
+  `d/with` report from default admits correctly at the REPL (identity maps with commit ids), so only the test world
+  reproduces it. The owner is sci/admit or print (shrink-eval lane). It needs the failure's
+  `::projection-error` message from a test run.
+- `a-function-body-write-reads-its-basis-projection` is TIMEBOUND: one sample, 12.84 ms against an in-test 10 ms
+  bound. It is a first `carried-projection` call on a speculative value, including builder resolution. The
+  identity assertion passes. Root decides whether the bound or the path moves.
+
+**Not yet proven.** The after-run waits for root's restart. Default was unreachable for over 10 minutes after
+4998d3fa1.
+
 ## Checks
 
 - `clj-kondo --lint src script test --cache false`: 0 errors, after each slice.
@@ -168,6 +205,7 @@ Root: restart default once, then run these:
 - `bin/test-check default --test seon.db-test/arity-components-and-callers-are-checked-in-the-final-state`
 - `bin/test-check default --test seon.db-test/a-report-touching-no-function-reuses-the-committed-arity-comparison`
 - `bin/test-check default --ns seon.owned-value-test`
+- (reds) `bin/test-check default --ns seon.db-test` again after 259bd59d9 / 4998d3fa1: expect at most 2 reds (nested-native admission, the 10 ms timebound)
 - `bin/test-check default --ns seon.test-support-test` (asserts `identity-attributes` and `populated-identity-attributes`)
 - `bin/test-check default --ns seon.db-test` (P1b touches the report path of the arity gate)
 - The first-defn after-probe (root's one-commit-defn-probe) on a fresh branch.
