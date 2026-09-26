@@ -1,6 +1,6 @@
 ---
 type: design
-status: "revision 2 (Opus): every finding of Astra review-repl-entry-renders-2026-09-26.md ruled and REPL-verified (§7); history policy for the owner in §4; back to Astra"
+status: "round 3 (Opus): disposal probed; #1 still needs authority changes, so three priced options for the owner (top section); revision 2 below applies once one is chosen"
 created: 2026-09-26
 scope: AI renders as REPL entries evaluated read-only on the one REPL path; curated namespaces; the agent-side API reality check that the dogfood milestone depends on
 ---
@@ -28,6 +28,104 @@ printing. The two new things are one positive value, read access in custody, che
 fix in call preparation's plan basis. There is no new loop, reader, evaluator, printer, cache or store, and no
 list of special cases. Where revision 1 needed a special case (comment-only entries, recursive renders, a
 transcript cache, a legend inside a value), the model changed instead.
+
+## Round 3: stop, and three priced options for the owner
+
+Astra's re-review (`c554c1092`) left #1 blocking and added #12. Root suggested isolation by **disposal** instead of
+enforcing read-only: a throwaway SCI fork plus a `seon.db/with` value, with no connection. I verified that model
+at the REPL. It dissolves #12 but not #1. Closing #1 needs authority changes at three owners, and one of them
+conflicts with a standing law. The round-3 rule therefore applies: this is not one more design revision, but
+three options.
+
+**Probe** (default 10d6fdff5, disposable branch `dre-round3`, JVM scratch `tmp.dre-r3` calling the installed
+owners). The hosted agent's context was forked; custody and environment were left with no connection; the
+database was a Datahike `with` value. Results:
+
+- `(defn r3-f …)` ⇒ `#'user/r3-f`, and no program row was committed. Local definitions are discarded, so there is
+  nothing for a guard to refuse, and #12 dissolves once the promised refusal is dropped. (On this archive the next
+  form did not resolve `r3-f`. The working value landed in d62d32bf7, which default is not running yet.)
+- Elided `(seon.db/transact! …)` ⇒ refused, with no connection bound.
+- `(seon.blob/put! (seon.db/branch-connection (seon.db/db) :dre-round3) "…")` ⇒ a digest, **durably
+  written**. Any database value conjures its live connection.
+- From branch SCI, `seon.cluster.boot/connection`, `seon.db/branch-connection`, `seon.blob/put!`,
+  `seon.cluster.registry/branch!`, `seon.shell.jvm/run` and `seon.effect/request!` all resolve.
+  `(seon.db/branch-connection (seon.db/db) :cluster-default)` ⇒ a live connection to the **cluster's own branch**.
+- #3 (`system-plan`'s source rereads) and #11 (history derived from shown strings) are untouched by disposal. They
+  belong to the refresh owner (audit F11, §5) under every option below.
+
+**What disposal cannot remove.** Durable authority is conjured from values and global state, not handed through
+custody: `db.clj:341` `branch-connection` (from a value's config), `boot.clj:527` `connection` (from the running
+instance), and direct capability handlers (`shell/jvm.clj:431-444`). Removing custody closes none of them.
+
+### Option 1: authority as today, writes detected, not prevented (simplest)
+
+Render entries are evaluated by the existing `system-turn` in the agent's own world, exactly as generated openings
+are today. The existing check `generated-read-fault` (`turn.clj:2032`, applied at `:2161`, `:4877`) is extended in
+place: it refuses to record a generated form whose evaluation left a receipt, an effect or a program change. That
+is the same fact set `read-only-evaluation?` already reads.
+
+- **Guarantee.** A renderer's write never becomes context silently; it faults loudly. Nothing is prevented, so the
+  exposure is the same as any agent form's.
+- **Cost.** About +15 lines on top of the entries-as-data conversion; no fork, access or custody change.
+- **Sacrifice.** "Read-only" in the render law becomes "detected".
+
+### Option 2 (recommended): disposal, and authority only as held custody
+
+Evaluate entries on a throwaway fork: no connection, and the run's working value (`seon.db/with`, d62d32bf7) as the
+database. Local `defn`s and writes land in discarded values, and the #12 refusal promise is dropped.
+
+The durable escape is closed by **one rule at the owners that conjure authority**: *a connection or capability is
+obtainable only as the custody the caller already holds.*
+
+- `seon.db/branch-connection` refuses a branch other than the caller's custody inside an agent evaluation.
+- `seon.cluster.boot/connection` refuses inside an agent evaluation.
+- Capability handlers refuse without the admitted effect context that `dispatch` sets (`effect.clj:465-506`).
+
+The blob and registry writers take a connection or store, so they close transitively. This is a uniform rule for
+all agent code, not a render special case. It is also a correctness fix: today a branch agent can obtain the
+cluster branch's live connection and write its blob tier.
+
+- **Guarantee.** No durable state and no external effect is reachable from an entry, by construction.
+  - The agent's private in-memory objects can still be mutated, because the SCI fork is shallow (verified in
+    revision 2).
+  - Those objects are never durable and never recovered ("Recover facts, not execution").
+- **Cost.**
+  - About +45 lines across three owners, plus about 40 regression lines, all through the real agent path:
+    conjured branch connection, boot connection, direct handler, blob put, local `defn`, elided write.
+  - The revision-2 access value (≈35) and the base-fork narrowing are withdrawn, so renders keep the viewer's
+    whole world, private defs included. That resolves the #1 world-semantics point.
+- **Sacrifice.**
+  - Agent code can no longer reach another branch's connection or call a handler directly.
+  - The first narrows "every program function is callable" to "callable, with authority only from its
+    custody". **That needs the owner's ruling.**
+
+### Option 3: renders never evaluate
+
+A render function returns entries together with the values their forms would return, computed from the held
+database value. They are printed as a transcript, and nothing is evaluated at render time. For each renderer, a
+committed regression evaluates its entries on a branch and asserts equality with the renderer's values.
+
+- **Guarantee.** No execution during rendering, so there is no authority question.
+- **Cost.** The smallest runtime: about today's render cost, and no fork, custody or refresh evaluation.
+- **Sacrifice.**
+  - It departs from the owner's ruling that the one REPL path evaluates each form.
+  - A shown value can drift from what its form returns, and only the tests catch it.
+  - It needs a second place that computes each form's value.
+
+**Open under every option** (rulings otherwise unchanged from revision 2):
+
+- **#3 / #11.** Refresh derives from recorded read provenance, consumes the existing read events, drops
+  shown-string reconstruction, the `pr-str` changes map (`turn.clj:2196-2209`) and the `issue-origin-read?`
+  exception; that is audit F11.
+- **#4.** Selection happens once for a printed result (value key → viewer namespace function → schema pair →
+  floor). The structural flag applies only to the already-selected value's terminal print, never as a blanket AI
+  exception.
+- **#6.** `system-turn` evaluates one ordered batch instead of per-source calls (`:2122-2144`).
+- **#7.** The executable walkthrough (`run.clj:14-56`) leaves opening production, or its forms become quoted data.
+- **#8.** Acceptance measurements, parent and candidate.
+
+Sections §2–§6 below are revision 2 and apply once an option is chosen. §2.3's access value and base fork are
+replaced under Option 2, and §2.3 does not apply under Options 1 and 3.
 
 ## 0. Broken things first (ranked, from the agent's side; statuses at f0efd9cc8)
 
