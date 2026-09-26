@@ -569,7 +569,10 @@
   (or (carried-environment failure)
       (let [instances (vec (vals (cond-> @running-instances name (select-keys [name]))))]
         (when (= 1 (count instances)) (env/of (:seon.sci.eval/ctx (first instances)))))
-      (throw (ex-info "SEON CORE FAULT (panic): no live cluster database to record this failure in."
+      ;; The unrecordable failure's own message leads, so the panic never
+      ;; hides what failed (a boot refused before its database stood).
+      (throw (ex-info (str "SEON CORE FAULT (panic): no live cluster database to record this failure in: "
+                           (ex-message failure))
                       {:seon.boot/cluster-name (or name :absent)} failure))))
 
 (defn request!

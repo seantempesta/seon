@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: fixed-pending-verification
 created: 2026-09-26
 severity: friction
 owner: script/seon/operator.clj (move-to-head!, -main)
@@ -40,3 +40,18 @@ script/seon/operator.clj:1319-1370). Root missed this twice.
 - Keep exit 1, and give a failed move that resumed the old program its own
   code, distinct from a failure that left nothing running. The existing code 3
   is `:seon.operator/fallback-from`, which a failed `move-to-head!` does not set.
+
+## Resolution (inv-boot-operator-opus, 2026-09-26)
+
+`-main` prints one stderr line first for every command (`headline`):
+`SEON start --head FAILED (exit 4, previous program runs): <message> CAUSE:
+<root cause> DIAGNOSTIC: <file>`. The cause is the failed child's root cause
+(`Throwable->map` `:cause`), beneath the launch form's panic. The whole
+diagnostic goes to `data/clusters/<name>/logs/operator-<command>-<stamp>.edn`,
+never to the terminal. The launch no longer prints `REPL`/`DEPENDENCY-CLASSES`/
+`HEAP-DUMPS` lines ahead of the outcome; they are data in the result, and a
+success line names the class-cache status. Exit codes: 0 ok, 3 nuke fell back
+to an older program, 4 failed and the previous program runs again, 5 failed
+and no JVM of this root runs (observed with `selected-processes`), 1 other.
+Replayed against the recorded failures 1300, 2000, 2130 and 1435: each
+headline names its real cause. Regression: `script/seon/operator_outcome_test.clj`.

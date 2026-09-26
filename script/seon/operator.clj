@@ -405,7 +405,7 @@
 ;;; The dependency class cache on the start classpath (owner 2026-09-23: "link
 ;;; the caches"). `dev_cache.clj` builds immutable, content-keyed directories
 ;;; under the MAIN checkout's `target/dev-dependency-classes/<digest>`; this
-;;; reads that cache for every launched source (the checkout itself, a nuke
+;;; reads that cache for every launched source (a committed archive, a nuke
 ;;; archive, a scratch snapshot) and never builds one: a miss starts from
 ;;; source and says so, with the command that fills the cache.
 
@@ -553,7 +553,7 @@
         (sort-by #(- (.lastModified ^java.io.File %)) (.listFiles (io/file root "data/heap")))))
 
 (defn- launch-child!
-  "Launch one JVM whose program is the checkout at `source` and return its
+  "Launch one JVM whose program is the directory `source` and return its
   terminal boot value with the coordinates it advertised. A nuke passes
   `reuse-classes?` false: it rebuilds reading no prior derived state. Its
   heap dump lands in the managed root's `data/heap`, never in the program
@@ -565,8 +565,6 @@
         heap (doto (io/file root "data/heap") .mkdirs)
         bound (operator-silence-backstop-ms (:seon.config/manifest request))]
     (io/make-parents log)
-    (when-let [dumps (seq (heap-dumps root))]
-      (binding [*out* *err*] (println "HEAP-DUMPS" (pr-str (vec dumps)))))
     (with-open [callback (ServerSocket. 0 1 (java.net.InetAddress/getLoopbackAddress))]
       (let [environment (child-environment root)
             classes (if reuse-classes?
@@ -604,9 +602,6 @@
           (.setSoTimeout socket bound)
           (let [coordinates (edn/read-string (.readLine reader))
                 _ (record-cache-reference! (repository-root) classes coordinates)
-                _ (binding [*out* *err*]
-                    (println "REPL" (pr-str coordinates) "log" (str log))
-                    (println "DEPENDENCY-CLASSES" (pr-str classes)))
                 ;; Cold indexing has the publication's declared bound, independently of socket silence.
                 boot-bound (operator-boot-bound-ms {})
                 _ (.setSoTimeout socket boot-bound)
@@ -638,12 +633,14 @@
                               (= :seon.cluster.store/held-elsewhere (:seon.cluster.store/rule %)))
                         (tree-seq coll? seq value))
               (.get (.onExit child) bound TimeUnit/MILLISECONDS))
-            (cond-> {:seon.operator/value (assoc value :seon.dev-cache/dependency-classes classes)
-                     :seon.boot/advertisement coordinates}
-              heads (assoc :seon.operator/captured-heads heads))))))))
-
-(defn launch! [request]
-  (:seon.operator/value (launch-child! request (repository-root) true)))
+            ;; What a launch observed is data in its value, never lines printed
+            ;; ahead of the outcome (`-main` prints the outcome's headline first).
+            (let [dumps (heap-dumps root)]
+              (cond-> {:seon.operator/value (cond-> (assoc value :seon.dev-cache/dependency-classes classes
+                                                           :seon.operator/log (str log))
+                                              (seq dumps) (assoc :seon.operator/heap-dumps dumps))
+                       :seon.boot/advertisement coordinates}
+                heads (assoc :seon.operator/captured-heads heads)))))))))
 
 ;;; Nuclear rebuild (plan §7 "Schema change and reset", owner 2026-09-23):
 ;;; delete the store and rebuild from COMMITTED inputs only, so no in-flight
@@ -1045,9 +1042,10 @@
 ;;; archive is the program; the store and every cache stay. The replacement
 ;;; JVM resumes: boot compares the files with the published program and
 ;;; publishes only the paths that differ (`seon.cluster.boot`
-;;; `changed-source-paths`), then `default` adopts that publication. A JVM
-;;; whose program is an archive does not see the working tree, so hook
-;;; publication is off until the root starts from the checkout again.
+;;; `changed-source-paths`), then `default` adopts that publication. Every
+;;; JVM's program is an archive (plain `start` launches HEAD's too, `launch!`),
+;;; so a half-edited working-tree file never reaches a boot and hook
+;;; publication is off: committed changes arrive by `start --head`.
 
 (def ^:private analysis-cache
   "The analyzer cache every archive of a root links (`seon.fn.analyzer`
@@ -1128,21 +1126,14 @@
         arguments))
 
 (defn- program-source
-  "Where a live JVM's program comes from and whether hook publication reaches it."
+  "The program directory a live JVM runs (every launch runs a committed
+  archive, so no working-tree edit reaches it; `start --head` moves it)."
   {:malli/schema [:=> [:cat :map] :map]}
   [identity]
-  (let [source (when-let [handle (matching-handle identity true)]
-                 (let [args (.arguments (.info handle))]
-                   (when (.isPresent args) (named-source (vec (.get args))))))
-        checkout (.getCanonicalPath (io/file (repository-root)))
-        archive? (and source (not= checkout (.getCanonicalPath (io/file source))))]
-    (cond-> {:seon.operator/source-root source
-             :seon.operator/hook-publication (if archive? :off :on)}
-      archive?
-      (assoc :seon.operator/hook-publication-reason
-             (str "This JVM's program is the committed archive " source
-                  "; working-tree edits are not published into it. Start the root from the"
-                  " checkout (`bin/seon down && bin/seon start`) to publish edits again.")))))
+  {:seon.operator/source-root
+   (when-let [handle (matching-handle identity true)]
+     (let [args (.arguments (.info handle))]
+       (when (.isPresent args) (named-source (vec (.get args))))))})
 
 (defn- held-sources
   "Canonical program directories every live process on this machine names."
@@ -1267,6 +1258,44 @@
                            {:seon.operator/captured-heads captured} :client-failed cause)
                :seon.operator/rollback :failed)))))
 
+(defn- prepared-source!
+  "`revision`'s committed archive, ready to launch: built once per commit
+  (`committed-source!`), linked to this root's shared caches (the analyzer
+  cache seeded from `previous-source`, the program that ran before) and its
+  classpath computed by tools.deps into the archive's own `.cpcache`. Runs
+  while any old JVM still serves."
+  {:malli/schema [:=> [:cat :string :string [:maybe :string]] :map]}
+  [root revision previous-source]
+  (let [began (System/nanoTime)
+        repository (committed-repository)
+        source (committed-source! root revision)
+        archive-ms (elapsed-ms began)
+        source-root (:seon.operator/source-root source)
+        analysis (root-analysis-cache! root previous-source)
+        shared (assoc (share-caches! {"target" (str (io/file repository "target"))
+                                      ".clj-kondo/.cache" (:seon.operator/analysis-cache analysis)}
+                                     source-root (gitlinks repository (:seon.source/git-sha source)))
+                      :seon.operator/analysis analysis)
+        share-ms (- (elapsed-ms began) archive-ms)
+        _ (command! ["clojure" "-Spath" "-M:dev:test"] source-root runtime-probe-bound-ms)
+        source-ms (elapsed-ms began)]
+    (assoc source
+           :seon.operator/shared-caches shared
+           :seon.operator/phases {:seon.operator/source-ms source-ms :seon.operator/archive-ms archive-ms
+                                  :seon.operator/share-ms share-ms
+                                  :seon.operator/classpath-ms (- source-ms archive-ms share-ms)})))
+
+(defn launch!
+  "Start the root's JVM on committed HEAD (owner 2026-09-26: boot reads the
+  committed archive, never the working tree), keeping the store and caches."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [request]
+  (let [source (prepared-source! (:seon.operator/managed-root request) "HEAD" nil)
+        outcome (launch-child! request (:seon.operator/source-root source) true)]
+    (merge (:seon.operator/value outcome)
+           {:seon.operator/source (dissoc source :seon.operator/phases)}
+           (program-source (:seon.boot/advertisement outcome)))))
+
 (defn move-to-head!
   "Replace the root's JVM with one whose program is committed HEAD (a drill
   may name `:seon.source/revision`), keeping the store and every cache.
@@ -1281,22 +1310,10 @@
   [request]
   (let [began (System/nanoTime)
         root (:seon.operator/managed-root request)
-        repository (committed-repository)
-        source (committed-source! root (get request :seon.source/revision "HEAD"))
-        archive-ms (elapsed-ms began)
-        source-root (:seon.operator/source-root source)
         ;; The replaced JVM's program directory seeds this root's analyzer cache.
         previous-source (some-> (advertisement root nil) program-source :seon.operator/source-root)
-        analysis (root-analysis-cache! root previous-source)
-        shared (assoc (share-caches! {"target" (str (io/file repository "target"))
-                                      ".clj-kondo/.cache" (:seon.operator/analysis-cache analysis)}
-                                     source-root (gitlinks repository (:seon.source/git-sha source)))
-                      :seon.operator/analysis analysis)
-        share-ms (- (elapsed-ms began) archive-ms)
-        ;; tools.deps computes the archive's classpath once, into its own
-        ;; `.cpcache`, while the old JVM still serves.
-        _ (command! ["clojure" "-Spath" "-M:dev:test"] source-root runtime-probe-bound-ms)
-        source-ms (elapsed-ms began)
+        {source-root :seon.operator/source-root :as source}
+        (prepared-source! root (get request :seon.source/revision "HEAD") previous-source)
         began-down (System/nanoTime)
         stopped (down! request (selected-processes root))
         down-ms (elapsed-ms began-down)
@@ -1331,15 +1348,13 @@
         adopt-ms (elapsed-ms began-adopt)
         adopted? (and ready? (not (:seon.error/message adoption)))
         pruned (when adopted? (prune-archives! root source-root))
-        phases {:seon.operator/source-ms source-ms :seon.operator/archive-ms archive-ms
-                :seon.operator/share-ms share-ms
-                :seon.operator/classpath-ms (- source-ms archive-ms share-ms)
-                :seon.operator/down-ms down-ms
-                :seon.operator/launch-ms launch-ms
-                :seon.boot/ready-ms (get-in value [:seon.boot/readiness :seon.boot/ready-ms])
-                :seon.operator/adopt-ms adopt-ms
-                :seon.operator/total-ms (elapsed-ms began)}
-        report {:seon.operator/source (assoc source :seon.operator/shared-caches shared)
+        phases (merge (:seon.operator/phases source)
+                      {:seon.operator/down-ms down-ms
+                       :seon.operator/launch-ms launch-ms
+                       :seon.boot/ready-ms (get-in value [:seon.boot/readiness :seon.boot/ready-ms])
+                       :seon.operator/adopt-ms adopt-ms
+                       :seon.operator/total-ms (elapsed-ms began)})
+        report {:seon.operator/source (dissoc source :seon.operator/phases)
                 :seon.operator/stopped-processes (:seon.operator/stopped-processes stopped)
                 :seon.operator/phases phases}]
     (if adopted?
@@ -1495,15 +1510,99 @@
                   (assoc :seon.boot/cluster-name (valid-name (or (first positionals) "default")))))
             (fail! "Unknown command." request)))))))
 
+;;; The outcome's first line (issue 2f6f10f75: a failed move's headline sat at
+;;; byte 1195 of one 410 KB line and read like success). Every command's
+;;; stderr begins with one short line naming the outcome; a failure's whole
+;;; diagnostic is written to a file that line names.
+
+(defn- first-line
+  {:malli/schema [:=> [:cat [:maybe :string]] [:maybe :string]]}
+  [text]
+  (some-> text str/split-lines first))
+
+(defn failure-cause
+  "The first message beneath a failed result's own: the failed child's root
+  cause (`Throwable->map`'s `:cause`), its message, its adoption's, then the
+  last link of the result's own cause chain."
+  {:malli/schema [:=> [:cat :map] [:maybe :string]]}
+  [result]
+  (let [evidence (:seon.error/offending result)
+        child (:seon.operator/value evidence)]
+    (some #(when (and (string? %) (not= % (:seon.error/message result))) %)
+          [(get-in child [:seon.error/cause :cause])
+           (:seon.error/message child)
+           (get-in evidence [:seon.operator/adoption :seon.error/message])
+           (:seon.error/message (peek (:seon.error/chain result)))])))
+
+(defn exit-code
+  "0 success; 3 ready on an older program because HEAD failed (nuke); 4 failed
+  and the previous program runs again; 5 failed and no JVM of this root runs
+  (observed: `live?`); 1 any other failure."
+  {:malli/schema [:=> [:cat :map :boolean] [:enum 0 1 3 4 5]]}
+  [result live?]
+  (cond
+    (:seon.error/message result)
+    (cond (true? (get-in result [:seon.error/offending :seon.operator/resumed :seon.operator/ready?])) 4
+          (not live?) 5
+          :else 1)
+    (:seon.operator/fallback-from result) 3
+    :else 0))
+
+(defn headline
+  "One short line naming `request`'s outcome: FAILED with its cause, the
+  missing layers and the diagnostic file, or its readiness."
+  {:malli/schema [:=> [:cat :map :map [:maybe :string] [:int {:min 0}]] :string]}
+  [request result diagnostic-path code]
+  (let [command (str (name (:seon.operator/command request))
+                     (when (:seon.operator/head? request) " --head"))
+        child (get-in result [:seon.error/offending :seon.operator/value])
+        missing (not-empty (get-in (or child result) [:seon.boot/readiness :seon.boot/missing-layers]))
+        classes (:seon.dev-cache/dependency-classes (or child result))]
+    (str "SEON " command " "
+         (if (:seon.error/message result)
+           (str "FAILED (exit " code
+                (case code 4 ", previous program runs" 5 ", no JVM runs" "") "): "
+                (first-line (:seon.error/message result))
+                (when-let [cause (failure-cause result)] (str " CAUSE: " (first-line cause)))
+                (when missing (str " MISSING: " (pr-str missing)))
+                (when diagnostic-path (str " DIAGNOSTIC: " diagnostic-path)))
+           (str (if (= 3 code) "READY ON AN OLDER PROGRAM (exit 3)" "OK")
+                (some->> (get-in result [:seon.operator/source :seon.source/git-sha]) (str " "))
+                (some->> (get-in result [:seon.operator/phases :seon.operator/total-ms]) (str " total-ms "))
+                (some->> (get-in result [:seon.boot/readiness :seon.boot/ready-ms]) (str " ready-ms "))
+                (when classes (str " classes " (name (:seon.dev-cache/status classes))
+                                   (some->> (:seon.dev-cache/reason classes) name (str " ")))))))))
+
+(defn- write-diagnostic!
+  "Write a failed result whole to a new file in its cluster's log directory; its path."
+  {:malli/schema [:=> [:cat :map :map] :string]}
+  [request result]
+  (let [file (io/file (:seon.operator/managed-root request) "data/clusters"
+                      (or (:seon.boot/cluster-name request) "default") "logs"
+                      (str "operator-" (name (:seon.operator/command request)) "-"
+                           (.format (java.text.SimpleDateFormat. "yyyyMMdd'T'HHmmss.SSS") (java.util.Date.))
+                           ".edn"))]
+    (io/make-parents file)
+    (spit file (str (pr-str result) "\n"))
+    (.getCanonicalPath file)))
+
 (defn -main [& args]
   (try
     (let [request (parse-argv args)
           result (if (= :help (:seon.operator/command request))
                    {:seon.operator/help "seon [--root PATH] start [NAME] [--config PATH] | start --head | init [NAME --force | --dev NAME] [--changed PATH...] | status [--verbose] | open [NAME] | stop [NAME] | down [--force] | reset [NAME] --force | nuke --force | logs [NAME] | config apply [NAME] PATH | export PATH"}
-                   (request! request))]
+                   (request! request))
+          failed? (:seon.error/message result)
+          ;; "No JVM runs" is observed, never inferred from the message.
+          code (exit-code result (or (not failed?)
+                                     (boolean (seq (selected-processes (:seon.operator/managed-root request))))))]
+      (when-not (:seon.operator/help result)
+        (binding [*out* *err*]
+          (println (headline request result (when failed? (write-diagnostic! request result)) code))
+          (flush)))
       (cond
         (:seon.operator/help result) (println (:seon.operator/help result))
-        (:seon.error/message result) (binding [*out* *err*] (prn result))
+        failed? nil
         (= :logs (:seon.operator/command request)) (print (slurp (:seon.operator.log/path result)))
         (= :open (:seon.operator/command request))
         (let [child (.start (ProcessBuilder. ^java.util.List ["open" (:seon.render.web/url result)]))]
@@ -1511,14 +1610,8 @@
             (reap-child! child (operator-silence-backstop-ms {}) result) (fail! "OS opener did not exit." result))
           (when-not (zero? (.exitValue child)) (fail! "OS opener failed." result)))
         :else (prn result))
-      (when (= :off (:seon.operator/hook-publication result))
-        (binding [*out* *err*]
-          (println "HOOK-PUBLICATION off:" (:seon.operator/hook-publication-reason result))))
       (shutdown-agents)
-      ;; 3: stable and ready, but on an older program because HEAD failed.
-      (System/exit (cond (:seon.error/message result) 1
-                         (:seon.operator/fallback-from result) 3
-                         :else 0)))
+      (System/exit code))
     (catch Exception cause
       (binding [*out* *err*] (prn (diagnostic (ex-message cause) (or (ex-data cause) {}) :argv-failed cause)))
       (System/exit 1))))

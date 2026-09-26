@@ -6,11 +6,12 @@
   this runtime's identity, because compiled bytecode is only valid under the
   runtime that produced it.
 
-  This namespace requires nothing outside `clojure.core`, `clojure.java.io`
-  and `clojure.string` so both consumers can reach it: `dev_cache.clj` runs on
-  tools.deps' tool classpath and loads this file by path, while the operator
+  This namespace requires nothing outside `clojure.core`, `clojure.edn`,
+  `clojure.java.io` and `clojure.string` so both consumers can reach it:
+  `dev_cache.clj` runs on tools.deps' tool classpath and loads this file by path, while the operator
   and the edit hook run it on babashka's `script` classpath."
-  (:require [clojure.java.io :as io]
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.string :as str])
   (:import [java.security MessageDigest]
            [java.util.concurrent TimeUnit]))
@@ -32,19 +33,6 @@
                       value)]
     (.update digest ^bytes value-bytes)
     (.update digest (byte-array [(byte 0)]))))
-
-(defn- digest-file!
-  [^MessageDigest digest file]
-  ;; Checkout location is not an input: identical source bytes in two
-  ;; isolated run roots must select the same dependency classes.
-  (with-open [input (io/input-stream file)]
-    (let [buffer (byte-array 65536)]
-      (loop []
-        (let [read-count (.read input buffer)]
-          (when (pos? read-count)
-            (.update digest buffer 0 read-count)
-            (recur))))))
-  (.update digest (byte-array [(byte 0)])))
 
 (def pin-query-bound-ms
   "The bound on one `git ls-files --stage` submodule pin query.
@@ -133,9 +121,29 @@
       (let [refusal (pins-unavailable root)]
         (throw (ex-info (:seon.error/message refusal) refusal)))))
 
+(def ^:private launch-options
+  "Alias keys that choose how a JVM or tool starts, never which dependency
+  bytes load: compiled dependency classes do not depend on them."
+  [:jvm-opts :main-opts :exec-fn :exec-args :ns-default :ns-aliases])
+
+(defn dependency-declarations
+  "`deps.edn`'s value without its aliases' launch options: the declarations
+  that choose the dependency set (observed 2026-09-26: c2b757cb3 changed only
+  a `:jvm-opts` HeapDumpPath and missed the class cache on every restart)."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [manifest]
+  (cond-> manifest
+    (map? (:aliases manifest))
+    (update :aliases update-vals #(if (map? %) (apply dissoc % launch-options) %))))
+
 (defn- digest-declarations!
   [^MessageDigest digest root]
-  (digest-file! digest (io/file root "deps.edn"))
+  ;; Both consumers (babashka and a JVM) print the value alike only under
+  ;; the same printer settings, bound here.
+  (digest-bytes! digest (binding [*print-namespace-maps* false *print-meta* false
+                                  *print-length* nil *print-level* nil]
+                          (pr-str (dependency-declarations
+                                   (edn/read-string (slurp (io/file root "deps.edn")))))))
   (digest-bytes! digest (dependency-pins root))
   digest)
 

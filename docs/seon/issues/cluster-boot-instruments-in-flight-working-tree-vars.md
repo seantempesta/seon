@@ -56,3 +56,11 @@ If an isolated-root fallback is the ruled substrate, the drive handoff names
 that root and actual cluster name through an observer-visible fact before the
 episode begins; an observer must not spend the complete watch window polling a
 name that cannot appear.
+
+## 2026-09-26 (inv-boot-operator-opus)
+
+Owner ruling: boot reads the committed archive, never the working tree. Every
+operator launch now runs an archive (`launch!` → `prepared-source!`, as
+`start --head` already did), so a JVM's Vars load from committed bytes and a
+lane's half-edit reaches no boot. Open until root verifies a plain `start` on
+the default root (landing inv-boot-operator-opus-2026-09-26).
