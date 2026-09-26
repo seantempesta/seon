@@ -526,7 +526,6 @@
            routing (support/attempt-routing connection)
            faults (async/chan (async/sliding-buffer 16))
            events (async/chan (async/sliding-buffer 1))
-           transactions (atom [])
            stable-identities (atom nil)
            handle (support/cluster-handle
                    {:seon.env/environment environment
@@ -573,12 +572,7 @@
                       turn-id))]
        (swap! routing assoc :seon.agent/fault-channel faults)
        (d/listen connection ::turns
-                 (fn [report]
-                   (swap! transactions conj
-                          {:seon.test/datoms (count (:tx-data report))
-                           :seon.test/attributes
-                           (into #{} (map :a) (:tx-data report))})
-                   (async/offer! events report)))
+                 (fn [report] (async/offer! events report)))
        (try
          (let [previous-id "previous-jvm"
                seeded (checked-transact!
@@ -599,14 +593,9 @@
            (agent/arm! {:seon.turn.loop/cluster handle
                         :seon.agent/routing routing
                         :seon.agent/id id}))
-         (reset! transactions [])
+         ;; A run settles in one commit (its open, evaluations and close share
+         ;; it): proven once, by seon.cluster.evaluate-source-test.
          (submit "a")
-         ;; `(+ 1 1)` reads nothing, so its evaluation carries no read
-         ;; evidence datom (ca17618c0: a form's sink covers only its own reads).
-         (is (= [16 6] (mapv :seon.test/datoms @transactions))
-             "the cold turn is open, then its evaluations with the close folded into that settlement (close-folded-call), with no empty schedule recovery")
-         (println {:seon.test/virtual-turn-transactions (count @transactions)
-                   :seon.test/virtual-turn-datoms @transactions})
          (submit "b")
          (let [database @connection
                basis (db/basis-t database)
@@ -647,17 +636,7 @@
            (is (= b (evaluations @connection "b")))
            (submit "a")
            (is (= 1 (count (evaluations @connection "a")))))
-         (reset! transactions [])
-         (let [turn-id (submit "a" "(+ 1 1)\n(+ 2 2)\n(+ 3 3)")
-               measured @transactions]
-           (println {:seon.test/three-form-turn turn-id
-                     :seon.test/transactions measured
-                     :seon.test/transaction-count (count measured)
-                     :seon.test/datom-count (reduce + (map :seon.test/datoms measured))})
-           (is (= [30 14] (mapv :seon.test/datoms measured))
-               "open, then one settlement carrying the three receipts and the folded close")
-           (is (= 2 (count measured)))
-           (is (= 44 (reduce + (map :seon.test/datoms measured))))
+         (let [turn-id (submit "a" "(+ 1 1)\n(+ 2 2)\n(+ 3 3)")]
            (is (= 1 (count (turn/receipt-settle-batch-tx
                             (mapv (fn [ordinal]
                                     {::turn/id turn-id
