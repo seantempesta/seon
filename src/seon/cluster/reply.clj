@@ -154,7 +154,12 @@
                                          (str/blank?
                                           (subs source previous-end start)))))
                                 code-events)]
-        (if (and (coll? (::form event))
+        ;; STRUCTURE IS THE AUTHORED SYNTAX, NOT THE VALUE READ. A reader
+        ;; conditional reads to its selected branch (`#?(:clj 1)` is `1`), a
+        ;; regex to a Pattern and a tagged literal to its value: none is a
+        ;; collection, yet each is dispatch-macro code, never prose.
+        (if (and (or (coll? (::form event))
+                     (str/starts-with? (subs source start (::end event)) "#"))
                  (or begins-line? follows-code?))
           [(conj indexes index) (conj code-events event)]
           [indexes code-events])))

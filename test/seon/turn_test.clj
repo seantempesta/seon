@@ -2306,3 +2306,19 @@
            (is (some? (:db-after (:seon.turn.loop/outcome settlement))) (pr-str (keys settlement)))
            (is (string? shown))
            (is (= (owner after (:seon.error/value settlement)) shown))))))))
+
+(deftest a-reply-keeps-its-dispatch-macro-forms-as-code
+  ;; The planner classified code by the value read, so a top-level reader
+  ;; conditional (read to its branch), a regex and a tagged literal were
+  ;; dropped as prose without a word. Structure is the authored syntax.
+  (let [planned #(let [r (turn/planned-sources % 'user 100000)]
+                   (if (map? r) (:seon.error/message r) (mapv :seon.cluster.eval/source r)))]
+    (is (= ["(import java.util.Date)" "(Date.)" "#?(:clj 1 :cljs 2)" "#\"a+\"" "(str ::x)"]
+           (planned "(import java.util.Date)\n(Date.)\n#?(:clj 1 :cljs 2)\n#\"a+\"\n(str ::x)")))
+    (is (= ["#?(:clj 1 :cljs 2)"] (planned "#?(:clj 1 :cljs 2)")))
+    (is (= ["#inst \"2026-09-25\""] (planned "#inst \"2026-09-25\"")))
+    (testing "prose stays prose; a fence's code is planned"
+      (is (string? (planned "just prose here")))
+      ;; Today's behaviour: the trailing `Done.` is planned as code
+      ;; (docs/seon/issues/a-trailing-prose-word-after-a-fence-becomes-an-evaluation.md).
+      (is (= ["(+ 1 2)" "Done."] (planned "Here is code:\n```clojure\n(+ 1 2)\n```\nDone."))))))

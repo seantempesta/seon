@@ -255,25 +255,36 @@ file's bytes, with the file as provenance.
 
 ### 2.2 Read once (slice P2, a prerequisite of P3 and P4)
 
-- **Segmentation is not reading.** The reply planner drops code it misreads as prose (§0.4), so outside agents'
-  code uses `code-segments`, which answers the raw text as one segment. The planner stays for model replies. Its
-  silent drops are its own defect (§0.4's issue).
-- **The loop reads each form after the namespace effects of the previous one**, as `clojure.main/repl` does
-  (`main.clj:414-446`), with the reader context the evaluation stage supplies. So `(require '[x :as a])` followed by
-  `::a/k` reads correctly in both evaluators, and JVM code is read with host mappings, never with an SCI context.
-- **What the loop needs from the reader:** the next event from an offset, with its end offset. The reader already
-  resumes the same text from an offset during recovery (`advance-to!`, shared with `skip-fences!`, S1 revise-2
-  finding 6). Whether `seon.sci.reader/read` exposes a one-event-from-offset call is UNVERIFIED; if not, P2 adds that
-  entry over `advance-to!`, and nothing else.
-- **Refusal.** A malformed form refuses as the reader's declared error, with its position; the remainder of the
-  segment is kept verbatim on the refusal, and nothing after it runs. An unmatched trailing closer remains a reader
-  error after the forms before it (S1 P1-C).
-- **What P2 deletes:** the second read of each form (the loop now always supplies the event, so `one-event`'s read
-  runs only for its other callers), the planner's second parse of the same text (`reply.clj:350-359`, pin
-  3785970b9), and, in P4, the JVM copy of the count policy. The exact deletion is priced by P2's call-graph trace.
-- **Proof:** a reader-invocation counter shows one read per form for a reply, an MCP call and a JVM call; effects run
-  once; namespace changes, aliases, a reader conditional and a regex each read correctly; a malformed trailing form
-  refuses with the remainder retained.
+**What the REPL showed at 19fbb7901** (default pid 39484, `turn/preview-sources` on root, no writes):
+
+- **The semantic read is already once per form, in order, in the right context.** The planner's pass at submission
+  reads with `:seon.sci.reader/defer-auto-resolve? true` (`reply.clj:63-95`): it freezes each form's exact source span
+  and resolves nothing. Each form is then read once more, in the loop, by `one-event` through the evaluating SCI
+  context after the previous form's effects (the one-reader lane's S3, 7b6c63e3c). Probe:
+  `(require '[clojure.string :as zz])` then `(str ::zz/k)` evaluates to `":clojure.string/k"`, and `(in-ns 'user)`
+  then `(str *ns*)` to `"user"`. The review's concern, that submission misreads code a later read cannot recover,
+  does not occur for aliases.
+- **The defect is the planner's classification, and it drops code silently.** `#?(:clj 1 :cljs 2)` then `(+ 1 1)`
+  evaluated one form: the reader conditional read to `1`, which the planner treats as prose because it is not a
+  collection (`structured-code-indexes`, `reply.clj:139-162`). A top-level regex and a tagged literal went the same
+  way (§0.4).
+
+**P2a (this slice, landed with its regression):** structure is the authored syntax, not the value read. A
+top-level event whose own text begins with the dispatch macro `#` (a reader conditional, a regex, a tagged literal)
+is code. Bare words and numbers stay prose; fenced code and prompt markers are unchanged. A pre-existing neighbour
+  is filed, not fixed: a trailing word after a fence plans as code
+  (`docs/seon/issues/a-trailing-prose-word-after-a-fence-becomes-an-evaluation.md`).
+
+**What remains is one syntactic pass. Ruled (a) by root, 2026-09-25:** two passes, documented honestly. The table records the choice:
+
+| Option | Guarantee | Cost | Sacrifice |
+|---|---|---|---|
+| **(a) Two passes, named honestly (ruled)** | the submission pass is syntax only (spans, prose, no resolution) and is what lets the run store its ordered sources before evaluating (`reply.clj:19-20`, recovery from facts); each form is read semantically exactly once, in its context | 0; AGENTS.md's "parsed once" reads as "read once, after one syntactic segmentation" | one extra edamame scan per reply, measured at 0.86 ms for six forms |
+| (b) Lazy reading in the loop | one parse per form: the run stores the raw reply, the loop reads the next form from an offset with the context, and receipts are created as forms are read | about +80 / −60 across `turn.clj`'s run, receipt and recovery owners; the reader needs a next-event-from-offset entry | ordered sources are no longer durable before evaluation, so recovery and the receipt model change |
+| (c) Reuse the syntactic event when it deferred nothing | one parse for forms with no `::` or syntax-quote | about +20 in `one-event` | two read paths chosen by content |
+
+**For outside agents' code** P3 adds `code-segments` beside the planner: every event the one reader reads is a
+source, so `1` and `1 #?(:clj 2)` evaluate as code. The planner stays for model replies.
 
 **Qualified definitions stay deferred** (1.10's `(defn other.ns/f …)` clause; §0.10). The later cut separates the
 reader context from the target evaluation and analysis context, expands once under the existing arm, and passes the
