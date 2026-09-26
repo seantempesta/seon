@@ -62,6 +62,12 @@
  ; lives: one power-of-two family, one provenance.
  :seon.config.eval.result/max-bytes 8388608
 
+ ; THE byte budget of the process cache (seon.cache, Caffeine): estimated
+ ; bytes every derived value Seon keeps may weigh together, evicted by
+ ; W-TinyLFU beyond it. About 5% of a 10.5 GB heap (cache-central design
+ ; 2026-09-26). Datahike's own caches keep their own dials.
+ :seon.config.cache/max-bytes 512000000
+
  ; The four caps below are NO LONGER READ BY ADMISSION (2026-09-07: the
  ; display caps were deleted from `seon.sci.admit`; elision happens only at
  ; the AI context generation boundary, under the render profile). They
