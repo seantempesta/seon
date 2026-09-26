@@ -1,10 +1,14 @@
 ---
 type: design
-status: "owner adopted shell-order floor 2026-09-25; §3 and §6 row 2 revised by Opus after Astra review 6e9deea71; awaiting Astra re-review"
+status: "owner adopted shell-order floor 2026-09-25; §3 and §6 row 2 revised after Astra 6e9deea71 and re-review 98c563b34 (A–D folded, real-queue proof 2026-09-26); awaiting root on the row 2(i) file list"
 created: 2026-09-25
 scope: One schema dispatch and one shape-aware, budget-owning floor printer
 ---
 # One render path
+
+§3c, §3d, §3g, §3i–§3k and §6 row 2 were revised in place on 2026-09-26 to fold in the re-review
+`98c563b34`'s corrections A–D. That revision is a real-queue REPL proof with an exact charge on the laid-out
+text, and continuation as a function over the walk's nodes instead of a `units` entrance (root ruling).
 
 Changes after [Opus review 8a9e946d7](one-render-path-review-2026-09-25.md), all findings accepted by root:
 Declared identity ownership and producer error/return alternatives replace structural discovery without losing pairs.
@@ -136,7 +140,7 @@ not a second pretty-print cost model. Saved historical shown text remains termin
 `problems/ai-prose` returns its family-lines map: remove its nested `render-ai` call and `config/defaults` fallback.
 Missing floor policy is derived once at the entrance from supplied custody or explicitly refused, never defaulted inside a renderer.
 
-## 3. One floor: held source → safe structural selection → one tree → two faces → one continuation entrance
+## 3. One floor: held source → safe structural selection → one tree → two faces → continuation over the walk's nodes
 
 **What exists and what it becomes.** Today MCP admits a raw value (`admit/admit-value`, which runs
 `Throwable->map` and Java collection admission, `sci/admit.clj:297`), turns it into an artifact, prepares the
@@ -148,20 +152,22 @@ artifact's reconstructed semantic value, rebuilds semantic data from the selecte
 (`value.clj:65`, `:119`) are two more cut engines, and `repl/pretty-response` reads prepared text back and
 reprints it (`repl.clj:457`).
 
-The design is one data flow, owned by the entrance of the
-[query + render building block](query-render-building-block-2026-09-25.md) (`seon.render/units`, its §3e–§3f):
+The design is one data flow over the nodes of the graph walk (`seon.render.walk/graph`, one composer; the
+building block's `seon.render/units` entrance is withdrawn, root ruling 2026-09-26):
 
-1. **Held source.** A live value, a live result handle, an admitted artifact digest or a query at a branch basis,
-   resolved under explicit custody. Nothing touches the value before step 2.
+1. **Held source.** A walk node: an entity at a database value, an evaluation's live result by its handle, or an
+   MCP host value's stored selection tree by digest, resolved under explicit custody. Nothing touches the value
+   before step 2.
 2. **Safe structural selection** (`render.value/prepare`). A table of permitted operations (§3a) decides what may
    be done to each reached object. A shell-order queue (§3c) spends one character budget B, which is the saved
-   AI text's length (§3d). It takes **no face target**.
+   AI text's length, charged exactly (§3d). It takes **no face target**.
 3. **One tree.** Plain print nodes: retained literal bytes, entries with key and value roles, cuts with absolute
    offsets and the source reference. No unknown object reaches a face.
 4. **Two faces.** AI: the tree as fipp's own operation stream, laid out by fipp's own stages (§3e); this text is
    clipped and is the saved text. HTML: the same tree as Hiccup, unclipped, each cut a lazy expander (§3f).
-5. **One continuation entrance.** `get_value` and `/data` decode coordinates and call `units` with the cut's
-   source reference, typed path and absolute offset (§3g). Neither transport navigates, windows or selects.
+5. **Continuation over the walk's nodes.** `get_value` and `/data` decode coordinates and call
+   `seon.render.walk/continue` with the cut's node designator, typed path and absolute offset (§3g). Neither
+   transport navigates, windows or selects.
 
 The principal Clojure approach: a `loop` over a `java.util.PriorityQueue` of plain maps, a data table of exact
 classes and their permitted operations, and pure functions from nodes to fipp operations and to Hiccup. There is
@@ -248,12 +254,11 @@ Consequences, each a closed trace from the review:
   over the old per-accessor `try`. A class that overrides any accessor, including `CompilerException`'s
   formatting (`Compiler.java:7403`, `:7474–7480`), is opaque with its class name. Links are **projected lazily**:
   `:via` is a seq of links that selection steps one `getCause` at a time, with an **identity** set
-  (`System/identityHashCode` plus `identical?`) bounded by the visited links (≤ B). `getStackTrace` runs only when
-  a link's `:trace` node is reached. It copies at most the JVM's recorded frames (`-XX:MaxJavaStackTraceDepth`,
-  1,024 by default), which is JDK code over already-captured data. `Throwable->map` is never called
+  (`System/identityHashCode` plus `identical?`) bounded by the visited links (≤ B). `getStackTrace` is not
+  called (its allocation bound is unproven). `Throwable->map` is never called
   (`core_print.clj:494–501`). Stored flat `:seon.error/*` maps are plain data and are preferred wherever they
-  exist. The projection is `#error {:via [{:type C, :message M, :data D} …], :trace [F …]}` in that declared
-  order.
+  exist. The projection is `#error {:via [{:type C, :message M, :data D} …]}` in that declared order; frames
+  are not acquired, because `getStackTrace`'s allocation bound is unproven (re-review B).
 - **Map lookup.** The floor never calls `get`, `find` or `contains?` on a map it did not prove all-scalar
   (§3b). `Util/equiv` sends a probe key into a stored key's `equiv` when either is a persistent collection
   (`Util.java:24–36`), so a lookup by keyword into a map holding a user collection key can run user code.
@@ -294,94 +299,86 @@ Consequences, each a closed trace from the review:
 
 ### 3c. Selection: skeletons first, then shell order
 
-**Admission unit** (P1-5 fix). A member is first admitted as its **skeleton**, a bounded face that is always
-followed by a value face:
+**Admission unit.** A member is first admitted as its **skeleton**, a bounded face that is always followed by
+a value face:
 
-- a scalar: its literal when its bound is ≤ S = 32 characters, else its descriptor;
-- a string, keyword or symbol: its first chunk of w = 16 characters plus the cut `…+N` when longer;
+- a scalar: its literal when its spelling is ≤ S = 32 characters, else its descriptor;
+- a string, or a keyword or symbol longer than S: its first chunk of w = 16 characters plus the cut `…+N`;
 - a collection: `open …N close` (for example `{…7}` or `[…100000]`);
-- a map entry: key skeleton, a space, value skeleton;
-- an opaque object: its `#object[…]` face, which is at most the class name plus 12 characters. A class name over
-  S characters is chunked like a string.
+- a map entry: key skeleton, a space, value skeleton. Key and value are each refined later in their own right;
+- an opaque object: its `#object[…]` face.
 
-Every skeleton is at most S plus a small cut face, so **an unaffordable member closes its collection only when the
-room left is under one bounded skeleton.** A huge first key no longer starves a later `:ok`: the huge key is a
-descriptor at its position.
+Every skeleton is at most S plus a small cut face. So **an unaffordable member closes its collection only when
+the room left is under one bounded skeleton.** A huge first key does not starve a later `:ok`: the key is a
+chunked name at its position.
 
 **Order.** The root has depth 0. A member has depth d and ordinal o, both 1-based. Its **shell** is
-`s = max(d, o₁, …, o_d)` over the ordinals along its path. A string's k-th chunk is at shell max(s, k), and a
-collection's refinement to member o is at shell max(s, o). The queue pops by `[s d o seq]`, where `seq` is the
-insertion counter. It holds at most one pending member per open collection or string: a k-way merge, with queue
-size ≤ open nodes + 1.
+`s = max(d, o₁, …, o_d)` over the ordinals along its path. A string's k-th chunk is at shell max(s, k); a
+collection's member o is at shell max(s, d+1, o). The queue (`java.util.PriorityQueue`) pops by `[s d o seq]`,
+where `seq` is the insertion counter. It holds at most one pending member per open collection and one pending
+chunk per open string: a k-way merge. The measured maximum queue size is 41 on the 3,435-key projection forms at
+45,000 characters.
 
-**Loop.** Pop the least entry, price its skeleton with the §3d charge, and admit it if it fits the room. Then push
-its parent's next member and its own first refinement. If it does not fit, close its parent at that ordinal (one
-tail cut) and continue with the other branches. Stop when the queue empties or the room is under the smallest
-skeleton. Declared renderers run when their node is reached (§2): a smaller returned value takes that node's
-place at the same key, and final text is one leaf charged whole or §2's overage diagnostic.
+**Loop.** Pop the least entry and admit it tentatively. Charge it with the §3d charge. If the charge still fits
+B, keep it, and push the parent's next member and the new node's first refinement. If it does not fit, the
+state before the entry is kept, which closes the parent at that ordinal (one tail cut). Then continue with the
+other branches. State is a value, `{nodes extras}`, and a refusal simply keeps the previous value. A declared
+renderer for a reached value runs when its node is reached (§2, provenance, §3d). A declared renderer is always
+consulted; only the order of admission is chosen here.
 
-**What is guaranteed, conditionally** (the review's "What can be proved"). Shells are popped in nondecreasing
-order. If the whole of complete shell k (every node with depth ≤ k and every ordinal ≤ k, at least as a skeleton,
-and every string's first k chunks) costs ≤ B, the output contains all of it. After that, shell k+1 is spent in
-queue order until B runs out. Nothing stronger is claimed. There is no equal per-branch allocation: an early bushy
-branch spends its share of shell k+1 before a later sibling's. A deep singleton chain costs one skeleton per level.
-No finite B shows every part of an arbitrary value; cuts say what was omitted and where.
+**What is guaranteed, conditionally.** Shells are popped in nondecreasing order. If the whole of complete shell
+k fits B at its exact charge, the output contains all of it. The charge includes every skeleton, separator and
+line break that fipp will emit, and the legend. After that, shell k+1 is spent in queue order until B runs out.
+Nothing stronger is claimed. A deep singleton chain costs one skeleton per level. No finite B shows every part
+of an arbitrary value; cuts say what was omitted and where.
 
-**Measured complete shells** (prototype, charge ≤ B, §3d):
+**Root and minimum.** If the root's skeleton plus the legend exceeds B, selection returns the declared
+`:seon.print/insufficient-floor-budget-error` (over `:seon.error/base`, naming B and the needed charge). A
+continuation that cannot admit even its first member returns that same refusal instead of an unchanged cut, so
+every successful expansion shows at least one new member (strict progress).
 
-| Value | B = 450 | B = 1,800 | B = 45,000 (15,000 tokens) |
-|---|---|---|---|
-| agent row | shell 5 | 7 | 29 |
-| projection forms (3,435 keys) | 3 | 5 | ≥ 200 (probe cap) |
-| stored error row | 4 | 25 | whole value |
-| Throwable chain | 5 | 12 | whole value |
-| test run | 7 | 11 | whole value |
+### 3d. B is the length of the saved AI text, charged exactly
 
-**Root and minimum.** If the root's own skeleton plus the legend (§3d) exceeds B, selection returns the declared
-`:seon.print/insufficient-floor-budget-error` (new, over `:seon.error/base`, naming B and the needed charge). It
-never claims a snippet fits. A continuation that cannot admit even its first member's skeleton returns that same
-refusal instead of an unchanged cut, so every successful expansion shows at least one new member (strict
-progress).
+B is converted once at entry: `(tokens/estimate-chars token-budget)`. Units are string characters
+(`String/length`, fipp's widths), not UTF-8 bytes. The charge is **the laid-out length itself**, maintained
+incrementally (review C). It is the sum of two terms.
 
-### 3d. B is the length of the saved AI text
+- **The flat width of every admitted node.** That is its literal or chunk text, quotes, delimiters, the `, ` or
+  ` ` separators, and its cut face (whose digits shrink as members arrive; the change is re-derived).
+- **The added width of every group fipp will break.** fipp breaks a group iff it does not fit from its start
+  column (`format-nodes`' fits test, `engine.cljc:203–208`). The selection derives that same decision: a group
+  breaks iff its parent broke and its flat width exceeds `width − start column`. A member of a broken
+  collection starts at its indentation. A map entry's value on a broken entry starts at the entry's indentation
+  + 2. A broken collection adds its child indentation per line break. A broken entry adds its indentation + 2.
+  Nesting stops at depth 6, so indentation is ≤ 18 columns.
+- **The legend**, reserved at entry and refunded when there is no cut.
 
-B is converted once at entry: `(tokens/estimate-chars token-budget calibration)` (3 characters per token live). It
-is charged against the **complete saved AI text**: content, delimiters, separators, descriptors, cuts, the legend,
-newlines and indentation (P1-8). Selection charges every node its **reserved** cost:
+Admitting a member re-derives flat widths along its chain to the root: each parent's child sum is adjusted by
+the child's delta, O(depth). Broken flags are then re-derived top-down along that chain, and a node that newly
+breaks cascades into its children, each node breaking at most once, O(n) overall. The emitter's own choices
+only shorten the text: fill for all-scalar collections, and `#:ns{}` lifting when every key shares one
+namespace. So the charge is an upper bound on the emitted length. After layout, `(<= (count text) charge B)` is
+asserted once. A violation is the declared `:seon.print/allocator-charge-error` (path, B, charge, length): a
+defect, never a second attempt.
 
-- its literal bytes (strings: one pair of quotes per string plus escaped chunk content; not `pr-str` per chunk);
-- its delimiters and cut face;
-- per member, its separator at the **broken** price: `,` + newline + the capped indentation I(d) at that depth.
-  I(d) is the sum of the §3e nests above it, where nesting stops at depth 6, so I(d) ≤ 18 columns;
-- per entry, its key/value break: newline + I(d) + 2;
-- the legend L, reserved at entry and refunded if the selection has no cut.
+**Measured, REPL proof, real queue** (2026-09-26, default PID 87270, `tmp/impl-floor-on-fipp/queue_probe.txt`,
+unarmed scratch namespace). Values: the root agent row, the schema projection's forms map (3,435 keys), a stored
+error row, a stored test run, a three-link Throwable chain, and the owner's three-branch probe. Text was ≤ charge
+≤ B in **all 28 cases at B = 384 / 450 / 1,800 / 45,000**. With a cut, the charge exceeds the text by 4
+characters, the difference between the reserved legend and the real one; with no cut, the legend is refunded.
+The design's first per-member reservation over-charged by 4–40% and **failed the owner's 128-token probe**:
+only `:sample/a` reached its text. The exact charge passes it, with every branch showing a 32–48-character
+prefix at 384 characters.
 
-fipp emits exactly the charged text operations. It emits each `:line` either as its inline space (at most the
-reserved break) or as a newline plus an indentation of at most I(d). Therefore **emitted length ≤ charge ≤ B** by
-construction. After layout, `(<= (count text) charge)` is checked once. A violation is the declared
-`:seon.print/allocator-charge-error` (new, over `:seon.error/base`, naming path, B, charge and length): a defect,
-never a second attempt. `:seon.render.value/text-chars` and `:seon.render.value/charge` are recorded with the
-saved text. Whole-unit prompt admission (§5) counts those saved bytes.
-
-Measured on the prototype, with the flat length (a single line), the laid-out text (width 100) and the reserved
-charge, in characters:
-
-| Value | B = 450: flat / text / charge | B = 1,800 | B = 45,000 |
-|---|---|---|---|
-| agent row | 182 / 188 / 244 | 1,072 / 1,295 / 1,778 | 32,410 / 37,867 / 43,051 |
-| projection forms | 220 / 224 / 309 | 901 / 974 / 1,220 | 35,702 / 38,367 / 44,184 |
-| stored error | 250 / 270 / 297 | 1,626 / 1,671 / 1,793 | 2,957 / 3,002 / 3,124 |
-| Throwable chain | 233 / 245 / 342 | 1,197 / 1,416 / 1,741 | 1,402 / 1,647 / 2,007 |
-| test run | 261 / 269 / 303 | 646 / 671 / 740 | 4,064 / 4,472 / 5,114 |
-
-Text was ≤ charge ≤ B in all 15 cases. Layout adds 2–21% over flat, against 2.4× for `fipp.edn`'s bracket
-alignment in the first pass. The reservation over-charges the laid-out text by 4–40% (median 15%). That
-unused room is the stated price of never re-fitting. The alternative, B over flat content only, weakens the
-owner's one budget and is not taken.
+**Provenance** (owner 2026-09-26). Text that a declared AI render function produced is not charged to B. It is
+laid out whole and bounded only by `:seon.print/rendered-token-ceiling`, a config dial, 50,000 tokens. Beyond
+that it becomes a character cut with its requery. The saved text is therefore ≤ B plus the declared renderer
+text it includes. Raw values keep B.
 
 **Legend.** It appears once, after the value and only when a cut exists, and it is charged:
-`;; …N = N more · continue: (seon.render/units {:seon.render/source-ref result/e12 :seon.render.data/path P :seon.render.data/offset N})`,
-or `;; …N = N more · not retrievable: <typed reason>` (§3g). About 100 or 50 characters.
+`;; …N = N more · continue: (seon.render.walk/continue <node> {:path P :offset N})`, where `<node>` is the cut
+subject's node designator (§3g). For example, `result/e12` for a live result, `[:seon.agent/id "root"]` for an
+entity, or a blob digest for an MCP host value.
 
 ### 3e. The AI face: fipp's own stages over an explicit-stack operation stream
 
@@ -420,7 +417,8 @@ appends a newline, `:247–259`), no EDN visitor (`ednize.clj:45–61`) and no n
   `"shown chars"…+N` after a string (outside the quotes, so a real string ending in `…+N` cannot read as a cut),
   `…?` for a pending tail. The AI text is display, not EDN to read back; `repl/pretty-response`'s read-back is
   deleted (review P1-1). The earlier `:…` map key could collide with a real key (review P2) and is withdrawn.
-- Errors read `#error {:via [{:type …, :message …, :data …} …], :trace ["seon.db/q (db.clj:2365)" …]}`.
+- Errors read `#error {:via [{:type …, :message …, :data …} …]}`. The generic floor acquires no frames (§3g);
+  a stored `:seon.error/*` row's pair shows them.
 
 ### 3f. The HTML face and the side-by-side debug view
 
@@ -448,46 +446,81 @@ is the HTML of the same source **if it is still retained**, labelled with its so
 as the original tree or the original B (review P1-10). `web/debug-value-html`'s raw `pr-str` (`web.clj:795`) and
 the toggle are deleted.
 
-### 3g. One continuation entrance, three sources
+### 3g. Continuation is a function over the walk's nodes and the floor's cut paths
 
-A cut's coordinates are **source reference + typed path + absolute offset** into the represented value, plus the
-producer chain when a declared renderer returned the represented value. `get_value` and `/data` are adapters:
-they validate wire input, call `(seon.render/units {:seon.render/source-ref r :seon.render.data/path p
-:seon.render.data/offset n …custody})`, and encode the common result. The source table, the stale-producer rule
-and `:seon.render/continuation-error` with reason `[:enum :stale :gone :unavailable :malformed]` are the building
-block's (§3e there). This section only fixes what the floor contributes.
+There is **no second entrance** (root ruling 2026-09-26): `:seon.render/units` is being deleted, because the
+graph walk (`seon.render.walk/graph`, one composer, nodes cached by content digest) replaces it.
+A cut's coordinates are **a node designator + typed path + absolute offset**. `seon.render.walk/continue` takes
+exactly those and the caller's custody (database value, SCI context). It resolves the node, navigates the path,
+and runs the same selection with the root collection starting at the offset. `get_value` and `/data` are
+adapters: they validate wire input, call `continue`, and encode its prepared projection. The only failure value
+is `:seon.render.walk/continuation-error`, with reason `[:enum :stale :gone :unavailable :malformed]`.
 
-- **Wire validation before parsing** (P1-9). The `path` parameter is bounded to 4,096 bytes before
-  `edn/read-string`. The parse is then checked against the Malli schema of typed steps
-  (`:seon.render.data/step`, new). A malformed, oversized or untyped cursor is a `:malformed` continuation error.
-  `parse-cursor`'s default-to-root and default-to-zero branches (`data.clj:27–44`) are deleted. A browser never
-  supplies a form: custody (connection, database value at the basis, SCI context) is the server's.
-- **Live results** are the agent's `result-objects` (`sci/eval.clj:620`, `repl/live-response` `repl.clj:465`).
-  They are reselected under the current program; `:gone` after eviction or restart.
-- **Artifacts** stay only where MCP writes them today. MCP no longer calls `admit/admit-value` before the floor
-  (P1-1: that call runs `Throwable->map` and Java collection admission ahead of any safe step). When the B-sized
-  selection has a cut and a connection exists, MCP writes an artifact made by **a second safe selection of the same
-  value at the admission allowance** A (the existing `:seon.config.eval.result/blob-threshold`). It is written as
-  EDN, with opaque faces and cuts as tagged literals (`#seon/object "…"`, `#seon/cut {:total …}`). Reading it back
-  gives plain data plus exact `TaggedLiteral`s, both rows of §3a. Continuing it is ordinary selection, and its
-  own cuts are terminal `:unavailable` ("beyond admission"). `admit/semantic-value` reconstruction (`admit.clj:584`)
-  leaves the MCP path. Cost per expansion: one O(artifact bytes) parse plus selection, measured per slice; no
-  cache is claimed.
-- **Entity queries** at a branch and basis follow the building block's `as-of` rule; current-entity pages say
-  "current".
-- **Realization is an explicit, bounded evaluation** (row 9.5). A pending cut's continuation returns
-  `:seon.render.continuation/realize`, carrying the derived form `(take n (drop offset (seon.render.data/at
-  result/e12 path)))`. Only an explicit request runs it: the expander button, or the agent's own REPL call. It runs
-  as an ordinary evaluation in the owning SCI context, under that evaluation's time limit and admission caps, and
-  records its own evaluation and saved text. The printer never realizes.
-- **Historical cuts** (review P1-10): **option 1, live object plus exact saved text,** with no new durable
-  write. After the live subject disappears, a historical cut answers `:gone`. The first pass's per-evaluation
-  artifact blob is withdrawn. Options 2 (a durable bounded snapshot) and 3 (indexed durable results) are the
-  review's, priced there, and they are the owner's to choose if post-restart exploration is wanted.
-- **Pre-floor reads found while probing.** `shown-result` reads `(:seon.instrument/check value)` on the raw result
-  (`sci/eval.clj:3274`). `RT/get` sends a `java.util.Map` to its own `.get` (`RT.java:778–789`), so a
-  hostile Map runs code before the floor. Slice 2(i) moves that check after `classify` (exact persistent maps
-  only).
+**Node designators.** There are three sources, each a node the walk already knows:
+
+| Designator | Resolution | Basis | After restart |
+|---|---|---|---|
+| lookup ref `[:seon.agent/id "root"]` or eid | `seon.db/pull` at the caller's database value | that value's commit | current entity, labelled "current" |
+| result handle `result/e12` (an evaluation receipt node) | the owning SCI context's `result-objects` (`sci/eval.clj:620`) | the live object | `:gone` |
+| blob digest (an MCP host value; host values have no agent node) | the stored **selection tree** (below) | the digest | retrievable |
+
+**Typed steps.** A path is a vector of typed steps: `[:seon.render.data/entry i :key|:val]`,
+`[:seon.render.data/nth i]` and `[:seon.render.data/char i]`, plus `[:seon.render.data/key k]` only in a map
+proved all-keyword (≤ 64 entries). There is one navigator, `render.data/at`, rewritten over these steps. Each
+object it reaches passes through `classify` first. It keeps present-versus-nil (`data.clj:46`), and
+`parse-cursor`'s default-to-root and default-to-zero branches are deleted. A map, set or seq step at ordinal i
+iterates i members through the table. That is query work, charged to the request's deadline, not to B.
+
+**Wire bound** (review D, narrowed explicitly). The `path` parameter is bounded to 4,096 bytes before
+`edn/read-string` and then validated against `:seon.render.data/step`. A 1,000-deep chain needs about 20,000
+characters of path, so browser expanders reach every cut up to that bound. Deeper than that, the expander is
+the REPL form itself: `(seon.render.walk/continue result/e12 {:path … :offset …})`, evaluated by the agent or
+on the debug page's REPL through the one REPL path. Its result is a new live result with its own handle, so
+paths re-root and stay short. No URL carries an unbounded path, and no continuation is advertised that the
+wire refuses.
+
+**MCP host values keep the representation that was selected** (review D). When the B selection has a cut and a
+connection exists, MCP stores **the selection tree** computed at the admission allowance A
+(`:seon.config.eval.result/blob-threshold` characters). That is plain data: node kinds, literal texts, ordered
+children and cut totals, as canonical EDN. It is never a re-read of the value. Continuing it means selecting
+over that tree, whose order and entry roles are preserved in vectors. So original ordinals stay valid and no
+map or set is reconstructed. Its own cuts are terminal `:unavailable` ("beyond admission"). The reader is plain
+`edn/read-string`; no tags are introduced. `admit/admit-value`, `admit/semantic-value` and the print-node
+artifact leave the MCP path.
+
+**Realization is an explicit, bounded evaluation.** A pending cut's continuation returns the form
+`(seon.render.walk/page result/e12 {:path P :offset N :count K})`. `page` navigates with `at` and realizes exactly
+K members, `(into [] (comp (drop N) (take K)) …)`, inside the evaluation that runs it, under that evaluation's
+time limit. Only an explicit request runs it: the expander button or the agent's own REPL call. The printer
+never realizes.
+
+**Historical cuts:** option 1, the live object plus the exact saved text, with no new durable write. After the
+live subject is gone, a historical cut answers `:gone`.
+
+**Terminal consumers in the same activation** (review A):
+
+- **Held order.** Selection order is the printed order. The emitter's canonical re-sort (`print/ordered-children`)
+  is deleted with the switch, and so is `fit`'s.
+- **Scalars.** They are printed from `classify`'s literal text, never `pr-str`. A metadata-dispatched Symbol
+  prints from its fields.
+- **The display is not EDN.** `…N` is not read back anywhere; each consumer that parses AI text is converted in
+  the same cut (the tests listed in §6 row 2).
+- **Retrieval stays usable.** `get_value`, `/data` and the HTML cut expanders all work through `continue` at
+  activation. Deleting the pager and the MCP window does not wait for a later slice.
+
+**Pre-floor reads closed** (review B):
+
+- `shown-result`'s `(:seon.instrument/check value)` reads (`sci/eval.clj:3684`, `:3698`) move after
+  `classify`. They become a bounded entry scan (≤ 64 entries, keys compared with `identical?` to the interned
+  keyword) over an exact `PersistentArrayMap` or `PersistentHashMap`. They never use `get`, which calls a tree
+  map's comparator or a host Map's `.get`.
+- `attribute-value`'s reshaping (`value.clj:391–427`) leaves the generic floor. That covers its
+  `:my.plan.item/needs` id sort, its component position sort and its per-ref identity pulls. An owning schema
+  that wants component order declares it in its pair.
+- Throwable frames are **not acquired** by the generic floor. `getStackTrace`'s allocation bound is unproven.
+  Stored `:seon.error/*` rows carry frames, and their pair shows them.
+- BigDecimal is inspected by its unscaled component's exact class before any method. Scalar bounds count the
+  actual spelling (sign, suffix, quotes, escapes).
 
 ### 3h. Regressions
 
@@ -501,13 +534,18 @@ block's (§3e there). This section only fixes what the floor contributes.
    the key's chunk.
 4. Composite keys: in `(array-map :a 1 [2] :hidden :z 3)`, all three entries show, and continuing at entry 1
    reaches `[2]`.
-5. Deep-first `{:a {:b {:c {:d {:e 1}}}} :z 2}` keeps `:z 2`. Fifty 1,000-character strings each show a prefix.
+5. Deep-first `{:a {:b {:c {:d {:e 1}}}} :z 2}` keeps `:z 2`. Fifty 1,000-character strings each show a prefix
+   at B = 1,800 (at 450 only five fit: 50 prefixes alone need about 1,000 characters).
 6. Exact charge on every §3d value: text ≤ charge ≤ B, and the legend appears once, only with cuts.
 7. Typed navigation: nil versus missing; `entry`/`key`/`val`/`nth`/`char` steps; empty and beyond-end are
    distinct; strict progress (every successful expansion shows a new member).
 8. One tree across faces: every AI-visible leaf is in the HTML, and every AI cut is exactly one expander whose
-   fetched fragment equals `units` at its coordinates, identically through MCP `get_value` and `/data`.
-9. The MCP value text equals the shared AI text, keeping the exact-shown bypass (`cluster.clj:414–422`).
+   fetched fragment equals `seon.render.walk/continue` at its coordinates, identically through MCP `get_value`
+   and `/data`.
+9. The MCP value text equals the shared AI text, keeping the exact-shown bypass. A one-key namespaced map
+   prints `{:seon.probe/member 1}` (`#:ns{}` lifts only two or more keys), which is what
+   `cluster/mcp_test.clj` `jvm-exceptions-keep-the-whole-cause` searches for. Its artifact fixture uses the
+   canonical running instance, never a hand-built map (`retrievable-artifacts-commit-no-transaction`).
 10. Retained: `background-poll-keeps-identity-while-payloads-grow` and `fit-preserves-breadth-and-long-strings`,
     converted to `prepare`.
 11. Debug side by side: exact saved bytes on the left; a labelled live source or the typed gone result on the
@@ -531,73 +569,77 @@ the object increments:
   refused before any digest or refusal text touches it;
 - depth-5,000 text **and** HTML; actual emitted bytes ≤ B; a 10⁶-key map at root and at offset 900,000.
 
-### 3i. Cost, measured and to measure
+### 3i. Cost, measured
 
-**Today's floor** (`prepare` at 150 / 600 / 15,000 tokens, same JVM, milliseconds): agent row 8.0 / 20.7 / 29.4;
-projection forms 5.7 / 4.6 / 5.6; stored error 2.2 / 1.8 / 1.3; Throwable chain 4.6 / 3.8 / 3.2; test run
-3.6 / 3.4 / 3.5. Every text was a single line. The profile's `max-children 32` caps the forms map at 4,116
-characters even at 45,000 (9% of B), and the agent row at 36,134.
+**Real queue, exact charge** (single warm runs, unarmed scratch namespace, default PID 87270, 2026-09-26),
+selection / layout in milliseconds:
 
-**Prototype** (complete-shell search, which reruns selection once per shell, so an upper bound on the queue's
-work). First run: selection 0–43 ms and layout 0–31 ms for every value at every budget, except the forms map at
-45,000, which took 123 ms of selection over 200 shell passes. Second run: selection ≤ 13 ms and layout ≤ 10 ms,
-with the forms map at 68 ms. The queue does one pass.
+| value | B = 384 | 450 | 1,800 | 45,000 |
+|---|---|---|---|---|
+| root agent row | 0.6 / 0.3 | 3.4 / 0.3 | 1.8 / 0.6 | 11.4 / 5.2 |
+| projection forms (3,435 keys) | 0.8 / 0.2 | 0.4 / 0.1 | 1.6 / 0.5 | 33.3 / 11.3 |
+| stored error row | 0.2 / 0.1 | 0.2 / 0.1 | 1.1 / 0.3 | 22.9 / 1.2 |
+| test run | 0.3 / 0.1 | 0.2 / 0.1 | 1.0 / 0.5 | 7.7 / 3.6 |
+| `{:a (vec (range 100000)) …}` | 0.5 / 0.1 | 0.4 / 0.1 | 1.4 / 0.4 | 32.5 / 10.5 |
 
-**Targets:** selection O(V log V) over admitted nodes, plus O(offset) navigation charged as query work; layout
-O(V + text); both sub-second at the default B. The slices' clock rows record, on parent and change: elapsed time,
-allocation, visited nodes, queue maximum, navigation steps, floor hits, and flat, text and charge characters,
-through MCP and `/data`. A regression over 20% or 50 ms is fixed first. Any case over 1 s names its collection.
+Allocation at 45,000 characters: 70 MB for the forms map and 21 MB for the agent row. That is mostly the
+persistent node map updated per admission, and it is the first thing to cut when implementing. A first version
+recomputed each parent's child sum per admission. It took **9.7 s** on the 100,000-member vector, O(n²). That
+version is gone; the incremental sum is what the table measures. Targets: selection O(V log V + V·depth) over
+admitted nodes, plus O(offset) navigation as query work; layout O(V + text); both sub-second at the default B.
+Clock rows on parent and change are recorded through MCP and `/data` at implementation.
 
-### 3j. Four live values: today and the prototype
+### 3j. Live values: today and the proof
 
-Both columns are **measured** at B = 450 characters (150 tokens). The prototype shows complete shells only; the
-queue's partial shell adds members up to B. The probe printed map cuts with the withdrawn `:… N` face; they are
-shown here in §3e's `…N` face, one character shorter each.
+At B = 450 (150 tokens), today's floor spends the budget depth first and prints one EDN elision map per cut.
+The proof's faces are shown below (the legend line is omitted).
 
-1. **Root agent row.** Today (399 characters, one line): `{:db/id 42410, :seon.agent/branch :cluster-default,
-   :seon.agent/id "root", :seon.agent/namespace #:db{:id 42404}, :seon.print/elision {…:omitted 3…}}`. The
-   plan, runtime and settings are gone. Prototype (188 characters, shell 5, pull order kept):
-   ```clojure
-   {:db/id 42410,
-    :seon.agent/branch :cluster-default,
-    :seon.agent/id "root",
-    :seon.agent/namespace {:db/id 42404},
-    :seon.agent/plan {:db/id 42411, :my.plan/agent {:db/id 42410}},
-    …2}
-   ```
-2. **Projection forms, 3,435 keys.** Today (323 characters): one key, then a 290-character elision map. Prototype
-   (224 characters):
-   ```clojure
-   {:seon.sci.eval/evaluation [:map, [:seon.test.accretion/candidate-ctx, …2], …14],
-    :seon.issue.citation/citation [:map, {:seon.db/attributes true, …1}, …4],
-    :seon.error.occurrence/id [:string, {:max 12, …3}],
-    …3432}
-   ```
-3. **Throwable chain.** Today: `#error {<elision of the whole throwable>}` (291 characters); at 600 tokens it opens
-   with REPL frames before `:via`. Prototype (245 characters, shell 5, declared type/message/data order). At
-   1,800 characters (shell 12) every `:data` map shows, including the real `seon.db/q` refusal's keys:
-   ```clojure
-   #error {:via
-   [{:type clojure.lang.ExceptionInfo, :message "Agent run failed", …1},
-    {:type clojure.lang.ExceptionInfo, :message "Datahike refused"…+19, …1},
-    {:type java.lang.IllegalStateException, :message "connection relea"…+3}]}
-   ```
-4. **Test run.** Today (434 characters): four of 16 keys, then an elision map. Prototype (269 characters, shell 7):
-   `:db/id` and `:seon.test.run/id` first, then `at`, `basis-t`, `branch`, `change-basis-t` and `cluster`, then
-   `…9`.
+```clojure
+{:db/id 33229,
+ :seon.agent/branch :cluster-default,
+ :seon.agent/id "root",
+ :seon.agent/namespace {:db/id 33223},
+ :seon.agent/plan {:db/id 33230, :my.plan/agent {:db/id 33229}},
+ :seon.agent/runtime
+   {:db/id 33232,
+    :seon.runtime/agent {:db/id 33229},
+    :seon.runtime/trigger {:db/id 33754},
+    :seon.runtime/turns [{…8} {…11} …33]},
+ …1}
+```
 
-The legend (§3d) follows each of these once. It is omitted above because the probe had no source reference.
+```clojure
+{:seon.sci.eval/evaluation
+   [:map [:seon.test.accretion/candidate-ctx {…1} …1] [:seon.sci.admit/value {…1} […2]] […3] …13],
+ :seon.issue.citation/citation
+   [:map
+    {:seon.db/attributes true, :seon.program/partition :seon.data}
+    [:seon.issue.citation/id :seon.issue.citation/id]
+    […2]
+    …2],
+ :seon.render.walk/graph-root :int,
+ …3475}
+```
+
+- The owner's three-branch probe at 384 characters shows every `:sample/text` with a prefix.
+- `{:a (vec (range 100000)) :b {:c 1} :d "x"}` at 300 keeps `:b {:c 1}` and `"x"`, with `:a`'s cut `…99967`.
+- An oversized first key is chunked, and `:ok 1` follows it.
+- `(array-map :a 1 [2] :hidden :z 3)` shows all three entries.
+- A two-link cause cycle prints two links.
+- A metadata-dispatched Symbol prints from its fields.
+- A 3,000-digit Ratio prints `#ratio[≈3006 digits]`.
+- An unrealized `(map inc [1 2 3])` prints `(…?)`, and `(range)`, whose class is `Iterate`, is opaque.
+- A 20-entry sorted map with a counting comparator made **0** comparator calls.
 
 ### 3k. Unproven parts
 
-1. The queue's partial-shell behaviour and its single-pass cost; only complete shells were measured.
-2. The allocation and memory of selection and layout; only elapsed time was measured.
-3. The constants S = 32, w = 16, the 64-entry sort bound, nest depth 6, F = 1,000 and the 4,096-byte cursor bound
-   were chosen here. F and nest depth 6 have the measurements above; the others do not.
-4. The per-class Throwable check has not been run against the JDK exception classes Seon actually raises. Classes
-   that fail it lose their message and show only their class.
-5. The artifact second selection's cost at the admission allowance, and the realization request's route in the
-   browser (it needs the one-REPL evaluation entrance).
+1. Armed cost. The proof ran unarmed, and the selection and emitter contracts add per-call validation.
+2. Allocation reduction below the measured 70 MB at 45,000 characters.
+3. The constants S = 32, w = 16, the 64-entry sort bound and nest depth 6 are chosen, not measured optima.
+4. Coverage of the JDK exception classes Seon actually raises by the per-class Throwable check. A class that
+   fails it shows only its class.
+5. The hostile fixture list in §3h, as isolated fixture-observation members run by root.
+6. The side-by-side debug view and deeper-fragment HTML expanders. Those are row 2(iii), after activation.
 
 ## 4. Re-adjudication of all 21 audit sites
 
@@ -654,7 +696,7 @@ writing, not a partial switch. Shared `value.clj` slices run sequentially; there
 | 0a schema | Declare missing identity owners with `:seon.program/row-schema`; prepare owned-key sets without changing dispatch. Probe agent-id envelope, two identities agreeing/conflicting, partial entity and non-program row classification. | 55 / 0 |
 | 0b schema/render | Add cached error-operation and contracted head-Var alternative lookup without switching dispatch. Probe nested specific error, uncontracted base, ambiguous/no-match alternatives, direct report and `let` floor. | 60 / 0 |
 | 1 render/SCI/MCP + explicit owners | Activate all three lookups; carry head Var into shown-result/MCP. In this same cut convert `oversight/unit`, `seon.run/render-namespace-ai`, four fixtures and walk/bootstrap/web owners. Only then remove old stages/specificity matching. Probe every converted entrance and no paired-error/report loss. | 75 / 260 |
-| 2 floor/print/MCP/web (folds old 2, 3, 5; owner 2026-09-25; revised after Astra `6e9deea71`) | §3, split by proof boundary, never two live pipelines. **(i) Safe shared selection and continuation, one activation:** the §3a table (scalar encoder, seq cells, lazy Throwable links), entry skeletons, the shell-order queue, the §3d charge on the existing emitter, the typed-step navigator in `render.data/at`, and the floor's share of `units` continuations (the building block's S3 books the entrance itself, +38 there). In the same cut convert **every** caller: `mcp-project` stops calling `admit/admit-value`, `artifact`/`artifact-edn` on the raw value and `admit/semantic-value`, returns the shared AI text plus cut coordinates, and writes its artifact from the second safe selection (§3g); `mcp-get-value` and `/data` `data-response` become adapters; `shown-result`'s raw key read moves after `classify`. **Delete** in (i): `value.clj` `text-limits`, `text-full`, `datum`, `causes`, `link-lines` and the bodies of `bounded-text`/`floor` (`:38–131`, entry names kept as calls into `prepare` for boot/flow/store/test callers); `stable-entries`, `counted-size`, `window`, `display-value` (`:297–366`); `attribute-value`'s `pr-str` tie-break; `ordered-head` (`:425–445`); `value-node*`, `value-node` (`:446–596`); `pager` (`:607–620`); `print.cljc` `value-at` (`:403`), `requery-fields`, `elision-node` (`:974–1052`), `preserve-requery` and the fit family (`:1054–1299`); `render.data/parse-cursor`'s root/zero defaults; the `mcp-get-value` string and collection windows (`cluster.clj:575–594`); the `mcp-project` admission/reconstruction body (`:423–494`). **(ii) Layout, after the deep and byte proofs:** `tree->ops` over fipp's own stages, `node->hiccup` with F-deep fragments; delete `Sink`, `TextSink`, `HiccupSink`, `TeeSink` and the sink helpers (`print.cljc:18–30`, `:192–338`), the `emit` multimethod family and `emit-node` re-sort (`:559–871`), table emission (`:496–557`), `render-elision-ai`'s EDN-map face, `visible-items`/`structural-cut?`, `repl/pretty-response`'s read-back and `clojure.pprint` (`repl.clj:457–463`, `:493–501`) and `web/debug-value-html`'s `pr-str` (`web.clj:795–798`). The selection contract does not change in (ii). **(iii) Page:** cut expanders and deeper-fragment expanders through the one entrance, the realization offer (§3g, row 9.5), and the side-by-side outline unit (delete the toggle). No durable historical capture (option 1); options 2–3 wait for the owner. **Convert:** `eval/drive.clj:135` (reads emitted text back with `::length 32`), `instrument_test.clj:1418` (`text-sink`/`sink?` as reload subject), `cluster/prompt.clj:280`, and the four `print/fit` tests. **Proof:** §3h ordinary 1–12 by root via `bin/test-check`; the hostile list as fixture-observation members only; §3i clock rows on parent and change through MCP and `/data`. **Unproven:** §3k. **Estimate** (planning, not measured; source lines only): (i) **+200 / −800**, (ii) **+90 / −420**, (iii) **+45 / −30**, total **+335 / −1,250**, net about −915. Separately: declarations about +35 (`:seon.render.data/step`, the tree node schema, `insufficient-floor-budget-error`, `allocator-charge-error`; `continuation-error` is the building block's); tests about +190 (i 120, ii 40, iii 30), with the deleted fit tests' lines counted when the conversion lands. `print.cljc` 1,307 → about 560 lines, `value.clj` 751 → about 480. Every sub-slice exceeds or approaches the 100-line law: (i) needs the owner's waiver extended to this activation, and there is no smaller cut that converts every caller at once. | 335 / 1,250 |
+| 2 floor/print/MCP/web (folds old 2, 3, 5; owner 2026-09-25; revised after Astra `6e9deea71`, re-review `98c563b34` A–D, 2026-09-26) | §3, never two live pipelines. **(ii) Layout landed first** (`63eb0dbcb`, `890a3de11`, lane impl-floor-on-fipp): fipp's own stages over an explicit-stack op stream, hiccup folded from the same stream; sinks, the emit family, tables and the `unknown-face-error` schema deleted (+329/−621); the provenance budget and held canonical order followed. **(i) Safe shared selection and continuation, one activation**, proved on real values with the real queue (§3c–§3d, §3i). **Source:** `src/seon/render/value.clj` (classify table, skeletons, shell queue, exact charge, `prepare` over them; `bounded-text`/`floor` stay as entry names over the same selection with the Throwable row), `src/seon/print.cljc` (emits the selected tree in held order; the `…N`/`…+N`/`…?` cut face and one legend; `render-elision-ai` stays for §5 prompt units), `src/seon/render/walk.clj` (`continue`, `page`), `src/seon/render/data.clj` (typed steps in `at`), `src/seon/render.clj` (nested values reach declared pairs through ordinary selection on the raw value, not through print nodes), `src/seon/cluster.clj` (`mcp-project` returns the shared AI text plus cut coordinates and stores the selection tree; `mcp-get-value` is an adapter), `src/seon/render/web.clj` (`data-response` an adapter; `debug-value-html` renders through the floor), `src/seon/sci/eval.clj` (`shown-result`'s reads after classify), `src/seon/db.clj:3046–3059` (`print/value-at` → `render.data/at`). **Declarations:** `seon.print.edn`, `seon.render.value.edn`, `seon.render.data.edn` (`:seon.render.data/step`, the selection-tree node), `seon.render.walk.edn` (`continuation-error`, `insufficient-floor-budget-error`, `allocator-charge-error`). **Delete, with current line counts:** `value.clj` `text-limits`…`floor` bodies (`:38–132`, 95; about 10 kept as entry names), `stable-entries`/`counted-size`/`window`/`display-value` (`:300–370`, 71), `reference-identity`/`attribute-value` (`:371–427`, 57), `ordered-head` (`:428–448`, 21), `value-node*`/`value-node` (`:449–599`, 151), `pager` (`:610–623`, 14), the print-node `artifact`/`artifact-edn`/`read-artifact`/`artifact-value` (`:686–732`, 47; about 15 back as the tree artifact); `print.cljc` `value-at` (`:212–221`, 10), `valued-kinds`/`node-order`/`ordered-children` (`:398–432`, 35), `requery-fields` and `elision-node` through `fit` (`:715–722`, `:754–1072`, 327); `render.clj` `project-entry`…`project-node` (`:1156–1307`, 152); `render.data` `parse-cursor` defaults and `at`'s raw `get`/`nth` (`:27–90`, 64; about 45 back); `cluster.clj` `mcp-project`'s admission/reconstruction body (`:334–434`, about 70 net) and `mcp-get-value`'s windows (`:493–549`, about 42 net); `web.clj` `data-response`'s navigation/window (`:3611–3717`, about 72 net) and `debug-value-html`'s `pr-str` (5). About **−1,230 / +350** source, net about −880. **Tests converted in the cut** (each red classified: deleted machinery, retired assumption, or a surviving owner's defect): `test/seon/print_test.clj` (fit tests go), `test/seon/render/value_test.clj`, `test/seon/render/data_test.clj`, `test/seon/mcp_test.clj` (`:80` redefines `value-node` — banned — becomes an assertion on the prepared projection), `test/seon/cluster/mcp_test.clj` (the two reds in §3h item 9), `test/seon/render/web_test.clj`, `test/seon/render/transcript_test.clj`, `test/seon/problems_test.clj`, `test/seon/cluster/prompt_test.clj`, `test/seon/error_test.clj`, `test/seon/db_test.clj`, `test/seon/loop_proof_test.clj`, `test/seon/render_simplification_test.clj`, and the baseline `test/seon/schema/datahike_parity.edn`. **(iii) Page, after activation:** deeper-fragment expanders, the realization offer, the side-by-side outline unit (delete the toggle). **Proof:** §3h ordinary 1–12 by root via `bin/test-check`; the hostile list as fixture-observation members only; clock rows on parent and change through MCP and `/data`. **Unproven:** §3k. Size is within the law: the additions are justified by the named deletions in the same cut (root ruling 2026-09-26). | 350 / 1,230 |
 | 4 render/problems | Retire `project-node*` redispatch; accept smaller data/final text using merged units without profile. Convert `ai-prose` to data. Probe nested problems uses one share, text-overage diagnostic, no defaults fallback and no repeated producer. | 30 / 140 |
 | 6 cluster/operator | Shared runtime/branch-error renderers (9,10,20). Probe >20 faults: complete counts, identities/requery, same terminal/MCP face. | 40 / 75 |
 | 7 transcript/walk/web | Render declared history/connection query pages; remove walk presentation min (5,12,14). Probe membership, count/link and exact historical AI/HTML bytes. | 30 / 70 |
