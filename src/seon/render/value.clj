@@ -10,7 +10,8 @@
             [seon.env :as env]
             [seon.error.refusal :as refusal]
             [seon.sci.admit :as admit]
-            [seon.ai.tokens :as tokens]))
+            [seon.ai.tokens :as tokens]
+            [sci.lang]))
 
 (schema.edn/load! {})
 
@@ -470,6 +471,16 @@
           (not pending?) (assoc :total (count members))))
       (identical? c clojure.lang.Var)
       {:kind :scalar :node {::print/face ::print/var ::print/name (str (.name (.ns ^clojure.lang.Var x)) "/" (.sym ^clojure.lang.Var x))}}
+      ;; An agent's Var: final fields `sym` and `ns` of final classes
+      ;; (sci/lang.cljc Var, Namespace); its metadata is never read.
+      (identical? c sci.lang.Var)
+      (let [sym (.-sym ^sci.lang.Var x) space (.-ns ^sci.lang.Var x)]
+        {:kind :scalar
+         :node {::print/face ::print/var
+                ::print/name (str (when (identical? (class space) sci.lang.Namespace)
+                                    (str (.-name ^sci.lang.Namespace space) "/"))
+                                  (when (identical? (class sym) clojure.lang.Symbol)
+                                    (.getName ^clojure.lang.Symbol sym)))}})
       (identical? c Class) {:kind :scalar :node {::print/face ::print/class ::print/name (.getName ^Class x)}}
       (and (instance? Throwable x) (throwable-safe c))
       (assoc (classify (throwable-value x) identity-attributes) :prefix "#error " :face ::print/throwable)

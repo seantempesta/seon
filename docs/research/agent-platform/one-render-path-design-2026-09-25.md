@@ -223,6 +223,7 @@ and nothing else is called on it. Approval of an outer class never approves its 
 | `Cons` | `.first`, `.more` (fields, `Cons.java:36–47`). **Not** `count`, which walks the tail (`:50`) | first, tail |
 | `LazySeq` | `.isRealized` (`lock == null`, `LazySeq.java:287`); when realized, `.seq` returns the field `s` (`:102–105`) | the cached seq. Unrealized: the pending marker |
 | `ChunkedCons` | `.chunkedFirst` (field, `ChunkedCons.java:56`), `.chunkedMore` (field, `:64`) | chunk must be exactly `ArrayChunk` (`nth`/`count` read an array, `ArrayChunk.java:39–51`); tail |
+| `clojure.lang.Var`, `sci.lang.Var` | JVM: `.ns`/`.sym` (final fields). SCI: final fields `sym` and `ns` (`sci/lang.cljc` `Var`); a `sci.lang.Namespace`'s final `name`. **Metadata is never read**; both print `#'ns/name` | `sym` exactly `Symbol`, `ns` exactly `sci.lang.Namespace` |
 | `PersistentVector$ChunkedSeq` | `count` (`PersistentVector.java:512`), `first`, `next` over its own vector | members |
 | `Throwable` subclass *C* | Only when `getMessage`, `getCause`, `getStackTrace` and `getSuppressed` all have declaring class `java.lang.Throwable` (`Class/getMethod` + `getDeclaringClass`, memoized per Class). `getData` only for exactly `ExceptionInfo` (`ExceptionInfo.java:34`) | message, data, cause, frames |
 
