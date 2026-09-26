@@ -1,0 +1,6 @@
+{:caffeine-getIfPresent-hit-ns 6.1544375, :key-hash-ns 5.018792, :threads-8/caffeine-get-ns 27.3677295, :threads-8/core-cache-lookup-or-miss-ns 761.40375, :caffeine-get-hit-ns 14.5795625, :core-cache-lookup-or-miss-hit-ns 408.452979, :jvm 26.0.1, :caffeine-stats CacheStats{hitCount=7225000, missCount=64, loadSuccessCount=64, loadFailureCount=0, totalLoadTime=9541, evictionCount=0, evictionWeight=0}, :core-cache-lookup-hit-ns 14.32075}
+{:weighted-kept 1, :policy-weighted OptionalLong[300]}
+{:caffeine-derivations-for-8-concurrent-misses 1, :core-cache-derivations-for-8-concurrent-misses 8}
+clojure.lang.ExceptionInfo: refused {}
+
+{:nested-ok true, :failure refused, :failure-retained? false, :weighted-size 1000, :evicted-by-kind {:bulk 200, :inner 1, :outer 1}, :async-hit-ns 147.3853125}
