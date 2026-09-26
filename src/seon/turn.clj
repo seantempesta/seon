@@ -5211,6 +5211,9 @@
                        (and problem (not (:seon.turn.loop/phase-failed problem)))
                        (assoc :seon.problems/form-problem problem))))
                  gated)
+                ;; the committed value the settlement is written on: the
+                ;; program-change fast path proves no commit came between
+                written-on (db/db connection)
                 settlement (settle-batch! cluster requests)
                 outcome (:outcome settlement)
                 prepared (:prepared settlement)
@@ -5237,6 +5240,7 @@
                     :seon.sci.eval/agent-ctx ctx
                     :seon.db/db (:db-after outcome)
                     :seon.db/transaction-report outcome
+                    :seon.sci.eval/written-on written-on
                     :seon.sci.eval/installations installations}))
                 (if (or (:seon.turn.loop/settled last-prepared)
                         (:seon.turn.loop/undisposed? last-prepared)
