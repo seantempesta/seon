@@ -326,3 +326,47 @@
                                :seon.eval/shown "2"})
               ":result"))
         "a preview with no evaluation identity has no handle")))
+
+(deftest ^{:seon/tasks #{"18c37812b5bc"}} the-reply-map-reads-back-as-data-whatever-the-value-text-ends-in
+  (let [read-response (fn [text] (binding [*read-eval* false] (read-string text)))
+        handle (admit/result-handle "e7b3")]
+    (testing "an elided value's legend comment does not swallow the keys after it"
+      (let [response (repl/response
+                      {:seon.cluster.eval/source "(vec (range 3000))"
+                       :seon.repl/handle handle
+                       :seon.eval/duration-ms 711
+                       :seon.eval/shown (str "[0 1 2 …2997]\n"
+                                             ";; …N = N more. Read any part with (seon.print/value-at "
+                                             handle " [...]).")})
+            reply (read-response response)]
+        (is (= [0 1 2 (symbol "…2997")] (:seon.repl/value reply)))
+        (is (= handle (:seon.repl/result reply)))
+        (is (= 711 (:seon.repl/ms reply)))
+        (is (str/includes? response ";; …N = N more") "the legend is still shown")))
+    (testing "a declared renderer's output keeps the handle and the time in the reply map after it"
+      (let [response (repl/response {:seon.cluster.eval/source "(my.plan/current)"
+                                     :seon.eval/renderer 'my.plan/render-ai
+                                     :seon.repl/handle handle
+                                     :seon.eval/duration-ms 12
+                                     :seon.eval/shown ";; The plan has two steps.\n(my.plan/step 1)"})
+            [shown tail] (str/split response #"\n(?=#:seon\.repl\{)")]
+        (is (= ";; The plan has two steps.\n(my.plan/step 1)" shown))
+        (is (= {:seon.repl/result handle :seon.repl/ms 12} (read-response tail)))))))
+
+(deftest a-reply-within-every-declared-bound-adds-nothing-and-an-exceeded-bound-is-one-line-above-it
+  (let [emission {:seon.cluster.eval/source "(inc 1)"
+                  :seon.repl/handle (admit/result-handle "e5885")
+                  :seon.eval/shown "2"
+                  :seon.eval/duration-ms 4}]
+    (testing "the normal reply is the answer, the handle and the time"
+      (is (= "#:seon.repl{:value 2, :result result/ee5885, :ms 4}" (repl/response emission)))
+      (is (= [] (repl/findings emission))))
+    (testing "each exceeded bound is one ;; line above the map naming measure, observation, bound and fix"
+      (let [slow (assoc emission :seon.eval/duration-ms 1450
+                        :seon.cluster.eval/output (apply str (repeat 400 "noisy line\n")))
+            lines (str/split-lines (repl/response slow))]
+        (is (= 3 (count lines)))
+        (is (str/starts-with? (first lines) ";; :seon.eval/duration-ms 1450 is over its bound [:<= 1000]: "))
+        (is (str/starts-with? (second lines) ";; :seon.repl/out-tokens "))
+        (is (str/starts-with? (peek lines) "#:seon.repl{:value 2"))
+        (is (every? #(re-find #": \S" %) (butlast lines)) "every finding carries its declared fix")))))

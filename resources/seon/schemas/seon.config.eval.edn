@@ -2,4 +2,15 @@
                    [:int
                     {:seon.config/display-label "Evaluation deadline" :seon.config/display-divisor 1000 :seon.config/display-unit "s" :min 1,
                      :seon.config/per-agent true,
-                     :seon.config/dial true}]}
+                     :seon.config/dial true}],
+                   :bounds
+                   [:map
+                    {:description "The declared misuse bounds over one evaluation's measures (seon.repl/cost). seon.repl/findings prints one ;; line above the reply map for each m/explain error against this schema, naming the measure, the observed value, the bound and the entry's :seon.repl/fix; within every bound the reply carries nothing extra. A new rule is a new entry; each measure is recorded by its producer."}
+                    [:seon.eval/duration-ms
+                     {:optional true
+                      :seon.repl/fix "over one second in the evaluation you asked for. Find what the work is proportional to (the store? the program? the call count?) and remove it; (seon.profile/summary (seon.profile/cells) 5) ranks the armed functions by time."}
+                     [:<= 1000]]
+                    [:seon.repl/out-tokens
+                     {:optional true
+                      :seon.repl/fix "printed output is saved and re-read in every later context. Return the value instead of printing it."}
+                     [:<= 500]]]}

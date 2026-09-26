@@ -11,7 +11,9 @@
   (:require [clojure.edn :as edn]
             [clojure.pprint :as pprint]
             [clojure.string :as str]
+            [malli.core :as m]
             [seon.ai :as ai]
+            [seon.ai.tokens :as tokens]
             [seon.db :as db]
             [seon.render.value :as value]
             [seon.schema.edn :as schema.edn]
@@ -203,31 +205,98 @@
                     [response-key text])))
           response-order)))
 
+(declare syntax-tokens)
+
+(defn- ends-in-comment?
+  "True when `text`'s last token is a line comment (the floor's elision legend,
+  a diagnostic line): anything written after it on the same line would be
+  read as part of the comment, so the reply map must end that line first."
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [text]
+  (= "comment" (first (peek (into [] (remove (comp #{"space"} first))
+                                   (syntax-tokens text))))))
+
+(defn- reply-map
+  "The entries as one `#:seon.repl{…}` map that reads back as data: entries
+  join with `, ` on one line, and a line an entry's text ends in a comment is
+  ended before the next key or the closing brace."
+  {:malli/schema [:=> [:cat [:vector [:tuple :qualified-keyword :string]]] [:maybe :string]]}
+  [entries]
+  (when (seq entries)
+    (let [ends (fn [text] (if (ends-in-comment? text) "\n " ", "))]
+      (str "#:seon.repl{"
+           (str/join (map-indexed
+                      (fn [index [response-key text]]
+                        (str (when (pos? index) (ends (second (nth entries (dec index)))))
+                             ":" (name response-key) " " text))
+                      entries))
+           (when (ends-in-comment? (second (peek entries))) "\n")
+           "}"))))
+
+;;; ---------------------------------------------------------------------------
+;;; Misuse findings
+;;;
+;;; The bounds are one declared Malli map schema, `:seon.config.eval/bounds`,
+;;; over the evaluation's measures; a finding is exactly one of `m/explain`'s
+;;; errors against it. No measure, schema or symbol is named here: a new rule
+;;; is a new entry in the resource, a tighter rule a new bound.
+;;; ---------------------------------------------------------------------------
+
+(def ^:private bounds
+  "The declared bounds, compiled at the first response after this namespace
+  loads (one read of the packaged forms): a bound edited in the schema
+  resource is adopted at the next reload of `seon.repl`."
+  (delay
+   (let [form (get (schema.edn/packaged-forms) :seon.config.eval/bounds)
+         schema (m/schema form)]
+     {::explainer (m/explainer schema)
+      ::measures (m/explicit-keys schema)
+      ::fixes (into {} (map (fn [[measure properties]] [measure (:seon.repl/fix properties)]))
+                    (m/children schema))})))
+
+(defn cost
+  "The measures the declared bounds judge for one evaluation: each one its
+  emission carries as recorded, and the estimated tokens of its printed
+  output (`:seon.repl/out-tokens`). Absent means not measured."
+  {:malli/schema [:=> [:cat :seon.repl/emission] :seon.repl/cost]}
+  [emission]
+  (let [output (:seon.cluster.eval/output emission)]
+    (cond-> (select-keys emission (::measures @bounds))
+      (seq output) (assoc :seon.repl/out-tokens (tokens/estimate output)))))
+
+(defn findings
+  "One `;;` line per declared bound the evaluation's cost exceeds, naming the
+  measure, what was observed, the bound and the declared fix. Empty within
+  every bound, which is the normal reply: nothing is added to it."
+  {:malli/schema [:=> [:cat :seon.repl/emission] [:vector :string]]}
+  [emission]
+  (let [{explainer ::explainer fixes ::fixes} @bounds]
+    (into []
+          (map (fn [{[measure] :in observed :value schema :schema}]
+                 (str ";; " measure " " observed " is over its bound " (pr-str (m/form schema))
+                      ": " (get fixes measure))))
+          (:errors (explainer (cost emission))))))
+
 (defn response
-  "The saved declared-renderer response, or the reply map for ordinary data.
+  "The reply map, after the declared renderer's output when there is one,
+  and after one `;;` line per exceeded bound.
+
+  The reply map always reads back as data. A declared renderer's output is
+  the value itself, so its reply map carries every other key (`:result`,
+  `:ms`, `:out`, diagnostics) but not `:value`/`:error`.
 
   Returns nil when the evaluation has settled nothing — a running form has
   not printed a result, and inventing an empty map would say it had."
   {:malli/schema [:=> [:cat :seon.repl/emission] [:maybe :string]]}
   [emission]
-  (let [reply-map (fn [entries]
-                    (when (seq entries)
-                      (str "#:seon.repl{"
-                           (str/join ", "
-                                     (map (fn [[response-key text]]
-                                            (str ":" (name response-key) " " text))
-                                          entries))
-                           "}")))]
-    (if (:seon.eval/renderer emission)
-      ;; The declared renderer's output is the value; its diagnostics and the
-      ;; branch's new errors still follow it, in the same reply map.
-      (let [errors (reply-map (into [] (keep (fn [[response-key text]]
-                                                (when text [response-key text])))
-                                    [[:seon.repl/diagnostics
-                                      (some-> (:seon.cluster.eval/diagnostics emission) data-text)]
-                                     [:seon.repl/errors (:seon.repl/errors emission)]]))]
-        (cond-> (value-text emission) errors (str "\n" errors)))
-      (reply-map (response-entries emission)))))
+  (let [entries (response-entries emission)
+        answer (if (:seon.eval/renderer emission)
+                 (let [tail (reply-map (filterv (comp (complement #{:seon.repl/value :seon.repl/error}) first)
+                                                entries))]
+                   (cond-> (value-text emission) tail (str "\n" tail)))
+                 (reply-map entries))]
+    (when answer
+      (str/join "\n" (conj (findings emission) answer)))))
 
 (defn- thinking-text
   "The agent's own `;;` prose for this evaluation, or nil.

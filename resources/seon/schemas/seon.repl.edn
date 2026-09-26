@@ -1,4 +1,9 @@
-#:seon.repl{:directory
+#:seon.repl{:cost
+            [:map-of {:description "One evaluation's measures as seon.repl/findings judges them against :seon.config.eval/bounds: each recorded measure the evaluation carries, plus :seon.repl/out-tokens. Absent means not measured."}
+             :qualified-keyword :int]
+            :out-tokens
+            [:int {:min 0 :description "Estimated tokens (seon.ai.tokens/estimate) of an evaluation's printed output, derived from the saved output when its reply is rendered."}]
+            :directory
             [:map {:seon.render/ai seon.repl/render-directory-ai
                    :seon.render/html seon.repl/render-directory-html
                    :description "The existing dir API's function and schema data."}
