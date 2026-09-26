@@ -629,3 +629,44 @@ had them.
   function needs it → required".
 - **Also:** 299011465's `:seon.db/custody-connection` becomes redundant once this lands. The same patch commit
   should delete it.
+
+## Resume 15 — the ruled slice is ready as a patch; stopped: "required on the unit" is the wrong granularity
+
+- **Patch:** `tmp/perf-boot-opus/required-only-slice.patch`, 111 lines, in one piece:
+  - the rule: only required entries are supplied;
+  - `:seon.render/unit`'s `:seon.db/db` made required;
+  - `:seon.db/custody-connection` deleted;
+  - `:seon.call-preparation/optional?` deleted.
+  The working tree is back at HEAD.
+- **Per-function decisions:** `tmp/perf-boot-opus/optional-decisions.edn`. 149 optional fills over 138 functions,
+  grouped by the schema that declares the entry.
+  - `:seon.render/unit`, 103 renderers: **44 read the database; 59 never do** (source scan for db use). The 59
+    include `seon.error/*` prose and renderers, `seon.config/render-*`, `seon.ai/*`, `seon.effect/render-*`,
+    `seon.cluster/runtime-observation-ai`, `seon.oversight/*` and `seon.print/render-elision-ai`.
+  - The other 46 stay optional; the new rule stops filling them. Each group's absence has a meaning:
+
+| group | why absence means something |
+|---|---|
+| `seon.fn/index-request` connection (11) | indexing works in the world it is handed |
+| `seon.turn.loop/evaluate-sources-request` db | absent = read the connection's current value |
+| `seon.instrument/request` db | absent = arm without supplied-default rows |
+| `seon.db/custody-request` connection (3), and `run-test` / `run-tests` / `bounded-result` connection | absent = no custody |
+| `seon.sci.eval/request` and `shown-request` db / connection / agent-id | a print or evaluation without that world input |
+| `seon.render.walk/request`, `history-request`, `continue-request` connection | a walk without a live connection |
+| `seon.error/*` and `seon.fault/context` agent-id | absent = not attributable to an agent; the producer declares identity, nothing downstream guesses it |
+| `seon.render.web/page-request` agent-id | a page with no viewing agent |
+
+- **Why I stopped.** With the database required on the shared unit, all 59 renderers that never read it are refused
+  whenever they are called with no world and no db. Host call sites that do this today:
+  - `boot.clj:656`, the status face;
+  - `problems.clj:538` and `:634`;
+  - `test/runner.clj:115`;
+  - `cluster.clj:434`.
+  Each would have to pass a database it doesn't use just to satisfy the shared schema.
+- **Options:**
+  1. **(Recommended) Keep `:seon.render/unit` free of a db requirement.** Add `:seon.render/db-unit` = unit + required
+     `:seon.db/db`, and switch the 44 reading renderers' input to it. That is one scripted token per contract, across
+     ~15 files, several held by other lanes. It is required exactly where needed.
+  2. **As ruled.** Unit db required; the 5 host call sites pass a database. The 59 non-readers carry a requirement
+     they don't need.
+  3. **Rule only, unit unchanged.** Renderers stop getting a db at all; the 44 readers break. Not viable.
