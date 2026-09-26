@@ -9,6 +9,11 @@ updated: 2026-09-26
 ## Now (current state — rewritten in place 2026-09-26 ~02:00Z; never append; ledger: tmp/orchestrator/file-ownership.md)
 
 ### Resume here — read everything, don't tail
+**Milestone (owner 2026-09-26): dogfood first.** One lane completes a real change entirely through the REPL path — MCP
+branch (hosted agent, P3b) → `defn` → the tests reaching the change → root merge → write-back — with no file edits.
+Everything else is subordinate until that works: green host-test, the write-back loop (merge gate), agent-test; then one
+real task through it; then lanes work that way. Beside it, always at least one lane deleting obsolete code or converting
+callers to an existing component/function/test that does the same thing better (not dogmatic: net-negative is the aim).
 1. Read `AGENTS.md` end to end. Laws added 2026-09-25 that shape everything below: the one REPL path is a composition of
    stages (read → evaluate → record → print; other readers/evaluators plug in as values, never a parallel pipeline); the Seon
    agent is the perspective (MCP, tests, web are views into its world); core is composable (shared db values, a shared SCI
