@@ -2308,9 +2308,6 @@
 (deftest an-agents-own-exception-is-minimal-complete-data
   (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))
         value (fn [source] (:seon.sci.admit/value @(future (run-in ctx source 2000))))
-        machinery? (fn [[class-name]]
-                     (some #(str/starts-with? (str class-name) %)
-                           ["seon.sci." "seon.turn" "seon.call_preparation" "seon.render" "seon.schema" "seon.db"]))
         divide (value "(/ 1 0)")
         thrown (value "(throw (ex-info \"boom\" {:a 1}))")]
     (is (= 'java.lang.ArithmeticException (:seon.error/exception-class divide))
@@ -2319,16 +2316,14 @@
            (:seon.error/message divide)))
     (is (= [{:seon.error/throwable-class "java.lang.ArithmeticException"
              :seon.error/message "Divide by zero"}]
-           (:seon.error/chain divide))
-        "no evaluator frame: the author's location is SCI's stacktrace")
+           (mapv #(dissoc % :seon.error/frames) (:seon.error/chain divide)))
+        "one link, the author's; its first-party frames stay on the value and its pair (kernel-test) selects")
     (is (= '[user 1 1] (peek (:seon.sci.eval/stacktrace divide))))
     (is (not-any? #(contains? divide %)
                   [:seon.error/data :seon.sci.kernel/guard-observation :seon.error/frame])
         "duration, allocation and outcome stay on the evaluation record")
-    (is (< (count (pr-str divide)) 600) (pr-str divide))
     (is (= [{:a 1}] (keep :seon.error/data (:seon.error/chain thrown)))
         "an ex-info shows its data on its link")
-    (is (not-any? machinery? (mapcat :seon.error/frames (:seon.error/chain thrown))))
     (testing "a contract refusal keeps operation, expected, offending and fix"
       ;; the armed compiled function called from interpreted code, as an
       ;; agent calls a program function
@@ -2342,7 +2337,6 @@
         (is (= :symbol (:seon.error/expected refused)))
         (is (= ["x"] (:seon.error/offending refused)))
         (is (some :seon.error/fix (:seon.error/problems refused)))
-        (is (not-any? machinery? (mapcat :seon.error/frames (:seon.error/chain refused))))
         (is (not (contains? (:seon.error/data refused) :seon.sci.admit/record)))
         (is (not-any? #(= (:seon.error/message refused) (:seon.error/message %)) (:seon.error/chain refused))
             "the refusal's message is said once")))))
