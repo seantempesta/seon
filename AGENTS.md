@@ -315,8 +315,8 @@ root.
 
 - **Operate through `bin/seon`.** Use its installed help for start/status/open/init/config apply/stop/down/reset/
   nuke, never deleted internals. Every JVM runs a committed archive, never the working tree: `start` launches HEAD;
-  `start --head` replaces a live root with HEAD, retaining store and caches and filling a class-cache miss before
-  the old JVM stops. Reset unlinks and forks from program rows, retaining caches. Nuke replaces one JVM, holds the
+  `start --head` replaces a live root with HEAD, retaining store and caches; a dependency-class miss is filled before
+  the old JVM stops, and our own classes are cached as boot loads them, so a miss never lengthens downtime. Reset unlinks and forks from program rows, retaining caches. Nuke replaces one JVM, holds the
   sibling store lock through deletion of the store and all derived caches and the rebuild and boot from committed
   inputs, reports full failures and falls back to the newest booting commit rather than refusing recovery. A
   competing start that wins the replacement gap is never killed or deleted by the loser. Destructive drills and
