@@ -653,15 +653,42 @@
   nil)
 
 (defn- reconcile-call
-  "Validate the manifest's function names against the writer's database."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection
+  "Validate the manifest's function names against the writer's database, whose
+  own declarations shape the rows (`db/carried-projection`): the transaction
+  names its inputs, never a copy of a projection."
+  {:malli/schema [:=> [:cat :seon.db/database-value
                        [:vector :map] :seon.reconcile/request] :seon.db/tx-data]}
-  [database projection desired request]
+  [database desired request]
   (require-functions! database desired)
   (let [tx-data (reconcile/plan database request)
         rows (filterv map? tx-data)
-        replacements (zipmap rows (population-transaction-data projection database rows))]
+        replacements (zipmap rows (population-transaction-data
+                                   (db/carried-projection database) database rows))]
     (mapv #(get replacements % %) tx-data)))
+
+(defn- hold-retired-attributes
+  "Each desired row with its entity's current values of attributes the checkout
+  no longer declares.
+
+  Rows compile from the checkout's declarations onto a branch that may not have
+  adopted them yet; `accrete-row-attributes!` is the added-attribute side. A
+  retired attribute is not configuration's to remove: adoption retires it with
+  its data (`seon.cluster/declaration-changes`), while until then the branch's
+  own declarations may still require it."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection [:vector :map]]
+                  [:vector :map]]}
+  [database projection rows]
+  (let [declared (schema.edn/packaged-forms)]
+    (mapv (fn [row]
+            (let [identity (row-identity projection row)
+                  current (when identity (db/pull database '[*] identity))]
+              (when (:seon.db/invalid-read current)
+                (throw (ex-info (str (:seon.error/message current)) current)))
+              (into row
+                    (remove (fn [[attribute _]]
+                              (or (= :db/id attribute) (contains? declared attribute))))
+                    current)))
+          rows)))
 
 (defn- accrete-row-attributes!
   "Install each attribute the desired rows name that the branch has not installed.
@@ -704,8 +731,10 @@
                            (schema/projection-from-database database)))
         forms (:seon.schema.projection/forms projection)
         desired
-        (into [(:seon.config/desired-row compiled)]
-              (:seon.config/initialization compiled))
+        (hold-retired-attributes
+         database projection
+         (into [(:seon.config/desired-row compiled)]
+               (:seon.config/initialization compiled)))
         desired-identities (into #{} (keep #(row-identity projection %)) desired)
         ;; A config row another cluster's required `:seon.cluster/config`
         ;; names is that cluster's: retracting it would invalidate its
@@ -747,7 +776,7 @@
                 (db/transact!
                  connection
                  {:tx-data
-                  [[:db.fn/call #'reconcile-call projection desired request]]
+                  [[:db.fn/call #'reconcile-call desired request]]
                   :tx-meta
                   {:seon.db/process
                    [:seon.db.process/id managing-process-identity]}})]

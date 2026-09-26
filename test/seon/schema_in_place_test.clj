@@ -189,6 +189,41 @@
           (is (= #{"g"} (values connection :schema.in-place/gone))
               "with its data"))))))
 
+(deftest a-required-key-retires-with-its-entity-schema-in-one-transaction
+  ;; Class regression (fix-dial-retirement-adoption 2026-09-26): adoption
+  ;; retracts a retired attribute with its data and rewrites the entity schema
+  ;; that required it in one transaction (`seon.cluster/adopt-rows!`). The
+  ;; writer judged that report by the declarations it replaced, so the
+  ;; entity looked like it was missing a required key and the adoption was
+  ;; refused. The final report is judged by the declarations it installs.
+  (with-population
+    (fn [connection]
+      (let [entity :schema.in-place/required-row
+            requiring (schema/declaration-projection
+                       (merge (schema.edn/packaged-forms) fixture-forms
+                              {:schema.in-place/required :keyword
+                               entity [:map {:seon.db/attributes true :seon.program/partition :seon.data}
+                                       [:schema.in-place/id :schema.in-place/id]
+                                       [:schema.in-place/required :schema.in-place/required]]}))
+            retired (schema/declaration-projection
+                     (merge (schema.edn/packaged-forms) fixture-forms
+                            {entity [:map {:seon.db/attributes true :seon.program/partition :seon.data}
+                                     [:schema.in-place/id :schema.in-place/id]]}))]
+        (schema/call-with-projection
+         requiring #(@#'seon.cluster/accrete-schema-population! connection nil true))
+        (support/transacted! connection [{:schema.in-place/id "r" :schema.in-place/required :panic}])
+        (let [database (db/db connection)
+              adoption (schema/call-with-projection
+                        retired
+                        #(db/transact! connection
+                                       {:tx-data (into (@#'seon.cluster/declaration-changes database retired)
+                                                       (@#'seon.cluster/schema-row-changes database retired))}))]
+          (is (some? (:db-after adoption)) (pr-str (:seon.error/message adoption)))
+          (is (not (contains? (:schema (db/db connection)) :schema.in-place/required))
+              "the required key's attribute is retired with its data")
+          (is (= #{"r"} (values connection :schema.in-place/id))
+              "and its entity keeps every other attribute"))))))
+
 (deftest an-adopted-branch-reopens-with-no-declaration-change
   (adopted-fixture
    (fn [connection _]

@@ -256,8 +256,8 @@
                           {:seon.config.flow.compute/queue-depth 23})]
        (with-redefs-fn
          {#'config/reconcile-call
-          (fn [database projection desired request]
-            (let [tx-data (original database projection desired request)]
+          (fn [database desired request]
+            (let [tx-data (original database desired request)]
               (swap! transactions conj tx-data)
               tx-data))}
          #(do
@@ -456,6 +456,27 @@
               (get-in @connection [:schema :seon.config/overlay-keys :db/cardinality])))
        (is (true? (:seon.config.ai/no-provider effective)))
        (is (= 3 (:seon.config.run/max-episode-runs effective)))))))
+
+(deftest a-dial-the-checkout-no-longer-declares-is-left-for-adoption
+  ;; Class regression (fix-dial-retirement-adoption 2026-09-26): boot applies
+  ;; the checkout's compiled config to a branch that has not adopted the
+  ;; checkout's declarations. Deleting `:seon.config/on-core-error` made that
+  ;; apply retract a value the branch's own declarations still required, and
+  ;; `start --head` refused. Retiring an attribute is adoption's (it retracts
+  ;; the attribute with its data); config leaves what it does not declare.
+  (test-support/with-database
+   (fn [connection]
+     (let [dial :seon.config-test/retired-dial
+           cluster [:seon.config/cluster "default"]]
+       (test-support/transacted! connection [{:db/ident dial
+                                              :db/valueType :db.type/keyword
+                                              :db/cardinality :db.cardinality/one}])
+       (test-support/transacted! connection [{:db/id cluster dial :panic}])
+       (let [result (config/apply-compiled!
+                     connection (config/compile-manifest {:seon.boot/cluster-name "default"}))]
+         (is (nil? (:seon.error/at result)) (pr-str result))
+         (is (= :panic (get (db/pull (db/db connection) [dial] cluster) dial))
+             "the undeclared dial keeps its value until adoption retires it"))))))
 
 (deftest apply-surfaces-a-refused-reconcile-as-its-flat-rule-error
   ;; A real refusal inside the reconcile transaction: the desired row names a

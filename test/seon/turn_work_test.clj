@@ -142,7 +142,7 @@
   [database {::keys [planned? closed? triggered? trigger-first?
                        lint-ordinal receipts]}]
   (let [projection (db/carried-projection database)
-        validator (#'db/write-report-validator projection)
+        validator #(#'db/validate-write-report projection %)
         apply-state (fn [database rows]
                       (:db-after (d/with database rows
                                    {:datahike/validate-report validator})))

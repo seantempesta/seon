@@ -18,7 +18,7 @@ Use `seon.db`. Its query and pull owners accept explicit immutable
 database values or agent-supplied defaults (`q`, `src/seon/db.clj:2438`;
 `pull`, `:2661`). Its transaction owner accepts an explicit connection or the
 agent's connection and returns errors as values (`transact!`,
-`src/seon/db.clj:4912`). A host JVM probe should supply explicit custody
+`src/seon/db.clj:4928`). A host JVM probe should supply explicit custody
 (`seon.db/call-with-custody`, `src/seon/db.clj:383`).
 
 Datahike accepts a transaction map with `:tx-data` and optional
@@ -61,8 +61,11 @@ matching datoms with no cascade and no incoming-ref sweep (`:1078-1089`).
 deletion policy property; required-ness already is one. Every swept datom is
 written through `transact-retract-datom` (`db/transaction.cljc:814-820`), so
 it lands in the report's `:tx-data`. Seon wires a final-report validator into
-every admitted `transact!`: `prepared-write` puts `write-report-validator` under
-`:tx-meta :datahike/validate-report` (`src/seon/db.clj:4639-4648`). Datahike
+every admitted `transact!`: `prepared-write` puts `validate-write-report` under
+`:tx-meta :datahike/validate-report` (`src/seon/db.clj`, `prepared-write`). It
+judges the report by the final database's own declarations
+(`carried-projection` of `:db-after`), so an adoption that retires a required
+key and rewrites its entity schema in one transaction is admitted. Datahike
 calls it once and throws `:transaction/validation-rejected` on any non-nil
 return, aborting the whole transaction (`validate-report`,
 `db/transaction.cljc:1224-1234`, invoked at `:1295`).
@@ -87,8 +90,7 @@ rows, missing children, cycles, multiple owners and exhausted
 `:seon.config.db/validation-node-limit` refuse. No component identity is invented.
 The projection carries the declared bootstrap bound (`with-compiled-cache`,
 `src/seon/schema.clj:331-354`); the final callback reads asserted configuration
-from the report's final database (`write-report-validator`,
-`src/seon/db.clj:4466-4480`).
+from the report's final database (`validate-write-report`, `src/seon/db.clj`).
 
 State the lifecycle consequence in the attribute's docstring: **cascade**
 (component), **sweep** (optional ref), **refuse** (required ref in a validated
@@ -292,8 +294,8 @@ are not undone.
 
 Return transaction data from a transaction function, never a refusal map:
 Datahike expects transaction data there. Seon's refusals are built with
-`seon.error.refusal/diagnostic` (`src/seon/error/refusal.clj:91`) and thrown,
-and `seon.db/transact!` (`src/seon/db.clj:4912`) reads the throwable back into
+`seon.error.refusal/diagnostic` (`src/seon/error/refusal.clj:107`) and thrown,
+and `seon.db/transact!` (`src/seon/db.clj:4928`) reads the throwable back into
 a flat `:seon.error` value in `transact-call`'s catch, through `write-refusal` and
 `seon.error.refusal/refusal` (`src/seon/db.clj:4655-4665`;
 `src/seon/error/refusal.clj:123`). Evidence and the final-report validation seam are in

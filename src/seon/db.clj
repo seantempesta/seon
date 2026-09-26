@@ -260,8 +260,6 @@
                 state)))
           (vals @instances)))))
 
-(declare write-report-validator)
-
 (defn carry-connection-projection-state!
   "Attach the owning projection state to a live connection at construction.
 
@@ -271,7 +269,6 @@
    [:=> [:cat :seon.db/connection :seon.sci.eval/projection-state]
     :seon.db/connection]}
   [connection state]
-  (write-report-validator (:seon.schema/projection @state))
   (alter-meta! (:wrapped-atom connection)
                assoc :seon.sci.eval/projection-state state)
   connection)
@@ -4456,21 +4453,29 @@
              :seon.error/expected :seon.fn/prepared-arities
              :seon.error/offending mismatches}))))))))
 
-(defn- write-report-validator
-  "Acquire the callback on its immutable projection, primed when the connection acquires it."
-  [projection]
-  (schema/projection-cache-value
-   projection ::write-report-validator
-   #(fn [report]
-      (schema/call-with-projection projection
-        (fn []
-          (let [attribute :seon.config.db/validation-node-limit
-                configured (when (get (dbi/-schema (:db-after report)) attribute)
-                             (map :v (d/datoms (:db-after report) :aevt attribute)))
-                ;; Every asserted policy on this branch applies to every writer.
-                ;; Before config construction, the projection carries the declared default.
-                limit (if (seq configured) (apply min configured) (get projection attribute))]
-            (write-report-error (assoc projection attribute limit) report)))))))
+(defn- validate-write-report
+  "Datahike's final-report validator (`validate-report`,
+  datahike/db/transaction.cljc:1224-1234): the refusal of the database this
+  report leaves, judged by that database's own declarations. A write that
+  changes declarations (adoption retiring a required key with its data) is
+  judged by the population it installs, never the one it replaces; any other
+  write's final value reuses its basis's projection (`carried-projection`).
+  A value holding no declaration rows is judged by the construction
+  projection `prepared` the write was prepared with."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/transaction-report]
+                  [:or :nil :seon.db/error-result]]}
+  [prepared report]
+  (let [database (:db-after report)
+        projection (if (declares-program? database) (carried-projection database) prepared)]
+    (schema/call-with-projection projection
+      (fn []
+        (let [attribute :seon.config.db/validation-node-limit
+              configured (when (get (dbi/-schema database) attribute)
+                           (map :v (d/datoms database :aevt attribute)))
+              ;; Every asserted policy on this branch applies to every writer.
+              ;; Before config construction, the projection carries the declared default.
+              limit (if (seq configured) (apply min configured) (get projection attribute))]
+          (write-report-error (assoc projection attribute limit) report))))))
 
 (defn- retention-rules [projection]
   (schema/projection-cache-value
@@ -4614,8 +4619,27 @@
                      (retention-snapshot after rules entities) actor
                      (into #{} (remove #(first (d/datoms after :eavt %))) entities))))
 
+(defn- attempted-transaction
+  "`transaction` as the operations it submitted, each transaction function named
+  by its function and never carried with its arguments.
+
+  The arguments are the caller's live inputs (a projection, a request holding
+  a world), which the caller still holds. Copied into an error, one config
+  apply printed 8.1 MB that could not be read back (duplicate keys in the
+  projection's compiled cache). Every other operation is kept as submitted."
+  {:malli/schema [:=> [:cat :seon.store/transaction] :seon.store/transaction]}
+  [transaction]
+  (let [named (fn [operations]
+                (mapv #(if (and (sequential? %) (= :db.fn/call (first %)))
+                         [:db.fn/call (second %)]
+                         %)
+                      operations))]
+    (if (map? transaction)
+      (cond-> transaction (contains? transaction :tx-data) (update :tx-data named))
+      (named transaction))))
+
 (defn- write-observation
-  "Carry the actual refused request and immutable pre-write basis as data.
+  "Carry the refused request's operations and immutable pre-write basis as data.
   Recorder admission owns its bounded stored projection."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/transaction :seon.error/base]
                   [:and :seon.db.write/validation-refusal :seon.db/error-result]]}
@@ -4628,7 +4652,7 @@
               :seon.error.basis/branch (:branch (dbi/-config database))
               :seon.error.basis/commit (d/commit-id database)
               :seon.error.basis/t (dbi/-max-tx database)})
-      (assoc-in [:seon.error/data :seon.db.write.attempt/transaction] transaction))
+      (assoc-in [:seon.error/data :seon.db.write.attempt/transaction] (attempted-transaction transaction)))
    assoc :seon.error/declared-schema :seon.db.write/validation-refusal))
 
 (defn- prepared-write
@@ -4640,7 +4664,7 @@
                  projection
                  (jdk-integers->long
                   (assoc-in (if (map? transaction) transaction {:tx-data transaction})
-                            [:tx-meta :datahike/validate-report] (write-report-validator projection))))
+                            [:tx-meta :datahike/validate-report] #(validate-write-report projection %))))
         rows (filter map? (:tx-data request))
         ;; A namespace row written here re-derives its declarations' digests in this transaction.
         namespaces (into #{} (keep #(when (:seon.program/definition-digest %) (:seon.ns/name %))) rows)
@@ -4725,9 +4749,9 @@
                      :seon.store/branch (:branch (:config database))
                      :seon.config.db/write-time-limit-ms write-time-limit-ms
                      :seon.db/write-wait-elapsed-ms elapsed-ms
-                     ;; The refusal hands back the transaction; the caller
+                     ;; The refusal hands back its operations; the caller
                      ;; must not retry it blindly (the outcome is unknown).
-                     :seon.store/transaction transaction
+                     :seon.store/transaction (attempted-transaction transaction)
                      :seon.db/transaction-outcome-unknown true}]
                 (diagnostic
                  {:seon.error/message (str "seon.db/transact! stopped waiting after " elapsed-ms
