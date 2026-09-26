@@ -1,6 +1,7 @@
 (ns seon.schema-test
   "Regression proofs for the canonical schema registration boundary."
-  (:require [clojure.edn :as edn]
+  (:require [clojure.core.cache :as core-cache]
+            [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
@@ -1934,3 +1935,63 @@
                    (schema/contract-product
                     projection {:seon.schema/form [:=> [:cat [:fn 'review.none/p?]] :int]
                                 :seon.schema/mode :shape}))))))
+
+(deftest a-population-table-retains-only-accounted-successful-products
+  ;; Contracts-out §10 (root ruling option 1) and Astra's slice-1 conditions
+  ;; F1 (unaccounted captures bypass), F3 (hits answer from one held value),
+  ;; T3 (publication into the acquired entry only). Exercised with explicit
+  ;; shape-only inputs: no production caller retains until slice 4.
+  (let [admissions {:review/a {:seon.schema.admission/source :core}}
+        build (fn [forms options]
+                (schema/build-projection forms {} (merge {:seon.schema/schema-admissions admissions} options)))
+        base (build {:review/a :int} {})
+        rebuilt (build (into {} {:review/a :int}) {})
+        retention {:seon.config.cache/contract-table-capacity 2}
+        request (fn [form] {:seon.schema/form form :seon.schema/mode :shape
+                            :seon.schema/admission {:seon.schema.admission/source :core}
+                            :seon.schema/identity 'review/f})
+        product #(schema/retained-contract %1 (request %2) %3)
+        form [:=> [:cat :review/a] :int]]
+    (is (identical? (product base form retention) (product base form retention)) "a hit")
+    (is (identical? (product base form retention) (product rebuilt form retention))
+        "an equal rebuilt population shares the held base and its products")
+    (is (not (identical? (product base form nil) (product base form nil)))
+        "no retention policy: uncached")
+    (testing "never retained"
+      (is (not (identical? (product base [:=> [:cat [:fn #'clojure.core/int?]] :int] retention)
+                           (product base [:=> [:cat [:fn #'clojure.core/int?]] :int] retention)))
+          "a form holding a host object")
+      (let [closure (let [captured (vec (range 1000))] (fn [x] (and (int? x) (some? captured))))
+            captured-base (build {:review/a [:fn 'review/p]}
+                                 {:seon.schema/predicate-functions {'review/p closure}
+                                  :seon.schema/pure-predicate-symbols #{'review/p}})]
+        (is (not (identical? (product captured-base form retention) (product captured-base form retention)))
+            "a population bound to an unaccounted closure"))
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (schema/retained-contract
+                    (build {:review/a :int :review/b [:maybe :string]}
+                           {:seon.schema/schema-admissions (assoc admissions :review/b {:seon.schema.admission/source :core})})
+                    (assoc (request [:=> [:cat :review/a] [:maybe :string]])
+                           :seon.schema/admission {:seon.schema.admission/source :agent})
+                    retention))
+          "a refusal is thrown, so nothing retains it")
+      (let [contracted (schema/build-projection {:review/a :int} {'review/g [:=> [:cat :review/a] :int]}
+                                                {:seon.schema/schema-admissions admissions})]
+        (is (not (identical? (product contracted form retention) (product contracted form retention)))
+            "a registry holding function contracts is not a shape-only base")))
+    (testing "the table's own protocol"
+      (let [entry {:seon.schema/table (atom (core-cache/lru-cache-factory {} :threshold 2))}
+            derivations (atom 0)
+            derive! (fn [value] (fn [] (swap! derivations inc) value))
+            table-product #'seon.schema/table-product]
+        (is (= :one (table-product entry :k1 some? (derive! :one))))
+        (is (= :one (table-product entry :k1 some? (derive! :other))) "a hit never derives")
+        (is (= 1 @derivations))
+        (table-product entry :k2 some? (derive! :two))
+        (table-product entry :k3 some? (derive! :three))
+        (is (= 2 (count @(:seon.schema/table entry))) "capacity bounds the table")
+        (is (nil? (table-product entry :refused (constantly false) (derive! nil))))
+        (is (not (core-cache/has? @(:seon.schema/table entry) :refused)) "an ineligible product is not published")
+        (let [racing (doall (for [_ (range 8)] (future (table-product entry :same some? (derive! :same)))))]
+          (is (every? #(= :same @%) racing) "concurrent misses all answer")
+          (is (core-cache/has? @(:seon.schema/table entry) :same)))))))

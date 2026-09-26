@@ -68,6 +68,11 @@
  ; 2026-09-26). Datahike's own caches keep their own dials.
  :seon.config.cache/max-bytes 512000000
 
+ ; How many compiled function contracts one schema population keeps in its
+ ; process-cache entry (contracts-out-of-projection design §10). Charged with
+ ; the population; retention starts in slice 4.
+ :seon.config.cache/contract-table-capacity 512
+
  ; The four caps below are NO LONGER READ BY ADMISSION (2026-09-07: the
  ; display caps were deleted from `seon.sci.admit`; elision happens only at
  ; the AI context generation boundary, under the render profile). They
