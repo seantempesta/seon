@@ -2684,67 +2684,45 @@
                           (get contexts path) (get rows path []) (get findings path []))))
             files)))))
 
-(declare report-identities)
-
 (def ^:private signature-attributes
-  "Facts a caller's analysis reads from its callee (B1 §2a step 9): a body or
-  docstring edit changes none of them, so it relints no caller."
-  #{:seon.fn/sym :seon.fn/arglists :seon.fn/arities :seon.fn/spec :seon.fn/private?
-    :seon.fn/macro? :seon.fn/inline? :seon.fn/defined-by :seon.fn/constant?})
+  "Facts a caller's publication lint reads from its callee (B1 §2a step 9): a
+  body, docstring or contract edit changes none of them, so it relints no
+  caller. Publication lints with every type-derived linter off
+  (`seon.fn.analyzer/publication-config`), so a callee's Malli contract, its
+  arity refs and the schemas they name never reach a caller's findings."
+  #{:seon.fn/sym :seon.fn/arglists :seon.fn/arities :seon.fn/private?
+    :seon.fn/macro? :seon.fn/inline? :seon.fn/defined-by :seon.fn/constant?
+    :seon.fn.arity/arity :seon.fn.arity/min :seon.fn.arity/max
+    :seon.fn.arity/argument-count :seon.fn.arity/order})
 
 (defn caller-files
   "Direct caller files of declarations whose signature the committed report
-  changed: identity, arglists, arities or their contracts, privacy, macro or
-  inline status. Schema changes also select callers of their consumers."
+  changed: identity, arglists, arities, privacy, macro or inline status.
+
+  Costs: two reads proportional to the changed signatures and their direct
+  callers; a contract or schema change selects nothing (measured 2026-09-26:
+  four changed schema keys had selected 241 of the program's files, 10.7 s
+  warm and most of a 47 s boot publication)."
   {:malli/schema [:=> [:cat :seon.db/transaction-report] [:set :string]]}
-  [{database :db-after before :db-before datoms :tx-data :as report}]
-  (let [identities (report-identities report)
-        _ (when (:seon.error/at identities)
-            (throw (ex-info (:seon.error/message identities) identities)))]
-    (if (empty? identities)
+  [{database :db-after before :db-before datoms :tx-data}]
+  (let [changed (into #{} (comp (filter #(signature-attributes (:a %))) (map :e)) datoms)]
+    (if (empty? changed)
       #{}
-      (let [schemas (into #{} (keep (fn [[attribute value]]
-                                     (when (= attribute :seon.schema/key) value))) identities)
-            schemas (loop [selected schemas pending schemas]
-                      (if (empty? pending)
-                        selected
-                        (let [parents (db/q '[:find [?key ...] :in $ [?changed ...]
-                                              :where [?schema :seon.schema/references ?changed]
-                                                     [?schema :seon.schema/key ?key]]
-                                            database (vec pending))
-                              _ (when (:seon.error/at parents)
-                                  (throw (ex-info (:seon.error/message parents) parents)))
-                              added (set/difference (set parents) selected)]
-                          (recur (into selected added) added))))
-            referring (if (seq schemas)
-                        (db/q '[:find [?symbol ...] :in $ [?key ...] [?attribute ...]
-                                :where [?arity ?attribute ?key]
-                                       [?function :seon.fn/arities ?arity]
-                                       [?function :seon.fn/sym ?symbol]]
-                              database (vec schemas)
-                              [:seon.fn.arity/input-refs :seon.fn.arity/output-refs :seon.fn.arity/guard-refs])
-                        [])
-            _ (when (:seon.error/at referring)
-                (throw (ex-info (:seon.error/message referring) referring)))
-            changed (into #{} (comp (filter #(or (signature-attributes (:a %))
-                                                 (= "seon.fn.arity" (namespace (:a %)))))
-                                    (map :e))
-                          datoms)
-            read! #(if (map? %) (throw (ex-info "Publication could not read changed signatures." %)) %)
+      (let [read! #(if (map? %) (throw (ex-info "Publication could not read changed signatures." %)) %)
             owners (mapcat #(read! (db/q '[:find [?f ...] :in $ [?e ...] :where [?f :seon.fn/arities ?e]]
                                          % (vec changed)))
                            [before database])
-            symbols (into (set referring)
+            symbols (into #{}
                           (comp (mapcat #(read! (db/pull-many % [:seon.fn/sym] (vec (into changed owners)))))
                                 (keep :seon.fn/sym))
                           [before database])
             paths (db/q '[:find [?path ...]
-                      :in $ [?symbol ...]
-                      :where
-                      [?caller :seon.fn/calls ?symbol]
-                      [?caller :seon.fn/file ?caller-file]
-                      [?caller-file :seon.fn.file/relative-path ?path]]
-                    database (vec symbols))]
+                          :in $ [?symbol ...]
+                          :where
+                          [?caller :seon.fn/calls ?symbol]
+                          [?caller :seon.fn/file ?caller-file]
+                          [?caller-file :seon.fn.file/relative-path ?path]]
+                        database (vec symbols))]
         (when (map? paths)
           (throw (ex-info "Publication could not read the changed declarations' callers." paths)))
         (set paths)))))

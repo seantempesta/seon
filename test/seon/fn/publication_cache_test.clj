@@ -70,9 +70,11 @@
                                             :seon.fn/manifest changed
                                             :seon.fn/changed-paths #{"src/alpha.clj"}))]
                  (is (not (:seon.error/at result)) (pr-str result))
-                 (is (= ["alpha.clj" "beta.clj"] @observed)
-                     "Only the direct caller is linted after the declaration transaction.")
-                 (is (= #{"src/beta.clj"}
+                 ;; Publication lints with type-derived linters off, so a
+                 ;; contract-only change cannot change a caller's findings.
+                 (is (= ["alpha.clj"] @observed)
+                     "A contract-only change relints no caller.")
+                 (is (= #{}
                         (functions/caller-files (:seon.db/transaction-report result))))))))
          (finally (support/delete-recursively! root))))))
   (doseq [[expected source]

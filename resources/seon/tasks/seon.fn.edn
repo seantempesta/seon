@@ -59,4 +59,17 @@
              :kind :function
              :intent "(my.test/check {:seon.test/changed ['user/a-test]}) at a branch REPL refuses: seon.fn/gate-sets is called with [<db> {:seon.db/db <db> :seon.fn/seeds #{...}}] against its [:cat :seon.db/database-value [:sequential :seon.fn/sym]] arity, so a database is supplied in front of the map arity's own request (callers seon.test at test.clj:835 and :1066). Building that refusal then throws ClassCastException Keyword -> Map$Entry. Reproduced 2026-09-26 20:46Z on branch merge-cut1-opus."
              :must-read #{seon.fn/gate-sets seon.test/run}
-             :evidence #{"docs/research/agent-platform/landing/merge-cut1-opus-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/merge-cut1-opus-2026-09-26.md"}}
+ #:seon.task{:id "ff74379b6565"
+             :name "caller-relint-follows-contract-consumers"
+             :kind :function
+             :intent "seon.fn/caller-files relints the direct callers of every function whose contract references a changed schema (transitively through :seon.schema/references) and of any :seon.fn/spec or arity-ref change, though publication lints with every type-derived linter off (seon.fn.analyzer/publication-config), so no contract can change a caller's publication findings. The a34078273 publication changed 4 schema keys: 57 consumers selected 241 files (the program) for a second clj-kondo pass, 10.7 s of a 15.2 s warm replay and most of a 47.6 s boot store->branch layer; true signature changes selected 3 files, all already reconciled. Patch: tmp/perf-boot-opus/fn-caller-files.patch (+26/-46). publication_cache_test's second change (spec only) then expects #{} instead of #{src/beta.clj}."
+             :must-read #{seon.fn/caller-files seon.fn/index!}
+             :evidence #{"docs/research/agent-platform/landing/perf-boot-opus-2026-09-26.md"
+                         "docs/seon/issues/a-three-file-changed-path-publication-takes-a-minute.md"}}
+ #:seon.task{:id "e09ead5c0cd6"
+             :name "report-identities-costs-a-second-per-call"
+             :kind :function
+             :intent "seon.fn/report-identities over one publication's 5,227 datoms took 1,312 ms per call on default (x2 = 2,623 ms; seon.db/with-declarations x15 2,669 ms, pull-many 1,300 ms), and publication, caller selection and adoption (source/changed-identities) each call it. Its work should follow the changed entities, read once per report."
+             :must-read #{seon.fn/report-identities}
+             :evidence #{"docs/research/agent-platform/landing/perf-boot-opus-2026-09-26.md"}}]
