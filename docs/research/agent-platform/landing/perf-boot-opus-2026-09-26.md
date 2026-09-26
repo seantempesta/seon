@@ -570,3 +570,38 @@ against the previous unchanged restart (21e3a7068):
 2. Commit something docs-only.
 3. `start --head` again: expect `program-classes? true` and a lower capture-ms.
 4. `bin/test-check default --test seon.cluster.program-classes-test/a-namespace-loaded-from-its-classes-keeps-protocol-and-record-identity-across-reload`
+
+## Resume 13 — two regressions from JVM test bodies running as their member (2d611cebc)
+
+Both are old call-preparation defects that became reachable once a JVM test body has a world; SCI callers already
+had them.
+
+1. **An explicit empty custody was filled (fixed, 299011465).** Preparation joins a map entry to a supplied
+   default by key AND value schema name. `:seon.db/custody-request`'s `[:seon.db/connection {:optional true}
+   :seon.db/connection]` matched, so `(call-with-custody {} f)` got the caller's connection. On live default,
+   `arm-plan` gives `seon.db/call-with-custody` a plan. Consequence: `host/start!`'s deliberate cross-branch
+   admission hit the custody fence, and host-test went 1/2/18.
+   - Fix: the entry's value is `:seon.db/custody-connection` (`[:and :seon.db/connection]`), which no
+     supplied-default row names.
+   - Scope: an edit to `seon.db.edn`, one entry and one schema; the contract compile check over the checkout is
+     clean.
+   - Regression: `program-change-test/an-explicit-empty-custody-clears-the-callers-world`.
+2. **A declared-arity call was prefixed (patch, not committed).** `call_preparation.clj` is held by defn-scan-opus.
+   - Cause: `seon.fn/gate-sets` declares `[request-map]` and `[database symbols]`. For count 1 the plan held a
+     dispatch between the map arity and the positional arity minus its database, decided by "is the first argument
+     a database?". A map is not a database, so the database was prepended and the call arrived with two arguments.
+     Live evidence: the plan's `by-supplied-count 1` is a `:dispatch`.
+   - Fix: dispatch only when the declared arity's own first argument is that same supplied slot. Otherwise the
+     declared arity matches in full and wins, as `resolve-count`'s docstring already promises.
+   - Patch: `tmp/perf-boot-opus/call-preparation-declared-arity.patch`, +14/−4. It passes `git apply --check`.
+   - Regression (committed, 168f3cfdf): `program-change-test/a-call-matching-a-declared-arity-is-never-prefixed`.
+     It stays red until the patch lands.
+3. **Not investigated:** the `ClassCastException` while building that refusal (instrument/error path), reported by
+   shrink-test.
+
+**Root runs** (after applying the patch through defn-scan-opus or yourself, then restarting):
+- `bin/test-check default --ns seon.cluster.host-test`
+- `bin/test-check default --ns seon.cluster.program-change-test`
+- `bin/test-check default --ns seon.test-failure-facts-test`
+- `bin/test-check default --ns seon.call-preparation-test`
+- `bin/test-check default --ns seon.db-test`
