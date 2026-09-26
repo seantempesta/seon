@@ -12,6 +12,7 @@
   (:require [malli.core] [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.set :as set]
+            [clojure.main]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
@@ -2310,6 +2311,25 @@
                                :seon.error.evidence/attribute]))))
       (finally (stop!)))))
 
+(deftest an-agents-own-exception-prints-as-clojure-main-prints-it
+  ;; REPL parity (clojure.main 1.12.5): an exception the agent's code throws is
+  ;; an ordinary value, shown as `Execution error (Class) at (location).` and
+  ;; its message, never as a refusal of the evaluator. clojure.main's own text
+  ;; for the same form, in this JVM, is the reference; only the location
+  ;; names the agent's form instead of a compiled frame.
+  (doseq [[source host] [["(/ 1 0)" #(/ 1 0)]
+                         ["(inc \"a\")" #(apply inc ["a"])]
+                         ["(throw (ex-info \"boom\" {:a 1}))" #(throw (ex-info "boom" {:a 1}))]]]
+    (let [reference (str/split-lines
+                     (clojure.main/ex-str
+                      (clojure.main/ex-triage (Throwable->map (try (host) nil (catch Throwable t t))))))
+          shown (:seon.error/message (:seon.sci.admit/value (run source)))
+          [head message] (str/split-lines shown)]
+      (is (= (second reference) message) shown)
+      (is (str/starts-with? head (subs (first reference) 0 (str/index-of (first reference) " at ")))
+          shown)
+      (is (not (str/includes? shown "refused")) shown))))
+
 (deftest both-entrances-classify-one-failure-identically
   (test-support/with-database
    (fn [connection]
@@ -2331,9 +2351,9 @@
          (is ((schema/projection-validator (schema/handed-projection) :seon.sci.kernel/error) evaluated-throw))
          (is ((schema/projection-validator (schema/handed-projection) :seon.sci.kernel/error) invoked-throw))
          (is (= 'user/probe-throw (get-in invoked-throw [:seon.error/data :seon.fn/sym])))
-         (is (= "boom" (:seon.error/message evaluated-throw)))
-         (is (= "Invocation of user/probe-throw failed: boom"
-                (:seon.error/message invoked-throw)))
+         (is (str/ends-with? (:seon.error/message evaluated-throw) "\nboom"))
+         (is (str/starts-with? (:seon.error/message invoked-throw)
+                               "Invocation of user/probe-throw failed: Execution error (ExceptionInfo) at ("))
          (is (= "clojure.lang.ExceptionInfo"
                 (:seon.sci.eval/throwable (:seon.error/data evaluated-throw))
                 (:seon.sci.eval/throwable (:seon.error/data invoked-throw)))
