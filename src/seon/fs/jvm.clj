@@ -696,8 +696,7 @@
               (let [{stage-name :seon.fs.jvm/stage-name
                      staged-content :seon.fs.jvm/content}
                     (stage-content! directory (:my.fs/content request)
-                                    write-limit)
-                    moved? (volatile! false)]
+                                    write-limit)]
                 (try
                   ;; No filesystem compares a digest at the rename, so only
                   ;; this JVM's recheck-and-move excludes; staging and fsync
@@ -707,7 +706,6 @@
                                         precondition read-limit)
                     (.move ^SecureDirectoryStream directory stage-name
                            ^SecureDirectoryStream directory entry-name))
-                  (vreset! moved? true)
                   (merge {:my.fs/path path
                           :my.fs/changed? true
                           :my.fs/after-digest
@@ -721,11 +719,12 @@
                              "The filesystem refused an atomic file move."
                              {:my.fs/path path}))
                   (finally
-                    (when-not @moved?
-                      (try
-                        (.deleteFile ^SecureDirectoryStream directory
-                                     stage-name)
-                        (catch NoSuchFileException _))))))))
+                    ;; The stage name is this write's own: a completed move
+                    ;; consumed it, so its deletion finds nothing.
+                    (try
+                      (.deleteFile ^SecureDirectoryStream directory
+                                   stage-name)
+                      (catch NoSuchFileException _)))))))
           (finally
             (close-streams! streams))))
       (catch Throwable error
