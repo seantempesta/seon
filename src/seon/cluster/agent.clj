@@ -849,7 +849,7 @@
    (and (identical? channel (get (:seon.agent/channels @routing) agent-eid))
         (async.protocols/closed? channel))))
 
-(declare disarm! arm-graph! stop-graph!)
+(declare disarm! arm-graph! stop-graph! interrupt-turn!)
 
 (defn- throw-causes!
   "Rethrow the first of `causes` whole, carrying every later one as suppressed."
@@ -1210,6 +1210,17 @@
                               :seon.schedule/channel schedule-channel
                               :seon.turn.loop/completion completion
                               :seon.agent/turn-backstop-state turn-backstop-state
+                              ;; The execution owner's stop request, read from
+                              ;; the roster when a fault fires: interrupt the
+                              ;; transform and request the graph's stop off
+                              ;; the calling thread. A request, never a join.
+                              :seon.fault/stop-request!
+                              (fn []
+                                (when-let [armed (get-in @routing [:seon.agent/armed agent-id])]
+                                  (interrupt-turn! armed)
+                                  (Thread/startVirtualThread
+                                   ^Runnable (fn [] (flow/stop (:seon.flow/graph armed)))))
+                                nil)
                               :seon.config.agent/turn-completion-backstop-ms
                               turn-completion-backstop-ms
                               :seon.agent/turn-thread (AtomicReference.))

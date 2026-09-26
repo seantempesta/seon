@@ -1273,10 +1273,16 @@
                     "the failed transform released its lifecycle permit")
               ;; the live backstop fires after the permit is released and
               ;; hands its failure to the channel disarm joins
-              failure
+              terminal
               (test-support/await-event!
                (:seon.agent/failure-channel @backstop-state)
-               ::quiescent-transform-backstop)]
+               ::quiescent-transform-backstop)
+              ;; under `:panic` the channel carries the panic whole: its
+              ;; receipt, caused by the declared failure (review R2)
+              receipt (:seon.fault/recorded (ex-data terminal))
+              failure (if receipt (ex-cause terminal) terminal)]
+          (is (or (nil? receipt) (true? (:seon.fault/committed? receipt)))
+              (pr-str (ex-data terminal)))
           (is (string? (:seon.agent/turn-completion-backstop (ex-data failure))))
           (is (= :seon.agent/turn-transform
                  (:seon.error/operation (ex-data failure))))

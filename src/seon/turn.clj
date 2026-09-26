@@ -5489,7 +5489,8 @@
          process :seon.db.process/id
          completion :seon.turn.loop/completion
          executor :seon.flow/executor
-         backstop-state :seon.agent/turn-backstop-state}
+         backstop-state :seon.agent/turn-backstop-state
+         stop-request! :seon.fault/stop-request!}
         (:seon.turn.loop/cluster state)
         agent-id (:seon.agent/id state)
         database (db/db connection)
@@ -5505,6 +5506,7 @@
         [value selected]
         (async/alts!! [completion (async/timeout timeout-ms)] :priority true)]
     (if (= selected completion)
+      (cond->
       {:seon.agent/turn-permit value
        :seon.agent/connection connection
        :seon.agent/process process
@@ -5522,6 +5524,8 @@
        ;; different worlds and a sliding-1 fault channel kept whichever
        ;; arrived last.
        :seon.agent/run-id (atom run-id)}
+        ;; the execution owner's stop, requested before a panic records
+        stop-request! (assoc :seon.fault/stop-request! stop-request!))
       (throw
        (turn-completion-backstop-failure
         agent-id run-id timeout-ms :seon.agent/turn-start :seon.agent/turn-permit
@@ -5595,8 +5599,10 @@
 
 (defn- record-turn-backstop-fault!
   "Record the fault of a turn whose completion bound fired, on the backstop's
-  thread. That thread has no caller, and disarm joins the failure it returns, so
-  a recorded panic ends here with its receipt; any other throw propagates."
+  thread, and answer the terminal throwable disarm joins: the recorded
+  failure under `:record`, else the panic whole (its receipt, refused outcome
+  and suppressed causes, caused by the failure). The execution owner's stop
+  is requested before a panic records (`:seon.fault/stop-request!`)."
   [{:seon.agent/keys [agent-id timeout-ms expected process] armed-run :seon.agent/run-id :as bound}]
   (let [run-id @armed-run
         failure
@@ -5605,13 +5611,14 @@
          (or expected :seon.agent/turn-terminal)
          [:seon.turn.loop/completion])]
     (try (fault/fault! (env/of bound) failure
-                       {:seon.error/layer :seon.agent/turn-completion-backstop
-                        :seon.error/operation 'seon.turn/arm-turn-completion-backstop!
-                        :seon.db.process/id process
-                        :seon.agent/id agent-id})
-         (catch clojure.lang.ExceptionInfo panic
-           (when-not (fault/carried-receipt panic) (throw panic))))
-    failure))
+                       (cond-> {:seon.error/layer :seon.agent/turn-completion-backstop
+                                :seon.error/operation 'seon.turn/arm-turn-completion-backstop!
+                                :seon.db.process/id process
+                                :seon.agent/id agent-id}
+                         (:seon.fault/stop-request! bound)
+                         (assoc :seon.fault/stop-request! (:seon.fault/stop-request! bound))))
+         failure
+         (catch Throwable panic panic))))
 
 (defn- arm-turn-completion-backstop!
   "Arm the live bound after the ready permit is consumed.
@@ -5655,7 +5662,15 @@
              (= selected parts) (recur part)
              (= selected timeout)
              ;; Disarm joins this same failure, including its admitted part.
-             (async/put! failure-channel (record-turn-backstop-fault! bound))
+             (async/put! failure-channel
+                         (try (record-turn-backstop-fault! bound)
+                              ;; a failure before any receipt settles the
+                              ;; join too, and still requests the stop
+                              (catch Throwable failure
+                                (when-let [stop! (:seon.fault/stop-request! bound)]
+                                  (try (stop!) (catch Throwable stop-failure
+                                                 (.addSuppressed failure stop-failure))))
+                                failure)))
              :else
              (do
                (when backstop-state

@@ -25,6 +25,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [seon.error :as error]
+            [seon.env :as env]
             [seon.fault :as fault]
             [seon.fn :as seon.fn]
             [seon.schema]
@@ -2309,3 +2310,32 @@
       ;; Today's behaviour: the trailing `Done.` is planned as code
       ;; (docs/seon/issues/a-trailing-prose-word-after-a-fence-becomes-an-evaluation.md).
       (is (= ["(+ 1 2)" "Done."] (planned "Here is code:\n```clojure\n(+ 1 2)\n```\nDone."))))))
+
+(deftest a-fired-turn-bound-requests-its-owners-stop-and-settles-its-join-whole
+  ;; Review lost-error-r1 R1/R2: a fired active-turn bound requests the
+  ;; execution owner's stop before a panic records, and its join channel
+  ;; carries the terminal throwable whole (the panic's receipt, caused by the
+  ;; declared failure), never an unresolved channel.
+  (support/with-database
+   (fn [connection]
+     (let [ctx (support/fork-cluster-ctx connection)
+           stops (atom 0)
+           observer (#'turn/arm-turn-completion-backstop!
+                     {:seon.agent/executor (cluster/projection-executor
+                                            (:seon.sci.eval/projection-state ctx))
+                      :seon.agent/timeout-ms 100
+                      :seon.agent/backstop-state (atom nil)
+                      :seon.env/environment (env/of ctx)
+                      :seon.agent/agent-id "fired-bound"
+                      :seon.agent/process cluster/boot-process-identity
+                      :seon.agent/run-id (atom nil)
+                      :seon.fault/stop-request! #(swap! stops inc)})
+           terminal (support/await-event! (:seon.agent/failure-channel observer)
+                                          ::fired-bound (constantly true) 5000)
+           receipt (:seon.fault/recorded (ex-data terminal))
+           failure (if receipt (ex-cause terminal) terminal)]
+       (is (instance? Throwable terminal))
+       (is (= :seon.agent/turn-transform (:seon.error/operation (ex-data failure)))
+           (pr-str (ex-data terminal)))
+       (when (= :panic (:seon.fault/policy receipt))
+         (is (= 1 @stops) "the panic requested the owner's stop once"))))))
