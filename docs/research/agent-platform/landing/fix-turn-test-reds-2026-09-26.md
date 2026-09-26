@@ -1,6 +1,6 @@
 ---
 type: landing
-status: landed (rounds 1-3 accepted; round 4 374e918b7, 29abfed1a, 4e703c93a; round 5 d421b6e1a; round 6 48a345bc1; round 7 f81a22cd8, 9a21c6cc1); tests owed to root
+status: landed (rounds 1-3 accepted; round 4 374e918b7, 29abfed1a, 4e703c93a; round 5 d421b6e1a; round 6 48a345bc1; round 7 f81a22cd8, 9a21c6cc1; round 8 9d59d5b30); tests owed to root
 lane: fix-turn-test-reds-opus
 created: 2026-09-26
 ---
@@ -392,6 +392,33 @@ and no custody stamp nothing (HEAD stamped the other branch). Regression:
 `db-test/a-custody-switch-to-another-connection-carries-no-receipt`. Contracts-compile over db.clj and
 db_test finds 0 problems.
 
+## Round 8: custody-stability-test, which never ran before today (`9d59d5b30`)
+
+- Census: `:seon.fn.arity/output-refs` holds schema keys, so the query now joins the keyword directly; before, it
+  joined schema entities and never matched. It also compares native symbols, the type `:seon.fn/sym` stores.
+  The snapshot is reviewed against the current program:
+  - New members: `seon.db/branch-connection` (borrows the registry's connection); `seon.sci.eval/base-ctx`,
+    `copy-base-ctx` and `derive-base-ctx` (program-only base contexts); and three test-world owners
+    (`test-support/fork-cluster-ctx`, `seon.test/open-world!`, and the agent-custody test's `held-connection`).
+  - Gone: `acquire-context!`, which now returns an execution handle.
+- Every context comes from `test-support/fork-cluster-ctx`, replacing `eval/cluster-ctx`, which never saw the
+  interned bindings.
+- Reachability counts a public Var only when the program declares it; a deftest or a compiler proxy Var has no
+  fn row.
+- Isolation creates its recipient through `agent-tx` (the hand-built agent row lacked `:seon.agent/branch`)
+  and compares against the member world's inherited messages.
+- Diagnostic REPL run of the edited file (scratch copy, isolated branch):
+
+  | Test | Pass/fail |
+  |---|---|
+  | census | 2/0 |
+  | reachability | 7/0 |
+  | isolation | 5/0 |
+  | foreign-context property | 1/0 |
+  | private-roots | red on a real defect: `seon.sci.eval/generator-ctx` is installed, and `@@#'seon.sci.eval/generator-ctx` returns the raw SCI context |
+
+  The defect is filed in [agent-sci-reaches-the-private-generator-context](../../../seon/issues/agent-sci-reaches-the-private-generator-context.md).
+
 ## Deleted / net lines
 
 | Commit | Files | + | − |
@@ -410,6 +437,7 @@ db_test finds 0 problems.
 | 48a345bc1 | web_debug_test | 1 | 0 |
 | f81a22cd8 | db.clj (arity gate) | 73 | 63 |
 | 9a21c6cc1 | db.clj, db_test (receipt custody) | 28 | 1 |
+| 9d59d5b30 | custody_stability_test (+ issue) | 111 | 45 |
 
 Net across seven code commits: src +5/−3 (program.cljc), tests +160/−142. The additions are mostly comments stating the owning rule at each fixture. Deleted: three hand-built `analyze-form` row paths in turn_test (≈45 lines). Added: the
 `held-handle` agent-id guard, the docstring note and the custody wrapper.
