@@ -21,6 +21,7 @@
   (:require [malli.core :as m]
             [seon.id :as id]
             [malli.registry :as mr]
+            [clojure.core.cache.wrapped :as cache]
             [clojure.core.reducers :as reducers]
             [clojure.set :as set]
             [clojure.walk :as walk]
@@ -2083,37 +2084,29 @@
                        schema-keys function-symbols]}]
   (let [core-admission {:seon.schema.admission/source :core}
         options {:registry registry}
-        !reference-advisories (atom {})
+        ;; One operation's memo (core.cache wrapped): a reference walk runs
+        ;; once per declaration, role and admission source, however many
+        ;; paths reach it.
+        reference-memo (cache/basic-cache-factory {})
         core-references?
         (every? #(= :core (get-in schema-admissions
                                  [% :seon.schema.admission/source]))
                 (keys forms))
         reference-advisories
         (fn [reference role admission derive-advisories]
-          (let [cache-key
-                [reference (if core-references? :schema role)
-                 (:seon.schema.admission/source admission)]
-                ;; The only role-sensitive rule is an agent's nilable output
-                ;; (internal/assert-complete-schema!). If EVERY referenced
-                ;; declaration explicitly records core admission, the whole
-                ;; reference walk has the same result in every role.
-                ;; The reference graph is already proven acyclic. Retain the
-                ;; complete walk, so shared descendants are traversed once
-                ;; per declaration and role rather than once per caller.
-                ;; Admission consumes refusals, not advisory vectors. Do not
-                ;; copy a shared descendant's advisory output along every
-                ;; path to it; standalone contract inspection still returns it.
-                cached
-                (or (get @!reference-advisories cache-key)
-                    (let [pending (delay (derive-advisories) [])]
-                      (get
-                       (swap! !reference-advisories
-                              (fn [cache]
-                                (if (contains? cache cache-key)
-                                  cache
-                                  (assoc cache cache-key pending))))
-                       cache-key)))]
-            @cached))
+          ;; The only role-sensitive rule is an agent's nilable output
+          ;; (internal/assert-complete-schema!). If EVERY referenced
+          ;; declaration explicitly records core admission, the whole
+          ;; reference walk has the same result in every role. The reference
+          ;; graph is already proven acyclic. Admission consumes refusals, not
+          ;; advisory vectors: a shared descendant's advisory output is not
+          ;; copied along every path to it; standalone contract inspection
+          ;; still returns it.
+          (cache/lookup-or-miss
+           reference-memo
+           [reference (if core-references? :schema role)
+            (:seon.schema.admission/source admission)]
+           (fn [_] (derive-advisories) [])))
         validation-base
         {:seon.schema/forms forms
          :seon.schema/compiled-schemas compiled-schemas
