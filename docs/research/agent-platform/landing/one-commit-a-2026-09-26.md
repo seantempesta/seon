@@ -2,7 +2,7 @@
 type: landing
 lane: one-commit-a-opus
 date: 2026-09-26
-status: option 2 (55b5b580f), program-change from report (ab87961d5) and the shared node cache pin (fc0ff40b9) committed; HEAD does not boot for a foreign task file (below); unmeasured
+status: measured on c029d48cb (pid 86089); do/defn contract fix in HEAD via 715c23669; RESET NEEDED for it
 ---
 
 # Landing: one durable commit per form (A), then reply-when-applied (B) (2026-09-26)
@@ -23,6 +23,32 @@ refusals, e.g. `agent-already-running`, answer the caller), evaluates on that va
 commits open + evaluations + close as ONE transaction (`with-submission` prepends the open; the
 run-dependent writer calls after it see the run mid-transaction, `datahike/db/transaction.cljc:1171`).
 The pass answers the reply port with its report; a pass that ends without settling closes the port.
+
+## Measured on c029d48cb (pid 86089: option 2, program change from report, shared node cache, P1)
+
+Root probes (see below) ran on this JVM, but other lanes' tests were running in it too:
+`seon.test-support/with-database` showed up in the same profile windows. Timings are in-JVM
+from `evaluate-source!` entry to answer.
+
+| probe | before | now |
+|---|---|---|
+| `(inc 1)`, 20 forms, branch hosted agent | 144 / 155 ms p50/p95 (8e4ac24c9) | 176 / 299, rerun 193 / 274 ms; one commit at each answer |
+| a form that writes (`seon.db/transact!` of a note), 10 forms | refused: "Nothing found for entity id" | 201 / 223 ms p50/p95, 2 commits (its write + settlement), no errors |
+| contracted defns on a fresh branch (first, then three) | 6,900 / 2,419 / 2,351 / 1,957 ms | 2,645 / 815 / 753 / 864 ms |
+
+- `(inc 1)` is slower than on 8e4ac24c9 and **it is not explained**. Per form, the settlement's
+  `transact-call` is now ~150 ms against 118. Option 2 removed the 10.7 ms with and added one
+  `system-run-plan` (~2 ms). Five empty commits on a branch measured 56–127 ms against ~64 earlier, so
+  disk contention from the concurrent test runs is the likely cause, not a code path. It needs a quiet
+  re-run before a cause is named.
+- Root's 448 ms first call of a new contracted function did not reproduce in isolation: 225 ms first
+  refusal call, 125 and 115 ms after, most of it the settlement commit.
+- **do/defn internal error** (`(do (defn smoke-inc ...) (smoke-inc "a"))`, signature cefa1c70ca31). Cause:
+  `unadmitted-notice` (804440215) passed the failed form's `:seon.sci.eval/binding` maps to
+  `program-value?`, whose contract required `:seon.sci.eval/intern` (+ `:seon.sci.eval/var`, which it never
+  reads). The contract now declares `:seon.sci.eval/binding`. That hunk reached HEAD inside another lane's
+  commit 715c23669, which committed `src/seon/sci/eval.clj` whole while it was held here. The regression is the
+  existing `seon.sci.entry-gate-test/a-top-level-do-admits-each-child-before-the-next-runs`.
 
 ## HEAD does not boot (21:10Z), cause outside this lane
 
