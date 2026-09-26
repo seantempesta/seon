@@ -8,6 +8,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.render :as render]
+            [seon.render.value :as value]
             [seon.render.walk :as walk]
             [seon.render.web]
             [seon.render.web-test :as web-test]
@@ -163,7 +164,28 @@
                (is (= 1 (get initial status-renderer))
                    "the first page renders the cluster observation")
                (is (= 2 (get @calls status-renderer))
-                   "the adopted commit is an input to the cluster observation")
+                   ;; diagnosis (shrink-web 2026-09-26): why the status call
+                   ;; was not re-invoked after a write to a read attribute
+                   (let [cache @(render/shared-cache ctx)
+                         database @connection
+                         entries (filter #(= 'seon.cluster.status/render-html
+                                             (get-in % [:seon.render.call/static-evidence
+                                                        :seon.render.call/producer]))
+                                         (vals (get-in cache [:seon.render.web/calls "root"])))]
+                     (str "the adopted commit is an input to the cluster observation; "
+                          (value/bounded-text
+                           {:db-basis (db/basis-t database)
+                            :page-basis (some-> (get-in cache [:seon.render.web/page-databases "root"])
+                                                db/basis-t)
+                            :status-entries
+                            (mapv (fn [entry]
+                                    {:basis (:seon.render.call/basis-transaction entry)
+                                     :reads (mapv #(get-in % [:datahike.read/revision :datahike.read/attributes])
+                                                  (:seon.render.call/read-evidence entry))
+                                     :current? (db/read-evidence-current?
+                                                database (:seon.render.call/read-evidence entry))})
+                                  entries)}
+                           2000))))
                (is (str/includes? (.body after)
                                   "f54229d7-54eb-472d-9ae8-917a0f97af71")
                    "the page shows the newly adopted commit")))))))))

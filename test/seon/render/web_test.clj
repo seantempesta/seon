@@ -1414,7 +1414,14 @@ handle))}}
                     to-b (read-patches! b 1)]
                 (is (= to-a to-b)
                     "each tab receives the same complete keyframe event")
-                (is (= 2 (count @sent)))
+                (is (= 2 (count @sent))
+                    ;; diagnosis (shrink-web 2026-09-26): which fragments each
+                    ;; send carried
+                    (value/bounded-text
+                     (mapv #(->> (re-seq #"id=\"([^\"]+)\"" (String. ^bytes % "UTF-8"))
+                                 (map second) distinct (take 16) vec)
+                           @sent)
+                     2000))
                 (is (every? #(java.util.Arrays/equals ^bytes (first @sent) ^bytes %) @sent)
                     "each caller paints equivalent current bytes")
                 (is (= before (derivations context))
