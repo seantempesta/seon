@@ -97,7 +97,13 @@
                             (if (nil? (m/-ref node))
                               child
                               (fold (m/deref node) (conj active reference))))]
-               (assoc target ::properties (merge (::properties target) properties)))
+               ;; Identity is a property of the attribute being declared: an
+               ;; attribute that reuses an identity's value shape by name
+               ;; (`:seon.turn/compaction-agent-id :seon.agent/id`) is not an
+               ;; upsert key, so the target's identity never crosses the ref.
+               (assoc target ::properties
+                      (merge (dissoc (::properties target) :seon.db/identity :seon.db/unique)
+                             properties)))
 
              (= :and t)
              (assoc child ::properties properties)
