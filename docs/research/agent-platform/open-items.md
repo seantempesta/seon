@@ -38,7 +38,7 @@ callers to an existing component/function/test that does the same thing better (
   root task. `:seon.render/units` is to be deleted (the walk replaces it). The debug page shows it: `/agent/{id}/debug?n=0..3`.
 - **Where context executes** (owner 2026-09-26): in the same context the agent runs in — root's in its cluster; an
   isolated experimental agent's fully contained (nothing escapes SCI, database changes only on its private fork) so root
-  merges back what it wants. No separate render fork. Authority comes only from held custody (AGENTS.md).
+  merges back what it wants. No separate render fork. Custody is the default world, not a security boundary (AGENTS.md; owner revised 2026-09-26: no isolation for security, agents are cooperative).
 - **Rulings of 2026-09-26 afternoon (owner):** (1) *Gate selection* — when fn A changes, run the tests that exercise (call) A
   and those exercising A's callers; call reach, never symbol mentions; a docstring-only edit runs no tests; most modifications
   select a contained set (survey of the average case in progress). (2) *Render forms* go through the same mechanism as the agent's

@@ -163,12 +163,14 @@ Private experiments remain possible; local green never implies shared acceptance
 
 ## Laws for data and contracts
 
-- **Authority comes only from held custody** (owner 2026-09-26). Agent code, render entries and tests obtain a
-  connection or capability only as the custody their caller already holds: no function conjures another branch's
-  connection, the process connection, or an effect handler outside admission. Every program function is callable, with
-  authority only from its custody. An agent's context executes in the same context the agent runs in: root's in its
-  cluster; an isolated (experimental) agent's inside its SCI containment with every database change on its own private
-  fork, so nothing escapes by default and root merges back only what it wants.
+- **Custody is the default world, not a security boundary** (owner 2026-09-26, revised same day). Every agent is
+  cooperative and trying to improve the system; there is no isolation for security anywhere. An evaluation's custody
+  (its branch connection) is the world its calls default to, so an agent's writes land on its own branch unless it
+  deliberately reaches elsewhere — and deliberately opening another branch, calling any program function or grabbing
+  the context it needs is allowed. Root tasks and branch-then-merge exist for separation of concerns, not protection.
+  An agent's context executes in the same context the agent runs in: root's in its cluster, an experimental agent's on
+  its own fork by default, so root merges back only what it wants. Do not build refusals, markers or denylists to stop
+  an agent from reaching another context.
 - **Pass the world explicitly.** Carry database/connection, projection, environment,
   render profile, proc and settlement inputs, including profiling/test ownership.
   Custody elides agent db/conn only; it does not authorize more ambient services.
