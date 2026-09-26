@@ -10,6 +10,7 @@
             [seon.cluster :as cluster]
             [seon.cluster.agent :as cluster-agent]
             [seon.config :as config]
+            [seon.contracts-compile-test :as contracts-compile]
             [seon.reconcile :as reconcile]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
@@ -796,3 +797,33 @@
         (is (identical? refusal result))
         (is (= :seon.schema/projection (:seon.schema/expected-value result)))
         (is (not (contains? result :seon.config/missing-effective)))))))
+
+
+(defn checkout-effective
+  "The shipped effective configuration the checkout at `root` compiles to, or
+  the refusal `seon.config/defaults` would throw at namespace load.
+
+  Reads the checkout's schema resources and `config/default.edn` from disk
+  (a JVM running a published archive has that archive's copies on its
+  classpath) and compiles them through the one compiler
+  `seon.config/defaults` uses. Run it over the working tree before committing
+  a dial, a `:seon.config/optional` change or a shipped decision."
+  {:malli/schema [:=> [:cat :string] :map]}
+  [root]
+  (let [projection (schema/declaration-projection
+                    (contracts-compile/checkout-packaged-forms root))
+        document (edn/read-string (slurp (io/file root config/default-manifest-path)))]
+    (try (:seon.config/effective (@#'config/compile-settings projection document {}))
+         (catch clojure.lang.ExceptionInfo refusal (ex-data refusal)))))
+
+(deftest the-shipped-decisions-satisfy-every-required-dial
+  ;; CLASS: a dial whose declaration stopped being `:seon.config/optional`
+  ;; while config/default.edn still decided it `:seon.config/absent` made
+  ;; `seon.config/defaults` refuse at namespace load ("Configuration requires a
+  ;; value for each required configuration key", :seon.config.maintenance/collect?,
+  ;; HEAD 2e0d7c35f), so no namespace requiring seon.config compiled and default
+  ;; could not boot. The shipped document and the declarations compile together.
+  (let [effective (checkout-effective ".")]
+    (is (not (:seon.error/message effective)) (pr-str (select-keys effective [:seon.config/error-key :seon.config/rule])))
+    (is (true? (:seon.config.maintenance/collect? effective))
+        "whole-store collection ships on")))
