@@ -422,13 +422,17 @@
            (pr-str (:seon.error/chain refusal)))
        (is (= refusal result) "the request returns the whole refusal, its cause chain included")
        (is (string? (:seon.error/signature recorded)) "the refused admission is a stored core fault")
+       ;; The occurrence keeps the evidence inline (`:seon.error/data-edn`);
+       ;; only capped evidence goes whole to the blob tier (`seon.error/evidence-stage`).
        (let [row (db/pull (db/db connection)
-                          [{:seon.error/occurrences [{:seon.error.occurrence/data-blob [:seon.error.occurrence/blob-digest]}]}]
+                          [{:seon.error/occurrences [:seon.error/data-edn
+                                                     {:seon.error.occurrence/data-blob [:seon.error.occurrence/blob-digest]}]}]
                           [:seon.error/signature (:seon.error/signature recorded)])
-             digest (get-in (first (:seon.error/occurrences row))
-                            [:seon.error.occurrence/data-blob :seon.error.occurrence/blob-digest])]
-         (is (string? digest) "the fault is stored with its evidence")
-         (is (str/includes? (str (blob/get connection digest)) "writer-refused")
+             occurrence (first (:seon.error/occurrences row))
+             digest (get-in occurrence [:seon.error.occurrence/data-blob :seon.error.occurrence/blob-digest])
+             evidence (if digest (str (blob/get connection digest)) (:seon.error/data-edn occurrence))]
+         (is (string? evidence) (str "the fault is stored with its evidence: " (pr-str row)))
+         (is (str/includes? (str evidence) "writer-refused")
              "the stored evidence keeps the root cause's data"))
        (is (empty? (db/q '[:find [?m ...] :where [?m :seon.test.member/symbol seon.test.one-request-test/refused-recording]]
                          (db/db connection)))
