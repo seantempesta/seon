@@ -446,11 +446,41 @@ joins the executor, which is the actual-exit proof; `release-context!` (`:804`) 
 retires. If the executor has not exited, the branch and its custody are **not** released and the answer names the
 live run. A branch held by an agent the session did not arm keeps today's refusal (`mcp.clj:476`).
 
-**P-RB (UNVERIFIED, first step of P3):** that root's inherited row can be armed on a lane branch's handle through the
-existing `arm!` (`agent.clj:1044`, which requires a committed agent entity, `:1060-1062`) and routed separately from
-root on the cluster branch. If it cannot, branch SCI uses a named outside agent written by the existing
-`seon.cluster.agent/creation-tx` (`agent.clj:205`) and armed by `arm!`, with the session recording what it created
-and armed; no new writer and no bridge state.
+**P-RB was refuted (default, 2026-09-26), so a lane is its own hosted agent** (ruled option (b)). Root's row names
+`:seon.agent/branch :cluster-default`; a lane branch inherits that row, and `acquire-context!` reads the context's
+branch from it (`acquire-context!`, `agent.clj:973-978` at this commit). Separately, `seon.turn` never reads an agent's branch: settlement writes through
+the cluster handle's own connection. An agent row on default pointing at a lane would therefore still settle its
+program rows onto default. The only working branch agent is the write-back regression's, whose loop handle is built
+for the branch's own connection by test-support's `cluster-handle` (`test/seon/test_support.clj:367`).
+
+**Hosting (P3b, design only; for Astra review before `src/seon/cluster.clj` is edited):**
+
+1. **One production function beside `loop-handle`** (`src/seon/cluster.clj:3457`): `seon.cluster/branch-handle`
+   takes the cluster instance's world (its process, launcher, projection executor, error fan-out and routing) plus a
+   branch connection, and answers the loop handle for that branch: `loop-handle` over the branch's connection with
+   its own wake channel, stream channel and completion, and `:seon.agent/routing` the cluster's. Dials are read from
+   the branch's own database value, so the branch's configuration facts govern its agent. It starts no graph; `arm!`
+   does, exactly as for a cluster agent.
+2. **One fixture system.** test-support's `cluster-handle` becomes a caller of `branch-handle` (a test member's
+   branch is a hosted branch), and its duplicate construction of channels, caps and dials (`test_support.clj:367-402`,
+   about 30 lines) is deleted in the same slice, so agents and tests build a hosted branch the same way.
+3. **Settlement writes through the hosted branch's connection.** It already does: every write in `turn` goes through
+   `(:seon.db/connection cluster)`, which is the branch's own connection in a branch handle. No turn change is needed;
+   the regression proves it (a hosted agent's `defn` lands on the branch, and default's head is unchanged).
+4. **`acquire-context!` takes the branch from custody.** With a branch handle, the live branch is the handle's own
+   connection (`live-branch`, `agent.clj:968`); an agent acquired through it is acquired on that branch, never on
+   the inherited `:seon.agent/branch` row. The row stays history: it records where the agent was created, and
+   `creation-tx`'s `branch-call` sets it from the transacting connection (`agent.clj:196`).
+5. **The MCP session** creates `mcp/<session-id>` with `creation-tx` on the lane branch, hosts it with
+   `branch-handle`, arms it and records both in its session entry. `branch retire` disarms (joining the executor, the
+   actual-exit proof), releases the context and retires the branch; with the executor still live, nothing is released
+   and the answer names the live run. The bridge's retained-context SCI path and its custody refusal retire in the
+   same slice: `sci-evaluation-form` (46 lines), `shown-event`/`decoded-projection-event` (24) and the bridge's
+   `refuse#` custody arm (about 8).
+
+Price: about +45 in `cluster.clj` and `mcp.clj`, −30 in test-support, −78 in the bridge. Proof: a hosted agent's
+`defn` settles on its branch; default's head does not move; two sessions on two branches do not share a context; a
+retire with a live run keeps the branch; the write-back regression runs unchanged over the converted `cluster-handle`.
 
 **What the bridge keeps:** transport, discovery, sessions, and adapters for `runtime_status`, `branch` and `get_value`
 that call owners and encode their answers. `runtime_status`'s observation already renders through its declared AI face (79d052d15). The `branch` tool's
@@ -555,6 +585,24 @@ probe, parent against change: fix before commit), and a sub-250 ms end-to-end as
 | print | in the evaluator today | once per evaluation | per evaluation |
 | completion | a second prepl round trip for the window today | one listener, one filtered await, one recheck | per call |
 | refresh after a run | none for MCP | `system-turn` after a closed run for an agent holding an issue (`turn.clj:5295-5305`) costs seconds today (task-context design §0.3) | the task-bearing root case |
+
+**Measured for P3a** (default pid 76020, root, warm, 2026-09-26; `seon.profile/explain` over the call). Parent: an
+MCP SCI `(+ 1 2)` without a branch evaluated in the shared context in about 5 ms and recorded nothing (revision-4
+probe). Change: one ordinary run of root.
+
+| Stage | One form | Two forms |
+|---|---:|---:|
+| submission (`submit-source!`: segmentation, run transaction, wake) | 62-64 ms | — |
+| turn on the Flow proc (`turn/step`, evaluation and print) | 74 ms | — |
+| settlement (`settle-batch!`) and close (`close-turn`) | 48 + 42 ms | — |
+| end to end (`evaluate-source!`, listen to terminal fact) | 184-231 ms | 225-229 ms |
+
+Four transactions account for 307 ms inclusive (they overlap across threads): `schema/call-with-projection-state`
+193 ms inside them, `blob/with-publication!` 107 ms over two, `db/declaration-content-key` 46 ms and 195
+`db/with-declarations` calls 54 ms. The evaluation itself is a few milliseconds. **This is a +180-225 ms regression
+against the unrecorded parent, over AGENTS.md's 50 ms bound, and it needs root's ruling:** the durable run is the
+owner's law for MCP evaluations, but the per-transaction cost belongs to `seon.db`'s writer (projection-state
+binding, declaration keys, blob publication) and is the cost to fix there, not in this slice.
 
 **The required measurement** (P3 and P4 landings): the same finite request on the parent and the change: one form,
 a multi-form request, and warm repeats; each stage above timed separately, with allocation and retained memory.
@@ -891,7 +939,7 @@ renders whole (5.8).
 | **S1** | landed: one definition authority | — | — | — | +59 measured | its landings |
 | **P1** | one finalization point: all result replacements including the disposition's completion, then one print; constructors answer native values; the refusal branch renders through the same owner (the `pr-str`s at `turn.clj:3704`, `:3753` retire, with F10's owner); the evaluator carries the head function as data; the form's sink covers print; the database value supplied to renderers by schema name | `src/seon/sci/eval.clj`, `src/seon/turn.clj` | +40 | −26 | +14 | a refused install, a disposition refusal and a success each save one rendering; a writer-time refusal publishes no speculative success; a completed disposition's value and text agree; a batch refusal uses ordinary selection; failed refusal storage is a core failure; `unrun-evaluation` prints nothing; render reads stay in the form's evidence; preview and refresh comparisons hold |
 | **P2** | read once: segments keep raw source; the loop reads the next form with the stage's reader context and passes the event; the reader's next-event-from-offset entry if missing; remainder kept on refusal; stage keys and their three function schemas; the submission-time stage check | `src/seon/turn.clj`, `src/seon/cluster/reply.clj`, `src/seon/sci/reader.cljc`, `src/seon/cluster/agent.clj` (check only), the turn and eval schemas | +55 | −25 (traced) | +30 | the §2.2 proofs; an incompatible stage symbol refuses before any run |
-| **P3** | MCP SCI is root's run: `evaluate-source!`; P-RB, then root armed on a branch by the session; continuation per stage; `run-receipts`/`current-run` public; retirement without releasing live custody; the `branch` tool's custody refusal and `refuse#` maps (P5, folded) | `src/seon/cluster/agent.clj`, `src/seon/turn.clj` (two contracts), `script/seon/dev/mcp.clj` | +65 | −138 (shown decoding 24, SCI forms 52, `execute-clj-eval` ≈ 54, `refuse#` ≈ 8) | −73 | M1's SCI proofs; the §2.10 measurement with a task-bearing root |
+| **P3** | P3a landed (branchless SCI; see §2.10 for its measurement, +197 / −21 source with docstrings and contracts). P3b (hosting, §2.6) pending review. MCP SCI is root's run: `evaluate-source!`; P-RB, then root armed on a branch by the session; continuation per stage; `run-receipts`/`current-run` public; retirement without releasing live custody; the `branch` tool's custody refusal and `refuse#` maps (P5, folded) | `src/seon/cluster/agent.clj`, `src/seon/turn.clj` (two contracts), `script/seon/dev/mcp.clj` | +65 | −138 (shown decoding 24, SCI forms 52, `execute-clj-eval` ≈ 54, `refuse#` ≈ 8) | −73 | M1's SCI proofs; the §2.10 measurement with a task-bearing root |
 | **P3m** | the fault observation, exactly lost-error design §M (folded here as its "pipeline that owns MCP reply assembly"): the cluster value captured before settlement, saved shown text, the `fault-window` component, the committed-cursor and last-form rules, lineage unknowns, `occurred-since` in place, one budget, outcome and `isError` | the settlement writer, `seon.cluster.eval` schema (+1 attribute and component, +1 error schema, counted once across both plans), `src/seon/error.clj`, `render/transcript.clj`, `mcp.clj` | +45 | −100 (window 55, transcript ≈ 45) | −55 | lost-error §M's class regression rows, including a fault resolved inside the window, a later recurrence leaving earlier saved text unchanged, and a failed settlement not advancing the lower bound |
 | **P4** | MCP JVM mode is root's run with the JVM stage; `mode "host"` with a bounded `valf`; the MCP projection, error summary, marks and dead prepl deleted; `get_value` reduced to the labelled old-artifact adapter (its mark call removed) | new `src/seon/repl/jvm.clj`, `src/seon/turn.clj` (refresh exclusion), `src/seon/cluster.clj`, `mcp.clj`, `resources/seon/operator/prepl.clj`, `script/seon/operator.clj`, the eval schema, `test/seon/cluster/mcp_test.clj`, `test/seon/mcp_test.clj`, `test/seon/render/web_context_test.clj` | +80 | −278 (R6 34, projection/valf/io-prepl 187, marks 31, JVM form 24, lookups 2) | −198 | M1's JVM proofs; `bin/seon status`, `start` and `config apply` read their replies; a large host value is bounded in `mode "host"` |
 | **P5** | folded into P3 (root, 2026-09-25): the `branch` tool's custody refusal joins P3's retirement, and its create policy stays transport over the registry's idempotent `branch!`; the status half landed in 79d052d15 | — | — | — | — | — |
