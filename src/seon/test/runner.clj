@@ -130,14 +130,15 @@
       (report-value (assoc options :seon.render/profile profile) message))))
 
 (defn- failure-message
-  [options event]
+  "The gate-log text of one failing assertion, laid out from its
+  `failure-report`: the operands are rendered once there, never again here."
+  {:malli/schema [:=> [:cat :map :map :seon.test.failure/report] :string]}
+  [options event report]
   (->> [(when (seq test/*testing-contexts*)
           (test/testing-contexts-str))
         (when (some? (:message event)) (message-text options (:message event)))
-        (when (contains? event :expected)
-          (str "expected: " (report-value options (:expected event))))
-        (when (contains? event :actual)
-          (str "actual: " (report-value options (:actual event))))]
+        (some->> (:seon.test.failure/expected report) (str "expected: "))
+        (some->> (:seon.test.failure/actual report) (str "actual: "))]
        (remove str/blank?)
        (str/join "\n")))
 
@@ -209,13 +210,13 @@
   (report-identity options test-symbol event (failure-report options event)))
 
 (defn- capture-event!
-  [options capture selected-namespaces event]
+  [options capture selected-namespaces event report]
   (when-let [test-symbol (event-symbol event)]
     (when (contains? selected-namespaces (symbol (namespace test-symbol)))
-      ;; A failure renders once, before the swap: a retried swap never renders again.
-      (let [report (when (#{:fail :error} (:type event)) (failure-report options event))
-            failure-id (when report (report-identity options test-symbol event report))
-            message (when report (failure-message options event))]
+      ;; The report is rendered once by the caller, before the swap: a retried
+      ;; swap never renders again.
+      (let [failure-id (when report (report-identity options test-symbol event report))
+            message (when report (failure-message options event report))]
         (swap! capture
                (fn [current]
                  (let [current (ensure-result current test-symbol)
@@ -260,16 +261,16 @@
                      current))))))))
 
 (defn- report-error!
-  [options event signature]
+  [options event report signature]
   (test/with-test-out
     (test/inc-report-counter :error)
     (println "\nERROR in" (test/testing-vars-str event))
-    (println (failure-message options event))
+    (println (failure-message options event report))
     (when signature
       (println "  signature:" signature))))
 
 (defn- report-event!
-  [options default-report reported-signatures event]
+  [options default-report reported-signatures event report]
   (if (and (= :error (:type event))
            (instance? Throwable (:actual event)))
     (let [signature (event-signature event)]
@@ -278,13 +279,13 @@
         (do
           (when signature
             (swap! reported-signatures conj signature))
-          (report-error! options event signature))))
+          (report-error! options event report signature))))
     (if (#{:fail :error} (:type event))
       (test/with-test-out
         (test/inc-report-counter (:type event))
         (println (str "\n" (str/upper-case (name (:type event))) " in")
                  (test/testing-vars-str event))
-        (println (failure-message options event)))
+        (println (failure-message options event report)))
       (default-report event))))
 
 (defn- assertionless-failure
@@ -325,20 +326,24 @@
       [])))
 
 (defn- capture-and-report-event!
+  "Capture and print each event; a failing one's `failure-report` is rendered
+  once and serves the stored evidence, its identity and the gate log."
   [options capture selected-namespaces default-report reported-signatures event]
-  (capture-event! options capture selected-namespaces event)
-  (when-let [failure (assertionless-failure capture event)]
-    (capture-event! options capture selected-namespaces failure)
-    (report-event! options default-report reported-signatures failure))
-  (when (= :end-test-var (:type event))
-    (when-let [started (get-in @capture [::results (event-symbol event) ::started-nanos])]
-      (doseq [failure (duration-failures options (:var event)
+  (let [report-of #(when (#{:fail :error} (:type %)) (failure-report options %))
+        report (report-of event)
+        both! (fn [failure]
+                (let [evidence (report-of failure)]
+                  (capture-event! options capture selected-namespaces failure evidence)
+                  (report-event! options default-report reported-signatures failure evidence)))]
+    (capture-event! options capture selected-namespaces event report)
+    (some-> (assertionless-failure capture event) both!)
+    (when (= :end-test-var (:type event))
+      (when-let [started (get-in @capture [::results (event-symbol event) ::started-nanos])]
+        (run! both! (duration-failures options (:var event)
                                        (/ (double (- (get-in @capture [::results (event-symbol event) ::ended-nanos])
                                                      started)) 1e6)
-                                       (:seon.test/time-limit-ms options))]
-        (capture-event! options capture selected-namespaces failure)
-        (report-event! options default-report reported-signatures failure))))
-  (report-event! options default-report reported-signatures event))
+                                       (:seon.test/time-limit-ms options)))))
+    (report-event! options default-report reported-signatures event report)))
 
 (defn- captured-results
   [{::keys [order results]}]
