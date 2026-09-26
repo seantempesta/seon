@@ -1846,7 +1846,7 @@
 
 (defn- identity-names
   "`[attribute symbol]` of each identity entity in `entities`, in one bound query."
-  {:malli/schema [:=> [:cat [:fn clojure.core/ifn?] :seon.db/database-value [:sequential :int]]
+  {:malli/schema [:=> [:cat [:fn clojure.core/ifn?] :seon.db/database-value [:set :int]]
                   [:map-of :int [:tuple :keyword :qualified-symbol]]]}
   [read! database entities]
   (into {} (map (fn [[entity attribute named]] [entity [attribute named]]))
@@ -1860,7 +1860,7 @@
                   [:map-of :qualified-symbol [:set :int]]]}
   [read! database]
   (let [edges (read! (declared-reference-edges database))
-        names (identity-names read! database (vec (mapcat identity edges)))]
+        names (identity-names read! database (into #{} cat edges))]
     (reduce (fn [incoming [caller target]]
               (update incoming (second (names target)) (fnil conj #{}) caller))
             {} edges)))
