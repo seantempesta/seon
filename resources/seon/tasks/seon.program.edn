@@ -10,4 +10,10 @@
              :kind :function
              :intent "program-attributes takes every partitioned schema's entries, not only :seon.db/attributes entities; a report schema marked with a partition put four uninstalled attributes into root's reads and stopped root's graph (fixed at the schema in 367871c45). Read only entity schemas, as seon.schema/assert-entity-partition! does."
              :must-read #{seon.program/program-attributes}
-             :evidence #{"docs/research/agent-platform/landing/fix-root-graph-panic-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/fix-root-graph-panic-2026-09-26.md"}}
+ #:seon.task{:id "0d8be4a76ab3"
+             :name "a-defn-scans-every-projection-form-per-call"
+             :kind :function
+             :intent "An agent defn on a branch takes 1.7 s p50 and allocates 1.57 GB JVM-wide with 182,000 armed calls per form (10 x (inc 1) on the same branch: 168 ms, 160 MB, 6,700 calls). The top counts are whole-projection walks: seon.program/source-family? 38,000 per defn (shapes-in and the families classification filter every key of :seon.schema.projection/forms, ~3,500, on each call), seon.schema.internal/reference-id 32,000, entity-maps 28,000, schema.datahike/compiled-storage 12,000, storable-attribute-in? 9,300. The family set and shapes are functions of the projection alone; derive them once per projection (the projection's own cache seam) and find which caller rebuilds per defn."
+             :must-read #{seon.program/shapes-in seon.schema.internal/entity-maps}
+             :evidence #{"docs/research/agent-platform/landing/contract-cost-opus-2026-09-26.md"}}]

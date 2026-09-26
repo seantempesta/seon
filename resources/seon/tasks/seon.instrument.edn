@@ -1,9 +1,9 @@
 [#:seon.task{:id "96ac997dcf2f"
              :name "hot-internals-pay-armed-validation"
              :kind :namespace
-             :intent "Armed contract validation is 25% of allocation and 33% of CPU in a cold agent evaluation (4.7 of 19 GB, 245 of 750 samples) and 18% / 16% on the debug page; a wrapper costs 1-5 us and several KB per call, multiplied by hot internals (compilable-form per form via canonical-reference-graph 1.45 GB, projection-registry 0.86 GB, db/q guards, render settle/extras, error.refusal/chain). Owner question: which hot internal functions stay armed, and how."
+             :intent "Armed validation cost per call was Malli's regex driver for the :cat input plus -instrument-f's argument vector and always-on guard pair (~700-1300 B, 200-500 ns per armed call; ~6,600 armed calls per trivial agent form). Fixed in malli 43c6dca8 (pin c0c39ec5c), adopted at the next restart. Done when root re-runs tmp/contract-cost-opus/probe.clj on the new pin and the armed-validation share of a trivial eval (JFR, tmp/contract-cost-opus/agg.py) is measured; the remaining armed overhead is seon.instrument/arm-var!'s timing wrapper (~100 ns, 0 B) and the validators' own leaf work."
              :must-read #{seon.instrument/arm-var! seon.schema/canonical-reference-graph}
-             :evidence #{"docs/research/agent-platform/perf-profile-2026-09-26.md"}}
+             :evidence #{"docs/research/agent-platform/perf-profile-2026-09-26.md" "docs/research/agent-platform/landing/contract-cost-opus-2026-09-26.md"}}
  #:seon.task{:id "7095e91b3f42"
              :name "an-oversized-refusal-hides-its-cause"
              :kind :function
