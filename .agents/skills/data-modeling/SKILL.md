@@ -18,10 +18,10 @@ a query instead — with its ruling and its Datahike grounding.
 
 The classpath resources under `resources/seon/schemas/` form one
 population. Duplicate keys refuse within and across resources
-(`src/seon/schema/edn.clj:216-228`, `:307-330`); `packaged-forms` returns the
-declarations (`:415`). The schema bridge consumes a supplied projection and
+(`src/seon/schema/edn.clj:218-230`, `:309-332`); `packaged-forms` returns the
+declarations (`:398`). The schema bridge consumes a supplied projection and
 derives Datahike attribute declarations (`malli->datahike-attr-in`,
-`src/seon/schema/datahike.clj:141-180`).
+`src/seon/schema/datahike.clj:147-186`).
 
 | Intent | Declaration | Derived behavior |
 |---|---|---|
@@ -34,8 +34,8 @@ derives Datahike attribute declarations (`malli->datahike-attr-in`,
 | "We looked" — an analysis actually ran | A required positive fact naming what it read (file digest, evaluation) | Presence is `analyzed?`; an empty result is then ordinary absence of edges |
 
 The bridge derives type and cardinality in one fold, `compiled-storage`
-(`src/seon/schema/datahike.clj:77-139`), and properties in
-`malli->datahike-attr-in` (`:141-180`).
+(`src/seon/schema/datahike.clj:77-146`), and properties in
+`malli->datahike-attr-in` (`:147-186`).
 
 ## The one question that decides a ref: statement or token?
 
@@ -51,7 +51,7 @@ that produced it.
   map REFUSES a sweep only when the surviving row is selected and validated;
   an optional one lets it SWEEP silently. Required presence is not a native
   foreign-key constraint: numeric ref values do not prove target existence
-  (`reference-code/datahike/src/datahike/db/utils.cljc:109-148`). See the
+  (`reference-code/datahike/src/datahike/db/utils.cljc:116-155`). See the
   datahike skill for the writer chain and complete owned-value check.
 - **AN OBSERVATION OF A TOKEN.** The writer saw a NAME — in source text, in
   metadata, in a note, in a report — and a name denotes itself. Whether
@@ -64,7 +64,7 @@ that produced it.
 The tell for a misfiled token is machinery that exists only to survive a
 rename or a republish: a `:seon.fn/reference-to` annotation whose whole job is
 telling a reader how to recover the name from a ref
-(`resources/seon/schemas/seon.fn.edn:17`, read by `src/seon/fn.clj:1462`), a
+(`resources/seon/schemas/seon.fn.edn:17`, read by `src/seon/fn.clj:1707`), a
 preservation pass that strips and re-resolves refs across a publication, a
 sibling attribute storing the same name as a value beside the ref. Every one of those is a name-observation
 wearing a ref.
@@ -106,7 +106,7 @@ yield id-only maps (`reference-code/datahike/src/datahike/pull_api.cljc:238-243`
 Obtain the complete value under the declared work bound or refuse.
 Every owned relation declares `:seon.db/component-schema`; the final writer
 validates those typed values as well as the root (`write-owned-values-error`,
-`src/seon/db.clj:3498`). The config schema declares
+`src/seon/db.clj:3523`). The config schema declares
 `:seon.config.db/validation-node-limit`
 (`resources/seon/schemas/seon.config.db.edn:1`), carried by
 projection acquisition and shared across writers; there is no per-constructor
@@ -136,7 +136,7 @@ whole owned concerns. Derived concerns are queries, not stored mirrors.
 An entity map's `:seon.db/attributes` property contributes its entry
 attributes to storage derivation; it does not stamp a kind on an entity.
 The decomposition owner is `compiled-attribute-selection`
-(`src/seon/schema/datahike.clj:214-246`).
+(`src/seon/schema/datahike.clj:220-252`).
 
 ## Contracts and honest generators
 
@@ -146,13 +146,13 @@ Malli input/output contracts. Adding optional data is accretion;
 requiring more or promising less changes the contract.
 
 Stored nilable shapes refuse at
-`src/seon/schema/datahike.clj:131` (message `:162`). Clearing is a retraction;
+`src/seon/schema/datahike.clj:137` (message `:168`). Clearing is a retraction;
 omission from an upsert is not a clear operation.
 Do not generalize allowances for in-memory polymorphic results to
 stored attributes.
 
 Authored incomplete contracts and predicate requirements are checked at
-`assert-complete-schema!` (`src/seon/schema/internal.cljc:309`). Malli
+`assert-complete-schema!` (`src/seon/schema/internal.cljc:329`). Malli
 generator overrides are selected at
 `reference-code/malli/src/malli/generator.cljc:466`; mapping an output occurs
 at `:489` (`-create-from-fmap`). Neither proves the generated
@@ -185,8 +185,8 @@ generated-form family.
 ## Results and identity
 
 Installed: the agent retains a context handle; `fork-for-turn`
-(`src/seon/sci/eval.clj:2956`) forks the current base and
-`regenerate-agent-context!` (`:2885-2954`) carries its private layer over it.
+(`src/seon/sci/eval.clj:3156`) forks the current base and
+`regenerate-agent-context!` (`:3082-3154`) carries its private layer over it.
 Its private defs, atoms, and result objects remain in memory.
 Shown text is stored because it records what was seen, not because
 it can restore the object. The profile is applied once at evaluation
@@ -194,10 +194,10 @@ time; no result blob, print-node encoding, or separate result byte cap.
 
 Use `seon.id/evaluation` for branch/turn/ordinal identity and
 `seon.id/symbol-in` for its result handle
-(`src/seon/id.clj:55`, `:47`). Do not add a random-id generator.
+(`src/seon/id.clj:67`, `:59`). Do not add a random-id generator.
 
 Read evidence is a dependency observation, not a copied result:
-`src/seon/db.clj:914`. Every distinct read form's latest evidence
+`src/seon/db.clj:920`. Every distinct read form's latest evidence
 feeds the since-query diff; changed reads append, writes/effects never
 rerun. Compaction retracts evaluations and regenerates the opening.
 Program identity tombstones are RETIRED by owner ruling 2026-09-16
@@ -205,4 +205,4 @@ Program identity tombstones are RETIRED by owner ruling 2026-09-16
 past is a temporal query; `src/` carries no tombstone mechanism.
 The final report refuses identity removal or rename when surviving symbol
 observers still name it; repairs are judged in the same final database
-(`removed-definition-error`, `src/seon/db.clj:4061`; `deletion-error`, `:4121`).
+(`removed-definition-error`, `src/seon/db.clj:4111`; `deletion-error`, `:4171`).
