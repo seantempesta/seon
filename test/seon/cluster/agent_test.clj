@@ -481,8 +481,8 @@
                                  "(defn b1 {:malli/schema [:=> [:cat :string] :string]} [x] (a1 x))\n"
                                  "(b1 \"q\")")))
                 "the run settles and closes with the caller's value")
-            (is (= ["2"] (submit! "(+ 1 1)\n(+ 1 1)\n(+ 1 1)\n(+ 1 1)"))
-                "the agent admits its next run"))
+            (is (= ["\"alias.batch\""] (submit! "(+ 1 1)\n(+ 1 1)\n(+ 1 1)\n(str *ns*)"))
+                "the agent admits its next run, which starts where the last one ended"))
           (finally
             (stop-database-events! connection events)
             (disarm-all! routing)))))))
@@ -518,29 +518,6 @@
                 :conns []
                 :io-exec (cluster/projection-executor
                           (:seon.sci.eval/projection-state ctx))})]
-          (test-support/transacted!
-                       connection
-                       [(test-support/namespace-row @connection 'my.agents.source-agent-moved)
-                        {:seon.agent/id "source-agent"
-                         :seon.agent/namespace
-                         [:seon.ns/name 'my.agents.source-agent-moved]}])
-          (let [refusal
-                (agent/submit-source!
-                 {:seon.turn.loop/cluster cluster-handle
-                  :seon.agent/routing routing
-                  :seon.agent/id "source-agent"
-                  :seon.turn/starting-ns
-                  [:seon.ns/name 'my.agents.source-agent]
-                  :seon.cluster.reply/text text})]
-            (is (= :seon.turn/starting-namespace-changed (:seon.turn/rule refusal))
-                "the rendered namespace wins even when assignment changed before submission")
-            (is (nil? (:seon.turn/id refusal)))
-            (is (nil? (async/poll! armer-channel))
-                "a refused submission publishes no wake")
-            (is (empty? (db/q '[:find [?run ...]
-                               :where [?run :seon.turn/id]]
-                             @connection))
-                "the writer rolls back the complete source run"))
           (is (nil? (agent/armed routing "source-agent"))
               "the source agent is unarmed before the armer starts")
           (flow/start armer-graph)

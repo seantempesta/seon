@@ -582,6 +582,21 @@
     namespace-ref (:seon.ns/name
                    (db/pull db [:seon.ns/name] namespace-ref))))
 
+(defn- previous-ending-namespace
+  "The namespace the agent's latest settled evaluation ended in, or nil.
+
+  A REPL session keeps `*ns*` between inputs, so a run with no requested
+  namespace starts where the agent's previous run ended."
+  [db agent-eid]
+  (when-let [evaluation (db/q '[:find (max ?evaluation) .
+                                :in $ ?agent
+                                :where
+                                [?run :seon.turn/agent ?agent]
+                                [?evaluation :seon.cluster.eval/run ?run]
+                                [?evaluation :seon.sci.eval/ending-ns _]]
+                              db agent-eid)]
+    (:seon.sci.eval/ending-ns (db/pull db [:seon.sci.eval/ending-ns] evaluation))))
+
 (declare receipt-row current-receipt)
 
 (defn- current-transaction-instant
@@ -681,9 +696,10 @@
                [?agent :seon.agent/namespace ?namespace]
                [?namespace :seon.ns/name ?namespace-name]]
              db (:db/id (::agent run)))
-        requested-starting-namespace (resolve-namespace-name db starting-ns)
         starting-namespace
-        (or requested-starting-namespace agent-namespace)
+        (or (resolve-namespace-name db starting-ns)
+            (previous-ending-namespace db (:db/id (::agent run)))
+            agent-namespace)
         existing-form-count
         (long
          (or (db/q '[:find (count ?form) .
@@ -699,10 +715,6 @@
       (refuse! `plan-call ::not-call-situation request))
     (when-not starting-namespace
       (refuse! `plan-call ::starting-namespace-missing request))
-    (when (and (= :system author)
-               requested-starting-namespace
-               (not= requested-starting-namespace agent-namespace))
-      (refuse! `plan-call ::starting-namespace-changed request))
     (into (cond-> [[:db/add run-eid ::reply-size (long (or reply-size (count (or reply (str/join "\n" (map :seon.cluster.eval/source sources))))))]
                     [:db/add run-eid ::starting-ns
                      (str "namespace:" starting-namespace)]]
@@ -748,12 +760,11 @@
                                 :where [?agent :seon.agent/namespace ?ns]
                                 [?ns :seon.ns/name ?name]]
                               database (::agent opened))
-        requested-namespace (resolve-namespace-name database starting-ns)
-        namespace-name (or requested-namespace agent-namespace)]
+        namespace-name (or (resolve-namespace-name database starting-ns)
+                           (previous-ending-namespace database (::agent opened))
+                           agent-namespace)]
     (when-not namespace-name
       (refuse! `system-run-call ::starting-namespace-missing request))
-    (when (and requested-namespace (not= requested-namespace agent-namespace))
-      (refuse! `system-run-call ::starting-namespace-changed request))
     (into [(merge opened
                   (select-keys request [::reply ::reply-blob ::reply-size])
                   {::starting-ns (str "namespace:" namespace-name)

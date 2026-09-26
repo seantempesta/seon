@@ -758,9 +758,9 @@
   read once after it, so a run that closed before the listener saw it is not
   missed. At the bound the answer is the await's declared timeout carrying the
   run id: the run keeps its ownership, the agent stays busy until it settles,
-  and nothing replays. The run starts in the agent's assigned namespace: the
-  run writer refuses any other (`:seon.turn/starting-namespace-changed`), and
-  a form moves the evaluation elsewhere with `in-ns`, as at a REPL."
+  and nothing replays. The run starts in the requested namespace, else where
+  the agent's previous run ended, else its assigned namespace; a form moves
+  the evaluation elsewhere with `in-ns`, as at a REPL."
   {:malli/schema [:=> [:cat :seon.agent/source-submission-request]
                   [:or :seon.agent/source-submission-result :seon.agent/source-submission-refused-error
                    :seon.await/timeout-error]]}

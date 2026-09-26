@@ -1248,38 +1248,6 @@
                    @connection))
           "the system run records its complete pending evaluation intent"))))
 
-(deftest system-run-refuses-a-concurrent-namespace-reassignment
-  (with-model-database
-    (fn [connection]
-      (support/transacted!
-              connection
-              (into [(namespace-row 'my.agents.before)
-                     (namespace-row 'my.agents.after)]
-                    cat
-                    [(support/agent-tx @connection "moving-agent" 'my.agents.before)]))
-      (let [before @connection
-            outcome
-            (db/transact!
-             connection
-             (into
-              [[:db/add [:seon.agent/id "moving-agent"]
-                :seon.agent/namespace
-                [:seon.ns/name 'my.agents.after]]]
-              (turn/system-run-tx
-               before
-               {:seon.agent/id "moving-agent" ::turn/id "moving-run" :seon.db.process/id "moving-process" :seon.turn/opened-tx "datomic.tx" ::turn/starting-ns [:seon.ns/name 'my.agents.before] ::turn/sources [{:seon.cluster.eval/source "(+ 1 1)"}]})))]
-        (is (= ::turn/starting-namespace-changed (::turn/rule outcome)))
-        (is (= 'my.agents.before
-               (db/q '[:find ?namespace-name .
-                       :where
-                       [?agent :seon.agent/id "moving-agent"]
-                       [?agent :seon.agent/namespace ?namespace]
-                       [?namespace :seon.ns/name ?namespace-name]]
-                     @connection))
-            "the refusing transaction also rolls back reassignment")
-        (is (nil? (db/pull @connection [:db/id]
-                           [::turn/id "moving-run"])))))))
-
 (deftest ^{:seon.test/long "Canonical turn creation, four evaluation settlements and runtime declaration analysis exercise the real writer and unresolved-call report. The two-analysis publication regression measured 20.54 s; this integration test includes additional settlement transactions."
            :seon.test/long-ms 60000}
   settlement-keeps-unresolved-call-and-require-names-as-values
