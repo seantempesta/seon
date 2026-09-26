@@ -151,9 +151,9 @@
         named {:seon.source/commit-id commit}]
     (is (= 3 (count published)) "the fixture publishes files")
     (is (= named (cluster/loaded-commit database commit published)))
-    (is (= named (cluster/loaded-commit database commit (assoc published "src/not/published.clj" "x")))
+    (is (= named (cluster/loaded-commit database commit (assoc published "src/not/published.clj" (apply str (repeat 64 "a")))))
         "a loaded file the commit does not publish is no program of it")
-    (is (nil? (cluster/loaded-commit database commit (assoc published (key (first published)) "other bytes")))
+    (is (nil? (cluster/loaded-commit database commit (assoc published (key (first published)) (apply str (repeat 64 "b")))))
         "one loaded file with other bytes names nothing: adoption reloads")
     (is (nil? (cluster/loaded-commit database commit {})) "nothing loaded names nothing")))
 

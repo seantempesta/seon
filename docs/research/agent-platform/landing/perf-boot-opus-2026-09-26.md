@@ -256,3 +256,24 @@ its store→branch ms):
    `--ns seon.fn.incremental-deletion-test`, `--ns seon.fn.analyzer-test`
 4. `bin/test-check default --ns seon.fs-test` (if present) and `--ns seon.cluster.publication-delta-test`
 5. Read `:seon.boot/layers` and confirm `development-source-refresh!` shows no reload/arming growth.
+
+## Resume 4 — reds on pid 12212 (d1f6a37fb)
+
+- **Boot on 15e6a31 (pid 17853):** store→branch 24.2 s, ready 27.1 s, full republication. The c029d48cb boot was
+  83.5 s / 89.5 s. The loaded identity equals the published commit, and no `call-with-program-change`,
+  `load-development-definitions!` or `adopt-rows!` row grew.
+- **(1) program-change-test — mine, fixed.** The regression passed "x" and "other bytes" as digests, which the
+  armed contract of `loaded-commit` (`:seon.source/relative-file-digests`) correctly refuses. It now passes
+  64-hex digests. REPL proof on pid 17853, armed: all four assertions are true, and
+  `loaded-program-digests` returns 321 inputs.
+- **(2) publication-delta-test/schema-referrers… — not mine, pre-existing.** The synthetic fixture row from
+  `seon.fn/source-rows` has no `:seon.fn/spec` and no arities, so nothing can be selected. Scratch copies of the code
+  before and after 46ad08a41, plus the live code, all give `[#:seon.fn{:sym my.note/arming-probe-x}]` with no spec,
+  while `analyzer/analyze` does report the `:malli/schema` meta. Task `3452b9f07046` (seon.fn); subject marked on
+  `seon.fn/source-rows`. The 6.2 s bound excess is the run total and is separate.
+- **(3) publication-cache-test ran 0.** Its only test is `:seon.test/long` and needs `--include-long`. It is not
+  broken.
+
+**Root runs after the restart:**
+- `bin/test-check default --ns seon.cluster.program-change-test`
+- `bin/test-check default --ns seon.fn.publication-cache-test --include-long`

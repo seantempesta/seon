@@ -1533,7 +1533,8 @@
   submitted rows. A submitted form has no file; each row's
   `:seon.fn/form-span` is the analyzer's exact byte span within `source`,
   transient provenance a caller drops before storing the row."
-  {:malli/schema
+  {:seon/tasks #{"3452b9f07046"}
+   :malli/schema
    [:=> [:cat :seon.db/database-value :seon.program/shapes
          :seon.ns/ns
          :string [:set :keyword]]
