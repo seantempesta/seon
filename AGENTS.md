@@ -172,7 +172,10 @@ Private experiments remain possible; local green never implies shared acceptance
   it may write 50 functions freely, and only what root deliberately merges reaches the cluster. An agent's context
   executes in the same context the agent runs in: root's in its cluster, every other agent's on its own branch by
   default. The values each entrant receives (database value, connection, branch, SCI fork, agent id, task, capabilities)
-  and where its writes land are declared once per entrant kind in the owning spec, never implied. Do not build refusals, markers or denylists to stop
+  and where its writes land are declared once per entrant kind in the owning spec, never implied.
+  Agents CAN make serious changes, first-party code included (owner 2026-09-26): the immutable database is the safety
+  net — a crashed cluster is rolled back to an earlier commit, not prevented. Hostile-agent protections never shape a
+  design; a restriction must name the correctness failure it prevents or be deleted. Do not build refusals, markers or denylists to stop
   an agent from reaching another context.
 - **Pass the world explicitly.** Carry database/connection, projection, environment,
   render profile, proc and settlement inputs, including profiling/test ownership.
