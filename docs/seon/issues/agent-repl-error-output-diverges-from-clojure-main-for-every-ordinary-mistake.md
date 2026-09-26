@@ -57,3 +57,18 @@ handle, arglists print as declared, and ordinary `java.lang` exception classes c
 ## Regression
 
 One parity row per line of the table, run through the agent entrance.
+
+## Evidence (cycle 4): the shown sentence drops the members the producer declared
+
+- `(seon.schema/register! :dogfood.book/book [:map {:seon.db/attributes true} …])` threw `ex-info` "An
+  identity-bearing entity schema must declare its partition." with `:seon.schema/member :seon.program/partition`
+  and `:seon.schema/expected #{:seon.program :seon.data}` (`src/seon/schema.clj:1457-1476`). The agent saw
+  `seon.sci.kernel/failure-value refused … got nil nil. Fix: An identity-bearing entity schema must declare its
+  partition.` The key and its allowed values, which are the whole fix, were dropped.
+- `(seon.db/transact! [{:dogfood.book/id "empty" :dogfood.book/title ""}])` against `[:string {:min 1}]` answered
+  `expected a string ([:string {:min 1}]), got a string "". Fix: Supply a string at [0 :dogfood.book/title].` The
+  sentence is built from the schema's type, not from Malli's explanation of the failing constraint ("should have at
+  least 1 character", `malli.error/humanize`).
+- Before the entity schema was registered, `(dir user)` listed `:dogfood.book/id` and `:dogfood.book/title`, but
+  `transact!` refused `:dogfood.book/title` as "an undeclared attribute … Use a declared attribute from the entity's
+  schema". Registered-but-not-installed is not distinguished from undeclared.

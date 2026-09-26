@@ -49,3 +49,23 @@ shows the thrown `ex-data` entity id as the "actual" return value. **Which model
 `:seon.db/database-value` argument is generated as an arbitrary empty Datahike value, not a database of the
 function's declared world. Supplied inputs (the database, the agent) are defaults supplied by declared schema
 name at the REPL, so the auto-check should supply the same defaults and not generate them.
+
+## Evidence 2026-09-26 (dogfood-repl-opus, cycle 4): an agent cannot install any function that reads its own data
+
+Branch `dogfood-repl-opus-9`, archive 10d6fdff5. The agent registered `:dogfood.book/id`, `:dogfood.book/title` and
+`:dogfood.book/book` (`:seon.program/partition :seon.data`), wrote one book, and pulled it back. Then:
+
+```clojure
+(defn book-titles "Sorted titles of every stored book."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:vector :dogfood.book/title]]}
+  [db] (vec (sort (seon.db/q '[:find [?t ...] :where [_ :dogfood.book/title ?t]] db))))
+```
+
+The install was refused: `auto-check 1/25`, and the arguments were
+`[#datahike/DB {… :max-tx 536870912 :max-eid 0}]`, a generated **empty database without the agent's schema**.
+The actual value was `seon.db/q cannot read uninstalled attribute :dogfood.book/title`, and it was printed as a
+vector of map entries (`[[:seon.db/invalid-read true] [:seon.db/refused-read-operation seon.db/q] …]`) with nine
+repeated `"should be a string"` lines. On the agent's real database the query answers. So the generated world, not the function, made
+the call fail. Every data-reading function must therefore declare a read refusal it can never meet in its own world, just to
+pass the check. That is a contract written for the generator, not for the program. This raises the class from friction:
+it blocks ordinary agent work on data.
