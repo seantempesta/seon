@@ -741,7 +741,10 @@
     (is (= #{'clojure.set}
            (get-in evaluation
                    [:seon.program/row :seon.ns/requires]))
-        "namespace dependencies observe their symbol values")))
+        "namespace dependencies observe their symbol values")
+    (let [declared (read-string (get-in evaluation [:seon.program/row :seon.ns/source]))]
+      (is (= 'ns (first declared)) "a REPL require declares its namespace's ns form, never the require form")
+      (is (= '(:require clojure.set) (some #(when (and (seq? %) (= :require (first %))) %) declared))))))
 
 (deftest base-context-bindings-resolve-without-dependency-stubs
   ;; The published program is the world's rows (derived from files at

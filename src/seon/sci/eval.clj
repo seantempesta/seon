@@ -99,6 +99,7 @@
             [clojure.core.cache.wrapped :as cache]
             [clojure.edn :as edn]
             [datahike.api :as d]
+            [edamame.core :as edamame]
             [clojure.java.io :as io]
             [clojure.main :as main]
             [clojure.string :as str]
@@ -1165,8 +1166,39 @@
         (conj program/identity-attributes
               :seon.program/delete-identities)))
 
+(defn- namespace-source
+  "The `ns` form a namespace declares after the REPL form `form` changed its
+  context: a `require`'s new libspecs spliced into the `:require` clause of the
+  namespace's stored `ns` form, each on its own line aligned with the clause
+  (edamame's locations; the rest of the text stays exact); a new `ns` form when
+  none is stored. Any other form keeps the stored `ns` form. Never the REPL
+  form itself."
+  {:malli/schema [:=> [:cat [:maybe :seon.db/database-value] :seon.ns/name :seon.schema/value] :seon.ns/source]}
+  [database namespace-name form]
+  (let [text (some-> database (db/pull [:seon.ns/source] [:seon.ns/name namespace-name]) :seon.ns/source)
+        declared (when text (edamame/parse-string text {:all true :read-cond :preserve}))
+        declared? (and (seq? declared) (= 'ns (first declared)))
+        clause (when declared? (some #(when (and (seq? %) (= :require (first %))) %) declared))
+        libspecs (for [arg (rest form) :let [spec (if (and (seq? arg) (= 'quote (first arg))) (second arg) arg)]
+                       :when (not (keyword? spec))
+                       :when (not (some #{spec} (rest clause)))]
+                   spec)
+        ;; The character offset of edamame's 1-based row and column.
+        offset (fn [row col] (+ (dec col) (reduce + (map #(inc (count %)) (take (dec row) (str/split-lines text))))))]
+    (cond
+      (not (and (seq? form) (#{'require 'clojure.core/require} (first form))))
+      (if declared? text (pr-str (list 'ns namespace-name)))
+      (not declared?) (str "(ns " namespace-name "\n  (:require " (str/join " " (map pr-str libspecs)) "))")
+      :else
+      (let [{:keys [end-row end-col col]} (meta (or clause declared))
+            at (dec (offset end-row end-col))
+            lines (if clause
+                    (map #(str "\n" (apply str (repeat (+ col 9) \space)) (pr-str %)) libspecs)
+                    [(str "\n  (:require " (str/join " " (map pr-str libspecs)) ")")])]
+        (str (subs text 0 at) (apply str lines) (subs text at))))))
+
 (defn- namespace-context-row
-  [projection namespace-name source before after changed?]
+  [projection database namespace-name form before after changed?]
   (when (or changed?
             (not= (select-keys before [:seon.sci.reader/aliases
                                       :seon.sci.reader/refers
@@ -1178,7 +1210,7 @@
      projection
      (merge
       {:seon.ns/name namespace-name
-       :seon.ns/source source}
+       :seon.ns/source (namespace-source database namespace-name form)}
       (binding-rows after))
      :contracted :agent)))
 
@@ -3749,7 +3781,7 @@
     live-declaration? :seon.sci.eval/live-declaration?
     namespace-name :seon.sci.eval/namespace-name
     namespace-unmap? :seon.sci.eval/namespace-unmap?
-    source :seon.cluster.eval/source}]
+    database :seon.db/db}]
   (let [removed-identities
         (when namespace-unmap?
           (removed-program-identities
@@ -3774,7 +3806,7 @@
         (when-not selected-row
           (namespace-context-row
            (context-projection execution-ctx)
-           namespace-name source before-reader-context
+           database namespace-name (:seon.sci.reader/form event) before-reader-context
            (reader-context execution-ctx namespace-name)
            namespace-changed?))
         row (cond-> (or selected-row context-row)
@@ -4503,7 +4535,7 @@
               :seon.sci.eval/live-declaration? live-declaration?
               :seon.sci.eval/namespace-name namespace-name
               :seon.sci.eval/namespace-unmap? namespace-unmap?
-              :seon.cluster.eval/source source})
+              :seon.db/db (if connection (db/db connection) (:seon.db/db request))})
             var-rows
             (when-let [database (:seon.db/db request)]
               (admit-program-change!
