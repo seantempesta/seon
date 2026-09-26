@@ -330,6 +330,21 @@
           :seon.error/data {:seon.boot/cluster-name cluster-name}})
       bootstrap-effective)))
 
+(defn- mcp-plain
+  "`value` by plain Clojure printing under `effective`'s result bounds, beside the
+  diagnostics of the render path that could not project it. The floor's fallback:
+  a failed projection never replaces the value (AGENTS.md, the REPL path is total)."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Clojure's prepl hands the projection arbitrary evaluation results, including live JVM objects and nil.", :gen/elements [nil false 0 "" :k [] {}]}]
+                       [:vector :seon.error/base] [:or :nil :seon.config/effective]]
+                  [:map [:seon.dev.mcp/value [:map [:seon.dev.mcp/text :string]]] [:seon.dev.mcp/windowed? :boolean]
+                   [:seon.render.value/diagnostics [:vector :seon.error/base]]]]}
+  [value diagnostics effective]
+  {:seon.dev.mcp/value {:seon.dev.mcp/text (binding [*print-length* (:seon.config.eval.result/max-nodes effective)
+                                                  *print-level* (:seon.config.eval.result/max-depth effective)]
+                                          (pr-str value))}
+   :seon.dev.mcp/windowed? false
+   :seon.render.value/diagnostics diagnostics})
+
 (defn- mcp-project
   {:malli/schema
    [:function
@@ -344,17 +359,25 @@
    (try
      (let [instance (mcp-instance cluster-name)
            connection (:seon.boot/cluster-connection instance)
-           effective (mcp-effective cluster-name bootstrap-effective)
-           caps (when-not (or (:seon.config/error-key effective)
-                 (:seon.db/invalid-read effective) (:seon.schema/expected-value effective))
-                  (config/result-caps effective))]
-       (cond
-         (or (:seon.config/error-key effective)
-                 (:seon.db/invalid-read effective) (:seon.schema/expected-value effective))
-         {:seon.dev.mcp/value effective :seon.dev.mcp/windowed? false}
-
+           configured (mcp-effective cluster-name bootstrap-effective)
+           ;; A refused configuration read never replaces the value: it prints
+           ;; under the bootstrap configuration the prepl started with, and the
+           ;; refusal rides beside it.
+           refused (when (or (:seon.config/error-key configured) (:seon.db/invalid-read configured)
+                             (:seon.schema/expected-value configured))
+                     configured)
+           effective (if refused bootstrap-effective configured)
+           caps (config/result-caps effective)
+           diagnostics (filterv some? [refused (when (:seon.config/error-key caps) caps)])
+           ;; A thrown evaluation is the one error shape: class, message,
+           ;; ex-data and first-party frames per cause link.
+           value (if (and exception? (instance? Throwable value))
+                   (seon.error.refusal/diagnostic (Date.) :seon.dev.mcp/evaluation 'clojure.core/eval
+                                                  {:seon.error/throwable value})
+                   value)]
+       (cond-> (cond
          (:seon.config/error-key caps)
-         {:seon.dev.mcp/value caps :seon.dev.mcp/windowed? false}
+         (mcp-plain value diagnostics bootstrap-effective)
 
          (and evaluation? (not exception?) (string? (:seon.eval/shown value)))
          {:seon.dev.mcp/value
@@ -431,10 +454,16 @@
 
              (and artifact-backed? (nil? stored-digest))
              (assoc :seon.dev.mcp/remainder
-                    "The cluster has no database connection; the remainder is not retrievable.")))))
-    ;; The ordinary render path itself failed: degrade to the Throwable floor.
-    (catch Throwable failure
-      {:seon.dev.mcp/value (render.value/floor failure) :seon.dev.mcp/windowed? false}))))
+                    "The cluster has no database connection; the remainder is not retrievable."))))
+         (and (seq diagnostics) (not (:seon.config/error-key caps)))
+         (assoc :seon.render.value/diagnostics diagnostics)))
+     ;; The ordinary render path itself failed: the value prints plainly, the
+     ;; failure's whole cause beside it.
+     (catch Throwable failure
+       (mcp-plain value
+                  [(seon.error.refusal/diagnostic (Date.) :seon.dev.mcp/projection `mcp-project
+                                                  {:seon.error/throwable failure})]
+                  bootstrap-effective)))))
 
 (defn mcp-valf
   "Project marked MCP returns with caller-supplied exception recognition."
@@ -473,26 +502,6 @@
          ;; Never re-enter admission or a failed producer: the Throwable floor
          ;; renders the whole bounded cause chain from the Throwable alone.
          (pr-str (render.value/floor failure)))))))
-
-(defn mcp-io-prepl
-  "Serve PREPL events with explicit exception status at MCP projection."
-  {:malli/schema [:=> [:cat :seon.boot/cluster-name
-                       :seon.config/effective]
-                  :nil]}
-  [cluster-name bootstrap-effective]
-  (let [out *out*
-        lock (Object.)]
-    (clojure.core.server/prepl
-     *in*
-     (fn [event]
-       (binding [*out* out *flush-on-newline* true *print-readably* true]
-         (locking lock
-           (prn
-            (if (#{:ret :tap} (:tag event))
-              (assoc event :val
-                     (mcp-valf cluster-name bootstrap-effective
-                               (:val event) (true? (:exception event))))
-              event))))))))
 
 (defn mcp-get-value
   "Read and drill one stored MCP value artifact without mutating REPL state."

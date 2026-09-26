@@ -1,0 +1,7 @@
+[#:seon.task{:id "3638f3f3bd57"
+             :name "keep-fault-observations-historical"
+             :kind :function
+             :intent "branch-errors reconstructs each evaluation's fault window by querying occurred-since as of its settlement transaction, but occurrence last-at and count are no-history attributes, so a later recurrence changes or removes what an old window shows and a fault after the last settlement has no window yet. Save the exact observation once when the evaluation settles and render that."
+             :must-read #{seon.render.transcript/branch-errors}
+             :evidence #{"docs/research/agent-platform/error-delivery-audit-2026-09-26.md"
+                         "docs/research/agent-platform/landing/err-s4-observation-opus-2026-09-26.md"}}]

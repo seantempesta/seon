@@ -12,13 +12,13 @@
              :evidence #{"docs/research/agent-platform/landing/inv-boot-operator-opus-2026-09-26.md"
                          "docs/research/agent-platform/perf-profile-2026-09-26.md"
                          "docs/seon/issues/move-to-head-takes-a-minute-or-more-not-seconds.md"}}
- #:seon.task{:id "e7be95eac7cd"
-             :name "mcp-io-prepl-serves-only-tests"
+ #:seon.task{:id "8aba59c87b88"
+             :name "record-jvm-evaluations-on-shared-path"
              :kind :function
-             :intent "seon.cluster/mcp-io-prepl's only callers are test/seon/mcp_test.clj:22 and test/seon/dev/mcp_bridge_test.clj:588,609 (agent-centric F03). Move those tests to the ordinary entrance and delete it."
-             :must-read #{seon.cluster/mcp-io-prepl}
-             :evidence #{"docs/research/agent-platform/landing/delete-r8-r6-r10-2026-09-26.md"
-                         "docs/research/agent-platform/landing/standing-deletion-2026-09-26.md"}}
+             :intent "A JVM-mode MCP evaluation is evaluated by the prepl and projected by mcp-project, but never recorded: it has no evaluation record, no settlement window and so no fault observation, unlike an SCI run. The JVM evaluator should be a stage value supplied to the one read-evaluate-record-print path (no custody), so its value, its error in the one shape and its window's faults are the same saved observation MCP and the context show."
+             :must-read #{seon.cluster/mcp-project seon.cluster/mcp-valf}
+             :evidence #{"docs/research/agent-platform/error-delivery-audit-2026-09-26.md"
+                         "docs/research/agent-platform/landing/err-s4-observation-opus-2026-09-26.md"}}
  #:seon.task{:id "0b3f443d1d94"
              :name "the-mcp-value-is-a-converted-tree"
              :kind :function

@@ -36,12 +36,6 @@
 (def stdout-lock (Object.))
 (def ^:dynamic *debug* (= "1" (System/getenv "DEBUG")))
 (defonce reload-state (atom {}))
-;; [root cluster branch] -> the basis of the last evaluation's error window there
-;; (branch nil = the shared cluster context, which starts at 0). A lane branch's
-;; entry starts at the fork basis its `branch` create returned; a lane this bridge
-;; did not create (or one from before a bridge restart) reports its start unknown.
-(defonce window-bases (atom {}))
-(def max-window-errors 20)
 
 (defn- content-text
   {:seon.fn/projection-boundary :none}
@@ -75,13 +69,20 @@
               :text (content-text value)}]})
 
 (defn- mcp-error
-  [error]
-  (let [data (if (map? error)
-               error
-               {:seon.dev.mcp/error (str error)})]
-    {:content [{:type "text"
-                :text (content-text data)}]
-     :isError true}))
+  [data]
+  {:content [{:type "text"
+              :text (content-text data)}]
+   :isError true})
+
+(defn- failure
+  "A bridge failure as data: `request`'s fields, the failure's declared kind
+  (its ex-data's, else `kind`), and the whole cause — `Throwable->map`'s class,
+  message and ex-data per link and its trace — printed once as EDN, so symbols
+  and keywords stay native through the JSON envelope."
+  [request kind ^Throwable throwable]
+  (assoc request
+         :seon.dev.mcp/failure (or (:seon.dev.mcp/failure (ex-data throwable)) kind)
+         :seon.dev.mcp/error (pr-str (Throwable->map throwable))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Operator-derived discovery
@@ -310,10 +311,14 @@
   ;; (`:seon.dev.mcp/text`) becomes the event's value beside its evaluation
   ;; keys, and every other `:val` keeps the printed bytes the JVM sent. The
   ;; bridge reprints nothing.
+  ;; Diagnostics the projection attached beside the value travel with it.
   [event]
-  (let [value (:seon.dev.mcp/value (:val (decoded-projection-event event)))]
+  (let [projected (:val (decoded-projection-event event))
+        value (:seon.dev.mcp/value projected)]
     (if (string? (:seon.dev.mcp/text value))
-      (merge event (dissoc value :seon.dev.mcp/text) {:val (:seon.dev.mcp/text value)})
+      (merge event (dissoc value :seon.dev.mcp/text)
+             (select-keys projected [:seon.render.value/diagnostics])
+             {:val (:seon.dev.mcp/text value)})
       event)))
 
 (defn- one-shot-events!
@@ -433,33 +438,41 @@
                            '~namespace-symbol (assoc :seon.turn/starting-ns [:seon.ns/name '~namespace-symbol])))]
             (if (or (:seon.error/at result#) (not (:seon.turn/id result#)))
               result#
-              (assoc result# :seon.dev.mcp/evaluations
-                     ((requiring-resolve 'seon.eval.drive/run-receipts)
-                      @(:seon.db/connection (:seon.turn.loop/cluster custody#)) [(:seon.turn/id result#)])))))))))
+              ;; Each evaluation answers with the response its agent's next
+              ;; context reads (`seon.render.transcript/history-entries`): the
+              ;; saved shown text, output, error and the new faults of its
+              ;; settlement window, the same bytes by the same function.
+              (let [database# @(:seon.db/connection (:seon.turn.loop/cluster custody#))
+                    run# (:seon.turn/id result#)
+                    responses# (into {} (map (juxt :seon.cluster.eval/ordinal :seon.render.history/printed-value))
+                                     ((requiring-resolve 'seon.render.transcript/history-entries)
+                                      {:seon.db/db database# :seon.agent/id (:seon.agent/id custody#)
+                                       :seon.sci.admit/caps ((requiring-resolve 'seon.config/result-caps)
+                                                             ((requiring-resolve 'seon.config/effective) database# ~cluster))
+                                       :seon.render.transcript/selected-run-id run#}))]
+                (assoc result# :seon.dev.mcp/evaluations
+                       (mapv (fn [evaluation#]
+                               (assoc evaluation# :seon.repl/response
+                                      (get responses# (:seon.cluster.eval/ordinal evaluation#))))
+                             ((requiring-resolve 'seon.eval.drive/run-receipts) database# [run#])))))))))))
 
 (defn- run-events
-  "The prepl events of a root run: one per settled evaluation, its stored shown
-  text as the value, and an error flagged as the event's exception. A recorded
-  error whose text is not the shown text (a refused settlement keeps each
-  form's value and records the refusal beside it) is its own `:err` event, so
-  the refusal is never hidden behind the value."
+  "The prepl events of a root run: one per settled evaluation whose value is the
+  response the agent's own context reads for it (`:seon.repl/response` — its
+  output, value, error and branch faults, printed by the one REPL grammar), and
+  an error flagged as the event's exception. An evaluation with no response yet
+  answers with its stored shown text or error."
   {:malli/schema [:=> [:cat [:vector :map]] [:vector :map]]}
   [events]
   (let [terminal (some #(when (= :ret (:tag %)) %) events)
         value (try (edn/read-string (:val terminal)) (catch Throwable _ nil))]
     (if-let [evaluations (:seon.dev.mcp/evaluations value)]
       (into (filterv #(not= :ret (:tag %)) events)
-            ;; What the evaluation wrote to *out* is recorded with it and printed
-            ;; before its value, as a prepl answers.
-            (mapcat (fn [{shown :seon.eval/shown error :seon.cluster.eval/error output :seon.cluster.eval/output
-                          ordinal :seon.cluster.eval/ordinal}]
-                      (cond-> []
-                        output (conj {:tag :out :val output :seon.cluster.eval/ordinal ordinal})
-                        (and error shown (not= error shown))
-                        (conj {:tag :err :val error :seon.cluster.eval/ordinal ordinal})
-                        true (conj (cond-> {:tag :ret :val (or shown error) :seon.cluster.eval/ordinal ordinal
-                                            :seon.turn/id (:seon.turn/id value)}
-                                     error (assoc :exception true))))))
+            (map (fn [{shown :seon.eval/shown error :seon.cluster.eval/error response :seon.repl/response
+                       ordinal :seon.cluster.eval/ordinal}]
+                   (cond-> {:tag :ret :val (or response shown error) :seon.cluster.eval/ordinal ordinal
+                            :seon.turn/id (:seon.turn/id value)}
+                     error (assoc :exception true))))
             evaluations)
       (cond->> events
         (:seon.error/at value) (mapv #(if (identical? % terminal) (assoc % :exception true) %))))))
@@ -543,69 +556,9 @@
         (if (or (:exception terminal) (not (map? value)) (:seon.error/at value))
           (mcp-error (cond-> (assoc response :seon.dev.mcp/failure :branch)
                        (:exception terminal) (assoc :seon.dev.mcp/events (mapv #(dissoc % :form) events))))
-          (do (case action
-                ;; a new branch's first window opens at its fork basis, not at 0
-                "create" (swap! window-bases assoc [root cluster branch] (:seon.db/basis-t value))
-                "retire" (swap! window-bases dissoc [root cluster branch])
-                nil)
-              (mcp-success response))))
+          (mcp-success response)))
       (catch Throwable throwable
-        (mcp-error (merge request {:seon.dev.mcp/failure :branch :seon.dev.mcp/error (ex-message throwable)
-                                  :seon.dev.mcp/class (.getName (class throwable))}
-                          (ex-data throwable)))))))
-
-(defn- window-form
-  "Read the evaluated branch's errors in (since, its current basis] through
-  `seon.error/occurred-since`; a nil `since` reads only the current basis."
-  [cluster branch since]
-  (pr-str
-   `(do
-      ((requiring-resolve 'seon.cluster/project-next-prepl-value!) {:seon.dev.mcp/read-only? true})
-      (let [instance# (get @@(requiring-resolve 'seon.operator.runtime/running-instances) ~cluster)
-            connection# (if ~branch
-                          ((requiring-resolve 'seon.cluster.registry/active-branch-connection)
-                           {:seon.store/store (:seon.store/store instance#) :seon.store/branch (keyword ~branch)})
-                          (:seon.db/connection (:seon.turn.loop/cluster instance#)))
-            since# (resolve 'seon.error/occurred-since)]
-        (cond
-          (nil? connection#) {:seon.dev.mcp/window :unknown :seon.error/message "No live connection holds this branch."}
-          (nil? since#) {:seon.dev.mcp/window :unknown :seon.error/message "This JVM's seon.error has no occurred-since (RESET NEEDED)."}
-          :else (let [database# ((requiring-resolve 'seon.db/db) connection#)
-                      errors# (if ~since (since# database# ~since) [])]
-                  (if (map? errors#)
-                    {:seon.dev.mcp/window :unknown :seon.error/error errors#}
-                    {:seon.db/basis-t ((requiring-resolve 'seon.db/basis-t) database#)
-                     :seon.dev.mcp/count (count errors#)
-                     :seon.dev.mcp/errors (vec (take ~max-window-errors errors#))})))))))
-
-(defn- branch-errors!
-  "The errors written on the evaluated branch since this bridge's previous
-  evaluation there, or nil when none; advances that branch's window basis.
-  Runs on the evaluation's own session, so it pays no second discovery."
-  [session timeout-ms [_ cluster branch :as key]]
-  ;; a lane branch's window opens at the fork basis its `branch` create
-  ;; recorded; one this bridge did not create has no known start
-  (let [since (get @window-bases key (when-not branch 0))
-        value (try (.write ^java.io.Writer (:writer session) (str (window-form cluster branch since) "\n"))
-                   (.flush ^java.io.Writer (:writer session))
-                   (terminal-projection (mapv decoded-projection-event
-                                              (collect-prepl-response! session timeout-ms)))
-                   (catch Throwable throwable
-                     ;; a half-read reply would desynchronize the next evaluation
-                     (close-clj-session! ((juxt :root :cluster :session-id) session))
-                     {:seon.dev.mcp/window :unknown :seon.error/message (ex-message throwable)}))
-        value (or (:seon.dev.mcp/value value) value)
-        value (if (and (nil? since) (:seon.db/basis-t value))
-                (assoc value :seon.dev.mcp/window :unknown
-                       :seon.error/message (str "This bridge recorded no fork basis for the branch; the window opens at "
-                                                (:seon.db/basis-t value) ". Requery (seon.error/occurred-since database <fork basis>)."))
-                value)]
-    (when-let [basis (:seon.db/basis-t value)]
-      (swap! window-bases assoc key basis))
-    (when (or (:seon.dev.mcp/window value) (pos? (:seon.dev.mcp/count value 0)))
-      (cond-> (assoc value :seon.dev.mcp/branch (or branch :cluster) :seon.dev.mcp/since since)
-        (< max-window-errors (:seon.dev.mcp/count value 0))
-        (assoc :seon.dev.mcp/requery (str "(seon.error/occurred-since database " since ")"))))))
+        (mcp-error (failure request :branch throwable))))))
 
 (defn- execute-clj-eval
   [{:keys [code root cluster mode session_id timeout_ms] :as request}]
@@ -629,17 +582,15 @@
                                             {:seon.dev.mcp/failure :invalid-branch}))))
                         selected)}
                      (catch Throwable throwable
-                       {:seon.dev.mcp/error throwable}))]
-    (if-let [throwable (:seon.dev.mcp/error validation)]
+                       {::invalid throwable}))]
+    (if-let [throwable (::invalid validation)]
       (mcp-error
-       (merge {:seon.dev.mcp/failure :invalid-form
-               :seon.dev.mcp/runtime "clj"
-               :seon.dev.mcp/root root
-               :seon.dev.mcp/cluster cluster
-               :seon.dev.mcp/session-id session-id
-               :seon.dev.mcp/form code
-               :seon.dev.mcp/error (ex-message throwable)}
-              (ex-data throwable)))
+       (failure {:seon.dev.mcp/runtime "clj"
+                 :seon.dev.mcp/root root
+                 :seon.dev.mcp/cluster cluster
+                 :seon.dev.mcp/session-id session-id
+                 :seon.dev.mcp/form code}
+                :invalid-form throwable))
       (let [mode (:seon.dev.mcp/mode validation)
             namespace-symbol (:seon.dev.mcp/namespace-symbol validation)]
         (try
@@ -674,14 +625,10 @@
                           :seon.dev.mcp/namespace (str namespace-symbol)
                           :seon.dev.mcp/session-id session-id
                           :seon.dev.mcp/form code
-                          :seon.dev.mcp/events events}
-                window (branch-errors! session timeout-ms
-                                       [root cluster (when (= "sci" mode) (:branch request))])]
-            (cond-> (if (or (:exception terminal) (some :exception events))
-                      (mcp-error (assoc response :seon.dev.mcp/failure :evaluation))
-                      (mcp-success response))
-              window (update :content conj {:type "text"
-                                            :text (content-text {:seon.dev.mcp/branch-errors window})}))))
+                          :seon.dev.mcp/events events}]
+            (if (or (:exception terminal) (some :exception events))
+              (mcp-error (assoc response :seon.dev.mcp/failure :evaluation))
+              (mcp-success response))))
         (catch SocketTimeoutException _
           (close-clj-session! key)
           (mcp-error {:seon.dev.mcp/failure :timeout
@@ -696,18 +643,14 @@
         (catch Throwable throwable
           (close-clj-session! key)
           (mcp-error
-           (merge {:seon.dev.mcp/failure
-                   (or (:seon.dev.mcp/failure (ex-data throwable))
-                       :transport)
-                   :seon.dev.mcp/runtime "clj"
-                   :seon.dev.mcp/root root
-                   :seon.dev.mcp/cluster cluster
-                   :seon.dev.mcp/mode mode
-                   :seon.dev.mcp/namespace (str namespace-symbol)
-                   :seon.dev.mcp/session-id session-id
-                   :seon.dev.mcp/form code
-                   :seon.dev.mcp/error (ex-message throwable)}
-                  (ex-data throwable)))))))))
+           (failure {:seon.dev.mcp/runtime "clj"
+                     :seon.dev.mcp/root root
+                     :seon.dev.mcp/cluster cluster
+                     :seon.dev.mcp/mode mode
+                     :seon.dev.mcp/namespace (str namespace-symbol)
+                     :seon.dev.mcp/session-id session-id
+                     :seon.dev.mcp/form code}
+                    :transport throwable))))))))
 
 (defn- session-rows
   [root cluster]
@@ -742,10 +685,10 @@
             default-timeout-ms))]
       (or (:seon.dev.mcp/value projected) projected))
     (catch Throwable throwable
-      {:seon.dev.mcp/cluster cluster
-       :seon.dev.mcp/health :unknown
-       :seon.dev.mcp/flow :unknown
-       :seon.dev.mcp/error (ex-message throwable)})))
+      (failure {:seon.dev.mcp/cluster cluster
+                :seon.dev.mcp/health :unknown
+                :seon.dev.mcp/flow :unknown}
+               :observation throwable))))
 
 (defn- execute-runtime-status
   [{:keys [root cluster]}]
@@ -942,11 +885,7 @@
       (log-error "request failed:" (ex-message throwable))
       (when id
         (let [reload-error (:error @reload-state)]
-          (send-result id
-                       (mcp-error
-                        (merge {:seon.dev.mcp/failure :request
-                                :seon.dev.mcp/error (ex-message throwable)}
-                               (ex-data throwable) reload-error)))
+          (send-result id (mcp-error (merge (failure {} :request throwable) reload-error)))
           (when reload-error (swap! reload-state dissoc :error)))))))
 
 (def parent-handle
@@ -1002,8 +941,7 @@
                       (catch Throwable throwable
                         (doseq [[v root] roots] (alter-var-root v (constantly root)))
                         (log-error "reload failed:" (.getPath source) (ex-message throwable))
-                        (swap! state assoc :error {:seon.dev.mcp/reload-error (ex-message throwable)
-                                                   :seon.dev.mcp/file (.getPath source)})))))))
+                        (swap! state assoc :error (failure {:seon.dev.mcp/file (.getPath source)} :reload throwable))))))))
               (@handler (json/parse-string line true)))
             (catch Throwable throwable
               (log-error "parse error:" (ex-message throwable))

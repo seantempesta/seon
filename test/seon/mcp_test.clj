@@ -8,6 +8,7 @@
             [seon.db :as db]
             [seon.env :as env]
             [seon.id :as id]
+            [seon.operator.prepl :as prepl]
             [seon.operator.runtime :refer [running-instances]]
             [seon.print :as print]
             [seon.render :as render]
@@ -20,7 +21,7 @@
                      (java.io.StringReader. (pr-str form)))
               writer (java.io.StringWriter.)]
     (binding [*in* reader *out* writer]
-      (cluster/mcp-io-prepl cluster-name effective))
+      (prepl/io-prepl :valf #(cluster/mcp-valf cluster-name effective %1 %2)))
     (with-open [events (java.io.PushbackReader.
                        (java.io.StringReader. (str writer)))]
       (loop [result []]
@@ -73,11 +74,14 @@
                        (edn/read-string (:val (first terminal))))]
            (is (= 1 (count terminal)))
            (is (true? (:exception (first terminal))))
-           ;; The whole Throwable->map prepl hands MCP (R6, d1d6b0eb6): its
-           ;; cause, its typed links and its frames, never a flat summary.
-           (is (= "expected failure" (:cause result)) (pr-str result))
-           (is (= 'clojure.lang.ExceptionInfo (:type (first (:via result)))))
-           (is (contains? result :trace)))
+           ;; The thrown Throwable itself reaches the projection, which keeps
+           ;; it in the one error shape: class, message and ex-data per cause
+           ;; link, and the root frame (task 8aba59c87b88).
+           (is (= "expected failure" (:seon.error/message result)) (pr-str result))
+           (is (= 'clojure.lang.ExceptionInfo (:seon.error/exception-class result)))
+           (is (= [{:seon.error/throwable-class "clojure.lang.ExceptionInfo"
+                    :seon.error/message "expected failure" :seon.error/data {}}]
+                  (mapv #(dissoc % :seon.error/frames) (:seon.error/chain result)))))
          ;; A root without an identity is refused before selection: the
          ;; refusal is the whole answer, with no tree and no text. With a
          ;; root, the one selection yields the tree and its text.

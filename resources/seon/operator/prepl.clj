@@ -28,7 +28,10 @@
             exit? (and (= :ret (:tag event)) (map? value) (not (sorted? value))
                        (true? (get value :seon.operator/process-exit?)))]
         [(pr-str (if (#{:ret :tap} (:tag event))
-                   (assoc event :val (cond project (project value (true? (:exception event)))
+                   ;; A thrown evaluation's projection receives the Throwable
+                   ;; itself, not prepl's `Throwable->map` of it, so it can keep
+                   ;; the whole cause in the one error shape.
+                   (assoc event :val (cond project (project (or failure value) (true? (:exception event)))
                                            failure (pr-str (failure-text failure))
                                            :else (pr-str value)))
                    event))

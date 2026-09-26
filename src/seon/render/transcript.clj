@@ -351,9 +351,11 @@
   recurrences and resolutions never rewrite an earlier response. A reply's
   forms settle in one transaction; that window belongs to its last form. The
   first evaluation's window opens at its read basis. The branch's occurrence
-  history selects the windows worth reading; cluster-branch copies of other
-  branches' faults are not this branch's errors. A window whose as-of read
-  refuses answers with that refusal, a typed unknown the response shows."
+  history selects the windows worth reading. A cluster-branch copy of another
+  branch's core fault is written there for the cluster's agents to act on, so
+  it reads in their window with its origin branch (`seon.fault/record!`). A
+  window whose as-of read refuses answers with that refusal, a typed unknown
+  the response shows."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id
                        [:or [:= :all] [:set :int]]]
                   [:map-of :int [:or [:vector {:min 1} :seon.repl/branch-error]
@@ -384,21 +386,14 @@
         opening (when-some [[_ _ first-form] (first batches)]
                   (:seon.cluster.eval/read-basis-transaction
                    (read-or-throw
-                    (db/pull db [:seon.cluster.eval/read-basis-transaction] first-form))))
-        branch (get-in db [:config :branch])]
+                    (db/pull db [:seon.cluster.eval/read-basis-transaction] first-form))))]
     (into {}
           (keep (fn [[since [tx eid]]]
                   (when (and since (or (= :all shown) (contains? shown eid)) (seq (subseq occurred > since <= tx)))
+                    ;; an unreadable window is a typed unknown in the
+                    ;; response, never an absence of errors
                     (let [found (error/occurred-since (db/as-of db tx) since)]
-                      (if (map? found)
-                        ;; an unreadable window is a typed unknown in the
-                        ;; response, never an absence of errors
-                        [eid found]
-                        (let [errors (into []
-                                           (comp (filter #(contains? (:seon.error.occurrence/branch % #{branch}) branch))
-                                                 (map #(dissoc % :seon.error.occurrence/branch)))
-                                           found)]
-                          (when (seq errors) [eid errors])))))))
+                      (when (or (map? found) (seq found)) [eid found])))))
           (map vector (cons opening (map first batches)) batches))))
 
 (defn- history
@@ -860,6 +855,7 @@
                  emitted (emission entry)]
              {:seon.render.history/call-id
               [:seon.render.transcript/entry (::kind entry) (::id entry)]
+              :seon.cluster.eval/ordinal (::ordinal entry)
               :seon.render.history/basis-transaction
               (or (::read-basis entry) (entry-basis db entry))
               :seon.render.history/form (::source entry)

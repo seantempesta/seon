@@ -12,6 +12,9 @@
             [seon.fault :as fault]
             [seon.bootstrap :as bootstrap]
             [seon.cluster.agent :as agent]
+            [seon.cluster.branch :as cluster.branch]
+            [seon.cluster.registry :as registry]
+            [seon.cluster.store :as store]
             [seon.turn :as turn]
 
             [seon.config :as config]
@@ -1401,17 +1404,18 @@
 
 (defn- settled-evaluation!
   "Settle evaluation `ordinal` of the fixture run, returning its settlement tx."
-  [connection ordinal]
+  ([connection ordinal] (settled-evaluation! connection "branch-errors" ordinal))
+  ([connection run-id ordinal]
   (let [report (support/transacted!
                 connection
-                [{:seon.cluster.eval/id (turn/receipt-identity "branch-errors" ordinal)
-                  :seon.cluster.eval/run [:seon.turn/id "branch-errors"]
+                [{:seon.cluster.eval/id (turn/receipt-identity run-id ordinal)
+                  :seon.cluster.eval/run [:seon.turn/id run-id]
                   :seon.cluster.eval/ordinal ordinal
                   :seon.cluster.eval/at (java.util.Date.)
                   :seon.cluster.eval/read-basis-transaction (db/basis-t @connection)
                   :seon.eval/shown (str ordinal)
                   :seon.cluster.eval/source (str "(identity " ordinal ")")}])]
-    (db/basis-t (:db-after report))))
+    (db/basis-t (:db-after report)))))
 
 ;; Requirement 8.3: each evaluation's response carries the open errors its
 ;; branch recorded after the previous evaluation settled, up to its own
@@ -1447,3 +1451,52 @@
            "the next evaluation never repeats it")
        (is (= 1 (count (re-seq #"raised while evaluation one ran" transcript))))
        (is (not (str/includes? transcript "raised on a sibling branch")))))))
+
+;; A core fault on a worker's branch is copied to the cluster branch for the
+;; cluster's agents (`seon.fault/record!`); that copy reads in the window of the
+;; cluster agent's evaluation with its origin branch, the same response MCP
+;; answers the run with (`seon.dev.mcp/run-form`).
+(deftest ^{:seon/tasks #{"3638f3f3bd57" "18051e0ee3e2"}} a-cluster-copy-of-another-branchs-fault-reads-in-the-cluster-agents-window
+  (let [cluster-name (str "transcript-copy-" (random-uuid))
+        home (cluster.branch/cluster-branch cluster-name)]
+    (support/with-database
+     (fn [attempt]
+       (let [origin (get-in (db/db attempt) [:config :branch])
+             store (:seon.store/store (support/execution-handle attempt))]
+         (support/apply-config! attempt cluster-name {})
+         (support/transacted!
+          attempt
+          (into (agents-tx attempt agent-id)
+                (concat (agent/creation-tx {:seon.agent/id "worker" :seon.ns/name 'my.agents.worker
+                                            :seon.cluster/name cluster-name :seon.agent/branch origin})
+                        [{:seon.turn/id "cluster-copy" :seon.turn/agent [:seon.agent/id agent-id]
+                          :seon.turn/opened-tx "datomic.tx"}])))
+         (registry/branch! {:seon.store/store store :seon.store/branch home
+                            :seon.cluster.registry/from (db/commit-id (db/db attempt))})
+         (let [cluster (db/carry-connection-projection-state!
+                        (store/open-branch! store home)
+                        (:seon.sci.eval/projection-state (meta attempt)))]
+           (try
+             (settled-evaluation! cluster "cluster-copy" 0)
+             (let [receipt (db/call-with-custody
+                            {:seon.db/connection cluster}
+                            #(fault/fault! (env/environment
+                                            {:seon.boot/cluster-name cluster-name
+                                             :seon.db/connection cluster
+                                             :seon.sci.admit/caps (config/result-caps config/defaults)})
+                                           (ex-info "raised on the worker's branch" {})
+                                           {:seon.error/layer ::evaluation
+                                            :seon.error/operation `copy-probe
+                                            :seon.db.process/id "transcript-test"
+                                            :seon.agent/id "worker"}))]
+               (is (true? (:seon.fault/committed? receipt)) (pr-str receipt)))
+             (settled-evaluation! cluster "cluster-copy" 1)
+             (let [responses (into {} (map (juxt :seon.cluster.eval/ordinal :seon.render.history/printed-value))
+                                   (transcript/history-entries (unit cluster)))]
+               (is (= #{0 1} (set (keys responses))) "each entry names its evaluation's ordinal")
+               (is (str/includes? (str (get responses 1)) "raised on the worker's branch") (pr-str responses))
+               (is (str/includes? (str (get responses 1)) (str origin)) "the copy names its origin branch")
+               (is (not (str/includes? (str (get responses 0)) "raised on the worker's branch"))))
+             (finally
+               (store/release-branch! cluster)
+               (registry/retire-branch! {:seon.store/store store :seon.store/branch home})))))))))
