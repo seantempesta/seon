@@ -1292,6 +1292,20 @@
         (is (= []
                (seon.fn/tests-reaching @connection (quote sample.reach/absent))))))))
 
+;; Class: a program attribute is a stored attribute. The contract-finding report
+;; row declared a program partition, so `program/program-attributes` named four
+;; attributes no store installs; a read over that set retained evidence whose
+;; witness `d/datoms` refuses, and root's graph panicked at every turn start
+;; (2026-09-26, default log 16:06:58Z and 16:14:33Z).
+(deftest every-program-attribute-is-installed
+  (test-support/with-database
+   (fn [connection]
+     (let [database @connection
+           installed (:schema database)]
+       (is (= [] (vec (sort (remove #(contains? installed %)
+                                    (program/program-attributes
+                                     (db/carried-projection database)))))))))))
+
 (deftest contract-findings-ranks-each-incomplete-function-contract
   (test-support/with-database
     (fn [connection]
