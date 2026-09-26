@@ -21,8 +21,9 @@
     (mapv #(or (:seon.eval/shown %) (:seon.cluster.eval/error %))
           (drive/run-receipts (db/db connection) [(:seon.turn/id result)]))))
 
-(deftest ^{:seon.test/long "Six ordinary agent runs, each a run transaction, one Flow turn and its settlement (measured 184-229 ms warm each on default, 2026-09-26), plus the agent's arming."
-           :seon.test/long-ms 20000}
+(deftest ^{:seon.test/long "Eight ordinary agent runs, each one Flow pass and its one settlement commit (measured 184-229 ms warm each on default under two commits, 2026-09-26), plus the agent's arming and one stopped run."
+           :seon.test/long-ms 20000
+           :seon/tasks #{"d741e6812a31" "62c45543598c"}}
   code-evaluates-as-one-ordinary-run-of-its-agent
   (let [target (support/execution-handle nil)
         connection (:seon.db/connection target)
@@ -86,6 +87,45 @@
                                                          :seon.cluster.reply/text "1"))]
               (is (= :seon.agent/segmenter (:seon.error/member refused)) (pr-str refused))
               (is (= before (runs)))))
+          (testing "the run is written in the one transaction that settles it; submission commits nothing"
+            (let [before (db/db connection)
+                  result (code "(+ 1 2)")
+                  after (db/db connection)
+                  txs (db/q '[:find ?opened ?shown ?closed :in $ ?id
+                              :where [?run :seon.turn/id ?id ?opened] [?e :seon.cluster.eval/run ?run]
+                              [?e :seon.eval/shown _ ?shown] [?run :seon.turn/closed-tx ?closed]]
+                            after (:seon.turn/id result))
+                  [[opened shown closed]] (vec txs)]
+              (is (= ["3"] (shown connection result)))
+              (is (= opened shown) "the run opens in the settlement transaction")
+              (is (= opened closed) "and closes in it")
+              (is (= 1 (- (db/basis-t after) (db/basis-t before))) "one commit per form")))
+          (testing "a submission is a value on the agent's request port; a pass stopped before settlement leaves no half-written run"
+            (let [submitted (agent/submit-source! (assoc request :seon.agent/segmenter 'seon.cluster.reply/code-sources
+                                                         :seon.cluster.reply/text "(loop [] (recur))"))
+                  reply (:seon.agent/reply submitted)
+                  requests (:seon.agent/requests (agent/armed routing agent-id))]
+              (is (:seon.turn/id submitted) (pr-str submitted))
+              (support/await-event! (async/go-loop []
+                                      (if (zero? (count (.buf ^clojure.core.async.impl.channels.ManyToManyChannel requests)))
+                                        true
+                                        (do (async/<! (async/timeout 5)) (recur))))
+                                    ::request-taken)
+              (agent/disarm! request)
+              (is (= reply (second (async/alts!! [reply (async/timeout 0)] :priority true)))
+                  "the caller's reply is answered or closed when the stop returns")
+              (let [database (db/db connection)]
+                (is (empty? (db/q '[:find ?run :in $ ?agent-id
+                                    :where [?agent :seon.agent/id ?agent-id] [?run :seon.turn/agent ?agent]
+                                    (not [?run :seon.turn/closed-tx _])]
+                                  database agent-id))
+                    "no open run remains")
+                (is (empty? (db/q '[:find ?e :in $ ?id
+                                    :where [?run :seon.turn/id ?id] [?e :seon.cluster.eval/run ?run]
+                                    (not [?e :seon.eval/shown _]) (not [?e :seon.cluster.eval/error _])
+                                    (not [?e :seon.cluster.eval/interrupted-at _])]
+                                  database (:seon.turn/id submitted)))
+                    "and no evaluation without a terminal fact"))))
           (finally
             (agent/disarm! request)
             (doseq [channel [faults (:seon.cluster.wake/channel handle)

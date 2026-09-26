@@ -53,8 +53,8 @@
 ;;; call (AGENTS §2.1: never fetch an input at call time).
 (defonce ^:private cluster-agent-acquire-context!
   (delay (requiring-resolve 'seon.cluster.agent/acquire-context!)))
-(defonce ^:private cluster-agent-submit-source!
-  (delay (requiring-resolve 'seon.cluster.agent/submit-source!)))
+(defonce ^:private cluster-agent-evaluate-source!
+  (delay (requiring-resolve 'seon.cluster.agent/evaluate-source!)))
 (defonce ^:private cluster-prompt-prompt
   (delay (requiring-resolve 'seon.cluster.prompt/prompt)))
 (defonce ^:private context-capture-tx
@@ -1379,6 +1379,15 @@
   (let [value (settled-value database row)]
     (if (:seon.error/at value) database value)))
 
+(defn- with-open-run
+  "`database` with `submission`'s run opened (`seon.db/with`, never committed),
+  or unchanged when the writer refuses the open: the settlement that carries
+  the open then carries its refusal."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.turn.loop/submission] :seon.db/database-value]}
+  [database submission]
+  (let [value (db/with database (:seon.db/tx-data submission))]
+    (if (:seon.error/at value) database value)))
+
 (def ^:private receipt-terminal-attributes
   [:seon.eval/shown
    :seon.eval/origin
@@ -2372,13 +2381,15 @@
   (db/transact! connection [[:db.fn/call #'compact-call agent-id]]))
 
 (defn virtual-turn!
-  "Submit a fixture reply to the ordinary agent proc, without a provider.
-  Returns its durable turn identity; completion is observed in its facts."
+  "Run a fixture reply as one ordinary run of the agent proc, without a
+  provider (`seon.cluster.agent/evaluate-source!`). Returns its turn identity
+  once the run has settled, or the pass's refusal (a run already open)."
   {:malli/schema [:=> [:cat :seon.turn/virtual-request]
                   [:or :seon.agent/source-submission-result
-                   :seon.agent/source-submission-refused-error]]}
+                   :seon.agent/source-submission-refused-error
+                   :seon.await/timeout-error :seon.await/closed-error]]}
   [request]
-  (@cluster-agent-submit-source!
+  (@cluster-agent-evaluate-source!
    (update request :seon.cluster.reply/text #(or % ""))))
 
 
@@ -3731,6 +3742,23 @@
               (cond-> receipt (seq faults) (assoc :seon.cluster.eval/faults faults))))
           (map vector requests receipts)))))
 
+(defn- with-submission
+  "`transaction` preceded by the pass's submitted run, when it carries one: the
+  run's open and frozen sources (`system-run-tx`) and its staged reply, so a
+  source run is written in the ONE transaction that settles it. The writer
+  applies the open first, so every run-dependent call after it sees the run."
+  {:malli/schema [:=> [:cat :seon.turn.loop/cluster
+                       [:map [:seon.db/tx-data :seon.store/transaction-data]
+                        [:seon.blob/staged-writes {:optional true} [:vector :seon.blob/staged-write]]]]
+                  [:map [:seon.db/tx-data :seon.store/transaction-data]
+                   [:seon.blob/staged-writes [:vector :seon.blob/staged-write]]]]}
+  [cluster transaction]
+  (let [submission (:seon.turn.loop/submission cluster)]
+    (assoc transaction
+           :seon.db/tx-data (into (vec (:seon.db/tx-data submission)) (:seon.db/tx-data transaction))
+           :seon.blob/staged-writes (into (vec (:seon.blob/staged-writes submission))
+                                          (:seon.blob/staged-writes transaction)))))
+
 (defn- settle-batch!
   "Settle every evaluated form and all turn side effects in one transaction."
   {:malli/schema
@@ -3796,7 +3824,7 @@
         ;; fault may never leave a run open.
         outcome
         (phase
-         #(let [transaction (transaction)]
+         #(let [transaction (with-submission cluster (transaction))]
             (blob/with-publication!
              connection (:seon.blob/staged-writes transaction)
              (fn [] (db/transact!
@@ -3936,18 +3964,21 @@
         ;; Same writer decision as `refusal-terminal-data`: the batch's
         ;; settlements and close each require the run to exist and be open,
         ;; which is what the refused batch commit may itself have denied.
-        {:tx-data
-         (into (if run-id
-                 [[:db.fn/call #'open-run-tx-call run-id
-                   (into (vec (receipt-settle-batch-tx receipts))
-                         (close-tx {:seon.turn/id run-id
-                                    :seon.db.process/id process
-                                    :seon.turn/closed-tx "datomic.tx"}))]]
-                 (vec (receipt-settle-batch-tx receipts)))
-               (:seon.db/tx-data recording))}
+        (with-submission
+         cluster
+         {:seon.db/tx-data
+          (into (if run-id
+                  [[:db.fn/call #'open-run-tx-call run-id
+                    (into (vec (receipt-settle-batch-tx receipts))
+                          (close-tx {:seon.turn/id run-id
+                                     :seon.db.process/id process
+                                     :seon.turn/closed-tx "datomic.tx"}))]]
+                  (vec (receipt-settle-batch-tx receipts)))
+                (:seon.db/tx-data recording))
+          :seon.blob/staged-writes (vec (:seon.blob/staged-writes recording))})
         outcome (blob/with-publication!
-                 connection (vec (:seon.blob/staged-writes recording))
-                 #(db/transact! connection transaction))]
+                 connection (:seon.blob/staged-writes transaction)
+                 #(db/transact! connection {:tx-data (:seon.db/tx-data transaction)}))]
     (when-not (:db-after outcome)
       (throw
        (ex-info "Batch refusal settlement was refused."
@@ -3998,12 +4029,13 @@
         ;; than escaping with the run still open.
         commit
         (fn [transaction]
-          (phase
-           #(blob/with-publication!
-             connection (vec (:seon.blob/staged-writes transaction))
-             (fn [] (db/transact!
-                     connection
-                     {:tx-data (:seon.db/tx-data transaction)})))))
+          (let [transaction (with-submission cluster transaction)]
+            (phase
+             #(blob/with-publication!
+               connection (:seon.blob/staged-writes transaction)
+               (fn [] (db/transact!
+                       connection
+                       {:tx-data (:seon.db/tx-data transaction)}))))))
         outcome (commit prepared)]
     (if (:db-after outcome)
       (assoc prepared :seon.turn.loop/outcome outcome)
@@ -4842,6 +4874,7 @@
         _ (when (:seon.error/at overlay)
             (throw (ex-info (:seon.error/message overlay "Agent overlay read refused.") overlay)))
         cluster (merge cluster overlay)
+        submission (:seon.turn.loop/submission cluster)
         ;; ONE DERIVATION PER TURN (2.1). The render profile is the turn's
         ;; presentation policy, not a per-form question, so it is derived
         ;; here — where the evaluation requests are built — and CARRIED on
@@ -4859,7 +4892,10 @@
            ordinal first-ordinal
            namespace-name starting-namespace
            results []
-           working nil]
+           ;; A submitted run's open was applied once, by the pass, to the
+           ;; value this commit id names; `with` keeps the base's commit id.
+           working (when-let [opened (:seon.db/db submission)]
+                     [(db/commit-id opened) opened])]
       (if-let [source (first remaining)]
         (let [form (assoc source :seon.cluster.eval/ns
                           [:seon.ns/name namespace-name])
@@ -4871,7 +4907,8 @@
               (if (= (db/commit-id latest) (first working))
                 working
                 [(db/commit-id latest)
-                 (reduce with-settled latest
+                 (reduce with-settled
+                         (cond-> latest submission (with-open-run submission))
                          (keep #(get-in % [:seon.sci.eval/evaluation :seon.program/row]) results))])
               captured (atom [])
               _ (await-turn-part! cluster :seon.sci.eval/evaluation
@@ -5072,7 +5109,10 @@
                   :seon.error/value failure})
         (report :error 0))
       (let [{ctx :seon.sci.eval/ctx} forked
-            database (db/db connection)
+            ;; A submitted run is read where its settlement will write it: on
+            ;; the value its open leaves (`with-submission`).
+            database (or (get-in cluster [:seon.turn.loop/submission :seon.db/db])
+                         (db/db connection))
             first-ordinal (:seon.cluster.eval/ordinal work)
             evaluations (fold-evaluations database run-id)
             evaluated
@@ -5443,7 +5483,11 @@
                                 :generate (generate-turn request)
                                 :resume (resume-turn request)
                                 :close (close-turn request))
-                       _ (episode-exhausted! cluster agent-id result)]
+                       ;; A source submission spends no episode run
+                       ;; (`episode-runs`), so its pass cannot be the one that
+                       ;; spent the last: no budget reads on its reply path.
+                       _ (when-not (:seon.turn.loop/submission cluster)
+                           (episode-exhausted! cluster agent-id result))]
                    (if (and (= :closed (:seon.turn.loop/outcome result))
                               (not= :generate (:seon.turn.work/situation work))
                               (db/q '[:find ?issue . :in $ ?id :where
@@ -5730,9 +5774,11 @@
   database value, derive `next-agent-work`, run the situation through
   `seon.turn/turn` — the surviving owner of open/call/resume/
   close and the pre-provider capture — then
-  `offer!` one wake into this agent's OWN mailbox when
-  `more-agent-work?`. Coalescing on sliding-1 keeps the rewake
-  non-recursive. Failures inside the pass stay VALUES (the existing
+  `offer!` one wake into this agent's OWN mailbox, so the next pass's one
+  derivation finds what remains. A source submission arrives as a value on
+  the request port and is its own work: its run's open is applied here and
+  commits with its settlement, and its reply port is answered with the
+  report. Coalescing on sliding-1 keeps the rewake non-recursive. Failures inside the pass stay VALUES (the existing
   `refused!`/`error-tx` owners); a Throwable that escapes anyway is a
   core fault and rides this graph's error channel into the cluster's
   fault committer, tagged with the agent. The completion channel is an
@@ -5752,6 +5798,8 @@
                   [:=> [:cat :map :keyword :seon.schema/value]
                    [:tuple :map [:maybe [:map [::flow/report [:vector :seon.turn.loop/pass-report]]]]]]]}
   ([]
+   ;; The agent's request port (`:seon.agent/request`, one source submission
+   ;; as a value) joins as an external in-port (`seon.cluster.agent/turn-step`).
    {:ins {:seon.agent/episode "One payload-free episode signal from the mailbox."}
     :outs {}
     :workload :io
@@ -5761,16 +5809,19 @@
    args)
   ([state _transition]
    state)
-  ([state _input _message]
+  ([state input message]
    (let [cluster (:seon.turn.loop/cluster state)
-         completion (:seon.turn.loop/completion cluster)]
+         completion (:seon.turn.loop/completion cluster)
+         submission (when (= :seon.agent/request input) message)
+         reply (:seon.agent/reply submission)]
      (if (:seon.turn.loop/parked state)
        ;; PARKED. The declared write-refusal bound already fired and committed
        ;; its one fault; a later wake must not resurrect the storm. Re-arming
        ;; the agent (disarm/arm) builds a fresh proc with fresh state, which
        ;; is the one way out — deliberately, so a park is visible until
-       ;; someone acts on the committed fault.
-       [state nil]
+       ;; someone acts on the committed fault. A submission it holds is
+       ;; answered closed: its caller reads the parked fault in status.
+       (do (some-> reply async/close!) [state nil])
        (if-some [turn-bound (await-turn-permit! state)]
        (let [backstop (arm-turn-completion-backstop! turn-bound)
              cluster (assoc cluster :seon.turn.loop/await-part
@@ -5782,8 +5833,20 @@
                       now (Date.)
                       request {:seon.agent/id agent-id
                                :seon.db.process/id process}
-               ;; ONE database value for the derivation
-                      next (next-agent-work (db/db connection) request)
+                      database (db/db connection)
+                      ;; A SUBMISSION IS ITS OWN WORK: its run's open is applied
+                      ;; to this one value by the writer's own functions, and a
+                      ;; refusal (a run already open, admission closed) answers
+                      ;; its caller. The open commits with the settlement.
+                      basis (when submission
+                              (db/with database (:seon.db/tx-data submission)))
+                      next (cond
+                             (nil? submission) (next-agent-work database request)
+                             (:seon.error/at basis) nil
+                             :else {:seon.turn.work/situation :resume
+                                    :seon.turn/id (:seon.turn/id submission)
+                                    :seon.agent/id agent-id
+                                    :seon.cluster.eval/ordinal 0})
                       ;; A REFUSED DERIVATION IS A CORE FAULT, NOT A SITUATION:
                       ;; its declared error arm escapes whole to this graph's
                       ;; fault route instead of reaching `turn` as work.
@@ -5797,13 +5860,20 @@
                       _ (when-let [derived (:seon.turn/id next)]
                           (reset! (:seon.agent/run-id turn-bound) derived))]
                   (if (nil? next)
-                    [(dissoc state :seon.turn/id)
-                     {::flow/report [{:seon.agent/id agent-id
-                                     :seon.turn.loop/idle? true}]}]
+                    (do (some->> basis (async/offer! reply))
+                        [(dissoc state :seon.turn/id)
+                         {::flow/report [{:seon.agent/id agent-id
+                                         :seon.turn.loop/idle? true}]}])
                     (let [report (turn
-                                  {:seon.turn.loop/cluster cluster
+                                  {:seon.turn.loop/cluster
+                                   (cond-> cluster
+                                     submission
+                                     (assoc :seon.turn.loop/submission
+                                            (assoc (select-keys submission [:seon.db/tx-data :seon.blob/staged-writes])
+                                                   :seon.db/db basis)))
                                    :seon.turn.work/next next}
                                   now)
+                          _ (when reply (async/offer! reply report))
                           _ (when-let [opened (:seon.turn/id report)]
                               (reset! (:seon.agent/run-id turn-bound) opened))
                           refusal (:seon.turn.loop/refusal report)
@@ -5838,8 +5908,11 @@
                         (record-write-refusal-fault!
                          cluster agent-id (:seon.turn/id report)
                          refusal refusals bound))
-                      (when (and (not parked?)
-                                 (more-agent-work? (db/db connection) request))
+                      ;; THE NEXT PASS DERIVES ITS OWN WORK. A pass that
+                      ;; turned something rewakes once; the next pass's one
+                      ;; derivation finds the rest or reports idle, after this
+                      ;; pass's caller was answered (task 62c45543598c).
+                      (when-not parked?
                         (async/offer!
                          (:seon.cluster.wake/channel cluster) :seon.agent/wake))
                       ;; THE PASS REPORTS THE RUN IT TURNED, not whatever
@@ -5861,6 +5934,9 @@
                 ;; flow's own report channel: observation, never a dependency
                        {::flow/report [report]}])))
          (finally
+           ;; An answered reply keeps its value; one never answered (the pass
+           ;; escaped or was interrupted) closes, so its caller's await ends now.
+           (some-> reply async/close!)
            (if (async/offer! completion :seon.agent/ready)
              (do
                (async/offer! (:seon.agent/cancel backstop) :seon.agent/completed)

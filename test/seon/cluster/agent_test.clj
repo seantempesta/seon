@@ -565,7 +565,7 @@
                                    [:seon.turn/id run-id])))
                       "the run retains exact submitted source, not reconstructed forms")
                   (is (some? (agent/armed routing "source-agent"))
-                      "the existing armer owns unarmed delivery")
+                      "submission arms an unarmed agent (arm! is idempotent)")
                   ;; THE COMMENT IS ITS OWN FACT beside the form it
                   ;; introduces, so a prompt line holds exactly one form.
                   (is (= [{:seon.cluster.eval/ordinal 0
@@ -612,14 +612,19 @@
           (test-support/transacted!
                        connection
                        (turn/open-tx {:seon.turn/id "already-open" :seon.turn/agent [:seon.agent/id "source-agent"] :seon.turn/opened-tx "datomic.tx"}))
-          (let [refusal
-                (agent/submit-source!
-                 {:seon.turn.loop/cluster cluster-handle
-                  :seon.agent/routing routing
-                  :seon.agent/id "source-agent"
-                  :seon.cluster.reply/text "(+ 2 2)"})]
-            (is (= :seon.turn/agent-already-running (:seon.turn/rule refusal))
-                "the transaction authority refuses a second open run")))))))
+          (try
+            (let [refusal
+                  (test-support/await-event!
+                   (:seon.agent/reply
+                    (agent/submit-source!
+                     {:seon.turn.loop/cluster cluster-handle
+                      :seon.agent/routing routing
+                      :seon.agent/id "source-agent"
+                      :seon.cluster.reply/text "(+ 2 2)"}))
+                   ::refused-open)]
+              (is (= :seon.turn/agent-already-running (:seon.turn/rule refusal))
+                  "the writer's own open refuses a second open run at the pass, answered on the reply"))
+            (finally (disarm-all! routing))))))))
 
 (deftest prompt-refusal-closes-without-answering-and-stops-at-the-agent-bound
   (with-connection

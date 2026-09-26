@@ -61,21 +61,22 @@
   law. Buffered wakes → boot re-stamps every graph and primes each
   mailbox once. Boot closes prior open turns and interrupts unfinished
   evaluations; nothing resumes the interrupted execution. No row
-  depends on a channel for recovery."
+  depends on a channel for recovery. A source submission is a value on
+  the agent's request port until the settlement that opens its run: a
+  crash before it leaves no fact, and its caller's failed call is its
+  record."
   (:require [seon.error.refusal]
             [clojure.core.async :as async]
             [clojure.core.protocols :as core.protocols]
             [clojure.core.async.impl.protocols :as async.protocols]
             [clojure.core.async.flow :as flow]
             [clojure.string :as str]
-            [datahike.api :as d]
             [seon.await :as await]
             [seon.bootstrap :as bootstrap]
             [seon.ai :as ai]
             [seon.turn :as turn]
             [seon.config :as config]
             [seon.db :as db]
-            [seon.blob :as blob]
             ;; loaded for agents: the root opening names (seon.cluster.status/agents {})
             [seon.cluster.status]
             [seon.cluster.registry :as registry]
@@ -531,7 +532,9 @@
                   [:=> [:cat :map :keyword :seon.schema/value]
                    [:tuple :map [:maybe [:map [::flow/report [:vector :seon.turn.loop/pass-report]]]]]]]}
   ([] (turn/step))
-  ([args] (turn/step args))
+  ;; the agent's request port is an in-port of this proc, beside the episode conn
+  ([args] (assoc (turn/step args) ::flow/in-ports
+                 {:seon.agent/request (:seon.agent/requests (:seon.turn.loop/cluster args))}))
   ([state transition] (turn/step state transition))
   ([state input message]
    (let [^AtomicReference holder
@@ -636,7 +639,7 @@
   [routing agent-id]
   (get-in @routing [:seon.agent/armed agent-id]))
 
-(declare submit-source-in-projection)
+(declare submit-source-in-projection arm!)
 
 (defn- segmenter
   "The function that segments a submission's text into its ordered sources:
@@ -658,13 +661,17 @@
         :seon.error/offending stage}))))
 
 (defn submit-source!
-  "Submit system-authored source through the ordinary durable run path.
+  "Submit system-authored source as one run of the agent, delivered as a value.
 
   Parsing, delimiter repair, evaluation, result bindings, and settlement are
-  the same owners used for a model reply. The run transaction decides whether
-  the agent is busy; after it commits, one payload-free wake starts or arms the
-  agent graph. A supplied starting namespace is the caller's parse-time
-  decision; the run transaction refuses if the agent's assignment changed."
+  the same owners used for a model reply. The run's open and frozen sources
+  (`seon.turn/system-run-tx`) and its staged reply travel to the armed agent's
+  request port; its turn proc applies the open, evaluates, and commits open
+  and settlement as ONE transaction, then answers the returned reply port.
+  Nothing is written here. The writer decides at the pass whether the agent is
+  busy or its admission closed; a full request port refuses as busy. A
+  supplied starting namespace is the caller's parse-time decision; the open
+  refuses if the agent's assignment changed."
   {:malli/schema
    [:=> [:catn [:request :seon.agent/source-submission-request]]
     [:or :seon.agent/source-submission-result :seon.agent/source-submission-refused-error]]}
@@ -724,83 +731,70 @@
         (if (:seon.cluster.reply/no-forms sources)
           (assoc sources :seon.agent/refused-source-agent agent-id)
           (let [run-id (turn/next-id database (:seon.cluster/name handle) agent-id)
-                now (Date.)
                 staged-reply (turn/stage-reply! connection text)
-                outcome
-                (blob/with-publication!
-                 connection (:seon.blob/staged-writes staged-reply)
-                 #(db/transact!
-                   connection
-                   {:tx-data
-                    (turn/system-run-tx
-                     database
-                     (merge (dissoc staged-reply :seon.blob/staged-writes)
-                            {:seon.agent/id agent-id :seon.turn/id run-id :seon.db.process/id (:seon.db.process/id handle) :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name namespace-name] :seon.turn/reply-size (count (pr-str sources)) :seon.turn/sources sources}))}))]
-            (if (:seon.db/transaction-refused outcome)
-              (assoc outcome :seon.agent/refused-source-agent agent-id)
-              (let [channel
-                    (or (:seon.cluster.wake/channel (armed routing agent-id))
-                        (:seon.cluster.wake/channel handle))]
-                (if (async/offer! channel :seon.agent/wake)
-                  {:seon.turn/id run-id}
-                  (seon.error.refusal/diagnostic (Date.) :seon.agent/source-submission `submit-source!
-                   {:seon.agent/refused-source-agent agent-id
-                    :seon.error/message "The source run committed, but its wake was not delivered."
-                    :seon.error/member :seon.cluster.wake/channel
-                    :seon.error/expected :seon.agent/wake
-                    :seon.error/offending run-id
-                    :seon.error/data {:seon.turn/id run-id}}))))))))))
+                reply (async/promise-chan)
+                request
+                {:seon.turn/id run-id
+                 :seon.agent/reply reply
+                 :seon.blob/staged-writes (:seon.blob/staged-writes staged-reply)
+                 :seon.db/tx-data
+                 (turn/system-run-tx
+                  database
+                  (merge (dissoc staged-reply :seon.blob/staged-writes)
+                         {:seon.agent/id agent-id :seon.turn/id run-id :seon.db.process/id (:seon.db.process/id handle) :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name namespace-name] :seon.turn/reply-size (count (pr-str sources)) :seon.turn/sources sources}))}
+                ;; the request port is the armed graph's; arming is idempotent
+                requests (:seon.agent/requests
+                          (arm! {:seon.turn.loop/cluster handle :seon.agent/id agent-id
+                                 :seon.agent/routing routing}))]
+            (if (async/offer! requests request)
+              {:seon.turn/id run-id :seon.agent/reply reply}
+              (seon.error.refusal/diagnostic (Date.) :seon.agent/source-submission `submit-source!
+               {:seon.agent/refused-source-agent agent-id
+                :seon.error/message "The agent is busy: a submission already waits on its request port."
+                :seon.error/member :seon.agent/requests
+                :seon.error/expected :seon.agent/request
+                :seon.error/offending run-id}))))))))
 
 (defn evaluate-source!
   "Evaluate `text` as one ordinary run of the agent and answer that run once it
-  has settled: `submit-source!`, then the run's terminal fact awaited under the
+  has settled: `submit-source!`, then the pass's reply awaited under the
   cluster's `:seon.config.agent/turn-completion-backstop-ms`.
 
-  The listener is registered before the submission and the durable state is
-  read once after it, so a run that closed before the listener saw it is not
-  missed. At the bound the answer is the await's declared timeout carrying the
-  run id: the run keeps its ownership, the agent stays busy until it settles,
-  and nothing replays. The run starts in the requested namespace, else where
-  the agent's previous run ended, else its assigned namespace; a form moves
-  the evaluation elsewhere with `in-ns`, as at a REPL."
+  The run is one value from submission to settlement: the agent's turn proc
+  receives it on its request port and answers on its reply port after the one
+  transaction that opens, evaluates and settles it. A run the writer refuses
+  to open answers its refusal. At the bound the answer is the await's
+  declared timeout carrying the run id, and a pass that ended without settling
+  closes its reply (the await's closed error); nothing replays. The run starts
+  in the requested namespace, else where the agent's previous run ended, else
+  its assigned namespace; a form moves the evaluation elsewhere with `in-ns`,
+  as at a REPL."
   {:malli/schema [:=> [:cat :seon.agent/source-submission-request]
                   [:or :seon.agent/source-submission-result :seon.agent/source-submission-refused-error
-                   :seon.await/timeout-error]]}
+                   :seon.await/timeout-error :seon.await/closed-error]]}
   [{handle :seon.turn.loop/cluster agent-id :seon.agent/id :as request}]
-  (let [connection (:seon.db/connection handle)
-        database @connection
-        run-id (atom nil)
-        closed (async/promise-chan)
-        closed? #(when-let [id @run-id]
-                   (some? (:seon.turn/closed-tx (db/pull % [:seon.turn/closed-tx] [:seon.turn/id id]))))
-        listener (keyword "seon.cluster.agent" (str "evaluate-source-" (id/id)))
-        bound (:seon.config.agent/turn-completion-backstop-ms
-               (config/effective database (:seon.cluster/name handle)))]
-    (cond
-      (not (pos-int? bound))
+  (let [bound (:seon.config.agent/turn-completion-backstop-ms
+               (config/effective @(:seon.db/connection handle) (:seon.cluster/name handle)))]
+    (if-not (pos-int? bound)
       (seon.error.refusal/diagnostic (Date.) :seon.agent/source-submission `evaluate-source!
        {:seon.agent/refused-source-agent agent-id
         :seon.error/message "The cluster declares no turn-completion bound to await the run under."
         :seon.error/member :seon.config.agent/turn-completion-backstop-ms
         :seon.error/offending bound})
-      :else
-      (do
-        (d/listen connection listener (fn [report] (when (closed? (:db-after report)) (async/offer! closed true))))
-        (try
-          (let [submitted (submit-source! request)]
-            (if-not (:seon.turn/id submitted)
-              submitted
-              (do (reset! run-id (:seon.turn/id submitted))
-                  (when (closed? @connection) (async/offer! closed true))
-                  (let [awaited (await/await!
-                                 {:seon.await/bound {:seon.await/config-attribute :seon.config.agent/turn-completion-backstop-ms
-                                                     :seon.await/config-value bound}
-                                  :seon.await/diagnostic {:seon.error/layer :seon.agent/source-submission
-                                                          :seon.error/operation `evaluate-source!
-                                                          :seon.error/offending (:seon.turn/id submitted)}
-                                  :seon.await/port-operations [closed]})]
-                    (if (true? awaited) submitted (assoc awaited :seon.turn/id (:seon.turn/id submitted)))))))
-          (finally (d/unlisten connection listener)))))))
+      (let [{run-id :seon.turn/id reply :seon.agent/reply :as submitted} (submit-source! request)]
+        (if-not reply
+          submitted
+          (let [answer (await/await!
+                        {:seon.await/bound {:seon.await/config-attribute :seon.config.agent/turn-completion-backstop-ms
+                                            :seon.await/config-value bound}
+                         :seon.await/diagnostic {:seon.error/layer :seon.agent/source-submission
+                                                 :seon.error/operation `evaluate-source!
+                                                 :seon.error/offending run-id}
+                         :seon.await/port-operations [reply]})]
+            (cond
+              (:seon.turn.loop/outcome answer) {:seon.turn/id run-id}
+              (:seon.await/config-attribute answer) (assoc answer :seon.turn/id run-id)
+              :else (assoc answer :seon.agent/refused-source-agent agent-id))))))))
 
 (defn fenced?
   "True when this agent is QUARANTINED: armed, routed, mailbox closed.
@@ -1228,6 +1222,9 @@
                                :seon.error/expected :seon.agent/routing})))
           connection (:seon.db/connection execution)
           wake-ch (wake-channel)
+          ;; ONE WAITING SUBMISSION: its caller holds it and awaits, so a
+          ;; full port refuses the next as busy rather than dropping one.
+          requests (async/chan 1)
           schedule-channel (async/chan (async/sliding-buffer 1))
           completion (async/chan 1)
           turn-backstop-state (atom nil)
@@ -1244,6 +1241,7 @@
                               :seon.cluster.wake/armer-channel
                               (:seon.cluster.wake/channel handle)
                               :seon.cluster.wake/channel wake-ch
+                              :seon.agent/requests requests
                               :seon.schedule/channel schedule-channel
                               :seon.turn.loop/completion completion
                               :seon.agent/turn-backstop-state turn-backstop-state
@@ -1277,6 +1275,7 @@
                  :seon.flow/started started
                  :seon.flow/executor executor
                  :seon.cluster.wake/channel wake-ch
+                 :seon.agent/requests requests
                  :seon.schedule/channel schedule-channel
                  :seon.turn.loop/completion completion
                  :seon.agent/turn-backstop-state turn-backstop-state}]
@@ -1467,6 +1466,13 @@
                    (update :seon.agent/channels dissoc
                            (:seon.agent/eid entry)))))
       (async/close! (:seon.cluster.wake/channel entry))
+      ;; A submission the stopped graph never took is answered closed now:
+      ;; its caller's await ends instead of spending its bound.
+      (when-let [requests (:seon.agent/requests entry)]
+        (async/close! requests)
+        (loop [] (when-let [request (async/poll! requests)]
+                   (async/close! (:seon.agent/reply request))
+                   (recur))))
       (async/close! (:seon.turn.loop/completion entry)))
     (finally (swap! routing update ::stopping dissoc agent-id)))
   nil)

@@ -73,6 +73,7 @@
                       [:seon.cluster.wake/channel :seon.flow/channel]
                       [:seon.turn.loop/completion
                        :seon.flow/channel]
+                      [:seon.agent/requests {:optional true} :seon.agent/requests]
                       [:seon.flow/executor {:optional true} :seon.flow/executor]],
                      :blueprint-request
                      [:map
@@ -143,7 +144,22 @@
                       {:description "The function that segments a submission's text into sources: seon.turn/planned-sources for a model reply (the default), seon.cluster.reply/code-sources for code. It must declare planned-sources' contract."}],
                      :source-submission-result
                      [:map
-                      [:seon.turn/id :seon.turn/id]],
+                      [:seon.turn/id :seon.turn/id]
+                      [:seon.agent/reply {:optional true} :seon.agent/reply]],
+                     ;; A source submission as the value its agent's turn proc
+                     ;; receives on its bounded request port: the run's open
+                     ;; and frozen sources, its staged reply, and the port the
+                     ;; pass answers once the run has settled. Replaceable: the
+                     ;; caller holds it and awaits, so nothing durable is lost
+                     ;; when a stop drops it (the caller's await answers).
+                     :request
+                     [:map
+                      [:seon.turn/id :seon.turn/id]
+                      [:seon.db/tx-data :seon.store/transaction-data]
+                      [:seon.blob/staged-writes [:vector :seon.blob/staged-write]]
+                      [:seon.agent/reply :seon.agent/reply]],
+                     :reply :seon.flow/channel,
+                     :requests :seon.flow/channel,
                      ;; The live value returned by `(help)`. These are
                      ;; projections of current facts, never attributes stored
                      ;; on the agent. Adding a member here is how the generated

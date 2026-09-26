@@ -221,23 +221,33 @@
               (finally (agent/release-context! execution)))))))))
 
 (deftest an-unsettled-host-run-keeps-ownership-until-it-exits
-  ;; The evaluation limit ends the loop at one second, so the run is live when
-  ;; the second submission arrives, and retirement joins it before releasing.
+  ;; The evaluation limit ends the loop at one second, so the run is live while
+  ;; later submissions arrive: one waits on the agent's bounded request port,
+  ;; the next is refused busy, and retirement joins the live run before
+  ;; releasing. Every reply is answered or closed when retire! returns.
   (with-host-world {:seon.config.eval/time-limit-ms 1000}
     (fn [{:keys [handle branch!]}]
-      (let [branch (branch!)
-            hosted (host-on! handle branch "mcp/busy")
+      (let [hosted (host-on! handle (branch!) "mcp/busy")
             custody (select-keys hosted [:seon.turn.loop/cluster :seon.agent/routing :seon.agent/id])
             submit! #(as-host hosted (fn [] (agent/submit-source! (assoc custody :seon.agent/segmenter 'seon.cluster.reply/code-sources
                                                                         :seon.cluster.reply/text %))))
             first-run (submit! "(loop [] (recur))")
-            second-run (submit! "1")]
+            ;; the turn proc has taken the first submission off its port
+            requests (:seon.agent/requests (agent/armed (:seon.agent/routing custody) "mcp/busy"))
+            _ (support/await-event! (async/go-loop []
+                                      (if (zero? (count (.buf ^clojure.core.async.impl.channels.ManyToManyChannel requests)))
+                                        true
+                                        (do (async/<! (async/timeout 5)) (recur))))
+                                    ::first-run-taken)
+            second-run (submit! "1")
+            third-run (submit! "2")
+            done? #(= % (second (async/alts!! [% (async/timeout 0)] :priority true)))]
         (is (:seon.turn/id first-run) (pr-str first-run))
-        (is (refused-by? :seon.turn/agent-already-running second-run) "the live run still owns the agent")
+        (is (:seon.turn/id second-run) "one submission waits on the request port")
+        (is (= :seon.agent/requests (:seon.error/member third-run)) "a full request port refuses as busy")
         (host/retire! hosted)
-        (is (some? (:seon.turn/closed-tx (db/pull (branch-db handle branch) [:seon.turn/closed-tx]
-                                                  [:seon.turn/id (:seon.turn/id first-run)])))
-            "retirement returned only after the run exited")))))
+        (is (done? (:seon.agent/reply first-run)) "retirement returned only after the live run exited")
+        (is (done? (:seon.agent/reply second-run)) "the waiting submission is answered or closed, never left hanging")))))
 
 (deftest a-namespace-switch-declares-nothing
   ;; SCI's in-ns only switches the namespace. Before the fix an agent's
