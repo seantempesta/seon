@@ -3140,3 +3140,24 @@
       (let [rows (seon.fn/published-index-rows
                   (db/db connection) [[:seon.ns/name 'my.agents.steward-cycle]])]
         (is (= [[:seon.agent/id "steward-cycle"]] (map :seon.ns/steward rows)))))))
+
+(deftest an-analyzer-launch-loaded-as-other-bytes-reanalyzes-everything
+  ;; The loaded analyzer's identity derives from what this JVM loaded, never
+  ;; from the prior head's rows alone (seon.cluster/launched-analyzer).
+  (test-support/with-database
+    (fn [connection]
+      (let [database (db/db connection)
+            launched-analyzer #'cluster/launched-analyzer
+            files (vec (distinct (map #(nth % 2) (#'cluster/analyzer-declarations database))))
+            stored (source/stored-path-digests database files)
+            head (#'cluster/analyzer-digest database)
+            other (apply str (repeat 64 "0"))]
+        (is (contains? stored "src/seon/fn.clj") "the indexer's own file is an analyzer file")
+        (is (= {:seon.source/analyzer-digest head}
+               (launched-analyzer database (assoc stored "src/seon/cluster.clj" other)))
+            "launch bytes the head published, and any file outside the analyzer, stay incremental")
+        (let [ahead (launched-analyzer database (assoc stored "src/seon/fn.clj" other))]
+          (is (not= head (:seon.source/analyzer-digest ahead))
+              "an analyzer file loaded as other bytes matches no seal, so every file reanalyzes")
+          (is (= other (get (:seon.cluster/launched-analyzer ahead) "src/seon/fn.clj"))
+              "and the publication seals the rows it analyzed with those bytes"))))))
