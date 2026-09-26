@@ -61,9 +61,6 @@
                [:seon.schema/schema-rows :seon.schema/projection-rows]
                [:seon.schema/function-contract-rows
                 :seon.schema/projection-rows]
-               [:seon.schema/function-source-rows
-                {:optional true}
-                :seon.schema/projection-rows]
                [:seon.schema/artifact-exports
                 {:optional true}
                 [:set :symbol]]
