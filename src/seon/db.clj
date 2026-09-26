@@ -187,6 +187,16 @@
        (:seon.db/invalid-read request)
        (assoc :seon.db/refused-read-operation operation))))
 
+(defn read-refusal?
+  "True for this owner's declared read refusals: a `:seon.db/invalid-read-error`
+  (its `:seon.db/invalid-read` member) or a missing-projection refusal (its
+  `:seon.schema/expected-value` member). THE ONE TEST every reader applies to
+  a value a read handed it in place of an answer."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
+  [value]
+  (boolean (and (map? value)
+                (or (:seon.db/invalid-read value) (:seon.schema/expected-value value)))))
+
 (defn- refused-read
   "`value` as the refusal of the read `operation` was handed it in place of a
   database. A read refusal passes on unchanged, still naming the read that
@@ -3743,7 +3753,7 @@
                          [?arity :seon.fn.arity/min ?minimum]
                          [(get-else $ ?arity :seon.fn.arity/max -1) ?maximum]]
                        database)]
-    (if (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows))
+    (if (read-refusal? rows)
       rows
       (reduce
        (fn [bounds [function-symbol minimum maximum]]

@@ -19,7 +19,7 @@
                                       [:seon.ns/name {:seon.ns/steward [:seon.agent/id]}]}]
                      [:seon.agent/id agent-id])]
     (cond
-      (or (:seon.db/invalid-read row) (:seon.schema/expected-value row)) row
+      (db/read-refusal? row) row
       (not (:seon.agent/id row))
       {:seon.agent/no-such-agent agent-id
        :seon.error/at (java.util.Date.) :seon.error/layer :seon.agent/identity
@@ -40,7 +40,7 @@
   (let [row (db/pull database [:seon.agent/id :seon.agent/archived-tx]
                      [:seon.agent/id agent-id])]
     (cond
-      (or (:seon.db/invalid-read row) (:seon.schema/expected-value row)) row
+      (db/read-refusal? row) row
       (:seon.agent/id row) (boolean (:seon.agent/archived-tx row))
       :else {:seon.agent/no-such-agent agent-id
              :seon.error/at (java.util.Date.) :seon.error/layer :seon.agent/identity
@@ -62,7 +62,7 @@
   (let [row (db/pull database [:db/id :seon.agent/archived-tx]
                      [:seon.agent/id agent-id])]
     (cond
-      (or (:seon.db/invalid-read row) (:seon.schema/expected-value row))
+      (db/read-refusal? row)
       (throw (ex-info (:seon.error/message row) row))
       (nil? (:db/id row))
       (throw (ex-info "The agent to archive does not exist."
@@ -95,8 +95,7 @@
                       {:seon.agent/no-such-agent agent-id})))
     (let [component (or (get-in agent [:seon.agent/settings :db/id]) "agent-settings")
           attributes (ai/agent-setting-attributes database)
-          _ (when (or (:seon.db/invalid-read attributes)
-                      (:seon.schema/expected-value attributes))
+          _ (when (db/read-refusal? attributes)
               (throw (ex-info (:seon.error/message attributes) attributes)))
           admitted (select-keys overrides attributes)]
       (if (seq admitted)
@@ -133,8 +132,7 @@
         defaults (when (string? cluster-name) (config/effective database cluster-name))
         overrides (ai/agent-overlay database agent-id)
         attributes (ai/agent-setting-attributes database)
-        refusal (some #(when (or (:seon.db/invalid-read %)
-                                 (:seon.schema/expected-value %)
+        refusal (some #(when (or (db/read-refusal? %)
                                  (:seon.config/error-key %)) %)
                       [cluster-name defaults overrides attributes])]
     (cond

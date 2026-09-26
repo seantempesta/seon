@@ -352,8 +352,7 @@
     [:or :seon.config/agent-overlay :seon.db/invalid-read-error :seon.schema/validation-refusal]]}
   [db agent-id]
   (let [attributes (agent-setting-attributes db)]
-    (if (or (:seon.db/invalid-read attributes)
-            (:seon.schema/expected-value attributes))
+    (if (db/read-refusal? attributes)
       attributes
       (let [row (db/pull db [{:seon.agent/settings (vec attributes)}]
                          [:seon.agent/id agent-id])]

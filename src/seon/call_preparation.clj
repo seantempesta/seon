@@ -283,17 +283,6 @@
 
       :else nil)))
 
-(defn- refused-read
-  "The first of `reads` that is the database owner's declared read error, or
-  nil when every read answered. An empty or nil read is an answer: nothing."
-  {:malli/schema [:=> [:cat [:sequential :seon.schema/value]]
-                  [:or :nil :seon.db/error-result]]}
-  [reads]
-  (some #(when (and (map? %) (or (:seon.db/invalid-read %)
-                                 (:seon.schema/expected-value %)))
-           %)
-        reads))
-
 (defn- newest-row-transaction
   "The newest transaction that asserted OR retracted any row fact.
 
@@ -320,10 +309,10 @@
                         (:seon.config/error-key history))
                    database
                    history)
-          ranges (when-not (refused-read [source])
+          ranges (when-not (db/read-refusal? source)
                    (mapv #(db/datoms source :aevt %) attributes))]
-      (or (refused-read [source])
-          (refused-read ranges)
+      (or (when (db/read-refusal? source) source)
+          (first (filter db/read-refusal? ranges))
           (transduce (comp cat (map :tx)) max 0 ranges)))))
 
 (defn- by-schema-key
@@ -373,7 +362,7 @@
     [:or :map :seon.db/error-result]]}
   [database projection]
   (let [rows (db/q database row-query)]
-    (if (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows))
+    (if (db/read-refusal? rows)
 
       rows
       (let [contracts (contract-arities (db/carried-projection database))
@@ -419,7 +408,7 @@
                                 candidate])))
                   compiled)
             basis (newest-row-transaction database (row-attributes))]
-        (if (refused-read [basis])
+        (if (db/read-refusal? basis)
           basis
           {:seon.call-preparation/supplied-defaults admitted
            :seon.call-preparation/prepared-symbols (prepared-symbols contracts (by-schema-key admitted))
@@ -518,7 +507,7 @@
           @(cache/lookup-or-miss
             memo (snapshot-revision-key database)
             (fn [_] (delay @(cache/lookup-or-miss memo commit-key derivation)))))]
-    (when (or (:seon.db/invalid-read derived) (:seon.schema/expected-value derived))
+    (when (db/read-refusal? derived)
       (cache/evict memo commit-key)
       (cache/evict memo (snapshot-revision-key database)))
     derived))
@@ -543,7 +532,7 @@
         derived (if memo
                   (memoized-snapshot database projection memo committed)
                   (derive-snapshot database projection))]
-    (if (or (:seon.db/invalid-read derived) (:seon.schema/expected-value derived))
+    (if (db/read-refusal? derived)
       derived
       (assoc derived
              :seon.schema/projection projection
@@ -568,7 +557,7 @@
             (some (comp attributes :a) tx-data))
       (snapshot after projection)
       (let [held (snapshot before projection)]
-        (if (or (:seon.db/invalid-read held) (:seon.schema/expected-value held))
+        (if (db/read-refusal? held)
           held
           (assoc held :seon.call-preparation/checked-through-t (db/basis-t after)))))))
 
@@ -613,7 +602,7 @@
                 (long basis))
           held
           (let [derived (snapshot database projection)]
-            (if (or (:seon.db/invalid-read derived) (:seon.schema/expected-value derived))
+            (if (db/read-refusal? derived)
 
               derived
               (:seon.call-preparation/snapshot
@@ -745,8 +734,8 @@
     [:or [:vector [:tuple :int :int :qualified-keyword]] :seon.db/error-result]]}
   [database sym]
   (let [rows (db/q database row-query)
-        current (when-not (refused-read [rows]) (snapshot database (db/carried-projection database)))]
-    (or (refused-read [rows current])
+        current (when-not (db/read-refusal? rows) (snapshot database (db/carried-projection database)))]
+    (or (first (filter db/read-refusal? [rows current]))
         (->> (for [{order :seon.fn.arity/order entries :seon.call-preparation/entries} (planned-arities database current sym)
                    {index :seon.fn.argument/index entry-key :seon.call-preparation/entry-key} entries]
                [order index entry-key])
@@ -774,9 +763,9 @@
                (db/q database '[:find ?spec . :in $ ?sym
                                 :where [?function :seon.fn/sym ?sym] [?function :seon.fn/spec ?spec]]
                      sym)]
-        arity-plans (when-not (refused-read reads) (planned-arities database current sym))]
-    (if (or (refused-read reads) (nil? arity-plans))
-      (refused-read reads)
+        arity-plans (when-not (some db/read-refusal? reads) (planned-arities database current sym))]
+    (if (or (some db/read-refusal? reads) (nil? arity-plans))
+      (first (filter db/read-refusal? reads))
       (let [fixed (remove :seon.call-preparation/variadic? arity-plans)
             exact-by-count
             (reduce (fn [acc arity]
@@ -880,7 +869,7 @@
     (if (identical? derivation (::derivation held))
       (:seon.call-preparation/plan held)
       (let [compiled (plan-for database current sym)]
-        (when (and compiled (not (refused-read [compiled]))
+        (when (and compiled (not (db/read-refusal? compiled))
                    (= (db/basis-t database) (:seon.call-preparation/checked-through-t current)))
           (swap! call-state assoc-in [:seon.call-preparation/plans sym]
                  {::derivation derivation :seon.call-preparation/plan compiled}))
@@ -1205,7 +1194,7 @@
         database (when connection ((mi/-f->original db/db) connection))]
     (if (nil? database)
       arguments
-      (let [current (if (refused-read [database])
+      (let [current (if (db/read-refusal? database)
                       database
                       ((mi/-f->original current-snapshot) call-state database projection))
             sym (callee-identity callee)]
@@ -1214,13 +1203,13 @@
           (nil? sym) arguments
           ;; Unreadable custody or program rows: whether this call needs a
           ;; supplied default is unknown, so it never runs without one.
-          (refused-read [current]) (reduced (refused-call sym current))
+          (db/read-refusal? current) (reduced (refused-call sym current))
           (not (contains? (:seon.call-preparation/prepared-symbols current) sym))
           arguments
           :else
           (let [environment (env/scope environment {:my.program/executing-ctx ctx})
                 plan-value (plan call-state database current sym)]
-            (if (refused-read [plan-value])
+            (if (db/read-refusal? plan-value)
               (reduced (refused-call sym plan-value))
               (let [prepared (prepare current environment plan-value
                                       (vec arguments))]

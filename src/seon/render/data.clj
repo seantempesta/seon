@@ -100,7 +100,7 @@
   [selector entity-id cursor]
   (let [pulled (db/pull selector entity-id)]
 
-    (if (or (:seon.db/invalid-read pulled) (:seon.schema/expected-value pulled))
+    (if (db/read-refusal? pulled)
       pulled
       (let [selected (at pulled cursor)]
         (if (:seon.render.data/root-description selected)
@@ -141,7 +141,7 @@
                        :limit limit :max-result-weight weight}
                 cursor (assoc :cursor (::index-cursor cursor))))]
 
-    (if (or (:seon.db/invalid-read page) (:seon.schema/expected-value page))
+    (if (db/read-refusal? page)
       page
       (cond-> {::datoms (:datahike.index-page/datoms page)
                ::complete? (:datahike.index-page/complete? page)}
@@ -170,7 +170,7 @@
                        (and (= offset start) (::index-cursor cursor))
                        (assoc :cursor (::index-cursor cursor))))]
 
-           (if (or (:seon.db/invalid-read page) (:seon.schema/expected-value page))
+           (if (db/read-refusal? page)
              (reduced page)
              (let [rows (into (::datoms result) (:datahike.index-page/datoms page))
                    more? (not (:datahike.index-page/complete? page))
@@ -203,9 +203,9 @@
         eid (:db/id found)]
     (cond
 
-      (or (:seon.db/invalid-read snapshot) (:seon.schema/expected-value snapshot)) snapshot
+      (db/read-refusal? snapshot) snapshot
 
-      (or (:seon.db/invalid-read found) (:seon.schema/expected-value found)) found
+      (db/read-refusal? found) found
       (nil? eid) (observation-error 'seon.render.data/entity-observation ::subject "The selected entity does not exist." subject)
       (not (and (matching-continuation? outgoing-cursor snapshot eid :outgoing)
                 (matching-continuation? incoming-cursor snapshot eid :incoming)))

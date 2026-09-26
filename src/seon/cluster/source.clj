@@ -336,7 +336,7 @@
     :seon.program/unresolved-report]}
   [database]
   (let [report (fn/unresolved-callers database)]
-    (when (or (:seon.db/invalid-read report) (:seon.schema/expected-value report))
+    (when (db/read-refusal? report)
       (refuse! ::publish-readback-failed
                "the published source unresolved-callers read was refused"
                {:seon.source/read 'seon.fn/unresolved-callers

@@ -67,7 +67,7 @@
         effective
         :else
         (let [overlay (ai/agent-overlay database agent-id)]
-          (if (or (:seon.db/invalid-read overlay) (:seon.schema/expected-value overlay))
+          (if (db/read-refusal? overlay)
             overlay
             (ai/settings effective overlay)))))))
 

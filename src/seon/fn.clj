@@ -1891,9 +1891,9 @@
                     database)
         population (db/q '[:find (count ?entity) .
                            :where [?entity :seon.program/analyzed-source-digest]] database)]
-    (or (when (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows)) rows)
-        (when (or (:seon.db/invalid-read stale) (:seon.schema/expected-value stale)) stale)
-        (when (or (:seon.db/invalid-read population) (:seon.schema/expected-value population)) population)
+    (or (when (db/read-refusal? rows) rows)
+        (when (db/read-refusal? stale) stale)
+        (when (db/read-refusal? population) population)
         {:seon.db/basis-t (db/basis-t database)
          :seon.program/analyzed-count (or population 0)
          :seon.program/stale-test-reach
@@ -1996,9 +1996,9 @@
         projection (or (db/carried-projection database)
                        (schema/projection-from-database database))]
     (or
-     (when (or (:seon.db/invalid-read function-symbols) (:seon.schema/expected-value function-symbols)) function-symbols)
-     (when (or (:seon.db/invalid-read specs) (:seon.schema/expected-value specs)) specs)
-     (when (or (:seon.db/invalid-read caller-counts) (:seon.schema/expected-value caller-counts)) caller-counts)
+     (when (db/read-refusal? function-symbols) function-symbols)
+     (when (db/read-refusal? specs) specs)
+     (when (db/read-refusal? caller-counts) caller-counts)
      (let [stored-attributes (set (schema.datahike/database-attributes-core-in projection))
            specs (into {} specs)
            caller-counts (into {} caller-counts)

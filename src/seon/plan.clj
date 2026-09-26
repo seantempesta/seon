@@ -99,7 +99,7 @@
   "Return an ordinary database-read result or refuse with its error value."
   {:malli/schema [:=> [:cat :seon.schema/value] :seon.schema/value]}
   [result]
-  (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result) (:seon.db.write.attempt/request-id result))
+  (if (or (db/read-refusal? result) (:seon.db.write.attempt/request-id result))
     (throw (ex-info (:seon.error/message result) result))
     result))
 
@@ -138,7 +138,7 @@
     [:or :int :nil :seon.db/error-result]]}
   [database reference]
   (let [entity (db/entity database reference)]
-    (if (or (:seon.db/invalid-read entity) (:seon.schema/expected-value entity)) entity (:db/id entity))))
+    (if (db/read-refusal? entity) entity (:db/id entity))))
 
 (defn- subject-eid
   {:malli/schema [:=> [:cat :seon.db/database-value :my.plan.item/about-token] [:or :int :nil :seon.db/error-result]]}
@@ -167,7 +167,7 @@
   [database token]
   (let [subject (subject-eid database token)]
     (cond
-      (or (:seon.db/invalid-read subject) (:seon.schema/expected-value subject)) (read-result! subject)
+      (db/read-refusal? subject) (read-result! subject)
       subject subject
       :else
       (refuse! {:seon.error/at (java.util.Date.)
@@ -192,7 +192,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or [:set :my.plan.item/id] :seon.db/error-result]]}
   [database agent-id]
   (let [ids (db/q owned-ids-query database rules agent-id)]
-    (if (or (:seon.db/invalid-read ids) (:seon.schema/expected-value ids)) ids (set ids))))
+    (if (db/read-refusal? ids) ids (set ids))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Pulled tree to derived render steps
@@ -228,10 +228,10 @@
   (reduce (fn [result item-id]
             (let [entity (step-eid database item-id)]
               (cond
-                (or (:seon.db/invalid-read entity) (:seon.schema/expected-value entity)) (reduced entity)
+                (db/read-refusal? entity) (reduced entity)
                 (nil? entity) (assoc result item-id true)
                 :else (let [row (db/pull database step-selector entity)]
-                        (if (or (:seon.db/invalid-read row) (:seon.schema/expected-value row))
+                        (if (db/read-refusal? row)
                           (reduced row)
                           (assoc result item-id (open-work? row)))))))
           {}
@@ -253,7 +253,7 @@
         foreign (if (seq foreign-ids)
                   (foreign-open-work database foreign-ids)
                   {})]
-    (if (or (:seon.db/invalid-read foreign) (:seon.schema/expected-value foreign))
+    (if (db/read-refusal? foreign)
       foreign
       (let [open? (fn [item-id]
                     (if (contains? open-by-id item-id)
@@ -342,7 +342,7 @@
                         {:my.plan/current-step [:my.plan.item/id]}
                         {:my.plan/steps step-selector}]}]
                      [:seon.agent/id agent-id])]
-    (if (or (:seon.db/invalid-read row) (:seon.schema/expected-value row)) row (:seon.agent/plan row))))
+    (if (db/read-refusal? row) row (:seon.agent/plan row))))
 
 (defn plan
   "Read this agent's whole plan as one derived current value.
@@ -356,7 +356,7 @@
   [{database :seon.db/db agent-id :seon.agent/id}]
   (let [agent-entity (agent-eid database agent-id)]
     (cond
-      (or (:seon.db/invalid-read agent-entity) (:seon.schema/expected-value agent-entity)) agent-entity
+      (db/read-refusal? agent-entity) agent-entity
 
       (nil? agent-entity)
       (seon.error.refusal/diagnostic (java.util.Date.) :my.plan/constraint 'seon.plan/plan
@@ -369,13 +369,13 @@
 
       :else
       (let [pulled (agent-plan-pull database agent-id)
-            frontier (when-not (or (:seon.db/invalid-read pulled) (:seon.schema/expected-value pulled))
+            frontier (when-not (db/read-refusal? pulled)
                        (derived-frontier database
                                          (tree-nodes (:my.plan/steps pulled))))
             ready-ids (:my.plan/ready frontier)
             blocked-ids (:my.plan/blocked frontier)
             values [pulled frontier]]
-        (if-let [error (some #(when (or (:seon.db/invalid-read %) (:seon.schema/expected-value %)) %) values)]
+        (if-let [error (some #(when (db/read-refusal? %) %) values)]
           (update error :seon.error/data
                   #(assoc (or % {}) :seon.agent/id agent-id))
           (let [current-id (get-in pulled [:my.plan/current-step
@@ -404,7 +404,7 @@
   [{database :seon.db/db item-id :my.plan.item/id}]
   (let [entity (step-eid database item-id)]
     (cond
-      (or (:seon.db/invalid-read entity) (:seon.schema/expected-value entity)) entity
+      (db/read-refusal? entity) entity
 
       (nil? entity)
       (seon.error.refusal/diagnostic (java.util.Date.) :my.plan/constraint 'seon.plan/item
@@ -421,16 +421,16 @@
                                     [?agent :seon.agent/id ?id]]
                            database rules entity)]
         (cond
-          (or (:seon.db/invalid-read agent-id) (:seon.schema/expected-value agent-id)) agent-id
+          (db/read-refusal? agent-id) agent-id
           agent-id
           (let [view (plan {:seon.db/db database :seon.agent/id agent-id})]
-            (if (or (:seon.db/invalid-read view) (:seon.schema/expected-value view) (:my.plan/missing-agent-id view))
+            (if (or (db/read-refusal? view) (:my.plan/missing-agent-id view))
               view
               (first (filter #(= item-id (:my.plan.item/id %))
                              (:my.plan/steps view)))))
           :else
           (let [pulled (db/pull database step-selector entity)]
-            (if (or (:seon.db/invalid-read pulled) (:seon.schema/expected-value pulled))
+            (if (db/read-refusal? pulled)
               pulled
               (first (derived-steps [pulled] nil #{} #{})))))))))
 
@@ -442,7 +442,7 @@
   [{database :seon.db/db item-ids :my.plan/item-ids}]
   (reduce (fn [result item-id]
             (let [step (item {:seon.db/db database :my.plan.item/id item-id})]
-              (if (or (:seon.db/invalid-read step) (:seon.schema/expected-value step) (:my.plan/missing-agent-id step) (:my.plan/missing-item-id step))
+              (if (or (db/read-refusal? step) (:my.plan/missing-agent-id step) (:my.plan/missing-item-id step))
                 (reduced step)
                 (conj result step))))
           [] item-ids))
@@ -450,7 +450,7 @@
 (defn- step-summary
   {:malli/schema [:=> [:cat [:or :my.plan/render-step :seon.db/error-result :my.plan/agent-not-found-error :my.plan/not-found-error]] [:or :my.plan/step-summary :seon.db/error-result :my.plan/agent-not-found-error :my.plan/not-found-error]]}
   [step]
-  (if (or (:seon.db/invalid-read step) (:seon.schema/expected-value step) (:my.plan/missing-agent-id step) (:my.plan/missing-item-id step))
+  (if (or (db/read-refusal? step) (:my.plan/missing-agent-id step) (:my.plan/missing-item-id step))
     step
     (assoc (select-keys step [:my.plan.item/id :my.plan.item/title
                                      :my.plan.item/done-when
@@ -466,7 +466,7 @@
   [database agent-id]
   (let [view (plan {:seon.db/db database :seon.agent/id agent-id})
         current-id (get-in view [:my.plan/current-step :my.plan.item/id])]
-    (if (or (:seon.db/invalid-read view) (:seon.schema/expected-value view) (:my.plan/missing-agent-id view))
+    (if (or (db/read-refusal? view) (:my.plan/missing-agent-id view))
       view
       (or (some #(when (= current-id (:my.plan.item/id %)) (step-summary %))
                 (:my.plan/steps view))
@@ -478,7 +478,7 @@
                   [:or [:vector :my.plan/step-summary] :seon.db/error-result :my.plan/agent-not-found-error]]}
   [database agent-id]
   (let [view (plan {:seon.db/db database :seon.agent/id agent-id})]
-    (if (or (:seon.db/invalid-read view) (:seon.schema/expected-value view) (:my.plan/missing-agent-id view)) view (mapv step-summary (:my.plan/blocked view)))))
+    (if (or (db/read-refusal? view) (:my.plan/missing-agent-id view)) view (mapv step-summary (:my.plan/blocked view)))))
 
 (defn steps
   "Read your plan steps in their authored tree order."
@@ -486,7 +486,7 @@
                   [:or [:vector :my.plan/step-summary] :seon.db/error-result :my.plan/agent-not-found-error]]}
   [database agent-id]
   (let [view (plan {:seon.db/db database :seon.agent/id agent-id})]
-    (if (or (:seon.db/invalid-read view) (:seon.schema/expected-value view) (:my.plan/missing-agent-id view)) view (mapv step-summary (:my.plan/steps view)))))
+    (if (or (db/read-refusal? view) (:my.plan/missing-agent-id view)) view (mapv step-summary (:my.plan/steps view)))))
 
 (defn ready
   "Read your ready steps; complete one with my.plan/complete!."
@@ -495,7 +495,7 @@
     [:or [:vector :my.plan/step-summary] :seon.db/error-result :my.plan/agent-not-found-error]]}
   [database agent-id]
   (let [view (plan {:seon.db/db database :seon.agent/id agent-id})]
-    (if (or (:seon.db/invalid-read view) (:seon.schema/expected-value view) (:my.plan/missing-agent-id view)) view (mapv step-summary (:my.plan/ready view)))))
+    (if (or (db/read-refusal? view) (:my.plan/missing-agent-id view)) view (mapv step-summary (:my.plan/ready view)))))
 
 (defn ready-subjects
   "List the resolved subject entities named by this agent's ready steps.
@@ -507,7 +507,7 @@
     [:or :my.plan/intent-subjects :seon.db/error-result :my.plan/agent-not-found-error :my.plan/subject-not-found-error]]}
   [database agent-id]
   (let [plan-steps (ready database agent-id)]
-    (if (or (:seon.db/invalid-read plan-steps) (:seon.schema/expected-value plan-steps) (:my.plan/missing-agent-id plan-steps))
+    (if (or (db/read-refusal? plan-steps) (:my.plan/missing-agent-id plan-steps))
       plan-steps
       (try
         (into []
@@ -671,7 +671,7 @@
                       [?i :seon.issue/agent ?a]
                       (not [?i :seon.issue/resolved-tx])
                       [?i :seon.issue/tests ?test]] database agent-id)]
-    (when (or (:seon.db/invalid-read tests) (:seon.schema/expected-value tests))
+    (when (db/read-refusal? tests)
       (throw (ex-info (:seon.error/message tests) tests)))
     (let [named (mapv (fn [test-eid]
                         [test-eid (:seon.test/sym
@@ -735,7 +735,7 @@
                            :args (cond-> [database] subject (conj subject))
                            :cancel (reify clojure.lang.IDeref
                                      (deref [_] (> (System/nanoTime) deadline)))))]
-    (when (or (:seon.db/invalid-read result) (:seon.schema/expected-value result))
+    (when (db/read-refusal? result)
       (refuse! {:seon.error/at (java.util.Date.)
                  :seon.error/layer :my.plan/constraint
                  :seon.error/operation 'seon.plan/done-query-result
@@ -847,7 +847,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :my.plan.item/id] [:or :nil :my.plan/step-summary :seon.db/error-result :my.plan/agent-not-found-error]]}
   [database agent-id item-id]
   (let [view (plan {:seon.db/db database :seon.agent/id agent-id})]
-    (if (or (:seon.db/invalid-read view) (:seon.schema/expected-value view) (:my.plan/missing-agent-id view)) view
+    (if (or (db/read-refusal? view) (:my.plan/missing-agent-id view)) view
         (step-summary (first (filter #(= item-id (:my.plan.item/id %))
                                     (:my.plan/steps view)))))))
 
@@ -864,7 +864,7 @@
         request (assoc step :seon.agent/id agent-id)
         result (transact-plan! connection agent-id
                                [[:db.fn/call #'add-step-call request]])]
-    (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result) (:seon.db.write.attempt/request-id result))
+    (if (or (db/read-refusal? result) (:seon.db.write.attempt/request-id result))
       result
       (changed-item (:db-after result) agent-id (:my.plan.item/id step)))))
 
@@ -879,7 +879,7 @@
                         [[:db.fn/call #'complete-step-call
                           {:my.plan.item/id item-id
                            :seon.agent/id agent-id}]])]
-    (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result) (:seon.db.write.attempt/request-id result))
+    (if (or (db/read-refusal? result) (:seon.db.write.attempt/request-id result))
       result
       (changed-item (:db-after result) agent-id item-id))))
 
@@ -921,7 +921,7 @@
   [item-id connection agent-id]
   (let [result (transact-plan! connection agent-id
                                [[:db.fn/call #'start-step-call agent-id item-id]])]
-    (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result) (:seon.db.write.attempt/request-id result))
+    (if (or (db/read-refusal? result) (:seon.db.write.attempt/request-id result))
       result
       (changed-item (:db-after result) agent-id item-id))))
 
@@ -953,7 +953,7 @@
   [changes connection agent-id]
   (let [result (transact-plan! connection agent-id
                                [[:db.fn/call #'update-step-call agent-id changes]])]
-    (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result) (:seon.db.write.attempt/request-id result)) result
+    (if (or (db/read-refusal? result) (:seon.db.write.attempt/request-id result)) result
         (changed-item (:db-after result) agent-id (:my.plan.item/id changes)))))
 
 ;;; ---------------------------------------------------------------------------
@@ -1319,7 +1319,7 @@
                {:tx-data (:my.plan/tx-data compiled)
                 :datahike/expected-basis-t basis
                 :tx-meta {:seon.db/user [:seon.agent/id agent-id]}})]
-          (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result) (:seon.db.write.attempt/request-id result))
+          (if (or (db/read-refusal? result) (:seon.db.write.attempt/request-id result))
             result
             {:my.plan/converged? false
              :my.plan/basis-t basis
@@ -1533,7 +1533,7 @@
                                    (if (map? selected) (:db/id selected) selected))))
                        (get-in derivation [:my.plan/current-step
                                            :my.plan.item/id]))]
-    (if (or (:seon.db/invalid-read derivation) (:seon.schema/expected-value derivation) (:my.plan/missing-agent-id derivation))
+    (if (or (db/read-refusal? derivation) (:my.plan/missing-agent-id derivation))
       ;; The derivation refused. The agent still reads a typed line through
       ;; this plan's own AI pair — never a bare exception message where its
       ;; instructions belong — and the refusal stays a `:seon.error` value.
@@ -1565,7 +1565,7 @@
         view (if (and database agent-id)
                (plan {:seon.db/db database :seon.agent/id agent-id})
                component)]
-    (if (or (:seon.db/invalid-read view) (:seon.schema/expected-value view) (:my.plan/missing-agent-id view))
+    (if (or (db/read-refusal? view) (:my.plan/missing-agent-id view))
       view
       (let [plan-steps (:my.plan/steps view)
             done (count (filter :my.plan.item/completed-tx plan-steps))]

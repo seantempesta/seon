@@ -121,7 +121,7 @@
                           '[{:my.note/_agent [*]}]
                           [:seon.agent/id (:seon.agent/id notes)]))
         notes (if (map? notes) (get pulled :my.note/_agent []) notes)]
-    (if (or (:seon.db/invalid-read pulled) (:seon.schema/expected-value pulled))
+    (if (db/read-refusal? pulled)
       pulled
       (into [:section {:class "seon-family-entry my-notes"}
          [:h3 (str "Current notes (" (count notes) ")")]]
@@ -252,7 +252,7 @@
       result
       (let [note (db/pull (:db-after result) note-selector
                           [:my.note/id id])]
-        (if (or (:seon.db/invalid-read note) (:seon.schema/expected-value note)) note (note-row note))))))
+        (if (db/read-refusal? note) note (note-row note))))))
 
 (defn add!
   "Add or update one note owned by the calling agent."
@@ -300,7 +300,7 @@
                 [?note :my.note/agent ?agent]
                 [?note :my.note/id ?id]]
               database agent-id)]
-    (if (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows))
+    (if (db/read-refusal? rows)
       rows
       (->> rows
            (sort-by first)

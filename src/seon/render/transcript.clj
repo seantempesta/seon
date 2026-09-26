@@ -770,8 +770,8 @@
                         db agent-ref))]
     {::selected-run-id (:seon.turn/id unit)
      ::selected-agent-id
-     (or supplied-agent-id (when-not (or (:seon.db/invalid-read queried) (:seon.schema/expected-value queried)) queried))
-     ::selected-run-error (when (or (:seon.db/invalid-read queried) (:seon.schema/expected-value queried)) queried)}))
+     (or supplied-agent-id (when-not (db/read-refusal? queried) queried))
+     ::selected-run-error (when (db/read-refusal? queried) queried)}))
 
 (defn- missing-selected-run
 
@@ -890,14 +890,14 @@
                             :where [?turn :seon.turn/id ?id]
                                    [?evaluation :seon.cluster.eval/run ?turn]]
                           database turn-id)]
-    (if (or (:seon.db/invalid-read row) (:seon.schema/expected-value row))
+    (if (db/read-refusal? row)
       [:p (:seon.error/message row)]
       [:article {:class "seon-turn-header"}
        [:h3 (str "Turn " turn-id)]
        [:dl
         [:dt "Opened"] [:dd (pr-str (get-in row [:seon.turn/opened-tx :db/txInstant]))]
         [:dt "Trigger"] [:dd (or (get-in row [:seon.turn/trigger :seon.message/id]) "None")]
-        [:dt "Evaluations"] [:dd (if (or (:seon.db/invalid-read evaluations) (:seon.schema/expected-value evaluations))
+        [:dt "Evaluations"] [:dd (if (db/read-refusal? evaluations)
                                    (:seon.error/message evaluations)
                                    (str (or evaluations 0)))]
         [:dt "Reply"] [:dd (if (find row :seon.turn/reply-size) "Recorded" "None")]]])))
@@ -953,7 +953,7 @@
                              [?run :seon.turn/opened-tx ?opened]]
                     :args [database agent-id]
                     :order-by '[?opened :desc ?run :desc]})]
-    (if (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows))
+    (if (db/read-refusal? rows)
       rows
       (let [total (count rows)
             newest (into [] (take limit) rows)
@@ -963,7 +963,7 @@
                   (keep
                    (fn [[eid _opened]]
                      (let [row (db/pull database history-run-selector eid)]
-                       (when-not (or (:seon.db/invalid-read row) (:seon.schema/expected-value row))
+                       (when-not (db/read-refusal? row)
                          (assoc row
                                 :seon.render.transcript/entries
                                 (history-entries
@@ -1157,7 +1157,7 @@
                             [?runtime :seon.runtime/turns ?t]
                             [?t :seon.turn/id _ ?opened]]
                    database agent-id debug-turn-selector)]
-    (if (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows)) rows
+    (if (db/read-refusal? rows) rows
         (mapv (fn [ordinal [_ row]] (assoc row ::ordinal ordinal))
               (range) (sort-by (juxt first #(get-in % [1 :seon.turn/id])) rows)))))
 
@@ -1365,7 +1365,7 @@
      (session-header request (if (vector? rows) rows []))
      [:h2 "Session"]
      (cond
-       (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows)) [:p {:class "seon-emission-error"} (:seon.error/message rows)]
+       (db/read-refusal? rows) [:p {:class "seon-emission-error"} (:seon.error/message rows)]
        url
        [:p {:role "status" :data-init (str "@get('" url "')")}
         (if (::outline? request)
@@ -1685,7 +1685,7 @@
      (session-header request (if (vector? rows) rows []))
      [:h2 "Session"]
      (cond
-       (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows))
+       (db/read-refusal? rows)
        [:div {:class "seon-emission-error"}
         (error/render-html (assoc request :seon.render/value rows))]
 
@@ -1804,7 +1804,7 @@
         definitions (db/q '[:find ?symbol ?tx
                              :where (or [?f :seon.fn/sym ?symbol ?tx]
                                         [?f :seon.test/sym ?symbol ?tx])] database)]
-    (if-let [failure (some #(when (or (:seon.db/invalid-read %) (:seon.schema/expected-value %)) %) [intervals steps messages definitions])]
+    (if-let [failure (some #(when (db/read-refusal? %) %) [intervals steps messages definitions])]
       failure
       {::steps (group-by first steps) ::messages (group-by first messages)
        ;; Acquire each definition once, then relate it to the saved intervals.
@@ -1825,7 +1825,7 @@
                         (map #(str "message sent to " (second %)) messages)
                         (map #(str "definition installed during this turn: " (second %)) definitions))]
     (cond
-      (or (:seon.db/invalid-read effects) (:seon.schema/expected-value effects)) {::details (:seon.error/message effects)}
+      (db/read-refusal? effects) {::details (:seon.error/message effects)}
       (not (:seon.turn/closed-tx row)) {::details "Turn is still open."}
       :else {::details (if (seq details) (str/join " · " details) "—")
              ::summary (str/join " · " (cond-> []
@@ -1840,7 +1840,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value [:or [:sequential :map] :seon.db/error-result] [:maybe :map]]
                   [:or [:vector :map] :seon.db/error-result]]}
   [database rows evaluations]
-  (if (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows)) rows
+  (if (db/read-refusal? rows) rows
     (mapv (fn [row]
             (let [attempts (mapv #(assoc % ::usage (attempt-usage %))
                                  (sort-by :seon.ai.attempt/ordinal (:seon.turn/attempts row)))
@@ -1939,7 +1939,7 @@
           (str (if provider? "Full context as sent" "Full context before reply")
                (when capture
                  (str ": " (format "%,d" (utf8-size capture)) " bytes · "
-                      (if (or (:seon.db/invalid-read calibration) (:seon.schema/expected-value calibration) (:seon.config/error-key calibration) (:seon.config/missing-effective calibration) (:seon.cluster.prompt/missing-cluster calibration) (:seon.cluster.prompt/missing-config calibration))
+                      (if (or (db/read-refusal? calibration) (:seon.config/error-key calibration) (:seon.config/missing-effective calibration) (:seon.cluster.prompt/missing-cluster calibration) (:seon.cluster.prompt/missing-config calibration))
                         "estimate unavailable"
                         (str "rebuilt ≈" (format "%,d" (tokens/estimate capture calibration)) " tokens"))))
                (when-let [billed (::prompt usage)] (str " · billed " (format "%,d" billed))))]
@@ -2074,7 +2074,7 @@
                                 [?m :seon.message/id ?mid]
                                 [?f :seon.error/occurrences ?occurrence]
                                 [?occurrence :seon.error.occurrence/count ?count]] database agent-id)]
-    (if (or (:seon.db/invalid-read messages) (:seon.schema/expected-value messages))
+    (if (db/read-refusal? messages)
       [(assoc (finding :faults "Fault delivery" []) ::unknown 1)
        (assoc (finding :fault-turns "Turns opened by faults" []) ::unknown 1)]
       (let [fault-message-ids (set (map first messages))
@@ -2100,7 +2100,7 @@
                      :where [?t :seon.turn/id ?id] [?c :seon.context.capture/run ?t]
                             [?c :seon.context.capture/prompt ?text]] database turn-id)
         opening (when (string? text) (turn/opening-db database turn-id))
-        frame (when (and opening (not (or (:seon.db/invalid-read opening) (:seon.schema/expected-value opening) (:seon.turn/missing-opening-datom opening))))
+        frame (when (and opening (not (or (db/read-refusal? opening) (:seon.turn/missing-opening-datom opening))))
                 (repl/frame opening agent-id))
         suffix (str "\n\n" frame)]
     (when frame
@@ -2173,7 +2173,7 @@
         per-step (frequencies
                   (for [row rows :when (seq (:seon.turn/attempts row))]
                     (let [basis (turn/opening-db database (:seon.turn/id row))]
-                      (when-not (or (:seon.db/invalid-read basis) (:seon.schema/expected-value basis) (:seon.turn/missing-opening-datom basis))
+                      (when-not (or (db/read-refusal? basis) (:seon.turn/missing-opening-datom basis))
                         (get-in (db/pull basis
                                          '[{:seon.agent/plan [{:my.plan/current-step [:my.plan.item/id]}]}]
                                          [:seon.agent/id agent-id])
@@ -2181,7 +2181,7 @@
     {::used (turn/episode-runs database agent-id)
      ::bound (#'turn/max-episode-runs database agent-id)
      ::completed (count (filter :my.plan.item/completed-tx steps))
-     ::steps (count steps) ::plan-unavailable (boolean (or (:seon.db/invalid-read plan) (:seon.schema/expected-value plan) (:my.plan/missing-agent-id plan)))
+     ::steps (count steps) ::plan-unavailable (boolean (or (db/read-refusal? plan) (:my.plan/missing-agent-id plan)))
      ::per-step per-step ::totals totals ::attempts (count attempts)
      ::missing-usage (count (remove #(every? number? (map (::usage %) [::prompt ::hit ::miss ::out])) attempts))
      ::cost (when (every? number? costs) (reduce + 0 costs))
@@ -2218,9 +2218,9 @@
                     (assoc (finding :stale-but-unchanged "stale-but-unchanged reads"
                                     (map #(evaluation-match by-eid %)
                                          (concat empty-emissions
-                                                 (when-not (or (:seon.db/invalid-read refreshes) (:seon.schema/expected-value refreshes))
+                                                 (when-not (db/read-refusal? refreshes)
                                                    (map #(get saved-by-eid (first %)) refreshes)))))
-                           ::unknown (if (or (:seon.db/invalid-read refreshes) (:seon.schema/expected-value refreshes)) 1 0))
+                           ::unknown (if (db/read-refusal? refreshes) 1 0))
                     (repeated-problem by-eid saved)
                     (empty-reply-problem rows saved)
                     (directory-problem database by-eid saved)
@@ -2384,7 +2384,7 @@
         request (assoc request ::calibrations calibrations)
         selected (or (:seon.turn/id request) (:seon.turn/id (last rows)))
         expanded (conj (set (map :seon.turn/id (take-last 3 rows))) selected)
-        problems (when-not (or (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows)) refusal)
+        problems (when-not (or (db/read-refusal? rows) refusal)
                    (session-problems request rows evaluations))]
     [:section {:id (session-id (:seon.agent/id request)) :class "seon-session seon-ledger" :data-author "seon"}
      [:div {:class "seon-session-sticky"} (session-header request rows)
@@ -2438,7 +2438,7 @@
                         {:seon.runtime/listens [:seon.listen/attribute]}]}]
                      [:seon.agent/id agent-id]))]
     (cond
-      (or (:seon.db/invalid-read row) (:seon.schema/expected-value row) (:seon.render.transcript/refused-member row)) row
+      (or (db/read-refusal? row) (:seon.render.transcript/refused-member row)) row
       (nil? (:seon.agent/runtime row))
       (let [observation
             (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.transcript/render 'seon.render.transcript/render-runtime-html

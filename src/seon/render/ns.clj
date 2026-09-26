@@ -28,18 +28,6 @@
       (pos-int? max-collection)
       (assoc :max-results max-collection))))
 
-(defn- read-refusal?
-  "A bounded read's refusal: `seon.db`'s declared `:seon.db/invalid-read-error`,
-  known by its distinguishing member. Sections are also strings and hiccup
-  vectors, which are never refusals."
-  {:malli/schema [:=> [:cat :any] :boolean]}
-  [value]
-  (and (map? value) (contains? value :seon.db/invalid-read)))
-
-;;; ---------------------------------------------------------------------------
-;;; Namespace bindings
-;;; ---------------------------------------------------------------------------
-
 (defn- first-doc-line
   {:malli/schema [:=> [:cat [:maybe :string]] [:maybe :string]]}
   [doc]
@@ -163,7 +151,7 @@
         edges (when (pos? (node-distance unit)) (issue/task-edges (:seon.db/db unit) id))]
     (cond
       (nil? edges) header
-      (read-refusal? edges) edges
+      (db/read-refusal? edges) edges
       :else (str header "\n" (comment-lines "Intent: " intent)
                  "\n;; Done when these proofs pass: " (names (:seon.task/proofs edges))
                  "\n;; Subjects: " (names (:seon.task/subjects edges))
@@ -179,7 +167,7 @@
         edges (when (pos? (node-distance unit)) (issue/task-edges (:seon.db/db unit) id))
         row (fn [label items]
               [:div [:dt label] [:dd (if (seq items) (into [:ul] (map #(vector :li [:code (str %)])) (sort-by str items)) "None")]])]
-    (if (read-refusal? edges)
+    (if (db/read-refusal? edges)
       edges
       [:article {:class "seon-family-entry seon-task-entry"}
        [:header [:p {:class "seon-kicker"} (str "Task · " (name kind) " · " task-ns)] [:h3 task-name " " [:code id]]]
@@ -231,11 +219,11 @@
         bounds (read-bounds unit)
         callees (db/q (merge bounds {:query '[:find [?s ...] :in $ [?s ...] :where [_ :seon.fn/sym ?s]]
                                      :args [database (vec (remove #{function-name} calls))]}))
-        callers (when-not (read-refusal? callees)
+        callers (when-not (db/read-refusal? callees)
                   (db/q (merge bounds {:query '[:find [?caller ...] :in $ ?target
                                                 :where [?c :seon.fn/calls ?target] [?c :seon.fn/sym ?caller]]
                                        :args [database function-name]})))]
-    (or (first (filter read-refusal? [callees callers])) [(vec callees) (vec callers)])))
+    (or (first (filter db/read-refusal? [callees callers])) [(vec callees) (vec callers)])))
 
 (defn function-ai
   "Render a function node: its authored source, then its callees and callers by name."
@@ -248,7 +236,7 @@
         [callees callers] neighbours]
     (cond
       (nil? neighbours) header
-      (read-refusal? neighbours) neighbours
+      (db/read-refusal? neighbours) neighbours
       :else (str header "\n" (or source (repl/source-text (list 'doc function-name)))
                  ;; the contract is shown where the authored form does not carry it
                  (when (and spec source (not (str/includes? source ":malli/schema"))) (str "\n;; contract: " spec))
@@ -268,7 +256,7 @@
         [callees callers] neighbours
         row (fn [label items]
               [:div [:dt label] [:dd (if (seq items) (into [:ul] (map #(vector :li [:code (str %)])) (sort-by str items)) "None")]])]
-    (if (read-refusal? neighbours)
+    (if (db/read-refusal? neighbours)
       neighbours
       [:article {:class "seon-family-entry seon-function"}
        [:header [:p {:class "seon-kicker"} "Function"]
@@ -289,7 +277,7 @@
   (let [found (db/pull (:seon.db/db unit)
                        [{[:seon.fn/_ns :limit nil] [:seon.fn/sym :seon.fn/private?]}]
                        [:seon.ns/name namespace-name])]
-    (if (read-refusal? found)
+    (if (db/read-refusal? found)
       found
       (into [] (comp (filter #(false? (:seon.fn/private? %)))
                      (map (comp symbol name :seon.fn/sym)))
@@ -317,7 +305,7 @@
         members (when (pos? (node-distance unit)) (public-functions unit namespace-name))]
     (cond
       (nil? members) header
-      (read-refusal? members) members
+      (db/read-refusal? members) members
       :else (str header "\n" (or source (repl/source-text (ns-form namespace-name (sort requires))))
                  "\n;; public functions" (shown-functions unit members)
                  "\n" (repl/source-text (list 'dir namespace-name))))))
@@ -330,7 +318,7 @@
         members (when (pos? (node-distance unit)) (public-functions unit namespace-name))
         link #(vector :a {:href (route/path ::route/namespace {:namespace (str %)})} [:code (str %)])
         row (fn [label items] [:div [:dt label] [:dd (if (seq items) (into [:ul] (map #(vector :li %)) items) "None")]])]
-    (if (read-refusal? members)
+    (if (db/read-refusal? members)
       members
       [:article {:class "seon-family-entry seon-namespace-entry"}
        [:header [:p {:class "seon-kicker"} "Namespace"] [:h3 (link namespace-name)]]

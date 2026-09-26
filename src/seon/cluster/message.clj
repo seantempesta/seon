@@ -257,7 +257,7 @@
                         :in $ ?agent
                         :where [?agent :seon.agent/id ?id]]
                       database entity-id)]
-            (when-not (or (:seon.db/invalid-read result) (:seon.schema/expected-value result))
+            (when-not (db/read-refusal? result)
               result))))))
 
 (defn- identity-reference
@@ -320,7 +320,7 @@
   {:malli/schema [:=> [:cat [:or :seon.render/unit :seon.error/value]]
                   [:or :nil :string :seon.error/value]]}
   [unit]
-  (if (or (:seon.db/invalid-read unit) (:seon.schema/expected-value unit))
+  (if (db/read-refusal? unit)
     unit
     (let [database (get unit :seon.db/db)
         content (get unit :seon.message/content)
@@ -556,13 +556,13 @@
                   [:or :my.message/inbox :seon.db/error-result]]}
   [database agent-id since]
   (let [recipient (recipient-eid database agent-id)]
-    (if (or (:seon.db/invalid-read recipient) (:seon.schema/expected-value recipient))
+    (if (db/read-refusal? recipient)
       recipient
       (let [source (if (some? since) (db/since database since) database)]
-        (if (or (:seon.db/invalid-read source) (:seon.schema/expected-value source))
+        (if (db/read-refusal? source)
           source
           (let [ids (inbox-message-eids source database recipient)]
-            (if (or (:seon.db/invalid-read ids) (:seon.schema/expected-value ids))
+            (if (db/read-refusal? ids)
               ids
               (->> ids
                    (map #(db/pull database message-selector %))
@@ -599,7 +599,7 @@
   (let [message (db/pull database message-selector
                          [:seon.message/id message-id])]
     (cond
-      (or (:seon.db/invalid-read message) (:seon.schema/expected-value message)) message
+      (db/read-refusal? message) message
       message (admitted-message message)
       :else
       {:my.message/not-found message-id
