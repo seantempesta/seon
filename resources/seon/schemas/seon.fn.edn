@@ -243,7 +243,9 @@
  :seon.fn/index-refused-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.fn/index-refused distinguishing member"} [:seon.fn/index-refused :seon.fn/index-refused] [:seon.cluster.source/phase {:optional true} :seon.cluster.source/phase] [:seon.error/message :seon.error/message]]
  :seon.fn/dependency-analysis-missing [:= true]
  :seon.fn/unresolved-targets [:vector {:min 1} :qualified-symbol]
- :seon.fn/dependency-analysis-missing-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must name the call targets whose namespace clj-kondo never analyzed"} [:seon.fn/dependency-analysis-missing :seon.fn/dependency-analysis-missing] [:seon.fn/unresolved-targets :seon.fn/unresolved-targets] [:seon.error/message :seon.error/message]]
+ :seon.fn/dependency-analysis-missing-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base
+  [:map {:error/message "must name the call targets whose namespace clj-kondo never analyzed"} [:seon.fn/dependency-analysis-missing :seon.fn/dependency-analysis-missing] [:seon.fn/unresolved-targets :seon.fn/unresolved-targets]]]
  :seon.fn/signature-refused [:= true]
  :seon.fn/signature-refused-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.fn/signature-refused distinguishing member"} [:seon.fn/signature-refused :seon.fn/signature-refused] [:seon.error/message :seon.error/message]]
  ; Additive error declaration manifest, 2026-09-18.

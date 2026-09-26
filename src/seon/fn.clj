@@ -1008,11 +1008,13 @@
                        ". Fill the checkout's cache from this JVM's classpath at its REPL: " dependency-analysis-command)]
       ;; A platform fault, not the author's mistake: its own declared schema
       ;; (`seon.turn` stores and delivers it rather than returning it).
-      (throw (ex-info message (with-meta {:seon.fn/index-refused true
-                                          ::dependency-analysis-missing true
-                                          :seon.cluster.source/phase :analysis
-                                          :seon.error/message message
-                                          ::unresolved-targets (vec (sort targets))}
+      (throw (ex-info message (with-meta (error.refusal/diagnostic
+                                          (java.util.Date.) :seon.fn/analysis 'seon.fn/unresolved-macro-refusal
+                                          {:seon.fn/index-refused true
+                                           ::dependency-analysis-missing true
+                                           :seon.cluster.source/phase :analysis
+                                           :seon.error/message message
+                                           ::unresolved-targets (vec (sort targets))})
                                 {:seon.error/declared-schema ::dependency-analysis-missing-error}))))))
 
 (defn- interpreted-namespaces
