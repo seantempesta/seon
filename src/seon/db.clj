@@ -3502,27 +3502,18 @@
                          {::entity identities ::entity-value row ::path (into [entity-id] in)})))))
        schema-keys))))
 
-(defn identity-attribute-accumulator?
-  "True for the arity gate's accumulator.
-  It is a volatile holding a set of qualified keywords."
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
-  [value]
-  (boolean (and (volatile? value)
-                (set? @value)
-                (every? qualified-keyword? @value))))
-
 (defn- write-owned-values-error
   "Validate complete owning values, reached through both sides of this report.
    EAVT supplies every child; AVET discovers owners without pull's 1,000 cap.
-   Every changed arity-bearing root's identity attributes are added to
-   `changed-identity-attributes`, the arity gate's input."
+   Returns the refusal, or on success every changed arity-bearing root's
+   identity attributes as `::changed-identity-attributes`, the arity gate's input."
   {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/transaction-report
                        ;; Datahike's `:schema` also maps each attribute's entity
                        ;; id to its ident, so the plans carry integer keys too.
-                       [:map-of [:or :keyword :int] :map] [:set :qualified-keyword]
-                       [:fn seon.db/identity-attribute-accumulator?]]
-                  [:or :nil :seon.db/error-result]]}
-  [projection report attribute-plans identity-attrs changed-identity-attributes]
+                       [:map-of [:or :keyword :int] :map] [:set :qualified-keyword]]
+                  [:or :seon.db/error-result
+                   [:map [:seon.db/changed-identity-attributes [:set :qualified-keyword]]]]]}
+  [projection report attribute-plans identity-attrs]
   (let [before (:db-before report)
         after (:db-after report)
         limit (:seon.config.db/validation-node-limit projection)
@@ -3711,19 +3702,19 @@
                                              (owning-ancestors :after after [entity]))
                                        entity)))
                        (into #{} (comp (map :e) (filter #(< (long %) const/tx0)))
-                             tx-data))))]
+                             tx-data))))
+              root-identities
+              (mapv (fn [root]
+                      (let [value (get expanded root)]
+                        [root value (merge (select-keys (row :before before root) identity-attrs)
+                                           (select-keys value identity-attrs))]))
+                    roots)]
         (or
-         (some (fn [root]
-                 (let [value (get expanded root)
-                       identities (merge (select-keys (row :before before root) identity-attrs)
-                                         (select-keys value identity-attrs))]
-                   (when (or (not (some identities [:seon.fn/sym :seon.test/sym]))
-                             (@changed-roots root))
-                     (vswap! changed-identity-attributes into (keys identities)))
-                   (when (and (seq value) (empty? identities))
-                     (fail! ::unowned-entity {::entity root ::entity-value value}))
-                   (write-entity-error after projection attribute-plans root identities value)))
-               roots)
+         (some (fn [[root value identities]]
+                 (when (and (seq value) (empty? identities))
+                   (fail! ::unowned-entity {::entity root ::entity-value value}))
+                 (write-entity-error after projection attribute-plans root identities value))
+               root-identities)
          (some (fn [[entity-id value]]
                  (when-let [[parent attribute] (first (owners-of :after after entity-id))]
                    (let [target (get targets attribute)
@@ -3731,7 +3722,14 @@
                      (when-let [refusal (write-entity-error after projection attribute-plans entity-id identities value [target])]
                        (update refusal :seon.error/data assoc
                                ::owner parent ::attribute attribute ::component-schema target)))))
-               expanded))))
+               expanded)
+         {::changed-identity-attributes
+          (into #{}
+                (mapcat (fn [[root _ identities]]
+                          (when (or (not (some identities [:seon.fn/sym :seon.test/sym]))
+                                    (@changed-roots root))
+                            (keys identities))))
+                root-identities)})))
       (catch clojure.lang.ExceptionInfo exception
         (if-let [refusal (::owned-refusal (ex-data exception))] refusal (throw exception))))))
 
@@ -4341,9 +4339,11 @@
         before (:db-before report)
         attempted (:datahike/attempted-tx-data report)
         affected (distinct (map :e (concat attempted (:tx-data report))))
-        changed-identity-attributes (volatile! #{})
         identity-attrs (report-identity-attributes report)
-        attribute-plans (write-attribute-plans projection database)]
+        attribute-plans (write-attribute-plans projection database)
+        ;; Forced in its place in the check order below; the arity gate
+        ;; reads its changed identity attributes after it has passed.
+        owned (delay (write-owned-values-error projection report attribute-plans identity-attrs))]
     (or
      (retention-report-check projection report affected)
      (some (fn [datom]
@@ -4365,8 +4365,7 @@
            attempted)
      (write-agent-retraction-error (:tx-data report))
      (write-deletion-error before database affected identity-attrs)
-     (write-owned-values-error projection report attribute-plans identity-attrs
-                               changed-identity-attributes)
+     (when-not (find @owned ::changed-identity-attributes) @owned)
      (write-digest-error projection report (identity-attributes database))
      ;; A render target breaks only by a declaration this report wrote or a
      ;; function it removed. Written rows are read alone; a removed function
@@ -4392,7 +4391,7 @@
      ;; supplied defaults. The owning-value walk already found
      ;; every changed root on both sides, including swept/deleted children.
      ;; An error, message or other ordinary fact cannot change call arities.
-     (when (some @changed-identity-attributes
+     (when (some (::changed-identity-attributes @owned)
                  [:seon.fn/sym :seon.test/sym :seon.schema/key :seon.call-preparation/key])
        (let [comparison (report-arity-comparison report)
              result (arity-verdict database projection report comparison)

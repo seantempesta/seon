@@ -143,18 +143,17 @@
             report (d/with (:db-after staged)
                            [[:db/add :db/current-tx :seon.fn/sym `a-transaction-entity-root-reaches-the-arity-gate]
                             [:db/add :db/current-tx :seon.fn/arities arity]])
-            transaction (get (:tempids report) :db/current-tx)
-            changed (volatile! #{})]
+            transaction (get (:tempids report) :db/current-tx)]
         (is (some? projection))
         (is (every? #(= transaction (:e %))
                     (remove #(= :db/txInstant (:a %)) (:tx-data report)))
             (pr-str (:tx-data report)))
-        (@#'seon.db/write-owned-values-error
-         projection report
-         (@#'seon.db/write-attribute-plans projection (:db-after report))
-         (@#'seon.db/report-identity-attributes report)
-         changed)
-        (is (contains? @changed :seon.fn/sym) (pr-str @changed))))))
+        (let [changed (:seon.db/changed-identity-attributes
+                       (@#'seon.db/write-owned-values-error
+                        projection report
+                        (@#'seon.db/write-attribute-plans projection (:db-after report))
+                        (@#'seon.db/report-identity-attributes report)))]
+          (is (contains? changed :seon.fn/sym) (pr-str changed)))))))
 
 (deftest new-entities-find-their-owners-without-an-index-seek
   ;; An entity id beyond :db-before's max-eid was referenced by nothing
