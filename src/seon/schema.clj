@@ -2334,7 +2334,10 @@
           :seon.schema.projection/catalog catalog
           :seon.schema.projection/fingerprint-version
           projection-fingerprint-version
-          :seon.schema.projection/fingerprint fingerprint}
+          :seon.schema.projection/fingerprint fingerprint
+          ;; What this registry was actually compiled with (contracts-out §1).
+          :seon.schema.projection/construction-inputs
+          [forms schema-admissions pure-predicate-symbols predicate-functions]}
          predicate-functions)]
     (when validate-render-contracts?
       (assert-render-contracts! projection (keys forms)))
@@ -2382,10 +2385,12 @@
      (let [options (assoc options :seon.schema/predicate-functions
                           (predicate-bindings forms function-contracts
                                               (:seon.schema/predicate-functions options {})))]
-       ;; Weight: 3.7 KB per form (52 MB / 4 projections / 3,514 forms,
-       ;; cache-central design 2026-09-26).
+       ;; Weight: 2.2 KB per declaration, schema forms and function contracts
+       ;; alike (52 MB / 4 projections / 5,835 declarations, cache-central
+       ;; design 2026-09-26): a contract-only projection weighs its contracts.
        (seon.cache/lookup ::projection [forms function-contracts options]
-                          #(* 3700 (count (:seon.schema.projection/forms %)))
+                          #(* 2230 (+ (count (:seon.schema.projection/forms %))
+                                      (count (:seon.schema.projection/function-contracts %))))
                           #(projection-build forms function-contracts options))))))
 
 (defn- projection-fingerprint-from-data
@@ -2593,6 +2598,25 @@
    :seon.schema/predicate-functions (predicate-functions-in projection)
    :seon.schema/validate-render-contracts? true})
 
+(defn- construction-bindings-kept?
+  "Whether a replacement of `projection` built with `predicate-functions` still
+   knows what its retained compiled children were compiled with: the base
+   records its construction inputs, carries no overlay
+   ([[with-predicate-functions]] changed nothing it compiled with), and every
+   binding it compiled with is the identical callable in the replacement.
+   Otherwise the replacement records no construction inputs, and nothing is
+   cached under an inferred population (contracts-out §1)."
+  {:malli/schema [:=> [:cat :map [:map-of :qualified-symbol [:fn clojure.core/ifn?]]] :boolean]}
+  [projection predicate-functions]
+  (let [[_ _ _ compiled-with] (:seon.schema.projection/construction-inputs projection)]
+    (boolean
+     (and compiled-with
+          (= compiled-with (predicate-functions-in projection))
+          (every? (fn [[predicate callable]]
+                    (let [kept (get predicate-functions predicate ::absent)]
+                      (or (identical? ::absent kept) (identical? kept callable))))
+                  compiled-with)))))
+
 (defn- projection-with-declarations
   "The projection of `forms` and `function-contracts`, derived from `projection`
    by recompiling only what changed.
@@ -2774,8 +2798,12 @@
                                   (zipmap pure-predicate-symbols (repeat true)) pure-changes))
             candidate
             (with-predicate-functions
-             (merge (dissoc projection :seon.schema.projection/compiled
-                            :seon.schema.projection/definition-strings)
+             (merge (cond-> (dissoc projection :seon.schema.projection/compiled
+                                    :seon.schema.projection/definition-strings
+                                    :seon.schema.projection/construction-inputs)
+                      (construction-bindings-kept? projection predicate-functions)
+                      (assoc :seon.schema.projection/construction-inputs
+                             [forms schema-admissions pure-predicate-symbols predicate-functions]))
                     {:seon.schema.projection/forms forms
                      :seon.schema.projection/registry registry
                      :seon.schema.projection/compile-options {:registry registry}

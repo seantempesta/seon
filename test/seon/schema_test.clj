@@ -1861,3 +1861,29 @@
         (is (= #{:review/a} (schema/contract-references other #{:review/a} compiled)))
         (is (= #{} (schema/contract-references registry #{:review/a} compiled))
             "references are derived only in the world the value was compiled in")))))
+
+(deftest a-projection-records-what-its-registry-was-compiled-with
+  ;; Contracts-out §1 / Astra T1: an overlay of the binding MEMBER must not pass
+  ;; for a population compiled with those bindings.
+  (let [forms {:review/value [:fn 'review/p]}
+        options (fn [p] {:seon.schema/predicate-functions {'review/p p}
+                         :seon.schema/pure-predicate-symbols #{'review/p}
+                         :seon.schema/schema-admissions
+                         {:review/value {:seon.schema.admission/source :core}}})
+        record :seon.schema.projection/construction-inputs
+        a (schema/build-projection forms {} (options int?))
+        b (schema/build-projection forms {} (options string?))
+        b-again (schema/build-projection (into {} forms) {} (options string?))
+        overlay (schema/with-predicate-functions a {'review/p string?})]
+    (is (= {'review/p int?} (peek (record a))) "the bindings the registry compiled with")
+    (is (= (record overlay) (record a)) "an overlay changes the member, never the record")
+    (is (not= (record overlay) (record b)) "so it never passes for the population built with string?")
+    (is (= (record b) (record b-again)) "an equal rebuilt population records equal inputs")
+    (testing "a replacement keeps the record only while it knows its retained children's bindings"
+      (let [grown (schema/projection-with-schema a :review/other :int
+                                                 {:seon.schema.admission/source :core})]
+        (is (= {'review/p int?} (peek (record grown))))
+        (is (= (assoc forms :review/other :int) (first (record grown)))))
+      (let [grown (schema/projection-with-schema overlay :review/other :int
+                                                 {:seon.schema.admission/source :core})]
+        (is (nil? (record grown)) "an overlaid base leaves provenance unknown")))))
