@@ -48,8 +48,9 @@
  #:seon.task{:id "4bb788513862"
              :name "the-checked-writer-is-slow-on-a-fresh-branch"
              :kind :function
-             :intent "A test request's 8-datom overlay write takes 480-620 ms, 211 ms of it write-report-error; root runs pay 8-9 ms of it over 3 transactions. Make the checked writer's report validation cost follow the written datoms."
-             :must-read #{seon.db/transact! seon.db/write-report-error}
-             :evidence #{"docs/research/agent-platform/landing/fix-test-request-cost-2026-09-26.md"
+             :intent "A test request's 8-datom overlay write takes 480-620 ms, 211 ms of it write-report-error; root runs pay 8-9 ms of it over 3 transactions. Make the checked writer's report validation cost follow the written datoms. Named cause (2026-09-26, commit-floor): every agent settlement adds its turn to :seon.runtime/turns, a cardinality-many component, so write-owned-values-error expands the runtime's whole owning value, every turn the agent ever ran: 10.8 ms at 179 turns, 12.3 ms at 219 (about 37 us per turn, on the writer, per form), unbounded until :seon.config.db/validation-node-limit refuses the agent's writes. Validate the changed children and the owner's own attributes, or drop the runtime->turns edge that :seon.turn/agent already derives."
+             :must-read #{seon.db/transact! seon.db/write-report-error seon.db/write-owned-values-error}
+             :evidence #{"docs/research/agent-platform/commit-floor-2026-09-26.md"
+                         "docs/research/agent-platform/landing/fix-test-request-cost-2026-09-26.md"
                          "docs/research/agent-platform/landing/fix-write-cost-2026-09-26.md"
                          "docs/research/agent-platform/landing/perf-admit-tests-opus-2026-09-26.md"}}]
