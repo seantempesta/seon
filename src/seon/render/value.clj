@@ -362,33 +362,34 @@
                                (assoc :data (.getData ^clojure.lang.ExceptionInfo link))))))))
 
 (defn- seq-cells
-  "A seq's members stepped through fields only. The first unrealized or
-  unlisted cell ends the prefix as a pending tail."
-  {:malli/schema [:=> [:cat :seon.schema/value] :map]}
-  [x]
+  "A seq's first `limit` members, stepped as Clojure's printer steps any
+  ISeq (`first`, `next`). An unrealized pending cell (a LazySeq, an
+  Iterate's next value) ends the prefix as pending, never realized here;
+  cells past `limit` end it as more."
+  {:malli/schema [:=> [:cat :seon.schema/value :int] :map]}
+  [x limit]
   (loop [cell x out (transient [])]
-    (let [c (class cell)]
-      (cond
-        (nil? cell) {:members (persistent! out)}
-        (identical? c clojure.lang.PersistentList$EmptyList) {:members (persistent! out)}
-        (identical? c clojure.lang.PersistentList)
-        (recur (.next ^clojure.lang.PersistentList cell) (conj! out (.first ^clojure.lang.PersistentList cell)))
-        (identical? c clojure.lang.Cons)
-        (recur (.more ^clojure.lang.Cons cell) (conj! out (.first ^clojure.lang.Cons cell)))
-        (identical? c clojure.lang.LazySeq)
-        (if (.isRealized ^clojure.lang.LazySeq cell)
-          (recur (.seq ^clojure.lang.LazySeq cell) out)
-          {:members (persistent! out) :pending? true})
-        (identical? c clojure.lang.ChunkedCons)
-        (let [chunk (.chunkedFirst ^clojure.lang.ChunkedCons cell)]
-          (if (identical? (class chunk) clojure.lang.ArrayChunk)
-            (recur (.chunkedMore ^clojure.lang.ChunkedCons cell)
-                   (reduce #(conj! %1 (.nth ^clojure.lang.ArrayChunk chunk (int %2))) out
-                           (range (.count ^clojure.lang.ArrayChunk chunk))))
-            {:members (persistent! out) :pending? true}))
-        (#{clojure.lang.PersistentVector$ChunkedSeq clojure.lang.LongRange} c)
-        (recur (.next ^clojure.lang.ISeq cell) (conj! out (.first ^clojure.lang.ISeq cell)))
-        :else {:members (persistent! out) :pending? true}))))
+    (cond
+      (or (nil? cell) (identical? (class cell) clojure.lang.PersistentList$EmptyList))
+      {:members (persistent! out)}
+      (and (instance? clojure.lang.IPending cell) (not (realized? cell)))
+      {:members (persistent! out) :pending? true}
+      (identical? (class cell) clojure.lang.LazySeq) (recur (.seq ^clojure.lang.LazySeq cell) out)
+      (>= (count out) limit) {:members (persistent! out) :more? true}
+      (instance? clojure.lang.ISeq cell)
+      (recur (.next ^clojure.lang.ISeq cell) (conj! out (.first ^clojure.lang.ISeq cell)))
+      :else {:members (persistent! out) :pending? true})))
+
+(defn- list-row
+  "A sequential value as a list (Clojure's printer): its stepped members,
+  with a total when every member was reached or the value is Counted."
+  {:malli/schema [:=> [:cat :seon.schema/value :seon.schema/value :int] :map]}
+  [x cells limit]
+  (let [{:keys [members pending? more?]} (seq-cells cells limit)]
+    (cond-> {:kind :coll :face ::print/list :open "(" :close ")" :members (seq members)}
+      (not (or pending? more?)) (assoc :total (count members))
+      (and more? (counted? x)) (assoc :total (count x))
+      (or pending? (and more? (not (counted? x)))) (assoc :pending? true))))
 
 (defn- held-order
   "Members in held order; an exact hash map or set of at most 64 exact
@@ -409,9 +410,10 @@
   {:kind :scalar :node {::print/face face ::print/value value ::print/text text}})
 
 (defn- classify
-  "One row of the permitted-operation table, matched by exact class."
-  {:malli/schema [:=> [:cat :seon.schema/value [:set :qualified-keyword]] :map]}
-  [x identity-attributes]
+  "One row of the permitted-operation table: exact classes for scalars, maps
+  and sets; seqs and other sequentials by interface, stepped to `limit`."
+  {:malli/schema [:=> [:cat :seon.schema/value [:set :qualified-keyword] :int] :map]}
+  [x identity-attributes limit]
   (let [c (class x)]
     (cond
       (nil? x) (scalar ::print/nil nil "nil")
@@ -463,12 +465,12 @@
       (#{clojure.lang.PersistentHashSet clojure.lang.PersistentTreeSet} c)
       {:kind :coll :face ::print/set :open "#{" :close "}" :total (count x) :ordered? true
        :members (if (identical? c clojure.lang.PersistentHashSet) (held-order x identity-attributes identity) (seq x))}
-      (#{clojure.lang.PersistentList clojure.lang.PersistentList$EmptyList clojure.lang.Cons clojure.lang.LazySeq
-         clojure.lang.ChunkedCons clojure.lang.PersistentVector$ChunkedSeq clojure.lang.LongRange} c)
-      (let [{:keys [members pending?]} (seq-cells x)]
-        (cond-> {:kind :coll :face ::print/list :open "(" :close ")" :members (seq members)}
-          pending? (assoc :pending? true)
-          (not pending?) (assoc :total (count members))))
+      ;; Every seq and every other Sequential prints as a list, as Clojure's
+      ;; printer prints it; a vector type prints as a vector.
+      (instance? clojure.lang.ISeq x) (list-row x x limit)
+      (instance? clojure.lang.IPersistentVector x)
+      {:kind :coll :face ::print/vector :open "[" :close "]" :total (count x) :members (seq x)}
+      (instance? clojure.lang.Sequential x) (list-row x (seq x) limit)
       (identical? c clojure.lang.Var)
       {:kind :scalar :node {::print/face ::print/var ::print/name (str (.name (.ns ^clojure.lang.Var x)) "/" (.sym ^clojure.lang.Var x))}}
       ;; An agent's Var: final fields `sym` and `ns` of final classes
@@ -483,7 +485,7 @@
                                     (.getName ^clojure.lang.Symbol sym)))}})
       (identical? c Class) {:kind :scalar :node {::print/face ::print/class ::print/name (.getName ^Class x)}}
       (and (instance? Throwable x) (throwable-safe c))
-      (assoc (classify (throwable-value x) identity-attributes) :prefix "#error " :face ::print/throwable)
+      (assoc (classify (throwable-value x) identity-attributes limit) :prefix "#error " :face ::print/throwable)
       :else
       {:kind :scalar :node {::print/face ::print/object
                             ::print/class (clojure.lang.Compiler/demunge (.getName c))}})))
@@ -679,7 +681,10 @@
                                                 ::print/requery-refusal "renderer text beyond its ceiling"})
                                 declared)]
                  (assoc base :kind :leaf :node declared :rendered? true))
-               (let [c (classify value identity-attributes)]
+               (let [children (:max-children context)
+                     ;; A root continuation pages from its absolute offset.
+                     limit (if (= Long/MAX_VALUE children) children (+ (:offset context 0) children))
+                     c (classify value identity-attributes limit)]
                  (case (:kind c)
                    :scalar (assoc base :kind :leaf :node (:node c))
                    :name (if (<= (count (:text c)) scalar-bound)

@@ -915,6 +915,15 @@
                                 (db/db connection))))
        (is (= refusal (value/transacted refusal (db/db connection))))))))
 
+(deftest every-sequential-prints-as-a-list
+  ;; Classified by interface, as Clojure's printer prints them: any ISeq or
+  ;; other Sequential is a list; an unrealized cell stays pending.
+  (let [text #(:seon.render.value/text (value/prepare (unit %)))]
+    (is (= "(1 2 3)" (text (sort [3 1 2]))))
+    (is (= "(:a :b)" (text (keys {:a 1 :b 2}))))
+    (is (= "(1 2)" (text (conj clojure.lang.PersistentQueue/EMPTY 1 2))))
+    (is (str/starts-with? (text (iterate inc 0)) "(0 …?)"))))
+
 (deftest a-value-s-own-rendered-data-is-its-ai-face
   ;; The master override (AGENTS render law): a value's own :seon.render/ai
   ;; key may be the rendered data itself. Only a named producer has indexed

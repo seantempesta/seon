@@ -222,20 +222,19 @@ and nothing else is called on it. Approval of an outer class never approves its 
 | `PersistentList`, `PersistentList$EmptyList` | `count` (`PersistentList.java:115`), `first`, `next` (fields) | members, tail |
 | `Cons` | `.first`, `.more` (fields, `Cons.java:36–47`). **Not** `count`, which walks the tail (`:50`) | first, tail |
 | `LazySeq` | `.isRealized` (`lock == null`, `LazySeq.java:287`); when realized, `.seq` returns the field `s` (`:102–105`) | the cached seq. Unrealized: the pending marker |
-| `ChunkedCons` | `.chunkedFirst` (field, `ChunkedCons.java:56`), `.chunkedMore` (field, `:64`) | chunk must be exactly `ArrayChunk` (`nth`/`count` read an array, `ArrayChunk.java:39–51`); tail |
 | `clojure.lang.Var`, `sci.lang.Var` | JVM: `.ns`/`.sym` (final fields). SCI: final fields `sym` and `ns` (`sci/lang.cljc` `Var`); a `sci.lang.Namespace`'s final `name`. **Metadata is never read**; both print `#'ns/name` | `sym` exactly `Symbol`, `ns` exactly `sci.lang.Namespace` |
 | `PersistentVector$ChunkedSeq` | `count` (`PersistentVector.java:512`), `first`, `next` over its own vector | members |
 | `Throwable` subclass *C* | Only when `getMessage`, `getCause`, `getStackTrace` and `getSuppressed` all have declaring class `java.lang.Throwable` (`Class/getMethod` + `getDeclaringClass`, memoized per Class). `getData` only for exactly `ExceptionInfo` (`ExceptionInfo.java:34`) | message, data, cause, frames |
 
 Consequences, each a closed trace from the review:
 
-- **Seq cells** (P1-3). `ChunkedCons` is safe only through an exact `ArrayChunk`; a user `IChunk` is opaque. A
-  realized `LazySeq` is unwrapped to its cached seq, which is then classified. `StringSeq`, `APersistentMap$KeySeq`,
-  `ASeq` subclasses, `Cycle`, `Iterate`, `Repeat`, `Range`, `IteratorSeq` and `EnumerationSeq` are not rows, so a
-  cell of one of those classes ends the prefix. The first unrealized or unlisted cell becomes the seq's tail cut with
-  an unknown total: `(1 2 3 …?)`. `(range)`, `(iterate f x)` and `(cycle xs)` show `(…?)` or at most their
-  already-held first cell. **Measured:** the probe's `seq-cells` steps `Cons`, realized `LazySeq` and
-  `ChunkedCons`/`ArrayChunk` through fields only.
+- **Seq cells** (root ruling 2026-09-26, superseding P1-3's closed class list). Every `clojure.lang.ISeq` and every
+  other `Sequential` prints as a list, as Clojure's printer prints it (an `IPersistentVector` as a vector); the
+  class is the interface, not a case list. `seq-cells` steps `first`/`next` up to the node's member limit (offset
+  plus max-children). A realized `LazySeq` is unwrapped to its cached seq; any unrealized `IPending` cell
+  (`LazySeq`, an `Iterate`'s next value) ends the prefix as the pending tail and is never realized by the printer:
+  `(range)` and `(iterate f x)` show `(0 …?)`, `(cycle xs)` `(1 …?)`. A seq longer than the limit shows its
+  total when it is `Counted`, else the pending tail.
 - **Row 9.5** (ruled): the pending tail is the declared "unrealized lazy seq" marker naming the cell's class, never
   nil. Realizing a page is an explicit, bounded evaluation (§3g), never the printer. The old claim that an agent's
   top-level lazy result is realized before `shown-result` renders it is withdrawn: the review traced the evaluation
