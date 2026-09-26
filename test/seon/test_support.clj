@@ -381,13 +381,20 @@
   recurrence limit — so the omission only ever shows up when something has
   already gone wrong (AGENTS §5: supply every declared input).
 
-  Everything structural is defaulted here from the SHIPPED decisions, once,
-  so no suite carries constants of its own; the caller wins, so a fixture
-  that drives a channel or pins a dial supplies its own and keeps it. The
-  cluster's identity — connection, name, process, SCI ctx — is never
-  defaulted: those are the caller's world."
+  Everything structural is defaulted here from the world's own decisions,
+  the effective config of the handle's cluster on its connection (the
+  shipped decisions for a handle naming no cluster world), so no suite
+  carries constants of its own; the caller wins, so a fixture that drives a
+  channel or pins a dial supplies its own and keeps it. The cluster's
+  identity — connection, name, process, SCI ctx — is never defaulted: those
+  are the caller's world."
   [handle]
-  (let [decisions config/defaults]
+  (let [connection (:seon.db/connection handle)
+        decisions (if (and connection (:seon.cluster/name handle))
+                    (config/effective (db/db connection) (:seon.cluster/name handle))
+                    config/defaults)
+        _ (when (:seon.error/at decisions)
+            (throw (ex-info (str (:seon.error/message decisions)) decisions)))]
     (merge {:seon.agent/routing (attempt-routing (:seon.db/connection handle))
             :seon.cluster.wake/channel (async/chan (async/sliding-buffer 1))
             :seon.render/context-channel (async/chan (async/sliding-buffer 1))

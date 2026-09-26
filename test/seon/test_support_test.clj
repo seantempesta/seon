@@ -356,3 +356,27 @@
       (is (= (concat (map #(vector ::opened %) (range acquired-count))
                      (map #(vector ::closed %) (reverse (range acquired-count))))
              @events)))))
+
+(deftest a-cluster-handle-takes-its-dials-from-its-worlds-effective-config
+  ;; CLASS: `cluster-handle` took every dial from the shipped defaults, so a
+  ;; test's manifest config never reached a host or agent built from its
+  ;; handle. The handle naming a connection and a cluster reads that world's
+  ;; effective config through seon.config; one naming no cluster world keeps
+  ;; the shipped decisions; a caller-supplied dial still wins.
+  (test-support/with-database
+   (fn [connection]
+     (test-support/seed-cluster! connection "handle-config" {:seon.config.eval/time-limit-ms 1234})
+     (let [effective (config/effective (db/db connection) "handle-config")
+           handle (test-support/cluster-handle {:seon.db/connection connection
+                                                :seon.cluster/name "handle-config"})]
+       (is (= 1234 (:seon.config.eval/time-limit-ms effective)) "the manifest reached the world")
+       (is (= 1234 (:seon.config.eval/time-limit-ms handle)) "and the handle built from it")
+       (is (= (config/result-caps effective) (:seon.sci.admit/caps handle)))
+       (is (= 77 (:seon.config.eval/time-limit-ms
+                  (test-support/cluster-handle {:seon.db/connection connection
+                                                :seon.cluster/name "handle-config"
+                                                :seon.config.eval/time-limit-ms 77})))
+           "the caller wins"))
+     (is (= (:seon.config.eval/time-limit-ms config/defaults)
+            (:seon.config.eval/time-limit-ms (test-support/cluster-handle {:seon.db/connection connection})))
+         "a handle naming no cluster keeps the shipped decisions"))))
