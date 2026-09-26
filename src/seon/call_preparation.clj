@@ -1122,8 +1122,10 @@
   :seon.call-preparation/offending-arguments arguments})
 
         :else
-        (let [refusal (volatile! nil)
-              absent (Object.)
+        ;; Each reduction stops at the first refusal (`reduced`), so no later
+        ;; supplier runs; a stopped reduction returns the refusal map, never
+        ;; the argument vector.
+        (let [absent (Object.)
               value-for (fn [slot]
                           (let [produced (supply current environment slot sym)
                                 unavailable? (and (map? produced) (:seon.call-preparation/unavailable-key produced))]
@@ -1131,37 +1133,32 @@
                               ;; Optional is a declared absence: the call runs without the key.
                               (and unavailable? (:seon.call-preparation/optional? slot)) absent
                               (or unavailable? (and (map? produced) (:seon.call-preparation/invalid-key produced)))
-                              (vreset! refusal produced)
+                              (reduced produced)
                               :else produced)))
               with-inserts
               (reduce (fn [args slot]
                         (let [position (:seon.fn.argument/index slot)
-                              produced (if (:seon.call-preparation/entries slot)
-                                         {}
-                                         (value-for slot))]
-                          (if @refusal
-                            args
-                            (into (conj (subvec args 0 position) produced)
-                                  (subvec args position)))))
+                              produced (if (:seon.call-preparation/entries slot) {} (value-for slot))]
+                          (if (reduced? produced)
+                            produced
+                            (into (conj (subvec args 0 position) produced) (subvec args position)))))
                       (vec arguments)
-                      (:seon.call-preparation/inserts answer))
-              filled
-              (reduce (fn [args entry]
-                        (let [position (:seon.fn.argument/index entry)
-                              entry-key (:seon.call-preparation/entry-key entry)
-                              target (nth args position nil)]
-                          (if (or @refusal
-                                  (not (map? target))
-                                  (contains? target entry-key))
-                            args
-                            (let [produced (value-for entry)]
-                              (if (or @refusal (identical? absent produced))
-                                args
-                                (assoc args position
-                                       (assoc target entry-key produced)))))))
-                      with-inserts
-                      (:seon.call-preparation/entries answer))]
-          (or @refusal filled))))))
+                      (:seon.call-preparation/inserts answer))]
+          (if (map? with-inserts)
+            with-inserts
+            (reduce (fn [args entry]
+                      (let [position (:seon.fn.argument/index entry)
+                            entry-key (:seon.call-preparation/entry-key entry)
+                            target (nth args position nil)]
+                        (if (or (not (map? target)) (contains? target entry-key))
+                          args
+                          (let [produced (value-for entry)]
+                            (cond
+                              (reduced? produced) produced
+                              (identical? absent produced) args
+                              :else (assoc args position (assoc target entry-key produced)))))))
+                    with-inserts
+                    (:seon.call-preparation/entries answer))))))))
 
 (defn- refused-call
   "A read error that stopped preparing a call to `sym`, naming that call."
