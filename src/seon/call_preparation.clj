@@ -528,13 +528,17 @@
   else means the caller wrote the shorter shape and the slot is filled.
 
   Only a LEADING omitted slot is decidable — the ruling says \"the
-  predicate on the first argument\" — and only when the call has a first
-  argument at all. Every other collision falls through to the declared
-  arity, which always wins."
-  [exact derived]
+  predicate on the first argument\" — and only when the declared arity's
+  own first argument is that same slot (`exact-leading-key`): then the first
+  argument tells which shape the caller wrote. A declared arity whose first
+  argument is something else (a request map) is simply matched in full, and
+  every other collision falls through to the declared arity, which always
+  wins."
+  [exact derived exact-leading-key]
   (let [leading (first (:seon.call-preparation/inserts derived))]
     (when (and (:seon.call-preparation/key leading)
-               (zero? (long (:seon.fn.argument/index leading))))
+               (zero? (long (:seon.fn.argument/index leading)))
+               (= exact-leading-key (:seon.call-preparation/key leading)))
       {:seon.call-preparation/key (:seon.call-preparation/key leading)
        :seon.call-preparation/supplied exact
        :seon.call-preparation/omitted derived})))
@@ -551,14 +555,14 @@
   slot's own value schema decides at call time; when two derived shapes
   land on one count, the plan refuses rather than guessing by arity
   order."
-  [exact derived]
+  [exact derived exact-leading-key]
   (cond
     (> (count exact) 1)
     {:seon.call-preparation/ambiguous? true
      :seon.call-preparation/candidates (candidate-indexes exact)}
 
     (and (= 1 (count exact)) (= 1 (count derived)))
-    (if-let [dispatch (dispatchable (first exact) (first derived))]
+    (if-let [dispatch (dispatchable (first exact) (first derived) exact-leading-key)]
       {:seon.call-preparation/ambiguous? false
        :seon.call-preparation/dispatch dispatch}
       (first exact))
@@ -653,6 +657,14 @@
                                (:seon.call-preparation/entries arity)}))
                     {}
                     fixed)
+            ;; The supplied-default key of each declared arity's first
+            ;; argument, when that argument is a suppliable slot.
+            exact-leading-by-count
+            (into {} (keep (fn [arity]
+                             (when-let [slot (first (filter #(zero? (long (:seon.fn.argument/index %)))
+                                                            (:seon.call-preparation/slots arity)))]
+                               [(:seon.fn.arity/argument-count arity) (:seon.call-preparation/key slot)])))
+                  fixed)
             ;; ONE derived shape per fixed arity: the arity minus ALL its
             ;; suppliable slots. No middle-omission combinatorics — a
             ;; Partial omissions are decided from the actual argument values
@@ -679,7 +691,8 @@
                           (when-let [answer
                                      (resolve-count
                                       (get exact-by-count supplied)
-                                      (get derived-by-count supplied))]
+                                      (get derived-by-count supplied)
+                                      (get exact-leading-by-count supplied))]
                             [supplied answer])))
                   (into (set (keys exact-by-count))
                         (keys derived-by-count)))
