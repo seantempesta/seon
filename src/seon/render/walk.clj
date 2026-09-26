@@ -490,47 +490,56 @@
                        (db/carried-projection database)
                        (sci.kernel/context-projection (:seon.sci.eval/ctx request)))
         installed (installed-attributes database)
-        pulled (atom {})
-        visited (atom #{})
-        evidence (atom [])
         width (pull-width caps)]
-    (letfn [(visit [lookup remaining]
-              (let [value (or (get @pulled lookup)
-                              (let [entry (acquire-entity projection database installed plan lookup cache)
-                                    value (:seon.render.call/output entry)]
-                                (swap! evidence into (:seon.render.call/read-evidence entry))
-                                (swap! pulled assoc lookup value (:db/id value) value)
-                                value))
+    ;; The walk's state is a value threaded through `visit`, [state value]:
+    ;; entities pulled by lookup and eid, eids expanded, and read evidence.
+    (letfn [(visit [state lookup remaining]
+              (let [[state value]
+                    (if-some [pulled (get-in state [::pulled lookup])]
+                      [state pulled]
+                      (let [entry (acquire-entity projection database installed plan lookup cache)
+                            value (:seon.render.call/output entry)]
+                        [(-> state
+                             (update ::evidence into (:seon.render.call/read-evidence entry))
+                             (update ::pulled assoc lookup value (:db/id value) value))
+                         value]))
                     eid (:db/id value)]
-                (if (or (not eid) (@visited eid))
-                  value
-                  (do
-                    (swap! visited conj eid)
-                    (reduce
-                     (fn [result [display _attribute reverse?]]
-                       (if-let [children (get value display)]
-                         (let [expand #(visit (:db/id %) (max 0 (dec remaining)))]
-                           (assoc result display
-                                  (if (map? children)
-                                    (expand children)
-                                    (let [selected (into #{} (map :db/id)
-                                                         (take width (if reverse?
-                                                                       (sort-by :db/id > children)
-                                                                       children)))]
-                                      (mapv #(if (selected (:db/id %)) (expand %) %) children)))))
-                         result))
-                     value
-                     (when (pos? remaining)
-                       (map (fn [[attribute reverse?]]
-                              [(if reverse? (reverse-attribute attribute) attribute)
-                               attribute reverse?])
-                            (connection-attributes projection installed value))))))))]
-      (let [root (visit (:seon.render.walk/lookup request) distance)]
+                (if (or (not eid) (contains? (::visited state) eid))
+                  [state value]
+                  (reduce
+                   (fn [[state result] [display _attribute reverse?]]
+                     (if-let [children (get value display)]
+                       (let [expand (fn [state child] (visit state (:db/id child) (max 0 (dec remaining))))]
+                         (if (map? children)
+                           (let [[state expanded] (expand state children)]
+                             [state (assoc result display expanded)])
+                           (let [selected (into #{} (map :db/id)
+                                                (take width (if reverse?
+                                                              (sort-by :db/id > children)
+                                                              children)))
+                                 [state expanded]
+                                 (reduce (fn [[state out] child]
+                                           (if (selected (:db/id child))
+                                             (let [[state child] (expand state child)]
+                                               [state (conj out child)])
+                                             [state (conj out child)]))
+                                         [state []] children)]
+                             [state (assoc result display expanded)])))
+                       [state result]))
+                   [(update state ::visited conj eid) value]
+                   (when (pos? remaining)
+                     (map (fn [[attribute reverse?]]
+                            [(if reverse? (reverse-attribute attribute) attribute)
+                             attribute reverse?])
+                          (connection-attributes projection installed value)))))))]
+      (let [[state root] (visit {::pulled {} ::visited #{} ::evidence []}
+                                (:seon.render.walk/lookup request) distance)
+            evidence (::evidence state)]
         (when db/*read-evidence-sink*
           (swap! db/*read-evidence-sink* into
-                 (map #(assoc % :seon.db/db database) @evidence)))
+                 (map #(assoc % :seon.db/db database) evidence)))
         {:seon.render.walk/root root
-         :seon.render.call/read-evidence @evidence}))))
+         :seon.render.call/read-evidence evidence}))))
 
 (defn root-acquisition
   "Pull and index one agent-root neighbourhood by stable entity identity.
@@ -848,8 +857,10 @@
       (reduce
        (fn [entries saved]
          (let [lookup [:seon.cluster.eval/id (:seon.cluster.eval/id saved)]
+               ;; `:t` is the read's basis (kept below), not an attribute of
+               ;; the receipt row; without it the row's owner and pair apply.
                rendered (render/render-call
-                         (assoc request :seon.render/value saved
+                         (assoc request :seon.render/value (dissoc saved :t)
                                         :seon.render/output :seon.render/ai
                                         :seon.render.call/id [lookup]))]
            (if (:seon.render/refused-member rendered)
