@@ -474,3 +474,35 @@ Options:
 3. **Lazy arming** (~1–1.5 s), leaving compilation as is. Smallest diff, but it touches arming timing.
 
 Say 1 or 2 and I'll build it on a scratch copy and measure the unchanged restart before and after.
+
+## Resume 10 — our compiled classes per commit (52f35ed2b, option 2); RESET NEEDED ×2
+
+- **Mechanism.** `launch-form` binds `*compile-files*` into `<archive>/.program-classes.staging-<pid>` around the
+  capture's and boot's `require` of the program, the same `*compile-files*` load `dev_cache`'s `compile-form` uses.
+  - On success the directory is promoted whole by an atomic move. A loser or a failed load deletes its staging.
+  - `start-classpath` prepends `<archive>/.program-classes` when it exists.
+  - The directory is inside the committed archive, so it is keyed by the commit and removed by the existing
+    `prune-archives!`. There is no second manifest, lock or reaper.
+  - The launch value reports `:seon.operator/program-classes?`.
+  - A miss costs exactly today's compile.
+- **Scope.** Namespaces first required later, by `arm-host-program!`, still compile from source.
+- **Size.** operator.clj +41/−8. Tests: the operator and publication-launch launch-form calls take the source
+  argument (+3/−2). A new test file adds 57 lines.
+- **Regression:** `seon.cluster.program-classes-test/a-namespace-loaded-from-its-classes-keeps-protocol-and-record-identity-across-reload`.
+  A child JVM compiles a fixture with a protocol and a record; the namespace then loads from those classes, and
+  `require :reload` keeps the same record class and protocol satisfaction. 8/8 on default, 627 ms.
+- **Finding.** The same test run inside one JVM that first compiled the namespace in memory FAILS: the record class
+  loads from disk while the protocol interface comes from the in-memory class cache. The shipped design never mixes
+  them, because the compiling JVM does not have the directory on its classpath, and a JVM that loads the classes
+  never compiled them. That is why the test compiles in a child JVM.
+- **Before:** unchanged restart total 11,401 ms, capture 4,868 ms (21e3a7068, classes hit).
+
+**Root runs:**
+1. `bin/seon start --head` onto 52f35ed2b (or later). This first launch misses and writes
+   `.program-classes`.
+2. `bin/seon start --head` again with nothing changed. Report total-ms, capture-ms, ready-ms and
+   `:seon.operator/program-classes? true`.
+3. `bin/test-check default --test seon.cluster.program-classes-test/a-namespace-loaded-from-its-classes-keeps-protocol-and-record-identity-across-reload`
+4. `bin/test-check default --ns seon.dev.publication-launch-test`
+5. The operator's own bb tests: `seon.operator-move-test`. The launch-form test passed locally in bb.
+6. The regular program-change, caller-lint and boot-arming tests from resume 8.
