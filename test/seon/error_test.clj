@@ -1360,9 +1360,11 @@
        (is ((schema/projection-validator (schema/handed-projection) :seon.render/hiccup) html))
        (is (str/includes? (pr-str html) (:seon.error/message value)))))))
 
-(deftest an-unstored-error-renders-its-own-message-and-contract-finding
+(deftest an-unstored-error-renders-its-own-message
   ;; A refusal carries its signature before, or without, its recording: the
-  ;; database holds no row for it, and both faces show the value itself.
+  ;; database holds no row for it, and both faces show the value itself,
+  ;; with no appended contract finding (whether a return is declared is the
+  ;; producer's armed output contract's decision, not the renderer's).
   (test-support/with-database
    (fn [connection]
      (let [value {:seon.error/at #inst "2026-09-22T00:00:00Z"
@@ -1371,11 +1373,11 @@
                   :seon.error/signature (str/join (repeat 64 \0))
                   :seon.error/message "The refusal's own message."}
            unit {:seon.render/value value :seon.db/db (db/db connection)}
-           ai (error/render-undeclared-ai unit)
-           html (pr-str (error/render-undeclared-html unit))]
+           ai (error/render-ai unit)
+           html (pr-str (error/render-html unit))]
        (is (str/includes? ai (:seon.error/message value)) ai)
-       (is (str/includes? ai "Contract finding: seon.error-test/rendering") ai)
-       (is (str/includes? html "Contract finding: seon.error-test/rendering"))))))
+       (is (not (str/includes? ai "Contract finding")) ai)
+       (is (str/includes? html (:seon.error/message value)))))))
 
 (deftest the-default-html-face-links-committed-evidence
   (let [html (error/render-html

@@ -1904,27 +1904,6 @@
            [:a {:href (evidence-path id)} "Inspect evidence"]]])))))
 
 
-(defn- undeclared-alternative-finding
-  "The contract finding for an error its own operation's declared returns do not describe."
-  {:malli/schema [:=> [:cat :map] :string]}
-  [value]
-  (str "Contract finding: " (:seon.error/operation value)
-       " returned this error, and none of its declared error alternatives matches it."))
-
-(defn render-undeclared-ai
-  "`:seon.render/ai` — the error through the base renderer, then the contract
-  finding that its operation declares no alternative it satisfies."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:string {:min 1}]]}
-  [unit]
-  (str (render-ai unit) "\n" (undeclared-alternative-finding (rendered-error-value unit))))
-
-(defn render-undeclared-html
-  "`:seon.render/html` — the base error card with the same contract finding."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
-  [unit]
-  (conj (render-html unit)
-        [:p {:class "seon-error-contract-finding"}
-         (undeclared-alternative-finding (rendered-error-value unit))]))
 
 (defn- fault-order
   {:malli/schema [:=> [:cat :map]
