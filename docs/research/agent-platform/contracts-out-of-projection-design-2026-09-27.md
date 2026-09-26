@@ -88,14 +88,20 @@ with `call-preparation`, which derives `arity-facts` from the compiled value (N5
 namespace.
 
 **Body.**
-1. **Bind the contract's predicates.** `bind-contract-predicates`, including its `:error/fn` rewrite
-   (instrument.clj:428-457), moves into `seon.schema` as the seam's binding step; instrument calls the moved
-   function, converted in S1 (N5.2). It uses `predicate-functions-in projection` first, then `runtime-predicate` for
-   symbols the population does not bind.
-2. **Compile.** The accepted option set is exactly `{:registry R}`; any other Malli option is refused by name.
-   - `:shape` mode: `R` is the projection registry.
-   - `:armed` mode: `R` is `(mr/composite-registry projection-registry (mr/var-registry))`, as instrument.clj:607-609
-     does today.
+1. **Normalize, then bind (third review).** Preserve today's order at instrument.clj:600-604:
+   - `schema/compilable-form` first, which widens component children and carries generator properties
+     (schema.clj:274-324);
+   - then `bind-contract-predicates`, including its `:error/fn` rewrite (instrument.clj:428-457).
+
+   The binder moves into `seon.schema` in S1 and instrument calls it. Both steps use the **same resolved bindings
+   that enter the key**: the held base's construction bindings, then the contract's own inner bindings.
+2. **Compile against the entry's held base (T1), never the caller's registry.**
+   - `:shape` mode: `R` is the held base registry.
+   - `:armed` mode: `R` is `(mr/composite-registry base-registry (mr/var-registry))`.
+
+   The seam passes `{:registry R}` and nothing else. A host compiled-schema object inside the form keeps its own
+   options (malli `schema`, core.cljc:2605-2608). Such a form is not refused; it is compiled and **bypasses
+   retention** (below).
 3. **Admit.** Run the one-contract validation request `validate-declarations!` builds today (schema.clj:2082-2100).
    It reuses a validation base of *immutable population products only* (compiled forms, dependencies, canonical
    keys, admissions, purity, `core-references?`), derived once per population under the §1 cache. The
@@ -103,32 +109,52 @@ namespace.
    holder (N2).
 4. **Derive references.** Compute the per-arity references with the scoped walker from §4.
 
-**Cache (N1, N2).** `seon.cache/lookup ::function-contract key weigh derive retain?`.
-- `retain?` is `(complement refusal?)`: **no refusal is retained**, whatever its cause.
-- The key is `[mode form admission-source population bindings]`, all resolved before lookup:
-  - `form`: the authored contract, compared by value.
-  - `admission-source`: `:agent` or `:core` (missing stored provenance → `:agent`, schema.clj:2869-2874).
-  - `population`: the shape constructor's resolved inputs, the same members `build-projection` keys its memo on
-    (schema.clj:2332-2340):
-    - forms, schema admissions and pure predicate symbols;
-    - the **complete predicate-binding map the population compiled against**
-      (`:seon.schema.projection/predicate-functions`).
+**Cache (N1, N2, T1).** This is the population table of §10. The outer key is the base's **construction inputs**,
+not projection members a caller can overlay.
 
-    This closes Astra's N1 witness: `{:review/value [:fn review/p]}` bound to `int?` in one registry and to
-    `string?` in the other. Maps unchanged across projections keep their identity, so equality short-circuits,
-    and a new map hashes once.
-  - `bindings`: the resolved callables for the contract's own predicate symbols that the population does not bind
-    (including `:error/fn` targets). A Var is its own identity, so root replacement stays live and is not
-    re-keyed. `ns-unmap` plus recreation, or a branch callable, is a different object and gives a new key.
-- **Var-schemas (N1).** In `:armed` mode, `mr/var-registry` resolves **Var objects** (registry.cljc:67-71), and host
-  `:malli/schema` values can contain Var objects or compiled schema objects whose own options survive
-  (core.cljc:2605-2639). A form containing any non-EDN value (a Var, a compiled schema, a function object) is
-  **compiled but not cached**. No resolution is keyed apart from its use. Every agent-authored and stored contract
-  is EDN (`canonical-definition` refuses callables), so this bypass affects host-only forms. Their count is
-  measured in S1 as the difference between seam calls and `::function-contract` lookups, using existing profile
-  counters; no new cache-status API is added.
-- **Weight and retention (§10, root ruling):** contracts live in a bounded per-population table, not flat
-  `::function-contract` entries. The lookup above is that table's inner key, `[mode form admission-source bindings]`.
+- **Construction inputs.** The shape constructor records the inputs it actually compiled the registry with,
+  `:seon.schema.projection/construction-inputs`:
+  `[forms schema-admissions pure-predicate-symbols construction-bindings]`. Only `projection-build` and
+  `projection-with-declarations` write it. `with-predicate-functions` (schema.clj:401-414) is an overlay that
+  changes the binding *member* but never this record. The overlay's extra bindings are contract-level inputs and go
+  into the inner key.
+- **Witness T1, read-only on pid 25122** (`witnesses` in `tmp/defn-scan-opus/scoped-refs-probe.clj`):
+  - base A has `review/p` = `int?`, and the overlay rebinds it to `string?`;
+  - base B is built with `string?`;
+  - the member keys are equal (`true`), so the old design would share an entry; the construction keys differ
+    (`false`);
+  - their validators differ as Astra showed: `[true false]` against `[false true]`.
+
+  **Fixed by** keying on construction inputs.
+- **The held base.** The outer entry holds one closed schema base: the registry, its canonical object map (§4) and
+  the immutable validation base. Every inner miss compiles against that held base, so an independently rebuilt
+  equal population shares it instead of adding a second registry to the table (T1 retention). The base is released
+  only with the outer entry.
+- **S1-S3 bridge (T1).** While producers still put contracts into the projection registry, a caller's registry
+  retains every stored contract. Astra found 2,405 symbol entries reachable from the tiny `[:=> [:cat :int] :int]`.
+  So **compilation is uncached until S4**: the seam compiles against the caller's projection and nothing is
+  retained. Consumers keep the compiled value they were handed, as today.
+
+  From S4 the projection is shape-only by construction, and the base is exactly that registry. An input whose
+  provenance cannot be established (no construction-inputs record, such as a caller-assembled projection) is
+  compiled uncached. **Fixed by** caching nothing before shape-only construction exists.
+- **Inner key** `[mode form admission-source inner-bindings]`, all resolved before lookup:
+  - `form`: the authored contract, by value.
+  - `admission-source`: `:agent` or `:core`; missing stored provenance is `:agent` (schema.clj:2869-2874).
+  - `inner-bindings`: the callables for the contract's own predicate and `:error/fn` symbols that the construction
+    bindings do not cover, plus overlay rebindings.
+    - A Var is its own identity, so root replacement stays live.
+    - `ns-unmap` plus recreation, or a branch callable, is a new object and gives a new key.
+    - Captured callables are retained; their accounting is in §10.
+- **Never retained:**
+  - a refusal of any cause;
+  - a form holding any non-EDN value (a Var, a compiled schema, a function object), which is host-only, since
+    stored and agent contracts are EDN;
+  - a product over the slot charge (§10).
+
+  Bypass and inner compiles are counted by probe-local counters in the S1 measurement script, not by a cache API.
+- **Nothing environmental in a product.** An inner product retains no projection, database, source row, wrapper,
+  table handle or advisory memo, only the compiled contract and its reference sets.
 
 ## 2. Every reader, and what each switches to (line numbers at `d1f6a37fb`)
 
@@ -184,36 +210,73 @@ name inside a Malli walk whose options also see only names (core.cljc:2012-2019,
 back after the children (schema/internal.cljc:18-36). Changing only its predicate therefore cannot recover a pruned
 local child, so the function is rewritten.
 
-**The replacement** is `schema/contract-references [canonical compiled]`. `canonical` maps each canonical key to its
-compiled object, which the projection already holds (`mr/schema registry k`). It is a direct recursion over Malli's
-own seams (`m/children`, map-entry children, `m/-ref-schema?`, `m/-ref`, `m/options`, `m/deref`):
-- A ref node counts as canonical **only when its own scope resolves the name to the canonical object**:
-  `(identical? (mr/schema (:registry (m/options node)) k) (canonical k))`. The walk records `k` and stops there.
-- Otherwise it follows `m/deref` under a **scoped recursion guard** keyed `[scope-registry k]`. It never uses
-  Malli's name-based `::walked-refs`.
+**The replacement** is `schema/contract-references [canonical-targets compiled]`. It is one walker with explicit
+inputs.
+- `canonical-targets` maps each canonical key to the object that **the registry the value was compiled against**
+  answers for it.
+- It is a direct recursion over Malli's own seams (`m/children`, map-entry children, `m/-ref-schema?`, `m/-ref`,
+  `m/options`, `m/deref`).
+- A ref is canonical only when its own scope resolves the name to that target:
+  `(identical? (mr/schema (:registry (m/options node)) k) (canonical-targets k))`.
+- Otherwise it follows `m/deref` under a scoped recursion guard `[scope-registry k]`. Malli's name-based
+  `::walked-refs` is never used.
 
-**Prototype** (`tmp/defn-scan-opus/scoped-refs-probe.clj`, read-only on pid 17853; 0.53 ms for these cases, 4 ms
-MCP event):
+**The pairing rule (T2).** References are derived **once, at compile time, against the targets of the world the
+contract was compiled in**, and travel with the compiled value (§1 `:seon.schema/references`). A cache hit returns
+the stored sets and is never walked again against a caller's current targets.
+
+Witness T2, read-only on pid 25122:
+- a contract compiled against canonical map 1 gives `#{:review/value}` walked with its own targets;
+- walked with an independently compiled equal map 2, it gives `#{}`.
+
+**Fixed by** the pairing rule plus the held base (§1): every product in an entry is compiled against that entry's
+one base, whose targets are the ones stored with the product.
+
+**Every caller converts in S1** (third review). Each passes the targets of the registry it compiled against:
+- the preflight reference graph (schema.clj:710-742) and incremental direct references (744-765) compile against
+  `reference-registry`, whose canonical targets are **reference sentinels** (686-708), so they pass those
+  sentinels. There is no full compilation before the cycle check, and the scope is never recovered from a
+  possibly shadowed child;
+- `direct-references` (882-900) and admission (1600-1604) pass the projection registry's targets;
+- function dependency derivation (2211, 2689) and `program/arity-row` (program.cljc:1033-1038) **take the
+  seam-returned sets** and stop re-walking.
+
+`compiled-references` [names] is deleted in S1.
+
+**Prototype on the §4 cases** (`tmp/defn-scan-opus/scoped-refs-probe.clj`, read-only; 0.53 ms, 4 ms MCP event):
 
 | case | walker result |
 |---|---|
-| Astra's shadow `[:schema {:registry {:review/a :review/b}} :review/a]` | `#{:review/b}` (the old walker gave `#{:review/a}`) |
+| Astra's shadow | `#{:review/b}` (the old walker gave `#{:review/a}`) |
 | plain tuple with a nested map | `#{:review/a :review/m}` |
 | local string alias | `#{:review/b}` |
 | explicit `[:ref …]` in a map | `#{:review/b}` |
 | local recursive registry | `#{:review/a}`, terminates |
-| **nested scopes reusing one recursive name** | `#{:review/a :review/b}`, terminates |
+| nested scopes reusing one recursive name | `#{:review/a :review/b}`, terminates |
 | empty-ref contract | `#{}` |
-| a function schema over all three roles | `#{:review/a :review/b :review/m}` |
+| a function schema over three roles | `#{:review/a :review/b :review/m}` |
 
-**One-time comparison of the stored facts, with the corrected walker** (N3; `compare-stored`, same file). Over all
-**2,357** stored contracts at pid 17853, the scoped walk equals `compiled-references` per arity and role for
-**every** contract: **0 differing, 370 ms**.
+**Stored facts: corrected claim and new evidence (T2 migration).** Revision 3's `compare-stored` compared old and
+new *recomputation* only; it was walker-compatibility evidence, not validation of stored facts. The new
+`stored-facts` check (same file, read-only on pid 25122):
+1. captures one database value (basis **536872032**);
+2. pulls every contracted row's stored arity input, output and guard sets, with an absent many-valued set
+   normalized to `#{}`;
+3. derives the same sets with the scoped walker over that value's projection.
 
-So this store's facts are valid under the corrected walker, and no stored contract uses a shadowing local registry.
-S3 still runs the comparison per store as a gate before the index becomes authoritative. A store with differences is
-repaired through the canonical writer (`program/contract-facts` over the final candidate population), not by
-patching datoms.
+Result: **2,358 rows; 2,358 equal, 0 differing, 0 missing compiled schemas, 0 missing arity roots.** The
+comparison took 9 ms after the query.
+
+Equal sets do not prove that no row uses a shadowing registry. A shadow can yield the same set, and then its facts
+are correct anyway.
+
+**S3's gate** is this check, committed as a reproducible test-support check. It:
+- runs against the final candidate population;
+- **refuses** missing compiled or arity evidence;
+- derives canonical facts through `program/contract-facts`, fed by the seam, not the probe walker;
+- repairs differences through the canonical writer before indexed selection becomes authoritative.
+
+Old/new walker agreement stays as separate compatibility evidence.
 
 **Integrity going forward.**
 - The final writer (§5) compares a changed contract's canonical stored arity fields with
@@ -268,15 +331,22 @@ acceptance path is added.
 
 ## 6. Slices (HEAD loads after each; producers and acquisition change last, R6, N5)
 
-- **S1, additive (schema.clj, instrument.clj for the moved binder, program.cljc, db.clj).**
-  - Adds the symbol-free seam (§1) and `schema/contract-references` (§4). `compiled-references` delegates to it,
-    since the stored facts compare equal (§4).
+- **S1, additive (schema.clj, instrument.clj for the moved binder, program.cljc, db.clj, config dial resource + default, `:measure` alias and script if decided).**
+  - Adds the symbol-free seam (§1) with **retention disabled until S4** (T1 bridge): the table code, the eligibility
+    rule and their regressions land here, but lookups compile uncached.
+  - Adds the `:seon.schema.projection/construction-inputs` record, written by the two constructors.
+  - Adds `schema/contract-references` (§4) and converts **every** `compiled-references` caller with its explicit
+    targets: sentinels for the reference graph, seam-returned sets for program and function dependencies. The old
+    walker is deleted.
   - Moves `bind-contract-predicates` into `seon.schema` and converts its instrument caller.
   - Adds `db/function-contract-row` and the scoped admission reader as an **unused** helper.
   - Adds `program/contract-facts`' compiled-contract argument; its current callers pass the registry entry.
   - Regressions:
     - seam equals registry compile for every stored contract;
     - N1's two-binding witness gives different keys;
+    - T1: an overlay and an equal rebuilt population get different construction keys;
+    - T2: a hit returns the stored reference sets and never re-walks against foreign targets;
+    - the T3 concurrency set (§10);
     - overlays sharing a holder; same-Var root replacement vs `ns-unmap`/recreate; distinct branch callables;
     - an armed form holding a Var or compiled schema is not cached;
     - `:error/fn` parity; agent/core admission parity;
@@ -284,13 +354,15 @@ acceptance path is added.
     - deleted predicates in a historical contract keep today's diagnostic;
     - the §4 walker table plus input, output and guard roles, unions and alias chains;
     - retention under many versions, **large forms and several distinct populations** stays within the configured
-      budget (§10).
+      budget. This is measured by the §10 tool, and the slot charge and eligibility constants are committed with
+      their results.
 - **S2, every consumer (§2 #1-#9, #12-#17; owners: instrument, call_preparation, render, web, effect, test, fn).**
   - Producers, loader admission and acquisition are unchanged.
   - The early checker calls (#10, #11) are **not** in S2.
   - R1/R2 regressions as in revision 2.
 - **S3, facts and the final checker (db.clj, turn.clj, sci/eval.clj, fn.clj).**
-  - Gate: run the stored-fact comparison with the corrected walker; repair any differences through the canonical
+  - Gate: the §4 stored-fact check, captured on one value and run against the final candidate population. It
+    refuses missing evidence, derives facts through `program/contract-facts`, and repairs through the canonical
     writer.
   - Install `program-relation-error` and switch the early entrances to its decision function. The projection-side
     function checks stay as well, and a parity test proves both refuse identically.
@@ -300,6 +372,7 @@ acceptance path is added.
   index/publication, sci/eval next-projection, fingerprint v4).**
   - Drops the producers and the contract range, activates schema-scoped admission acquisition, and removes the
     resource member, the retired APIs and the tests naming them, together.
+  - Enables retention: the base is the shape-only registry.
   - Class regression `a-function-contract-never-changes-the-projection` with the §8 replay.
   - Root's test list is as in revision 2.
 
@@ -310,14 +383,17 @@ These are estimates from source, ±25%. The final count comes with the diffs.
 | part | lines |
 |---|---:|
 | schema.clj function half: registry, indices, fingerprint, validation branch, replacement, row parsing, three replacement APIs, cached arities | −200 |
-| schema.clj seam, references fix, scoped admissions | +70 |
+| schema.clj seam, construction-inputs record, walker with explicit targets (callers converted), scoped admissions | +95 |
+| schema.clj population table: holder, eligibility rule, dial input | +45 |
+| config dial (schema resource + default) | +8 |
+| measurement script + alias (if option 1 of the §10 tool decision) | +120 script, +1 alias |
 | db.clj `function-contract-row`, `program-relation-error` (the renderer coherence and replacement recheck move here from schema.clj), scoped content key | +90 / −10 |
 | instrument (#1-#4) | −15 / +10 |
 | call_preparation (#5-#7) | −10 / +15 |
 | fn, render, web, effect, test, turn, sci/eval (#8-#16) | ±40 |
 | resource member | −2 |
 
-**Net:** about −275 / +225. Most of the added lines are the final-writer checker, which replaces checks that
+**Net (source, excluding the measurement script):** about −275 / +300. Most of the added lines are the final-writer checker, which replaces checks that
 today run implicitly inside projection acquisition.
 
 ## 8. Expected benefit and the measurement that decides it (R7)
@@ -353,33 +429,87 @@ It records:
 
 ## 10. Retention of compiled contracts (N2) — root ruling 2026-09-27: one bounded table per population
 
-A compiled contract retains its registry through its Malli options, and through it the whole shape population. The
-central cache weighs a value once, when it is inserted (cache.clj:115-124, 155-164). Contract entries must therefore
-never outlive an uncharged population.
+**Ruling (root, option 1).** One `seon.cache` entry per construction-input key (§1) holds that population's base and
+a contract table bounded by a config dial (default 512). The entry is charged the population weight plus the dial
+times a per-slot charge measured in S1, with a 16 KB ceiling to verify. The population and its contracts are evicted
+together.
 
-**Ruling (root, 2026-09-27, option 1).** One `seon.cache` entry per schema population holds that population's
-contract table.
-- **Lookup.** `seon.cache/lookup ::contract-population population-key weigh derive`, where `population-key` is §1's
-  population member: forms, schema admissions, pure predicate symbols and the complete binding map.
-- **The table.** The value is a core.cache LRU whose threshold is a **contract-count config dial** with default
-  512. The dial is declared once in the config schema resources and read at the arming or acquisition boundary; it
-  is never a code constant. Entries are keyed `[mode form admission-source bindings]` and each is retained only when
-  it is not a refusal.
-- **Weight.** The population weight (the `::projection` formula, `3700 × forms`) plus `dial × per-slot charge`.
-  The per-slot charge is **measured in S1** as the retained size of real compiled contracts, including large forms;
-  **16 KB is the ceiling to verify**. A contract whose measured retained size exceeds the slot charge is compiled
-  but not stored in the table.
-- **Guarantee.** A population and its contracts are charged together and evicted together, so no contract keeps an
-  uncharged population reachable. Growth within one population is bounded by the dial.
-- **Regressions (S1).**
-  - Many versions under one population stay within the dial.
-  - A large form over the slot charge is not stored.
-  - Several distinct populations are each charged once and evicted with their contracts.
-  - Eviction of the population entry releases its compiled contracts (a weak-reference probe).
+**Ownership and concurrency (T3).**
+1. **Holder.** The outer value is `{::base … ::table (atom <core.cache LRU, threshold = dial>)}`.
+   - A caller acquires the entry with `seon.cache/lookup`, which coalesces outer construction only
+     (cache.clj:148-175), and releases the handle when the operation returns.
+   - Products hold no reference back to the holder.
+   - The holder is never placed on a projection, wrapper or other long-lived value.
+2. **Inner lookup.**
+   - A hit is `(swap! table cache/hit k)`. It updates LRU recency, which core.cache's wrapped `lookup` does not do
+     (wrapped.clj:25-34).
+   - A miss compiles **outside** the swap against the acquired entry's base. Only an eligible product (not a
+     refusal, not a bypass form, within the slot charge) is then published with one `swap!`: if the key is present
+     it is a hit, otherwise `cache/miss`.
+   - `lookup-or-miss` is not used, because it has no retention predicate (wrapped.clj:38-70).
+   - Independent concurrent misses on one key may compile twice. That is allowed and counted; single-flight is added
+     only if a measurement warrants it.
+3. **Eviction during a compile.** A completion publishes into the table of the entry it acquired (E1), never into a
+   fresh lookup. If E1 was evicted, that insert lands in an unreachable table and is collected with it. A later
+   caller builds E2 from its own miss.
 
-The alternatives considered were charging each contract the whole population (hit rates collapse at about 38
-contracts under 512 MB) and having no shared cache (per-use recompiles in render and supplier reads). Both were
-declined.
+   Eviction removes the **cache's** root only. Installed wrappers and plans keep their own compiled values
+   (instrument.clj:608-625), and a function that is still executing is never invalidated. The weak-reference
+   regression first releases those owners and waits for Caffeine maintenance (`cleanUp`). It never demands an
+   immediate GC.
+4. **Dial lifetime.**
+   - The dial value is **part of the outer key** and is read once at the acquisition owner: the cluster's config
+     facts at arming or acquisition. It is passed explicitly into the seam; the seam reads no config.
+   - A dial change builds new entries under the new policy and charge. Old entries age out under the outer LRU, and
+     no table grows under its old weight.
+   - Clusters sharing a population with different dial values hold separate entries, each charged.
+
+**Slot sizing and eligibility (T4).** This needs a decision on the measurement tool (below).
+- **Tool.** clj-memory-meter 0.3.0, which is JOL-based and already in `~/.m2` but not on seon's classpath. It runs
+  from a committed script in a `:measure` alias JVM against a copied store. The alternatives are below.
+- **Object boundary.**
+  - **Population root, measured once:** the key, base registry, canonical targets, validation base and holder
+    overhead, over populations with different form sizes and bindings. Objects shared with the projection's own
+    `::projection` entry are reported separately; two outer entries do not charge shared objects "exactly once".
+  - **Incremental slot:** `measure([base table-with-k-slots]) − measure([base table-with-0-slots])`, divided by k.
+    It covers the inner key and authored form, local registries, bindings and captures, the compiled contract,
+    reference sets and LRU bookkeeping, with the held base excluded because it is the same object graph.
+  - **After use:** measured again after forcing the validators and explainers the consumers use (Malli's lazy
+    caches, core.cljc:345-359).
+  - **Corpus:** multi-arity, local-recursive, large-literal, local-registry and branch-closure contracts.
+- **Runtime eligibility (executable).** A conservative size rule fitted from those measurements:
+  `estimate = a × printed-EDN-length(form) + b × arity-count + c × local-registry-entries`, with the fitted
+  constants committed beside the script. A product whose estimate exceeds the slot charge is returned uncached.
+  Computing it costs one `pr-str` of the form per miss, never per hit, and that time is measured.
+- **Reported separately:** estimate, observed retained size, safety margin, bypass rate, measurement time, compile
+  time. If real contracts exceed 16 KB they bypass, as ruled; the ceiling is never raised silently.
+- **Regressions (S1):**
+  - same-key concurrent misses;
+  - distinct-key pressure at the threshold;
+  - refusal, bypass and oversize are not retained, even transiently;
+  - eviction during an inner compile;
+  - a dial change;
+  - many versions, large forms and several populations measured as retained roots after the probe references are
+    dropped.
+
+**Needs a decision: the retained-size measurement tool (T4).**
+1. **Recommended: clj-memory-meter in a `:measure` alias.**
+   - It runs in its own measurement JVM over a copied store, from a committed script. It needs
+     `-Djdk.attach.allowAttachSelf`.
+   - Guarantee: exact object-graph sizes with shared-graph subtraction.
+   - Cost: 1 alias line, about 120 script lines, and one isolated JVM run per measurement. This is a declared
+     measurement JVM, not a test or probe JVM on default.
+   - Sacrifice: a new dev-only dependency.
+2. **Heap histogram differences on default.**
+   - `jcmd GC.class_histogram` before and after inserting N contracts into a scratch table.
+   - Cost: no dependency; about 60 script lines.
+   - Sacrifice: each histogram forces a full GC pause on the shared default; resolution is per class, not per graph;
+     shared-object attribution is approximate.
+3. **Estimate only.**
+   - Fix the slot charge at the 16 KB ceiling and use the printed-length rule with conservative constants from the
+     existing projection weight calibration.
+   - Cost: no measurement.
+   - Sacrifice: no retained-memory evidence, so the guarantee rests on an estimate. Astra's T4 would stay open.
 
 ## 11. Composition with derive-once (`derive-once-design-2026-09-26.md`)
 
