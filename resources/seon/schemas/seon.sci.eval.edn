@@ -236,7 +236,7 @@
                   :seon.sci.eval/settled-namespaces]],
                 :settled-namespaces
                 [:map-of
-                 {:description "The namespace rows earlier forms of this settlement will store, by name: a definition digests with the row its transaction leaves stored."}
+                 {:description "Retiring (no producer or reader since d62d32bf7; delete at the next adoption): the run's working value holds the namespace rows earlier forms store."}
                  :seon.ns/name :seon.ns/ns],
                 :schema-refused :seon.schema/key,
                 :reader-event-count-error
