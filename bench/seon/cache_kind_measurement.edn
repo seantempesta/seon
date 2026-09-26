@@ -1,0 +1,32 @@
+#:seon.measure{:tool
+               "used heap after System/gc, holding the value, less before; one kind per fresh JVM",
+               :jvm "26.0.1",
+               :git-head "repository HEAD at the run (moves); see :snapshot",
+               :snapshot "git archive of 27eab14c6, the program measured",
+               :date "2026-09-27",
+               :repeats {:seon.schema/declaration-projection [8915728 9121032]
+                         :seon.schema/projection-with-contracts [19475152 19945312]},
+               :corpus "2,371 stored contracts copied from default at basis 536872447 (the defn-scan corpus)",
+               :forms 3549,
+               :kinds
+               {:seon.schema.edn/packaged-population
+                {:count 3545,
+                 :retained-bytes 1336008,
+                 :bytes-per-unit 376},
+                :seon.schema/declaration-projection
+                {:count 3549,
+                 :retained-bytes 8915728,
+                 :bytes-per-unit 2512},
+                :seon.schema/projection
+                {:count 3549,
+                 :retained-bytes 10096784,
+                 :bytes-per-unit 2844},
+                :seon.schema/projection-with-contracts
+                {:count 5920,
+                 :retained-bytes 19475152,
+                 :bytes-per-unit 3289,
+                 :contracts 2371},
+                :seon.program/authored-shapes
+                {:count 6,
+                 :retained-bytes 243600,
+                 :bytes-per-unit 40600}}}

@@ -277,6 +277,11 @@
                                             m/properties))
                    (keys (:seon.schema.projection/forms projection)))))))
 
+;; Process-cache weight: bytes the authored shapes keep alive per row family,
+;; their projection built (bench/seon/cache_kind_measurement.edn, 2026-09-27:
+;; 244 KB / 6 families).
+(def shape-bytes-per-family 40600)
+
 (defn- authored-shapes
   "The shapes the AUTHORED declaration resources currently define.
 
@@ -294,10 +299,9 @@
   remembered: a refusal throws out of the derivation."
   []
   #?(:clj
-     ;; Weight: 4 KB per row family (a shape is a handful of attribute sets).
      (let [forms (schema.edn/packaged-forms)]
        (seon.cache/lookup ::authored-shapes forms
-                          #(* 4096 (count %))
+                          #(* shape-bytes-per-family (count %))
                           #(shapes-in (schema/build-projection forms))))
      :cljs (shapes-in (schema/build-projection (schema/registered-schemas)))))
 

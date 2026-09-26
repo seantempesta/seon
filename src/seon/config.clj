@@ -383,7 +383,7 @@
   []
   (let [forms (schema.edn/packaged-forms)]
     (seon.cache/lookup ::declared-projection forms
-                       #(* 1300 (count (:seon.schema.projection/forms %)))
+                       #(* schema/declaration-projection-bytes-per-form (count (:seon.schema.projection/forms %)))
                        #(schema/declaration-projection forms))))
 
 (defn default-population

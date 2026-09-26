@@ -370,18 +370,21 @@
                          (.listFiles (io/file url)))))
       [[(.toExternalForm url) -1 (.getLastModified (.openConnection url))]])))
 
+;; Process-cache weight: bytes a retained population keeps alive per declared
+;; form (bench/seon/cache_kind_measurement.edn, 2026-09-27: 1.34 MB / 3,545).
+(def population-bytes-per-form 376)
+
 (defn- packaged-population
   "The population the resources declare, one per resource URL in the process
   cache. Every JVM runs a committed archive (`data/source/<sha>`), so the
   resources on its classpath never change while it runs and the URL names
   them. Stamping the 210 files cost 1.3 ms armed on every `packaged-forms`
-  (2026-09-26). Weight: 375 bytes per form (1.32 MB / 3,514 forms,
-  cache-central design 2026-09-26)."
+  (2026-09-26). Weighed by [[population-bytes-per-form]]."
   {:malli/schema [:=> [:cat] :map]}
   []
   (seon.cache/lookup ::packaged-population
                      (str (io/resource default-resource))
-                     #(* 375 (count (::declared-forms %)))
+                     #(* population-bytes-per-form (count (::declared-forms %)))
                      #(resource-population default-resource)))
 
 (defn declaration-digest

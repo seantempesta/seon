@@ -1345,6 +1345,16 @@
                         " must declare a nonempty :seon.config/display-label.")} assoc :seon.error/declared-schema :seon.schema/validation-refusal)]
       (throw (ex-info (:seon.error/message refusal) refusal)))))
 
+;;; The process-cache weights of the projection kinds: bytes a retained entry
+;;; keeps alive per counted unit, fitted offline (bench/seon/measure_cache_kinds.clj,
+;;; one kind per fresh JVM; results in bench/seon/cache_kind_measurement.edn,
+;;; 2026-09-27: declaration projection 8.9-9.1 MB / 3,549 forms; projection
+;;; 10.1 MB marginal over it, 19.5-19.9 MB with 2,371 contracts).
+;;; test/seon/cache_calibration_test.clj holds each charge to its measurement.
+(def declaration-projection-bytes-per-form 2550)
+(def projection-bytes-per-form 2850)
+(def projection-bytes-per-contract 4050)
+
 (defn declaration-projection
   "One immutable projection over the declaration population in hand.
 
@@ -1366,11 +1376,11 @@
                           (into #{} (mapcat predicate-symbols-in) (vals forms)))]
      ;; A pure function of its forms and the predicate Vars they name: equal
      ;; inputs answer the built value from the process cache (~340 ms /
-     ;; ~410 MB per packaged build, perf-profile 2026-09-26). Weight: 1.3 KB
-     ;; per form (9.0 MB / 2 packaged projections / 3,514 forms, cache-central design).
+     ;; ~410 MB per packaged build, perf-profile 2026-09-26), weighed by
+     ;; its measured retention per form.
      (seon.cache/lookup
       ::declaration-projection [forms predicates]
-      #(* 1300 (count (:seon.schema.projection/forms %)))
+      #(* declaration-projection-bytes-per-form (count (:seon.schema.projection/forms %)))
       (fn []
         (let [dependencies (canonical-reference-graph forms predicates)
               _ (assert-acyclic-references!
@@ -2383,12 +2393,12 @@
      (let [options (assoc options :seon.schema/predicate-functions
                           (predicate-bindings forms function-contracts
                                               (:seon.schema/predicate-functions options {})))]
-       ;; Weight: 2.2 KB per declaration, schema forms and function contracts
-       ;; alike (52 MB / 4 projections / 5,835 declarations, cache-central
-       ;; design 2026-09-26): a contract-only projection weighs its contracts.
+       ;; Weighed by its measured retention per form and per contract, so a
+       ;; contract-only projection weighs its contracts.
        (seon.cache/lookup ::projection [forms function-contracts options]
-                          #(* 2230 (+ (count (:seon.schema.projection/forms %))
-                                      (count (:seon.schema.projection/function-contracts %))))
+                          #(+ (* projection-bytes-per-form (count (:seon.schema.projection/forms %)))
+                              (* projection-bytes-per-contract
+                                 (count (:seon.schema.projection/function-contracts %))))
                           #(projection-build forms function-contracts options))))))
 
 (defn- projection-fingerprint-from-data
