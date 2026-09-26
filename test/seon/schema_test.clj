@@ -531,7 +531,7 @@
          :qualified-symbol]
         projection
         (schema/declaration-projection (schema.edn/packaged-forms))]
-    (is (= definition (schema/canonical-definition definition {})))
+    (is (= definition (schema/canonical-definition definition)))
     (schema/call-with-projection
      projection
      (fn []

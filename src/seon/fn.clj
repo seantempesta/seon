@@ -563,7 +563,7 @@
 (def ^:private seed-contract
   "The one contract a named seed function declares, in `:seon.fn/spec` form."
   (pr-str (schema/canonical-definition
-           [:=> [:cat :seon.test.seed/input] :seon.test.seed/value] {})))
+           [:=> [:cat :seon.test.seed/input] :seon.test.seed/value])))
 
 (defn- assert-seed-contracts!
   "Refuse a seed entry whose function the final program lacks or did not
@@ -790,8 +790,7 @@
                (pr-str (schema/canonical-definition
                         (qualify-schema-symbols
                          (:malli/schema metadata)
-                        (get namespace-contexts namespace-name))
-                        {})))
+                        (get namespace-contexts namespace-name)))))
         (seq (get calls-by-caller qualified))
         (assoc :seon.fn/calls
                (into #{}

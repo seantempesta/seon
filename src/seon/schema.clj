@@ -582,35 +582,26 @@
 (defn canonical-definition
   "Return one Malli definition as durable EDN.
 
-   Evaluating Clojure metadata resolves predicate symbols to callable roots.
-   This is the inverse of `compilable-form`: a bound predicate IS the Var its
-   qualified symbol names, and a Var carries that symbol, so the inverse is
-   reading the name back off the Var — no process-global table of callables
-   is scanned, and no second environment's registration can supply a
-   different answer. A compiled generator carries its authored symbol in
-   metadata, preserving the same inverse without inspecting its implementation.
-   Callables the caller supplied explicitly (a preprocessed
-   projection carries raw functions) are matched by identity against that
-   supplied map. Anonymous or otherwise unresolvable callables are refused
-   instead of being printed as unreadable `#object` values."
+   `definition` is authored source read as data (`seon.fn` qualifies its
+   symbols): predicates are symbols, a quoted predicate symbol is its name.
+   A callable value — an evaluated root, an anonymous `(fn ...)` form — names
+   nothing and is refused instead of printed as an unreadable `#object`. The
+   compiled direction is never inverted: a refusal carries its producer's
+   declared identity (`seon.instrument/boundary-refusal`), not a name read
+   back off a compiled predicate."
   {:malli/schema
-   [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}] :map] :seon.schema/definition]}
-  [definition predicate-functions]
-  (let [bindings (sort-by (comp str key) predicate-functions)
-        callable-symbol
+   [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.schema/definition]}
+  [definition]
+  (let [callable-symbol
         (fn [value]
-          (or (when (var? value) (symbol value))
-              (some (fn [[predicate f]]
-                      (when (identical? value f) predicate))
-                    bindings)
-              (throw
+          (throw
                (ex-info
                 (str "A durable Malli definition contains an unnamed callable: contracts are data; "
                      "use a registered predicate schema or a quoted symbol naming an admitted predicate.")
                 {:seon.schema/error :seon.schema/noncanonical-definition
                  :seon.schema/noncanonical-definition ::unnamed-callable
                  :seon.schema/value value
-                 }))))
+                 })))
         callable?
         (fn [value]
           (and (ifn? value)

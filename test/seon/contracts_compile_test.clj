@@ -168,8 +168,7 @@
                                (edn/read-string
                                 (pr-str (schema/canonical-definition
                                          (@#'seon.fn/qualify-schema-symbols
-                                          authored context)
-                                         {}))))
+                                          authored context)))))
                         (catch Exception error
                           (assoc entry ::read-refusal
                                  (error.refusal/chain error))))))))

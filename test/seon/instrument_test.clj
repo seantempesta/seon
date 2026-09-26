@@ -1410,14 +1410,8 @@
 (deftest named-generators-survive-compilation-in-refusal-evidence
   (test-support/with-database
    (fn [_]
-     (let [projection (schema/handed-projection)
-           definition (get (:seon.schema.projection/forms projection)
-                           :seon.db/database-value)
-           predicates (schema/predicate-functions-in projection)
-           compiled (m/schema (schema/compilable-form definition predicates))
-           refusal (test-support/refusal-data
+     (let [refusal (test-support/refusal-data
                     #(db/database-value-identity :seon.instrument-test/not-a-database))]
-       (is (= definition (schema/canonical-definition (m/form compiled) predicates)))
        (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) refusal)
            (pr-str refusal))
        (is (= :input (:seon.instrument/check refusal)))
