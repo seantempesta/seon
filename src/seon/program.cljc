@@ -265,12 +265,17 @@
   attribute on 2026-09-16 (`7cfe02790`, `925ca19fe`)."
   {:malli/schema [:=> [:cat :seon.schema/projection] :seon.program/shapes]}
   [projection]
-  (into {}
-        (map (fn [identity-attribute]
-               [identity-attribute (derived-shape projection identity-attribute)]))
-        (filter #(source-family? (some-> (mr/schema (:seon.schema.projection/registry projection) %)
-                                         m/properties))
-                (keys (:seon.schema.projection/forms projection)))))
+  ;; A function of the projection value: one walk of its forms per projection,
+  ;; never one per caller (a contracted defn asked ~10 times per form).
+  (#?(:clj schema/projection-cache-value :cljs (fn [_ _ derive-fn] (derive-fn)))
+   projection ::shapes
+   (fn []
+     (into {}
+           (map (fn [identity-attribute]
+                  [identity-attribute (derived-shape projection identity-attribute)]))
+           (filter #(source-family? (some-> (mr/schema (:seon.schema.projection/registry projection) %)
+                                            m/properties))
+                   (keys (:seon.schema.projection/forms projection)))))))
 
 (defn- authored-shapes
   "The shapes the AUTHORED declaration resources currently define.
@@ -381,12 +386,30 @@
     :seon.program/definition-digest
     :seon.schema.admission/source})
 
+(defn- used-resolver-context
+  "The part of a namespace's resolver context `row`'s own usages resolve
+  through: requires and aliases of the namespaces its calls, references and
+  keywords name, and refers of the symbols it uses. Imports stay whole: the
+  analysis records no class usage. A require edit the definition does not
+  use therefore leaves its digest unchanged, while retargeting a used alias
+  changes the resolved usages and so the kept entry."
+  {:malli/schema [:=> [:cat :map :map] :map]}
+  [row {:keys [requires aliases refers imports]}]
+  (let [used (into (set (:seon.fn/calls row)) (:seon.fn/references row))
+        used-namespaces (into #{} (keep #(some-> % namespace symbol))
+                              (concat used (:seon.fn/keywords row)))]
+    {:requires (into #{} (filter used-namespaces) requires)
+     :aliases (into {} (filter (comp used-namespaces val)) aliases)
+     :refers (into {} (filter (comp used val)) refers)
+     :imports (or imports {})}))
+
 (defn definition-digest
   "Digest one declaration's identity and effective meaning.
 
-   The digest includes authored definition, resolver context and effective
-   semantic metadata. Storage provenance, position and derived graph
-   observations are deliberately excluded."
+   The digest includes authored definition, the resolver context its usages
+   resolve through ([[used-resolver-context]]) and effective semantic
+   metadata. Storage provenance, position and derived graph observations are
+   deliberately excluded."
   {:seon/tasks #{"0798a2fb94f3"}
    :malli/schema
    [:function
@@ -398,7 +421,8 @@
          (cond-> {:seon.program/declaration
                   (apply dissoc row definition-digest-excluded-attributes)}
            resolver-context
-           (assoc :seon.program/resolver-context resolver-context))]
+           (assoc :seon.program/resolver-context
+                  (used-resolver-context row resolver-context)))]
      (id/digest 64 [(schema/canonical-data-string parts)]))))
 
 #?(:clj
@@ -442,15 +466,16 @@
             (cond
               (and digested? (not recomputed?)) :seon.program/compared-families
               (and recomputed? (not digested?)) :seon.program/recomputed-families
-              :else :seon.program/unclassified-families)))
-        families (filter #(source-family? (some-> (mr/schema registry %) m/properties))
-                         (keys (:seon.schema.projection/forms projection)))]
-    (reduce (fn [result attribute]
-              (update result (classify attribute) conj attribute))
-            {:seon.program/compared-families #{}
-             :seon.program/recomputed-families #{}
-             :seon.program/unclassified-families #{}}
-            families)))
+              :else :seon.program/unclassified-families)))]
+    (#?(:clj schema/projection-cache-value :cljs (fn [_ _ derive-fn] (derive-fn)))
+     projection ::declaration-families
+     (fn []
+       (reduce (fn [result attribute]
+                 (update result (classify attribute) conj attribute))
+               {:seon.program/compared-families #{}
+                :seon.program/recomputed-families #{}
+                :seon.program/unclassified-families #{}}
+               (keys (shapes-in projection)))))))
 
 #?(:clj
    (defn digest-map

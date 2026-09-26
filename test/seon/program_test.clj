@@ -163,6 +163,50 @@
            (:seon.program/recomputed-families
             (program/declaration-families recomputed))))))
 
+(deftest program-shapes-derive-once-per-projection
+  ;; Task 400bcf52dd53: every caller of `shapes-in` walked all ~3,500 forms,
+  ;; about ten walks per contracted defn. One projection value, one walk.
+  (let [projection (example-projection "memo.example" {} true)
+        other (example-projection "other.example" {} true)]
+    (is (identical? (program/shapes-in projection) (program/shapes-in projection)))
+    (is (identical? (program/declaration-families projection)
+                    (program/declaration-families projection)))
+    (is (contains? (program/shapes-in other) :other.example/id))
+    (is (not (contains? (program/shapes-in other) :memo.example/id))
+        "Another projection value derives its own shapes")))
+
+(deftest a-require-a-definition-does-not-use-leaves-its-digest-unchanged
+  ;; Task 434fed5a3a67: swapping one require changed every digest in its namespace.
+  (let [row {:seon.fn/sym 'sample/f
+             :seon.fn/source "(defn f [x] (c/lookup x ::s/key))"
+             :seon.fn/calls #{'clojure.core/defn 'clojure.core.cache/lookup}
+             :seon.fn/keywords #{:seon.schema/key}}
+        context {:requires #{'clojure.core.cache 'clojure.string 'seon.schema}
+                 :aliases {'c 'clojure.core.cache 'str 'clojure.string 's 'seon.schema}
+                 :refers {'join 'clojure.string/join}
+                 :imports {}}
+        digest (program/definition-digest row context)]
+    (is (= digest (program/definition-digest
+                   row (-> context (update :requires conj 'seon.cache)
+                           (assoc-in [:aliases 'sc] 'seon.cache)
+                           (assoc-in [:refers 'lookup] 'seon.cache/lookup))))
+        "Adding a require, alias and refer it does not use")
+    (is (= digest (program/definition-digest
+                   row (-> context (update :requires disj 'clojure.string)
+                           (update :aliases dissoc 'str)
+                           (assoc :refers {}))))
+        "Removing ones it does not use")
+    (is (not= digest (program/definition-digest
+                      (assoc row :seon.fn/calls #{'clojure.core/defn 'seon.cache/lookup})
+                      (-> context (update :requires conj 'seon.cache)
+                          (assoc-in [:aliases 'c] 'seon.cache))))
+        "Retargeting the alias its call resolves through")
+    (is (not= digest (program/definition-digest
+                      (assoc row :seon.fn/keywords #{:seon.schema.edn/key})
+                      (-> context (update :requires conj 'seon.schema.edn)
+                          (assoc-in [:aliases 's] 'seon.schema.edn))))
+        "Retargeting the alias its keyword resolves through")))
+
 (deftest digest-map-is-exactly-the-stored-declarations-or-a-typed-refusal
   (let [projection (example-projection "branch.example" {} true)
         rows (mapv (fn [n]
