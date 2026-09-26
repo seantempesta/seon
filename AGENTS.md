@@ -236,6 +236,9 @@ Private experiments remain possible; local green never implies shared acceptance
   wedges the value. The floor printer is total: any value prints (plain Clojure printing is the fallback); a smart renderer
   that fails shows the value plus one diagnostic. A graph stops only when its own execution cannot continue; if storage
   fails, stop. No stage guesses what a value is — the producer declares. Diagnose at the REPL; no fallback store or retry loop.
+  "Loud in dev" means reliably DELIVERED (owner 2026-09-26): every error reaches the agent that caused or can act on it as
+  data in its own tool results — Claude/Codex agents through the MCP replies, Seon agents through their context — never
+  only a log line, a panic or a silent record.
 - **Let Flow own execution.** Give each agent a graph; procs declare `:io` or `:compute`,
   transforms reference Vars, topology changes rebuild graphs. Add no central scheduler
   or dispatcher. Listen before deriving work; channels carry only rederivable or replaceable
