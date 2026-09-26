@@ -3,429 +3,502 @@ type: review
 status: completed
 reviewer: Astra
 date: 2026-09-26
-design: 0af223c5360ba65003cf8edf07cd401cec38ab8a
-source-basis: 3c40f0c21e682dd8504d08a758cf5a402e600fdd
+design: 94dad15fa
+source-basis: 9be9bd159dcd8e4e5731253f8e5643db2d0a3c0a
 verdict: REVISE
 ---
 
-# Independent review: REPL-entry renders
+# Independent re-review: REPL-entry renders, revision 2
 
-**REVISE.** Reusing `preview-sources` → `evaluate-sources` → `evaluate` →
-`shown-result` → `seon.repl/text` is the right composition. It does not yet
-establish read-only execution, one read per form, content-valid transcript
-reuse, or the promised history semantics. Those are design defects, not reasons
-to add another evaluator.
+**REVISE.** The existing reader, evaluator, recorder and floor are the right
+owners. Revision 2 removes the proposed transcript cache and corrects D7,
+history direction, namespace ownership and deletion accounting. It still does
+not establish read-only execution in the viewing agent's world. Its universal
+writer claim is false, its promised `defn` refusal happens at a stage the preview
+does not reach, and retained history processing still parses sources and
+reconstructs printed results outside the proposed single path.
 
-Broken evidence boundary first: `bin/seon status` and MCP `runtime_status`
-reported default alive but **faulted**, pid 25654, start
-`2026-09-26T02:39:49.524Z`, 9 error signatures, 95 failed tests and 26 unknown
-failed tests. Publication was off; the running source root was
-`data/source/fbd0897dfa9ee3cb4e0943b2c6196a7f4dfc3892`, not this checkout.
-Its reported ready time was 39,333 ms. These are observations, not passing proof
-of the proposed stages. Other lanes continued changing the checkout; source
-citations below are pinned to **3c40f0c21**, unless another revision is named.
-I inspected committed versions where working files changed.
+Broken evidence boundary first: default was alive but faulted, publication off,
+running archive **10d6fdff5edf870ad31f7980b098a547d546fcc7**, not the checkout
+revision below. During the review the shared REPL disappeared and returned as
+pid 39759, start `2026-09-26T03:05:21Z`; I did not restart it. Final observed
+health was one error signature and 19 failed tests; readiness was 4,451 ms.
+The fault observation named invalid `:seon.db/read-request` values on foreign
+branches `dogfood-repl-opus-5` and `dogfood-repl-opus-6`. This is a foreign
+installation/evidence boundary, not a reason this source review stopped and
+not a passing platform proof.
 
-Read authorities: all of `AGENTS.md`, including the render ruling introduced by
-`e5c19877f` and “The one REPL path”; all of `open-items.md`'s `## Now`; all 444
-lines of the design at `0af223c53`; the data-oriented Clojure, REPL and Datahike
-skills. The later open-items text and live status disagree about the active JVM;
-the live observations above govern this review. No production edits, publication,
-restart, foreign-session interaction, paid provider run, or worktree was used.
+The reviewed design is all 424 lines at **94dad15fa**, including every §7
+ruling. Source citations below are pinned to **9be9bd159**, which includes the
+snapshot correction, unless explicitly stated otherwise. Concurrent checkout
+changes are not silently attributed to that revision. The original review at
+**ebb8ba691** covers revision 1 and retains its original probes in Git history.
+Authorities read include all of AGENTS, the `## Now` section of
+`docs/research/agent-platform/open-items.md`, the render law introduced by
+**e5c19877f**, “The one REPL path,” and the relevant data-oriented Clojure, REPL,
+Datahike and testing skills. The revised design's requests for owner confirmation
+are proposals; this re-review request does not amend the standing render law.
 
-## Findings, most severe first
+## Disposition of all ten original findings
 
-### 1. Blocking: dropping two connections does not make the viewing world read-only
+“Resolved” below means resolved in the design, not implemented or proved installed.
+Numbers remain stable; new findings start at 11.
 
-The two carriers identified in §2.3 are real: custody is bound by
-`src/seon/sci/eval.clj:4060,4092`; the call-preparation hook reads the environment
-connection at `src/seon/call_preparation.clj:1189-1196`. Removing them stops those
-implicit connection supplies. It does **not** revoke write authority:
+| Original finding | Status | Ruling verified |
+|---|---|---|
+| 1. Read-only by removing connections | **OPEN, blocking** | Removal is correctly withdrawn. Positive access is a useful DB-writer input, but does not cover all durable effects, survive the stated pipeline unchanged, or preserve the viewer's world. See findings 1 and 12. |
+| 2. Content-invalid transcript cache | **RESOLVED for the proposed new cache** | §2.6 deletes it. The mixed pull/atom counterexample is accepted. Existing `system-plan` reuse still needs the same input-validity audit: finding 11. |
+| 3. Second source read | **OPEN, high** | Passing the read event to finalization and deleting `def-note` are correct. Retained `source-events`/`source-key` still reread entries and history. |
+| 4. Recursive rendering and transcript grammar | **OPEN, high** | Structural terminal printing uses the existing floor and terminates recursion. Applying it to every AI result while leaving HTML selection unchanged alters the standing render law. Target examples and wrapper retirement are now honestly identified. |
+| 5. D7 and snapshot basis | **RESOLVED in design; hook fix pending** | The hook, not the already scoped-first supplier, is the defect. The held-value plan fix belongs in this slice. Snapshot source no longer uses the latest-plan shortcut. |
+| 6. History A/B/C | **OPEN in integration; policy direction resolved** | Corrected B, using `system-turn`, is the smallest policy consistent with durable shown text and handles. Its current suppression/diff processing and base-world refresh do not support “no policy change” without further work. |
+| 7. Entry grammar and duplicate vocabulary | **OPEN, medium** | Comment-plus-required-source and loop-owned namespace are sound. The old vocabulary has more consumers and its walkthrough performs the very operations this design forbids. |
+| 8. Bounds and cost proof | **OPEN as acceptance evidence** | Timings are now labelled feasibility. Aggregate exit ownership is still a requirement without a named implementation; end-to-end cost and memory remain unmeasured. |
+| 9. Curated aliases and migration | **RESOLVED in design; D17 prerequisite open** | The viewer's own `:seon.ns/aliases` is the right existing attribute; other namespaces' aliases remain data. Existing namespace adoption is correctly separated from seeding. |
+| 10. Claimed ~640-line deletion | **RESOLVED as accounting correction** | Gross removals and conversions are separated; +~93 first-slice lines explicitly delete zero. These are estimates, not an accepted implementation size or a waiver for new machinery. |
 
-- `seon.db/transact!` explicitly allows a supplied live connection when custody
-  is absent (`src/seon/db.clj:4872-4901`). Removing custody therefore removes its
-  ordinary agent connection comparison, rather than installing a read-only
-  policy. `branch-connection` can recover an open connection from a database
-  value and branch (`src/seon/db.clj:344-353`). A held connection, closure or
-  callable host function is another route. I did not execute a database write.
-- SCI's `fork` copies the environment map into a new atom, not every object
-  reachable from its roots (`reference-code/sci/src/sci/core.cljc:345-351`, pin
-  `409888f61fa1f3bbade8d7e3eecb9b8e09c8004a`). Seon deliberately preserves actual
-  private roots (`src/seon/sci/eval.clj:2891-2916,2962-2985`). The live dependency
-  probe below mutated an atom through the child and observed **1 in the parent**.
-- `evaluate-sources` still carries the cluster connection into the evaluation
-  request and walk context (`src/seon/turn.clj:4807-4826`) and the function gate
-  (`:4827`, `:3271-3293`). `shown-result` prefers a request connection and can
-  prepare durable error evidence (`src/seon/sci/eval.clj:3679-3703`). Two map
-  deletions do not establish “persists nothing” for the entire composition.
+## Findings ranked by severity
 
-P4 proves that a particular `defn` did not settle a program row. It does not
-prove read-only execution. It also returned a Var, contradicting §4's promised
-regression that a render `defn` “shows its refusal.” Require/alias changes in the
-disposable world and externally visible mutation must have distinct semantics.
+### 1. Blocking, OPEN: one positive DB access value does not establish the claimed read-only world
 
-**Required revision:** specify and enforce the read-only stage at the existing
-execution/write/effect authorities, including explicit arguments and shared host
-objects; audit every carried authority. Do not add a render-only evaluator or
-claim that a deny-list of top-level source names catches nested compiled calls.
-Test an elided write, an explicit-connection write, a supplied writer, a nested
-writer, a shared atom/closure, and permitted `require` on the real agent path.
-The smaller immediate cut is to establish this stage in the existing preview
-owner before migrating renderers. If the complete guarantee needs a constrained
-admission contract, name that unresolved owner decision instead of calling the
-current two-field omission sufficient.
+The design says every durable write an agent form can cause passes through
+`seon.db/transact!` (§2.3, lines 173–179), then acknowledges registry/konserve
+writers as residual host authority (188–195). Those are durable writes too.
+This is a contradiction in the guarantee, not merely a JVM-atom caveat.
 
-### 2. High: the proposed transcript cache is not content-valid
+- `src/seon/cluster/registry.clj:192-222`, `branch!`, calls Datahike `d/branch!`
+  directly. It does not pass the proposed DB transaction guard.
+- `src/seon/blob.clj:318-326`, `put!`, stages content and calls
+  `with-publication!`; `:296-316` publishes before calling the root-commit
+  callback. `publish-staged!` at `:185-195` calls `k/bassoc` directly. In `put!`
+  the callback just returns the digest: there is no later DB transaction to
+  refuse at all.
+- Live probe P2 resolves **both writers in a fork of root's base program SCI
+  context**, along with `seon.shell.jvm/run`, `seon.effect/request!`,
+  `seon.db/call-with-custody` and `seon.db/call-without-custody`. Not resolving
+  `datahike.api/transact` does not prove that callable Seon wrappers cannot
+  write. I did not invoke these effects.
 
-`[program identity, namespace, entry bytes]` plus nonempty database read evidence
-is insufficient. `read-evidence-current?` checks retained database dependency
-plans/revisions, with optional read replay; it does not claim to track all inputs
-to an arbitrary Clojure expression (`src/seon/db.clj:1159-1202`). The live probe
-below changes a local atom from 0 to 1 while the expression also pulls root's id:
-the answer changes, there is one captured database read, and the predicate is
-still **true**. The proposed empty-evidence exclusion does not catch mixed reads.
+There is a separate propagation defect. At the pinned source,
+`resources/seon/schemas/seon.db.edn:179-182` has the custody request but no access
+member. `src/seon/db.clj:383-410` binds connection, read basis and receipt, and
+`:412-434` supplies empty custody. `src/seon/sci/eval.clj:4101-4102` reconstructs
+custody with **only a connection**. Consequently the stage table's “evaluate:
+none” does not carry the proposed access value. Simply adding another binding
+that reads its request resets it on this call and on nested empty-custody calls.
+A form can resolve those wrappers itself. Access must not widen merely because
+a nested stage supplies an incomplete request or a different connection.
 
-Other missing inputs are private callable/value roots, alias/refers state, the
-viewing agent's supplied identity, effective print/profile settings and preceding
-entry state. `reader-context` resolves aliases from the actual SCI namespace
-table (`src/seon/sci/eval.clj:940-965`); namespace name alone is not that table.
-Print settings advance between forms (`:4278-4288`). Profile acquisition occurs
-outside the per-form read sink (`src/seon/turn.clj:4772-4777,4810-4813`), so the
-sink is not proof that every presentation input was captured.
+The proposed check has not been installed: P3 found no `:seon.db/access` in the
+live projection. The author's probes verify the old failure and base-fork
+behavior; they do not test the proposed refusal. This is legitimate design
+work, but “every finding REPL-verified” must not be read as a candidate proof.
 
-Caching `{shown, read-evidence}` also drops stdout and ending-namespace data
-needed by the transcript (`src/seon/repl.clj:171-205`). Skipping a cached entry
-that changes local alias/namespace state can change the next form's meaning.
-A whole-program identity causes all entries to miss after unrelated program
-changes, contrary to the reached-input cost law.
+**Effects, specifically.** The normal `effect/request!` route really does open
+through `db/transact!` before dispatch (`src/seon/effect.clj:837-844`). A correctly
+carried access check can prevent that admission. However, the caller recognizes
+refusal through three specific keys (`:845-847`); a new error must go through
+the writer's existing refusal envelope (`src/seon/db.clj:4923-4929`), not bypass
+it and fall through to dispatch. Direct handler calls are another route:
+`src/seon/shell/jvm.clj:431-444` calls `execute` without effect admission, and P2
+resolves that private handler in base SCI. This is source evidence of a bypass
+route, not a claim that a shell command was executed successfully. Also the
+proposed effect regression, `my.message/send`, calls `message/send!` directly
+(`src/my/message.clj:31-49`); it does not exercise `effect/request!` admission.
 
-`render/shared-cache` is a real, existing branch-scoped holder
-(`src/seon/render.clj:1602-1652`); using it adds no second physical cache/store.
-It does add a new memoized derivation whose validity and eviction still need
-definition. Existing `call-cache-evidence` already accounts for callable identity,
-projection, arguments and agent (`:803-839`); that is a better starting point,
-though it is not proof for arbitrary source expressions either. If custody loses
-its connection, carry the held database there so `branch-scope` does not become
-empty (`:1623-1627`). Treat only literal `true` from a predicate returning an
-error alternative as positive proof.
+**Base-world semantics.** AGENTS says private definitions/objects belong to the
+agent's context (`AGENTS.md:125-128`) and render entries run in the viewing
+agent's own world (`:240-250`). A base fork intentionally removes those values;
+that prevents one demonstrated private-atom mutation by making its name
+unresolvable, but changes the requested world. Worse, §4 retains refresh of
+agent-authored reads. Such a read can use a private value, alias or `result/eN`
+handle. `system-plan` selects those reads (`src/seon/turn.clj:2017-2026`); the
+new base fork cannot reproduce their environment. A program-level host atom is
+not deep-copied either. The prior shallow-fork counterexample remains relevant.
 
-**Smaller:** omit this new cross-prompt transcript memoization from the first cut.
-Keep dependency-owned query/pull reuse and measure one composed fork. Later cache
-only computations with complete immutable input evidence, retaining the complete
-transcript outcome. Never label a nonempty subset of reads complete evidence.
+“Trusted merge-gated renderers” does not enforce the read-only guarantee against
+mistakes and also excludes the law's inline/value overrides. The design itself
+says transitive reach cannot see higher-order/interop calls. Neither option
+establishes the stated guarantee; neither is authorized by the standing law.
 
-### 3. High: §2.3's “read once” claim is falsified by its own finalization stage
+**Smaller correction:** retain the existing execution stages and define access
+there as authority carried through the entire execution, with no widening at
+nested custody, effect admission or lifecycle boundaries. Audit the actual
+nontransaction write owners instead of calling them harmless residual state.
+Keep the initial change a common execution/preview fix; do not migrate renders
+or invent a parallel restricted interpreter. If preserving the viewing world
+requires an owner decision, expose that contradiction before implementation.
 
-`evaluate-for-install` calls `one-event` and supplies that event to `evaluate`
-(`src/seon/sci/eval.clj:4467-4489`); `evaluate` consumes it without reparsing
-(`:4225-4234`) and calls `sci/eval-form` once for the form (`:4274-4275`). This
-part supports the design. However, `evaluate-sources` subsequently calls
-`disposition-rule-error`, which **calls `read-source` again** on the same source
-(`src/seon/turn.clj:4725-4727,4833-4836`). It receives a namespace name, not the
-reader's complete alias context. Removing `planned-sources` does not remove
-that second read. `repl/def-note` additionally uses `edn/read-string` on source
-(`src/seon/repl.clj:119-140,204`) until its claimed retirement actually lands.
+### 12. High, NEW, OPEN: a preview `defn` has no install transaction for the proposed guard to refuse
 
-**Required revision:** pass the already-read event/form to disposition and
-declaration-note consumers on the common path; retire reparsing there. The
-ordinary reply segmenter's separately ruled passes are not this finalization
-reread. No replacement parser is needed. Verify alias-qualified keywords and
-syntax-quote after `require`, not just `(+ 1 2)`.
+The design promises that a `defn` under read access “is refused at its install
+transaction” (§2.3, 185–187). The existing composition does not do that.
 
-### 4. High: terminal result rendering and recursion are unspecified
+`evaluate-sources` explicitly does not settle (`src/seon/turn.clj:4742-4747`).
+Its function gate invokes `evaluate-candidate` (`:3250-3293`), and
+`src/seon/sci/eval.clj:4483-4500,4502-4512` creates and accepts candidate roots
+into the disposable evaluation context. That can produce a program row and a
+successful callable value without issuing an installation transaction.
 
-The design says `shown-result` selects a renderer and then prints the result,
-while every AI renderer now returns executable entries. Selection is not a
-terminal floor today: `shown-result` calls `render.value/prepare`
-(`src/seon/sci/eval.clj:3715-3723`), whose map-node path invokes declared pairs
-(`src/seon/render/value.clj:617-644,646-652` →
-`src/seon/render.clj:1153-1220`). Thus printing an entry's result can select
-another entry-producing renderer. A renderer that reads back its own entity is
-the obvious cycle; `render-note-form` already emits that read
-(`src/seon/note.clj:131-137`). Errors also carry declared render pairs.
+P1 called the real preview owner on this lane's branch using its base context.
+A contracted `defn` returned `#'user/astra-r2-preview-id`; the following call
+returned **7**. The definition outcome contained a program row. The branch
+commit was unchanged and pulling its function identity returned nil. This
+falsifies the proposed refusal mechanism, not just its installation status.
 
-Without a specified terminal stage, simply changing output contracts either
-leaves vectors of entries/refusals in the print path, or creates recursive
-evaluation while printing. The graph's back-references and node limits do not
-bound recursion inside `shown-result`. This is an unclosed design seam, not a
-claim that the unimplemented recursion has already happened.
+Ordinary runs settle separately (`src/seon/turn.clj:5084` → `settle-batch!` at
+`:3628-3688`) and only install committed rows afterward (`:5091-5108`). Yes,
+those program-row transactions use `db/transact!`; no, an evaluation-scoped
+binding alone does not automatically govern later lifecycle settlement.
+`system-turn`'s `record-evaluated-tx` explicitly does **not** install definitions
+(`:1536-1542`). Do not fix this by making the recorder install them or by
+refusing its authorized history writes.
 
-**Required revision:** state how selection, entry evaluation and terminal result
-printing compose once, including nested declared values and failures. Examine
-the existing structural-print option (`src/seon/render/value.clj:623-624`) and
-reuse the same floor, rather than introducing another printer. Prove an entity
-self-read, a returned entity with a declared pair, and a failing renderer.
+**Required correction:** put the program-change decision at the existing
+admission/settlement boundary, with its authority carried as data. Decide
+explicitly whether disposable local definitions are allowed. If they are,
+remove the promised refusal; if not, refuse before returning success through
+the ordinary program owner. A render-only `defn` name check is not a solution.
 
-Also, the live `seon.repl/text` probe below still prints
-`#:seon.repl{:value 3}`. Its current `response` owns that grammar
-(`src/seon/repl.clj:216-237,264-281`). §2.5's manually laid-out examples are
-target illustrations, not an end-to-end installed `clojure.main` transcript.
-Move the shared grammar conversion into the claimed end-to-end proof slice,
-preserving stdout, errors and saved shown bytes through that owner.
+### 3. High, OPEN: retaining `system-plan` retains another source-reading path
 
-### 5. High: D7 must be fixed with read-only preparation, but its diagnosis is too broad
+Passing the existing event into disposition finalization and deleting
+`repl/def-note` correctly removes the two readers identified in revision 1.
+Bypassing `planned-sources` for render entries also avoids the demonstrated
+alias loss. But “one read per form” still does not follow:
 
-The defect is in **`hook`**, not `prepare`. The hook derives the database for
-preparation-plan lookup only from the connection, returning raw arguments if
-none exists (`src/seon/call_preparation.clj:1189-1215`). This explains both
-missing database and missing agent-id defaults in P3: preparation was bypassed.
+- `src/seon/turn.clj:1866-1877`: `source-events` calls `reader/read`;
+  `source-key` calls it to derive source identity.
+- `:1934-1950`: historical evaluations are reread through `source-key`, twice
+  in one reduce step.
+- `:1968-1975`: classifying a retained read calls `source-events` again.
+- `:1986-2026`: `system-plan` invokes these helpers for deduplication,
+  eligibility and status; `:2145,2173,2199,2214,2224` invokes them again.
 
-The actual database supplier **already prefers the scoped database value**:
-`src/seon/db.clj:2270-2295`. It did so at the design revision too. Therefore D7's
-statement that a supplied read necessarily receives current head is not supported
-by its cited hook code. That code does establish a potentially inconsistent
-**plan** basis. Retain the existing supplier; do not write a second one.
+This is the same reader library called through a second parsing path, not a
+new reader implementation. It still violates read-once and is not in the
+claimed deletions. These reads receive a namespace name, not the sequential
+SCI alias table. Therefore the successful direct-entry alias probe does not
+prove the retained system-turn path.
 
-Changing the hook's database expression alone is also insufficient for older
-held values. `current-snapshot` returns its held snapshot whenever
-`checked-through-t >= requested basis` (`src/seon/call_preparation.clj:598-609`),
-and `adopt` keeps the newest basis (`:568-580`). A newer preparation plan is not
-automatically valid for an older program world. A fork also inherits the
-call-preparation carrier unless its owner explicitly handles that state.
+**Smaller:** derive source identity without reparsing, and carry classification
+from the real read/evaluation as data. If identity requires the form, consume
+the existing read event. Include these callers in the common-path retirement;
+prove sequential `require`, alias-qualified keywords and syntax-quote through
+`system-turn`, not only `evaluate-sources`.
 
-**Required revision:** keep this fix in the same slice, using the scoped value
-to acquire a content-valid plan while preserving supplied-argument precedence
-and ordinary connection-backed calls. Prove no-connection defaults, held value
-versus later head, and a held old program after a supplier/contract changes.
-Correct the hook's temporality prose (`:26-30`) along with the implementation.
-This is smaller and more accurate than replacing database supply generally.
+### 4. High, OPEN: a terminal floor is sound; skipping selection for all AI results changes the render law
 
-### 6. High: option A is a policy change, and none of A/B/C is acceptable as written
+The structural option exists (`src/seon/render/value.clj:628-635`) and uses the
+same floor. It is a promising terminal stage after selecting a renderer and
+evaluating its entries. It is not a second printer.
 
-The design correctly exposes this decision, but §2.3 already chooses A by saying
-“record: none.” A provider capture is real: `seon.context/capture-tx` records
-exact prompt bytes and contributions (`src/seon/context.clj:359-402`), and the
-turn commits them before the provider (`src/seon/turn.clj:4542-4568`). However,
-that write is conditional on **not** `no-provider` (`:4553`); a debug preview
-does not execute it. It is neither an evaluation record nor each form's read
-evidence, and it only covers the prompt selected for that attempt.
+The broader rule in §2.4 says **every AI printed result** has no declared pair,
+with producers invoked only for walk nodes; HTML keeps its existing pair
+selection. An ordinary evaluated value can have its own AI override, a viewer
+namespace default or a schema render pair. Such a value is not necessarily a
+separately selected graph node. Bypassing selection at `shown-result` makes
+those attachments ineffective for that result. Keeping HTML's nested selection
+unchanged also does not establish the common selection/node-tree law
+(`AGENTS.md:240-256`). The cited precedent in `src/seon/repl.clj:460-472` is
+conditional HTML recovery of a live result without a recorded renderer, not a
+rule to skip AI selection universally.
 
-`AGENTS.md` still requires recorded/queryable results on the one REPL path,
-changed-read refresh including agent-authored reads, and settling shown-text
-durability before deleting evidence. `system-plan` explicitly includes those
-agent reads (`src/seon/turn.clj:2017-2026`). Removing its refresh path to save
-about 200 lines can remove a separate required behavior, not just obsolete
-opening assembly. A disposable evaluation fork does not imply no owner may
-record its observations after evaluation.
+The returned-error case needs the same explanation: the law composes error
+base and satisfied schema renderers, whereas §2.4 declares their keys alone
+the story. Avoiding recursive refusal rendering is required, but it does not
+authorize deleting the first legitimate selection.
 
-- **B, corrected, is the smallest compatible first slice (recommended for now):**
-  keep the existing record/refresh owners, feed entries, and use the read-only
-  fork for the rendering execution. Recording by the lifecycle owner is separate
-  from admitting writes inside a render form. Preserve handles through the
-  existing result owner or explicitly scope their absence; do not invent another
-  result store. B's assertion that the read-only fork must be unused is false.
-- **A is a possible later owner decision**, not established by the render ruling.
-  It needs an explicit durability/retrieval contract for every shown surface and
-  a decision about agent-read refresh. Its “always current” guarantee also
-  depends on fixing finding 2. Retain historical records already written.
-- **C adds unnecessary comparison/writing policy.** Equal shown text does not
-  imply equal read evidence or live values; a new dependency may matter later.
-  If pursued, advance that evidence even when output text is equal, through the
-  existing recorder, not a parallel fresh/recorded evaluator.
+**Required correction:** show selection → entry evaluation → terminal print
+once on the common ordinary-value path, including an inline override, a viewer
+default, a self-reading entity, a returned declared value and a renderer
+failure. State which already-selected value the terminal structural flag
+applies to. Preserve the two faces' shared selection rather than creating an
+AI-only exception. Wrapper removal and machine comments are otherwise a
+coherent transcript target; the design correctly stops calling examples
+installed output.
 
-Do not count an unchosen policy's deletions as the first slice's savings.
+### 11. High, NEW, OPEN: the retained history algorithm still derives from shown strings and incomplete inputs
 
-### 7. Medium: the proposed entry schema cannot represent all promised entries
+The history owner is correctly reused, but §4 cannot describe it as unchanged
+while promising one terminal print of real values and content-valid reuse.
 
-`:seon.cluster.reply/form` requires `:seon.cluster.eval/source`
-(`resources/seon/schemas/seon.cluster.reply.edn:1-11`). §2.2's standalone
-back-reference comment has no source. Live validation against the installed
-schema returned **false** for that comment and **true** for a normal source
-entry. Adding only `:seon.eval/origin` does not fix this. An empty source is not
-a form and cannot silently become an evaluation.
+`src/seon/repl.clj:78-89`, `shown-value`, EDN-reads previously printed text (or
+falls back to the entire string). `latest-evaluations` reconstructs values from
+it (`src/seon/turn.clj:1940-1948`). `system-turn` compares that reconstruction
+with a newly printed result (`:2148-2150`), then computes a diff from two shown
+values and **overwrites `:seon.eval/shown` with `pr-str` of a changes map**
+(`:2196-2209`). This is not another source evaluator, but it is another
+print/interpret cycle outside `shown-result`, with no common floor budget at
+that `pr-str`. The printed value may already be cut or may be non-EDN. It is
+not the live value required before the print edge. Merely changing
+`seon.repl/text` cannot remove this transformation.
 
-The loop also uses its starting/ending namespace, not each entry's optional
-`:seon.ns/name` (`src/seon/turn.clj:4778-4785,4883-4884`). Specify whether that
-entry member is advisory or operative; do not promise a namespace field the
-execution ignores. `seon.repl/entry` is another existing entry vocabulary
-(`resources/seon/schemas/seon.repl.edn:36-43,93`), and `run/usage-form` already
-returns a vector of those entries despite its `:seon.render/form` contract
-(`src/seon/run.clj:58-84`). The claim that every third-output producer simply
-wraps one form is false for that producer.
+Separately, `system-plan` marks a previous entry unchanged using
+`read-evidence-current?` (`:1994-2000`) and skips it (`:2115-2116`). Its
+eligibility test requires nonempty DB evidence and no recorded writes/effects
+(`:1968-1982`); that still admits the mixed DB-read/private-value example from
+finding 2. §2.6 accepts that evidence is incomplete, then retains this same
+validity assumption. Calling it history rather than a new cache does not make
+it content-valid. Suppressing based only on reconstructed shown value also
+ignores changed stdout (`:2148-2184`).
 
-**Smaller:** converge on one entry representation at the existing reader/loop
-boundary, explicitly admitting a comment-only variant there or preserving it as
-composition data that never goes through evaluation. Retire the other entry
-vocabulary and convert the walkthrough deliberately; do not merely rename its
-output contract.
+An explicit special case also survives: `issue-origin-read?` identifies reads
+whose origin issue has an agent (`:2028-2031`); those reads bypass both the
+turn-dependency refusal (`:2077`) and the shown-value diff (`:2198`). Revision 2
+retains this owner without retiring or justifying those exceptions. Its “no
+list of special cases” claim is therefore too strong even before the new
+disposition exclusion. Resolve the underlying read/refresh model in this owner.
 
-### 8. Medium: cost and bounds do not establish the one-second guarantee
+**Smaller:** retain the existing recorder, receipt IDs, exact historical bytes
+and post-commit handle binding. Make refresh operate on real retained values
+or explicit read results under the common result/print stage, with complete
+input validity; never parse a bounded display back into its authoritative
+value. If no complete validity evidence exists, do not claim reuse is sound.
+This is a correction at an existing owner, not justification for another cache
+or result store.
 
-§5 honestly labels totals estimates, but 60 selected `doc`/pull forms at
-168–201 ms do not measure renderer invocation, graph acquisition, nested
-rendering, history assembly, selection, all cache checks, or the final composed
-prompt. The 3.40/3.50 s debug path is already over the law. Naming only
-“turn/settlement” is not the required responsible armed-function profile; no
-memory result or end-to-end hit/miss count accompanies these claims. One fork
-per prompt is necessary, not sufficient. “Same order as 5 ms” is not measured
-warm latency for the new path.
+### 6. High, OPEN integration: corrected B is right, but the recorder is not already the proposed single ordered batch
 
-Graph `max-nodes`/`max-collection` bounds govern graph acquisition
-(`src/seon/render/walk.clj:1034-1050`); they do not limit the number of entries
-one renderer returns. The proposed sources schema is an unbounded vector.
-`evaluate-sources` runs every source sequentially (`src/seon/turn.clj:4778-4885`);
-`await-turn-part!` merely invokes an optional observer (`:4349-4353`). Whole-unit
-prompt selection after execution is not an execution bound. Per-form deadlines
-alone allow arbitrarily many individually cheap forms.
+I accept §4's policy direction: lifecycle recording can write while the entry
+is read-only. Existing `record-evaluated-tx`/`db/transact!` and post-commit
+`bind-result!` (`src/seon/turn.clj:2227-2258`) avoid a new result store. Historical
+shown text must not be rerun; agent-authored changed reads must still refresh.
 
-**Required proof:** explicitly bound aggregate render work/entry admission on
-the existing owner, distinguish timeout from actual exit, and measure the same
-real root graph on parent and candidate, cold and warm, with armed profiles,
-allocated/retained memory, final bytes and cache counts. Include a node with many
-entries and nested rendering. Fix or justify each operation over one second;
-costs over ten seconds need the separate owner authorization/issue required by
-the law. The design's measurements support feasibility, not acceptance.
+However, existing `system-turn` reduces over sources, invokes
+`evaluate-sources` with **`[source]`**, resets starting namespace from each
+source, and uses a separate preview per source when not writing
+(`:2122-2144`). “One entries vector per prompt, one fork, one loop” is a
+necessary change to this owner, not the stage table's “record: none.” The
+single batch must preserve sequential namespace/alias state and evaluation
+ordinals while supporting its existing history selection. Skipping an
+unchanged `require` must not remove the alias needed in a fresh fork. The
+base-world refresh conflict is finding 1; the current diff/suppression policy
+is finding 11.
 
-### 9. Medium: aliases are the right attribute, but seeding and graph scope are incomplete
+Do not create a second preview recorder. Revise the existing owner's data flow
+and prove exact recorded text, stdout, handles, sequential aliases and changed
+agent reads together. A/B/C no longer needs another abstract option exercise:
+B has the right owner, with these concrete corrections still open.
 
-Use `:seon.ns/aliases`: it already owns component bindings with local and target
-symbols and an AI/HTML pair (`resources/seon/schemas/seon.ns.edn:2,26`;
-`seon.ns.alias.edn:1-18`). No new curation registry is justified for actual
-`:as` requirements. A require plus `dir`, and task-level `doc` entries, matches
-the owner rule.
+### 7. Medium, OPEN: the vocabulary retirement and walkthrough still require a semantic decision
 
-But `namespace-seed-call` returns `[]` for an existing namespace
-(`src/seon/cluster/agent.clj:166-178`). Editing that seed does not give today's
-root the promised aliases. Include existing-root adoption and preserve its
-current requires/refers. Do not delete toolkit facts before consumers migrate.
+The revised entry shape is sound: every entry has source, prose belongs above
+that source, and namespace changes are actual forms. No comment-only schema
+exception or per-entry namespace implementation is needed.
 
-Moreover, aliases belong to their **owning namespace**, not to every viewer of
-that namespace. The graph walks forward and reverse references and can reach
-other namespace declarations (`src/seon/render/walk.clj:944-998,1034-1042`).
-Blindly executing every reached alias's `require` in one viewing namespace can
-retarget the same local name or refuse it. Graph definition order derives from
-the enumerated value edges, which do not include aliases (`:914-922,1023-1028`);
-it does not prove all namespace setup precedes every dependent entry.
+The caller audit is incomplete. `run/usage-form` is not the only producer of
+the old shape: `src/seon/run.clj:14-56`, `walkthrough`, returns old entries under
+`:seon.repl/entries`, and `usage-form` composes it at `:84`. The old entry schema
+is referenced by `:seon.repl/episode` and `:seon.repl/candidate`
+(`resources/seon/schemas/seon.repl.edn:82,88-93`) and by render forms
+(`resources/seon/schemas/seon.render.edn:162-163`). Deleting the two named schemas
+requires converting or deleting all of those consumers.
 
-**Required revision:** identify the viewer/task attachment selection, preserve
-alias ownership, and prove two reached namespaces using the same local alias
-for different targets. Adopt root's declaration through the existing writer.
-Keep `:requires`/`:aliases` coherent using the normal namespace declaration
-producer, not independent alias facts that invent a second source of truth.
+More importantly, the walkthrough executes two `defn`s, a `deftest`, a call to
+the defined function and `my.turn/complete` (`run.clj:21-56`). Mechanical
+conversion to source strings would now demonstrate refusals rather than the
+advertised successful lifecycle. §2.5 says entries never contain dispositions
+and admission refuses them, which conflicts with this existing producer.
+The loop currently interprets returned `:my.turn/disposition` values
+(`src/seon/turn.clj:4880-4882`), including values produced indirectly; inspecting
+a top-level callee is not a complete admission rule. This remaining special
+case needs a common execution policy, not an exemption for help/walkthroughs.
 
-### 10. Medium: the deletion budget is an estimate, not a verified retirement plan
+**Smaller:** retire the executable write walkthrough from read-only opening
+production, or present its example forms as ordinary quoted data through the
+same entry path. Do not add another evaluator to execute demonstrations. Name
+this semantic conversion and all schema consumers in the slice.
 
-The seven included §4 numbers add to **741**, not 640:
-`57 + 110 + 113 + 78 + (63 + 20) + 50 + 150`.
-The 150 is already a *net conversion estimate*, unlike gross deleted spans;
-subtracting 120 additions from that mixed total is not reproducible accounting.
-The first slice's `+60/-80` has no concrete 80-line retirement list and retains
-the old string adapter during migration.
+### 8. Medium, OPEN proof: bounds and one-second acceptance remain requirements, not evidence
 
-Several nominated spans contain surviving work:
+The revised source-byte and entry-count admissions are reasonable uses of
+existing bounds. Graph nodes and entries are different counts, so explicitly
+applying the count bound to the final vector is necessary. The design correctly
+admits there is no aggregate deadline in `evaluate-sources`; the loop's
+`await-turn-part!` (`src/seon/turn.clj:4789-4791`) does not itself prove interrupt
+exit. Name the enforcing system-turn owner and its terminal event in the slice.
 
-- `repl.clj:119-237` includes `value-text` and `error-text` (`:143-167`), which
-  preserve shown bytes and Clojure error formatting, not just the response map.
-- `entity-emission` (`src/seon/repl.clj:368-447`) translates namespace/renderer
-  refs and saved fields, and derives handles; its callers remain in the render
-  pair (`:449-454`) and `src/seon/render/transcript.clj:1466,1864`. Removing
-  render-time reads is not deleting the entire conversion without replacement.
-- Help includes a surviving HTML projection (`src/seon/bootstrap.clj:72`), and
-  the third-output producer census misses the walkthrough shape in finding 7.
+§6's 42–45 ms fork, 168–201 ms/60 forms and 79 ms/7 forms are feasibility
+measurements, not a prompt/recording benchmark. Reusing one batch could be
+sub-second, but current per-source system-turn processing does not prove that.
+The reported 3.40/3.50 s debug operation remains over the law with responsible
+armed costs unprofiled. The revised design honestly lists missing graph,
+render, record, memory and many-entry measurements; acceptance still requires
+them and parent/candidate comparison. No invented speedup or retained-memory
+number is credited here.
 
-The ~750 walk and ~500 transcript candidates are correctly excluded pending
-other slices/caller audits; retain that exclusion. Give an exact owner/caller
-retirement table, distinguish gross deletion from conversion deltas, and count
-schema/test migrations. Prefer the existing preview and supplier fixes first;
-do not justify new cache/composer machinery with unrelated future deletions.
+## Resolved rulings and smaller accepted changes
+
+**5 / D7.** Keep the corrected hook fix in the same read-only slice.
+`src/seon/call_preparation.clj:1142-1152` obtains a DB only from the environment
+connection and silently passes arguments through otherwise. Its plan basis can
+therefore disagree with the held database, while `src/seon/db.clj:2278-2301`
+already supplies the scoped database first. Changing that supplier again is
+unnecessary. Choose the held value for the plan, falling back to the connection
+only when absent, without losing explicit caller arguments. The snapshot
+implementation at `call_preparation.clj:506-540` now answers each held value's
+own basis, reusing dependency revisions and a projection-owned memo. The source
+change is **a44538acc**; **10d6fdff5** is its landing evidence, not the code diff.
+No new latest-plan atom or render cache is needed. P3's temporal probe did not
+distinguish two basis values, so it is not credited as a historical regression
+pass.
+
+**9 / aliases.** `:seon.ns/aliases` and the existing alias component are the right
+attributes (`resources/seon/schemas/seon.ns.edn:2-8,26`). They represent the
+namespace's actual require aliases. Restricting executed requires to the
+viewer's own namespace avoids cross-namespace alias collision without another
+registry. D17 is correctly a prerequisite for existing root adoption;
+`namespace-seed-call` is only for new namespace rows. Keep toolkit consumers
+until their conversion. The required output remains `(require '[ns :as alias])`
+plus `dir`/`doc` and contracts, not an invented capability manifest.
+
+**10 / size.** The old ~640 deletion and +120 implementation claims are withdrawn.
+The revised gross estimate is about **225 lines** (57 + 93 + 60 + 3 + 12), with
+producer changes explicitly classified as conversions. The initial estimate is
+**+93 lines, zero deletions**, including ~40 test lines. That satisfies the need
+to state growth honestly, not proof that those numbers are achievable. Findings
+1, 6 and 7 expose missing work in the estimate. The smallest justified initial
+slice remains D6/D7 in the existing execution owners before renderer migration.
 
 ## Stage-by-stage verdict on §2.3
 
-| Stage | Verified installed seam | Assessment |
+| Stage | Source evidence at 9be9bd159 | Verdict |
 |---|---|---|
-| World | `sci.eval/fork-for-turn`, `eval.clj:2962-2994` | Existing fork; no installed stage parameter implementing the proposed read-only semantics. Private objects are shared. Do not pass the held agent as `agent-ctx` when a disposable child is intended: that branch regenerates the supplied context in place. |
-| Segment | Entries directly into `evaluate-sources`, `turn.clj:4757` | Correct smaller seam; bypass text planning for already segmented entries. Comment-only and legacy entry shapes remain to settle. |
-| Read | `evaluate-for-install` → `one-event` → `reader/read`, `eval.clj:4476-4489,957-966` | One primary read in actual SCI namespace context. Finalization and `def-note` still reread. |
-| Evaluate | `evaluate`, `eval.clj:3908,4225-4275` | Existing evaluator; no second evaluator needed. It binds the held read value at `:4099-4101`. Authority revocation and plan acquisition are incomplete. |
-| Finalize | `disposition-rule-error`, `turn.clj:4721-4740,4833` | Existing policy, but it reparses; completed/wait results can also stop the entry loop (`:4880-4882`). Define render behavior through the common stage rather than assuming every following entry runs. |
-| Print | `shown-result`, `eval.clj:3665-3728` | Existing selector/floor, with nested renderer invocation and connection-dependent error preparation. Terminal entry-result semantics are missing. |
-| Record | `preview-sources` returns an in-memory preview, `turn.clj:4888-4924` | No new result store, but “none” is a deliberate recording-policy change; capture does not automatically cover this entrance. |
-| Transcript | `seon.repl/text`, `repl.clj:264-281` | One existing grammar owner, currently response-map grammar. Change it in place; do not manually assemble a second transcript. |
-| Preview | `preview-sources`, `turn.clj:4907-4924` | Already composes fork/planner/evaluate-sources, so extend it, not a parallel orchestration. Its current docstring is not a read-only guarantee. |
+| `fork-for-turn` | `src/seon/sci/eval.clj:2971-3002` uses SCI fork and existing environment/state carriers | Existing fork, no new evaluator. Shallow objects and base/private-world semantics remain unresolved. |
+| `evaluate-sources` | `src/seon/turn.clj:4742-4886` threads namespace, requests, outcomes and dispositions | Existing loop. Carries writable cluster inputs; does not settle. Must carry access and be called as one ordered batch. |
+| `evaluate-for-install` / reader | `src/seon/sci/eval.clj:4483-4498` obtains one event and hands it to `evaluate` | Correct reader seam; surrounding identity/history/finalization reads must also retire. |
+| `evaluate` | `src/seon/sci/eval.clj:4101-4109,4234-4243,4283-4284` binds custody/read DB, consumes event and calls SCI | Existing evaluator, not a replacement. “No changes” is false for access propagation. |
+| `shown-result` | `src/seon/sci/eval.clj:3683-3732`; `src/seon/render/value.clj:628-647` | Existing printer preparation; structural terminal stage possible. Preserve first selection and remove history reprinting. |
+| `seon.repl/text` | `src/seon/repl.clj:119-142,169-237,264` | Existing transcript owner; wrapper/def-note retirement and raw transcript grammar are proposed, not installed. |
+| `preview-sources` | `src/seon/turn.clj:4888-4924` forks, plans text, calls the same loop without settlement | Correct composition owner. Its current “persisting nothing” docstring does not prevent form effects; accept entries here instead of another parser. |
+| `system-turn` recording | `src/seon/turn.clj:2086-2261` | Existing store and lifecycle are sufficient. Per-source calls, shown-string diffing and incomplete reuse remain. |
 
-`clojure.main/repl` supplies the appropriate dependency precedent: `:read`,
-`:eval`, `:print`, `:caught` are values used in one loop
-(`reference-code/clojure/src/clj/clojure/main.clj:368-437`, pin
-`3bc2b3e91fdff462620d84bbdfd40379d9c562e5`). It does not itself provide the
-read-only authority or Seon recording policy. No new parser, evaluator, printer,
-physical cache or durable store is justified by this review.
+There is **no need for a second evaluator, printer implementation, cache or
+store**. The retained code still has additional parsing calls and a separate
+print-after-diff branch. Revision 2 removes the proposed new transcript cache,
+but it does not make existing historical reuse content-valid automatically.
 
-## Reproducible live evidence and limits
+## Reproducible probe evidence and limits
 
-All three calls used MCP JVM mode, `root /Users/sean/src/seon`, cluster `default`,
-namespace `user`, `read_only true`, 5,000 ms request timeout. They changed only
-fresh locally bound objects, not an agent's state or program Vars. The first is
-a **dependency** probe, the second a **database/contract-owner** probe; neither
-pretends to be an installed read-only agent render. Tools returned complete
-small result envelopes. Concurrent branch-error notices were foreign test
-observations; I did not operate on their sessions or files.
+### P1: preview succeeds locally without an install transaction
+
+Run through MCP `eval_clj`, explicit root `/Users/sean/src/seon`, cluster
+`default`, JVM mode; hosted branch `:astra-repl-render-r2`, agent
+`mcp/astra-render-review-r2`. The held handle and context came from the real
+host/acquire owners, not a fabricated fixture. The essential complete owner
+request was:
 
 ```clojure
 (let [started (System/nanoTime)
-      cell (atom 0)
-      parent (sci.core/init {:bindings {'cell cell}})
-      child (sci.core/fork parent)
-      result (sci.core/eval-string* child "(swap! cell inc)")]
-  {:fork-result result :parent-cell @cell
-   :elapsed-ms (/ (- (System/nanoTime) started) 1e6)})
-;; {:fork-result 1, :parent-cell 1, :elapsed-ms 0.859958}
-;; io-prepl event: 4 ms. Allocation was not measured for this call.
-
-(let [bean (java.lang.management.ManagementFactory/getThreadMXBean)
-      tid (.getId (Thread/currentThread))
-      allocated-before (.getThreadAllocatedBytes
-                         ^com.sun.management.ThreadMXBean bean tid)
-      start (System/nanoTime)
-      database @(seon.cluster.boot/connection "default")
-      projection (seon.db/carried-projection database)
-      valid? (seon.schema/projection-validator
-               projection :seon.cluster.reply/sources)
-      sink (atom [])
-      cell (atom 0)
-      read-value (fn [] [(seon.db/pull database [:seon.agent/id]
-                                     [:seon.agent/id "root"]) @cell])
-      before (binding [seon.db/*read-evidence-sink* sink] (read-value))
-      evidence (seon.db/read-evidence @sink)
-      _ (reset! cell 1)
-      after (read-value)]
-  {:comment-entry-valid?
-   (valid? [{:seon.cluster.eval/comment ";; see root above"}])
-   :form-entry-valid? (valid? [{:seon.cluster.eval/source "(+ 1 2)"}])
-   :before before :after after :evidence-count (count evidence)
-   :evidence-current? (seon.db/read-evidence-current? database evidence)
-   :elapsed-ms (/ (- (System/nanoTime) start) 1e6)
-   :thread-allocated-bytes
-   (- (.getThreadAllocatedBytes ^com.sun.management.ThreadMXBean bean tid)
-      allocated-before)})
-;; {:comment-entry-valid? false, :form-entry-valid? true,
-;;  :before [#:seon.agent{:id "root"} 0],
-;;  :after [#:seon.agent{:id "root"} 1],
-;;  :evidence-count 1, :evidence-current? true,
-;;  :elapsed-ms 0.41275, :thread-allocated-bytes 190104}
-;; io-prepl event: 4 ms. This allocation includes the complete bounded form;
-;; it is not a render-memory benchmark or retained-heap measurement.
-
-(seon.repl/text {:seon.ns/name 'user
-                 :seon.cluster.eval/source "(+ 1 2)"
-                 :seon.eval/shown "3"})
-;; "user=> (+ 1 2)\n#:seon.repl{:value 3}"
-;; io-prepl event: 3 ms.
+      instance (get @seon.operator.runtime/running-instances "default")
+      hosted (seon.cluster.host/host!
+              {:seon.turn.loop/cluster
+               (assoc (:seon.turn.loop/cluster instance)
+                      :seon.store/store (:seon.store/store instance))
+               :seon.agent/branch :astra-repl-render-r2
+               :seon.agent/id "mcp/astra-render-review-r2"
+               :seon.ns/name 'user})
+      handle (:seon.turn.loop/cluster hosted)
+      held (seon.cluster.agent/acquire-context! handle "mcp/astra-render-review-r2")
+      connection (:seon.db/connection held)
+      database @connection
+      before (seon.db/commit-id database)
+      preview (seon.turn/preview-sources
+                {:seon.turn.loop/cluster handle
+                 :seon.db/db database
+                 :seon.sci.eval/ctx (:seon.sci.eval/base-ctx held)
+                 :seon.agent/id "mcp/astra-render-review-r2"
+                 :seon.ns/name 'user
+                 :seon.cluster.reply/text
+                 "(defn astra-r2-preview-id {:malli/schema [:=> [:cat :int] :int]} [x] x)\n(astra-r2-preview-id 7)"
+                 :seon.sci.admit/caps (:seon.sci.admit/caps handle)})]
+  {:elapsed-ms (/ (- (System/nanoTime) started) 1e6)
+   :commit-unchanged? (= before (seon.db/commit-id @connection))
+   :stored-function (seon.db/pull @connection [:seon.fn/sym]
+                                [:seon.fn/sym 'user/astra-r2-preview-id])
+   :outcomes (mapv (fn [item]
+                     (let [e (:seon.sci.eval/evaluation item)]
+                       {:shown (:seon.eval/shown e)
+                        :error (:seon.cluster.eval/error e)
+                        :program-row? (boolean (:seon.program/row e))}))
+                   (:seon.turn.loop/evaluated-sources preview))})
+;; {:elapsed-ms 158.988458, :commit-unchanged? true,
+;;  :stored-function nil,
+;;  :outcomes [{:shown "#'user/astra-r2-preview-id", :error nil, :program-row? true}
+;;             {:shown "7", :error nil, :program-row? false}]}
+;; io-prepl: 162 ms.
 ```
 
-Contract evidence uses the installed projection's retained Malli validator
-(`src/seon/schema.clj:3699-3707` → `malli.core/validator`,
-`reference-code/malli/src/malli/core.cljc:2637-2643`, pin
-`befcd302a8e626a67d84b80aabee0cd1b38dadb6`).
+### P2: base-world callable resolution
 
-The inspected `reference-code/datahike` gitlink is
-`f3a3cb59380c8b1e9ea0a3d6074c0863012cf0dd`; Seon's read-evidence owner is the
-actual probe entrance. No claim of validation for the proposed new schema or
-stage is made.
+This is a diagnostic of the installed SCI surface, not an alternative product
+evaluator or a claim to have executed any write:
 
-This is a design review, with **0 source lines and 0 test lines changed**. No
-`bin/test` gate, `seon.test/run`, candidate publication or browser-paint proof was
-run; there is no implementation diff to exercise. The live archive mismatch is
-the installation limit, not a reason the source audit stopped. No scratch branch,
-JVM, namespace or filesystem measurement resource was created to clean up.
-Only this review file is owned and committed; its commit identity is reported
-in the handoff. Release this path after the commit.
+```clojure
+(let [started (System/nanoTime)
+      instance (get @seon.operator.runtime/running-instances "default")
+      handle (:seon.turn.loop/cluster instance)
+      held (seon.cluster.agent/acquire-context! handle "root")
+      ctx (:seon.sci.eval/base-ctx held)]
+  {:ctx? (boolean ctx)
+   :resolved
+   (when ctx
+     (sci.core/eval-string*
+       (sci.core/fork ctx)
+       "(mapv (fn [s] [s (some? (resolve s))]) '[seon.db/call-with-custody seon.db/call-without-custody seon.shell.jvm/run seon.cluster.registry/branch! seon.blob/put! seon.effect/request!])"))
+   :elapsed-ms (/ (- (System/nanoTime) started) 1e6)})
+;; :ctx? true; all six symbols resolve true.
+;; :elapsed-ms 5.42825; io-prepl 9 ms.
+```
+
+An earlier ordinary SCI run on the probe branch also resolved the custody,
+branch and shell owners, while `datahike.api/transact` did not resolve. A
+private atom definition succeeded on that branch, but the following private vs
+base comparison was interrupted by shared JVM replacement; no result is claimed
+for that attempted comparison. The author's base/private comparison and the
+source establish the distinction; P2 establishes that the base retains the
+named host routes.
+
+### P3: access installation and snapshot probe limit
+
+```clojure
+(let [started (System/nanoTime)
+      database @(seon.cluster.boot/connection "default")
+      projection (seon.db/carried-projection database)
+      older (seon.db/as-of database (dec (seon.db/basis-t database)))
+      current-plan (seon.call-preparation/snapshot database projection)
+      older-plan (seon.call-preparation/snapshot older projection)]
+  {:current-basis (seon.db/basis-t database)
+   :current-plan-basis (:seon.call-preparation/checked-through-t current-plan)
+   :older-basis (seon.db/basis-t older)
+   :older-plan-basis (:seon.call-preparation/checked-through-t older-plan)
+   :access-schema-present?
+   (contains? (:seon.schema.projection/forms projection) :seon.db/access)
+   :elapsed-ms (/ (- (System/nanoTime) started) 1e6)})
+;; All four basis values: 536871144. :access-schema-present? false.
+;; :elapsed-ms 707.712209; io-prepl 711 ms.
+```
+
+The `as-of` wrapper's reported basis did not distinguish old/new here; this is
+**not** credited as proof that two different held plans remain isolated. The
+source audit and the existing snapshot landing evidence support the design
+correction; its real regression remains an implementation proof obligation.
+
+These bounded probes all completed under one second. No allocated/retained
+memory measurement was taken in this re-review; they are not render-cost
+benchmarks. Default's unrelated over-second profile rows are not attributed to
+these calls. No candidate access implementation exists in this review, so no
+candidate publication/adoption, new behavior test, `seon.test/run`, cold gate or
+browser proof is claimed. No foreign source repair or archive build was needed
+for this documentation-only review; source remained inspectable and the live
+REPL returned. No `bin/test` gate or git worktree was used.
+
+Cleanup: MCP retirement returned
+`{:seon.store/branch :astra-repl-render-r2, :seon.dev.mcp/retired? true}`.
+No other lane's sessions, branches or files were operated on. The only changed
+path is this review: **0 source lines, 0 test lines**. Its commit is the handoff;
+release this path afterward. `git diff --check` and the canonical
+`seon.dev.markdown/validate-file` passed (valid true, no violations; 232 ms
+command wall time). Final verdict remains **REVISE** until the open
+model and common-path findings above are resolved.
