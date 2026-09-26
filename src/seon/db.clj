@@ -3794,11 +3794,26 @@
                 (or (nil? maximum) (<= (long arity) (long maximum)))))
          declared)))
 
-(def ^:private call-edges-query
-  '[:find ?caller-symbol ?call
-    :where [?caller :seon.fn/call-arities ?call]
-    (or [?caller :seon.fn/sym ?caller-symbol]
-        [?caller :seon.test/sym ?caller-symbol])])
+(def ^:private call-edges-queries
+  ;; One plain join per caller family. One `or` over both families cost
+  ;; 1,208 ms cold on a speculative value of default (102,063 edges); these
+  ;; two cost 87 ms together with the identical union (2026-09-26).
+  (mapv (fn [family]
+          [:find '?caller-symbol '?call
+           :where ['?caller :seon.fn/call-arities '?call] ['?caller family '?caller-symbol]])
+        [:seon.fn/sym :seon.test/sym]))
+
+(defn- call-edges
+  "Every `[caller-symbol call]` edge of `database`'s functions and tests, or
+  the first read refusal `query-fn` answered."
+  {:malli/schema [:=> [:cat [:=> [:cat :seon.db/query :seon.db/database-value] [:or :seon.schema/value :seon.db/error-result]]
+                       :seon.db/database-value]
+                  [:or [:set :seon.schema/value] :seon.db/error-result]]}
+  [query-fn database]
+  (reduce (fn [edges query]
+            (let [rows (query-fn query database)]
+              (if (read-refusal? rows) (reduced rows) (into edges rows))))
+          #{} call-edges-queries))
 
 (def ^:private arity-attributes
   "Every attribute the arity gate reads."
@@ -3842,7 +3857,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value] :map]}
   [database]
   (let [derive (fn []
-                 (let [edges (set (d/q call-edges-query database))
+                 (let [edges (call-edges d/q database)
                        bounds (declared-arity-bounds d/q database)]
                    (merge (arity-comparison edges bounds)
                           {::edge-set edges
@@ -3898,9 +3913,9 @@
         after (:db-after report)
         tx-data (:tx-data report)]
     (if-not (every? #(get (dbi/-schema before) %) arity-attributes)
-      (let [edges (d/q call-edges-query after)
+      (let [edges (call-edges d/q after)
             bounds (declared-arity-bounds d/q after)]
-        (assoc (arity-comparison (set edges) bounds) ::bounds bounds))
+        (assoc (arity-comparison edges bounds) ::bounds bounds))
       (let [base (arity-base before)
               symbols (fn [database entities attributes]
                           (into #{}
@@ -4057,7 +4072,7 @@
 (defn- arity-mismatches-with
   {:malli/schema [:=> [:cat [:=> [:cat :seon.db/query :seon.db/database-value] [:or :seon.schema/value :seon.db/error-result]] :seon.db/database-value :seon.schema/projection] [:or :seon.fn/arity-mismatch-report :seon.db/error-result]]}
   [query-fn database projection]
-  (let [edges (query-fn call-edges-query database)
+  (let [edges (call-edges query-fn database)
         bounds (when-not (:seon.db/invalid-read edges)
                  (declared-arity-bounds query-fn database))]
     (or (when (:seon.db/invalid-read edges) edges)
