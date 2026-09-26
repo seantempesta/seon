@@ -382,6 +382,23 @@
 ;;; twice, and the handler calls `record-uncaught!` through its Var.
 (defonce ^:private uncaught-handler (delay (install-uncaught-handler!)))
 
+(defn listening-instance
+  "One instance's structural members: its bootstrap config, the listener it
+  advertises, this process's identity and the root executors. Every layer is
+  added to this value as boot acquires it; a test world that stands in for a
+  running cluster builds its instance here too, so it is a declared instance."
+  {:malli/schema [:=> [:cat :seon.boot/config [:fn seon.cluster/socket-server?]]
+                  :seon.boot/instance]}
+  [config listener]
+  {:seon.boot/config config
+   :seon.boot/advertisement
+   (merge (process/current-identity)
+          {:seon.boot/cluster-name (:seon.boot/cluster-name config)
+           :seon.boot/prepl-host (:seon.boot/prepl-host config)
+           :seon.boot/prepl-port (.getLocalPort ^java.net.ServerSocket listener)})
+   :seon.boot/prepl-server listener
+   :seon.boot/executors (cluster/root-executors)})
+
 (defn start!
   "Acquire a listener before the store; retain partial boot after any later refusal.
   A supplied listener was opened by the launcher's minimal core-only entry form."
@@ -416,14 +433,7 @@
                                              :port (:seon.boot/prepl-port config)
                                              :args [:cluster-name name]}))
                                        (catch Throwable cause (throw (failed cause))))]
-                     (publish! {:seon.boot/config config
-                                :seon.boot/advertisement
-                                (merge (process/current-identity)
-                                       {:seon.boot/cluster-name name
-                                        :seon.boot/prepl-host (:seon.boot/prepl-host config)
-                                        :seon.boot/prepl-port (.getLocalPort ^java.net.ServerSocket listener)})
-                                :seon.boot/prepl-server listener
-                                :seon.boot/executors (cluster/root-executors)})))]
+                     (publish! (listening-instance config listener))))]
     (try
       (let [;; The cluster the launcher opened this JVM for (it supplies the
             ;; listener) is its development cluster: the development overlay

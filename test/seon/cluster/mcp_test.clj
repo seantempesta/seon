@@ -48,6 +48,17 @@
   [value]
   (alength (.getBytes ^String (pr-str value) "UTF-8")))
 
+(defn- listening-instance
+  "A declared `:seon.boot/instance` for a fixture cluster, built by boot's own
+  constructor over this JVM's live listener and bootstrap config (renamed), with
+  the fixture's connection as its database layer."
+  [connection cluster-name]
+  (let [live (some #(when (:seon.boot/prepl-server %) %) (vals @running-instances))]
+    (assert live "a fixture instance stands beside this JVM's live instance")
+    (assoc (boot/listening-instance (assoc (:seon.boot/config live) :seon.boot/cluster-name cluster-name)
+                                    (:seon.boot/prepl-server live))
+           :seon.boot/cluster-connection connection)))
+
 (defn- running-instance
   [connection cluster-name]
   (let [projection (schema/projection-from-database (db/db connection))
@@ -57,10 +68,10 @@
           :seon.db/connection connection
           :seon.db/basis-t (db/basis-t (db/db connection))
           :seon.schema/projection projection})]
-    {:seon.boot/cluster-connection connection
+    (assoc (listening-instance connection cluster-name)
      :seon.turn.loop/cluster (env/carry-state {} (env/environment-state environment))
      :seon.sci.eval/ctx
-     (env/carry-state {} (env/environment-state environment))}))
+     (env/carry-state {} (env/environment-state environment)))))
 
 (defn- sci-evaluation
   [effective source]
@@ -95,8 +106,8 @@
            projection-state (:seon.sci.eval/projection-state (meta database))
            observed (atom nil)]
        (swap! running-instances assoc cluster-name
-              {:seon.boot/cluster-connection connection
-               :seon.sci.eval/ctx (env/carry-state {} projection-state)})
+              (assoc (listening-instance connection cluster-name)
+                     :seon.sci.eval/ctx (env/carry-state {} projection-state)))
        (try
          (with-redefs [config/effective
                        (fn [value _]
@@ -271,7 +282,6 @@
   (support/with-database
    (fn [connection]
      (let [cluster-name (str "mcp-observation-bound-" (random-uuid))
-           live (some #(when (map? %) %) (vals @running-instances))
            _ (support/apply-config! connection cluster-name {:seon.config/on-core-error :record})
            environment (env/environment {:seon.boot/cluster-name cluster-name :seon.db/connection connection})
            record! (fn [i message]
@@ -282,12 +292,7 @@
            receipts (mapv #(record! % "bounded fault") (range 50))
            long-receipt (record! 50 (apply str (repeat 1000 \x)))
            _ (problems/resolve! connection (:seon.error/signature (first receipts)))]
-       (is (some? live) "the observation reads this JVM's live instance's structural members")
-       (swap! running-instances assoc cluster-name
-              (-> (select-keys live [:seon.boot/config :seon.boot/advertisement
-                                     :seon.boot/prepl-server :seon.boot/executors])
-                  (assoc-in [:seon.boot/config :seon.boot/cluster-name] cluster-name)
-                  (assoc :seon.boot/cluster-connection connection)))
+       (swap! running-instances assoc cluster-name (listening-instance connection cluster-name))
        (try
          (let [result (cluster/mcp-runtime-observation cluster-name)
                shown (:seon.dev.mcp/open-faults result)
