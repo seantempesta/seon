@@ -1558,38 +1558,24 @@
 (def ^:private seed-cluster-facts!
   (delay (requiring-resolve 'seon.cluster/seed-cluster-facts!)))
 
-(defn- program-overlay-tx
-  "Transaction data putting `candidate`'s differing program rows onto `world`.
+(defn- digest-differences
+  "The declarations `world` and `candidate` hold at different definition
+  digests, as `[offered-by-candidate held-by-world]` identity sets.
 
   Entity ids differ between lineages, so declarations compare by stored
   definition digest: a digest one value holds and the other lacks names a
-  declaration that was added, changed or retracted. Only those identities are
-  read and replaced (`seon.fn/reconcile-tx`) with their program-partition
-  attributes, an identity absent from the candidate retracting, and with any
-  row they name by lookup that the world lacks (a new file). Callers of a changed
-  definition interpret it at acquisition. Attributes the candidate installed
-  and the world lacks come first. Equal programs and attributes answer `[]`;
-  a refused read answers its refusal."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value]
-                  [:or :seon.db/tx-data :seon.error/value]]}
-  [world candidate]
-  (let [families (vec (:seon.program/compared-families
-                       (program/declaration-families (db/carried-projection candidate))))
-        ;; One query per value (0.5 ms on 10,779 declarations; the armed
+  declaration that was added, changed or retracted. A refused read answers
+  its refusal."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value [:vector :qualified-keyword]]
+                  [:or [:tuple :seon.program/identity-set :seon.program/identity-set] :seon.error/value]]}
+  [world candidate families]
+  (let [;; One query per value (0.5 ms on 10,779 declarations; the armed
         ;; `db/datoms` read of the same range measured 44 ms).
         by-digest (fn [database]
                     (let [found (db/q '[:find ?digest ?e :where [?e :seon.program/definition-digest ?digest]]
                                       database)]
                       (if (:seon.error/at found) found (into {} found))))
         [held offered :as maps] (mapv by-digest [world candidate])
-        ;; Attributes the candidate installed that the world lacks (an agent's
-        ;; or fixture's new schema): schema-on-write needs them installed before
-        ;; a carried row or a member writes them. Sub-millisecond on 2,452.
-        attributes (into [] (keep (fn [[attribute declaration]]
-                                    (when (and (qualified-keyword? attribute)
-                                               (not (get (:schema world) attribute)))
-                                      declaration)))
-                         (sort-by key (filter (comp keyword? key) (:schema candidate))))
         named (fn [database digests other]
                 (let [rows (db/pull-many database families
                                          (into [] (keep (fn [[digest e]] (when-not (get other digest) e)))
@@ -1598,7 +1584,37 @@
                       (into #{} (mapcat (fn [row] (keep #(when-some [v (get row %)] [% v]) families)))
                             rows))))
         present (when-not (some :seon.error/at maps) (named candidate offered held))
-        changed (when (set? present) (named world held offered))
+        changed (when (set? present) (named world held offered))]
+    (cond (some :seon.error/at maps) (some #(when (:seon.error/at %) %) maps)
+          (not (set? present)) present
+          (not (set? changed)) changed
+          :else [present changed])))
+
+(defn- program-overlay-tx
+  "Transaction data putting `candidate`'s differing program rows onto `world`.
+
+  Only the `digest-differences` identities are read and replaced
+  (`seon.fn/reconcile-tx`) with their program-partition attributes, an
+  identity absent from the candidate retracting, and with any row they name
+  by lookup that the world lacks (a new file). Callers of a changed
+  definition interpret it at acquisition. Attributes the candidate installed
+  and the world lacks come first. Equal programs and attributes answer `[]`;
+  a refused read answers its refusal."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value]
+                  [:or :seon.db/tx-data :seon.error/value]]}
+  [world candidate]
+  (let [families (vec (:seon.program/compared-families
+                       (program/declaration-families (db/carried-projection candidate))))
+        differences (digest-differences world candidate families)
+        [present changed] (when (vector? differences) differences)
+        ;; Attributes the candidate installed that the world lacks (an agent's
+        ;; or fixture's new schema): schema-on-write needs them installed before
+        ;; a carried row or a member writes them. Sub-millisecond on 2,452.
+        attributes (into [] (keep (fn [[attribute declaration]]
+                                    (when (and (qualified-keyword? attribute)
+                                               (not (get (:schema world) attribute)))
+                                      declaration)))
+                         (sort-by key (filter (comp keyword? key) (:schema candidate))))
         ;; Only the program partition carries over: another writer's fact on
         ;; a row (a namespace's steward agent) names data the world lacks.
         others #(let [program (program/program-attributes (db/carried-projection candidate))]
@@ -1622,9 +1638,7 @@
                                (functions/reconcile-tx world rows (vec (sort (into present changed)))))]
                     [rows tx]))]
     (cond
-      (some :seon.error/at maps) (some #(when (:seon.error/at %) %) maps)
-      (not (set? present)) present
-      (not (set? changed)) changed
+      (:seon.error/at differences) differences
       (empty? (into present changed)) attributes
       :else
       (loop [extra #{}]
@@ -1712,6 +1726,51 @@
     (store/release-branch! connection)
     nil))
 
+(defn- world-base
+  "The source commit `cluster`'s adoption record on `recording` names: the
+  published program this JVM loaded, which every test world starts from."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.cluster/name] :seon.source/commit-id]}
+  [recording cluster]
+  (or (:seon.source/commit-id
+       (db/pull (db/db recording) [:seon.source/commit-id] [:seon.cluster/name cluster]))
+      (throw (ex-info "The cluster records no adopted source commit to branch a test world from."
+                      {:seon.error/expected :seon.source/commit-id
+                       :seon.error/offending cluster}))))
+
+(declare request-refusal)
+
+(defn changes
+  "What a check of `execution` must reach: the declarations its program holds
+  at other definition digests than the published commit its test world
+  starts from, exactly what `clean-request-handle` overlays onto that world.
+  A namespace identity is a binding change; it stays only when the namespace
+  declares something a test can reach. Equal programs refuse by name: there
+  is no change to check."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.db/connection]
+                  [:or :seon.test/changed :seon.test/selection-error :seon.error/value]]}
+  [execution recording]
+  (let [store (or (:seon.store/store execution) (:seon.store/store (env/of execution)))
+        base (world-base recording (:seon.cluster/name execution))
+        candidate (db/db (:seon.db/connection execution))
+        families (vec (:seon.program/compared-families
+                       (program/declaration-families (db/carried-projection candidate))))
+        differences (digest-differences (source/database store base) candidate families)
+        identities (when (vector? differences) (apply into differences))
+        declaring (when identities
+                    (db/q '[:find [?name ...] :in $ [?name ...]
+                            :where [?n :seon.ns/name ?name] (or [?e :seon.fn/ns ?n] [?e :seon.test/ns ?n])]
+                          candidate (vec (keep (fn [[a v]] (when (= :seon.ns/name a) v)) identities))))
+        changed (when (sequential? declaring)
+                  (vec (sort-by pr-str (filter (fn [[a v]] (or (not= :seon.ns/name a) (some #{v} declaring)))
+                                               identities))))]
+    (cond (:seon.error/at differences) differences
+          (not (sequential? declaring)) declaring
+          (empty? changed)
+          (request-refusal :seon.test/policy-unscoped
+                           "My program equals the published commit my tests start from: there is no change to check. Name tests with :seon.test/identities, or run my namespace's tests with (my.test/run)."
+                           base)
+          :else changed)))
+
 (defn- clean-request-handle
   "Acquire the request's world: the loaded published program, boot's facts and
   the execution's differing program rows.
@@ -1733,12 +1792,7 @@
                   :seon.agent/execution-handle]}
   [execution recording cluster effective]
   (let [store (or (:seon.store/store execution) (:seon.store/store (env/of execution)))
-        base (:seon.source/commit-id
-              (db/pull (db/db recording) [:seon.source/commit-id] [:seon.cluster/name cluster]))
-        _ (when-not base
-            (throw (ex-info "The cluster records no adopted source commit to branch a test world from."
-                            {:seon.error/expected :seon.source/commit-id
-                             :seon.error/offending cluster})))
+        base (world-base recording cluster)
         candidate (db/db (:seon.db/connection execution))
         ;; Branching shares the base's entity ids, so rows reconciled against
         ;; the base apply unchanged on its checkpoint's descendants.

@@ -5,25 +5,27 @@
 (defn check
   "Check the tests reaching my change as one request and return its answer.
 
-  My acquired context and connection are supplied by call preparation. Each
-  reaching test runs on its own branch off my current commit, isolated from my
-  writes and from the other tests; its result is recorded on my connection.
-  `:seon.test/passed?` is true only when every reaching test has green
-  evidence. Failure data names the test and its claim.
+  My change is `:seon.test/changed` when I name it, otherwise every
+  declaration my program holds at another digest than the published program
+  my tests start from (`seon.test/changes`). My acquired context and
+  connection are supplied by call preparation. Each reaching test runs on its
+  own branch off my current commit, isolated from my writes and from the
+  other tests; its result is recorded on my connection. `:seon.test/passed?`
+  is true only when every reaching test has green evidence. Failure data
+  names the test and its claim.
 
   Example:
   (my.test/check {:seon.test/changed ['my.note/add!]})"
   {:malli/schema [:=> [:cat :my.test/check-request]
                   [:or :seon.test/run-result :seon.error/value]]}
   [{context :my.program/context connection :seon.db/connection :as request}]
-  (seon.test/run
-   (cond-> {:seon.test/execution context
-            :seon.test/recording-connection connection
-            ;; The reaching set of a named change; with no change, the
-            ;; outstanding and changed work since the recorded evidence.
-            :seon.test/policy (if (seq (:seon.test/changed request)) :named :incremental)}
-     (seq (:seon.test/changed request))
-     (assoc :seon.test/changed (vec (:seon.test/changed request))))))
+  (let [changed (or (not-empty (:seon.test/changed request)) (seon.test/changes context connection))]
+    (if (:seon.error/at changed)
+      changed
+      (seon.test/run {:seon.test/execution context
+                      :seon.test/recording-connection connection
+                      :seon.test/policy :named
+                      :seon.test/changed (vec changed)}))))
 
 (defn run-owned
   "Run my namespace's declared tests as one named request.
