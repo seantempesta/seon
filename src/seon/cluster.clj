@@ -2457,10 +2457,12 @@
   contracts silently unarmed."
   {:malli/schema [:=> [:cat [:map
                              [:seon.profile/definition-digests :seon.profile/definition-digests]
-                             [:seon.cluster/program-namespaces [:vector :symbol]]]
+                             [:seon.cluster/program-namespaces [:vector :symbol]]
+                             [:seon.db/db :seon.db/database-value]]
                        :map [:or :nil :seon.flow/commit-fault!]]
                   :seon.instrument/applied]}
-  [{digests :seon.profile/definition-digests namespaces :seon.cluster/program-namespaces}
+  [{digests :seon.profile/definition-digests namespaces :seon.cluster/program-namespaces
+    database :seon.db/db}
    effective commit-fault!]
   (doseq [namespace-name namespaces]
     (require namespace-name))
@@ -2471,6 +2473,9 @@
                   (cond-> {:seon.config/on-core-error (:seon.config/on-core-error effective)
                            :seon.sci.admit/caps (config/result-caps effective)
                            :seon.schema/projection projection
+                           ;; The cluster's supplied-default rows: each contract's
+                           ;; call preparation is decided from them at arming.
+                           :seon.db/db database
                            :seon.profile/definition-digests digests}
                     (:seon.config.error/max-evidence-bytes effective)
                     (assoc :seon.config.error/max-evidence-bytes
@@ -2695,6 +2700,7 @@
                               :seon.config.error/max-evidence-bytes
                               (:seon.config.error/max-evidence-bytes effective)
                               :seon.schema/projection projection
+                              :seon.db/db previous-database
                               :seon.instrument/changed-identities
                               arming-identities
                               :seon.profile/definition-digests

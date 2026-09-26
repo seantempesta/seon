@@ -70,7 +70,8 @@
            ;; with its profiling cell and definition digest; adoption later
            ;; re-arms only changed identities (`cluster/refresh-source!`).
            host-arming (cluster/arm-host-program!
-                        (cluster/published-program (:seon.store/store instance))
+                        (assoc (cluster/published-program (:seon.store/store instance))
+                               :seon.db/db (db/db connection))
                         boot-dials (:seon.flow/commit-fault! arm-request))
            instance (publish! (assoc instance :seon.instrument/applied host-arming))
            bare-ctx
