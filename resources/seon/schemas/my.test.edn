@@ -8,4 +8,5 @@
   [:seon.db/connection :seon.db/connection]
   [:seon.db/db :seon.db/database-value]
   [:seon.agent/id :seon.agent/id]
-  [:my.program/context :my.program/context]]}
+  [:my.program/context :my.program/context]
+  [:seon.ns/name {:optional true} :seon.ns/name]]}
