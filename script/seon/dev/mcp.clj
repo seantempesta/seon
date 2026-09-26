@@ -439,10 +439,15 @@
         value (try (edn/read-string (:val terminal)) (catch Throwable _ nil))]
     (if-let [evaluations (:seon.dev.mcp/evaluations value)]
       (into (filterv #(not= :ret (:tag %)) events)
-            (map (fn [{shown :seon.eval/shown error :seon.cluster.eval/error ordinal :seon.cluster.eval/ordinal}]
-                   (cond-> {:tag :ret :val (or shown error) :seon.cluster.eval/ordinal ordinal
-                            :seon.turn/id (:seon.turn/id value)}
-                     error (assoc :exception true))))
+            ;; What the evaluation wrote to *out* is recorded with it and printed
+            ;; before its value, as a prepl answers.
+            (mapcat (fn [{shown :seon.eval/shown error :seon.cluster.eval/error output :seon.cluster.eval/output
+                          ordinal :seon.cluster.eval/ordinal}]
+                      (cond-> []
+                        output (conj {:tag :out :val output :seon.cluster.eval/ordinal ordinal})
+                        true (conj (cond-> {:tag :ret :val (or shown error) :seon.cluster.eval/ordinal ordinal
+                                            :seon.turn/id (:seon.turn/id value)}
+                                     error (assoc :exception true))))))
             evaluations)
       (cond->> events
         (:seon.error/at value) (mapv #(if (identical? % terminal) (assoc % :exception true) %))))))

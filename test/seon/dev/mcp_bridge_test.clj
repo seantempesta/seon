@@ -657,6 +657,11 @@
                                 (finally (consume)))]
                 (or (-> result :seon.dev.mcp/evaluations last :seon.eval/shown)
                     (:seon.error/message result))))
+        printed (fn [source on-branch]
+                  (let [form ((bridge-var 'run-form) source cluster nil false on-branch)]
+                    (try (-> ((requiring-resolve 'seon.db/call-with-custody) {} #(eval (read-string form)))
+                             :seon.dev.mcp/evaluations first :seon.cluster.eval/output)
+                         (finally (consume)))))
         held #(some? (get-in @roster [:seon.agent/children (keyword branch)]))]
     (is (some? store) "a running cluster supplies the store")
     (try
@@ -665,6 +670,7 @@
       (is (= (str "#'user/" probe)
              (sci (str "(defn " probe " \"Add 41.\" {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 41))") branch)))
       (is (= "42" (sci (str "(" probe " 1)") branch)) "the hosted agent's next run on the branch calls the def")
+      (is (= "hi\n" (printed "(println \"hi\")" branch)) "the run's receipts carry what it printed")
       (is (nil? ((requiring-resolve 'sci.core/resolve) (:seon.sci.eval/ctx (get instances cluster)) (symbol "user" probe)))
           "the shared context never sees it")
       (is (contains? (set (:seon.dev.mcp/branches (run "list" nil))) (keyword branch)))
@@ -771,3 +777,13 @@
         (call 'seon.cluster.registry/retire-branch! {:seon.store/store store :seon.store/branch child})
         (execute "retire")
         (is (nil? (get @@(bridge-var 'window-bases) [root cluster parent])))))))
+
+(deftest a-run-reply-prints-recorded-output-before-its-value
+  ;; A receipt's recorded *out* is an :out event ahead of that evaluation's value.
+  (let [events ((bridge-var 'run-events)
+                [{:tag :ret :val (pr-str {:seon.turn/id "r"
+                                          :seon.dev.mcp/evaluations
+                                          [{:seon.eval/shown "nil" :seon.cluster.eval/output "hi\n" :seon.cluster.eval/ordinal 0}
+                                           {:seon.eval/shown "2" :seon.cluster.eval/ordinal 1}]})}])]
+    (is (= [[:out "hi\n" 0] [:ret "nil" 0] [:ret "2" 1]]
+           (mapv (juxt :tag :val :seon.cluster.eval/ordinal) events)))))

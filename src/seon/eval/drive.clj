@@ -120,7 +120,7 @@
                   [:vector :seon.eval.drive/evaluation]]}
   [db run-ids]
   (if (seq run-ids)
-    (->> (db/q '[:find ?run-id ?ordinal ?source ?result ?error ?at
+    (->> (db/q '[:find ?run-id ?ordinal ?source ?result ?error ?output ?at
                 :in $ [?run-id ...]
                 :where
                 [?run :seon.turn/id ?run-id]
@@ -131,17 +131,19 @@
                 [?receipt :seon.cluster.eval/ordinal ?ordinal]
                 [?receipt :seon.cluster.eval/at ?at]
                 [(get-else $ ?receipt :seon.eval/shown ::absent) ?result]
-                [(get-else $ ?receipt :seon.cluster.eval/error ::absent) ?error]]
+                [(get-else $ ?receipt :seon.cluster.eval/error ::absent) ?error]
+                [(get-else $ ?receipt :seon.cluster.eval/output ::absent) ?output]]
               db run-ids)
-         (sort-by (juxt #(inst-ms (nth % 5)) second))
-         ;; An absent shown text or error is no key, never an empty-string sentinel.
-         (mapv (fn [[run-id ordinal source result error at]]
+         (sort-by (juxt #(inst-ms (nth % 6)) second))
+         ;; An absent shown text, error or output is no key, never an empty-string sentinel.
+         (mapv (fn [[run-id ordinal source result error output at]]
                  (cond-> {:seon.turn/id run-id
                           :seon.cluster.eval/ordinal ordinal
                           :seon.cluster.eval/source source
                           :seon.cluster.eval/at at}
                    (not= ::absent result) (assoc :seon.eval/shown result)
-                   (not= ::absent error) (assoc :seon.cluster.eval/error error)))))
+                   (not= ::absent error) (assoc :seon.cluster.eval/error error)
+                   (not= ::absent output) (assoc :seon.cluster.eval/output output)))))
     []))
 
 (defn- completed-results
