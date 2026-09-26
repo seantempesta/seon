@@ -254,31 +254,20 @@
     (Files/readAttributes path BasicFileAttributes no-follow)
     (catch NoSuchFileException _ nil)))
 
-(defn- progress-reporter
-  [progress! progress-backstop-ms started-nanos]
-  (when progress!
-    (let [interval-nanos
-          (.toNanos TimeUnit/MILLISECONDS (long progress-backstop-ms))
-          next-report (volatile! (+ started-nanos interval-nanos))]
-      (fn [directory counts]
-        (let [now (System/nanoTime)]
-          (when (<= ^long @next-report now)
-            (vreset! next-report (+ now interval-nanos))
-            (progress!
-             (assoc counts
-                    ::directory (str directory)
-                    ::elapsed-ms
-                    (.toMillis TimeUnit/NANOSECONDS
-                               (- now started-nanos))))))))))
+(defn- entry-kind
+  "The count a deleted entry adds to: its link, directory or file."
+  [^BasicFileAttributes attribute]
+  (cond (.isSymbolicLink attribute) ::symlinks
+        (.isDirectory attribute) ::directories
+        :else ::files))
 
 (defn- delete-recursively-impl!
   [root target progress! progress-backstop-ms]
   (let [root-path (normalized-path root)
         target-path (normalized-path target)
         started-nanos (System/nanoTime)
-        report-progress!
-        (progress-reporter progress! progress-backstop-ms started-nanos)
-        ^longs counts (long-array 4)]
+        interval-nanos (when progress!
+                         (.toNanos TimeUnit/MILLISECONDS (long progress-backstop-ms)))]
     (when-not (.startsWith target-path root-path)
       (throw
        (ex-info
@@ -292,10 +281,21 @@
         "Recursive deletion target crosses an intermediate symlink."
         {::root (str root-path)
          ::target (str target-path)})))
+    ;; The walk is one fold over the tree: its state is the deletion counts and
+    ;; the next progress deadline, threaded through every entry it deletes.
     (letfn [(under-root? [^Path candidate]
               (.startsWith (.normalize (.toAbsolutePath candidate))
                            root-path))
-            (delete-one! [^Path entry attribute]
+            (reported [state ^Path entry ^BasicFileAttributes attribute]
+              (let [now (System/nanoTime)]
+                (if (and interval-nanos (<= ^long (::next-report state) now))
+                  (do (progress!
+                       (assoc (select-keys state [::deleted ::files ::directories ::symlinks])
+                              ::directory (str (if (.isDirectory attribute) entry (.getParent entry)))
+                              ::elapsed-ms (.toMillis TimeUnit/NANOSECONDS (- now started-nanos))))
+                      (assoc state ::next-report (+ now ^long interval-nanos)))
+                  state)))
+            (delete-one [state ^Path entry attribute]
               (when-not (under-root? entry)
                 (throw
                  (ex-info
@@ -303,45 +303,30 @@
                   {::root (str root-path)
                    ::target (str target-path)
                    ::entry (str entry)})))
-              (when (Files/deleteIfExists entry)
-                (aset-long counts 0 (inc (aget counts 0)))
-                (aset-long
-                 counts
-                 (cond
-                   (.isSymbolicLink ^BasicFileAttributes attribute) 3
-                   (.isDirectory ^BasicFileAttributes attribute) 2
-                   :else 1)
-                 (inc
-                  (aget counts
-                        (cond
-                          (.isSymbolicLink
-                           ^BasicFileAttributes attribute) 3
-                          (.isDirectory
-                           ^BasicFileAttributes attribute) 2
-                          :else 1))))
-                (when report-progress!
-                  (report-progress!
-                   (if (.isDirectory ^BasicFileAttributes attribute)
-                     entry
-                     (.getParent entry))
-                   {::deleted (aget counts 0)
-                    ::files (aget counts 1)
-                    ::directories (aget counts 2)
-                    ::symlinks (aget counts 3)}))))
-            (walk! [^Path entry ^BasicFileAttributes attribute]
+              (if (Files/deleteIfExists entry)
+                (-> state
+                    (update ::deleted inc)
+                    (update (entry-kind attribute) inc)
+                    (reported entry attribute))
+                state))
+            (walk [state ^Path entry ^BasicFileAttributes attribute]
               (try
-                (when (.isDirectory attribute)
-                  (with-open [children (Files/newDirectoryStream entry)]
-                    (run!
-                     (fn [^Path child]
-                       (when-let [child-attribute (attributes child)]
-                         (walk! child child-attribute)))
-                     (vec children))))
-                (delete-one! entry attribute)
+                (delete-one
+                 (if (.isDirectory attribute)
+                   (with-open [children (Files/newDirectoryStream entry)]
+                     (reduce (fn [state ^Path child]
+                               (if-let [child-attribute (attributes child)]
+                                 (walk state child child-attribute)
+                                 state))
+                             state children))
+                   state)
+                 entry attribute)
                 (catch NoSuchFileException _
-                  nil)))]
+                  state)))]
       (when-let [target-attribute (attributes target-path)]
-        (walk! target-path target-attribute)))
+        (walk {::deleted 0 ::files 0 ::directories 0 ::symlinks 0
+               ::next-report (+ started-nanos (or interval-nanos 0))}
+              target-path target-attribute)))
     nil))
 
 (defn delete-recursively!
