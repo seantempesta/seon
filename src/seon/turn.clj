@@ -329,6 +329,13 @@
                      ::rule rule
                      :seon.error/data {::request request}})))))
 
+(defn- refuse-closed-admission!
+  "Refuse, inside the writer, a run for an agent whose admission is closed."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol :int :map] :nil]}
+  [db transition agent-eid request]
+  (when (:seon.agent/admission-closed-tx (db/pull db [:seon.agent/admission-closed-tx] agent-eid))
+    (refuse! transition ::admission-closed request)))
+
 (defn- current-run
   "The run's current facts on `db`, or nil when no such run exists.
   The mid-transaction pull IS the eligibility read: a missing lookup ref
@@ -688,6 +695,7 @@
                     [?form :seon.cluster.eval/run ?run]]
                   db run-eid)
              0))]
+    (refuse-closed-admission! db `plan-call (:db/id (::agent run)) request)
     (when (some? (::reply-size run))
       (refuse! `plan-call ::plan-frozen request))
     (when-not (= :call (:seon.turn.work/situation run))
@@ -738,6 +746,7 @@
         _ (when (empty? open-rows)
             (refuse! `system-run-call ::agent-already-running request))
         opened (first open-rows)
+        _ (refuse-closed-admission! database `system-run-call (::agent opened) request)
         agent-namespace (db/q '[:find ?name . :in $ ?agent
                                 :where [?agent :seon.agent/namespace ?ns]
                                 [?ns :seon.ns/name ?name]]
