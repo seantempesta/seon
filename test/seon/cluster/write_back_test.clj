@@ -35,11 +35,16 @@
   "One ordinary agent turn of `text` on `request`'s agent, observed closed."
   [request text]
   (let [connection (get-in request [:seon.turn.loop/cluster :seon.db/connection])
-        run-id (:seon.turn/id (turn/virtual-turn! (assoc request :seon.cluster.reply/text text)))]
-    (is run-id "the agent accepted the submission")
-    (support/await-event! connection ::turn-closed
-                          (fn [_] (:seon.turn/closed-tx (db/pull (db/db connection) [:seon.turn/closed-tx]
-                                                                  [:seon.turn/id run-id]))))
+        ;; The agent's work is its own branch's: under the member's custody the
+        ;; writer refuses a write naming the candidate branch.
+        submitted (db/call-with-custody {:seon.db/connection connection}
+                                        #(turn/virtual-turn! (assoc request :seon.cluster.reply/text text)))
+        run-id (:seon.turn/id submitted)]
+    (is run-id (str "the agent accepted the submission: " (pr-str submitted)))
+    (when run-id
+      (support/await-event! connection ::turn-closed
+                            (fn [_] (:seon.turn/closed-tx (db/pull (db/db connection) [:seon.turn/closed-tx]
+                                                                    [:seon.turn/id run-id])))))
     run-id))
 
 (deftest ^{:seon.test/long "One agent turn, one prepare-merge! (a nested seon.test/run on a new candidate commit; 60 s is merge-test's measured bound for one prepare) and three analyses of a one-file fixture."
