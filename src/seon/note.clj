@@ -117,8 +117,10 @@
   [notes]
   (let [database (when (map? notes) (:seon.db/db notes))
         pulled (when (map? notes)
+                 ;; the members `note-html` reads: a `[*]` read depends on
+                 ;; every attribute, so any commit re-rendered this block
                  (db/pull (:seon.db/db notes)
-                          '[{:my.note/_agent [*]}]
+                          [{:my.note/_agent note-selector}]
                           [:seon.agent/id (:seon.agent/id notes)]))
         notes (if (map? notes) (get pulled :my.note/_agent []) notes)]
     (if (db/read-refusal? pulled)

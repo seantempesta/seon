@@ -58,8 +58,11 @@
                    :seon.cluster.status/unavailable-error]]}
   [{database :seon.db/db connection :seon.db/connection}]
   (try
-    (let [cluster (db/q '[:find (pull ?c [:seon.cluster/name :seon.source/commit-id]) .
-                          :where [?c :seon.cluster/name]] database)
+    (let [;; two reads, not a pull inside :find: Datahike plans a find-pull
+          ;; as a dependency on every attribute, so any commit re-rendered
+          ;; the status block
+          cluster (some->> (db/q '[:find ?c . :where [?c :seon.cluster/name]] database)
+                           (db/pull database [:seon.cluster/name :seon.source/commit-id]))
           heap (.getHeapMemoryUsage (ManagementFactory/getMemoryMXBean))
           faults (db/q '[:find ?signature (sum ?count)
                          :with ?o

@@ -168,6 +168,31 @@
                                   "f54229d7-54eb-472d-9ae8-917a0f97af71")
                    "the page shows the newly adopted commit")))))))))
 
+(deftest root-page-blocks-read-attribute-bounded
+  ;; A read Datahike plans on `:all` attributes (a `[*]` pull, a pull inside
+  ;; :find) has no revision proof, so every commit re-rendered its block and
+  ;; re-derived the page. Every retained call on the root page reads named
+  ;; attributes. Two wait: faults (`seon.error/for-agent`,
+  ;; tmp/shrink-web-opus/error-faults-bounded.patch) and settings, whose
+  ;; `config/effective` pulls the config row with `[*]`
+  ;; (tmp/shrink-web-opus/config-bounded-dials.patch: 73 -> 310 µs a read).
+  (#'web-test/with-server
+   (fn [_connection server context]
+     (flow/pause (:graph context))
+     (is (= 200 (.statusCode (#'web-test/fetch server "/agent/root"))))
+     (let [unbounded
+           (into (sorted-set)
+                 (keep (fn [call]
+                         (when (some #(= :all (get-in % [:datahike.read/revision
+                                                        :datahike.read/attributes]))
+                                     (:seon.render.call/read-evidence call))
+                           (str (get-in call [:seon.render.call/static-evidence
+                                              :seon.render.call/producer])))))
+                 (vals (get-in @(render/shared-cache (:ctx context))
+                               [:seon.render.web/calls "root"])))]
+       (is (empty? (disj unbounded "seon.error/render-faults-html" "seon.agent/render-settings-html"))
+           (str "whole-entity reads: " unbounded))))))
+
 (deftest selected-session-defers-prompt-acquisition
   (#'web-test/with-server
    (fn [_connection server _context]
