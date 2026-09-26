@@ -96,7 +96,7 @@
 
  :seon.instrument/contract-error
  [:and
- {:seon.db/attributes true}
+ {:seon.db/attributes true :seon.render/ai seon.error/render-contract-ai}
  :seon.error/base
  [:map
   {:seon.db/attributes true}

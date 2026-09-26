@@ -14,7 +14,7 @@
  ; that fired, a symbol with no installed Var, an unadmittable failure).
  :seon.sci.kernel/error
  [:and
- {:seon.db/attributes true}
+ {:seon.db/attributes true :seon.render/ai seon.sci.kernel/render-ai}
  :seon.error/base
  [:map
   {:seon.db/attributes true}
@@ -23,11 +23,12 @@
 
  ; An agent's own exception, as seon.sci.kernel/failure-value reports it the
  ; way clojure.main does: the class the author's code threw, its message, the
- ; chain with ex-data per link, and SCI's author stacktrace. No bookkeeping:
+ ; chain with ex-data per link, and SCI's author stacktrace; its pair
+ ; (seon.sci.kernel/render-ai) selects what an agent sees. No bookkeeping:
  ; duration, allocation and outcome stay on the evaluation record.
  :seon.sci.kernel/execution-error
  [:and
- {:seon.db/attributes true}
+ {:seon.db/attributes true :seon.render/ai seon.sci.kernel/render-ai}
  :seon.error/base
  [:map
   {:seon.db/attributes true}

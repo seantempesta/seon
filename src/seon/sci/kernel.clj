@@ -781,6 +781,25 @@
          (or failing-symbol subject)
          (assoc :seon.error/offending (or failing-symbol subject))))))))
 
+(defn render-ai
+  "An agent's own exception as REPL entries, the way `clojure.main` reports
+  it: its message (class and location), then the author's SCI stacktrace and
+  each cause's `ex-data`, read from the held error. The whole chain with its
+  first-party frames is one read away."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
+  [unit]
+  (let [value (if (map? (:seon.render/value unit)) (:seon.render/value unit) unit)
+        held (error/held-reference unit)
+        location (:seon.sci.eval/stacktrace value)]
+    (error/source-entries
+     (concat
+      [(or (:seon.error/message value) (str (:seon.error/exception-class value)))]
+      (when location
+        [(if held (list :seon.sci.eval/stacktrace held) (str "At " (pr-str location)))])
+      (when (and held (some :seon.error/data (:seon.error/chain value)))
+        [(list 'keep :seon.error/data (list :seon.error/chain held))])
+      (when held [(str "Cause chain: (:seon.error/chain " held ")")])))))
+
 (defn unarmed-record
   "The diagnostic record for a failure that never reached an arm."
   {:malli/schema [:=> [:cat :int] :seon.sci.admit/record]}

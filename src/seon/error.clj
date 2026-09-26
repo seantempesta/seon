@@ -1729,7 +1729,11 @@
         ;; The stored row, when this database holds one; an error it never
         ;; stored (a refusal returned before, or instead of, its recording)
         ;; is shown as the value itself.
-        value (or (when (and database (:seon.error/signature value))
+        ;; A held observation is rendered as held; only a bare identity
+        ;; (a signature without its occurrences or message) is read.
+        value (or (when (and database (:seon.error/signature value)
+                             (not (find value :seon.error/occurrences))
+                             (not (find value :seon.error/message)))
                     (db/pull database
                              (observation-selector (or (db/carried-projection database)
                                                        (:seon.schema/projection unit)
@@ -1820,6 +1824,63 @@
            (str "\n" shown))
          (when-let [n (:seon.error/occurrence-count value)]
            (str " Occurrences: " n ".")))))
+
+;;; SCHEMA PAIRS AS REPL ENTRIES (owner 2026-09-26, "Three points"). An
+;;; error value stays whole; its schema's pair selects what the agent needs
+;;; as runnable reads over the held value (its result handle), whose results
+;;; the floor prints. Without a handle the pair says only bounded scalars.
+
+(defn held-reference
+  "The symbol naming the rendered value in the viewer's world, its result
+  handle (`seon.sci.admit/result-handle`), or nil."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :qualified-symbol]]}
+  [unit]
+  (let [root (or (:seon.repl/handle unit) (:seon.render.value/root unit))]
+    (when (and (qualified-symbol? root) (= "result" (namespace root))) root)))
+
+(defn source-entries
+  "REPL entries in order: a string is a `;;` comment (one per line), any
+  other entry a form printed as runnable source."
+  {:malli/schema [:=> [:cat [:sequential {:min 1} [:or :string :seon.repl/expression]]]
+                  :seon.render/source]}
+  [entries]
+  (str/join "\n" (mapcat (fn [entry]
+                           (if (string? entry)
+                             (map #(str ";; " %) (str/split-lines entry))
+                             [(str/trimr (repl/source-text entry))]))
+                         entries)))
+
+(defn render-contract-ai
+  "A contract refusal as REPL entries: the function and member refused, then
+  each problem's path, expected schema, offending value and fix and the
+  author's location, read from the held refusal. The function's contract and
+  the whole refusal are one read away; instrument bookkeeping stays on the
+  value, unshown."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
+  [unit]
+  (let [value (if (map? (:seon.render/value unit)) (:seon.render/value unit) unit)
+        held (held-reference unit)
+        {:seon.error/keys [operation member problems message]} value
+        location (:seon.sci.eval/stacktrace value)]
+    (source-entries
+     (concat
+      [(str operation " refused its " (or member "call") ".")]
+      (cond
+        (and held (seq problems))
+        [(list 'mapv (list 'fn '[problem]
+                           (list 'select-keys 'problem [:seon.error/path :seon.error/expected
+                                                        :seon.error/offending :seon.error/fix]))
+               (list :seon.error/problems held))]
+        (seq problems)
+        (map #(problem-sentence operation %
+                                (scalar-text (:seon.error/expected %))
+                                (scalar-text (:seon.error/offending %)))
+             problems)
+        :else (when (string? message) [message]))
+      (when location
+        [(if held (list :seon.sci.eval/stacktrace held) (str "At " (pr-str location)))])
+      [(str "Contract: (doc " operation ")"
+            (when held (str "; the whole refusal: " held)))]))))
 
 (defn render-html
   "Render one fault's operation, message, time, function, turn, and evidence link."

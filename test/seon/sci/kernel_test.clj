@@ -7,10 +7,13 @@
   items 2 and 5): `System/nanoTime`, `Math/abs`, `future` and
   `(require 'malli.core)` did not resolve, and a context opened inside an
   armed evaluation was refused as \"a different SCI context\"."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [sci.core :as sci]
+            [seon.ai.tokens :as tokens]
             [seon.config :as config]
             [seon.schema :as schema]
+            [seon.error :as error]
             [seon.sci.eval :as eval]
             [seon.sci.kernel :as kernel]))
 
@@ -95,3 +98,61 @@
       (vreset! held (assoc pressure ::kernel/resume-bytes Long/MAX_VALUE))
       (is (nil? (kernel/memory-pressure held)))
       (is (nil? @held)))))
+
+;;; SCHEMA PAIRS SELECT; VALUES STAY WHOLE (owner 2026-09-26, "Three points";
+;;; render-specificity audit slice 1). Each pair's source is read back and its
+;;; forms evaluated in a world holding the value under its handle, as the
+;;; viewing agent's REPL evaluates them.
+
+(defn- failure
+  [ctx source]
+  (:seon.sci.admit/value (evaluate ctx source 5000)))
+
+(defn- shown
+  "`source`'s forms evaluated where `handle` names `value`, and the size of
+  the transcript they print (source plus results) in estimated tokens."
+  [source handle value]
+  (let [world (sci/init {:namespaces {(symbol (namespace handle)) {(symbol (name handle)) value}}})
+        results (mapv #(sci/eval-form world %) (read-string (str "[" source "\n]")))]
+    {:results results
+     :tokens (long (Math/ceil (/ (+ (count source) (count (pr-str results)))
+                                 tokens/shipped-chars-per-token)))}))
+
+(deftest an-agents-exception-is-whole-and-its-pair-shows-what-clojure-main-shows
+  (let [ctx (eval/build-base-ctx (schema/handed-projection))
+        handle 'result/e1
+        divide (failure ctx "(/ 1 0)")
+        thrown (failure ctx "(throw (ex-info \"boom\" {:a 1}))")
+        source (kernel/render-ai {:seon.render/value divide :seon.repl/handle handle})
+        {:keys [results tokens]} (shown source handle divide)]
+    (testing "the pair: clojure.main's message, then the author's location read from the held value"
+      (is (= [";; Execution error (ArithmeticException) at (REPL:1:1)." ";; Divide by zero"]
+             (take 2 (str/split-lines source))) source)
+      (is (= [(:seon.sci.eval/stacktrace divide)] results) source)
+      (is (str/includes? source (str "(:seon.error/chain " handle ")")) "the whole chain is one read away")
+      (is (not (str/includes? source "seon.sci.eval")) "no evaluator frame is shown")
+      (is (<= tokens 200) source))
+    (testing "an ex-info's data is shown per cause"
+      (let [source (kernel/render-ai {:seon.render/value thrown :seon.repl/handle handle})]
+        (is (= [{:a 1}] (peek (:results (shown source handle thrown)))) source)))
+    (testing "without a handle only bounded comments are said"
+      (is (every? #(str/starts-with? % ";; ")
+                  (str/split-lines (kernel/render-ai {:seon.render/value divide})))))))
+
+(deftest a-contract-refusals-pair-shows-operation-expected-offending-fix-and-location
+  (let [ctx (eval/build-base-ctx (schema/handed-projection))
+        handle 'result/e2
+        refusal (failure ctx "(seon.error.refusal/frame-function \"x\")")
+        source (error/render-contract-ai {:seon.render/value refusal :seon.repl/handle handle})
+        {:keys [results tokens]} (shown source handle refusal)]
+    (is (= 'seon.error.refusal/frame-function (:seon.error/operation refusal)) (pr-str refusal))
+    (is (str/starts-with? source ";; seon.error.refusal/frame-function refused its ") source)
+    (is (= [{:seon.error/path [] :seon.error/expected :symbol :seon.error/offending "x"}]
+           (mapv #(dissoc % :seon.error/fix) (first results)))
+        source)
+    (is (string? (:seon.error/fix (ffirst results))))
+    (is (= (:seon.sci.eval/stacktrace refusal) (second results)) "the author's location")
+    (is (str/includes? source "(doc seon.error.refusal/frame-function)") "its contract is one read away")
+    (is (not-any? #(str/includes? source %) ["seon.instrument/" ":seon.error/doc" "expected-shape"])
+        "instrument bookkeeping stays on the value, unshown")
+    (is (<= tokens 400) source)))

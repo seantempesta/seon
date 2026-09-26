@@ -1389,6 +1389,29 @@
        (is (not (str/includes? ai "Contract finding")) ai)
        (is (str/includes? html (:seon.error/message value)))))))
 
+(deftest a-held-error-observation-renders-as-held-without-a-read
+  ;; Render-specificity audit slice 1: the pair used to re-pull every value
+  ;; carrying a signature, touching data the caller already held. Only a
+  ;; bare identity (a signature without occurrences or message) is read.
+  (test-support/with-database
+   (fn [connection]
+     (let [reads (atom [])
+           bare-reads (atom [])
+           value {:seon.error/at #inst "2026-09-22T00:00:00Z"
+                  :seon.error/layer ::rendering
+                  :seon.error/operation 'seon.error-test/rendering
+                  :seon.error/signature (str/join (repeat 64 \1))
+                  :seon.error/message "The held observation's message."}
+           unit {:seon.render/value value :seon.db/db (db/db connection)}
+           ai (binding [db/*read-evidence-sink* reads] (error/render-ai unit))
+           bare (binding [db/*read-evidence-sink* bare-reads]
+                  (error/render-ai (assoc unit :seon.render/value
+                                          (dissoc value :seon.error/message))))]
+       (is (str/includes? ai (:seon.error/message value)) ai)
+       (is (string? bare))
+       (is (empty? @reads) "the held observation is not read again")
+       (is (seq @bare-reads) "a bare identity is read")))))
+
 (deftest the-default-html-face-links-committed-evidence
   (let [html (error/render-html
               {:seon.error/at #inst "2026-09-22T00:00:00Z"
