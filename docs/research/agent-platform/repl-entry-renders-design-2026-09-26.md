@@ -236,9 +236,18 @@ Revision 1's cache is withdrawn. Read evidence is not complete input evidence. W
 local atom, the answer changed from `[… 0]` to `[… 1]` while `read-evidence-current?` stayed `true` (verified, §7
 #2). Namespace tables, print settings and profiles are further inputs.
 
-Reuse stays with the dependencies: Datahike's query and pull caches, and the walk's entity-pull reuse. Refresh
-stays with `system-plan`'s existing shown-value comparison. Any later cache keys only computations with complete
-immutable inputs.
+Reuse stays with the dependencies: Datahike's query and pull caches, and the walk's entity-pull reuse. Any later
+cache keys only computations with complete immutable inputs.
+
+Refresh is the other direction. It decides to **re-evaluate**, never to skip, so it may use incomplete evidence
+conservatively:
+
+- a recorded entry with changed read evidence (`db/read-evidence-changes`, `db.clj:1072`) is re-evaluated;
+- so is an entry with empty or unknown evidence;
+- nothing is skipped on the claim that it is unchanged.
+
+Refresh derives from recorded read provenance, not from reparsed shown text. That is audit F11, taken in the same
+slice as feeding `system-turn` entries (§5).
 
 ### 2.7 Three node renders (target illustrations, not installed output)
 
@@ -339,8 +348,19 @@ own.
 - `help-value` becomes help-topic entries; `render-help-html` survives.
 - AI producers that only prettified results are deleted where no walk node uses them.
 
-The walk's `neighborhood` (≈750) and the transcript renderer's parallel projection are excluded; they belong to
-other slices.
+**Reconciled with the agent-centric audit** (`agent-centric-audit-2026-09-26.md`). These rows are taken inside
+this design's slices, so each cut happens once:
+
+| Audit | What this design does | Estimate (the audit's; spans at f0efd9cc8) | Slice |
+|---|---|---|---|
+| **F06** the transcript converts evaluations into another model and back | Taken. The transcript's evaluation view becomes the evaluation owner's canonical value (`turn/evaluation-facts`), rendered by `seon.repl/text` in the §2.1 grammar and ordered by `walk/graph`. Deleted with callers: `receipt-entry` (`transcript.clj:254`), `entry-order` (`:298`), `emission` (`:485`), `projected-entry` (`:544`), `candidate-history` (`:663-733`), `projection` (`:734`); `render-ai` (`:750`) calls the shared composition. The span `:254-790` is 536 lines; the audit prices −420/+70 after keeping message ordering, selected runs, historical bytes and error windows. Callers converted: `web.clj:1490` (preview), `eval/drive.clj:284`, history views. This is the "parallel projection" row of revision 1, now priced | −420 / +70 | with the transcript grammar (§5 "then" step 3), and it needs `entity-emission`'s conversion |
+| **F11** refresh rereads and reparses all past evaluations | Taken. `latest-evaluations` (`turn.clj:1934`) stops parsing `repl/shown-value` and replaying diffs, and `read-only-evaluation?` (`:1968`) stops reparsing source. Candidates come from recorded read evidence per distinct source (§2.6). The shown-value diff-as-value (B6) goes with it | −115 / +45 | with step 4 (entries into `system-turn`) |
+| **F17** "preview" suppresses settlement, not effects | Same defect as D6; fixed by the first slice's read access | — | first slice |
+| **F10** every continuing turn regenerates the private context | **Not removed.** Render evaluation never takes the `regenerate-agent-context!` path: it forks the base program context without `agent-ctx` (§2.3), so it adds no regeneration. Ordinary agent turns still call `fork-for-turn` with `agent-ctx` (`turn.clj:4967`, `sci/eval.clj:2979`). F10's unchanged-program shortcut belongs to the context owner's lane | — | outside this design |
+
+With F06 and F11 the design's gross deletions are about −760 (the table above ≈225, F06 420, F11 115), against
+about +115 added in conversion (F06 70, F11 45) plus the first slice's ≈95. All are estimates until the caller
+audit. The walk's `neighborhood` (≈750) stays excluded; it belongs to task-context-install slice B.
 
 **First slice (a correctness fix that grows code, so it is justified here per AGENTS).** It establishes the stage
 in the existing preview owner before any renderer migrates, and it deletes nothing. Its justification is D6 and
