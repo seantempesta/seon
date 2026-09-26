@@ -438,16 +438,38 @@ db_test finds 0 problems.
 | R7 A125–A127 (eval/drive.clj) | d170bb216 | three volatiles; one lexical `release!` for every exit | REPL with injected boot/registry namespaces: ok, boot-failure and episode-failure release orders are correct and failures rethrow | +35/−35 |
 
 Not done:
-- **A092 (process.clj), held back with a finding.** The silence bound has no production caller: no
-  `run-process!` caller passes `:seon.operator.subprocess/event-silence-ms` or a progress atom. Its only use,
-  `publication_test/ordinary-output-cannot-hide-a-silent-publication`, passes a progress atom without
-  `observe-output!`, which the precondition refuses before any process starts. Colocating a timestamp into a
-  progress protocol nobody produces would invent its shape. The smaller change deletes the silence bound (the
-  watch, `last-progress`, the precondition and the two options) together with that test. Root's call.
-- **Held files, skipped:** A091 (src/seon/cluster/boot.clj:401) and A093/A094 (src/seon/cluster/registry.clj:468-469).
+- A092 (process.clj) was held back with a finding and landed in round 10 on root's ruling.
+- A091 (boot.clj) landed in round 10. A093/A094 (src/seon/cluster/registry.clj:468-469) remain skipped, since the file is held.
 
 Static checks: contracts-compile over ai, fs, fs.jvm and drive finds 0 problems; clj-kondo reports 0 errors on
 every touched file.
+
+## Round 10: A092, agent-centric F20 and F19, atom audit A091
+
+| Row | Commit | What goes | Proof | +/− |
+|---|---|---|---|---|
+| A092 (process.clj, publication_test) | 2b4ee9c6f | Deleted: the silence bound (the `event-silence-ms` and `progress` options and their contract members, the precondition and its refusal, `last-progress`, the watch and its re-arm loop, `progress-atom?`) and its one test, `ordinary-output-cannot-hide-a-silent-publication`, which passed a progress atom the precondition refused. The wait is one `.waitFor` on the remaining deadline. | REPL: echo exits 0; a sleep past its deadline is a `:process-exit` refusal with `reaped? true`; output still streams | +5/−51 |
+| F20 (eval/drive.clj) | 04f3a159b | Deleted: the tautological receipt-count = form-count second query (the same `:seon.cluster.eval/run` relation twice). Now `bootstrap-complete?` is one query: a closed run with no evaluation lacking a terminal fact (shown, error or interrupted-at). `run-episode!` throws a read refusal returned by the await. | REPL on real facts: open → pending; closed while running → pending; settled but open → pending; settled and closed → complete; absent → pending | +24/−29 |
+| F19 (boot.clj, seon.cluster.boot.edn, cluster_test) | 489c2d602 | Deleted: `readable-response`, which checked transportability with `pr-str` then `edn/read-string` and rewrote a failure to bounded text; its wrapper around `request!`; and its `:non-edn-response` disposition (schema enum and the test's member). No stored fact carries that disposition (live count nil). | Live. The 4-arity `diagnostic` already carries evidence as bounded text at its producer, and `status` and a refused request round-trip equal through the operator's reader (`read-prepl-val`: Clojure reader, tagged literals). A value with Date, UUID and symbols, an opaque Object and an ex-info cause reads back with equal scalars, the Object as a tagged literal, and the cause as `#error` with its ex-data whole. operator.clj needed no change, since its reader already admits tags. | +4/−16 |
+| A091 (boot.clj `start!`) | b6ebe109d | Deleted: the `latest` atom and its reset. `publish!` writes only `running-instances`. `failed` takes the instance explicitly. The catch reads and cleans up the table's entry only while that entry holds this start's listener (`identical?` prepl-server), so a competing start's entry is never consumed or removed. | Scratch-namespace copy (uncaught-handler defonce stubbed): a start that fails after store acquisition throws `:boot-failed` carrying the identical retained entry holding this start's listener. The held-elsewhere cleanup branch was **not** exercised. | +14/−11 |
+
+Round total: +47/−107 (net −60). The load proof for boot.clj was a scratch-namespace `load-string` of the
+committed text (16 ms) plus live `request!` calls. Default's Vars were not reloaded, so the installed change
+waits on root's adoption.
+
+Static checks: contracts-compile over boot, drive and process finds 0 problems (424 ms). clj-kondo reports
+0 errors on each touched file. The schema EDN reads.
+
+Probe incident (A091): the scratch `start!` proceeded past the manifest into `acquire-root-store!` on
+`tmp/fix-turn-test-reds-a091` before refusing ("the adopted source commit is unavailable", 1.33 s) and retained
+its root-store holder (2 holders) and flock, as partial boot is designed to. I released both through
+`seon.cluster/release-root-store!`, checked that the holder and flock tables list only `data/store`, dissoc'd
+the scratch entry, closed the listener and deleted the directory. This was a partial scratch-root acquisition
+inside default's JVM, not a second JVM. It was contrary to "no scratch root".
+
+Residue: the schemas `:seon.operator.subprocess/progress-member` and `:progress-undeclared-error`
+(resources/seon/schemas/seon.operator.state.edn, seon.operator.subprocess.edn) now have no producer. They
+need a schema-retirement step with their publication.
 
 ## Deleted / net lines
 
