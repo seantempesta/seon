@@ -1,0 +1,60 @@
+#:seon.measure{:armed-compile-ms-median 3.086542,
+               :estimate-ms-per-form 0.026143575284690006,
+               :individual-max-bytes 2642648,
+               :estimate-bypass-count 2371,
+               :margin-against-16k -2626264,
+               :estimate-bypass-rate 1.0,
+               :total-ms 450277.561416,
+               :individual-largest
+               [{:printed 660,
+                 :arities 2,
+                 :local-entries 0,
+                 :sym seon.instrument/wrap-interpreted,
+                 :slot-bytes 2642648}
+                {:printed 144,
+                 :arities 1,
+                 :local-entries 0,
+                 :sym seon.call-preparation/preparing,
+                 :slot-bytes 2452328}
+                {:printed 622,
+                 :arities 1,
+                 :local-entries 0,
+                 :sym seon.issue/start!,
+                 :slot-bytes 2409720}
+                {:printed 1232,
+                 :arities 1,
+                 :local-entries 0,
+                 :sym seon.turn/record-attempt!,
+                 :slot-bytes 2342864}
+                {:printed 133,
+                 :arities 1,
+                 :local-entries 0,
+                 :sym seon.plan/current,
+                 :slot-bytes 2241864}],
+               :individual-before-use
+               {:max 1107752, :median 1069232, :over-16k 60},
+               :population-root-bytes-after-use 43786664,
+               :compiled 2371,
+               :tool
+               "clj-memory-meter 0.3.0 (jamm), -Djdk.attach.allowAttachSelf",
+               :armed-compiled 200,
+               :population-forms 3549,
+               :shape-compile-ms {:median 0.819125, :max 219.598042},
+               :contracts 2371,
+               :aggregate-slot-bytes-before-use 10422328,
+               :individual-slots 60,
+               :fitted
+               {:a 19704,
+                :b 2048,
+                :c 1024,
+                :domain
+                "EDN forms whose bindings are all Vars or Var roots (accounted)"},
+               :jvm "26.0.1",
+               :corpus-basis 536872447,
+               :population-root-bytes 42423416,
+               :individual-after-use
+               {:max 2642648, :median 27304, :over-16k 35},
+               :mean-slot-bytes-after-use 215853,
+               :refused 0,
+               :aggregate-slot-bytes-after-use 511787840,
+               :population-build-ms 644.097458}

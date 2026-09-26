@@ -21,7 +21,6 @@
   (:require [malli.core :as m]
             [seon.id :as id]
             [malli.registry :as mr]
-            [clojure.core.cache :as core-cache]
             [clojure.core.cache.wrapped :as cache]
             [seon.cache]
             [clojure.core.reducers :as reducers]
@@ -2335,10 +2334,7 @@
           :seon.schema.projection/catalog catalog
           :seon.schema.projection/fingerprint-version
           projection-fingerprint-version
-          :seon.schema.projection/fingerprint fingerprint
-          ;; What this registry was actually compiled with (contracts-out §1).
-          :seon.schema.projection/construction-inputs
-          [forms schema-admissions pure-predicate-symbols predicate-functions]}
+          :seon.schema.projection/fingerprint fingerprint}
          predicate-functions)]
     (when validate-render-contracts?
       (assert-render-contracts! projection (keys forms)))
@@ -2599,25 +2595,6 @@
    :seon.schema/predicate-functions (predicate-functions-in projection)
    :seon.schema/validate-render-contracts? true})
 
-(defn- construction-bindings-kept?
-  "Whether a replacement of `projection` built with `predicate-functions` still
-   knows what its retained compiled children were compiled with: the base
-   records its construction inputs, carries no overlay
-   ([[with-predicate-functions]] changed nothing it compiled with), and every
-   binding it compiled with is the identical callable in the replacement.
-   Otherwise the replacement records no construction inputs, and nothing is
-   cached under an inferred population (contracts-out §1)."
-  {:malli/schema [:=> [:cat :map [:map-of :qualified-symbol [:fn clojure.core/ifn?]]] :boolean]}
-  [projection predicate-functions]
-  (let [[_ _ _ compiled-with] (:seon.schema.projection/construction-inputs projection)]
-    (boolean
-     (and compiled-with
-          (= compiled-with (predicate-functions-in projection))
-          (every? (fn [[predicate callable]]
-                    (let [kept (get predicate-functions predicate ::absent)]
-                      (or (identical? ::absent kept) (identical? kept callable))))
-                  compiled-with)))))
-
 (defn- projection-with-declarations
   "The projection of `forms` and `function-contracts`, derived from `projection`
    by recompiling only what changed.
@@ -2799,12 +2776,8 @@
                                   (zipmap pure-predicate-symbols (repeat true)) pure-changes))
             candidate
             (with-predicate-functions
-             (merge (cond-> (dissoc projection :seon.schema.projection/compiled
-                                    :seon.schema.projection/definition-strings
-                                    :seon.schema.projection/construction-inputs)
-                      (construction-bindings-kept? projection predicate-functions)
-                      (assoc :seon.schema.projection/construction-inputs
-                             [forms schema-admissions pure-predicate-symbols predicate-functions]))
+             (merge (dissoc projection :seon.schema.projection/compiled
+                            :seon.schema.projection/definition-strings)
                     {:seon.schema.projection/forms forms
                      :seon.schema.projection/registry registry
                      :seon.schema.projection/compile-options {:registry registry}
@@ -4175,173 +4148,3 @@
       :seon.schema/pure-predicate-symbols (:seon.schema.projection/pure-predicate-symbols projection #{})
       :seon.schema/predicate-functions (predicate-functions-in projection)})
     product))
-
-;;; ---------------------------------------------------------------------------
-;;; The population's contract table (contracts-out §10, root ruling option 1)
-;;; ---------------------------------------------------------------------------
-
-(def ^:private contract-slot-bytes
-  "The charge reserved per contract slot, bytes: the ruling's ceiling, kept
-   until slice 1's offline measurement (script/seon/measure_contracts.clj)
-   supplies the fitted per-slot charge."
-  16384)
-
-(defn- edn-value?
-  "True when `value` is plain EDN data all the way down: no Var, compiled
-   schema, function or other host object whose retention the table cannot account."
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
-  [value]
-  (every? (fn [node]
-            (or (nil? node) (boolean? node) (number? node) (string? node) (char? node)
-                (keyword? node) (symbol? node) (map? node) (vector? node)
-                (set? node) (seq? node) (map-entry? node)))
-          (tree-seq coll? seq value)))
-
-(defn- accounted-callable?
-  "Whether the table can account what `callable` retains: a Var, or the current
-   root of the Var `predicate` names (program code, not slot-owned). Any other
-   callable (a closure, a branch binding) retains objects no measurement covered."
-  {:malli/schema [:=> [:cat :symbol [:fn clojure.core/ifn?]] :boolean]}
-  [predicate callable]
-  (or (var? callable)
-      (boolean (when-let [named (when (qualified-symbol? predicate) (loaded-predicate-var predicate))]
-                 (identical? callable (var-get named))))))
-
-(defn- contract-inner-bindings
-  "The callables `form` binds beyond the population's own compiled bindings, by
-   symbol: `[:fn sym]` predicates and (armed) `:error/fn` symbols, resolved the
-   way `mode` compiles them. [[retained-contract]] retains only when every one
-   is accounted ([[accounted-callable?]], F1)."
-  {:malli/schema [:=> [:cat :seon.schema/projection :seon.schema/value [:enum :shape :armed]]
-                  [:map-of :symbol [:fn clojure.core/ifn?]]]}
-  [base form mode]
-  (let [bound (predicate-functions-in base)
-        named (into #{}
-                    (concat (predicate-symbols-in form)
-                            (when (= :armed mode)
-                              (keep #(when (map? %) (let [f (:error/fn %)] (when (qualified-symbol? f) f)))
-                                    (tree-seq coll? seq form)))))]
-    (into {}
-          (keep (fn [symbol]
-                  (when-not (contains? bound symbol)
-                    (when-let [callable (if (= :armed mode)
-                                          (predicate-callable base symbol)
-                                          (loaded-predicate-var symbol))]
-                      [symbol callable]))))
-          named)))
-
-(defn- contract-size-estimate
-  "The conservative retained-size estimate of one slot, bytes, from the authored
-   form's printed length, its arity count and its local registry entries.
-   Constants from slice 1's offline measurement; valid only for EDN forms whose
-   bindings are all accounted ([[contract-inner-bindings]])."
-  {:malli/schema [:=> [:cat :seon.schema/value] :int]}
-  [form]
-  (let [nodes (tree-seq coll? seq form)
-        arities (max 1 (count (filter #(and (vector? %) (= :=> (first %))) nodes)))
-        local-entries (reduce + 0 (keep #(when (map? %) (count (:registry %))) nodes))]
-    (long (+ (* 24 (count (pr-str form))) (* 2048 arities) (* 1024 local-entries)))))
-
-(defn- provable-population?
-  "Whether `projection` is a transitively shape-only construction whose bindings
-   are all accounted: it records its construction inputs, its registry holds no
-   function contract, and every construction binding is a Var or Var root (F1)."
-  {:malli/schema [:=> [:cat :seon.schema/projection] :boolean]}
-  [projection]
-  (let [[_ _ _ bindings :as inputs] (:seon.schema.projection/construction-inputs projection)]
-    (boolean
-     (and inputs
-          ;; A registry compiled from forms alone holds no function symbol,
-          ;; so its retained children carry no contract world.
-          (empty? (:seon.schema.projection/function-contracts projection))
-          (every? (fn [[predicate callable]] (accounted-callable? predicate callable)) bindings)))))
-
-(defn- population-base
-  "The closed base one population entry holds: the members contract compilation
-   and admission read, nothing environmental."
-  {:malli/schema [:=> [:cat :seon.schema/projection] :map]}
-  [projection]
-  (with-predicate-functions
-   (select-keys projection [:seon.schema.projection/registry
-                            :seon.schema.projection/forms
-                            :seon.schema.projection/canonical-keys
-                            :seon.schema.projection/schema-dependencies
-                            :seon.schema.projection/schema-admissions
-                            :seon.schema.projection/pure-predicate-symbols
-                            :seon.schema.projection/construction-inputs])
-   (predicate-functions-in projection)))
-
-(defn- population-entry
-  "The one process-cache entry of `base`'s population under `capacity` slots:
-   the held base and its LRU table. Charged the population once plus every
-   slot's reserved charge; evicted with its slots."
-  {:malli/schema [:=> [:cat :map [:int {:min 1}]] :map]}
-  [base capacity]
-  (seon.cache/lookup
-   ::contract-population
-   [(:seon.schema.projection/construction-inputs base) capacity]
-   (fn [_] (+ (* 3700 (count (:seon.schema.projection/forms base)))
-              (* capacity contract-slot-bytes)))
-   (fn [] {::base base
-           ::table (atom (core-cache/lru-cache-factory {} :threshold capacity))})))
-
-(defn- table-product
-  "The product under `inner-key` in `entry`'s table, or `derive-fn`'s.
-
-   A hit answers from ONE held immutable table value and then records recency;
-   a key evicted meanwhile still answers that value (F3). A miss derives outside
-   any swap and publishes into THIS entry's table only when `retain?` accepts
-   the product, so a completion after the entry's eviction lands in the
-   unreachable table (T3). Concurrent misses may derive twice."
-  {:malli/schema [:=> [:cat :map :seon.schema/value [:fn clojure.core/ifn?] [:fn clojure.core/ifn?]]
-                  :seon.schema/value]}
-  [entry inner-key retain? derive-fn]
-  (let [table (::table entry)
-        held @table]
-    (if (core-cache/has? held inner-key)
-      (let [product (core-cache/lookup held inner-key)]
-        (swap! table (fn [current]
-                       (if (core-cache/has? current inner-key)
-                         (core-cache/hit current inner-key)
-                         current)))
-        product)
-      (let [product (derive-fn)]
-        (when (retain? product)
-          (swap! table (fn [current]
-                         (if (core-cache/has? current inner-key)
-                           (core-cache/hit current inner-key)
-                           (core-cache/miss current inner-key product)))))
-        product))))
-
-(defn retained-contract
-  "[[function-contract]] through the population's bounded contract table.
-
-   `retention` is the acquisition owner's policy
-   (`{:seon.config.cache/contract-table-capacity n}`); nil, an unprovable
-   population ([[population-base]]), a non-EDN form or an unaccounted binding
-   compiles uncached. Every miss compiles against the entry's HELD base, never
-   the caller's registry. Refusals are never retained; neither is a slot over
-   its charge. Slice 1 lands this with no production caller: retention starts
-   in slice 4, when projections are shape-only."
-  {:malli/schema [:=> [:cat :seon.schema/projection
-                       [:map [:seon.schema/form :seon.schema/value]
-                        [:seon.schema/mode [:enum :shape :armed]]
-                        [:seon.schema/admission :map]
-                        [:seon.schema/identity :qualified-symbol]]
-                       [:maybe [:map [:seon.config.cache/contract-table-capacity [:int {:min 1}]]]]]
-                  [:map [:seon.schema/compiled [:fn malli.core/schema?]]
-                   [:seon.schema/references
-                    [:vector [:tuple [:set :keyword] [:set :keyword] [:set :keyword]]]]]]}
-  [projection {form :seon.schema/form mode :seon.schema/mode admission :seon.schema/admission
-               :as request} retention]
-  (let [capacity (:seon.config.cache/contract-table-capacity retention)
-        base (when (and capacity (provable-population? projection)) (population-base projection))
-        inner (when (and base (edn-value? form)) (contract-inner-bindings base form mode))]
-    (if (and base inner
-             (every? (fn [[predicate callable]] (accounted-callable? predicate callable)) inner)
-             (<= (contract-size-estimate form) contract-slot-bytes))
-      (table-product (population-entry base capacity)
-                     [mode form (:seon.schema.admission/source admission :agent) inner]
-                     map?
-                     #(function-contract base request))
-      (function-contract projection request))))

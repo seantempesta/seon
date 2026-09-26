@@ -168,6 +168,15 @@
               "-XX:+ExitOnOutOfMemoryError"
               "-XX:+HeapDumpOnOutOfMemoryError"]}
 
+  ;; Offline retained-size measurement of the contract table (contracts-out
+  ;; design §10, root ruling 2026-09-27): its own JVM, never on default.
+  ;; clojure -M:measure -m seon.measure-contracts bench/seon/contracts_corpus.edn bench/seon/contracts_measurement.edn
+  :measure
+  {:extra-paths ["bench"]
+   :extra-deps {com.clojure-goes-fast/clj-memory-meter {:mvn/version "0.3.0"}}
+   :jvm-opts ["-Djdk.attach.allowAttachSelf" "--add-modules" "jdk.incubator.vector"
+              "--enable-native-access=ALL-UNNAMED" "-XX:+UseG1GC" "-Xmx6g"]}
+
   :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.5"}}
           :ns-default build}
 
