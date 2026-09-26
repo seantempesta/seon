@@ -534,17 +534,6 @@
    (or (:seon.boot/cluster-connection (selected-instance name))
        (refuse! "Cluster database connection is not acquired." {:seon.boot/cluster-name name}))))
 
-(defn- readable-response
-  "Return one plain-EDN response; malformed diagnostic evidence becomes readable data."
-  {:malli/schema [:=> [:cat :seon.schema/value] :seon.operator/response]}
-  [response]
-  (try
-    (with-meta (edn/read-string (pr-str response)) (meta response))
-    (catch Throwable cause
-      (diagnostic (str "Operator response contained non-EDN evidence.\n" (render.value/floor cause))
-                  (render.value/bounded-text response)
-                  :non-edn-response))))
-
 (defn- request-world
   "The world a failed request records in: the environment the failure carries,
   else the named (or sole) live instance's. None means no database to record
@@ -562,8 +551,7 @@
   {:malli/schema [:=> [:cat :seon.operator/request] :seon.operator/response]}
   [{command :seon.operator/command root :seon.operator/managed-root
     name :seon.boot/cluster-name :as request}]
-  (readable-response
-   (try
+  (try
     (let [identity (process/current-identity)
           actual (store/declared-operator-root)
           cluster-root (str (io/file root "data/clusters"))]
@@ -707,7 +695,7 @@
                                {:seon.error/layer :seon.operator/operation
                                 :seon.error/operation `request!
                                 :seon.db.process/id
-                                (cluster/process-identity (process/current-identity))}))))))))
+                                (cluster/process-identity (process/current-identity))})))))))
 
 (defn banner
   "Render observed readiness without treating missing layers as ready."

@@ -399,7 +399,7 @@
                                        :seon.schema/validation-refusal) refusal)))))
 
 (deftest boot-refusals-retain-the-operator-disposition
-  (doseq [disposition [:refused :boot-failed :non-edn-response :operation-failed]]
+  (doseq [disposition [:refused :boot-failed :operation-failed]]
     (let [refusal (seon.cluster.boot/diagnostic "Operator failed." {} disposition)]
       (is (= disposition (:seon.cluster.boot/disposition refusal)))
       (is ((schema/projection-validator (schema/handed-projection)
