@@ -49,4 +49,10 @@
              :intent "A settlement refusal, a renderer failure or a printing failure never replaces a completed evaluation's value: it is saved beside it as :seon.cluster.eval/diagnostics and shown as its own response entry; each settlement saves its fault window as references."
              :must-read #{seon.turn/refusal-terminal-data seon.turn/settle-batch-refusal! seon.turn/fault-window}
              :evidence #{"docs/research/agent-platform/error-delivery-audit-2026-09-26.md"
-                         "docs/research/agent-platform/landing/err-s12-record-data-opus-2026-09-26.md"}}]
+                         "docs/research/agent-platform/landing/err-s12-record-data-opus-2026-09-26.md"}}
+ #:seon.task{:id "62c45543598c"
+             :name "a-turn-pass-derives-its-work-twice"
+             :kind :function
+             :intent "Each agent pass derives next-agent-work on a fresh database value, runs the turn, then derives it again for the rewake (more-agent-work?); with episode-exhausted! (turns-left: episode-runs + max-episode-runs, four history queries) and opening-deferred? a trivial form spends ~12 ms and ~59 seon.db/q in turn derivations (2 ms for the same derivation on a held value). The rewake answer is decidable from the pass's own report (a closed run with no unanswered wake) without re-deriving from scratch; the budget reads scan the agent's whole turn history since assignment."
+             :must-read #{seon.turn/step seon.turn/next-agent-work seon.turn/more-agent-work? seon.turn/turns-left}
+             :evidence #{"docs/research/agent-platform/landing/perf-eval-overhead-2026-09-26.md"}}]

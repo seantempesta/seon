@@ -126,4 +126,10 @@
              :intent "An evaluation's failure is saved as its whole flat error data (class, message, ex-data per link, the author's SCI source location, refusal fields), printed by the floor, and that saved text is what MCP replies and the next context show; no triage prose, wrapper frame or SCI callstack object. Audit P1/P2/P3."
              :must-read #{seon.sci.eval/shown-result seon.sci.kernel/failure-value seon.repl/response}
              :evidence #{"docs/research/agent-platform/error-delivery-audit-2026-09-26.md"
-                         "docs/research/agent-platform/landing/err-s12-record-data-opus-2026-09-26.md"}}]
+                         "docs/research/agent-platform/landing/err-s12-record-data-opus-2026-09-26.md"}}
+ #:seon.task{:id "56b1dad969bd"
+             :name "forms-just-after-boot-cost-hundreds-of-ms"
+             :kind :function
+             :intent "smoke-6 (default b4b90d405, about one minute after readiness) recorded :seon.eval/duration-ms 284-495 ms for each trivial form of a fresh branch run; the same forms on a fresh branch 30 minutes later took 0-3 ms (a new defn 73 ms, its first call 23 ms). Not reproduced warm: at the next restart, profile the first eight forms (seon.profile/begin + explain, JFR) and name what each recomputes while cold."
+             :must-read #{seon.sci.eval/evaluate seon.sci.eval/fork-for-turn}
+             :evidence #{"docs/research/agent-platform/landing/perf-eval-overhead-2026-09-26.md" "tmp/orchestrator/smoke-6-2026-09-26.md"}}]

@@ -1,0 +1,6 @@
+[#:seon.task{:id "d741e6812a31"
+             :name "a-trivial-form-waits-on-two-durable-commits"
+             :kind :function
+             :intent "A one-form MCP run costs 155 ms warm in the JVM (168 ms through the bridge), 128 ms of it two durable Datahike commits (submission in submit-source!, settlement in settle-batch!), 64 ms each; evaluation is 1-2 ms. Under the ruled durability (sync-blob? and commit-graph? false inadmissible) a commit on this workstation cannot go below ~30 ms of forces, so a single-digit-ms form needs the owner to choose: keep two durable commits and trim (~115 ms), make the submission a non-durable hand-off so one commit per form remains (~60 ms), or relax durability for evaluation records. Options priced in the landing."
+             :must-read #{seon.cluster.agent/submit-source! seon.cluster.agent/evaluate-source! seon.turn/settle-batch!}
+             :evidence #{"docs/research/agent-platform/landing/perf-eval-overhead-2026-09-26.md"}}]
