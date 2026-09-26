@@ -169,7 +169,7 @@
 
 (deftest ^{:seon.test/long "An admission, two recordings and two requests on one fixture branch: 37.7 s measured at 0e53eb8b1 on a scratch cluster, dominated by the routed per-request acquisition and per-connection projection costs."
            :seon.test/long-ms 45000}
-  no-body-of-a-cluster-starts-while-an-unexited-member-holds-its-world
+  a-member-that-never-exits-holds-only-its-own-test-and-the-next-request-runs
   (support/with-database
    (fn [connection]
      (let [handle (support/execution-handle connection)
@@ -206,17 +206,19 @@
          (is (not (:seon.error/at (exit!))) "an exit seen before the result exists is not a refusal")
          (is (nil? (exit-tx)) "and writes nothing: the result's own write carries its exit")
          (is (not (:seon.error/at (record! false))) "the unfinished member is recorded without its exit")
-         ;; The live body keeps its world until it exits, so no request of
-         ;; its cluster is admitted meanwhile, for its own test or any other:
-         ;; worlds never pile up behind a body that does not exit (the
-         ;; 2026-09-26 OutOfMemoryError).
-         (doseq [requested [test-symbol other]]
-           (let [before (db/basis-t (db/db connection))
-                 held (request requested)]
-             (is (= :seon.test/member-unfinished (:seon.test/admission-refusal held)) (pr-str held))
-             (is (some #{test-symbol} (tree-seq coll? seq held)) "the refusal names the live body")
-             (is (not (contains? held :seon.test/results)) "no body started beside a live one")
-             (is (= before (db/basis-t (db/db connection))) "a refused admission writes nothing")))
+         ;; The live body holds its own test and only that: a request for
+         ;; another test runs, and a request for the live test reports it
+         ;; pending, never a second body beside it (2026-09-27: one stuck
+         ;; web-test member refused every later request of the cluster).
+         (let [runnable (request other)]
+           (is (nil? (:seon.test/admission-refusal runnable)) (pr-str runnable))
+           (is (= 1 (:seon.test/executed-count runnable)) (sut/tally runnable))
+           (is (true? (:seon.test/passed? runnable)) (sut/tally runnable)))
+         (let [held (request test-symbol)]
+           (is (nil? (:seon.test/admission-refusal held)) (pr-str held))
+           (is (= [test-symbol] (:seon.test/pending held)) "the live body's test is reported pending")
+           (is (zero? (:seon.test/executed-count held)) "no body started beside a live one")
+           (is (false? (:seon.test/passed? held))))
          ;; The watcher's write is the exit only, never a re-sent outcome
          ;; (a changed outcome was refused as immutable and held the test).
          (let [written (exit!)]
@@ -225,10 +227,9 @@
            (is (some? recorded) "the observed exit is recorded")
            (is (not (:seon.error/at (exit!))))
            (is (= recorded (exit-tx)) "a second observation changes nothing")))
-       (doseq [requested [test-symbol other]]
-         (let [after (request requested)]
-           (is (= 1 (:seon.test/executed-count after)) (sut/tally after))
-           (is (true? (:seon.test/passed? after)))))))))
+       (let [after (request test-symbol)]
+         (is (= 1 (:seon.test/executed-count after)) (sut/tally after))
+         (is (true? (:seon.test/passed? after))))))))
 
 (deftest ^{:seon.test/long "One agent test definition, one row edit and one nested request on a fixture branch: 13.8 s measured on default's JVM (load 14.7): define 1.0 s, edit 0.2 s, member 0.06 s, the nested request's admission and recording 12.6 s (docs/seon/issues/a-data-only-commit-rebuilds-the-whole-sci-program.md)."
            :seon.test/long-ms 30000}

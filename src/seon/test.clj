@@ -309,7 +309,7 @@
               (failed (str "Test " test-symbol " did not exit within "
                            ":seon.test/check-time-limit-ms remainder " timeout-ms " ms; thread "
                            (.threadId thread) " remains live and keeps its branch until it exits. "
-                           "No further body may start.")
+                           "This request starts no further body; later requests hold only this test until it exits.")
                       false)))
           (catch InterruptedException _
             (.interrupt (Thread/currentThread))
@@ -1168,8 +1168,9 @@
   carries the publisher's input digest and immutable tested provenance;
   selection is handed as immutable input. This function executes no test bodies. It checks the current program and custody,
   then reserves only members not already covered by matching admitted runs.
-  While a body of the cluster is not observed to exit, it refuses
-  (`:seon.test/member-unfinished`, naming that body's test).
+  A body of the cluster not observed to exit holds its own test: a later
+  request's member for that test is not reserved (the request reports it
+  pending); every other member is admitted.
   Concurrent requests see earlier reservations in the transaction database.
   An identical replay emits no evidence datoms; a changed replay refuses.
 
@@ -1251,9 +1252,6 @@
                           (db/basis-t database)
                           (select-keys row [:seon.test.run/basis-t
                                             :seon.test.run/change-basis-t])))
-    (when (and (not snapshot?) (seq (changed-definition-symbols database (:seon.test.run/basis-t run))))
-      (admission-refusal! :seon.test/program-mismatch run-id
-                          :unchanged-tested-program :program-changed-after-tested-basis))
     (when-not snapshot?
     (let [inputs (selection-read!
                   (db/q '[:find [?digest ...] :where [_ :seon.source/test-input-digest ?digest]] database))]
@@ -1329,28 +1327,29 @@
                                          [(>= ?order 0)]]
                                 database (vec runs) symbols jvm-started))
                          [])
-            ;; A body not observed to exit keeps its world (branch, connection,
-            ;; node cache, context) until it exits, so no other body of its
-            ;; cluster is admitted meanwhile: worlds never pile up behind it.
-            _ (when-not snapshot?
-                (let [since-start (selection-read!
-                                   (db/q '[:find [?run ...] :in $ ?cluster ?since
-                                           :where [?run :seon.test.run/cluster ?cluster]
-                                                  [?run :seon.test.run/selection-tx]
-                                                  [?run :seon.test.run/at ?at]
-                                                  [(compare ?at ?since) ?order]
-                                                  [(>= ?order 0)]]
-                                         database cluster-id jvm-started))
-                      live (selection-read!
-                            (db/q '[:find [?symbol ...] :in $ [?run ...]
-                                    :where [?run :seon.test.run/members ?member]
-                                           [?member :seon.test.member/symbol ?symbol]
-                                           [?member :seon.test.member/completed-tx]
-                                           (not [?member :seon.test.member/terminated-tx])]
-                                  database (vec since-start)))]
-                  (when (seq live)
-                    (admission-refusal! :seon.test/member-unfinished run-id
-                                        :every-admitted-body-exited (vec (sort live))))))
+            ;; A body not observed to exit holds its test in every scope of
+            ;; its cluster, and only its test: one stuck body never wedges the
+            ;; cluster's other requests (2026-09-27, web-test). The program
+            ;; digest names a commit, so any write since that body's admission
+            ;; (its own recording) changes it; the hold reads runs since JVM start.
+            live (if (or snapshot? (empty? symbols))
+                   []
+                   (let [since-start (selection-read!
+                                      (db/q '[:find [?run ...] :in $ ?cluster ?since
+                                              :where [?run :seon.test.run/cluster ?cluster]
+                                                     [?run :seon.test.run/selection-tx]
+                                                     [?run :seon.test.run/at ?at]
+                                                     [(compare ?at ?since) ?order]
+                                                     [(>= ?order 0)]]
+                                            database cluster-id jvm-started))]
+                     (selection-read!
+                      (db/q '[:find ?run ?member ?symbol :in $ [?run ...] [?symbol ...]
+                              :where [?run :seon.test.run/members ?member]
+                                     [?member :seon.test.member/symbol ?symbol]
+                                     [?member :seon.test.member/completed-tx]
+                                     (not [?member :seon.test.member/terminated-tx])]
+                            database (vec since-start) symbols))))
+            candidates (distinct (concat candidates live))
             scope-of (memoize
                       (fn [run-eid]
                         (let [candidate (selection-read! (db/pull database selector run-eid))]
@@ -2218,8 +2217,9 @@
   on the recording connection, and the branch unlinked by
   `release-context!` after the body's thread exits. The request is bounded by
   `:seon.test/check-time-limit-ms` (request member or the cluster's dial); a
-  body still live at the bound fails and keeps its branch; no further body of
-  its cluster is admitted, in this request or a later one, until it exits.
+  body still live at the bound fails and keeps its branch; the rest of its
+  request stops, and a later request holds (reports pending) only that test
+  until it exits.
   Members reaching a destructive owner or declaring a file-backed fixture
   are excluded in a JVM operating the development checkout, with the platform
   command. `:seon.test/passed?` is true only when every obligation has green
