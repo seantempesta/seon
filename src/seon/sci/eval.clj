@@ -1931,7 +1931,7 @@
                        (merge metadata (select-keys (meta installed)
                                                     [:sci/generation :ns]))))))))
 
-(declare base-bindings)
+(declare base-bindings acquisition-attributes program-basis revision-basis)
 
 (defn acquired-program
   "Return the database and refusal report actually acquired by this context.
@@ -1969,7 +1969,18 @@
   ;; as :db-after (datahike/writer.cljc:229-264), so the report's datoms name
   ;; everything between :db-before and :db-after only when :db-after ends at
   ;; the report's own transaction, on the acquired value's branch.
-  (when (and (= (db/basis-t before) (db/basis-t (:db-before report)))
+  (when (and (let [after-acquired (:db-before report)]
+               ;; the settlement starts from the acquired program: the same value,
+               ;; or a later committed one whose acquisition-attribute revisions
+               ;; are unchanged (receipts, turns, messages only; `acquired-database?`)
+               (or (= (db/basis-t before) (db/basis-t after-acquired))
+                   ;; a report's :db-before is the writer's value, with no commit
+                   ;; id but the connection's attribute revisions (`revision-basis`)
+                   (let [attributes (acquisition-attributes projection)
+                         basis #(program-basis (revision-basis %) attributes)
+                         acquired (basis before)]
+                     (and (:datahike.cache/connection-id acquired)
+                          (= acquired (basis after-acquired))))))
              (= (get-in before [:config :branch]) (get-in report [:db-before :config :branch]))
              (= (db/basis-t (:db-after report)) (:tx (first (:tx-data report)))))
     (let [after (:db-after report)
