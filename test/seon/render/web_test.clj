@@ -2249,8 +2249,9 @@ handle))}}
 ;;; the pass's own protection, so a throw while REPORTING a failure ended the
 ;;; proc exactly as the failure would have.
 (defn- throwing-render-state
-  "One render-pass state whose pages all throw, with a real fault channel."
-  [connection fault-channel]
+  "One render-pass state whose pages all throw, recording faults under :record
+  (R1: every producer records through seon.fault/fault! on its own thread)."
+  [connection]
   (support/seed-cluster! connection "web-fault-test")
   (support/transacted! connection
                        (cluster.agent/creation-tx
@@ -2264,10 +2265,9 @@ handle))}}
     :seon.sci.admit/caps caps
     :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
     :seon.config.eval/time-limit-ms 1000
-    :seon.config/on-core-error :panic
+    :seon.config/on-core-error :record
     :seon.db.process/id "web-fault-test"})
-   :seon.agent/routing
-   (atom {:seon.agent/fault-channel fault-channel})
+   :seon.agent/routing (atom {})
    :seon.render.web/registration (atom {"agent-a" 1})
    :seon.render.web/latest-packages (atom {})
    :seon.render.web/root-agent-id "root"
@@ -2277,12 +2277,16 @@ handle))}}
    ::web/calls {}
    ::web/passes 0})
 
-(deftest a-page-failing-every-pass-offers-one-fault-and-the-proc-survives
+(deftest a-page-failing-every-pass-records-one-fault-and-the-proc-survives
   (support/with-database
     (fn [connection]
-      (let [fault-channel (async/chan 10)
-            state (throwing-render-state connection fault-channel)
+      (let [state (throwing-render-state connection)
             failure (atom (ex-info "the page threw" {}))
+            ;; The stored occurrences of the page fault, the one fault route.
+            recorded #(count (db/q '[:find [?o ...]
+                                     :where [?o :seon.error.occurrence/message ?m]
+                                     [(clojure.string/includes? ?m "A page derivation threw.")]]
+                                   (db/db connection)))
             three-passes
             (fn [state]
               (with-redefs-fn
@@ -2292,51 +2296,29 @@ handle))}}
                             (first (#'web/render-pass state @connection true)))
                           state
                           (range 3)))))
+            before (recorded)
             after (three-passes state)]
-        (testing "three failing passes commit ONE fault"
-          (is (some? (async/poll! fault-channel))
-              "the first failure reaches the committer")
-          (is (nil? (async/poll! fault-channel))
-              "the two identical repeats do not"))
+        (testing "three failing passes record ONE fault"
+          (is (= (inc before) (recorded))))
         (testing "and the proc kept going: every pass produced a page"
           (is (= 3 (::web/passes after)))
           (is (str/includes?
                (str (vals (get @(:seon.render.web/latest-packages after) "agent-a")))
                "This page could not be derived")))
-        (testing "a DIFFERENT failure on the same page is offered again"
+        (testing "a DIFFERENT failure on the same page is recorded again"
           (reset! failure (ex-info "the page threw something else" {}))
-          (three-passes after)
-          (is (some? (async/poll! fault-channel)))
-          (is (nil? (async/poll! fault-channel))))
-        (testing "a page that recovers has its next failure offered afresh"
+          (let [before (recorded)]
+            (three-passes after)
+            (is (= (inc before) (recorded)))))
+        (testing "a page that recovers has its next failure recorded afresh"
           (reset! failure (ex-info "the page threw" {}))
           (let [recovered (first (#'web/render-pass
-                                  (three-passes after) @connection true))]
-            (async/poll! fault-channel)
+                                  (three-passes after) @connection true))
+                before (recorded)]
             (is (empty? (::web/fault-signatures recovered))
                 "a rendering page holds no retained signature")
             (three-passes recovered)
-            (is (some? (async/poll! fault-channel)))))
-        (async/close! fault-channel)))))
-
-(deftest a-throw-while-reporting-a-failed-page-does-not-end-the-proc
-  (support/with-database
-    (fn [connection]
-      ;; Routing with no fault channel value at all: `failed-page-result`
-      ;; derefs it, and a nil deref target throws inside the reporting path.
-      (let [state (assoc (throwing-render-state connection nil)
-                         :seon.agent/routing nil)
-            after (with-redefs-fn
-                    {#'web/derive-page!
-                     (fn [& _] (throw (ex-info "the page threw" {})))}
-                    (fn []
-                      (first (#'web/render-pass state @connection true))))]
-        (is (= 1 (::web/passes after))
-            "the pass completed rather than ending the proc")
-        (is (str/includes?
-             (str (vals (get @(:seon.render.web/latest-packages after) "agent-a")))
-             "could not be derived")
-            "and the page still says so where its content would have been")))))
+            (is (= (inc before) (recorded)))))))))
 
 (deftest session-acquisition-failure-replaces-the-loading-panel
   (with-server
