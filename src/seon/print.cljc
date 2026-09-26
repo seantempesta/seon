@@ -349,10 +349,12 @@
   [node depth]
   (let [value (::value node)]
     (case (::face node)
+      ;; A scalar the floor selected carries its classified spelling in
+      ;; `::text`, made from the value's own fields, never through `pr-str`.
       ::nil [(text-op ::nil "nil")]
       (::boolean ::number ::keyword ::symbol ::char ::string)
-      [(text-op (::face node) (literal value))]
-      (::inst ::uuid) [(text-op ::tag (literal value))]
+      [(text-op (::face node) (or (::text node) (literal value)))]
+      (::inst ::uuid) [(text-op ::tag (or (::text node) (literal value)))]
       ::var [(text-op ::symbol (str "#'" (::name node)))]
       (::type ::class) [(text-op ::symbol (::name node))]
       ::object [(text-op ::object
@@ -364,7 +366,14 @@
       ::truncated-string [(text-op ::string (literal (str value "…")))]
       ::failed [(text-op ::object (str "#object[" (::class node) " "
                                        (literal (str "projection failed: " (::message node))) "]"))]
-      ::elided [(text-op ::elision (render-elision-ai node))]
+      ;; ONE CUT FACE (design §3e): `…N` after shown members, `"prefix"…+N`
+      ;; after a string's shown characters, `…?` for a pending tail. The cut's
+      ;; coordinates stay on the node for HTML and continuation.
+      ::elided [(text-op ::elision
+                         (case (::elision-unit node)
+                           :characters (str (literal (or (::prefix node) "")) "…+" (::omitted node))
+                           :pending "…?"
+                           (str "…" (::omitted node "?"))))]
       ::pruned [(text-op ::prune "#")]
       ::projected (let [output (:seon.render/output node)]
                     (cond
@@ -384,51 +393,19 @@
     (let [key-nodes (map first entries)
           namespaces (map (comp namespace ::value) key-nodes)]
       (when (and (every? #(contains? #{::keyword ::symbol} (::face %)) key-nodes)
+                 ;; A key shown as a cut name keeps its own spelling.
+                 (every? #(or (nil? (::text %)) (= (::text %) (literal (::value %)))) key-nodes)
                  (every? some? namespaces)
                  (apply = namespaces))
         (first namespaces)))))
 
 (defn- unqualified-key-node
   [node]
-  (update node ::value (if (= ::keyword (::face node))
-                         #(keyword (name %))
-                         #(symbol (name %)))))
-
-(declare flat-text)
-
-(def ^:private valued-kinds
-  #{::nil ::boolean ::number ::keyword ::symbol ::char ::string ::inst ::uuid})
-
-(defn- node-order
-  "Canonical order of two child nodes: nodes carrying a scalar value in
-  `compare-values` order (the order the value walk selects by), then every
-  other node by its flat text."
-  [left right]
-  (let [left-value? (contains? valued-kinds (::face left))
-        right-value? (contains? valued-kinds (::face right))]
-    (cond
-      ;; `compare-values`'s own scalar order, without an armed call per pair:
-      ;; its category is the value's type, then `compare` within it.
-      (and left-value? right-value?)
-      (let [category #(let [value (::value %)] (if (nil? value) "nil" (str (type value))))]
-        (compare [(category left) (::value left)] [(category right) (::value right)]))
-      left-value? -1
-      right-value? 1
-      :else (compare (flat-text left) (flat-text right)))))
-
-(defn- ordered-children
-  "A node's children in canonical order, elisions last: map entries by key,
-  unordered set members by themselves (`node-order`)."
-  [node]
-  (let [ordered (fn [elided? key-of children]
-                  (let [{cuts true members false} (group-by elided? children)]
-                    (into (vec (sort-by key-of node-order members)) cuts)))]
-    (case (::face node)
-      (::map ::record) (ordered (complement vector?) first (::entries node))
-      ::set (if (::ordered? node)
-              (::items node)
-              (ordered #(= ::elided (::face %)) identity (::items node)))
-      (::items node))))
+  (-> node
+      (dissoc ::text)
+      (update ::value (if (= ::keyword (::face node))
+                        #(keyword (name %))
+                        #(symbol (name %))))))
 
 (defn- summary
   [node path]
@@ -440,25 +417,14 @@
 (defn- collection-work
   "The work one collection expands to: its open group, members and close."
   [node options depth path]
-  (let [children (vec (ordered-children node))
+  ;; Held order: the producer's order is the printed order (design §3b).
+  (let [children (vec (or (::items node) (::entries node)))
         length (::length options)
         shown (if (and length (< length (count children))) (into [] (take length) children) children)
         cut? (< (count shown) (count children))
         map-like? (contains? #{::map ::record} (::face node))
-        ;; A cut among map entries is read back as an entry: it takes the
-        ;; first `:seon.print/elision[-n]` key no shown entry already uses.
-        shown (if map-like?
-                (let [used (into #{} (keep #(when (vector? %) (::value (first %)))) shown)
-                      free (remove used (map #(keyword "seon.print" (str "elision" (when (pos? %) (str "-" %))))
-                                             (range)))]
-                  (first (reduce (fn [[entries free] entry]
-                                   (if (vector? entry)
-                                     [(conj entries entry) free]
-                                     [(conj entries [{::face ::keyword ::value (first free)} entry]) (rest free)]))
-                                 [[] free] shown)))
-                shown)
         lifted (when (and (= ::map (::face node)) (::namespace-maps? options))
-                 (same-key-namespace shown))
+                 (same-key-namespace (filterv vector? shown)))
         shown (if lifted (mapv #(if (vector? %) (update % 0 unqualified-key-node) %) shown) shown)
         open (case (::face node)
                ::vector "[" ::list "(" ::set "#{"
@@ -537,12 +503,6 @@
                    append out ops))
       (transduce (keep #(case (:op %) :text (:text %) :line (:inline %) nil)) append out ops))
     (str out)))
-
-(defn- flat-text
-  [node]
-  (case (::face node)
-    (::boolean ::number ::keyword ::symbol ::char ::string) (literal (::value node))
-    (ops-text (node-ops node generated-item-options) 0)))
 
 (defn- close-frame
   [{::keys [node children]}]
@@ -712,14 +672,6 @@
             false))
         true))))
 
-(defn- requery-fields
-  [profile]
-  (if-some [identity (::requery-id profile)]
-    {::requery-id identity}
-    {::requery-refusal
-     (or (::requery-refusal profile)
-         "the source has no stable requery identity")}))
-
 (defn elision
   "One complete elision node: what was omitted, where, and how to ask again.
 
@@ -750,321 +702,6 @@
     (assoc ::requery-refusal requery-refusal)
     (and (nil? requery-id) (nil? requery-refusal))
     (assoc ::requery-refusal "the source has no stable requery identity")))
-
-(defn- elision-node
-  ;; ABSENT MEANS NO KEY, here most of all: every field of
-  ;; `:seon.print/elision-request` is optional, and an optional key present
-  ;; as nil is a contract violation — which is what turned every live
-  ;; presentation cut into a refusal instead of an elision the moment `fit`
-  ;; reached this constructor.
-  ;;
-  ;; THE STRIP IS FOR WHAT IS GENUINELY OPTIONAL — `prefix`, `bound-by`, an
-  ;; unknown `total`. IT IS NOT FOR THE REQUERY COORDINATES. A cut that lost
-  ;; its path and offset reads as an ordinary cut, and the reader asking
-  ;; "what was omitted, and how do I see it" gets silence: absence reported
-  ;; as health, one constructor down. A missing path is a defect AT THE
-  ;; CALLER, so this refuses instead of quietly producing a coordinate-less
-  ;; elision. Every call site in this namespace supplies both, so the
-  ;; refusal is unreachable from ordinary rendering by construction.
-  {:malli/schema [:=> [:cat :map :seon.render.data/path :int :int [:or :nil :int] :seon.print/elision-unit [:or :nil :string]] :seon.print/node]}
-  [profile path next-offset omitted total unit prefix]
-  (when-not (and (vector? path) (int? next-offset))
-    (throw
-     (ex-info
-      (str "An elision must carry its requery coordinates: "
-           ":seon.render.data/path " (literal path)
-           " and :seon.render.data/next-offset " (literal next-offset) ".")
-      {::elision-without-requery-coordinates true
-       :seon.render.data/path path
-       :seon.render.data/next-offset next-offset
-       ::elision-unit unit})))
-  (elision
-   (into (requery-fields profile)
-         (remove (comp nil? val))
-         {::omitted omitted
-          ::elision-unit unit
-          ::prefix prefix
-          ::bound-by (::bound-by profile)
-          :seon.render.data/total total
-          :seon.render.profile/id (:seon.render.profile/id profile)
-          ;; guaranteed present by the refusal above, so the strip cannot
-          ;; reach them
-          :seon.render.data/path path
-          :seon.render.data/next-offset next-offset})))
-
-(defn- preserve-requery
-  [cut carried]
-  (cond
-    (::requery-id carried)
-    (-> cut
-        (dissoc ::requery-refusal)
-        (assoc ::requery-id (::requery-id carried)
-               ::requery-form (requery-form (::requery-id carried)
-                                            (:seon.render.data/path cut []))))
-
-    (::requery-refusal carried)
-    (-> cut
-        (dissoc ::requery-id ::requery-form)
-        (assoc ::requery-refusal (::requery-refusal carried)))
-
-    :else cut))
-
-(declare fit-node)
-
-(defn- fit-entry
-  [entry profile depth path child-limit string-limit]
-  (if (vector? entry)
-    (let [[key-node value-node] entry
-          value-path (or (:seon.render.data/path value-node)
-                         (try
-                           (conj (pop path)
-                                 (edn/read-string (emit-text key-node generated-item-options)))
-                           (catch #?(:clj Throwable :cljs :default) _ (pop path))))]
-      [key-node (fit-node value-node profile depth value-path
-                          child-limit string-limit)])
-    entry))
-
-(defn- fit-children
-  [children profile depth path child-limit string-limit child-fit]
-  (let [children (vec children)
-        carried-elision (when (and (= ::elided (::face (peek children)))
-                                  (= :children (::elision-unit (peek children)))
-                                  (= path (:seon.render.data/path (peek children))))
-                          (peek children))
-        children (if carried-elision (pop children) children)
-        admitted-total (count children)
-        total (or (when (empty? path)
-                    (:seon.render.data/total profile))
-                  (:seon.render.data/total carried-elision)
-                  (when-some [omitted (::omitted carried-elision)]
-                    (+ admitted-total omitted))
-                  admitted-total)
-        limit (min child-limit admitted-total)
-        ;; Keys are coordinates, so a key cannot be replaced by a different
-        ;; value. If a key needs elision, omit the whole remaining entries.
-        key-cut (when (= child-fit fit-entry)
-                  (first
-                   (keep-indexed
-                    (fn [index entry]
-                      (when (vector? entry)
-                        (when-let [cut
-                                   (some #(when (= ::elided (::face %)) %)
-                                         (tree-seq coll? seq
-                                                   (fit-node (first entry) profile
-                                                             (inc depth) path
-                                                             child-limit string-limit)))]
-                          [index (::bound-by cut)])))
-                    (subvec children 0 limit))))
-        retained (or (first key-cut) limit)
-        fitted-elision
-        (when (< retained total)
-          (preserve-requery
-           (elision-node (assoc profile
-                                ::bound-by (or (second key-cut)
-                                               (when (= retained admitted-total)
-                                                 (::bound-by carried-elision))
-                                               (::bound-by profile)
-                                               :seon.render.profile/max-children))
-                         path retained (- total retained) total
-                         :children nil)
-           carried-elision))]
-    (cond->
-     (mapv (fn [index child]
-             (child-fit child profile (inc depth) (conj path index)
-                        child-limit string-limit))
-           (range retained)
-           (subvec children 0 retained))
-      fitted-elision
-      (conj fitted-elision))))
-
-(defn- projected-text
-  [node]
-  (let [value (::value node)]
-    (if (string? value) value (literal value))))
-
-(defn- fit-text
-  "Clip one over-long string to the characters its profile admits.
-
-  A CUT NEVER OMITS ITS WHOLE SUBJECT. Emitting an elision whose omitted
-  count equalled the total was the silent case wearing a count: the reader
-  learned the size of what it was not shown and nothing else. The characters
-  that fit ride the cut as `::prefix`, the offset names how many were shown,
-  and the count names only the remainder — so the reader sees content, knows
-  exactly what is missing, and can continue from a real coordinate."
-  [node profile path string-limit]
-  (let [value (if (= ::projected (::face node))
-                (projected-text node)
-                (::value node))
-        original (long (or (::length node) (count value)))
-        kept (max 0 (min (count value) (long string-limit)))]
-    (if (or (> original string-limit) (< (count value) original))
-      (elision-node (assoc profile
-                           ::bound-by
-                           (or (::bound-by node)
-                               (::bound-by profile)
-                               (when (:seon.render.profile/max-string-length profile)
-                                 :seon.render.profile/max-string-length)
-                               :seon.render.profile/token-budget))
-                    path kept (- original kept) original :characters
-                    (when (pos? kept) (subs value 0 kept)))
-      node)))
-
-(defn- structural-elision
-  [node profile path]
-  (let [children (vec (or (::items node) (::entries node) []))
-        carried (when (and (= ::elided (::face (peek children)))
-                           (= :children (::elision-unit (peek children)))
-                           (= path (:seon.render.data/path (peek children))))
-                  (peek children))
-        admitted (if carried (dec (count children)) (count children))
-        total (or (:seon.render.data/total carried)
-                  (when-some [omitted (::omitted carried)]
-                    (+ admitted omitted))
-                  admitted)]
-    (preserve-requery
-     (elision-node (assoc profile ::bound-by (or (::bound-by profile)
-                                                :seon.render.profile/max-depth))
-                   path 0 (max 1 total) total :subtree nil)
-     carried)))
-
-(defn- fit-node
-  [node profile depth path child-limit string-limit]
-  (let [node (case (::face node)
-               (::map ::record) (assoc node ::entries (ordered-children node))
-               ::set (assoc node ::items (vec (ordered-children node)))
-               node)
-        face (::face node)
-        path (or (:seon.render.data/path node) path)]
-    (cond
-      (and (>= depth (:seon.render.profile/max-depth profile))
-           (contains? structural-kinds face)
-           (seq (or (::items node) (::entries node))))
-      (structural-elision node profile path)
-
-      :else
-      (case face
-        (::vector ::list ::set)
-        (assoc node ::items
-               (fit-children (::items node) profile depth path child-limit
-                             string-limit fit-node))
-
-        (::map ::record)
-        (assoc node ::entries
-               (fit-children (::entries node) profile depth path child-limit
-                             string-limit fit-entry))
-
-        ::throwable
-        (update node ::value fit-node profile (inc depth)
-                (conj path ::throwable) child-limit string-limit)
-
-        ::projected
-        (if (= :seon.render/ai (:seon.render/output node))
-          (fit-text node (assoc profile ::bound-by ::rendered-token-ceiling)
-                    path (::rendered-chars profile))
-          (fit-text node profile path string-limit))
-
-        (::string ::truncated-string)
-        (fit-text node profile path string-limit)
-
-        node))))
-
-(defn- rendered-text-chars
-  "Characters of declared AI renderer text in a node tree: the text the raw
-  budget does not pay for."
-  [node]
-  (loop [pending [node] chars 0]
-    (if-some [current (peek pending)]
-      (recur (into (pop pending) (child-nodes current))
-             (cond-> chars
-               (and (= ::projected (::face current))
-                    (= :seon.render/ai (:seon.render/output current)))
-               (+ (count (projected-text current)))))
-      chars)))
-
-(defn fit
-  "Fit one admitted node to one declared presentation profile.
-
-  THIS IS THE AI CONTEXT GENERATION BOUNDARY'S ONE ELISION, and the only
-  place presentation size cuts a value at all (owner ruling, 2026-09-07).
-  HTML is not bounded; the AI projection is bounded HERE, by the render profile the request
-  carried. A caller that is not generating AI context does not call this —
-  a request with no presentation decision must not make one.
-
-  THE BUDGET IS CHOSEN BY PROVENANCE (owner 2026-09-26). Raw values spend
-  the profile's token budget, children and depth. Text a declared AI render
-  function produced is not charged to that budget and is never halved: it is
-  cut only beyond `:seon.print/rendered-token-ceiling`.
-
-  Token size is measured only through `seon.ai.tokens/estimate`. Structural
-  cuts remain ordinary elision nodes carrying their count, path and requery
-  identity, so a cut names its own source and can be asked again.
-
-  THE SEARCH HAS A FLOOR AND THE FLOOR IS STRUCTURAL, NOT NUMERIC: one child,
-  one level, one character. Driving any limit to zero produced a projection
-  that showed NOTHING and reported a count — absence read as a bound, the
-  failure class AGENTS.md §2.4 names. Below the floor the candidate may
-  exceed the budget; that is the honest answer, and the cut it carries says
-  which bound it hit."
-  {:malli/schema
-   [:function
-    [:=> [:cat :seon.print/node :seon.render.profile/profile] :seon.print/node]
-    [:=> [:cat :seon.print/node :seon.render.profile/profile :seon.print/options]
-     :seon.print/node]]}
-  ([node profile] (fit node profile (default-options)))
-  ([node profile options]
-  (let [budget (:seon.render.profile/token-budget profile)
-        initial-children (:seon.render.profile/max-children profile)
-        initial-depth (:seon.render.profile/max-depth profile)
-        ;; Measured on the text the caller will save: the same width and cuts.
-        options (assoc (effective-options options) ::length nil ::level nil)
-        ;; Chosen at entry by provenance: renderer text is bounded only by
-        ;; the ceiling and is not charged to the raw value's budget.
-        profile (assoc profile ::rendered-chars
-                       (tokens/estimate-chars (or (::rendered-token-ceiling profile)
-                                                  (::rendered-token-ceiling options))))
-        raw-tokens (fn [candidate]
-                     (tokens/estimate-of-characters
-                      (max 0 (- (count (emit-text candidate options))
-                                (rendered-text-chars candidate)))))
-        initial-strings (or (:seon.render.profile/max-string-length profile)
-                            (tokens/estimate-chars budget))]
-    (loop [child-limit initial-children
-           depth-limit initial-depth
-           string-limit initial-strings]
-      (let [candidate (fit-node node
-                                (assoc profile
-                                       :seon.render.profile/max-depth
-                                       depth-limit
-                                       ::bound-by (when (or (< child-limit initial-children)
-                                                           (< depth-limit initial-depth)
-                                                           (< string-limit initial-strings))
-                                                    :seon.render.profile/token-budget))
-                                0 [] child-limit string-limit)]
-        (cond
-          (<= (raw-tokens candidate) budget)
-          candidate
-
-          ;; BREADTH AND TEXT DEGRADE TOGETHER. Spending one dimension to its
-          ;; floor before touching the other destroys that dimension to save
-          ;; the one that caused the overflow, and both orders were measured
-          ;; doing exactly that: shrinking members first deleted
-          ;; `:seon.effect/result-edn` outright to pay for its own length
-          ;; (`seon.render.value-test/background-poll-keeps-identity-while-payloads-grow`),
-          ;; and shrinking text first clipped a 36-character one-liner to
-          ;; nothing to pay for 116 siblings
-          ;; (`fit-preserves-breadth-and-long-strings`). Halving both at once
-          ;; is symmetric, keeps every member visible for as long as the text
-          ;; inside it, and converges in the logarithm of the budget instead
-          ;; of one child at a time. Depth is last because it costs the most:
-          ;; a cut level takes a whole subtree with it.
-          (or (> string-limit 1) (> child-limit 1))
-          (recur (max 1 (quot child-limit 2)) depth-limit
-                 (max 1 (quot string-limit 2)))
-
-          (> depth-limit 1)
-          (recur child-limit (dec depth-limit) string-limit)
-
-          :else candidate))))))
 
 (schema/register-core-predicate! 'seon.print/node? node?)
 (schema/register-core-predicate! 'seon.print/node-child? node-child?)

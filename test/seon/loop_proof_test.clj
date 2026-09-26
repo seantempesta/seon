@@ -18,7 +18,6 @@
             [seon.eval :as evaluation]
             [seon.env :as env]
             [seon.flow :as flow]
-            [seon.print :as print]
             [seon.render :as render]
             [seon.repl :as repl]
             [seon.schema :as schema]
@@ -631,13 +630,14 @@
                      _ (is (some? entry))
                      emission (repl/entity-emission (assoc entry :seon.db/db @connection))
                      ctx (agent/acquire-context! handle "juniper")
-                     raw @(sci/resolve ctx (:seon.repl/handle emission))
-                     cuts (filter #(and (map? %) (:seon.print/omitted %))
-                                  (tree-seq coll? seq (edn/read-string (:seon.eval/shown entry))))]
-                 (is (seq cuts) "the stored shown value must actually exercise elision")
-                 (doseq [cut cuts]
-                   (is (= (print/value-at raw (:seon.render.data/path cut))
-                          (sci/eval-form ctx (:seon.print/requery-form cut)))))))
+                     handle (:seon.repl/handle emission)
+                     raw @(sci/resolve ctx handle)
+                     shown (:seon.eval/shown entry)]
+                 ;; One cut face and one legend (one-render-path §3d): the
+                 ;; legend's form reads the retained result.
+                 (is (re-find #"\"…\+\d+" shown) "the stored shown value must actually exercise elision")
+                 (is (str/includes? shown (str "(get-in " handle " [...])")) shown)
+                 (is (= raw (sci/eval-form ctx (list 'get-in handle []))))))
              (agent/disarm! {:seon.agent/routing routing
                              :seon.agent/id "juniper"})
              (testing "one plan write appends exactly the plan read"

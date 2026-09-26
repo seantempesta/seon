@@ -498,27 +498,16 @@
             (is (string? cut) (pr-str cut))
             (is (< (count cut) (count ai))
                 "the AI projection is bounded by the render profile")
-            ;; AN ELISION IS ORDINARY DATA, NOT PROSE. The cut names its
-            ;; bound, its unit, how much it omitted and the form to ask again
-            ;; with, as declared keys (`resources/seon/schemas/seon.print.edn`)
-            ;; — the "… N more characters" sentence was a rendering of that
-            ;; value, never the value itself, and a test that greps for the
-            ;; sentence is asserting a presentation it does not own.
-            (is (str/includes? cut (str :seon.print/bound-by " "
-                                        :seon.render.profile/token-budget))
-                (str "the cut must name the bound that made it: "
+            ;; ONE CUT FACE (one-render-path §3e): the characters that fit,
+            ;; then `…+N`, and one legend naming how to read the rest. The
+            ;; cut's coordinates stay on the tree node, not in the text.
+            (is (re-find #"\"…\+\d+" cut)
+                (str "the cut shows its prefix and counts the rest: "
                      (subs cut 0 (min 400 (count cut)))))
-            ;; The declared counts stay characters — the reader's coordinates
-            ;; — and the token size it budgets by rides alongside.
-            (is (str/includes? cut (str :seon.print/elision-unit " :characters")))
-            (is (str/includes? cut (str :seon.ai.tokens/estimate)))
-            (is (str/includes? cut (str :seon.print/prefix))
-                "and the characters that fit are shown, not only counted")
-            (is (str/includes? cut (str :seon.print/omitted)))
-            (is (str/includes? cut (str :seon.print/requery-form))
-                "and the form a reader asks again with")
+            (is (str/includes? cut ";; …N = N more")
+                "and one legend says what a cut means")
             (is (str/includes? cut "transcript-cut")
-                "carrying the identity that form requeries")))
+                "carrying the identity the legend's form requeries")))
         (assert-no-session-narration ai)))))
 
 (defn- seed-pinned-bootstrap-history!

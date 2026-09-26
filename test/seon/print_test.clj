@@ -11,11 +11,8 @@
             [malli.core :as m]
             [malli.generator :as mg]
             [sci.core :as sci]
-            [seon.ai.tokens :as tokens]
             [seon.config :as config]
             [seon.print :as print]
-            [seon.render :as render]
-            [seon.render.hiccup :as hiccup]
             [seon.schema :as schema]
             [seon.sci.admit :as admit]
             [seon.test-support :as test-support]))
@@ -58,16 +55,6 @@
   about."
   [value]
   (first (:seon.print/items (admitted-node [value]))))
-
-(defn- observed-query-shape
-  []
-  (let [text (apply str (repeat 36 \x))]
-    (mapv (fn [row]
-            (into {:db/id row}
-                  (map (fn [field]
-                         [(keyword "seon.fn" (str "field-" field)) text]))
-                  (range 7)))
-          (range 116))))
 
 (deftest print-nodes-expose-symbols-and-entity-identities-without-shape-rules
   (let [node (admitted-node
@@ -314,87 +301,6 @@
       (is (= (normalize-whitespace text)
              (normalize-whitespace (lexical-hiccup-text hiccup)))))))
 
-(deftest fit-bounds-a-terminal-projection-and-names-what-it-omitted
-  ;; `fit` IS the AI context generation boundary's one elision (owner ruling,
-  ;; 2026-09-07). Callers that are not generating AI context do not call it:
-  ;; `seon.render/fit-terminal` fits only `:seon.render/ai`, and the HTML
-  ;; projection is emitted whole. Asserted HERE at the bounder, and at the
-  ;; render seam by
-  ;; `seon.render.web-test/a-five-megabyte-value-is-elided-for-ai-and-complete-for-html`.
-  (let [profile (assoc (render/agent-render-profile
-                        (test-support/effective-config))
-                       :seon.render.profile/token-budget 16
-                       :seon.render.profile/max-depth 8
-                       :seon.render.profile/max-children 32
-                       :seon.render.profile/composition :multiline
-                       :seon.print/requery-id
-                       [:seon.render.call/id :fixture/long])
-        long-text (apply str (repeat 512 "outward "))
-        fitted (print/fit {:seon.print/face :seon.print/projected
-                           :seon.render/output :seon.render/ai
-                           :seon.print/value long-text}
-                          profile)]
-    (is (= :seon.print/elided (:seon.print/face fitted))
-        "an over-budget projection becomes a declared elision value")
-    (is (= :characters (:seon.print/elision-unit fitted)))
-    (is (= (count long-text) (:seon.render.data/total fitted))
-        "the elision states the whole size it was cut from")
-    (is (pos? (:seon.print/omitted fitted)))
-    (is (< (:seon.print/omitted fitted) (:seon.render.data/total fitted))
-        "a cut never omits its whole subject: the floor keeps what fits")
-    (is (pos? (count (:seon.print/prefix fitted)))
-        "and the characters that fit ride the cut as its prefix")
-    (is (= [:seon.render.call/id :fixture/long]
-           (:seon.print/requery-id fitted))
-        "and it carries the identity the reader asks again with")
-    (let [shown (edn/read-string (print/render-elision-ai fitted))]
-      ;; AGENTS.md §2.4: the size an agent budgets by is estimated tokens.
-      ;; The declared counts stay characters — they are the reader's
-      ;; coordinates into the value, and a requery executes against them.
-      (is (= :characters (:seon.print/elision-unit shown)))
-      (is (= (tokens/estimate-of-characters (:seon.print/omitted fitted))
-             (:seon.ai.tokens/estimate shown)))
-      (is (= (:seon.print/omitted fitted) (:seon.print/omitted shown)))
-      (is (= (:seon.print/prefix fitted) (:seon.print/prefix shown))))))
-
-(deftest fit-preserves-breadth-and-long-strings
-  (let [text (apply str (repeat 36 \x))
-        line-width (:seon.print/width (print/default-options))
-        profile (render/agent-render-profile
-                 (test-support/effective-config))
-        fitted
-        (print/fit
-         (admitted-node (observed-query-shape))
-         profile)
-        long-string-fit
-        (print/fit
-         (admitted-node (apply str (repeat (* 2 line-width) \y)))
-         (assoc profile :seon.render.profile/token-budget 1))
-        emitted
-        (print/emit-text
-         fitted
-         (assoc (print/default-options)
-                :seon.print/length nil
-                :seon.print/level nil))]
-    (is (str/includes? emitted (pr-str text))
-        "a one-line string remains readable before structural breadth")
-    (is (< (count (:seon.print/items fitted)) 116)
-        "breadth past the profile's budget is cut, not carried")
-    (is (= :seon.print/elided
-           (:seon.print/face (peek (:seon.print/items fitted))))
-        "and the cut is a declared elision value, never a silent drop")
-    (is (= :seon.print/elided (:seon.print/face long-string-fit))
-        "an over-budget string becomes a declared elision value")
-    ;; The cut is not taken at the display width, and it is not taken at
-    ;; nothing either: the floor keeps what the budget admits and the offset
-    ;; names it.
-    (is (pos? (:seon.render.data/next-offset long-string-fit))
-        "the characters that fit are kept, never elided to nothing")
-    (is (< (:seon.render.data/next-offset long-string-fit) line-width)
-        "a string is never cut at the display width")
-    (is (= (* 2 line-width) (:seon.render.data/total long-string-fit))
-        "and the elision states the whole size it was cut from")))
-
 (deftest tagged-envelope-never-collides-with-authored-print-keywords
   (let [value {:seon.print/face :seon.print/elided
                :seon.print/value :seon.print/pruned
@@ -501,37 +407,6 @@
            left-rendered))
     (is (= left-rendered right-rendered))))
 
-(deftest refitting-a-truncated-collection-preserves-its-honest-elision
-  (let [total 210
-        node {:seon.print/face :seon.print/vector
-              :seon.print/items
-              [{:seon.print/face :seon.print/symbol
-                :seon.print/value 'seon.bootstrap}
-               {:seon.print/face :seon.print/elided
-                :seon.print/omitted (dec total)
-                :seon.print/elision-unit :children
-                :seon.render.data/total total
-                :seon.render.data/path []
-                :seon.render.data/next-offset 1
-                :seon.render.profile/id :seon.render.profile/agent
-                :seon.print/requery-id [:seon.db/query :requires]}]}
-        fitted (print/fit
-                node
-                (assoc (render/agent-render-profile
-                        (test-support/effective-config))
-                       :seon.render.profile/token-budget 1
-                       :seon.render.profile/max-depth 8
-                       :seon.render.profile/max-children 1
-                       :seon.render.profile/composition :multiline))
-        items (:seon.print/items fitted)
-        elision (if items (peek items) fitted)
-        rendered (if items (dec (count items)) 0)]
-    (is (= :seon.print/elided (:seon.print/face elision)))
-    (is (= total (:seon.render.data/total elision)))
-    (is (= (- total rendered) (:seon.print/omitted elision)))
-    (is (= [:seon.db/query :requires] (:seon.print/requery-id elision)))
-    (is (not (contains? elision :seon.print/requery-refusal)))))
-
 (deftest throwable-face-is-readable-error-data
   (let [failure (ex-info "outer" {:outer true}
                          (ex-info "root" {:root 42}))
@@ -539,62 +414,6 @@
     (is (str/starts-with? text "#error "))
     (is (= (Throwable->map failure)
            (edn/read-string {:readers {'error identity}} text)))))
-
-(deftest the-budget-is-chosen-by-provenance
-  ;; Owner 2026-09-26: text a declared AI render function produced is its
-  ;; deliberate first bound, laid out whole under the ceiling; raw values
-  ;; keep the profile's token budget.
-  (let [rendered (apply str (repeat 2000 "w"))
-        node {:seon.print/face :seon.print/map
-              :seon.print/entries
-              [[{:seon.print/face :seon.print/keyword :seon.print/value :a/rendered}
-                {:seon.print/face :seon.print/projected :seon.render/output :seon.render/ai
-                 :seon.print/value rendered}]
-               [{:seon.print/face :seon.print/keyword :seon.print/value :b/raw}
-                {:seon.print/face :seon.print/string :seon.print/value (apply str (repeat 2000 "r"))}]]}
-        profile (assoc (render/agent-render-profile (test-support/effective-config))
-                       :seon.render.profile/token-budget 50)
-        fitted (print/fit node profile (print/default-options))
-        [[_ kept] raw] (:seon.print/entries fitted)
-        ceiling (print/fit node profile (assoc (print/default-options)
-                                               :seon.print/rendered-token-ceiling 10))]
-    (is (= rendered (:seon.print/value kept)) "renderer text is not charged to the raw budget")
-    (is (not= 2000 (count (get-in raw [1 :seon.print/value] "")))
-        "the raw string is cut to the profile's budget")
-    (is (= :seon.print/rendered-token-ceiling
-           (get-in ceiling [:seon.print/entries 0 1 :seon.print/bound-by]))
-        "beyond the ceiling renderer text is cut, naming the ceiling")))
-
-(deftest a-cut-among-map-entries-reads-back-as-an-entry
-  (let [node {:seon.print/face :seon.print/map
-              :seon.print/entries
-              [[{:seon.print/face :seon.print/keyword :seon.print/value :seon.print/elision}
-                {:seon.print/face :seon.print/number :seon.print/value 1}]
-               (print/elision {:seon.print/omitted 3 :seon.print/elision-unit :children
-                               :seon.render.data/path [] :seon.render.data/next-offset 1
-                               :seon.print/requery-refusal "fixture"})]}]
-    (doseq [width [0 20 72]]
-      (let [shown (edn/read-string (print/emit-text node (assoc no-cuts :seon.print/width width)))]
-        (is (= 1 (:seon.print/elision shown)) "a real key keeps its entry")
-        (is (= 3 (get-in shown [:seon.print/elision-1 :seon.print/omitted]))
-            "the cut takes the first free elision key")))))
-
-(deftest whole-value-elision-preserves-count-and-requery
-  (let [text (apply str (repeat 512 "z"))
-        fitted
-        (print/fit
-         {:seon.print/face :seon.print/string :seon.print/value text}
-         (assoc (render/agent-render-profile
-                 (test-support/effective-config))
-                :seon.render.profile/token-budget 1
-                :seon.render.profile/max-depth 1
-                :seon.render.profile/max-children 1
-                :seon.render.profile/composition :single-line
-                :seon.print/requery-id [:seon.message/id "message-1"]))]
-    (is (= :seon.print/elided (:seon.print/face fitted)))
-    (is (= 512 (:seon.render.data/total fitted)))
-    (is (= [:seon.message/id "message-1"]
-           (:seon.print/requery-id fitted)))))
 
 (deftest an-object-node-never-renders-as-empty-brackets
   ;; THE CLASS THE NODE CARRIES IS THE ONLY CONTENT AN OBJECT FACE HAS. An
@@ -622,10 +441,28 @@
            (:seon.error/message (edn/read-string nameless)))
         "a node that names no class says so instead of printing nothing")))
 
-(deftest canonical-order-belongs-to-print-nodes
-  (let [left (admitted-node (array-map :z 1 :a 2 :m 3))
-        right (admitted-node (array-map :m 3 :a 2 :z 1))]
-    (is (= "{:a 2, :m 3, :z 1}" (print/emit-text left no-cuts)))
-    (is (= (print/emit-both left no-cuts) (print/emit-both right no-cuts)))
+(deftest one-cut-face-and-held-order
+  ;; The display is not EDN (design §3e): a cut is `…N`, `"prefix"…+N` or
+  ;; `…?`, and it keeps its coordinates on the node. The printed order is the
+  ;; node's own order; nothing re-sorts it.
+  (let [cut (fn [request] (print/elision (merge {:seon.render.data/path [] :seon.render.data/next-offset 1
+                                                  :seon.print/requery-refusal "fixture"} request)))
+        node {:seon.print/face :seon.print/map
+              :seon.print/entries
+              [[{:seon.print/face :seon.print/keyword :seon.print/value :z}
+                {:seon.print/face :seon.print/vector
+                 :seon.print/items [{:seon.print/face :seon.print/number :seon.print/value 1}
+                                    (cut {:seon.print/omitted 3 :seon.print/elision-unit :children})]}]
+               [{:seon.print/face :seon.print/keyword :seon.print/value :a}
+                (cut {:seon.print/omitted 40 :seon.print/elision-unit :characters :seon.print/prefix "ab\"c"})]
+               (cut {:seon.print/elision-unit :pending})]}]
+    (is (= "{:z [1 …3], :a \"ab\\\"c\"…+40, …?}" (print/emit-text node no-cuts)))
     (is (= "[3 1 2]" (print/emit-text (admitted-node [3 1 2]) no-cuts)))
-    (is (= "(3 1 2)" (print/emit-text (admitted-node '(3 1 2)) no-cuts)))))
+    (is (= "(3 1 2)" (print/emit-text (admitted-node '(3 1 2)) no-cuts)))
+    (is (= "{:z 1, :a 2}"
+           (print/emit-text {:seon.print/face :seon.print/map
+                             :seon.print/entries [[{:seon.print/face :seon.print/keyword :seon.print/value :z}
+                                                   {:seon.print/face :seon.print/number :seon.print/value 1}]
+                                                  [{:seon.print/face :seon.print/keyword :seon.print/value :a}
+                                                   {:seon.print/face :seon.print/number :seon.print/value 2}]]}
+                            no-cuts)))))

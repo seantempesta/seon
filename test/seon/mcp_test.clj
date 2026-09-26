@@ -76,20 +76,18 @@
            (is (true? (:exception (first terminal))))
            (is (symbol? (:seon.error/exception-class result)))
            (is (not (contains? result :trace))))
-         (let [visits (atom 0) emits (atom 0)
-               visit @#'value/value-node emit print/emit-both]
-           (with-redefs-fn
-             {#'value/value-node (fn [& args] (swap! visits inc) (apply visit args))
-              #'print/emit-both (fn [& args] (swap! emits inc) (apply emit args))}
-             (fn []
-               (is (string? (:seon.render.value/root-description (value/prepare request))))
-               (is (= [0 0] [@visits @emits]))
-               (let [prepared (value/prepare
-                               (assoc request :seon.render.value/root [::root]))]
-                 (is (= {"a" 1 "b" 2}
-                        (edn/read-string (:seon.render.value/text prepared))))
-                 (is (pos? @visits))
-                 (is (= 1 @emits))))))
+         ;; A root without an identity is refused before selection: the
+         ;; refusal is the whole answer, with no tree and no text. With a
+         ;; root, the one selection yields the tree and its text.
+         (let [refused (value/prepare request)]
+           (is (string? (:seon.render.value/root-description refused)))
+           (is (not (contains? refused :seon.render.value/tree)))
+           (is (not (contains? refused :seon.render.value/text))))
+         (let [prepared (value/prepare (assoc request :seon.render.value/root [::root]))]
+           (is (= {"a" 1 "b" 2} (edn/read-string (:seon.render.value/text prepared))))
+           (is (= (:seon.render.value/text prepared)
+                  (:seon.print/text (print/emit-both (:seon.render.value/tree prepared)
+                                                     (:seon.render.value/options prepared))))))
          (let [calls (atom [])
                invoke kernel/invoke
                failing (assoc request :seon.render.value/root [::root]

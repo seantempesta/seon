@@ -56,16 +56,19 @@
               [:seon.print/nil
                [:map
                 [:seon.print/face [:= :seon.print/nil]]
+                [:seon.print/text {:optional true} :seon.print/text]
                 [:seon.print/value :nil]]]
               [:seon.print/boolean
                [:map
                 [:seon.print/face
                  [:= :seon.print/boolean]]
+                [:seon.print/text {:optional true} :seon.print/text]
                 [:seon.print/value :boolean]]]
               [:seon.print/number
                [:map
                 [:seon.print/face
                  [:= :seon.print/number]]
+                [:seon.print/text {:optional true} :seon.print/text]
                 [:seon.print/value
                  [:fn
                   {:error/message "must be a printable number",
@@ -75,15 +78,18 @@
                [:map
                 [:seon.print/face
                  [:= :seon.print/keyword]]
+                [:seon.print/text {:optional true} :seon.print/text]
                 [:seon.print/value :keyword]]]
               [:seon.print/symbol
                [:map
                 [:seon.print/face
                  [:= :seon.print/symbol]]
+                [:seon.print/text {:optional true} :seon.print/text]
                 [:seon.print/value :symbol]]]
               [:seon.print/char
                [:map
                 [:seon.print/face [:= :seon.print/char]]
+                [:seon.print/text {:optional true} :seon.print/text]
                 [:seon.print/value
                  [:fn
                   {:error/message "must be a printable character",
@@ -97,10 +103,12 @@
               [:seon.print/inst
                [:map
                 [:seon.print/face [:= :seon.print/inst]]
+                [:seon.print/text {:optional true} :seon.print/text]
                 [:seon.print/value :inst]]]
               [:seon.print/uuid
                [:map
                 [:seon.print/face [:= :seon.print/uuid]]
+                [:seon.print/text {:optional true} :seon.print/text]
                 [:seon.print/value :uuid]]]
               [:seon.print/vector
                [:map
@@ -294,7 +302,7 @@
              :omitted [:int {:min 1}],
              :elisions [:vector {:description "Complete omitted-member coordinates retained when a print map is decoded as data."} :seon.print/node]
              :elision-unit
-             [:enum :children :characters :subtree :tokens :evaluations],
+             [:enum :children :characters :subtree :tokens :evaluations :pending],
              :requery-id :seon.schema/value,
              :requery-form
              [:sequential {:description "Executable Clojure form retrieving the omitted value."}

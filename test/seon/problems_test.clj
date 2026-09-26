@@ -590,9 +590,9 @@
                      (range 600))
         text (problems/ai-prose {:seon.problems/failed-tests failed :seon.render/profile profile})
         shown (count (re-seq #"Test seon\.fake-test/t-\d+" text))
-        omitted (some->> text (re-find #":seon\.print/omitted (\d+)") second parse-long)]
+        omitted (some->> text (re-find #"…(\d+)") second parse-long)]
     (is (<= (tokens/estimate text) 15000) "the prose fits the profile's token budget")
     (is (pos? shown) "whole failed-test lines are shown")
     (is (= 600 (+ shown (or omitted 0))) "the elision names every omitted test")
-    (is (str/includes? text "(seon.print/value-at (seon.problems/problems (seon.db/db) {}) [:seon.problems/failed-tests])")
-        "the elision names the requery for the full failed-test list")))
+    (is (str/includes? text "(seon.print/value-at (seon.problems/problems (seon.db/db) {}) [...])")
+        "the legend names the requery for the full failed-test list")))

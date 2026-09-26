@@ -36,7 +36,6 @@
             [seon.blob :as blob]
             [seon.agent :as agent]
             [seon.cluster :as cluster]
-            [seon.ai.tokens :as tokens]
             [seon.cluster.agent :as cluster.agent]
             [seon.cluster.wake :as wake]
             [seon.config :as config]
@@ -1961,19 +1960,12 @@ handle))}}
          (is (string? ai) (pr-str ai))
          (is (< (count ai) (count huge))
              "the AI projection is bounded by the render profile")
-         (let [elision (edn/read-string ai)]
-           ;; The AI-facing size is estimated tokens (AGENTS.md §2.4), and a
-           ;; cut never omits its whole subject: the prefix that fit is shown
-           ;; and only the remainder is counted.
-           (is (= :characters (:seon.print/elision-unit elision)))
-           (is (pos? (count (:seon.print/prefix elision))))
-           (is (= (count huge) (:seon.render.data/total elision)))
-           (is (= (- (count huge) (:seon.render.data/next-offset elision))
-                  (:seon.print/omitted elision)))
-           (is (= (tokens/estimate-of-characters (:seon.print/omitted elision))
-                  (:seon.ai.tokens/estimate elision)))
-           (is (= 'seon.print/value-at
-                  (first (:seon.print/requery-form elision)))))
+         ;; A cut never omits its whole subject: the prefix that fit is
+         ;; shown and only the remainder is counted (one-render-path §3e).
+         (let [[_ prefix omitted] (re-find #"^\"([^\"]*)\"…\+(\d+)" ai)]
+           (is (pos? (count prefix)) ai)
+           (is (= (count huge) (+ (count (edn/read-string (str "\"" prefix "\""))) (parse-long omitted)))))
+         (is (str/includes? ai "(seon.print/value-at ") "and one legend names the requery")
          (is (<= (count huge) (count html-string))
              "the HTML projection serves the whole value, unbounded")
          ;; THE STRUCTURAL HALF. A wide collection's cut is minted by
@@ -1993,15 +1985,12 @@ handle))}}
            (is (< (count wide-ai) (count (pr-str wide)))
                "a wide collection is cut for AI under the same profile")
            (let [shown (edn/read-string wide-ai)
-                 elision (peek shown)]
-             (is (= :children (:seon.print/elision-unit elision)))
+                 cut (peek shown)]
+             ;; `[0 1 … …N]` reads back as numbers ending in the cut symbol.
              (is (= (count wide)
-                    (+ (dec (count shown)) (:seon.print/omitted elision))))
-             (is (= 'seon.print/value-at
-                    (first (:seon.print/requery-form elision)))))
-           (is (str/includes? wide-ai
-                              (str :seon.render.profile/max-children))
-               "naming the bound that made the cut")
+                    (+ (dec (count shown)) (parse-long (subs (str cut) 1))))))
+           (is (str/includes? wide-ai "(seon.print/value-at ")
+               "and one legend names the requery")
            (is (str/includes? wide-html "4999")
                "while HTML serves the whole collection")))))))
 
