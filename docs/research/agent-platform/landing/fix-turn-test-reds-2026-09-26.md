@@ -1,6 +1,6 @@
 ---
 type: landing
-status: landed (rounds 1-2 accepted; round 3 eb848eacd, 08b57bfcd, 515b7e296, 42685bc27); tests owed to root
+status: landed (rounds 1-3 accepted; round 4 374e918b7, 29abfed1a, 4e703c93a); tests owed to root
 lane: fix-turn-test-reds-opus
 created: 2026-09-26
 ---
@@ -229,6 +229,31 @@ which converts mcp_test next:
 The profile counters are JVM-wide, so a concurrent writer can make the doc-write delta nonzero and cause a
 false failure, but it cannot hide a call. `with-redefs-fn` was equally global.
 
+## Round 4 (root run verify-1210, JVM at archive 65bf078ec, which contains rounds 1-3)
+
+### Committed, each clearing its class at the producer
+
+| Commit | Class | Producer and fix | Members it clears |
+|---|---|---|---|
+| 374e918b7 | digest after the mint retirement (my eb848eacd regressed two members) | program-test's `analyzed-row-tx` handed undigested `analyze-form` rows to settlement. They passed before only because `declaration-row` minted a digest, which the writer accepts when the namespace row carries no resolver context. The helper now digests through `revised-row`. The forged digests (`"aaaa…"`) become two real revisions, and the cross-namespace test row comes from `support/program-row`. | program-test `changed-runtime-redeclaration-builds-a-real-replacement`, `opening-basis-divergence-is-only-claimed-when-it-is-measurable`, `digest-map-compares-two-fixture-branches-from-one-commit`, `typed-cross-namespace-deletion-retracts-function-and-test` |
+| 29abfed1a | `missing-component-schema` / undeclared synthetic schema | The writer derives its projection from stored schema rows (`db/carried-projection`), so a projection a fixture carries on its connection declares nothing. `test-support/schema-rows` is now the one helper that declares synthetic `[key definition]` forms as canonical schema rows. error-test and db-test's codec fixture use it; db-test now includes the component child schema. web-debug's private `declare-schemas!` is deleted and its four callers use the helper. REPL on isolated branches: before the rows, each write refuses `missing-component-schema`; after them, each commits. | error-test `complete-error-children-validate-through-the-writer`, db-test `component-expanded-pull-evidence-detects-a-child-only-change` |
+| 4e703c93a | same class | fn-test's `canonical-schema-rows` over the branch projection refused the undeclared key ("Missing schema declaration"). The fixture now uses `schema-rows`, whose row commits with a digest. | fn-test `publication-writes-one-definition-digest-per-declaration-family` |
+
+sci.eval-test `database-provenance-…` (eval_test.clj:202) was stale in 1210: the fix, `8074989b9`, is not in
+archive 65bf078ec (the archive's copy of the file has no `replacement-tx`). It clears on HEAD.
+
+### Classified, not fixture classes (routing)
+
+| Red | Class | Evidence | Owner |
+|---|---|---|---|
+| turn-test `settlement-refuses-a-divergent-program-change-since-opening` :1546 | surviving-owner defect, Datahike | The divergent row commits. `declaration-written-by-run?` returns run a's receipt when asked about run b, and the same query with its clauses reordered answers nil. [a-history-query-drops-a-bound-input-by-clause-order](../../../seon/issues/a-history-query-drops-a-bound-input-by-clause-order.md) | Datahike fork (query executor) |
+| turn-test `a-refused-generated-form-records-its-refusal` :331 | surviving-owner defect, error render pair | The shown text is a render diagnostic: `seon.error/render-undeclared-ai` → `undeclared-alternative-finding` refused its argument (`:seon.fn.arity/input`, expected `:map`), so the refusal's message never shows. Blob 36afb1d2… on default. | src/seon/error.clj (lost-error-seams) |
+| turn-test `a-replaced-result-is-shown-by-the-one-print-owner` :2292 | terminal-refusal half of the print owner | d3ecb9333 fixed the disposition half. The recorded-error half still differs; not probed this round. | pipeline lane (turn.clj) |
+| turn-test recovery / transitions / virtual (duration) | design cost | unchanged from class E above (28.7 s transitions, 17.4 s recovery, 13.6 s virtual) | fast-harness lane |
+| web-debug `outline-origin-survives-the-issues-deletion` :1073 | rule versus fixture: decide | The fixture `retractEntity`s an issue created by `issue/add!`. `seon.db/retention-check` (db.clj:4509) refuses any change of a created issue's authority (`(and (:seon.db/creator prior) changed-authority?)`), even with zero tests and even by its creator, so a created issue can never be deleted. Either the rule is too strict (the creator should delete its own issue) or the test's deletion leg is a retired assumption. | root ruling, then db.clj or the test |
+| test-runner-test `result-recording-is-total-under-concurrent-test-retraction` | surviving-owner defect | `seon.test.runner/record-tx` throws "Test completion has no surviving test definition" (transaction outcome unknown), where the test requires recording to be total. | src/seon/test/runner.clj |
+| fn-test `declared-function-values…`, `re-index-replaces…`, `the-indexer-emits-no-attribute…` | dependency analysis | "clj-kondo holds no analysis of seon.db / seon.effect" (first-party namespaces absent from the analysis these fixtures read) | root routes (dependency-analysis class) |
+
 ## Deleted / net lines
 
 | Commit | Files | + | − |
@@ -240,6 +265,9 @@ false failure, but it cannot hide a call. `with-redefs-fn` was equally global.
 | 08b57bfcd | db_test, web_debug_test | 17 | 6 |
 | 515b7e296 | mcp_test | 14 | 22 |
 | 42685bc27 | publication_validation_test | 34 | 16 |
+| 374e918b7 | program_test | 20 | 14 |
+| 29abfed1a | test_support, error_test, db_test, web_debug_test | 43 | 25 |
+| 4e703c93a | fn_test | 2 | 3 |
 
 Net across seven code commits: src +5/−3 (program.cljc), tests +160/−142. The additions are mostly comments stating the owning rule at each fixture. Deleted: three hand-built `analyze-form` row paths in turn_test (≈45 lines). Added: the
 `held-handle` agent-id guard, the docstring note and the custody wrapper.
