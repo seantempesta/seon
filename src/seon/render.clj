@@ -15,6 +15,7 @@
             [clojure.string]
             [datahike.db :as datahike.db]
             [malli.core :as m]
+            [malli.transform :as mt]
             [sci.core :as sci]
             [seon.ai.tokens :as tokens]
             [seon.config :as config]
@@ -180,12 +181,7 @@
   [request]
   (let [value (render-value request)
         database (:seon.db/db request)
-        identity-requery
-        (when (and database (map? value))
-          (some (fn [attribute]
-                  (when-let [entry (find value attribute)]
-                    [attribute (val entry)]))
-                (db/identity-attributes database)))]
+        identity-requery (render.value/value-identity database value)]
     (cond-> (request-profile request)
     identity-requery
     (assoc :seon.print/requery-id identity-requery)
@@ -334,17 +330,35 @@
                                                    (internal/entity-entries definition))])))
                            (set (vals rows)))}))))
 
+(defn- row-satisfied?
+  "Does `value` satisfy row schema `row`? The value is restored to its
+  transaction shape and its collections to the row's declared kinds (Malli's
+  collection transformer, malli/transform.cljc), since a pull returns every
+  cardinality-many attribute as a vector. Decoder and validator once per row
+  and projection."
+  {:malli/schema [:=> [:cat :seon.schema/projection :qualified-keyword :map [:maybe :seon.db/database-value]] :boolean]}
+  [projection row value database]
+  (let [[decode valid?] (schema/projection-cache-value
+                         projection [::row-check row]
+                         (fn []
+                           (let [row-schema (m/schema row {:registry (:seon.schema.projection/registry projection)})]
+                             [(m/decoder row-schema (mt/collection-transformer)) (m/validator row-schema)])))]
+    (valid? (decode (if database (render.value/transacted value database) (render.value/transacted value))))))
+
 (defn- entity-owner
   "The one row schema owning map `value`: every identity attribute present
-  names it and every present key is its entry or `:db/id`; else nil."
-  {:malli/schema [:=> [:cat :seon.schema/projection :map] [:maybe :qualified-keyword]]}
-  [projection value]
+  names it, every present key is its entry or `:db/id`, and the value
+  satisfies it. Owning a few of a row's attribute names is not being one of
+  its entities: a partial map stays a partial map (task 135d92ea1308)."
+  {:malli/schema [:=> [:cat :seon.schema/projection :map [:maybe :seon.db/database-value]] [:maybe :qualified-keyword]]}
+  [projection value database]
   (let [{rows ::identity-rows owned ::owned-keys} (entity-owners projection)
         named (into #{} (keep rows) (keys value))
         row (first named)]
     ;; A value's inline face keys are render data, not entity attributes.
     (when (and (= 1 (count named))
-               (every? #(or ((get owned row #{}) %) (#{:seon.render/ai :seon.render/html} %)) (keys value)))
+               (every? #(or ((get owned row #{}) %) (#{:seon.render/ai :seon.render/html} %)) (keys value))
+               (row-satisfied? projection row value database))
       row)))
 
 (defn- named-alternatives
@@ -469,7 +483,7 @@
       ;; the shape its declared input accepts.
       (let [attribute-value
             (get (render.value/transacted
-                  (if (and (map? value) (contains? value attribute))
+                  (if (and (render.value/keyword-lookup? value) (contains? value attribute))
                     value
                     {attribute value})
                   (:seon.db/db request))
@@ -503,7 +517,7 @@
       (nil? projection) []
       ;; An attribute request stays about that attribute: its own pair.
       (attribute-scoped? request) (into [] (keep identity) [(attribute-producer projection request output)])
-      (not (map? value)) []
+      (not (render.value/keyword-lookup? value)) []
       (:seon.error/at value)
       ;; The identity its producer declared (`:seon.error/declared-schema` on
       ;; the value's metadata, where the thrower attached it), else the
@@ -522,7 +536,7 @@
       ;; owner's pair claims only a root value. A nested value takes only the
       ;; pair its reaching attribute declares (a component's schema).
       :else (pairs (or (when (empty? (:seon.render.data/path request))
-                         (some-> (entity-owner projection value) vector))
+                         (some-> (entity-owner projection value (:seon.db/db request)) vector))
                        (some->> (attribute-identity projection (:seon.render.data/path request))
                                 (named-alternatives projection)
                                 (filterv #((schema/projection-validator projection %) value))))))))
@@ -585,7 +599,7 @@
   {:malli/schema [:=> [:cat :seon.schema/value :seon.render/output]
                   [:maybe [:tuple :seon.render/output :seon.schema/value]]]}
   [value output]
-  (when (map? value) (find value output)))
+  (when (render.value/keyword-lookup? value) (find value output)))
 
 (defn- explicit-value-stage
   [request output]
@@ -932,7 +946,8 @@
   "The row schema owning the rendered value, else the generic value schema."
   [projection request]
   (let [value (render-value request)]
-    (or (when (and projection (map? value)) (entity-owner projection value))
+    (or (when (and projection (render.value/keyword-lookup? value))
+          (entity-owner projection value (:seon.db/db request)))
         :seon.schema/value)))
 
 (defn- render-cost-fact
@@ -1146,6 +1161,24 @@
     (or (invocation-unknown request output selected result)
         (:seon.sci.admit/value result))))
 
+(defn- invalid-output
+  "The observation for a selected renderer whose output is outside `output`'s face."
+  {:malli/schema [:=> [:cat :seon.render/output :seon.schema/value] :seon.render/error-result]}
+  [output rendered]
+  (vary-meta {:seon.error/fix "Return a value satisfying the renderer's declared output contract."
+              :seon.error/at (Date.)
+              :seon.error/layer :seon.render/output
+              :seon.error/operation 'seon.render/raw-output
+              :seon.render/invalid-output (keyword (name output))
+              :seon.error/message (case output
+                                    :seon.render/ai "The selected AI renderer did not return text."
+                                    :seon.render/html "The selected HTML renderer did not return Hiccup."
+                                    "The selected form renderer did not return a form.")
+              :seon.error/data {:seon.render/output rendered}
+              :seon.error/expected "a value satisfying the requested render output"
+              :seon.error/offending rendered}
+             assoc :seon.error/declared-schema :seon.render/invalid-output-error))
+
 (defn- valid-projection?
   [projection output value]
   (or (and (:seon.error/at value) (:seon.error/layer value) (:seon.error/operation value)) ;; debt: seon.sci.kernel/invoke declares :seon.error/value through its admitted result.
@@ -1179,7 +1212,7 @@
         ;; prepare → project-node before this rule).
         rendering (:seon.render/rendering request #{})
         refused? #(or (:seon.render/refused-member %) (:seon.render/candidates %) (:seon.render.unknown/reason %))
-        selected (when (and projection (map? value))
+        selected (when (and projection (render.value/keyword-lookup? value))
                    (if-let [explicit (explicit-value value output)]
                      (val explicit)
                      (declared-producer projection request value output)))
@@ -1213,13 +1246,15 @@
             unavailable (invocation-unknown node-request output selected result)]
         (cond
           unavailable {:seon.error/value unavailable}
-          (and (valid-projection? projection output rendered) (not (refused? rendered))
-               (not (:seon.render/invalid-output rendered)))
+          ;; A returned error (a refusal, an invalid output) is the
+          ;; renderer's failure, shown beside the value, never its face.
+          (some? (render.value/keyword-entry rendered :seon.error/at)) {:seon.error/value rendered}
+          (valid-projection? projection output rendered)
           {:seon.print/node (cond-> {:seon.print/face :seon.print/projected
                                      :seon.render/output output
                                      :seon.print/value rendered}
                               (qualified-symbol? selected) (assoc :seon.render.call/selected-producer selected))}
-          :else nil)))))
+          :else {:seon.error/value (invalid-output output rendered)})))))
 
 (defn- invoke-producer
 
@@ -1249,54 +1284,16 @@
                (some #(m/validate % nil {:registry (:seon.schema.projection/registry projection)})
                      (schema/function-matching-outputs-in
                       projection selected
-                      [(render-invocation-argument projection request selected)])))]
-      (case output
-        :seon.render/ai
-        (if (or declared-absence? (string? rendered) (or (:seon.render.unknown/reason rendered) (:seon.render/invalid-output rendered) (:seon.render/refused-member rendered))
-                (valid-projection? projection :seon.render/source-blocks rendered))
-          rendered
-          (let [observation
-                (vary-meta {:seon.error/fix "Return a value satisfying the renderer's declared output contract."
-                 :seon.error/at (Date.)
-                 :seon.error/layer :seon.render/output
-                 :seon.error/operation 'seon.render/raw-output
-                 :seon.render/invalid-output :ai
-                 :seon.error/message "The selected AI renderer did not return text."
-                 :seon.error/data {:seon.render/output rendered}
-                 :seon.error/expected "a value satisfying the requested render output"
-                 :seon.error/offending rendered} assoc :seon.error/declared-schema :seon.render/invalid-output-error)]
-            observation))
-
-        :seon.render/html
-        (if (or declared-absence? (or (:seon.render.unknown/reason rendered) (:seon.render/invalid-output rendered) (:seon.render/refused-member rendered))
-                (hiccup/hiccup? rendered))
-          rendered
-          (let [observation
-                (vary-meta {:seon.error/fix "Return a value satisfying the renderer's declared output contract."
-                 :seon.error/at (Date.)
-                 :seon.error/layer :seon.render/output
-                 :seon.error/operation 'seon.render/raw-output
-                 :seon.render/invalid-output :html
-                 :seon.error/message "The selected HTML renderer did not return Hiccup."
-                 :seon.error/data {:seon.render/output rendered}
-                 :seon.error/expected "a value satisfying the requested render output"
-                 :seon.error/offending rendered} assoc :seon.error/declared-schema :seon.render/invalid-output-error)]
-            observation))
-
-        :seon.render/form
-        (if (valid-projection? projection :seon.render/form rendered)
-          rendered
-          (let [observation
-                (vary-meta {:seon.error/fix "Return a value satisfying the renderer's declared output contract."
-                 :seon.error/at (Date.)
-                 :seon.error/layer :seon.render/output
-                 :seon.error/operation 'seon.render/raw-output
-                 :seon.render/invalid-output :form
-                 :seon.error/message "The selected form renderer did not return a form."
-                 :seon.error/data {:seon.render/output rendered}
-                 :seon.error/expected "a value satisfying the requested render output"
-                 :seon.error/offending rendered} assoc :seon.error/declared-schema :seon.render/invalid-output-error)]
-            observation))))))
+                      [(render-invocation-argument projection request selected)])))
+          failed? (or (:seon.render.unknown/reason rendered) (:seon.render/invalid-output rendered)
+                      (:seon.render/refused-member rendered))]
+      (if (case output
+            :seon.render/ai (or declared-absence? (string? rendered) failed?
+                                (valid-projection? projection :seon.render/source-blocks rendered))
+            :seon.render/html (or declared-absence? failed? (hiccup/hiccup? rendered))
+            :seon.render/form (valid-projection? projection :seon.render/form rendered))
+        rendered
+        (invalid-output output rendered)))))
 
 (defn render-ai
   "Render one value as text through the unique selected live SCI Var."

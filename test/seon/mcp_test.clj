@@ -1,6 +1,7 @@
 (ns seon.mcp-test
   "Total outward preparation through the real MCP PREPL."
   (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.cluster :as cluster]
             [seon.config :as config]
@@ -90,15 +91,20 @@
            (is (= (:seon.render.value/text prepared)
                   (:seon.print/text (print/emit-both (:seon.render.value/tree prepared)
                                                      (:seon.render.value/options prepared))))))
-         ;; A value's own renderer that refuses the value is shown as its
-         ;; declared unknown diagnostic, never as a missing value: the real
-         ;; directory renderer refuses a map that is not a directory.
-         (let [prepared (value/prepare
+         ;; A value's own renderer that refuses the value never replaces it:
+         ;; the value prints as data and the refusal is one diagnostic line
+         ;; beside it. The real directory renderer refuses a map that is not
+         ;; a directory.
+         (let [value {:seon.render/ai 'seon.repl/render-directory-ai
+                      :seon.error/message "probe"}
+               prepared (value/prepare
                          (assoc request :seon.render.value/root [::root]
-                                :seon.render/value
-                                {:seon.render/ai 'seon.repl/render-directory-ai
-                                 :seon.error/message "probe"}))
-               shown (edn/read-string (:seon.render.value/text prepared))]
-           (is (= 'seon.repl/render-directory-ai (:seon.render.unknown/producer shown)) (pr-str shown))
-           (is (= :refused (:seon.render.unknown/reason shown))))
+                                :seon.render/value value))
+               shown (:seon.render.value/text prepared)
+               diagnostics (filter #(str/starts-with? % ";; renderer failed") (str/split-lines shown))]
+           (is (= value (edn/read-string shown)) shown)
+           (is (= 1 (count diagnostics)) (:seon.render.value/text prepared))
+           (is (str/includes? (first diagnostics) "seon.repl/render-directory-ai"))
+           (is (= :refused (:seon.render.unknown/reason
+                            (first (:seon.render.value/diagnostics prepared))))))
          (finally (swap! running-instances dissoc cluster-name)))))))

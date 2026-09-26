@@ -204,6 +204,37 @@
        " at basis transaction " (:t unit)
        " commit " (:datahike/commit-id unit)))
 
+(defn keyword-lookup?
+  "May `value` be asked for a keyword key? Only where the lookup can neither
+  run foreign code nor refuse the keyword: an exact array or hash map (keys
+  compared by hash and identity), or a tree map ordered by Clojure's default
+  comparator whose keys are keywords (`Keyword/compareTo`). This row of the
+  permitted-operation table is the one gate for a value's render attachment,
+  identity and entity shape: a symbol-keyed sorted map, a custom comparator,
+  a record or a host Map declares none, so it prints as the data it is."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (let [c (class value)]
+    (or (identical? c clojure.lang.PersistentArrayMap)
+        (identical? c clojure.lang.PersistentHashMap)
+        (and (identical? c clojure.lang.PersistentTreeMap)
+             (identical? (.comparator ^clojure.lang.PersistentTreeMap value) clojure.lang.RT/DEFAULT_COMPARATOR)
+             (or (zero? (count value))
+                 (identical? (class (key (first value))) clojure.lang.Keyword))))))
+
+(defn value-identity
+  "`value`'s own address `[attribute value]`: its first installed
+  `:db.unique/identity` attribute in `database`, for a map `keyword-lookup?`
+  permits; else nil."
+  {:malli/schema [:=> [:cat [:maybe :seon.db/database-value] :seon.schema/value]
+                  [:maybe [:tuple :qualified-keyword :seon.schema/value]]]}
+  [database value]
+  (when (and database (keyword-lookup? value))
+    (some (fn [attribute]
+            (when-some [entry (find value attribute)]
+              [attribute (val entry)]))
+          (db/identity-attributes database))))
+
 (def ^:private print-option-keys
   #{:seon.print/length
     :seon.print/level
@@ -235,11 +266,7 @@
   [unit]
   (let [value (:seon.render/value unit)
         database (:seon.db/db unit)]
-    (when (and database (map? value))
-      (some (fn [attribute]
-              (when-some [entry (find value attribute)]
-                [attribute (val entry)]))
-            (db/identity-attributes database)))))
+    (value-identity database value)))
 
 (defn node-id
   "Stable element id for one root selector and `get-in` path."
@@ -459,10 +486,9 @@
           (scalar ::print/number x (str x "M"))
           (scalar ::print/number x (str "#bigdec[≈" (integer-digits u) " digits]"))))
       (#{clojure.lang.PersistentArrayMap clojure.lang.PersistentHashMap clojure.lang.PersistentTreeMap} c)
-      ;; A keyword key is looked up by name only where `find` compares it by
-      ;; hash and identity: exact array and hash maps, never a comparator.
+      ;; A keyword key names a path step only where `keyword-lookup?` permits.
       {:kind :map :face ::print/map :open "{" :close "}" :total (count x) :indexed? true
-       :lookup? (not (identical? c clojure.lang.PersistentTreeMap))
+       :lookup? (keyword-lookup? x)
        :members (held-order x identity-attributes key)}
       (#{clojure.lang.PersistentVector clojure.lang.MapEntry} c)
       {:kind :coll :face ::print/vector :open "[" :close "]" :total (count x) :members (seq x)}
@@ -533,14 +559,12 @@
                                         ::print/namespace-maps? false}))))
 
 (defn keyword-entry
-  "The value at keyword `k` in an exact persistent array or hash map of at
-  most 64 entries, found by comparing keys with `identical?`; nil otherwise.
-  Never calls `get`, a comparator or a host Map on an unclassified value."
+  "The value at keyword `k` in a map `keyword-lookup?` permits; nil otherwise.
+  Never calls `get`, a refusing comparator or a host Map on an unclassified value."
   {:malli/schema [:=> [:cat :seon.schema/value :keyword] :seon.schema/value]}
   [value k]
-  (when (and (#{clojure.lang.PersistentArrayMap clojure.lang.PersistentHashMap} (class value))
-             (<= (count value) sorted-bound))
-    (some (fn [entry] (when (identical? (key entry) k) (val entry))) value)))
+  (when (keyword-lookup? value)
+    (some-> (find value k) val)))
 
 (defn- cut-text
   {:malli/schema [:=> [:cat :map] :string]}
@@ -649,32 +673,50 @@
 
 (defn- declared
   "What the render pairs say about a reached map (design §2): nil, the
-  producer's print node `{::print/node n}`, or a value to select in its
-  place `{:value v}` (its identity projection, or a producer's refusal)."
+  producer's print node `{::print/node n}`, its identity projection to select
+  in its place `{:value v}`, or `{:diagnostic failure}` when selection or the
+  producer failed. A failure never replaces the value: the node prints as the
+  data it is and the failure is shown once beside it (AGENTS.md, the REPL
+  path is total)."
   {:malli/schema [:=> [:cat :seon.render/unit :seon.schema/value :seon.render.data/path :seon.render/output] [:maybe :map]]}
   [unit value path output]
-  (when (and (map? value) (:seon.sci.eval/ctx unit)
+  (when (and (keyword-lookup? value) (:seon.sci.eval/ctx unit)
              (not (get-in unit [:seon.render.value/options :seon.render.value/structural?])))
-    (let [projection (or (:seon.schema/projection unit)
-                         (:seon.schema/projection (meta (:seon.db/db unit)))
-                         (:seon.schema/projection (env/of (:seon.sci.eval/ctx unit))))
-          identity (when projection (schema/identity-only-projection-in projection value))
-          value (if identity (:seon.schema/identity-value identity) value)
-          projector (when identity
-                      (let [form (get (:seon.schema.projection/forms projection) (:seon.schema/key identity))]
-                        (when (and (vector? form) (map? (second form)))
-                          (:seon.schema/identity-projection (second form)))))
-          answer (try
-                   (@render-declared-projection
+    (try
+      (let [projection (or (:seon.schema/projection unit)
+                           (:seon.schema/projection (meta (:seon.db/db unit)))
+                           (:seon.schema/projection (env/of (:seon.sci.eval/ctx unit))))
+            identity (when projection (schema/identity-only-projection-in projection value))
+            value (if identity (:seon.schema/identity-value identity) value)
+            projector (when identity
+                        (let [form (get (:seon.schema.projection/forms projection) (:seon.schema/key identity))]
+                          (when (and (vector? form) (map? (second form)))
+                            (:seon.schema/identity-projection (second form)))))
+            answer (@render-declared-projection
                     (cond-> (assoc unit :seon.render.data/path path)
                       projector (assoc :seon.render/value value :seon.render.call/function projector))
-                    value output)
-                   (catch Throwable failure
-                     {::print/node {::print/face ::print/string ::print/value (floor failure)}}))]
-      (cond
-        (::print/node answer) answer
-        (:seon.error/value answer) {:value (:seon.error/value answer)}
-        identity {:value value}))))
+                    value output)]
+        (cond
+          (::print/node answer) answer
+          (:seon.error/value answer) {:diagnostic (:seon.error/value answer)}
+          identity {:value value}))
+      (catch Throwable failure {:diagnostic failure}))))
+
+(defn- diagnostic-line
+  "One line naming a presentation failure beside the value it did not replace."
+  {:malli/schema [:=> [:cat :seon.render.data/path [:or :seon.error/throwable :map] :int] :string]}
+  [path failure further]
+  (let [text (if (instance? Throwable failure)
+               (str (.getName (class failure)) ": " (ex-message failure))
+               ;; A typed unknown names its producer; what refused it is
+               ;; the guarded invocation's own error, its offending value.
+               (str (some-> (:seon.render.unknown/producer failure) (str " "))
+                    (:seon.error/message failure)
+                    (some->> (keyword-entry (:seon.error/offending failure) :seon.error/message) (str " "))))
+        limit (:chars text-limits)]
+    (str ";; renderer failed at " (pr-str path) ", value printed as data: "
+         (if (> (count text) limit) (str (subs text 0 limit) "…") text)
+         (when (pos? further) (str " (and " further " further renderer failures)")))))
 
 (defn- make-node
   "A node for `value` reached at `path`, classified, with its flat width."
@@ -684,8 +726,9 @@
         answer (declared unit value path output)
         declared (::print/node answer)
         value (if (contains? answer :value) (:value answer) value)
-        base {:id id :depth depth :path path :parent parent :indent (:indent position 0)
-              :outside (:outside position) :kids [] :n 0 :sum 0}
+        base (cond-> {:id id :depth depth :path path :parent parent :indent (:indent position 0)
+                      :outside (:outside position) :kids [] :n 0 :sum 0}
+               (:diagnostic answer) (assoc :diagnostic (:diagnostic answer)))
         node (if declared
                (let [text (when (and (= ::print/projected (::print/face declared))
                                      (= :seon.render/ai (:seon.render/output declared)))
@@ -983,9 +1026,29 @@
            form (str "Read any part with (seon.print/value-at " (pr-str (second form)) " [...]).")
            :else (str "Not retrievable: " (or (:seon.print/requery-refusal profile) "no source identity") ".")))))
 
+(defn- plain-projection
+  "The total floor's last answer: `value` as plain bounded Clojure text, with
+  the one diagnostic naming the failure that stopped the structural floor."
+  {:malli/schema [:=> [:cat :seon.schema/value :seon.error/throwable :seon.render.data/path]
+                  :seon.render.value/projection]}
+  [value failure path]
+  (let [text (str (bounded-text value (:floor-chars text-limits)) "\n" (diagnostic-line path failure 0))]
+    {:seon.render.value/tree {::print/face ::print/projected :seon.render/output :seon.render/ai ::print/value text}
+     :seon.render.value/options (print/default-options)
+     :seon.render.value/truncated? true
+     :seon.render.value/text text
+     :seon.render.value/html [:div {:class "seon-data-panel"} [:pre text]]
+     :seon.render.value/diagnostics [failure]}))
+
 (defn prepare
   "Select the value under its render profile (design one-render-path §3) and
-  emit the one tree as laid-out AI text and structural HTML."
+  emit the one tree as laid-out AI text and structural HTML.
+
+  TOTAL (AGENTS.md, the REPL path is total): a renderer that fails leaves its
+  node printed as data, a failure of the floor itself prints the value as
+  plain bounded Clojure text, and either failure is shown once beside the
+  value and returned as `:seon.render.value/diagnostics` for the caller to
+  record as a core fault."
   {:malli/schema
    [:function
     [:=> [:cat :seon.render/unit]
@@ -998,8 +1061,9 @@
    (prepare unit :seon.render/ai))
   ([unit output]
    (let [path (vec (get-in unit [:seon.render.data/cursor
-                                :seon.render.data/path] []))
-         id (node-id unit path)]
+                                :seon.render.data/path] []))]
+     (try
+       (let [id (node-id unit path)]
      (if (:seon.render.value/root-description id)
        id
        (let [profile (render-profile unit)
@@ -1030,10 +1094,14 @@
          (if (:seon.error/at state)
            state
        (let [cut? (boolean (some more? (vals (:nodes state))))
+             failed (sort-by :id (filter :diagnostic (vals (:nodes state))))
              selected (tree (:nodes state) context)
              emitted (print/emit-both selected options)
              text (cond-> (:seon.print/text emitted) cut? (str "\n" legend))
-             limit (- (charge state) (if cut? 0 (:legend context)))]
+             limit (- (charge state) (if cut? 0 (:legend context)))
+             ;; Shown once, beside the value and outside its budget.
+             diagnostic (when-let [node (first failed)]
+                          (diagnostic-line (:path node) (:diagnostic node) (dec (count failed))))]
          ;; The charge is the laid-out length (design §3d); a longer text is
          ;; the allocator's defect, never a second attempt. Declared renderer
          ;; text lays out on its own terms and is exempt.
@@ -1047,14 +1115,19 @@
          (cond-> {:seon.render.value/tree selected
                   :seon.render.value/options options
                   :seon.render.value/truncated? (boolean (or cut? (pos? (:offset context))))
-                  :seon.render.value/text text
+                  :seon.render.value/text (cond-> text diagnostic (str "\n" diagnostic))
                   :seon.render.value/html
                   [:div {:id id :class "seon-data-panel"}
                    (breadcrumbs unit path)
-                   (:seon.print/hiccup emitted)]}
+                   (:seon.print/hiccup emitted)
+                   (when diagnostic [:div {:class "seon-render-unavailable"} diagnostic])]}
+           (seq failed)
+           (assoc :seon.render.value/diagnostics (mapv :diagnostic failed))
            (:seon.render.call/selected-producer selected)
            (assoc :seon.render.call/selected-producer
-                  (:seon.render.call/selected-producer selected))))))))))
+                  (:seon.render.call/selected-producer selected))))))))
+       (catch Throwable failure
+         (plain-projection (:seon.render/value unit) failure path))))))
 
 (defn render-ai-data
   "Return the text sink result from one already prepared projection."

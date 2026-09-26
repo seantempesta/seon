@@ -938,16 +938,50 @@
 
 (deftest a-value-s-own-inline-function-renders-it
   ;; The master override's third form (AGENTS render law): an inline function
-  ;; is invoked under the same arm as a named producer, at the root or nested;
-  ;; one that throws is its typed unknown, never a missing value.
+  ;; is invoked under the same arm as a named producer, at the root or nested.
   (support/with-database
    (fn [connection]
      (let [text #(:seon.render.value/text (value/prepare (render-request connection %)))]
        (is (= "hello 1" (text {:seon.render/ai (fn [unit] (str "hello " (:x unit))) :x 1})))
-       (is (= "{:a \"inner\"}" (text {:a {:seon.render/ai (fn [_] "inner")}})))
-       (is (= :refused (:seon.render.unknown/reason
-                        (edn/read-string
-                         (text {:seon.render/ai (fn [_] (throw (ex-info "boom" {})))})))))))))
+       (is (= "{:a \"inner\"}" (text {:a {:seon.render/ai (fn [_] "inner")}})))))))
+
+(deftest ^{:seon/tasks #{"135d92ea1308"}} a-failing-renderer-never-replaces-the-value
+  ;; AGENTS.md, the REPL path is total: a renderer that throws or refuses
+  ;; leaves its value printed as data, with ONE diagnostic line beside it for
+  ;; the whole value, and the failures returned for the caller to record.
+  (support/with-database
+   (fn [connection]
+     (let [boom (fn [_] (throw (ex-info "boom" {})))
+           prepared (value/prepare (render-request connection
+                                                   [{:seon.render/ai boom :a 1}
+                                                    {:b {:seon.render/ai boom :c 2}}]))
+           shown (:seon.render.value/text prepared)
+           diagnostics (filter #(str/starts-with? % ";; renderer failed") (str/split-lines shown))]
+       (is (str/starts-with? shown "[{:seon.render/ai #object[") shown)
+       (is (str/includes? shown ":a 1}") shown)
+       (is (str/includes? shown ":c 2}}]") shown)
+       (is (= 1 (count diagnostics)) shown)
+       (is (str/starts-with? (first diagnostics) ";; renderer failed at [0]") shown)
+       (is (str/ends-with? shown "(and 1 further renderer failures)") shown)
+       (is (= 2 (count (:seon.render.value/diagnostics prepared))))))))
+
+(deftest ^{:seon/tasks #{"135d92ea1308"}} a-map-that-cannot-hold-keywords-prints-as-clojure-prints-it
+  ;; Smoke 2026-09-26: `(sorted-map 'b 2 'a 1)` printed a ClassCastException
+  ;; from the renderer's keyword lookup in place of the map. Only a map
+  ;; `keyword-lookup?` permits carries an attachment or an identity; a keyword
+  ;; sorted map still carries its own face.
+  (support/with-database
+   (fn [connection]
+     (let [prepared #(value/prepare (render-request connection %))
+           text #(:seon.render.value/text (prepared %))]
+       (is (= "[42 {a 1, b 2}]" (text [42 (sorted-map 'b 2 'a 1)])))
+       (is (= "{a 1, b 2}" (text (sorted-map 'b 2 'a 1))))
+       (is (= "{:k {\"x\" 1}}" (text {:k (sorted-map "x" 1)})))
+       (is (= "{z 1}" (text (sorted-map-by compare 'z 1))))
+       (is (nil? (:seon.render.value/diagnostics (prepared (sorted-map 'b 2 'a 1)))))
+       (is (= "custom face" (text (sorted-map :seon.render/ai "custom face" :x 1))))
+       (is (false? (value/keyword-lookup? (sorted-map 'a 1))))
+       (is (true? (value/keyword-lookup? (sorted-map :a 1))))))))
 
 (deftest a-reference-prints-as-its-referent-s-identity
   ;; A non-component ref attribute's entity id prints as the referent's
