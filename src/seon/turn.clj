@@ -160,6 +160,12 @@
       ;; emitted (audit F3).
       (int? (:seon.eval/duration-ms evaluation))
       (assoc :seon.eval/duration-ms (:seon.eval/duration-ms evaluation))
+      ;; The rest of the evaluation's recorded cost (queryable, shown only
+      ;; when a declared bound in :seon.config.eval/bounds is exceeded).
+      (int? (:seon.eval/acquisition-ms evaluation))
+      (assoc :seon.eval/acquisition-ms (:seon.eval/acquisition-ms evaluation))
+      (int? (:seon.eval/allocated-bytes evaluation))
+      (assoc :seon.eval/allocated-bytes (:seon.eval/allocated-bytes evaluation))
       ;; A FORM'S OWN `set!` OF *print-length* / *print-level*. Captured
       ;; while sci's binding is still installed (`sci/eval.clj` print-options
       ;; volatile), it is what the response must print the value under.

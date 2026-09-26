@@ -10,6 +10,10 @@
                      {:optional true
                       :seon.repl/fix "over one second in the evaluation you asked for. Find what the work is proportional to (the store? the program? the call count?) and remove it; (seon.profile/summary (seon.profile/cells) 5) ranks the armed functions by time."}
                      [:<= 1000]]
+                    [:seon.eval/allocated-bytes
+                     {:optional true
+                      :seon.repl/fix "the evaluation allocated over 512 MiB: something realized far more than it returned (an unbounded lazy sequence, a whole-store read, a copied collection). Realize only what you need."}
+                     [:<= 536870912]]
                     [:seon.repl/out-tokens
                      {:optional true
                       :seon.repl/fix "printed output is saved and re-read in every later context. Return the value instead of printing it."}

@@ -130,7 +130,6 @@
             [seon.program :as program]
             [seon.render :as render]
             [seon.render.value :as render.value]
-            [seon.profile :as profile]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.sci.kernel :as kernel]
@@ -4071,23 +4070,6 @@
       (assoc :seon.cluster.eval/diagnostics (floor-text request (mapv flat-diagnostic failures)))
       record (assoc :seon.sci.admit/record record))))
 
-(defn- explained-evaluation
-  "Return `evaluation`, explained when it took over one second.
-
-  The explanation rides as `:seon.profile/explanation` and its lines are
-  appended to the evaluation's output, the text the agent is shown, so a slow
-  form always says what the armed definitions did during it."
-  {:malli/schema [:=> [:cat :seon.profile/mark :seon.sci.eval/evaluation]
-                  :seon.sci.eval/evaluation]}
-  [mark evaluation]
-  (if-let [explanation (profile/explain-slow mark)]
-    (let [output (:seon.cluster.eval/output evaluation)
-          lines (str/join "\n" (map #(str ";; " %) (:seon.profile/lines explanation)))]
-      (assoc evaluation
-             :seon.profile/explanation explanation
-             :seon.cluster.eval/output (if (seq output) (str output "\n" lines) lines)))
-    evaluation))
-
 (defn- success-evaluation
   [{admitted :seon.sci.eval/admitted
     caps :seon.sci.admit/caps
@@ -4098,7 +4080,9 @@
     print-options :seon.print/options
     definitions :seon.sci.eval/bindings
     restore! :seon.sci.eval/restore
-    row :seon.program/row}]
+    row :seon.program/row
+    duration-ms :seon.eval/duration-ms
+    acquisition-ms :seon.eval/acquisition-ms}]
   (cond-> (cond-> {:seon.print/options print-options
                    :seon.cluster.eval/ns [:seon.ns/name namespace-name]
                    :seon.sci.eval/ending-ns ending-namespace
@@ -4115,14 +4099,14 @@
                    (:seon.eval/shown admitted))
             (:seon.cluster.eval/diagnostics admitted)
             (assoc :seon.cluster.eval/diagnostics (:seon.cluster.eval/diagnostics admitted)))
-    ;; HOW LONG THE FORM TOOK IS A KEY OF THE EVALUATION, not something two
-    ;; readers dig out of the diagnostic record by different routes. The
-    ;; storage projection and the page's in-memory render both read this one
-    ;; spelling, so an unstored record and its stored evaluation cannot
-    ;; disagree about `:seon.repl/ms`.
-    (int? (get-in admitted [:seon.sci.admit/record :seon.eval/duration-ms]))
-    (assoc :seon.eval/duration-ms
-           (get-in admitted [:seon.sci.admit/record :seon.eval/duration-ms]))
+    ;; HOW LONG THE EVALUATION TOOK IS A KEY OF THE EVALUATION: entrance to
+    ;; shown answer, less Seon's program acquisition, which is its own key.
+    ;; Allocation is the kernel's measurement, kept instead of dropped.
+    :always (assoc :seon.eval/duration-ms duration-ms)
+    (pos? acquisition-ms) (assoc :seon.eval/acquisition-ms acquisition-ms)
+    (pos? (get-in admitted [:seon.sci.admit/record :seon.eval/allocated-bytes] -1))
+    (assoc :seon.eval/allocated-bytes
+           (get-in admitted [:seon.sci.admit/record :seon.eval/allocated-bytes]))
     row (assoc :seon.program/row row)
     (seq definitions) (assoc :seon.sci.eval/bindings definitions)
     restore! (assoc :seon.sci.eval/restore restore!)
@@ -4295,10 +4279,7 @@
     :as request}]
   (let [form-sink (form-read-sink request)]
   (binding [db/*read-evidence-sink* nil]
-  (let [;; The profile window opens before any work: an evaluation over one
-        ;; second returns what the armed definitions did (`seon.profile`).
-        profile-mark (profile/begin)
-        ;; A supplied ctx keeps its accumulated defs. The only replacement is
+  (let [;; A supplied ctx keeps its accumulated defs. The only replacement is
         ;; the environment state: each form receives a turn-scoped immutable
         ;; value, so call preparation cannot read the long-lived cluster value
         ;; and silently omit the agent/run/form members.
@@ -4346,6 +4327,12 @@
         ;; this namespace's own contract. The interrupt-fn needs no arm: it
         ;; is the ctx's stable process guard, inert until armed.
         started-at (System/nanoTime)
+        ;; Seon's own program acquisition inside the arm, subtracted from the
+        ;; evaluation's reported time and recorded beside it.
+        acquisition-nanos (volatile! 0)
+        ;; The reply's `:ms`: entrance to answer (shown text), without
+        ;; acquisition. One clock difference, approximate by design.
+        elapsed-ms (fn [] (quot (- (System/nanoTime) started-at @acquisition-nanos) 1000000))
         arm-state (volatile! nil)
         interrupt-fn (get-in evaluation-ctx
                              [::kernel/guard ::kernel/interrupt-fn])
@@ -4426,8 +4413,6 @@
                   (cond-> request
                     (not (:seon.render/refused-member profile))
                     (assoc :seon.render/profile profile)))]
-    (explained-evaluation
-     profile-mark
     (schema/call-with-projection-state
      projection-state
      (fn []
@@ -4549,7 +4534,9 @@
                 (let [before-snapshot @(::kernel/program-snapshot evaluation-ctx)
                       own (keys (turn-interns evaluation-ctx))
                       base (or (::base-ctx evaluation-ctx) evaluation-ctx)
-                      result (acquire! {:seon.sci.eval/ctx base :seon.db/db database})]
+                      acquired-at (System/nanoTime)
+                      result (acquire! {:seon.sci.eval/ctx base :seon.db/db database})
+                      _ (vswap! acquisition-nanos + (- (System/nanoTime) acquired-at))]
                   (when-let [failure (first (::acquisition-refusals result))]
                     (throw (ex-info "SCI program acquisition refused a declaration." failure)))
                   (when-let [failure (::acquisition-recording-error result)]
@@ -4791,14 +4778,16 @@
             :seon.print/options @print-options
             :seon.sci.eval/bindings definitions
             :seon.sci.eval/restore restore!
-            :seon.program/row row}))))
+            :seon.program/row row
+            :seon.eval/duration-ms (elapsed-ms)
+            :seon.eval/acquisition-ms (quot @acquisition-nanos 1000000)}))))
         (catch Throwable throwable
           (failure-result throwable))
           )))
         (catch Throwable throwable
           (if @arm-state
             (throw throwable)
-            (failure-result throwable)))))))))))))))
+            (failure-result throwable))))))))))))))
 
 (defn- install-candidate-function!
   [ctx database row]

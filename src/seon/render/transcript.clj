@@ -288,6 +288,7 @@
      ::interrupted-at (:seon.cluster.eval/interrupted-at receipt)
      ::comment (:seon.cluster.eval/comment receipt)
      ::duration-ms (:seon.eval/duration-ms receipt)
+     ::allocated-bytes (:seon.eval/allocated-bytes receipt)
      ::print-length (:seon.print/length receipt)
      ::print-level (:seon.print/level receipt)
      ::ending-ns (:seon.sci.eval/ending-ns receipt)
@@ -489,6 +490,8 @@
       (::ending-ns entry) (assoc :seon.sci.eval/ending-ns (::ending-ns entry))
       (::duration-ms entry) (assoc :seon.eval/duration-ms
                                    (::duration-ms entry))
+      (::allocated-bytes entry) (assoc :seon.eval/allocated-bytes
+                                       (::allocated-bytes entry))
       (::branch-errors-text entry) (assoc :seon.repl/errors
                                           (::branch-errors-text entry)))))
 

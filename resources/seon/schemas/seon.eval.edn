@@ -33,6 +33,7 @@
               {:optional true}
               :inst]],
             :duration-ms [:and {:seon.wake/context-inert true} :int],
+            :acquisition-ms [:int {:min 0 :seon.wake/context-inert true :description "Milliseconds of Seon's own SCI program acquisition inside one evaluation's arm, excluded from :seon.eval/duration-ms (the agent's reply time) and recorded beside it."}],
             :fn-entries [:and {:seon.wake/context-inert true} :int],
             :allocated-bytes [:and {:seon.wake/context-inert true} :int],
             :outcome [:enum {:seon.wake/context-inert true} :ok :time :error],
