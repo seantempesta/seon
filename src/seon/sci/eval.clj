@@ -111,6 +111,8 @@
             [my.turn]
             [sci.addons.future :as sci.future]
             [sci.core :as sci]
+            [sci.ctx-store]
+            [sci.impl.namespaces :as sci.namespaces]
             [sci.impl.vars :as sci.vars]
             [sci.impl.utils :as sci.utils]
             [sci.interrupt :as sci.interrupt]
@@ -262,6 +264,60 @@
              (ns-publics host)))
       {})))
 
+;;; clojure.test over the evaluating context's namespaces. The agent's
+;;; clojure.test is the host namespace copied in; its test-var, test-vars and
+;;; report run as they are, while these four find SCI namespaces through the
+;;; evaluating ctx (`sci.ctx-store`, bound by `sci/eval-form`) as babashka's
+;;; SCI-side copy does (reference-code/babashka/src/babashka/impl/clojure/test.clj:750-790).
+
+(defn- agent-test-all-vars
+  "Run every test Var interned in one SCI namespace, with its fixtures."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "clojure.test names a namespace by symbol or by namespace object.", :gen/elements [nil]}]] :nil]}
+  [namespace-designator]
+  (let [ctx (sci.ctx-store/get-ctx)]
+    (clojure.test/test-vars
+     (vals (sci.namespaces/sci-ns-interns*
+            ctx (sci.namespaces/sci-the-ns* ctx namespace-designator))))))
+
+(defn- agent-test-ns
+  "Run one SCI namespace's tests; answer its report counters."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "clojure.test names a namespace by symbol or by namespace object.", :gen/elements [nil]}]] [:map-of :keyword :int]]}
+  [namespace-designator]
+  (binding [clojure.test/*report-counters* (ref clojure.test/*initial-report-counters*)]
+    ;; clojure.test's :begin-test-ns report calls the host `ns-name`, which
+    ;; cannot name a SCI namespace; print its line here instead.
+    (clojure.test/with-test-out
+      (println "\nTesting" (str (sci.namespaces/sci-the-ns* (sci.ctx-store/get-ctx) namespace-designator))))
+    (agent-test-all-vars namespace-designator)
+    @clojure.test/*report-counters*))
+
+(defn- agent-run-tests
+  "Run the named SCI namespaces' tests, else the current namespace's; report the summary."
+  {:malli/schema [:=> [:cat [:* [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "clojure.test names a namespace by symbol or by namespace object.", :gen/elements [nil]}]]] [:map-of :keyword [:or :int :keyword]]]}
+  [& namespace-designators]
+  (let [summary (assoc (apply merge-with + (map agent-test-ns (or namespace-designators [@sci/ns])))
+                       :type :summary)]
+    (clojure.test/do-report summary)
+    summary))
+
+(defn- agent-use-fixtures
+  "Record fixtures on the current SCI namespace, where clojure.test/test-vars reads them."
+  {:malli/schema [:=> [:cat [:enum :once :each] [:* ifn?]] :any]}
+  [fixture-type & fixtures]
+  (alter-meta! @sci/ns assoc
+               (keyword "clojure.test" (str (name fixture-type) "-fixtures")) fixtures))
+
+(defn- agent-test-namespace
+  "The clojure.test entries that must see the evaluating context's namespaces."
+  [sci-namespace]
+  (into {}
+        (map (fn [[intern-name function]]
+               [intern-name (sci/new-var intern-name function {:ns sci-namespace})]))
+        {'test-all-vars agent-test-all-vars
+         'test-ns agent-test-ns
+         'run-tests agent-run-tests
+         'use-fixtures agent-use-fixtures}))
+
 (defn build-base-ctx
   "Build the minimal interpreter from the projection supplied by its caller."
   {:malli/schema [:=> [:cat :seon.schema/projection] :seon.sci.eval/ctx]}
@@ -294,6 +350,8 @@
                           symbols)])))
               (group-by (comp symbol namespace)
                         (program/base-context-injected-symbols projection)))
+        injected-namespaces (update injected-namespaces 'clojure.test merge
+                                    (agent-test-namespace (sci/create-ns 'clojure.test)))
         ctx
         (sci/init
         (->
@@ -2412,12 +2470,46 @@
        (boolean (clojure.core/find-ns '~namespace-name))))
    {:ns (sci/create-ns 'clojure.repl)}))
 
+(defn stored-source
+  "The stored source of the program declaration named `qualified`, or nil.
+
+  Each program family's shape names its identity and source attributes
+  (`seon.program/shapes-in`); the families whose identity schema admits
+  `qualified` are asked, and the first holding it answers."
+  {:malli/schema [:=> [:cat :seon.db/database-value :symbol] [:maybe :string]]}
+  [database qualified]
+  (let [projection (or (db/carried-projection database)
+                       (schema/projection-from-database database))
+        registry (:seon.schema.projection/registry projection)]
+    (some (fn [[identity-attribute {source-attribute :seon.program/source-attribute}]]
+            (when (m/validate (m/schema identity-attribute {:registry registry}) qualified)
+              (let [source (db/q '[:find ?source . :in $ ?identity ?value ?attribute
+                                   :where [?entity ?identity ?value] [?entity ?attribute ?source]]
+                                 database identity-attribute qualified source-attribute)]
+                (if (:seon.db/invalid-read source)
+                  (throw (ex-info (:seon.error/message source) source))
+                  source))))
+          (program/shapes-in projection))))
+
+(defn- stored-source-fn
+  "`clojure.repl/source-fn` for the evaluating context: SCI's `source` macro
+  calls it (`reference-code/sci/src/sci/impl/namespaces.cljc:2436`); the
+  symbol resolves in the calling SCI namespace and the stored row answers."
+  {:malli/schema [:=> [:cat :symbol] [:maybe :string]]}
+  [requested]
+  (let [resolved (sci/resolve (sci.ctx-store/get-ctx) requested)
+        {var-ns :ns var-name :name} (meta resolved)]
+    (stored-source (db/db) (if resolved (symbol (str var-ns) (str var-name)) requested))))
+
 (defn- install-program-doc!
   "Install REPL macros without capturing program facts or a database value."
   [ctx _db _projection]
   (let [doc-var (program-doc-var)
         dir-var (program-dir-var)]
-    (sci/add-namespace! ctx 'clojure.repl {'doc doc-var 'dir dir-var})
+    (sci/add-namespace! ctx 'clojure.repl
+                        {'doc doc-var 'dir dir-var
+                         'source-fn (sci/new-var 'source-fn stored-source-fn
+                                                 {:ns (sci/create-ns 'clojure.repl)})})
     (sci/add-namespace! ctx 'clojure.core
                         {'doc doc-var 'dir dir-var
                          'deftest (sci/resolve ctx 'clojure.test/deftest)
@@ -4332,7 +4424,10 @@
                   ;; Read evidence is what the form read: the request's sink
                   ;; is bound here and around its shown result, never around
                   ;; acquisition, identity checks or install.
-                  (let [value (binding [db/*read-evidence-sink* form-sink]
+                  ;; clojure.test reports through the host `*test-out*`
+                  ;; (its `with-test-out`); this form's report is its output.
+                  (let [value (binding [db/*read-evidence-sink* form-sink
+                                        clojure.test/*test-out* printed]
                                 ;; This thread is the REPL thread for this
                                 ;; form. SCI attaches the form's location to a
                                 ;; throw only on the ctx's :main-thread-id,

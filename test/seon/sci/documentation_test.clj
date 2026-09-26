@@ -305,3 +305,57 @@
        (is (not= "" (:summary doc)))
        (is (str/includes? (:summary doc) (str :seon.fn/doc)))
        (is (str/includes? (:doc row) (str :seon.fn/doc)))))))
+
+(deftest clojure-test-at-the-agent-repl-reports-into-the-evaluations-output
+  (support/with-database
+   (fn [connection]
+     (is (:db-after (db/transact! connection
+                                 [{:seon.agent/id "clojure-test"
+                                   :seon.agent/namespace
+                                   (support/namespace-row @connection 'fixture.clojure-test)}])))
+     (let [ctx (support/fork-cluster-ctx connection)
+           run (fn [source]
+                 (evaluation/evaluate
+                  {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
+                   :seon.db/connection connection :seon.agent/id "clojure-test"
+                   :seon.cluster.eval/ns [:seon.ns/name 'fixture.clojure-test]
+                   :seon.cluster.eval/source source
+                   :seon.sci.admit/caps (config/result-caps config/defaults)
+                   :seon.sci.eval/time-limit-ms 10000
+                   :seon.config/on-core-error :panic}))]
+       (sci/binding [sci/ns (sci/create-ns 'fixture.clojure-test)]
+         (sci/eval-string* ctx "(deftest a-failing-test (is (= 1 2)))")
+         (sci/eval-string* ctx "(deftest a-passing-test (is (= 1 1)) (is (= 2 2)))"))
+       (let [direct (run "(a-failing-test)")
+             current (run "(clojure.test/run-tests)")
+             named (run "(clojure.test/run-tests 'fixture.clojure-test)")
+             summary {:test 2 :pass 2 :fail 1 :error 0 :type :summary}]
+         (is (str/includes? (str (:seon.cluster.eval/output direct)) "FAIL in (a-failing-test)")
+             (pr-str direct))
+         (doseq [result [current named]]
+           (is (= summary (:seon.sci.admit/value result)) (pr-str result))
+           (is (str/includes? (str (:seon.cluster.eval/output result)) "Testing fixture.clojure-test"))
+           (is (str/includes? (str (:seon.cluster.eval/output result))
+                              "Ran 2 tests containing 3 assertions."))))))))
+
+(deftest source-at-the-agent-repl-prints-the-stored-declaration
+  (support/with-database
+   (fn [connection]
+     (let [ctx (support/fork-cluster-ctx connection)
+           run (fn [source]
+                 (evaluation/evaluate
+                  {:seon.sci.eval/ctx ctx
+                   :seon.cluster.eval/source source
+                   :seon.sci.admit/caps (config/result-caps config/defaults)
+                   :seon.sci.eval/time-limit-ms 2000
+                   :seon.config/on-core-error :panic}))
+           stored (:seon.fn/source (db/pull (db/db connection) [:seon.fn/source]
+                                            [:seon.fn/sym 'my.agent/settings!]))
+           qualified (run "(clojure.repl/source my.agent/settings!)")
+           aliased (run "(do (require '[my.agent :as agent]) (clojure.repl/source agent/settings!))")
+           missing (run "(clojure.repl/source fixture.missing/nothing)")]
+       (is (string? stored))
+       (is (= (str stored "\n") (:seon.cluster.eval/output qualified)) (pr-str qualified))
+       (is (= (str stored "\n") (:seon.cluster.eval/output aliased)) (pr-str aliased))
+       (is (= "Source not found\n" (:seon.cluster.eval/output missing)) (pr-str missing))
+       (is (= stored (evaluation/stored-source (db/db connection) 'my.agent/settings!)))))))

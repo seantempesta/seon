@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: fixed-unproven
 severity: high
 created: 2026-09-26
 tags: [issue, sci, repl, test, dogfood]
@@ -47,3 +47,11 @@ reporting into the evaluation's printed output. `my.test/run` runs `*ns*`'s test
 ## Regression
 
 One parity row per table line, through the agent entrance.
+
+## Fix (agent-repl-gaps-opus, 2026-09-26; root's installed proof pending)
+
+`seon.sci.eval` binds the host `clojure.test/*test-out*` to the evaluation's printed writer, and the agent's
+`clojure.test/run-tests`, `test-ns`, `test-all-vars` and `use-fixtures` find SCI namespaces through the evaluating
+context (`sci.ctx-store`), as babashka's SCI-side copy does. `my.test/run` runs `*ns*`'s tests unless the request names
+`:seon.ns/name`. Regression: `seon.sci.documentation-test/clojure-test-at-the-agent-repl-reports-into-the-evaluations-output`.
+Landing: `docs/research/agent-platform/landing/agent-repl-gaps-2026-09-26.md`.
