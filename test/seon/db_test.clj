@@ -383,12 +383,20 @@
      (schema/call-with-projection
       fixture-projection
       (fn []
+        ;; A component attribute's declared child schema is a row too: the
+        ;; writer validates the owned value against it.
         (test-support/transacted!
          connection
-         (schema/canonical-schema-rows
-          fixture-projection
-          (select-keys (:seon.schema.projection/forms fixture-projection)
-                       (keep :db/ident (:seon.test-support/extra-schema options)))))
+         (let [forms (:seon.schema.projection/forms fixture-projection)
+               idents (keep :db/ident (:seon.test-support/extra-schema options))
+               children (keep #(let [form (get forms %)]
+                                 (when (and (vector? form) (map? (second form)))
+                                   (:seon.db/component-schema (second form))))
+                              idents)]
+           (test-support/schema-rows
+            (db/db connection)
+            (mapv (fn [schema-key] [schema-key (get forms schema-key)])
+                  (concat idents children)))))
         (body connection))))))
 
 (deftest edn-backed-reads-return-distinguishable-logical-values

@@ -27,20 +27,6 @@
             [seon.test-support :as support]
             [seon.turn :as turn]))
 
-;; `projection-with-schema` admits each form in order onto the fixture's own
-;; carried projection, so a form may name the ones before it; the rows come
-;; from `canonical-schema-rows`, which derives each definition digest.
-(defn- declare-schemas!
-  "Write synthetic schema declarations as canonical rows through the writer."
-  {:malli/schema [:=> [:cat :seon.db/connection [:vector [:tuple :qualified-keyword :any]]]
-                  :seon.db/transaction-report]}
-  [connection forms]
-  (let [projection (reduce (fn [current [schema-key definition]]
-                             (schema/projection-with-schema
-                              current schema-key definition {:seon.schema.admission/source :core}))
-                           (db/carried-projection @connection) forms)]
-    (support/transacted! connection (schema/canonical-schema-rows projection (into {} forms)))))
-
 (defn- element-text [node]
   (cond
     (string? node) node
@@ -505,12 +491,12 @@
 (deftest blocks-use-the-values-schema-documentation
   (support/with-database
     (fn [connection]
-      (declare-schemas! connection
+      (support/transacted! connection (support/schema-rows @connection
                         [[::title [:string {:title "Notebook title"}]]
                          [::notebook [:map {:seon.db/attributes true
                                             :title "Notebook"
                                             :description "Notes for this concern."}
-                                      [::title ::title]]]])
+                                      [::title ::title]]]]))
       (let [database @connection
             projection (schema/projection-from-database database)
             metadata (#'web/block-metadata projection database
@@ -532,11 +518,11 @@
 (deftest every-declared-attribute-has-an-ordered-pair-even-when-absent
   (support/with-database
    (fn [connection]
-     (declare-schemas! connection
+     (support/transacted! connection (support/schema-rows @connection
                        [[::name :string] [::notes :string]
                         [::record [:map {:seon.db/attributes true}
                                    [::name ::name]
-                                   [::notes {:optional true} ::notes]]]])
+                                   [::notes {:optional true} ::notes]]]]))
      (let [database @connection
            projection (schema/projection-from-database database)
            declared (#'web/declared-entity-units projection database {::name "Example"})
@@ -562,10 +548,10 @@
      {:db/ident ::right :db/valueType :db.type/ref :db/cardinality :db.cardinality/one}
      {:db/ident ::hidden :db/valueType :db.type/ref :db/cardinality :db.cardinality/one}]}
    (fn [connection]
-     (declare-schemas! connection
+     (support/transacted! connection (support/schema-rows @connection
                        [[::declared-concerns [:map {:seon.db/attributes true :seon.program/partition :seon.data
                                                     :seon.render/units [::_left ::_right]}
-                                              [:seon.agent/id :seon.agent/id]]]])
+                                              [:seon.agent/id :seon.agent/id]]]]))
      (support/transacted! connection
                           (into (support/agent-tx @connection "relationships")
                             ;; Each relationship entity has an identity: the writer
@@ -694,7 +680,7 @@
 (deftest block-reference-headers-link-identities-and-omit-unidentified-entities
   (support/with-database
    (fn [connection]
-     (declare-schemas! connection [[::identity-alias :seon.agent/id]])
+     (support/transacted! connection (support/schema-rows @connection [[::identity-alias :seon.agent/id]]))
      (let [installed (db/transact!
                       connection
                       [(schema.datahike/malli->datahike-attr-in

@@ -762,6 +762,21 @@
     (@#'seon.db/declaration-value database (db/identity-attributes database) stored)
     (namespace-row database namespace-name)))
 
+(defn schema-rows
+  "Canonical schema declaration rows for synthetic `forms`, `[key definition]`
+   pairs in dependency order, each declared onto `database`'s projection through
+   `seon.schema/projection-with-schema`. The writer derives its projection from
+   stored schema rows (`seon.db/carried-projection`), so a synthetic schema a
+   fixture writes through is one of these rows, never a carried projection."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector [:tuple :qualified-keyword :any]]]
+                  [:vector :map]]}
+  [database forms]
+  (let [projection (reduce (fn [current [schema-key definition]]
+                             (schema/projection-with-schema
+                              current schema-key definition {:seon.schema.admission/source :core}))
+                           (db/carried-projection database) forms)]
+    (vec (schema/canonical-schema-rows projection (into {} forms)))))
+
 (defn revised-row
   "`row` with `overrides` merged, digested from that FINAL row through the one
    digest owner `seon.db/definition-digest-of` with the namespace row the write

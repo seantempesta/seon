@@ -1045,6 +1045,15 @@
      (fn [connection]
        (db/carry-connection-projection-state!
         connection (sci.eval/projection-state (db/db connection) projection))
+       ;; The writer derives its projection from stored schema rows, so the
+       ;; synthetic manifest schemas are declared as rows, not only carried.
+       (test-support/transacted!
+        connection
+        (test-support/schema-rows
+         (db/db connection)
+         (mapv #(vector % (get forms %))
+               [::manifest-id ::manifest-location ::manifest-observation
+                ::manifest-explanations ::manifest-root])))
        (test-support/transacted! connection [{::manifest-id "root-path"
                                               ::manifest-location {:seon.error.location/length 0}}])
        (test-support/transacted!
