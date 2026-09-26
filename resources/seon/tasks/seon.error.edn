@@ -10,4 +10,22 @@
              :kind :function
              :intent "A missing key whose schema carries :error/message reads 'the required key :seon.db/db with must be ...' (error.clj:867)."
              :must-read #{seon.error/explain-problem}
-             :evidence #{"docs/research/agent-platform/landing/error-text-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/error-text-2026-09-26.md"}}
+ #:seon.task{:id "c75ab14cb365"
+             :name "deliver-core-faults-to-responsible-agent"
+             :kind :function
+             :intent "The writer chooses who acts on a recorded fault from held relations (the steward, else the escalation owner the producer names), never from whether a Throwable was present; the notification carries the error value, not prose (audit §2.5 items 2-3, E01)."
+             :must-read #{seon.error/commit-call}
+             :evidence #{"docs/research/agent-platform/error-delivery-audit-2026-09-26.md"}}
+ #:seon.task{:id "f58c3aab9277"
+             :name "fault-observation-returns-the-recorded-error"
+             :kind :function
+             :intent "occurred-since returns each touched error's recorded observation with its references and resolution instead of a signature/message/count summary, and resolution never hides a fault from its window; for-agent reaches the escalation owner of a fault no steward answers for (audit §2.5 items 5-6)."
+             :must-read #{seon.error/occurred-since seon.error/for-agent}
+             :evidence #{"docs/research/agent-platform/error-delivery-audit-2026-09-26.md"}}
+ #:seon.task{:id "5e008f619131"
+             :name "error-transactions-carry-references-never-worlds"
+             :kind :function
+             :intent "An error-recording transaction's writer call carried the whole schema projection, so any refused write copied it into its refusal and the operator could not read the failure back (owner 2026-09-26, start --head at 7c40396b3). The call holds data and references; the writer reads its database's own projection."
+             :must-read #{seon.error/recording seon.error/commit-call}
+             :evidence #{"docs/research/agent-platform/landing/err-s3-fault-identity-opus-2026-09-26.md"}}]

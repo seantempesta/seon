@@ -683,9 +683,7 @@
   (test-support/assert-check!
    (tc/quick-check
     80
-    (prop/for-all [reason (gen/elements
-                           [nil :your-run :no-attributable-agent
-                            :recurring :failover])]
+    (prop/for-all [reason (gen/elements [nil :failover])]
       (let [fact (fact)
             notice (error/notice
                     (cond-> {:seon.error/fact fact}
@@ -806,27 +804,39 @@
                               (db/db connection)))))))))
    (is (= 1 @applications) "The canonical cluster seed is the sole config writer.")))
 
-(deftest only-a-throwable-tells-the-attributed-agent
-  (with-db
-    (fn [connection]
-      (testing "a Throwable interrupted the agent's run, and it cannot know
-      unless told"
-        (let [[_ messages] (commit! connection
-                                    (transform-error (ex-info "boom" {}))
-                                    {:seon.agent/id "agent-3"
-                                     :seon.turn/id "run-9"})]
-          (is (= {"agent-3" 1} messages))))))
-  (with-db
-    (fn [connection]
-      (testing "a refused transition is a VALUE: the run's own facts already
-      say what happened, so the fact is recorded and nobody is mailed"
-        (let [[facts messages]
-              (commit! connection
-                       {:seon.error/message "the run is held by another process"}
-                       {:seon.agent/id "agent-3"
-                        :seon.turn/id "run-9"})]
-          (is (= 1 facts))
-          (is (= {} messages)))))))
+(deftest ^{:seon/tasks #{"c75ab14cb365"}} the-writer-not-the-evidence-shape-chooses-who-acts
+  ;; Audit 2026-09-26 §2.5 item 2: a Throwable's presence used to route an
+  ;; attributed fault to the agent it happened to, and the same fault as a
+  ;; flat value to nobody. Both now reach the escalation owner the producer
+  ;; names, as its value; the attributed agent is never mailed about it.
+  (doseq [[label source] [[:throwable (transform-error (ex-info "boom" {}))]
+                          [:flat-value {:seon.error/message "the run is held by another process"}]]]
+    (with-db
+      (fn [connection]
+        (testing (str label " attributed to agent-3")
+          (let [[facts messages] (commit! connection source {:seon.agent/id "agent-3"
+                                                             :seon.turn/id "run-9"})
+                content (db/q '[:find ?content . :where [?m :seon.message/about _]
+                                                        [?m :seon.message/content ?content]]
+                              (db/db connection))
+                delivered (edn/read-string content)]
+            (is (= 1 facts))
+            (is (= {"root" 1} messages))
+            (is (= #{:seon.error/at :seon.error/layer :seon.error/operation :seon.error/message
+                     :seon.error/signature :seon.error/id}
+                   (into #{} (filter #{:seon.error/at :seon.error/layer :seon.error/operation
+                                       :seon.error/message :seon.error/signature :seon.error/id})
+                         (keys delivered)))
+                "the notification is the error's value, readable as data")))))
+    (with-db
+      (fn [connection]
+        (testing (str label " from a producer naming no escalation owner: an agent's own mistake")
+          (test-support/transacted!
+           connection
+           (error/commit-tx (db/db connection)
+                            (dissoc (commit-request source {:seon.agent/id "agent-3"})
+                                    :seon.config.error/escalate-to)))
+          (is (empty? (db/q '[:find ?m :where [?m :seon.message/about _]] (db/db connection)))))))))
 
 (deftest an-agent-this-cluster-does-not-have-is-no-attribution-at-all
   ;; review-caught: attribution is read off the FACT, not the request.

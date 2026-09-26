@@ -718,11 +718,9 @@
 (defn notice
   "The agent-facing unit for one fact; :seon.error/notice declares its AI renderer.
 
-  `:seon.error/reason` is the per-RECIPIENT why-clause and is optional
-  because a log has no recipient: one fact is `:your-run` to the
-  interrupted agent and `:recurring` to the escalation owner in the same
-  transaction, which is why the reason is derived here and never stored
-  on the entity."
+  `:seon.error/reason` is optional: only a failover attempt's notice
+  (`seon.turn`) states one. A recorded fault's notification carries the
+  error's value, not a notice (`message-tx`)."
   {:malli/schema [:=> [:cat :seon.error/notice-request] :seon.error/notice]}
   [{:seon.error/keys [fact reason occurrence occurrence-count notification-limit
                       notification]
@@ -1148,19 +1146,10 @@
                   :string]}
   [notice]
   (let [{:seon.error/keys [fact reason]} notice
-        {:seon.error/keys [id message run signature]} fact]
+        {:seon.error/keys [id message signature]} fact]
     (if (= reason :failover)
       "The primary model was not called: its connection failed before send, so no output exists. Answer the unchanged request as the backup attempt."
-      (str/join " "
-                (remove nil?
-                        [message
-                         (case reason
-                           :your-run (when run (str "It interrupted run " (second run) "."))
-                           :no-attributable-agent "No agent or run could be attributed."
-                           :recurring "This fault belongs to a namespace assigned to you."
-                           nil)
-                         (str "Inspect error " id ". Signature: " signature ".")
-                         "Further occurrences share this record and send no notification until it is resolved."])))))
+      (str message " Inspect error " id ". Signature: " signature "."))))
 
 (declare ai-prose)
 
@@ -1343,19 +1332,19 @@
   (id/id (cond-> [error-signature recipient] (not= 0 opening-token) (conj opening-token))))
 
 (defn- message-tx
-  {:malli/schema [:=> [:cat :seon.error/fact :seon.agent/id :seon.agent/id :seon.error/reason :map
+  "One notification per opening. Its content is the error's value, the flat
+  data and references `value` keeps, printed readably; its subject is the
+  signature, so the recipient's context reaches the whole record."
+  {:malli/schema [:=> [:cat :seon.error/fact :seon.agent/id :seon.agent/id
                        [:or [:int {:min 0}] :seon.program/definition-digest]]
                   :map]}
-  [fact sender recipient reason notification opening]
+  [fact sender recipient opening]
   ;; one message per opening: a re-opened signature is a new message, so it wakes again
   {:db/id (str "seon.error/notified-" recipient)
    :seon.message/id (notification-id (:seon.error/signature fact) recipient opening)
    :seon.message/to [:seon.agent/id recipient]
    :seon.message/from [:seon.agent/id sender]
-   :seon.message/content (ai-prose (notice (merge {:seon.error/fact fact
-                                                 :seon.error/reason reason
-                                                 :seon.agent/id recipient}
-                                                notification)))
+   :seon.message/content (pr-str (value fact))
    :seon.message/about (:seon.error/signature fact)})
 
 
@@ -1398,9 +1387,7 @@
                             steward-id steward-present opened])]
     (if read-refusal
       read-refusal
-      (let [projection (or (db/carried-projection database)
-                            (:seon.schema/projection request)
-                            (schema/projection-from-database database))
+      (let [projection (db/carried-projection database)
         ;; THE FAULT'S OWN SCHEMA, NOT THE POPULATION. The stored diagnostic
         ;; attributes are its declared schema's and the base's own entries,
         ;; each where that schema declares `:seon.db/attributes`. An earlier
@@ -1429,7 +1416,6 @@
         fact (cond-> fact (nil? agent-id) (dissoc :seon.error/agent)
                          (nil? turn-id) (dissoc :seon.error/run))
         count (inc (or (:seon.error.occurrence/count old) 0))
-        interrupted? (some? (:seon.error/exception-class fact))
         evidence (select-keys fact [:seon.error/process :seon.error/proc :seon.error/op
                                    :seon.error/result-id :seon.error/shown
                                    :seon.error/cid :seon.error/throwable-class
@@ -1467,25 +1453,17 @@
                                           :seon.error/layer :seon.error/operation :seon.instrument/fn :seon.error/frame
                                           :seon.error/exception-class])
                          :seon.error/occurrences #{occurrence})
-        notification {:seon.error/notification-id signature}
+        ;; WHO ACTS ON A RECORDED FAULT is the writer's reading of held
+        ;; relations, never of the evidence's shape (a Throwable's presence
+        ;; says how it escaped, not who fixes it): the steward of its function,
+        ;; else the escalation owner the producer names. A producer recording
+        ;; an agent's own mistake, already returned to that agent, names none.
+        ;; The agent a fault happened to reads it through `for-agent`.
         recipients (when (some? opened)
-                     (cond
-                       steward-present {steward-id :recurring}
-                       (and interrupted? agent-id) {agent-id :your-run}
-                       ;; a fault no agent answers for reaches the configured
-                       ;; escalation owner, with or without a throwable. The
-                       ;; shipped default leaves `escalate-to` absent (owner
-                       ;; ruling 2026-09-24): the fault stays recorded and shown,
-                       ;; and wakes no paid root turn. An attributed fault without
-                       ;; a throwable is its agent's mistake, already returned to
-                       ;; that agent in its turn.
-                       (and escalation-present (nil? agent-id)) {escalate-to :no-attributable-agent}
-                       :else {}))
-        messages (mapv (fn [[recipient reason]]
-                         (message-tx fact (or agent-id
-                                             (when escalation-present escalate-to)
-                                             steward-id) recipient reason notification opened))
-                       recipients)]
+                     (cond steward-present #{steward-id}
+                           escalation-present #{escalate-to}
+                           :else #{}))
+        messages (mapv #(message-tx fact (or agent-id steward-id %) % opened) recipients)]
     (if (and (:seon.error/obligation request) (:seon.error.occurrence/id old))
       ;; ONE OBLIGATION, ONE DISPOSITION: this occurrence already answers it
       [{:seon.db.process/id process}]
@@ -1601,8 +1579,12 @@
                 :seon.error/declared-schema (:seon.error/declared-schema fact)
                 :seon.error/layer (:seon.error/layer fact)
                 :seon.error/operation (:seon.error/operation fact)}]
+         ;; the writer's call holds data and references, never a world: the
+         ;; projection is the writer database's own (`db/carried-projection`),
+         ;; and a refused write copies this call into its refusal
          tx (conj rows [:db.fn/call #'commit-call
-                        (assoc request :seon.error/fact fact :seon.error.occurrence/id occurrence-id)])]
+                        (-> (dissoc request :seon.schema/projection)
+                            (assoc :seon.error/fact fact :seon.error.occurrence/id occurrence-id))])]
      {:seon.error/fact fact
       :seon.error/ref [:seon.error/signature signature]
       :seon.error.occurrence/ref [:seon.error.occurrence/id occurrence-id]
@@ -1623,51 +1605,47 @@
                      attribution))))
 
 (defn occurred-since
-  "The unresolved errors written on `database`'s branch after basis `since`, one
-  entry per signature: the window (since, basis of `database`]. Shown once per
-  window, no seen-flag; a recurrence writes its occurrence again and re-enters.
-  The count sums the touched occurrences' cumulative counts. A branch other than
-  `database`'s own marks a core fault's cluster-branch copy."
+  "The errors written on `database`'s branch after basis `since`, the window
+  (since, basis of `database`], newest first: per signature its recorded
+  observation as `latest-fact` reads it (flat members, stored evidence and
+  references), with `:seon.error.occurrence/branch` the branches of the
+  occurrences this window touched (another branch marks a core fault's
+  cluster-branch copy) and `:seon.error/resolution` when it is resolved.
+  A resolved error stays in its window: resolution is not delivery.
+  `:seon.error/occurrence-count` is cumulative, never a count since `since`."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/basis-t]
                   [:or [:vector [:map [:seon.error/signature :seon.error/signature]
                                  [:seon.error/operation :seon.error/operation]
                                  [:seon.error.occurrence/message :seon.error.occurrence/message]
                                  [:seon.error.occurrence/count :seon.error.occurrence/count]
-                                 [:seon.error.occurrence/branch {:optional true} [:set :seon.store/branch]]]]
+                                 [:seon.error.occurrence/branch {:optional true} [:set :seon.store/branch]]
+                                 [:seon.error/resolution {:optional true} :seon.error/resolution]]]
                    :seon.db/error-result]]}
   [database since]
-  (let [rows (db/q '[:find ?signature ?operation ?message ?count ?tx ?occurrence
+  (let [rows (db/q '[:find ?signature ?tx ?branch
                      :in $ ?since
                      :where [?occurrence :seon.error.occurrence/last-at _ ?tx]
                             [(> ?tx ?since)]
                             [?error :seon.error/occurrences ?occurrence]
                             [?error :seon.error/signature ?signature]
-                            [?error :seon.error/operation ?operation]
-                            [?occurrence :seon.error.occurrence/message ?message]
-                            [?occurrence :seon.error.occurrence/count ?count]
-                            ;; not-join: Datahike's `not` drops ?tx from the predicate
-                            (not-join [?error ?tx]
-                                      [?error :seon.error/resolved-tx ?resolution]
-                                      [(>= ?resolution ?tx)])]
+                            [(get-else $ ?occurrence :seon.error.occurrence/branch false) ?branch]]
                    database since)
-        branches (when-not (map? rows)
-                   (db/q '[:find ?occurrence ?branch :in $ [?occurrence ...]
-                           :where [?occurrence :seon.error.occurrence/branch ?branch]]
-                         database (mapv peek rows)))]
-    (cond
-      (map? rows) rows
-      (map? branches) branches
-      :else
-      (let [branch (into {} branches)]
-        (->> (group-by first rows)
-             (sort-by (fn [[_ group]] (- (reduce max (map #(nth % 4) group)))))
-             (mapv (fn [[signature group]]
-                     (let [[_ operation message] (apply max-key #(nth % 4) group)
-                           branches (into #{} (keep (comp branch peek)) group)]
-                       (cond-> {:seon.error/signature signature :seon.error/operation operation
-                                :seon.error.occurrence/message message
-                                :seon.error.occurrence/count (reduce + (map #(nth % 3) group))}
-                         (seq branches) (assoc :seon.error.occurrence/branch branches))))))))))
+        selector (when-not (map? rows)
+                   (observation-selector (db/carried-projection database)))]
+    (if (map? rows)
+      rows
+      (reduce (fn [found [signature group]]
+                (let [error (db/pull database selector [:seon.error/signature signature])
+                      resolved (resolution database signature)
+                      fact (when (map? error) (latest-fact error))]
+                  (if-some [refusal (some #(when (db/read-refusal? %) %) [error resolved fact])]
+                    (reduced refusal)
+                    (conj found (cond-> (assoc fact :seon.error.occurrence/branch
+                                                       (into #{} (comp (map peek) (filter keyword?)) group))
+                                  resolved (assoc :seon.error/resolution resolved))))))
+              []
+              (sort-by (fn [[_ group]] (- (reduce max (map second group))))
+                       (group-by first rows))))))
 
 (defn commit-tx
   "Transaction data for one observation, or its acquisition refusal."
@@ -1934,7 +1912,9 @@
 (def ^:private agent-faults-query
   "Errors this agent must be able to read, by the two refs that name it.
 
-  A fault in a namespace it stewards names its current function by symbol. A
+  A fault in a namespace it stewards names its current function by symbol; a
+  fault no steward answers for reaches the escalation owner the writer
+  notified, whose opening message is about its signature. A
   fault recorded WHILE IT WAS WORKING — a lost model call is the founding
   case — carries no `:seon.instrument/fn` at all and names the agent only through
   its occurrence. Selecting only the first read the absence of the second as
@@ -1950,14 +1930,20 @@
                          [?function :seon.fn/sym ?function-symbol]
                          [?error :seon.instrument/fn ?function-symbol])
                     (and [?occurrence :seon.error.occurrence/agent ?agent]
-                         [?error :seon.error/occurrences ?occurrence]))])
+                         [?error :seon.error/occurrences ?occurrence])
+                    ;; the writer notified it: the escalation owner of a
+                    ;; fault no steward answers for (`commit-call`)
+                    (and [?message :seon.message/to ?agent]
+                         [?message :seon.message/about ?signature]
+                         [?error :seon.error/signature ?signature]))])
 
 (defn for-agent
   "Return the errors assigned to an agent, newest first, each with every
   declared observation member and occurrence.
 
   An error is assigned when it names a function in a namespace the agent
-  stewards, or when one of its occurrences happened in the agent's work.
+  stewards, when one of its occurrences happened in the agent's work, or
+  when the writer notified the agent of it. Resolution removes nothing.
   Example: (seon.error/for-agent (seon.db/db) \"root\")"
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
                   [:or [:vector :seon.db/pulled-entity] :seon.db/error-result]]}

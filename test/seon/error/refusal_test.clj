@@ -173,6 +173,27 @@
   (is (= '[clojure.lang.Numbers ops "Numbers.java" 1095]
          (error.refusal/root-frame @wrapped))))
 
+(deftest ^{:seon/tasks #{"4c559398c4be"}} a-cleanup-failure-survives-beside-the-primary
+  (let [primary (ex-info "primary" {:seon.probe/step :work} (ex-info "root" {:seon.probe/step :leaf}))
+        cleanup (ex-info "cleanup" {:seon.probe/step :release} (IllegalStateException. "closed"))
+        _ (.addSuppressed ^Throwable primary cleanup)
+        links (error.refusal/chain primary)]
+    (is (= ["primary" "root"] (mapv :seon.error/message links))
+        "the cause links stay the primary's own")
+    (is (= [[{:seon.error/throwable-class "clojure.lang.ExceptionInfo" :seon.error/message "cleanup"
+              :seon.error/data {:seon.probe/step :release}}
+             {:seon.error/throwable-class "java.lang.IllegalStateException" :seon.error/message "closed"}]]
+           (mapv #(mapv (fn [link] (dissoc link :seon.error/frames)) %)
+                 (:seon.error/suppressed (first links))))
+        "the suppressed cleanup failure keeps its whole chain on the link that suppressed it")
+    (is ((schema/projection-validator (schema/handed-projection) :seon.error/base)
+         (error.refusal/diagnostic (assoc observation :seon.error/throwable primary)))))
+  (testing "a cause cycle ends at its first repeat"
+    (let [a (Exception. "a") b (Exception. "b" a)]
+      (.initCause a b)
+      (is (= ["b" "a"] (mapv :seon.error/message (error.refusal/chain b))))
+      (is (vector? (error.refusal/root-frame b))))))
+
 (deftest constructor-output-keeps-the-producing-contract
   (let [projection (-> (schema/handed-projection)
                           (schema/projection-with-schema :x/member :int

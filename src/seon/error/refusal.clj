@@ -62,6 +62,17 @@
      (some #(.startsWith ^String (namespace function) ^String %)
            first-party-namespace-prefixes))))
 
+(defn- cause-links
+  "`throwable` and its causes, outermost to root, each once: a cause cycle
+  (`initCause` permits one) ends at its first repeat, as `printStackTrace`'s
+  own guard does."
+  {:malli/schema [:=> [:cat :seon.error/throwable] [:vector {:min 1} :seon.error/throwable]]}
+  [^Throwable throwable]
+  (loop [^Throwable link throwable seen #{} found []]
+    (if (and link (not (contains? seen link)))
+      (recur (.getCause link) (conj seen link) (conj found link))
+      found)))
+
 (defn root-frame
   "The first complete stack frame of the ROOT cause, where the failure
   happened. The outermost throwable's frame is where it was wrapped: a
@@ -70,23 +81,28 @@
                   [:or :nil :seon.error/frame]]}
   [throwable]
   (when throwable
-    (first (stack-frames (last (take-while some? (iterate ex-cause throwable)))))))
+    (first (stack-frames (peek (cause-links throwable))))))
 
 (defn chain
-  "The whole cause chain, outermost to root, as `Throwable->map` reads it
-  (`clojure/core_print.clj:473`): per link its class, message and
-  `ex-data`, plus that link's own first-party frames. A link without a
-  message, data or first-party frame omits the member."
+  "The whole cause chain, outermost to root: per link its class, message and
+  `ex-data` (what `Throwable->map`, `clojure/core_print.clj:473`, reads), its
+  own first-party frames, and the chains of the throwables it suppressed — a
+  cleanup failure `.addSuppressed` kept beside the primary, which no cause
+  link reaches. A link without a message, data, first-party frame or
+  suppressed throwable omits the member."
   {:malli/schema [:=> [:cat :seon.error/throwable] :seon.error/chain]}
   [^Throwable throwable]
-  (mapv (fn [{link-class :type :keys [message data]} link]
-          (let [frames (filterv first-party-frame? (stack-frames link))]
-            (cond-> {:seon.error/throwable-class (str link-class)}
+  (mapv (fn [^Throwable link]
+          (let [frames (filterv first-party-frame? (stack-frames link))
+                suppressed (mapv chain (.getSuppressed link))
+                message (ex-message link)
+                data (ex-data link)]
+            (cond-> {:seon.error/throwable-class (.getName (class link))}
               (seq message) (assoc :seon.error/message message)
               data (assoc :seon.error/data data)
-              (seq frames) (assoc :seon.error/frames frames))))
-        (:via (Throwable->map throwable))
-        (take-while some? (iterate ex-cause throwable))))
+              (seq frames) (assoc :seon.error/frames frames)
+              (seq suppressed) (assoc :seon.error/suppressed suppressed))))
+        (cause-links throwable)))
 
 (defn diagnostic
   "Preserve the supplied observation, consuming only its optional Throwable.

@@ -43,7 +43,11 @@
                        (let [seen (error/occurred-since (db/db a) a0)]
                          (testing "the next evaluation on A carries it, tagged with A"
                            (is (= ['seon.error.branch-test/probe] (mapv :seon.error/operation seen)))
-                           (is (= #{(branch a)} (:seon.error.occurrence/branch (first seen))))))
+                           (is (= #{(branch a)} (:seon.error.occurrence/branch (first seen))))
+                           (testing "as the recorded error, not a summary (task f58c3aab9277)"
+                             (is (= [:seon.error.branch-test/probe "A probe failure."]
+                                    ((juxt :seon.error/layer :seon.error/message) (first seen))))
+                             (is (string? (:seon.error/id (first seen)))))))
                        (let [a1 (db/basis-t (db/db a))]
                          (testing "the following window no longer shows it"
                            (is (= [] (error/occurred-since (db/db a) a1))))
@@ -51,9 +55,11 @@
                          (let [recurred (error/occurred-since (db/db a) a1)]
                            (testing "a recurrence re-enters the window"
                              (is (= [2] (mapv :seon.error.occurrence/count recurred))))
-                           (testing "a resolution after the occurrence closes it"
+                           (testing "a resolution after the occurrence marks it and hides nothing (task f58c3aab9277)"
                              (is (:db-after (problems/resolve! a (:seon.error/signature (first recurred)))))
-                             (is (= [] (error/occurred-since (db/db a) a1))))))
+                             (is (= [:seon.error/resolved-tx]
+                                    (mapv (comp :seon.error/resolved-by :seon.error/resolution)
+                                          (error/occurred-since (db/db a) a1)))))))
                        (branch a))))]
     (test-support/with-database
      (fn [b]
@@ -71,7 +77,8 @@
            (testing "with A released, the cluster branch keeps the copy beside its own occurrence"
              (is (keyword? origin))
              (is (= [#{origin (branch cluster)}] (mapv :seon.error.occurrence/branch seen)))
-             (is (= [2] (mapv :seon.error.occurrence/count seen))))))))))
+             (is (= [2] (mapv :seon.error/occurrence-count seen))
+                 "the cumulative count over every occurrence of the signature"))))))))
 
 (deftest a-fault-is-delivered-and-shown-open-once-per-opening
   (test-support/with-database

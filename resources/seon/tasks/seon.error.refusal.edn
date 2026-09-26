@@ -1,0 +1,6 @@
+[#:seon.task{:id "4c559398c4be"
+             :name "preserve-primary-and-suppressed-causes"
+             :kind :function
+             :intent "One normalization keeps every cause link once (a cause cycle ends at its first repeat) and the chains of suppressed throwables, so a cleanup failure kept by .addSuppressed survives beside the primary (audit §2.2)."
+             :must-read #{seon.error.refusal/chain seon.error.refusal/root-frame}
+             :evidence #{"docs/research/agent-platform/error-delivery-audit-2026-09-26.md"}}]
