@@ -58,6 +58,33 @@ definition, so after an incremental install they still call the JVM definition, 
 override. `database-provenance-…` now asserts the subset relation and compares roots outside the
 affected closure.
 
+## Round 4: the seon.schema reloader and the one-argument program-fn-row (2a5375c3b, 324ae355a)
+
+- **The reloader, proven by reproduction.** `seon.schema/converged-predicate-var` ran
+  `(require ns :reload)` on any loaded namespace whose copy lacked a predicate a declaration
+  named, and swallowed every error. On default (pid 25654) I loaded a scratch namespace from a
+  scratch classloader root and replaced its Var root with a marker, as arming does. Compiling
+  `[:fn fixevalreds.probe/absent?]` still refused ("no admitted callable"), and afterwards the
+  Var held its source root, not the marker. So any declaration naming a missing
+  `seon.schema/…` predicate strips all of that namespace's wrappers. Which caller did it in the
+  052552039 pass is not pinned: no test names an absent `seon.schema` predicate literally.
+  **Fix:** the function is deleted (−58 lines). Compilation refuses by name
+  (`:seon.schema/predicate-namespace`), and adoption is the one place that reloads.
+  **Consequence:** a commit that adds a predicate to an already-loaded namespace, together with
+  a declaration naming it, is refused by in-place publication until that namespace loads from
+  the new source (restart or adoption). Regression:
+  `a-declaration-naming-a-predicate-its-loaded-owner-lacks-refuses-without-reloading`; its second
+  case checks that `seon.schema/compilable-form`'s armed root is the same object after a refused
+  compile. The reproduction is added to
+  `docs/seon/issues/adopting-the-instrumentation-owner-leaves-unreloaded-namespaces-unarmed.md`.
+  Static checks: contracts-compile over the edited schema.clj 0 findings; resources-as-EDN 211/0.
+- **`program-fn-row` with one argument** now re-indexes the declaration's own file through
+  publication's incremental path, against the executing member's world: the canonical file
+  row, stored digest, 25-291 ms, instead of the whole-checkout manifest (12.8-15 s, refused on
+  the dev roots). The four callers keep the one-argument form. Scratch runs:
+  `overrides-follow-…` 10/0 in 1.0 s, `database-provenance-…` 26/0 in 3.6 s,
+  `a-component-bearing-row-…` 274/0 in 1.4 s.
+
 ## Round 3: reds at real HEAD 052552039 (verify-1510 018, 019)
 
 The rows from verify-1210 came from a JVM still running the stale archive 65bf078ec
