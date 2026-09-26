@@ -3657,6 +3657,35 @@
 
 (declare settle-batch-refusal!)
 
+(defn- final-namespace-digests
+  "`receipts` with every function and test row digested against the namespace
+  row the batch leaves stored: the last namespace row a LATER receipt of the
+  batch writes for its namespace. A form digests its row against the
+  namespace as it stood at that form (`seon.sci.eval/definition-row`); a later
+  `require` in the same run changes the resolver context the writer checks
+  that row against, and the writer refused the whole settlement
+  (`seon.db/write-digest-error`). The digest owner is `db/definition-digest-of`."
+  {:malli/schema [:=> [:cat :seon.schema/projection [:vector :seon.cluster.eval/settle-request]]
+                  [:vector :seon.cluster.eval/settle-request]]}
+  [projection receipts]
+  (let [namespace-row? #(and (:seon.ns/name %)
+                             (not (some % [:seon.fn/sym :seon.test/sym :seon.schema/key])))
+        ;; namespace name -> [ordinal-in-batch row] of its last namespace row
+        final (into {} (keep-indexed (fn [index receipt]
+                                       (let [row (:seon.program/row receipt)]
+                                         (when (namespace-row? row) [(:seon.ns/name row) [index row]]))))
+                    receipts)]
+    (into []
+          (map-indexed
+           (fn [index receipt]
+             (let [row (:seon.program/row receipt)
+                   [later namespace-row] (get final (second (or (:seon.fn/ns row) (:seon.test/ns row))))]
+               (if (and (:seon.program/definition-digest row) namespace-row (< index later))
+                 (assoc-in receipt [:seon.program/row :seon.program/definition-digest]
+                           (db/definition-digest-of projection row namespace-row))
+                 receipt))))
+          receipts)))
+
 (defn- settle-batch!
   "Settle every evaluated form and all turn side effects in one transaction."
   {:malli/schema
@@ -3689,7 +3718,9 @@
         {:seon.blob/staged-writes
          (into [] (mapcat :seon.blob/staged-writes) prepared)
          :seon.db/tx-data
-         (-> (into (receipt-settle-batch-tx (mapv :seon.turn.loop/receipt prepared))
+         (-> (into (receipt-settle-batch-tx
+                    (final-namespace-digests (db/carried-projection (db/db connection))
+                                             (mapv :seon.turn.loop/receipt prepared)))
                    (mapcat :seon.db/tx-data)
                    prepared)
              ;; The close precedes plan/settle-call, as in close-turn; a

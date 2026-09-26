@@ -2,6 +2,7 @@
   "An outside agent's code evaluated as one ordinary run of an agent
   (`seon.cluster.agent/evaluate-source!`), segmented as code."
   (:require [clojure.core.async :as async]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
@@ -20,7 +21,7 @@
     (mapv #(or (:seon.eval/shown %) (:seon.cluster.eval/error %))
           (drive/run-receipts (db/db connection) [(:seon.turn/id result)]))))
 
-(deftest ^{:seon.test/long "Four ordinary agent runs, each a run transaction, one Flow turn and its settlement (measured 184-229 ms warm each on default, 2026-09-26), plus the agent's arming."
+(deftest ^{:seon.test/long "Six ordinary agent runs, each a run transaction, one Flow turn and its settlement (measured 184-229 ms warm each on default, 2026-09-26), plus the agent's arming."
            :seon.test/long-ms 20000}
   code-evaluates-as-one-ordinary-run-of-its-agent
   (let [target (support/execution-handle nil)
@@ -62,6 +63,19 @@
                    (:seon.turn/rule (agent/evaluate-source! (assoc request :seon.cluster.reply/text "(str *ns*)"
                                                                    :seon.turn/starting-ns [:seon.ns/name 'seon.id]))))
                 "the run writer refuses another starting namespace by name"))
+          (testing "a defn then a require in one run settles: its row digests against the namespace row the run stores"
+            (let [namespace-name (str "my.agents." agent-id)
+                  defn-source "(defn run-inc \"Adds one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))"
+                  settled (fn [sources]
+                            (let [result (code sources)
+                                  receipts (drive/run-receipts (db/db connection) [(:seon.turn/id result)])]
+                              (is (not-any? :seon.cluster.eval/error receipts) (pr-str receipts))
+                              (shown connection result)))]
+              (is (= [(str "#'" namespace-name "/run-inc") "nil"]
+                     (settled (str defn-source "\n(require '[malli.core :as m])"))))
+              (is (= ["nil" (str "#'" namespace-name "/run-inc2")]
+                     (settled (str "(require '[clojure.set :as set])\n"
+                                   (str/replace defn-source "run-inc " "run-inc2 ")))))))
           (testing "the reply planner stays the default: a bare number is prose there"
             (is (:seon.cluster.reply/no-forms (agent/evaluate-source! (assoc request :seon.cluster.reply/text "1")))))
           (testing "a segmenter without the planner's contract refuses by name before any run"
