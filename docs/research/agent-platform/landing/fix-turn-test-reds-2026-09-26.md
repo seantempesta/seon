@@ -1,6 +1,6 @@
 ---
 type: landing
-status: landed (rounds 1-3 accepted; round 4 374e918b7, 29abfed1a, 4e703c93a; round 5 d421b6e1a; round 6 48a345bc1; round 7 f81a22cd8, 9a21c6cc1; round 8 9d59d5b30); tests owed to root
+status: landed (rounds 1-3 accepted; round 4 374e918b7, 29abfed1a, 4e703c93a; round 5 d421b6e1a; round 6 48a345bc1; round 7 f81a22cd8, 9a21c6cc1; round 8 9d59d5b30; round 9 aae6b89eb, 17feb7d41, 7c3287135, 2e0d7c35f, d170bb216); tests owed to root
 lane: fix-turn-test-reds-opus
 created: 2026-09-26
 ---
@@ -418,6 +418,36 @@ db_test finds 0 problems.
   | private-roots | red on a real defect: `seon.sci.eval/generator-ctx` is installed, and `@@#'seon.sci.eval/generator-ctx` returns the raw SCI context |
 
   The defect is filed in [agent-sci-reaches-the-private-generator-context](../../../seon/issues/agent-sci-reaches-the-private-generator-context.md).
+
+## Round 9: generator-ctx design, C12 deferred, atom-audit bundle R12 + R7 (free files)
+
+- generator-ctx (ruling: no heuristic). The design is written into
+  [opaque-contract-generators-share-live-process-objects](../../../seon/issues/opaque-contract-generators-share-live-process-objects.md)
+  (`ae2ef4bfc`). The context serves only the contract generator; derive a fresh `(sci/init {})` per sample
+  (0.04 ms) and delete the Var. The custody test's two generator-ctx lines are then tests of deleted machinery.
+  The edit is root-sequenced (sci/eval.clj, dogfood-API lane).
+- C12: deferred by root (no second JVM for lanes).
+
+| Row | Commit | What goes | Proof | +/− |
+|---|---|---|---|---|
+| R12 A124 (ai.clj) | aae6b89eb | the invocation-local failure atom; the read failure is the line sequence's terminal element, folded into the final snapshot | REPL on seon.ai-test's truncating stream: text "(+ 1 2) (+ 3", 2 sink calls, one truncation with the JDK cause chain; empty stream is a truncation with 0 received; ordinary stop has no truncation; the key does not leak; completion equal to HEAD's | +24/−16 |
+| R7 A005/A006 (operator.clj) | 17feb7d41 | two volatiles and two doseqs; one reduction plus a keep | Babashka on a scratch root: deleted target/test-classpaths and the advertisement, kept the linked .clj-kondo and its target; operator-move-test 6 tests/35 assertions, operator-nuke-test 7 assertions | (with A007) +41/−34 |
+| R7 A007 (operator_move_test.clj) | 17feb7d41 | the holder-process atom; the process is bound lexically in a nested try/finally after directory setup | as above | |
+| R7 A128/H01 (fs.clj) | 7c3287135 | the `long-array` counters, the volatile deadline and `progress-reporter`; one fold state threaded through the walk, reducing each DirectoryStream | REPL: 2 files, 4 directories and 1 link deleted, reported counts 1..7, the link's target intact | +41/−56 |
+| R7 A129 (fs/jvm.clj) | 2e0d7c35f | the `moved?` flag; finally always deletes the write's own stage | REPL: a fenced write commits and leaves no stage; a stale-digest refusal leaves none | +7/−8 |
+| R7 A125–A127 (eval/drive.clj) | d170bb216 | three volatiles; one lexical `release!` for every exit | REPL with injected boot/registry namespaces: ok, boot-failure and episode-failure release orders are correct and failures rethrow | +35/−35 |
+
+Not done:
+- **A092 (process.clj), held back with a finding.** The silence bound has no production caller: no
+  `run-process!` caller passes `:seon.operator.subprocess/event-silence-ms` or a progress atom. Its only use,
+  `publication_test/ordinary-output-cannot-hide-a-silent-publication`, passes a progress atom without
+  `observe-output!`, which the precondition refuses before any process starts. Colocating a timestamp into a
+  progress protocol nobody produces would invent its shape. The smaller change deletes the silence bound (the
+  watch, `last-progress`, the precondition and the two options) together with that test. Root's call.
+- **Held files, skipped:** A091 (src/seon/cluster/boot.clj:401) and A093/A094 (src/seon/cluster/registry.clj:468-469).
+
+Static checks: contracts-compile over ai, fs, fs.jvm and drive finds 0 problems; clj-kondo reports 0 errors on
+every touched file.
 
 ## Deleted / net lines
 
