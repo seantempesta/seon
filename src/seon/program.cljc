@@ -11,7 +11,8 @@
                :cljs [cljs.reader :as reader])
             ;; CLJ-only: `seon.schema.edn` has no CLJS side, and the two uses
             ;; below already sit inside a `#?(:clj …)` branch.
-            #?(:clj [seon.schema.edn :as schema.edn])))
+            #?(:clj [seon.schema.edn :as schema.edn])
+            #?(:clj [clojure.core.cache.wrapped :as cache])))
 
 (defn- source-family?
   "Does this identity attribute's property map declare a source declaration
@@ -270,7 +271,12 @@
                                          m/properties))
                 (keys (:seon.schema.projection/forms projection)))))
 
-#?(:clj (defonce ^:private !authored-shapes (atom nil)))
+#?(:clj
+   ;; The same core.cache wrapped LRU `seon.schema.edn` holds its packaged
+   ;; populations in, keyed by the same declaration stamp: the current
+   ;; authored files and the one before an edit.
+   (defonce ^:private authored-shapes-memo
+     (cache/lru-cache-factory {} :threshold 2)))
 
 (defn- authored-shapes
   "The shapes the AUTHORED declaration resources currently define.
@@ -286,20 +292,12 @@
   the next `seon.fn/artifact` then silently stripped
   (`program-shapes-cache-strips-attributes-declared-after-the-jvm-started`);
   keying by `seon.schema.edn/declaration-stamp` makes that edit a MISS BY
-  CONSTRUCTION. Only a SUCCESS is remembered, because a cached refusal would
-  outlive the reload that fixes the declaration and report a healthy
-  population as broken forever."
+  CONSTRUCTION. Only a SUCCESS is remembered: a refusal throws out of the
+  derivation, so the reload that fixes the declaration derives again."
   []
   #?(:clj
-     (let [stamp (schema.edn/declaration-stamp)
-           cached @!authored-shapes]
-       (if (= stamp (:seon.program/declaration-stamp cached))
-         (:seon.program/shapes cached)
-         (let [derived (shapes-in (schema/build-projection (schema.edn/packaged-forms)))]
-           (reset! !authored-shapes
-                   {:seon.program/declaration-stamp stamp
-                    :seon.program/shapes derived})
-           derived)))
+     (cache/lookup-or-miss authored-shapes-memo (schema.edn/declaration-stamp)
+                           (fn [_] (shapes-in (schema/build-projection (schema.edn/packaged-forms)))))
      :cljs (shapes-in (schema/build-projection (schema/registered-schemas)))))
 
 (defn shapes
