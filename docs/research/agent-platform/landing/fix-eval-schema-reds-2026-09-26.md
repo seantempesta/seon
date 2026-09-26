@@ -58,6 +58,28 @@ definition, so after an incremental install they still call the JVM definition, 
 override. `database-provenance-…` now asserts the subset relation and compares roots outside the
 affected closure.
 
+## Round 3: reds at real HEAD 052552039 (verify-1510 018, 019)
+
+The rows from verify-1210 came from a JVM still running the stale archive 65bf078ec
+(pid 12358 and pid 14906). Their runs record loaded commit 6ab71b89…, `without-interrupt-marker`
+did not resolve, and the old test names still did. They do not test these commits.
+
+| Red | Class | Disposition |
+|---|---|---|
+| schema-test `a-component-bearing-row-validates-its-own-declared-shape` (error + 11.6 s) | slow fixture producer | The one-argument `test-support/program-fn-row` builds the whole-checkout manifest (`build-manifest` 12.8-15 s cold). At HEAD it also refuses on the dev roots (`dev-cache`, `seon.dev.*`, `seon.operator*`) that the dependency analysis excludes, because test files call them. The test now analyzes the world's stored source through the production path: 2.0 s, 275/0 in a scratch run (3c40f0c21) |
+| schema-test `a-refused-projection-source-…` | environmental: `seon.schema` unarmed | In pid 19443, all 103 contracted `seon.schema` Vars had profile cells with calls (they were armed at boot), yet 0 carried a wrapper. Every other src namespace was fully armed. A reload of `seon.schema` during the pass removed them. The contract is correct: validated directly, the poisoned map is refused. Candidate reloaders: `seon.schema/converged-predicate-var` (schema.clj:246, `require … :reload` of any loaded namespace, errors swallowed) and development adoption (`cluster/load-development-definitions!`). Not pinned; for root |
+| sci.eval-test `database-provenance-…` (16.4 s) | slow fixture producer | the same one-argument form ×3, replaced with the stored-source row (`:core` admission stated): 26/0 in 4.5 s |
+| sci.eval-test `contracted-defn-renders-the-var-it-declared` (:833, :834) | floor lane | shown `#object[sci.lang.Var]` where `#'user/…` is expected: the floor printer's Var face |
+| (destructive) `the-evaluator-remains-live-after-its-namespace-reloads` | host-bound test on the shared JVM | it `require :reload`s `seon.sci.eval` in default (the source of round 1's stale generators); it now declares `:seon.test/fixture-observation` and runs as a platform-host member |
+| render.value-test "got nil nil" (verify-1210) | kernel owner defect since 9bf22ecd9 | `:seon.error/offending nil` stored when a failure names neither a symbol nor a subject; fixed in b28fcf408 (absence is no key) |
+| web-debug-test `block-reference-headers-…` (:702) | retired assumption (26f1f40d6) | the fixture declares its identity attribute directly through `schema-rows` (f62e42661); 25/0. No other test declares an alias of an identity attribute |
+
+For the owner of test_support.clj (the producer fix): the one-argument `program-fn-row`
+should analyze the executing member's stored source (`(:seon.db/db (execution-handle …))`)
+instead of building the checkout manifest. This removes about 15 s per publication and the
+dev-root refusal for every caller: 4 one-argument call sites remain, among them eval_test's
+`overrides-follow-…`.
+
 ## Classes, dispositions, commits that introduced them
 
 ### schema.clj (b4c1ed00e)
