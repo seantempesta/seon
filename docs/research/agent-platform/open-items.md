@@ -34,6 +34,9 @@ updated: 2026-09-26
 - **Render functions select data; the one printer lays it out.** A pair returns a spec'd value (the fields worth showing),
   rendered in turn by the floor printer built on fipp (walk → fipp operations with an explicit stack → fipp's engine; our code
   keeps classification + the one budget); text only for deliberate prose, no `pr-str` layout inside a pair (impl-floor-on-fipp).
+  The one budget is chosen by provenance (owner 2026-09-26): output a declared render function selected is laid out
+  permissively (no collection-length/level elision; only a high token ceiling that turns a giant into a blob reference),
+  while a raw value keeps the tight floor bounds. Still one clipper; the render function is the first, deliberate bound.
 - **Store references, never copies:** errors/facts carry a db value as commit id/basis, an SCI ctx as agent/branch identity,
   a request as its evaluation/turn ref, a large value as one blob digest. Opaque world objects are typed identities at the
   admission edge, never walked.
