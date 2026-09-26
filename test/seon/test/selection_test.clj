@@ -132,6 +132,23 @@
                         (string? (:seon.test.run/program-digest %))
                         (string? (:seon.test.run/input-digest %)))
                    (:seon.test.selection/unchanged reused)))
+       ;; A request naming a changed identity selects the tests reaching it,
+       ;; but naming is no observed change: an unchanged reach digest reuses
+       ;; green, and a changed one executes (dogfood 2026-09-26: an agent's
+       ;; identical `my.test/check` never reused).
+       (let [named-change {:seon.test.run/cluster [:seon.cluster/name "named-selection"]
+                           :seon.test.run/policy :named
+                           :seon.test/changed [(fixture-symbol "leaf")]}
+             select-change! #(sut/select (assoc named-change :seon.db/db (db/db connection)))
+             unchanged (select-change!)]
+         (is (= [] (:seon.test.run/members unchanged)) (pr-str unchanged))
+         (is (= #{(fixture-symbol "direct")}
+                (set (map :seon.test/sym (:seon.test.selection/unchanged unchanged)))))
+         (install-selection-program! connection "(defn leaf [] 4)")
+         (let [changed (select-change!)]
+           (is (= #{(fixture-symbol "direct")}
+                  (set (map :seon.test/sym (:seon.test.run/members changed)))) (pr-str changed))
+           (is (empty? (:seon.test.selection/unchanged changed)))))
        (install-selection-program! connection "(defn leaf [] 3)")
        (let [acquire runner/reach-digests
              requested (atom #{})

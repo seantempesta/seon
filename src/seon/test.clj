@@ -568,13 +568,17 @@
                   [:map-of :qualified-symbol :seon.source/digest]]}
   [database symbols]
   (into {}
-        (selection-read!
-         (db/q '[:find ?symbol ?digest
-                 :in $ [?symbol ...]
-                 :where (or [?entity :seon.fn/sym ?symbol]
-                            [?entity :seon.test/sym ?symbol])
-                        [?entity :seon.program/definition-digest ?digest]]
-               database symbols))))
+        ;; One query per identity attribute: an `or` over both leaves the
+        ;; attribute unbound, which scans (38 ms current, 180 ms as-of, against
+        ;; about 1 ms with the attribute bound, 2026-09-26).
+        (mapcat (fn [attribute]
+                  (selection-read!
+                   (db/q '[:find ?symbol ?digest
+                           :in $ [?symbol ...] ?attribute
+                           :where [?entity ?attribute ?symbol]
+                                  [?entity :seon.program/definition-digest ?digest]]
+                         database symbols attribute)))
+                [:seon.fn/sym :seon.test/sym])))
 
 (defn- changed-definition-symbols
   "Read assertion and retraction identities in the same lineage, including namespace bindings."
@@ -827,18 +831,21 @@
                                     [:seon.schema/key :seon.schema/edn])))
             _ (when (seq schema-changes)
                 (refuse! :seon.test/coverage-unknown "Schema changes require proven bounded dependencies." (vec schema-changes)))
-            reached (if (seq changed)
-                      (selection-read! (functions/gate-sets {:seon.db/db database :seon.fn/seeds changed})) [])
+            reaching #(if (seq %)
+                        (set (selection-read! (functions/gate-sets {:seon.db/db database :seon.fn/seeds %})))
+                        #{})
+            ;; Tests reaching a change observed since the recorded evidence
+            ;; cannot reuse it. An identity the request names as changed is no
+            ;; such observation: its reach selects candidates, and an unchanged
+            ;; reach digest still reuses their green.
+            observed-reached (reaching observed-changed)
+            requested-walk (reaching requested-changed)
+            reached (into observed-reached requested-walk)
             work? (or first-run? (seq changed) (seq pending))
-            reached (set reached)
             ;; A named request's `:seon.test/changed` names the tests reaching
             ;; exactly those identities; changes observed since the last run
             ;; widen only incremental requests.
-            requested-reached (if (and (= :named policy) (seq requested-changed))
-                                (set (selection-read!
-                                      (functions/gate-sets {:seon.db/db database
-                                                            :seon.fn/seeds requested-changed})))
-                                #{})
+            requested-reached (if (= :named policy) requested-walk #{})
             ;; A first run widens to every test only when the request names
             ;; nothing: named changes, tests or namespaces select their reach.
             scoped? (or (seq requested-changed) (seq identities) (seq namespaces))
@@ -990,7 +997,7 @@
                                    (when (and (green? member)
                                               (one run-eid :seon.test.run/loaded-commit-id)
                                               (or (nil? supplied-basis) (= supplied-basis (one run-eid :seon.test.run/basis-t)))
-                                              (not (reached test-symbol))
+                                              (not (observed-reached test-symbol))
                                               (string? (get current-reach test-symbol))
                                               (= (get current-reach test-symbol)
                                                  (one member :seon.test.member/reach-digest)))
@@ -2357,9 +2364,17 @@
                 ;; differing program rows, never from its operational data.
                 request-handle (when (seq ordered)
                                  (clean-request-handle execution recording cluster effective))
-                ;; Once per request: the members an attempt evaluation serves.
-                effect-reach (when-let [reach (some-> request-handle :seon.db/db (functions/gate-set 'seon.effect/request*))]
-                               (if (vector? reach) (set reach) (throw (ex-info "Effect reach is unreadable." reach))))
+                ;; Once per request: the members an attempt evaluation serves,
+                ;; those whose own reach (the index `reach` read) names the
+                ;; effect owner, never the owner's whole reverse closure
+                ;; (1,539 names, 65-90 ms per request, 2026-09-26).
+                effect-reach (when request-handle
+                               (let [reaches (runner/reach-memberships database (vec ordered))]
+                                 (if (:seon.error/at reaches)
+                                   (throw (ex-info "Effect reach is unreadable." reaches))
+                                   (into #{} (keep (fn [[test-symbol names]]
+                                                     (when (contains? names 'seon.effect/request*) test-symbol)))
+                                         reaches))))
                 run-batch
                 (fn [outcome batch-provenance members]
                   (let [run-id (:seon.test.run/id batch-provenance)
