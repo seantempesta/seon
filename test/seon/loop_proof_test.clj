@@ -66,13 +66,17 @@
      (config/apply! {:seon.db/connection connection
                     :seon.boot/cluster-name "running-fixture"
                     :seon.config/manifest
-                    {:seon.config.run/max-episode-runs :seon.config/absent}})
+                    ;; a core fault is stored and delivered, and the graph
+                    ;; that raised it keeps running for the rest of the scenario
+                    {:seon.config.run/max-episode-runs :seon.config/absent
+                     :seon.config/on-core-error :record}})
      (support/transacted! connection (support/agent-tx @connection "root" 'my.agents.root))
      (cluster/ensure-cluster-entity! connection "running-fixture" cluster/boot-process-identity)
      (let [ctx (support/fork-cluster-ctx connection)
            environment (support/environment "running-fixture" connection)
            routing (support/attempt-routing connection)
-           faults (async/chan (async/sliding-buffer 16))
+           occurrences #(set (db/q '[:find [?o ...] :where [?o :seon.error.occurrence/id]] (db/db connection)))
+           occurrences-before (occurrences)
            events (async/chan (async/sliding-buffer 1))]
        (with-open [launcher (support/closeable
                              (flow/start-work-launcher!
@@ -86,7 +90,6 @@
                         :seon.sci.eval/ctx ctx :seon.flow/work-launcher @launcher
                         :seon.flow/executor (cluster/projection-executor (:seon.sci.eval/projection-state ctx))
                         :seon.db.process/id cluster/boot-process-identity})
-               _ (swap! routing assoc :seon.agent/fault-channel faults)
                armer (flow/start-graph!
                       {::flow/graph-definition
                        {:procs {:seon.agent/armer
@@ -114,7 +117,6 @@
                          :seon.cluster.wake/armer-channel (:seon.cluster.wake/channel handle)
                          :seon.cluster.wake/render-channel (:seon.render/context-channel handle)
                          :seon.render.web/interest (atom :all)
-                         :seon.cluster.wake/fault-channel faults
                          :seon.cluster.wake/key ::running-route})
            (try
              (do
@@ -190,7 +192,7 @@
                (await-settled!)
                (is (= 29 (turn/turns-left @connection "juniper")))
                (is (some #(> (:t %) basis) (evaluation/of-agent @connection "juniper"))))
-             (is (not (some? (async/poll! faults))) "the installer and both wakes are fault-free")
+             (is (= occurrences-before (occurrences)) "the installer and both wakes record no core fault")
              (testing "a lost turn permit faults at the declared completion allowance"
                (let [entry (agent/armed routing "juniper")
                      completion (:seon.turn.loop/completion entry)
@@ -208,11 +210,14 @@
                  (try
                    (let [start (System/nanoTime)]
                      (async/offer! (:seon.cluster.wake/channel entry) :seon.agent/wake)
-                     (let [fault (support/await-event! faults ::evaluation-limit-fault)
-                           data (ex-data (::async.flow/ex fault))]
-                       (is (string? (:seon.agent/turn-completion-backstop data)))
-                       (is (= "running-fixture/withheld" (:seon.turn/id data)))
-                       (is (= 100 (:seon.config.agent/turn-completion-backstop-ms data)))
+                     ;; the proc's throw is recorded by its fault port: one
+                     ;; stored occurrence naming the run and the allowance
+                     (let [message "Agent \"juniper\" run \"running-fixture/withheld\" did not publish turn permit within 100 ms."
+                           stored #(seq (db/q '[:find [?o ...] :in $ ?m
+                                                :where [?o :seon.error.occurrence/message ?m]]
+                                              % message))]
+                       (support/await-event! connection ::evaluation-limit-fault stored)
+                       (is (= 1 (count (stored (db/db connection)))))
                        (is (< (/ (- (System/nanoTime) start) 1e6) 2000))))
                    (finally
                      (support/transacted! connection [[:db/add settings :seon.config.agent/turn-completion-backstop-ms 600000]])
@@ -224,7 +229,7 @@
                (doseq [id (keys (:seon.agent/armed @routing))]
                  (agent/disarm! {:seon.agent/routing routing :seon.agent/id id}))
                (d/unlisten connection ::running-fixture)
-               (doseq [channel [events faults (:seon.cluster.wake/channel handle)
+               (doseq [channel [events (:seon.cluster.wake/channel handle)
                                 (:seon.render/context-channel handle) (:seon.turn.loop/completion handle)]]
                  (async/close! channel))))))))))
 
@@ -243,8 +248,6 @@
                     (cluster/projection-executor (:seon.sci.eval/projection-state ctx))
                     :seon.db.process/id cluster/boot-process-identity})
            routing (support/attempt-routing connection)
-           faults (async/chan (async/sliding-buffer 16))
-           _ (swap! routing assoc :seon.agent/fault-channel faults)
            ready (java.util.concurrent.CountDownLatch. 2)
            start (java.util.concurrent.CountDownLatch. 1)
            request {:seon.turn.loop/cluster handle
@@ -276,7 +279,6 @@
              (agent/disarm! {:seon.agent/id "concurrent" :seon.agent/routing routing})
              (async/close! (:seon.schedule/channel entry)))
            (doseq [arm arms] (future-cancel arm))
-           (async/close! faults)
            (doseq [key [:seon.cluster.wake/channel :seon.render/context-channel
                         :seon.turn.loop/completion]]
              (async/close! (get handle key)))))))))
@@ -310,7 +312,6 @@
            environment (support/environment "loop-proof" connection)
            routing (support/attempt-routing connection)
            transactions (atom [])
-           faults (async/chan (async/sliding-buffer 16))
            events (async/chan (async/sliding-buffer 1))]
        (with-open [launcher-resource
                    (support/closeable
@@ -365,15 +366,9 @@
                                        (filter #(= (:db/id turn-row)
                                                    (get-in % [:seon.cluster.eval/run :db/id]))
                                                (evaluation/of-agent @connection "juniper")))}))
-                         (when-let [fault (async/poll! faults)]
-                           (prn (update-vals fault
-                                            #(if (instance? Throwable %)
-                                               {:seon.error/message (ex-message %)
-                                                :seon.error/data (ex-data %)} %))))
                          (throw failure))))
                    (is (boolean (closed?)))
                    id))]
-           (swap! routing assoc :seon.agent/fault-channel faults)
            (d/listen connection ::proof
                      (fn [report]
                        (swap! transactions conj report)
@@ -891,7 +886,7 @@
                (agent/disarm! {:seon.agent/routing routing
                                :seon.agent/id "juniper"})
                (d/unlisten connection ::proof)
-               (doseq [channel [events faults
+               (doseq [channel [events
                                 (:seon.cluster.wake/channel handle)
                                 (:seon.render/context-channel handle)
                                 (:seon.turn.loop/completion handle)]]
