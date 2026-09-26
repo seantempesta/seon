@@ -19,4 +19,10 @@
              :evidence #{"docs/research/agent-platform/dogfood-author-opus-2026-09-26.md"
                          "docs/research/agent-platform/dogfood-report-2026-09-26.md"
                          "docs/seon/issues/a-plain-value-with-an-entity-key-renders-through-that-entitys-renderer-and-fails-the-evaluation.md"
-                         "docs/seon/issues/schema-rows-render-through-the-pair-they-declare.md"}}]
+                         "docs/seon/issues/schema-rows-render-through-the-pair-they-declare.md"}}
+ #:seon.task{:id "15a0784f82d5"
+             :name "error-operation-read-as-returner"
+             :kind :function
+             :intent "Rendering read :seon.error/operation as the function that returned the error and appended a false contract finding to every agent exception. Fixed 5d353149b and b51fbb71d; the producer's declared identity now selects the renderer (M3)."
+             :must-read #{seon.render/declared-producers}
+             :evidence #{"docs/research/agent-platform/landing/agent-path-2-2026-09-26.md"}}]

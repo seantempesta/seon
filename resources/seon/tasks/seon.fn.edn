@@ -42,4 +42,16 @@
              :must-read #{seon.fn/gate-sets seon.fn/gate-sets-in seon.fn/test-reach-rules seon.test/destructive-reach}
              :evidence #{"docs/research/agent-platform/dogfood-dogfood-analyst-astra-2026-09-26.md"
                          "docs/research/agent-platform/landing/inv-test-selection-cost-opus-2026-09-26.md"
-                         "docs/seon/issues/gate-set-rederives-the-declared-reference-population-on-every-call.md"}}]
+                         "docs/seon/issues/gate-set-rederives-the-declared-reference-population-on-every-call.md"}}
+ #:seon.task{:id "bca96d7b84af"
+             :name "identity-names-refuses-set-callers"
+             :kind :function
+             :intent "Every contracted defn failed its gate: identity-names declared [:sequential :int] while its callers pass entity sets. Fixed e9b2066ac."
+             :must-read #{seon.fn/identity-names seon.fn/call-reach}
+             :evidence #{"docs/research/agent-platform/landing/agent-path-2-2026-09-26.md"}}
+ #:seon.task{:id "bd7cb669b45d"
+             :name "host-bound-class-list-copies-interpreter-config"
+             :kind :function
+             :intent "Class usage marks a declaration host-bound from a copied SCI class list although the interpreter resolves every class; (java.util.Date.) refuses on later calls. Executability must come from the configured interpreter (Astra M1)."
+             :must-read #{seon.fn/host-bound-callers seon.sci.eval/build-base-ctx}
+             :evidence #{"docs/research/agent-platform/landing/agent-path-2-2026-09-26.md"}}]

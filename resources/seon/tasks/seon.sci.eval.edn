@@ -101,4 +101,22 @@
              :intent "After the agent clojure.test fix (agent-repl-gaps), a FAIL line still names SCI's frame (FAIL in (fails) (lang.cljc:217)) instead of the test's line; test-ns-hook is not honoured; a custom :begin-test-ns report is bypassed; run-all-tests walks the host's namespaces; an install refusal's failure location reads 'fail AFn.java:154'."
              :must-read #{seon.sci.eval/evaluate}
              :evidence #{"docs/research/agent-platform/dogfood-report-2026-09-26.md"
-                         "docs/research/agent-platform/landing/agent-repl-gaps-2026-09-26.md"}}]
+                         "docs/research/agent-platform/landing/agent-repl-gaps-2026-09-26.md"}}
+ #:seon.task{:id "9aed35a8bbc6"
+             :name "required-library-vars-read-as-definitions"
+             :kind :function
+             :intent "A required dependency namespace is a library: never the agent's definition, always kept across turns. Fixed 926326d8c; proven by root after restart."
+             :must-read #{seon.sci.eval/load-host-namespace seon.sci.eval/regenerate-agent-context!}
+             :evidence #{"docs/research/agent-platform/landing/agent-path-2-2026-09-26.md"}}
+ #:seon.task{:id "9949c640e249"
+             :name "branch-change-measured-against-loaded-program"
+             :kind :function
+             :intent "A branch's change is computed against the JVM's loaded program, not its fork point, so a branch forked before an adoption refuses every form (Astra M1)."
+             :must-read #{seon.sci.eval/install-row!}
+             :evidence #{"docs/research/agent-platform/landing/agent-path-2-2026-09-26.md"}}
+ #:seon.task{:id "2d2e18e61f60"
+             :name "analysis-order-differs-from-evaluation-order"
+             :kind :function
+             :intent "Analysis runs per batch and acquisition installs by name order, not evaluation order: alias hang, (do (in-ns) (defn)), register! only at top level, name-order install (Astra M1)."
+             :must-read #{seon.sci.eval/acquire!}
+             :evidence #{"docs/research/agent-platform/landing/agent-path-2-2026-09-26.md"}}]

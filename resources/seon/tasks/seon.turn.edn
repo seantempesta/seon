@@ -36,4 +36,10 @@
              :kind :function
              :intent "read-only-evaluation? (fixed for writers that read other branches in 90c542fd0) still promotes a form that writes another branch without reading it and reads only its own database, so a system turn may re-run a writer. A positive proof records every transaction the evaluation made."
              :must-read #{seon.turn/read-only-evaluation?}
-             :evidence #{"docs/research/agent-platform/landing/fix-root-graph-panic-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/fix-root-graph-panic-2026-09-26.md"}}
+ #:seon.task{:id "47b64f4cebf4"
+             :name "failed-run-left-unsettled"
+             :kind :function
+             :intent "A run failing after it records its sources was never closed with its cause (sorted-map wedge, sticky unavailable). rc-m4 f83931226 closes escaping runs; proven by root after restart."
+             :must-read #{seon.turn/turn}
+             :evidence #{"docs/research/agent-platform/landing/agent-path-2-2026-09-26.md"}}]
