@@ -2,7 +2,7 @@
 type: landing
 lane: rc-m3-error-identity-opus
 date: 2026-09-26
-status: one slice committed (8b4a10a44); two patches for root; RESET NEEDED
+status: two slices committed (8b4a10a44 installed and proven; 3cf5ff927); three patches for root; RESET NEEDED
 model error: M3 — an error's location or compiled form was treated as its producer contract
 ---
 
@@ -77,6 +77,50 @@ HEAD's `instrument.clj` and `render.clj` were each loaded into a throwaway names
   - `bin/test-check default --test seon.contracts-compile-test/every-declared-contract-compiles-against-the-packaged-projection` → pass 2, 481 ms (reused).
 - **Agent path before the change** (MCP SCI, branch rc-m3, retired): `(/ 1 0)` → "Execution error (ArithmeticException) at (REPL:1:1).\nDivide by zero", with no finding line. `(m3-inc "a")` → "user/m3-inc refused x at []: expected an integer (:int), got a string \"a\"…".
 
+## Slice 1, installed proof (the JVM restarted onto 8b4a10a44 at 17:24Z)
+
+- `(seon.schema/call-with-forms {} 42)` → "seon.schema/call-with-forms refused f at []: expected the declared predicate, got an integer 42…", 1.4 ms. Declared identity: `:seon.instrument/contract-error`.
+- `bin/test-check default`:
+  - `--ns seon.schema.predicate-metadata-refusal-test` → pass 17 (3.1 s; the test bodies run 2).
+  - `entity-pairs-test/declared-identity-and-producer-lookups-name-their-owners` → pass 10 (1.7 s).
+  - `instrument-test/an-invalid-refusal-retains-its-evidence-at-the-kernel-boundary` → pass 4 (1.9 s).
+  - `instrument-test/named-generators-survive-compilation-in-refusal-evidence` → pass 5 (1.9 s).
+- All four exceed one second end to end. That time is the request and fork overhead of `test-check`; no body exceeds its 5 s bound.
+
+## Slice 2 — 3cf5ff927: producers declare what settlement guessed (E6, task 1bf47dae6f04; root's follow-up)
+
+- **What changed.**
+  - A scripted sweep (`tmp/rc_m3_error_identity_opus/declared_identity_sweep.clj`, rewrite-clj under bb, about 3 s) visited every construction site that sets an error schema's distinguishing member.
+  - It wrapped each in `(vary-meta … assoc :seon.error/declared-schema <schema>)`.
+  - The member-to-schema table and its priority are exactly turn.clj's three discriminators, so each producer now declares the schema those tables chose.
+- **Sites: 86.**
+
+  | file | sites |
+  |---|---|
+  | db | 16 |
+  | ai | 17 |
+  | config | 18 |
+  | render | 12 |
+  | render/walk | 5 |
+  | render/transcript | 5 |
+  | cluster/prompt | 3 |
+  | schema | 6 |
+  | fn | 1 |
+  | turn | 2 |
+
+- **Hand residue (3).**
+  - Render's typed unknown declares on `unknown`'s result, not on the request maps handed to it.
+  - `request-profile`'s threaded relabel.
+  - `db/write-observation`'s threaded `assoc`.
+- **Lines:** +200/−163, including a 34-line test. The wraps are line-neutral.
+- **Checks.**
+  - clj-kondo shows no new findings in any of the ten files (compared against HEAD).
+  - Contracts compile over the ten files → `[]` (282 ms).
+- **Behaviour change:** where a producer relabels another error (for example, prompt's `assoc … :seon.cluster.prompt/error-agent-id`), the relabelling producer's schema now wins. The old table would pick an earlier member. Both schemas validate the value.
+- **Not converted.** turn.clj:4667 (`failure` detection over ten `seon.ai` members) and ai.clj:1369 (`contains?` over four members) still detect failure from members. They choose no schema, so they are left to the M3 follow-up.
+- **Regression:** `test/seon/error/declared_identity_test.clj`. It needs 3cf5ff927 installed.
+- **Deletion → patch 3.** `cluster/reply.clj` builds `:seon.cluster.reply/no-forms-error`, and that file is not this lane's. Deleting the discriminators without it would record a no-forms settlement with a nil schema, which panics recording. The deletion (turn.clj −42 lines) therefore ships in one patch with reply.clj's two wraps.
+
 ## Patches for root (files this lane does not hold)
 
 1. **`tmp/rc-m3-error-identity-opus/canonical-definition-one-direction.patch`** (schema.clj, fn.clj, contracts_compile_test, schema_test, instrument_test; +17/−34).
@@ -89,20 +133,23 @@ HEAD's `instrument.clj` and `render.clj` were each loaded into a throwaway names
    - `unresolved-macro-refusal` builds its value through `error.refusal/diagnostic`.
    - Proof, over the patched checkout population: a produced value validates; `extends-schema? … :seon.error/base` → true; contracts compile → `[]`.
    - Once applied, turn.clj:3525's docstring reason, and `phase`'s rerouting of this refusal, are M4's to delete.
-   - Both patches apply together on 8b4a10a44 (checked).
+   - Both patches apply together (checked again on 3cf5ff927).
+3. **`tmp/rc-m3-error-identity-opus/settlement-reads-declared-identity.patch`** (cluster/reply.clj +2 wraps; turn.clj −42 lines).
+   - `refusal-terminal-data`, `settle-batch-refusal!` and `record-attempt!` read only the producer's declaration.
+   - Apply the whole patch in one commit, after 3cf5ff927 (checked: it applies).
 
-## For rc-m4-terminal-opus, through root (E6)
+## E6 carrier (agreed with rc-m4 through root)
 
-- **The carrier is `(:seon.error/declared-schema (meta value))`** on the thrown ex-data or error value.
-  - The instrument refusal and the minimal refusal already carry it.
-  - `failure-value`'s `existing` branch and `error.refusal/refusal` preserve it (`assoc`/`update` keep metadata).
-- The three settlement discriminators (turn.clj:3786, :3861, :4197) should read only that carrier, falling back to `:seon.error/base`, and delete their member-guess tables.
-- A producer missing the carrier is a producer defect.
+- **The carrier is `(:seon.error/declared-schema (meta value))`**, attached by the producer to the ex-data or the error value.
+  - `failure-value`'s `existing` branch and `error.refusal/refusal` preserve it, because `assoc` and `update` keep metadata.
+  - `(merge {…} value)` would drop it; no settlement path does that today.
+- `seon.error/prepare` refuses `:seon.error/base` as a declaration, so there is no fallback: a producer missing the carrier fails loudly at recording. That is a producer defect.
 
 ## What root must run
 
-- **RESET NEEDED**, or `start --head`, to load 8b4a10a44.
-- Then:
+- **RESET NEEDED**, or `start --head`, to load 3cf5ff927 and any patches applied.
+- Then `bin/test-check default --ns seon.error.declared-identity-test`, `seon.turn-test`, and `seon.render.entity-pairs-test`.
+- The following already passed on the installed 8b4a10a44:
   - `bin/test-check default --ns seon.schema.predicate-metadata-refusal-test`
   - `--test seon.render.entity-pairs-test/declared-identity-and-producer-lookups-name-their-owners`
   - `--test seon.instrument-test/an-invalid-refusal-retains-its-evidence-at-the-kernel-boundary`
