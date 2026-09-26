@@ -50,3 +50,18 @@ socket.
 `seon.public-contract-test/lifecycle-generators-make-a-fresh-sample-each-generation`
 is the standing regression; the two remaining samples join its table when
 their owners land.
+
+## Re-verified at HEAD a5cb41426 (2026-09-26, research-system-state-opinion)
+
+Still open, now at new lines:
+
+- `src/seon/render/web.clj:115-124`: `generator-server` is a `defonce` `delay` of
+  `(http/run-server … {:ip "127.0.0.1" :port 0})`, handed out as the same bound server by
+  `server-generator`.
+- `:136-141`: `generator-mult`, one shared mult.
+- `src/seon/sci/eval.clj:183-188`: `generator-ctx`, one shared `sci/init` context.
+
+Under the state architecture adopted in 39a026318 (one roster per scope), this server is a live host object that no
+roster holds. `boot/stop!` and `web/stop!` never reach it, so it holds a loopback port and its worker threads until the
+JVM exits once any generation realizes it. This is the only http-kit server in the process that no cluster instance owns.
+Inventory row: `docs/research/agent-platform/system-state-opinion-2026-09-26.md` §3.1.
