@@ -192,27 +192,27 @@
     (is (false? (:seon.dev.mcp/windowed? result)))
     (is (not (contains? result :seon.blob/digest)))))
 
-(defn- jvm-exceptions-retain-the-root-location-and-flat-error
+(defn- jvm-exceptions-keep-the-whole-cause
+  ;; An exception is an ordinary value on the one REPL path: prepl's
+  ;; `Throwable->map` projects like any other value, every cause link with
+  ;; its message and ex-data, and an oversized one pages by digest.
   [connection]
   (let [cluster-name "mcp-jvm-exception-face-test"
         effective config/defaults
         inline-ceiling (:seon.config.eval.result/blob-threshold effective)
-        dependency-frame
-        ['malli.core$_map_schema$reify__1 'invoke "core.cljc" 1289]
-        serving-frame
-        ['seon.cluster$mcp_io_prepl 'invokeStatic "cluster.clj" 336]
-        small-message "The contract value was wrong."
+        frame ['seon.cluster$mcp_io_prepl 'invokeStatic "cluster.clj" 336]
+        root-message "The contract value was wrong."
         oversized-message (apply str (repeat (inc inline-ceiling) \x))
         envelope
         {:via [{:type 'clojure.lang.ExceptionInfo
                 :message "The wrapper."
-                :at serving-frame}
+                :data {:seon.probe/member 1}
+                :at frame}
                {:type 'java.lang.IllegalArgumentException
-                :message small-message
-                :at dependency-frame}]
-         :trace (into [dependency-frame serving-frame]
-                      (repeat 500 serving-frame))
-         :cause small-message
+                :message root-message
+                :at frame}]
+         :trace [frame]
+         :cause root-message
          :phase :execution}]
     (config/apply! {:seon.db/connection connection
                     :seon.boot/cluster-name cluster-name})
@@ -224,90 +224,32 @@
            (running-instance connection cluster-name))
     (try
       (let [result (projected cluster-name effective envelope false true)
-            face (:seon.dev.mcp/value result)
+            whole (:seon.dev.mcp/value result)
+            shown (pr-str result)
             oversized-result
             (projected cluster-name effective
                        (assoc envelope :cause oversized-message) false true)
             retained-message
             (cluster/mcp-get-value
-             cluster-name (:seon.blob/digest oversized-result)
-             [:seon.error/message] 0)]
-        (is (= serving-frame (:seon.error/frame face))
-            "the first first-party frame survives instead of the dependency frame")
-        (is (= 'java.lang.IllegalArgumentException
-               (:seon.error/exception-class face)))
-        (is (= small-message (:seon.error/message face)))
-        (is (not (contains? face :seon.dev.mcp/text))
-            "the same sentence is not rendered again inside the face")
-        (is (false? (:seon.dev.mcp/windowed? result)))
-        (is (not (contains? result :seon.blob/digest))
-            "a small exception does not retain its bulky prepl envelope")
-        ;; Diagnostic evidence accretes without changing the boundary:
-        ;; require the flat face to stay an order of magnitude smaller
-        ;; than the complete Throwable->map instead of freezing one byte
-        ;; count for today's declared evidence attributes.
-        (is (< (* 10 (utf8-size result)) (utf8-size envelope))
-            "the complete Throwable->map does not become the inline face")
+             cluster-name (:seon.blob/digest oversized-result) [:cause] 0)]
+        (doseq [part ["The wrapper." root-message ":seon.probe/member"
+                      "clojure.lang.ExceptionInfo" "java.lang.IllegalArgumentException"]]
+          (is (str/includes? shown part)
+              (str "the reply keeps every cause link: " part)))
+        (is (false? (:seon.dev.mcp/windowed? result)) "a small exception stays inline")
+        (is (= [{:seon.probe/member 1} nil] (mapv :data (:via whole)))
+            "each link keeps its own ex-data")
+        (is (= root-message (:cause whole)) "the root cause is the value's own member")
         (is (true? (:seon.dev.mcp/windowed? oversized-result)))
-        (is (string? (:seon.blob/digest oversized-result)))
         (is (true? (:seon.dev.mcp/retrievable? oversized-result)))
         (is (= (subs oversized-message 0 72)
                (:seon.render.value/window retained-message))
-            "a genuinely oversized message remains pageable by digest")
+            "an oversized cause pages by digest")
         (is (= (count oversized-message)
                (:seon.render.value/total retained-message))))
       (finally
         (swap! running-instances dissoc cluster-name)))))
 
-(deftest jvm-nil-deref-is-a-flat-error-value
-  (let [cluster-name "mcp-jvm-nil-deref-test"
-        effective config/defaults
-        deref-frame
-        ['clojure.core$deref_future 'invokeStatic "core.clj" 2314]
-        serving-frame
-        ['seon.cluster$mcp_io_prepl 'invokeStatic "cluster.clj" 336]
-        result
-        (projected
-         cluster-name effective
-         {:via [{:type 'java.lang.NullPointerException
-                 :message
-                 "Cannot invoke java.util.concurrent.Future.get() because fut is null"
-                 :at deref-frame}]
-          :trace [deref-frame serving-frame]
-          :cause
-          "Cannot invoke java.util.concurrent.Future.get() because fut is null"
-          :phase :execution} false true)
-        face (:seon.dev.mcp/value result)]
-    (is (= 'java.lang.NullPointerException
-           (:seon.error/exception-class face)))
-    (is (= serving-frame (:seon.error/frame face)))
-    (is (= "The evaluated form dereferenced nil."
-           (:seon.error/message face)))
-    (is (not (str/includes? (pr-str result) "Future.get"))
-        "the misleading host overload sentence must not leak")))
-
-(deftest jvm-ex-info-projects-its-message-class-and-first-party-frame
-  (let [cluster-name "mcp-jvm-ex-info-test"
-        dependency-frame
-        ['malli.core$_map_schema$reify__1 'invoke "core.cljc" 1289]
-        first-party-frame
-        ['seon.cluster$mcp_io_prepl 'invokeStatic "cluster.clj" 336]
-        message "The JVM evaluation refused the supplied member."
-        face
-        (:seon.dev.mcp/value
-         (projected
-          cluster-name config/defaults
-          {:via [{:type 'clojure.lang.ExceptionInfo
-                  :message message
-                  :at dependency-frame}]
-           :trace [dependency-frame first-party-frame]
-           :cause message
-           :phase :execution}
-          false true))]
-    (is (= message (:seon.error/message face)))
-    (is (= 'clojure.lang.ExceptionInfo
-           (:seon.error/exception-class face)))
-    (is (= first-party-frame (:seon.error/frame face)))))
 
 (deftest runtime-observation-is-whole-and-its-ai-face-renders-less
   ;; The producer returns every open fault whole, newest first; the value
@@ -540,7 +482,7 @@
         executed (atom [])
         acquire @#'support/with-fresh-database
         scenarios
-        [[:exception jvm-exceptions-retain-the-root-location-and-flat-error]
+        [[:exception jvm-exceptions-keep-the-whole-cause]
          [:identity oversized-values-share-one-digest-across-storeless-and-stored-modes]
          [:string stored-strings-page-by-character-offset]
          [:nested ordinary-value-artifacts-drill-from-the-result-root]
