@@ -1379,15 +1379,6 @@
   (let [value (settled-value database row)]
     (if (:seon.error/at value) database value)))
 
-(defn- with-open-run
-  "`database` with `submission`'s run opened (`seon.db/with`, never committed),
-  or unchanged when the writer refuses the open: the settlement that carries
-  the open then carries its refusal."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.turn.loop/submission] :seon.db/database-value]}
-  [database submission]
-  (let [value (db/with database (:seon.db/tx-data submission))]
-    (if (:seon.error/at value) database value)))
-
 (def ^:private receipt-terminal-attributes
   [:seon.eval/shown
    :seon.eval/origin
@@ -2331,13 +2322,7 @@
                     (assoc report :seon.turn/refused-system-agent agent-id)
                       (if (some #(and (= :seon.turn/id (:a %))
                                       (= turn-id (:v %))) (:tx-data report))
-                        (do
-                          (doseq [item evaluated
-                                  :let [evaluation (:seon.sci.eval/evaluation item)]]
-                            (sci.eval/bind-result!
-                             agent-ctx (:seon.repl/handle evaluation)
-                             (:seon.sci.admit/value evaluation)))
-                          (assoc result :seon.turn/id turn-id))
+                        (assoc result :seon.turn/id turn-id)
                         result)))
                 result)))))))
 
@@ -4874,7 +4859,6 @@
         _ (when (:seon.error/at overlay)
             (throw (ex-info (:seon.error/message overlay "Agent overlay read refused.") overlay)))
         cluster (merge cluster overlay)
-        submission (:seon.turn.loop/submission cluster)
         ;; ONE DERIVATION PER TURN (2.1). The render profile is the turn's
         ;; presentation policy, not a per-form question, so it is derived
         ;; here — where the evaluation requests are built — and CARRIED on
@@ -4892,10 +4876,7 @@
            ordinal first-ordinal
            namespace-name starting-namespace
            results []
-           ;; A submitted run's open was applied once, by the pass, to the
-           ;; value this commit id names; `with` keeps the base's commit id.
-           working (when-let [opened (:seon.db/db submission)]
-                     [(db/commit-id opened) opened])]
+           working nil]
       (if-let [source (first remaining)]
         (let [form (assoc source :seon.cluster.eval/ns
                           [:seon.ns/name namespace-name])
@@ -4908,7 +4889,7 @@
                 working
                 [(db/commit-id latest)
                  (reduce with-settled
-                         (cond-> latest submission (with-open-run submission))
+                         latest
                          (keep #(get-in % [:seon.sci.eval/evaluation :seon.program/row]) results))])
               captured (atom [])
               _ (await-turn-part! cluster :seon.sci.eval/evaluation
@@ -4992,7 +4973,9 @@
                               database form
                               (select-keys evaluation [:seon.cluster.eval/read-evidence]))]
               (throw (ex-info (:seon.error/message fault) fault))))
-          (when entity-id
+          ;; ONE BIND SITE: an evaluation that will be recorded (an existing
+          ;; entity, or a run whose settlement writes it) is bound in the fork now.
+          (when handle
             (sci.eval/bind-result! ctx handle (:seon.sci.admit/value evaluation)))
           (let [results (conj results
                               {:seon.cluster.eval/ordinal ordinal
@@ -5121,6 +5104,9 @@
                 :seon.sci.eval/ctx ctx
                 :seon.agent/id agent-id
                 :seon.turn/id run-id
+                ;; a submitted run's evaluations exist only in its settlement:
+                ;; its handles are minted now, as for any written run
+                :seon.turn/write? (contains? cluster :seon.turn.loop/submission)
                 :seon.cluster.eval/ordinal first-ordinal
                 :seon.ns/name (or (fold-namespace database run-id evaluations
                                                  first-ordinal)
