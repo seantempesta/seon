@@ -8,9 +8,15 @@
            [java.util.concurrent.atomic AtomicLong]))
 
 (defn- settle
-  "Run Caffeine's pending maintenance so eviction is observable now."
+  "Run Caffeine's pending maintenance, then await its removal notifications,
+  so eviction is observable now. Caffeine runs the removal listener (which
+  counts evictions and bytes) on the cache's executor, by default
+  `ForkJoinPool/commonPool`; `cleanUp` only schedules those notifications, so
+  under load a status read could miss the last ones (red at 16:31 on
+  2026-09-26: 16 evictions, 1,200 bytes)."
   [held]
-  (.cleanUp (.synchronous ^com.github.benmanes.caffeine.cache.AsyncCache (::cache/cache held))))
+  (.cleanUp (.synchronous ^com.github.benmanes.caffeine.cache.AsyncCache (::cache/cache held)))
+  (.awaitQuiescence (java.util.concurrent.ForkJoinPool/commonPool) 5 java.util.concurrent.TimeUnit/SECONDS))
 
 (deftest concurrent-misses-of-one-key-derive-once
   (let [held (cache/create 1000000)

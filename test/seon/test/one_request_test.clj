@@ -393,8 +393,10 @@
   a-refused-recording-write-is-a-stored-core-fault-carrying-its-whole-refusal
   ;; The recording writer is the request's value (lane impl-world-injection
   ;; 2026-09-25): a writer the dependency refuses, with no caller mistake, is
-  ;; stored as a core fault that throws under :panic. A caller mistake stays a
-  ;; returned refusal (source-test's foreign recording connection).
+  ;; stored as a core fault and the request returns the refusal beside it
+  ;; (`seon.fault/fault!` returns its receipt; 0cbf4336f deleted the :panic
+  ;; policy). A caller mistake stays a returned refusal (source-test's foreign
+  ;; recording connection).
   (support/with-database
    (fn [connection]
      (let [handle (support/execution-handle connection)
@@ -406,22 +408,20 @@
                                                 [:db.fn/call (fn [_] (throw (ex-info "recording writer refused"
                                                                                      {:error ::writer-refused})))]))))
            _ (define-agent-test! handle "(clojure.test/deftest refused-recording (clojure.test/is true))")
-           thrown (try (sut/run {:seon.test/execution (support/execution-handle connection)
-                                 :seon.test/recording-connection connection
-                                 :seon.test/recording-writer writer
-                                 :seon.test/policy :named
-                                 :seon.test/identities #{'seon.test.one-request-test/refused-recording}})
-                       nil
-                       (catch clojure.lang.ExceptionInfo panic panic))
+           result (sut/run {:seon.test/execution (support/execution-handle connection)
+                            :seon.test/recording-connection connection
+                            :seon.test/recording-writer writer
+                            :seon.test/policy :named
+                            :seon.test/identities #{'seon.test.one-request-test/refused-recording}})
            refusal @refused
-           recorded (:seon.fault/recorded (ex-data thrown))]
+           recorded {:seon.error/signature
+                     (db/q '[:find ?signature . :where [?e :seon.error/operation seon.test/admit-run]
+                             [?e :seon.error/signature ?signature]]
+                           (db/db connection))}]
        (is (= {:error ::writer-refused} (:seon.error/data (peek (:seon.error/chain refusal))))
            (pr-str (:seon.error/chain refusal)))
-       (is (= :panic (:seon.fault/policy recorded)) (pr-str (ex-data thrown)))
-       (is (true? (:seon.fault/committed? recorded)) "stored before it throws")
-       (is (= 'seon.test/admit-run (:seon.error/operation recorded)))
-       (is (= refusal (ex-data (ex-cause thrown))) "the fault carries the whole refusal, its cause chain included")
-       (is (= "recording writer refused" (:seon.error/message (peek (:seon.error/chain (ex-data (ex-cause thrown)))))))
+       (is (= refusal result) "the request returns the whole refusal, its cause chain included")
+       (is (string? (:seon.error/signature recorded)) "the refused admission is a stored core fault")
        (let [row (db/pull (db/db connection)
                           [{:seon.error/occurrences [{:seon.error.occurrence/data-blob [:seon.error.occurrence/blob-digest]}]}]
                           [:seon.error/signature (:seon.error/signature recorded)])

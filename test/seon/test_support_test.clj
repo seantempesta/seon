@@ -8,6 +8,7 @@
             [clojure.test.check.properties :as prop]
             [seon.db :as db]
             [seon.cluster :as cluster]
+            [seon.cluster.process :as process]
             [seon.config :as config]
             [seon.instrument :as instrument]
             [malli.core :as m]
@@ -153,8 +154,11 @@
                     vec)
                (db/populated-identity-attributes database))
             "the browse catalogue derives from installed identities in datoms")
+        ;; A member world holds boot's cluster facts, written on its
+        ;; checkpoint by this process (`seon.test/prepare-checkpoint!`).
         (is (= #{cluster/boot-process-identity
-                 config/managing-process-identity}
+                 config/managing-process-identity
+                 (process/id (process/current-identity))}
                (set
                 (db/q
                  '[:find [?process-id ...]
