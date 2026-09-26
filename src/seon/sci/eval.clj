@@ -49,10 +49,9 @@
   guard, arming, the deadline, `interrupted?`, and the one failure
   classifier; this namespace is the FORM entrance and `kernel/invoke` is
   the NAMED-FUNCTION entrance a renderer call takes. Neither copies the
-  other's guard semantics, so they cannot drift: work reached while this
-  context is already armed on this thread inherits that arm and its
-  deadline, and a different context on an armed thread is refused as an
-  ordinary flat error value.
+  other's guard semantics, so they cannot drift: work reached on a thread
+  already armed inherits that arm and its deadline, in whichever context
+  it evaluates.
 
   AN AGENT EVALUATES IN ITS ASSIGNED NAMESPACE, by construction. The eval
   reads `:seon.agent/namespace` from the database and binds sci's
@@ -110,6 +109,7 @@
             [my.background]
             [my.message]
             [my.turn]
+            [sci.addons.future :as sci.future]
             [sci.core :as sci]
             [sci.impl.vars :as sci.vars]
             [sci.impl.utils :as sci.utils]
@@ -243,25 +243,24 @@
     copied))
 
 
-(def ^:private java-lang-throwables
-  "Every public `java.lang` class assignable to Throwable, under its short and
-  its full name, read once from the running JDK's `java.base` module (the
-  `jrt:` file system). SCI grants a class to interpreted code only through
-  its `:classes` option (`sci/impl/opts.cljc:68`), so this is that option's
-  value; deriving it keeps agent `catch` clauses in step with the JDK."
-  (delay
-   (let [file-system (java.nio.file.FileSystems/getFileSystem (java.net.URI/create "jrt:/"))
-         directory (.getPath file-system "/modules" (into-array String ["java.base" "java" "lang"]))
-         loader (ClassLoader/getSystemClassLoader)]
-     (with-open [paths (java.nio.file.Files/list directory)]
-       (into {}
-             (comp (map #(str (.getFileName ^java.nio.file.Path %)))
-                   (filter #(and (str/ends-with? % ".class") (not (str/includes? % "$"))))
-                   (map #(Class/forName (str "java.lang." (subs % 0 (- (count %) 6))) false loader))
-                   (filter #(and (java.lang.reflect.Modifier/isPublic (.getModifiers ^Class %))
-                                 (.isAssignableFrom Throwable ^Class %)))
-                   (mapcat (fn [^Class c] [[(symbol (.getSimpleName c)) c] [(symbol (.getName c)) c]])))
-             (iterator-seq (.iterator paths)))))))
+(defn- load-host-namespace
+  "SCI's `:load-fn` (`reference-code/sci/src/sci/impl/load.cljc:204-243`): a
+  namespace the JVM already loaded, required and not yet in the context, is
+  exposed as itself, each public Var copied at its root, so an agent requires
+  `malli.core` or `datahike.api` as a Clojure REPL does. Program namespaces are
+  acquired into the context before any form runs, so none reaches here; an
+  unloaded namespace answers nil and SCI reports it as not found."
+  {:malli/schema [:=> [:cat [:map [:namespace :symbol] [:ctx :map]]] [:maybe :map]]}
+  [{namespace-name :namespace ctx :ctx}]
+  (when-let [host (find-ns namespace-name)]
+    (let [sci-namespace (sci/create-ns namespace-name)]
+      (sci/add-namespace!
+       ctx namespace-name
+       (into {:obj sci-namespace}
+             (map (fn [[intern-name host-var]]
+                    [intern-name (copy-host-var host-var sci-namespace)]))
+             (ns-publics host)))
+      {})))
 
 (defn build-base-ctx
   "Build the minimal interpreter from the projection supplied by its caller."
@@ -297,6 +296,7 @@
                         (program/base-context-injected-symbols projection)))
         ctx
         (sci/init
+        (->
         {:interrupt-fn (:interrupt-fn kernel-options)
          :host-interop-observer (:host-interop-observer kernel-options)
          :built-in-call-observer (:built-in-call-observer kernel-options)
@@ -319,10 +319,14 @@
          (merge {'clojure.core sci.interrupt/clojure-core
                  'clojure.string sci.interrupt/clojure-string}
                 injected-namespaces)
-         ;; every public java.lang Throwable, derived from the running JDK
-         ;; (`java-lang-throwables`): an agent names them in `catch` as
-         ;; clojure.main code does, and no other host class is granted
-         :classes @java-lang-throwables})
+         ;; every class on the classpath resolves as the compiler resolves it
+         ;; (our SCI fork's `interop/host-class-opts`); interruption stays
+         ;; SCI's ceiling: a host call is not interrupted (interrupt.md:84-98)
+         :classes {:allow :all}
+         :load-fn load-host-namespace}
+         ;; SCI's own `future` addon; its `future-call` carries the arm
+         sci.future/install
+         (assoc-in [:namespaces 'clojure.core 'future-call] kernel/future-call)))
         help-var (get-in injected-namespaces ['seon.bootstrap 'help])
         dir-var (get-in injected-namespaces ['seon.bootstrap 'dir])
         doc-var (get-in injected-namespaces ['seon.bootstrap 'doc])]

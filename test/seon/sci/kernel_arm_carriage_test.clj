@@ -133,29 +133,6 @@
         (is (= :time (:seon.eval/outcome record))))
       (next-arm-succeeds))))
 
-(deftest a-foreign-arm-refusal-identifies-the-existing-arm-and-site
-  (let [ctx (crossing-ctx)
-        arm (kernel/arm ctx 1000)]
-    (try
-      (let [failure (try
-                      (kernel/arm (crossing-ctx) 1000)
-                      (catch Throwable throwable throwable))
-            data (ex-data failure)]
-        (is (= :seon.sci.kernel/arm-id
-               (get-in data [:seon.sci.kernel/guard-observation :seon.error.evidence/attribute])))
-        (is (= 'seon.sci.kernel/acquire-arm (:seon.error/operation data)))
-        (is (int? (get-in data
-                          [:seon.sci.kernel/existing-arm
-                           :seon.sci.kernel/arm-id])))
-        (is (seq (get-in data
-                         [:seon.sci.kernel/existing-arm
-                          :seon.sci.kernel/armed-at])))
-        (is (int? (get-in data
-                          [:seon.sci.kernel/requested-context
-                           :seon.sci.kernel/interpreter-id]))))
-      (finally
-        ((:seon.sci.kernel/stop! arm))))))
-
 (deftest entrances-on-another-thread-reach-the-governing-arm
   (let [ctx (crossing-ctx)]
     (testing "the arming thread's own entrances (baseline)"

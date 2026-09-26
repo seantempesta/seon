@@ -2280,36 +2280,6 @@
                (:seon.render.unknown/refused-operation deadline-result)))
           "nested render work keeps the outer 50ms time limit")))))
 
-(deftest a-foreign-armed-context-is-refused-as-a-value
-  (let [armed-ctx (eval/build-base-ctx (seon.schema/handed-projection))
-        other-ctx (eval/build-base-ctx (seon.schema/handed-projection))
-        {stop! :seon.sci.kernel/stop!} (kernel/arm armed-ctx 30000)]
-    (try
-      (let [evaluation (run-in other-ctx "(+ 1 2)" 1000)]
-        (is (schema/valid-candidate-value? (schema/handed-projection)
-                                           :seon.sci.kernel/error
-                                           (:seon.sci.admit/value evaluation))
-            "a refusal at an agent-facing operation is a value, never a throw")
-        (is (= 'seon.sci.kernel/acquire-arm
-               (:seon.error/operation (:seon.sci.admit/value evaluation))))
-        (is (some? (:seon.cluster.eval/error evaluation))
-            "presence is the state, so a preserved refusal still carries the
-             message the loop reads — it must never store a nil there"))
-      ;; `sci/fork` is `(update ctx :env …)`, so it PRESERVES the guard key
-      ;; and shares the parent's ThreadLocal
-      ;; (reference-code/sci/src/sci/core.cljc:318-323). Two contexts sharing
-      ;; one arm on one thread cannot both be honoured, so the fork is refused
-      ;; loudly rather than silently borrowing the parent's deadline.
-      (let [forked (run-in (sci/fork armed-ctx) "(+ 1 2)" 1000)]
-        (is (schema/valid-candidate-value? (schema/handed-projection)
-                                           :seon.sci.kernel/error
-                                           (:seon.sci.admit/value forked)))
-        (is (= :seon.sci.kernel/arm-id
-               (get-in forked [:seon.sci.admit/value
-                               :seon.sci.kernel/guard-observation
-                               :seon.error.evidence/attribute]))))
-      (finally (stop!)))))
-
 (deftest an-agents-own-exception-prints-as-clojure-main-prints-it
   ;; REPL parity (clojure.main 1.12.5): an exception the agent's code throws is
   ;; an ordinary value, shown as `Execution error (Class) at (location).` and
