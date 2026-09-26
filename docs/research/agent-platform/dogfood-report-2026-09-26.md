@@ -127,7 +127,24 @@ snapshot.
   `:example` strings lose their indentation. `my.issue/add!` has no example, and its `doc` is unreadable
   (#18). The branch is retired.
 
-### Cycle 1 change (unmerged): coverage for `my.plan/current`
+- **Cycle 6** (03:22–03:27Z, branch **`dogfood-repl-opus-12`, kept alive for root's merge**, archive 04f3a159b).
+  - **Verified fixed on the live default:** the regex query (#4) answers `10` and does not wedge the agent
+    (b96d6e684). A branch agent's message now reaches the cluster (#5): the proposal below is entity
+    34655 on the cluster branch.
+  - **Milestone step reached:** I re-made the cycle-1 test on this branch, authored an issue for it with
+    `(my.issue/add! …)`, written from its source because its `doc` is unreadable (#18), and ran
+    `(my.test/check {:seon.test/changed [...]})`, which passed 2/2 in 2,056 ms (run `2d6b17831736`). Then
+    `(my.program/propose-merge! {:seon.issue/id "7bae492de6db"})` delivered message `276dd9433eb3` to root.
+  - **Open questions for the merge:**
+    1. Issue `7bae492de6db` exists only on the branch. The cluster has no row for it, and the
+       merge-test name says "a merge naming a task the destination lacks refuses".
+    2. The message's `:seon.message/content` is a `pr-str` string of a map, not the map.
+  - `seon.cluster.source/write-back!` and `prepare-merge!` have no `:example`, and their `:summary` stops
+    mid-sentence at the first line break ("Write the function and test changes of `accepted`
+    (`accept-merge!`'s report"). An agent cannot preview write-back, because it is root's step after
+    `accept-merge!`.
+
+### Cycle 1 change (proposed in cycle 6 from `dogfood-repl-opus-12`, message `276dd9433eb3`, issue `7bae492de6db`): coverage for `my.plan/current`
 
 ```clojure
 (in-ns 'my.plan-test)
