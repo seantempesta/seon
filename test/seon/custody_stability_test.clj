@@ -1,6 +1,7 @@
 (ns seon.custody-stability-test
   "Standing database checks for the current custody-returning surface."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.set]
+            [clojure.test :refer [deftest is]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
@@ -21,51 +22,65 @@
     :seon.sci.eval/ctx})
 
 (def ^:private expected-custody-returning-functions
-  #{["seon.cluster.store/open-branch!" :seon.db/connection]
-    ["seon.cluster.store/open-store!" :seon.store/store]
-    ["seon.sci.eval/build-base-ctx" :seon.sci.eval/ctx]
-    ["seon.sci.eval/cluster-ctx" :seon.sci.eval/ctx]
+  ;; Symbols, as the census reads them: `:seon.fn/sym` is a Datahike symbol.
+  #{['seon.cluster.store/open-branch! :seon.db/connection]
+    ['seon.cluster.store/open-store! :seon.store/store]
+    ['seon.sci.eval/build-base-ctx :seon.sci.eval/ctx]
+    ['seon.sci.eval/cluster-ctx :seon.sci.eval/ctx]
     ;; The fifth, reviewed 2026-08-08 (P17 S2). `seon.db/supplied-connection`
     ;; is the declared supplier of `:seon.db/connection`: handing out that
     ;; cluster's connection IS its whole contract, and it can only produce
     ;; the one carried by the environment it is called with, so it widens no
     ;; custody. This snapshot caught it exactly as intended — the row landed
     ;; with S1 and this census was the thing that noticed.
-    ["seon.db/supplied-connection" :seon.db/connection]
+    ['seon.db/supplied-connection :seon.db/connection]
     ;; Source acquisition owns both values while constructing the one base
     ;; later forked by sovereign clusters. Neither function is agent-callable:
     ;; `source-base!` returns only newly constructed source custody, and
     ;; `fork-cluster-ctx` replaces connection custody with its explicit branch.
-    ["seon.cluster/source-base!" :seon.store/store]
-    ["seon.cluster/source-base!" :seon.sci.eval/ctx]
-    ["seon.sci.eval/fork-cluster-ctx" :seon.sci.eval/ctx]
+    ['seon.cluster/source-base! :seon.store/store]
+    ['seon.cluster/source-base! :seon.sci.eval/ctx]
+    ['seon.sci.eval/fork-cluster-ctx :seon.sci.eval/ctx]
     ;; Export fallback borrows the already-registered branch connection; it
     ;; neither creates custody nor changes its reference count. Returning that
     ;; exact connection is the function's declared purpose.
-    ["seon.cluster.registry/active-branch-connection"
+    ['seon.cluster.registry/active-branch-connection
      :seon.db/connection]
     ;; Ruling 47 grew the program population to every ctx-resolvable name.
     ;; These ordinary public functions are therefore visible to the derived
     ;; custody census and require the same explicit review as prior members.
-    ["seon.cluster.boot/connection" :seon.db/connection]
-    ["seon.sci.eval/fork-candidate-ctx" :seon.sci.eval/ctx]
-    ;; Reviewed 2026-09-16. `acquire-context!` IS the per-agent context
-    ;; acquisition owner: it forks the cluster ctx once per agent and keeps
-    ;; the fork in its execution's roster, so the custody it
-    ;; returns is the custody it just minted for that agent.
-    ["seon.cluster.agent/acquire-context!" :seon.sci.eval/ctx]
+    ['seon.cluster.boot/connection :seon.db/connection]
+    ['seon.sci.eval/fork-candidate-ctx :seon.sci.eval/ctx]
+    ;; Reviewed 2026-09-26. `seon.db/branch-connection` borrows the
+    ;; connection Datahike's registry already holds for a branch, as
+    ;; `active-branch-connection` does; it opens nothing.
+    ['seon.db/branch-connection :seon.db/connection]
+    ;; The base-context owners: `derive-base-ctx` builds the interpreter and
+    ;; acquires the program, `base-ctx` memoizes it per database value and
+    ;; `copy-base-ctx` forks that memoized base. A base is program-only: it
+    ;; carries no connection custody until `fork-cluster-ctx` binds one.
+    ['seon.sci.eval/base-ctx :seon.sci.eval/ctx]
+    ['seon.sci.eval/copy-base-ctx :seon.sci.eval/ctx]
+    ['seon.sci.eval/derive-base-ctx :seon.sci.eval/ctx]
+    ;; Test-world owners, program rows like any other. The fixture fork is the
+    ;; production fork onto the fixture's own connection; `open-world!` returns
+    ;; the member branch connection it opened; the agent-custody test's private
+    ;; helper returns the connection a handle already holds.
+    ['seon.test-support/fork-cluster-ctx :seon.sci.eval/ctx]
+    ['seon.test/open-world! :seon.db/connection]
+    ['seon.cluster.agent-custody-test/held-connection :seon.db/connection]
     ;; `carry-connection-projection-state!` returns the very connection it was
     ;; handed after attaching the owning projection state (law 2.1). Like
     ;; `seon.db/supplied-connection` it widens no custody: it can only return
     ;; the connection its caller already holds.
-    ["seon.db/carry-connection-projection-state!" :seon.db/connection]})
+    ['seon.db/carry-connection-projection-state! :seon.db/connection]})
 
 (def ^:private custody-returning-query
   '[:find ?function-symbol ?schema-key
     :in $ [?schema-key ...]
     :where
-    [?schema :seon.schema/key ?schema-key]
-    [?arity :seon.fn.arity/output-refs ?schema]
+    ;; `:seon.fn.arity/output-refs` holds the schema keys themselves.
+    [?arity :seon.fn.arity/output-refs ?schema-key]
     [?function :seon.fn/arities ?arity]
     [?function :seon.fn/sym ?function-symbol]])
 
@@ -182,18 +197,34 @@
                      [?function :seon.fn/ns ?namespace]
                      [?namespace :seon.ns/name ?namespace-name]]
                    db))
+            declared-names
+            (reduce
+             (fn [by-namespace [function-symbol namespace-name]]
+               (update by-namespace namespace-name (fnil conj #{})
+                       (symbol (name (symbol function-symbol)))))
+             {}
+             (db/q '[:find ?function-symbol ?namespace-name
+                     :where
+                     [?function :seon.fn/sym ?function-symbol]
+                     [?function :seon.fn/ns ?namespace]
+                     [?namespace :seon.ns/name ?namespace-name]]
+                   db))
+            ;; A public Var the program does not declare as a function is not
+            ;; SCI's to install: a deftest is a test declaration, run by
+            ;; `seon.test/run`, and a compiler-generated proxy Var has no row.
             expected
             (into (sorted-map)
                   (map (fn [[namespace-name host-namespace]]
                          [namespace-name
                           (into (sorted-set)
                                 (concat
-                                 (keys (ns-publics host-namespace))
+                                 (filter (get declared-names namespace-name #{})
+                                         (keys (ns-publics host-namespace)))
                                  (get indexed-function-names
                                       namespace-name)))]))
                   host-namespaces)
             installed-all (sci/namespace-interns
-                           (eval/cluster-ctx db connection))
+                           (test-support/fork-cluster-ctx connection))
             installed
             (select-keys
              installed-all
@@ -222,7 +253,7 @@
 (deftest non-function-private-custody-roots-and-operator-state-stay-unreachable
   (test-support/with-database
     (fn [connection]
-      (let [ctx (eval/cluster-ctx @connection connection)
+      (let [ctx (test-support/fork-cluster-ctx connection)
             forbidden
             ['seon.cluster/running-instances
              'seon.cluster/root-store-holder
@@ -253,8 +284,8 @@
            (fn [connection-a]
              (test-support/with-database
                (fn [connection-b]
-                 (let [ctx-a (eval/cluster-ctx @connection-a connection-a)
-                       ctx-b (eval/cluster-ctx @connection-b connection-b)
+                 (let [ctx-a (test-support/fork-cluster-ctx connection-a)
+                       ctx-b (test-support/fork-cluster-ctx connection-b)
                        before (context-snapshot ctx-b)]
                    (every?
                     true?
@@ -270,20 +301,29 @@
     (fn [connection-a]
       (test-support/with-database
         (fn [connection-b]
-          (let [ctx-a (eval/cluster-ctx @connection-a connection-a)
+          ;; A message is its recipient and its content. The recipient is a
+          ;; canonical agent on each branch (`agent-tx`); a refused write would
+          ;; make every isolation assertion below vacuously true.
+          (doseq [connection [connection-a connection-b]]
+            (test-support/transacted! connection (test-support/agent-tx @connection "custody-recipient")))
+          (let [ctx-a (test-support/fork-cluster-ctx connection-a)
                 _ (sci/intern ctx-a 'user 'own-connection connection-a)
                 _ (sci/intern ctx-a 'user 'foreign-connection connection-b)
-                ;; A message is its recipient and its content: the declared
-                ;; entity requires `:seon.message/to` and
-                ;; `:seon.message/content`, so each write mints (upserts) the
-                ;; one recipient agent in the same transaction and addresses
-                ;; the message to it. A refused transaction would make every
-                ;; isolation assertion below vacuously true.
+                message-ids
+                (fn [connection]
+                  (set
+                   (db/q
+                    '[:find [?id ...]
+                      :where [_ :seon.message/id ?id]]
+                    @connection)))
+                ;; Both fixture branches inherit the member world's messages;
+                ;; isolation is about what this evaluation adds.
+                before-a (message-ids connection-a)
+                before-b (message-ids connection-b)
                 message-data
                 (fn [message-id]
-                  (str "[{:db/id -1 :seon.agent/id \"custody-recipient\"} "
-                       "{:seon.message/id \"" message-id "\" "
-                       ":seon.message/to -1 "
+                  (str "[{:seon.message/id \"" message-id "\" "
+                       ":seon.message/to [:seon.agent/id \"custody-recipient\"] "
                        ":seon.message/content \"custody isolation probe\"}]"))
                 own
                 (evaluate-in
@@ -299,17 +339,10 @@
                 (evaluate-in
                  ctx-a
                  (str "(seon.db/transact! foreign-connection "
-                      (message-data "custody-foreign") ")"))
-                message-ids
-                (fn [connection]
-                  (set
-                   (db/q
-                    '[:find [?id ...]
-                      :where [_ :seon.message/id ?id]]
-                    @connection)))]
+                      (message-data "custody-foreign") ")"))]
             (is (nil? (:seon.cluster.eval/error own)))
             (is (nil? (:seon.cluster.eval/error ambient)))
             (is (string? (get-in foreign [:seon.sci.admit/value :seon.db.write.attempt/request-id])))
             (is (= #{"custody-own" "custody-ambient"}
-                   (message-ids connection-a)))
-            (is (empty? (message-ids connection-b)))))))))
+                   (clojure.set/difference (message-ids connection-a) before-a)))
+            (is (= before-b (message-ids connection-b)))))))))
