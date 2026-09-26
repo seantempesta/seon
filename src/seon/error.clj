@@ -1756,13 +1756,16 @@
                 (:seon.render/value unit)
                 unit)
         database (:seon.db/db unit)
-        value (if (and database (:seon.error/signature value))
-                (db/pull database
-                         (observation-selector (or (db/carried-projection database)
-                                                   (:seon.schema/projection unit)
-                                                   (schema/projection-from-database database)))
-                         [:seon.error/signature (:seon.error/signature value)])
-                value)]
+        ;; The stored row, when this database holds one; an error it never
+        ;; stored (a refusal returned before, or instead of, its recording)
+        ;; is shown as the value itself.
+        value (or (when (and database (:seon.error/signature value))
+                    (db/pull database
+                             (observation-selector (or (db/carried-projection database)
+                                                       (:seon.schema/projection unit)
+                                                       (schema/projection-from-database database)))
+                             [:seon.error/signature (:seon.error/signature value)]))
+                  value)]
     (if (map? value) (latest-fact value) value)))
 
 
