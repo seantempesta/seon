@@ -152,6 +152,18 @@ snapshot.
   with one token budget and a separate child bound, but a lone large string costs the agent the whole
   budget. I did not file it; it is for the floor lane to judge.
 
+- **Cycle 8** (03:30–03:33Z, branch `dogfood-repl-opus-14`, retired).
+  - The `my.background` example works: a background `printf` finished in 67 ms. But `poll` answers
+    `:seon.effect/request-edn` and `:seon.effect/result-edn` as **EDN strings**, so the agent must parse
+    its own result (evidence on
+    [capability-component-arguments-stay-in-request-edn](../../seon/issues/capability-component-arguments-stay-in-request-edn.md)).
+  - `dir` lists plumbing as agent API: `my.edit/form-request-generator` ("This program row carries no
+    :seon.fn/doc."), `my.fs/write-precondition-generator`, `my.fs/content-generator`,
+    `my.shell/stdin-generator`, and `my.turn/usage-form` (`:seon.fn/internal? true`).
+  - **Design question for root:** `my.edit/form!`, `exact!` and `lines!` let an agent edit source
+    *files*, which contradicts "files are the write-back of accepted rows, not the working medium" and
+    "product agents … never shell self-modification". I did not call them.
+
 ### Cycle 1 change (proposed in cycle 6 from `dogfood-repl-opus-12`, message `276dd9433eb3`, issue `7bae492de6db`): coverage for `my.plan/current`
 
 ```clojure

@@ -36,3 +36,14 @@ the derived writer exists to remove.
 
 Option 1 is the one that matches §2.2 of the effects research
 (`docs/prds/steward-platform/research/effects-and-write-back-2026-09-16.md`).
+
+## Evidence 2026-09-26 (dogfood-repl-opus): the agent reads its own result as an EDN string
+
+Branch `dogfood-repl-opus-14`, archive 04f3a159b. The `my.background/await` docstring example (a background `printf`)
+answered `:my.turn/disposition :wait` with `[:seon.effect/id "764fa22a6d78"]`. The next
+`(my.background/poll {:my.background/result [:seon.effect/id "764fa22a6d78"]})` answered
+`#:seon.effect{:id …, :request-edn "#:my.shell{:argv [\"printf\" …] …}", :result-edn "#:my.shell{… :exit 0, :stdout
+#:my.shell.output{… :text \"Verified.\"} …}", :result-size 369, :duration-ms 67}`. To read `:exit` or the stdout text, the
+agent must `read-string` its own result. The law says everything before the print is a real value under its schema. The
+storage choice (canonical EDN plus declared datoms) has leaked into the agent's read: `poll` should answer the
+result **value** (decoded once, at the reader, from what is stored), not the stored spelling.
