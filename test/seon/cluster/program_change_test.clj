@@ -6,6 +6,7 @@
   identity atom; the JVM's `seon.sci.eval/loaded-identity` is never touched."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [my.program]
             [seon.cluster :as cluster]
             [seon.db :as db]
             [seon.schema :as schema]
@@ -167,3 +168,15 @@
         "every packaged schema resource is an input")
     (is (contains? paths "src/seon/cluster.clj") "a loaded first-party namespace is an input")
     (is (every? string? (vals inputs)))))
+
+(deftest a-booted-wrapper-supplies-its-declared-defaults
+  ;; Boot arms against the published commit's projection, which holds the
+  ;; function contracts a call-preparation plan is read from; armed against the
+  ;; files' schema forms alone, every wrapper armed without a plan and callers
+  ;; were refused a supplied :seon.db/db (46ad08a41 with fa6f8e8b0's skipped
+  ;; post-boot re-arm).
+  (support/with-database
+   (fn [_connection]
+     (let [result (my.program/breaks {:seon.program/subject 'seon.id/valid?})]
+       (is (map? result))
+       (is (not (:seon.error/at result)) (pr-str (select-keys result [:seon.error/message])))))))

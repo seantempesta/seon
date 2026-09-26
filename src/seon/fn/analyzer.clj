@@ -658,7 +658,8 @@
                    [:seon.fn.analyzer/require-forms [:vector :map]]
                    [:seon.fn.analyzer/literal-defs [:set [:tuple :int :int]]]
                    [:seon.fn.analyzer/task-maps-after-name [:set [:tuple :int :int]]]
-                   [:seon.fn.analyzer/mentioned-symbols [:set :qualified-symbol]]]]}
+                   [:seon.fn.analyzer/mentioned-symbols [:set :qualified-symbol]]
+                   [:seon.fn.analyzer/namespaced-attribute-maps [:map-of [:tuple :int :int] :map]]]]}
   [filename source]
   (let [root (binding [kondo.reader/*reader-exceptions* (atom [])]
                (kondo.utils/parse-string-all source))
@@ -687,6 +688,18 @@
                                       (and (= 4 (count form)) (string? (nth form 2))))
                                   (literal-value? (last form)))
                          [(:row (meta node)) (:col (meta node))])))))
+           nodes)
+     ;; A defining form whose attribute map is a namespaced map literal
+     ;; (`#:malli{:schema ...}`, what `pr-str` prints): clj-kondo reports no
+     ;; `:meta` for it, so its value is read from this parse, by position.
+     ::namespaced-attribute-maps
+     (into {}
+           (keep (fn [node]
+                   (let [[_ named first-form second-form] (:children node)
+                         attributes (if (:lines first-form) second-form first-form)]
+                     (when (and (= :list (:tag node)) (symbol? (:value named))
+                                (= :namespaced-map (:tag attributes)))
+                       [[(:row (meta node)) (:col (meta node))] (kondo.utils/sexpr attributes)]))))
            nodes)
      ;; A map naming :seon/tasks right after a defining form's name (and an
      ;; optional docstring): for a deftest it is a body value, not metadata.
@@ -831,7 +844,13 @@
                                          (assoc :literal-def? true)
                                          (get-in spans [(:filename entry) ::task-maps-after-name
                                                         [(:row entry) (:col entry)]])
-                                         (assoc :task-map-after-name? true))) definitions)))
+                                         (assoc :task-map-after-name? true)
+                                         (nil? (:meta entry))
+                                         (as-> entry
+                                           (if-let [attributes (get-in spans [(:filename entry) ::namespaced-attribute-maps
+                                                                              [(:row entry) (:col entry)]])]
+                                             (assoc entry :meta attributes)
+                                             entry)))) definitions)))
         quotes (mapcat ::var-quotes (vals spans))
         require-forms (into [] (comp (mapcat ::require-forms) (map location)) (vals spans))
         attributed (group-by #(if (:class %) :java-class-usages :var-usages)

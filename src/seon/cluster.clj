@@ -2489,11 +2489,15 @@
   {:malli/schema [:=> [:cat :seon.store/store :seon.source/commit-id]
                   [:map
                    [:seon.profile/definition-digests :seon.profile/definition-digests]
-                   [:seon.cluster/program-namespaces [:vector :symbol]]]]}
+                   [:seon.cluster/program-namespaces [:vector :symbol]]
+                   [:seon.schema/projection :seon.schema/projection]]]}
   [store commit-id]
   (let [published (source/database store commit-id)]
     (try
-      {:seon.profile/definition-digests (definition-digests published)
+      {;; The commit's own declaration world: its schema forms AND its
+       ;; function contracts, which a wrapper's call-preparation plan reads.
+       :seon.schema/projection (db/carried-projection published)
+       :seon.profile/definition-digests (definition-digests published)
        :seon.cluster/program-namespaces
        (vec (sort (db/q '[:find [?name ...]
                           :where [?namespace :seon.ns/name ?name]
@@ -2506,23 +2510,30 @@
 (defn arm-host-program!
   "Load the program namespaces and arm every contracted Var, once, at boot.
 
-  The loaded Vars derive from the files, so their contracts compile against the
-  files' own schema declarations (`schema.edn/packaged-forms`); each profiling
-  cell carries the digest the published program names for its symbol. A
-  registration error refuses the boot: a running program never runs with its
-  contracts silently unarmed."
+  The loaded Vars derive from the files the published commit indexes, so
+  their contracts compile against that commit's projection
+  (`published-program`): its schema forms and its function contracts, from
+  which each wrapper's call-preparation plan is decided with the cluster's
+  supplied-default rows. The files' own schema declarations
+  (`schema.edn/packaged-forms`) answer only when no projection is handed;
+  they hold no function contract, so they arm no supplied default. Each
+  profiling cell carries the digest the published program names for its
+  symbol. A registration error refuses the boot: a running program never runs
+  with its contracts silently unarmed."
   {:malli/schema [:=> [:cat [:map
                              [:seon.profile/definition-digests :seon.profile/definition-digests]
                              [:seon.cluster/program-namespaces [:vector :symbol]]
-                             [:seon.db/db :seon.db/database-value]]
+                             [:seon.db/db :seon.db/database-value]
+                             [:seon.schema/projection {:optional true} :seon.schema/projection]]
                        :map [:or :nil :seon.flow/commit-fault!]]
                   :seon.instrument/applied]}
   [{digests :seon.profile/definition-digests namespaces :seon.cluster/program-namespaces
-    database :seon.db/db}
+    database :seon.db/db published-projection :seon.schema/projection}
    effective commit-fault!]
   (doseq [namespace-name namespaces]
     (require namespace-name))
-  (let [projection (schema/declaration-projection (schema.edn/packaged-forms))
+  (let [projection (or published-projection
+                       (schema/declaration-projection (schema.edn/packaged-forms)))
         result (schema/call-with-projection
                 projection
                 #(instrument/apply!
