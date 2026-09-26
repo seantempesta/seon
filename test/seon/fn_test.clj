@@ -107,6 +107,33 @@
         (is (contains? (set (:seon.fn/calls (second (nth results 2)))) 'seon.fn/tests-reaching)
             "a form of another namespace keeps its own namespace")))))
 
+(deftest a-static-member-call-is-a-class-member-never-a-required-namespace
+  ;; Live 2026-09-26 (HEAD 67b02c99f, fresh branch): the let below refused
+  ;; "Cannot classify host binding: clj-kondo holds no analysis of System":
+  ;; the synthesized namespace form required every qualified symbol's prefix,
+  ;; so kondo read `System/nanoTime` as a Var of an unanalyzed namespace. A
+  ;; prefix names a namespace only when the program declares one; otherwise it
+  ;; is a class member, as the Clojure compiler resolves it.
+  (test-support/with-database
+    (fn [connection]
+      (test-support/transacted!
+       connection {:tx-data [(test-support/namespace-row @connection 'sample.static-member)]})
+      (let [here [:seon.ns/name 'sample.static-member]
+            source (str "(let [t0 (System/nanoTime)] "
+                        "(defn f \"d\" {:malli/schema [:=> [:cat :int] :int]} [x] "
+                        "(seon.fn/tests-reaching nil 'x/y) (Math/abs x) (java.util.UUID/randomUUID) (inc x)) "
+                        "(quot (- (System/nanoTime) t0) 1000000))")
+            [_ row] (seon.fn/analyze-form
+                     @connection source here
+                     {:seon.fn/sym 'sample.static-member/f :seon.fn/ns here :seon.fn/source source
+                      :seon.fn/arglists "([x])" :seon.fn/private? false
+                      :seon.schema.admission/source :agent})]
+        (is (map? row) (pr-str row))
+        (is (contains? (set (:seon.fn/calls row)) 'seon.fn/tests-reaching)
+            "a prefix the program declares as a namespace still resolves its call")
+        (is (not-any? #(#{"System" "Math" "java.util.UUID"} (namespace %)) (:seon.fn/calls row))
+            "a class member is never a call edge")))))
+
 (deftest defining-forms-share-one-form-local-kondo-batch
   (test-support/with-database
     (fn [connection]

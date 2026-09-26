@@ -926,6 +926,21 @@
     (mapv (fn [function-symbol] {:seon.fn/sym function-symbol})
           (sort (into batch-symbols existing-symbols)))))
 
+(defn- program-namespaces
+  "The namespaces among `named` that name a namespace: one of the batch's own,
+  or one the program declares. A qualified symbol whose prefix names no
+  namespace is a class member (`System/nanoTime`), as the Clojure compiler
+  resolves it (`Compiler.java:7524` namesStaticMember, pinned 3bc2b3e9); requiring it
+  would make clj-kondo read the member as a Var of an unanalyzed namespace."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :symbol] [:set :symbol]]
+                  [:set :symbol]]}
+  [database batch-namespaces named]
+  (into (set/intersection named (set batch-namespaces))
+        (db/q '[:find [?name ...]
+                :in $ [?name ...]
+                :where [_ :seon.ns/name ?name]]
+              database (vec named))))
+
 (defn- runtime-analysis-batch
   "Run the analyzer once for an ordered batch of submitted forms.
 
@@ -968,8 +983,10 @@
                           namespace-name
                           (update namespace-row :seon.ns/refers
                                   (fnil into []) interpreter-refers)
-                          (analyzer/referenced-program-namespaces
-                           namespace-name (mapv :form-source group))))]
+                          (program-namespaces
+                           database namespace-names
+                           (analyzer/referenced-program-namespaces
+                            namespace-name (mapv :form-source group)))))]
              (reduce (fn [{:keys [source spans]} {form-source :form-source}]
                        (let [first-source-row (inc (count (filter #{\newline} source)))]
                          {:source (str source form-source "\n")
