@@ -904,10 +904,10 @@
                        [?agent :seon.agent/id ?to]]
                      (db/db connection) text))))))))
 
-(deftest a-core-fault-wakes-root-only-when-escalation-is-configured
-  ;; owner ruling 2026-09-24: nine fault-woken root turns at ~25k prompt
-  ;; tokens each ignored their fault. The shipped config leaves
-  ;; `escalate-to` absent: the fault is recorded, and root is not mailed.
+(deftest a-core-fault-wakes-the-configured-escalation-owner-root-by-default
+  ;; owner ruling 2026-09-25 20:50Z: core faults deliver to root by default.
+  ;; The shipped config names root; a cluster that decides the dial absent
+  ;; still records the fault and mails nobody.
   ;; Each arm has its own operation, hence its own signature, and counts only
   ;; its own rows: the test branch inherits the cluster's live faults.
   (with-db
@@ -933,12 +933,11 @@
                                                           [?message :seon.message/to ?agent]
                                                           [?agent :seon.agent/id ?to]]
                                                  database signature)))]))]
-        (is (= {} shipped) "the shipped default names no escalation owner")
-        (is (= [1 {}] (record! 'seon.error-test/unowned-fault-with-the-shipped-dial shipped))
-            "recorded, and nobody is mailed")
-        (is (= [1 {"root" 1}] (record! 'seon.error-test/unowned-fault-with-root-named
-                                       {:seon.config.error/escalate-to "root"}))
-            "a manifest naming root turns the wake back on")))))
+        (is (= {:seon.config.error/escalate-to "root"} shipped) "the shipped default names root")
+        (is (= [1 {"root" 1}] (record! 'seon.error-test/unowned-fault-with-the-shipped-dial shipped))
+            "recorded, and root is mailed")
+        (is (= [1 {}] (record! 'seon.error-test/unowned-fault-with-no-owner-named {}))
+            "a request naming no escalation owner is recorded and mails nobody")))))
 
 (deftest the-storm-is-bounded-by-the-signature-count
   ;; the live falsifier's unit twin: one signature repeated forever must

@@ -73,11 +73,12 @@
                                           :seon.error.occurrence/blob-digest])]
            (is (string? digest) (pr-str occurrence))
            (is (str/includes? (str (blob/get connection digest)) "inner root cause"))))
-       (testing "the shipped config names no escalation owner, so nobody is woken
-       (owner ruling 2026-09-24: an unowned fault wakes no paid root turn)"
-         (is (nil? (:seon.config.error/escalate-to
-                    (config/effective (db/db connection) "fault-record"))))
-         (is (empty? woken)))
+       (testing "the shipped config delivers an unowned fault to root
+       (owner ruling 2026-09-25 20:50Z), and the receipt names that recipient"
+         (is (= "root" (:seon.config.error/escalate-to
+                        (config/effective (db/db connection) "fault-record"))))
+         (is (= #{"root"} woken))
+         (is (= #{"root"} (:seon.fault/delivered-to receipt))))
        (is (< elapsed-ms 1000.0) (str "one synchronous fault write took " elapsed-ms " ms"))))))
 
 (deftest a-stored-occurrence-carries-its-own-declared-schemas-attributes

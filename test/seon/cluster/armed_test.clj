@@ -163,8 +163,8 @@
             (is (seon.schema/valid-candidate-value? (seon.schema/handed-projection) :seon.turn.loop/cluster
                                                     handle))
             (is (= "armed" (:seon.cluster/name handle)))
-            (is (nil? (find handle :seon.config.error/escalate-to))
-                "the shipped config names no escalation owner (owner ruling 2026-09-24)")
+            (is (= "root" (:seon.config.error/escalate-to handle))
+                "the shipped config delivers core faults to root (owner ruling 2026-09-25 20:50Z)")
             (is (empty? (select-keys handle
                                      [:seon.ai/primary
                                       :seon.ai/backup
