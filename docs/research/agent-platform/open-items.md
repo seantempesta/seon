@@ -116,6 +116,12 @@ EXISTING store (prove adoption on a branch of the live store, never only on a fr
 | floor §3, function face, query+render block, derived contracts | older; floor/face/block now converge on the graph render — re-read before starting |
 
 ### Queued (root-ruled; waiting on a held file or on the harness)
+- **C5 projection-as-a-read sweep** (duplicate-paths audit §11 C5; prerequisite refuted for a one-file cut, landing
+  delete-r8-r6-r10 §C5): convert every ambient projection reader to pass `seon.db/carried-projection` explicitly —
+  `handed-projection` 18 sites/10 files, `call-with-projection` 42/16, `call-with-projection-state` 12/7, plus
+  `call-with-forms`/`current-projection`/`registered-schemas` and the registration-delta atom (`schema.clj:3549`) — as one
+  scripted sweep once cluster.clj, sci/eval.clj, render/walk.clj and program.cljc are released; then delete the dynamic Vars.
+- **Atom audit cuts** (atom-audit-2026-09-26.md when it lands): file-disjoint DELETE/MOVE/COLOCATE slices.
 - Render-dispatch reds in web-debug-test (`repl/render-ai` returns the raw evaluation map), fault card nil kicker/message,
   fixture writes refused (`unowned-entity`, "only the creator may remove tests"), `turn-details` 34 s.
 - seon.test-test: two stale fixtures (bare doc upsert; `with-redefs` on `db/pull`) and the runner/db question: should
