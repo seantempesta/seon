@@ -130,6 +130,12 @@ random one. An attribute the write left untouched keeps its basis revision.
 
 ### P4. The per-write report validator does whole-schema work for a one-datom write (40× `d/with`)
 
+> **Correction (2026-09-26, after measuring on pid 12212):** the 763 plan lookups were a one-time miss. The whole-schema
+> plan map rebuilds in 5.4 ms only when the projection changes; otherwise it is a cache hit. A warm one-datom `db/with`
+> costs 2.1 ms, not 4.2. P4 therefore shipped only the `identity-attributes` change (read from Datahike's `rschema`)
+> in 15e6a31c4; the plan narrowing is dropped.
+
+
 - **What is slow.** A trivial `with` costs 4.24 ms against 0.10 ms (task `the-checked-writer-is-slow-on-a-fresh-branch`
   records 211 ms of `write-report-error` on a fresh branch).
 - **Proportional to.** The installed schema and projection per write, not the written datoms. Measured per write:
