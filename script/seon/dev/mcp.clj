@@ -14,7 +14,13 @@
 ;; replacements without a restart.
 
 (def project-root
+  ;; The managed root: the operator names it on every cluster JVM it launches
+  ;; (`-Dseon.operator.root`, script/seon/operator.clj). A JVM running an
+  ;; archive has `data/source/<sha>/` as its working directory, which holds no
+  ;; advertisements; the working directory is only the last resort, for a
+  ;; bridge process launched from the checkout itself.
   (or (System/getenv "SEON_PROJECT_ROOT")
+      (System/getProperty "seon.operator.root")
       (System/getProperty "user.dir")))
 
 (def own-cluster

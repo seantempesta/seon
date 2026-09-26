@@ -691,7 +691,7 @@
   (let [instances @@(ns-resolve 'seon.cluster (symbol "running-instances"))
         cluster (first (sort (keys instances)))
         data (result-data ((bridge-var 'execute-branch)
-                                  {:root (.getCanonicalPath project-root) :cluster cluster :action "list"}))]
+                                  {:root @(bridge-var 'project-root) :cluster cluster :action "list"}))]
     (is (vector? (:seon.dev.mcp/branches (read-string (:seon.dev.mcp/value data)))) (pr-str data))
     (is (not (contains? data :seon.dev.mcp/events)))))
 
@@ -701,7 +701,8 @@
   (let [instances @@(ns-resolve 'seon.cluster (symbol "running-instances"))
         cluster (first (sort (keys instances)))
         store (:seon.store/store (get instances cluster))
-        root (.getCanonicalPath project-root)
+        ;; the managed root the bridge resolves, never the program directory
+        root (.getCanonicalPath (io/file @(bridge-var 'project-root)))
         branch (str "lane-mcp-window-" (random-uuid))
         consume (ns-resolve 'seon.cluster 'consume-mcp-projection!)
         window (fn [since]
