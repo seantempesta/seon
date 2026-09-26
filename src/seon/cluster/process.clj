@@ -19,10 +19,6 @@
   {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
   [value] (instance? Process value))
 
-(defn progress-atom?
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
-  [value] (instance? clojure.lang.IAtom value))
-
 (defn id
   "The provenance id of one `(pid, start-instant)` identity."
   {:malli/schema [:=> [:cat :seon.cluster.process/identity] :seon.db.process/id]}
@@ -232,8 +228,7 @@
                       identities))))
 
 (defn run-process!
-  "Run one foreign argv under a deadline, or an explicitly declared event-silence bound.
-  A supplied progress atom names phase events; ordinary output is not progress."
+  "Run one foreign argv under its deadline."
   {:malli/schema [:=> [:cat [:map
                  [:seon.operator.subprocess/argv [:vector {:min 1} :string]]
                  [:seon.operator.subprocess/deadline-ms [:int {:min 1}]]
@@ -242,8 +237,6 @@
                  [:seon.operator.subprocess/input {:optional true} :string]
                  [:seon.operator.subprocess/merge-error? {:optional true} :boolean]
                  [:seon.operator.subprocess/output-file {:optional true} :string]
-                 [:seon.operator.subprocess/event-silence-ms {:optional true} [:int {:min 1}]]
-                 [:seon.operator.subprocess/progress {:optional true} [:fn 'seon.cluster.process/progress-atom?]]
                  [:seon.operator.subprocess/observe-output! {:optional true} [:=> [:cat :string] :seon.schema/value]]]]
      [:map [:seon.operator.subprocess/argv [:vector :string]]
       [:seon.operator.subprocess/exit :int]
@@ -256,8 +249,6 @@
     input :seon.operator.subprocess/input
     merge-error? :seon.operator.subprocess/merge-error?
     output-file :seon.operator.subprocess/output-file
-    silence-ms :seon.operator.subprocess/event-silence-ms
-    progress :seon.operator.subprocess/progress
     observe-output! :seon.operator.subprocess/observe-output!
     :as request}]
   (when-not (and (vector? argv) (seq argv) (every? string? argv)
@@ -270,19 +261,7 @@
          :seon.error/member :seon.operator.subprocess/deadline-ms
          :seon.error/expected "a positive deadline and nonempty argv"
          :seon.operator.subprocess/deadline-member :seon.operator.subprocess/deadline-ms}))))
-  (when (and silence-ms (not (and (pos-int? silence-ms) progress observe-output!)))
-    (throw (ex-info "Supply a progress atom and output observer for the silence bound."
-                    (seon.error.refusal/diagnostic (java.util.Date.) :seon.operator/lifecycle 'seon.cluster.process/run-process!
-                     {:seon.error/message "Supply a progress atom and output observer for the silence bound."
-         :seon.error/offending request
-         :seon.error/member :seon.operator.subprocess/progress
-         :seon.error/expected "a phase observation for the silence bound"
-         :seon.operator.subprocess/progress-member :seon.operator.subprocess/progress}))))
   (let [deadline-ns (+ (System/nanoTime) (* 1000000 (long deadline-ms)))
-        last-progress (atom (System/nanoTime))
-        watch-key (Object.)
-        _ (when silence-ms (add-watch progress watch-key
-                             (fn [_ _ _ _] (reset! last-progress (System/nanoTime)))))
         options (cond-> {:out (if output-file :write :string)
                          :err (if merge-error? :out :string)
                          :shutdown process/destroy-tree}
@@ -291,10 +270,7 @@
                   (some? input) (assoc :in input)
                   output-file (assoc :out-file output-file))
         options (if observe-output! (dissoc (assoc options :out :stream) :out-file) options)
-        process-record (try (process/process argv options)
-                            (catch Throwable failure
-                              (when silence-ms (remove-watch progress watch-key))
-                              (throw failure)))
+        process-record (process/process argv options)
         streamed-output (when observe-output!
                           (future
                             (with-open [reader (io/reader (:out process-record))
@@ -308,16 +284,8 @@
         root (.toHandle child)
         identities (subprocess-tree-identities root)
         timeout-value (Object.)
-        completed? (try
-                     (loop []
-                       (let [deadline (if silence-ms
-                                        (+ @last-progress (* 1000000 (long silence-ms)))
-                                        deadline-ns)]
-                         (cond (.waitFor child (subprocess-remaining-ms deadline) java.util.concurrent.TimeUnit/MILLISECONDS) true
-                               (and silence-ms (> @last-progress (- deadline (* 1000000 (long silence-ms))))) (recur)
-                               :else false)))
-                     (finally (when silence-ms (remove-watch progress watch-key))))
-        output-deadline (if silence-ms (+ @last-progress (* 1000000 (long silence-ms))) deadline-ns)
+        completed? (.waitFor child (subprocess-remaining-ms deadline-ns) java.util.concurrent.TimeUnit/MILLISECONDS)
+        output-deadline deadline-ns
         tasks [(cond streamed-output streamed-output output-file "" :else (:out process-record))
                (if merge-error? "" (:err process-record))]
         [output error-output] (when completed? (join-output tasks output-deadline timeout-value))
