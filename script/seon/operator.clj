@@ -362,12 +362,16 @@
      (catch Throwable cause#
        {:seon.error/message (ex-message cause#) :seon.error/cause (Throwable->map cause#)})))
 
-(def ^:private program-classes-directory
-  "Our compiled classes for one committed archive, inside it: keyed by the
-  commit the archive is, pruned with it (`prune-archives!`)."
-  ".program-classes")
+(def ^:private program-classes-root
+  "Our compiled classes, one directory per digest of what produces them
+  (`program-classes`), shared by every archive whose inputs match."
+  "target/dev-program-classes")
 
-(defn- launch-form [request port source]
+(def ^:private program-classes-kept
+  "Class directories kept besides the one a launch uses (most recently used)."
+  3)
+
+(defn- launch-form [request port program]
   ;; Only Clojure core loads before opening and reporting the diagnostic REPL.
   ;; The second callback value is terminal boot evidence, never a file poll;
   ;; a move reads the branch heads first, as the value between them.
@@ -390,10 +394,9 @@
         (with-open [callback# (java.net.Socket. "127.0.0.1" ~port)
                     writer# (~'clojure.java.io/writer callback#)]
           (.write writer# (str (pr-str coordinates#) "\n")) (.flush writer#)
-          (let [final# (java.io.File. ~source ~program-classes-directory)
-                staging# (when-not (.isDirectory final#)
-                           (java.io.File. ~source (str ~program-classes-directory ".staging-"
-                                                       (:seon.boot/pid identity#))))
+          (let [final# (some-> ~program java.io.File.)
+                staging# (when (and final# (not (.isDirectory final#)))
+                           (java.io.File. (str final# ".staging-" (:seon.boot/pid identity#))))
                 _# (some-> staging# .mkdirs)
                 ;; The boot's own requires (arming loads the rest of the
                 ;; program) compile under the same binding.
@@ -414,9 +417,18 @@
             (when staging#
               (if (or (:seon.error/message result#) (.isDirectory final#))
                 (doseq [file# (reverse (file-seq staging#))] (.delete ^java.io.File file#))
-                (java.nio.file.Files/move (.toPath staging#) (.toPath final#)
-                                          (into-array java.nio.file.CopyOption
-                                                      [java.nio.file.StandardCopyOption/ATOMIC_MOVE]))))
+                ;; The directory's key proves its classes are this source's, so they
+                ;; must win Clojure's class-newer-than-source test against any
+                ;; archive's extraction time.
+                (try (doseq [file# (file-seq staging#)] (.setLastModified ^java.io.File file# 4102444800000))
+                     (java.nio.file.Files/move (.toPath staging#) (.toPath final#)
+                                               (into-array java.nio.file.CopyOption
+                                                           [java.nio.file.StandardCopyOption/ATOMIC_MOVE]))
+                     ;; The directory's own time is its last use (`prune-program-classes!`).
+                     (.setLastModified final# (System/currentTimeMillis))
+                     ;; Another launch promoted the same key first.
+                     (catch java.nio.file.FileAlreadyExistsException _#
+                       (doseq [file# (reverse (file-seq staging#))] (.delete ^java.io.File file#))))))
             ;; The capture's holder of the store ends once boot holds its own.
             (when (:seon.operator/heads heads#)
               ((resolve '~'seon.cluster/release-root-store!) ~(:seon.operator/capture-heads request)))
@@ -542,14 +554,52 @@
                 :seon.dev-cache/fill (str "cd " source " && clojure -T:dev-cache ensure-cache")})
            :seon.dev-cache/selection-ms (quot (- (System/nanoTime) started) 1000000))))
 
+(defn- program-classes
+  "The directory of our compiled classes for the archive `source`: keyed by
+  what compiles into them (the Git tree of `src`; `deps.edn` and the pinned
+  `reference-code` gitlinks, whose namespaces boot compiles when the
+  dependency classes miss them; that dependency cache's identity), so a commit
+  changing docs, tests, resources or tasks shares its predecessor's. No macro
+  reads a resource at expansion, and a namespace's top-level reads run at
+  load. Nil for a source that is no commit archive."
+  {:malli/schema [:=> [:cat :string :string :map] [:maybe :string]]}
+  [repository source classes]
+  (let [sha (.getName (io/file source))
+        trees (try (str/split-lines (command! ["git" "rev-parse" (str sha ":src") (str sha ":deps.edn") (str sha ":reference-code")]
+                                              repository runtime-probe-bound-ms))
+                   (catch clojure.lang.ExceptionInfo _ nil))]
+    (when (= 3 (count trees))
+      (let [digest (.digest (java.security.MessageDigest/getInstance "SHA-256")
+                            (.getBytes (pr-str [trees (select-keys classes [:seon.dev-cache/status
+                                                                            :seon.dev-cache/digest])])
+                                       "UTF-8"))]
+        (.getCanonicalPath (io/file repository program-classes-root
+                                    (apply str (map #(format "%02x" (bit-and % 0xff)) digest))))))))
+
+(defn- prune-program-classes!
+  "Keep `program` and the most recently used class directories; delete the
+  rest and any staging a day old (a launch that died filling it)."
+  {:malli/schema [:=> [:cat :string :string] :nil]}
+  [repository program]
+  (let [directories (or (.listFiles (io/file repository program-classes-root)) [])
+        {staging true complete false} (group-by #(str/includes? (.getName ^java.io.File %) ".staging-")
+                                                directories)
+        stale (concat (drop program-classes-kept
+                            (sort-by #(- (.lastModified ^java.io.File %))
+                                     (remove #(= program (.getCanonicalPath ^java.io.File %)) complete)))
+                      (filter #(< (.lastModified ^java.io.File %) (- (System/currentTimeMillis) 86400000))
+                              staging))]
+    (doseq [directory stale] (fs/delete-tree directory))
+    (.setLastModified (io/file program) (System/currentTimeMillis))
+    nil))
+
 (defn- start-classpath
-  "The `-Scp` argument prepending the archive's own compiled classes and a
-  dependency hit's classes to `source`'s own classpath, or nothing."
-  {:malli/schema [:=> [:cat :string :map] [:maybe :string]]}
-  [source classes]
-  (let [program (io/file source program-classes-directory)
-        prefix (cond-> []
-                 (.isDirectory program) (conj (.getCanonicalPath program))
+  "The `-Scp` argument prepending our compiled classes and a dependency hit's
+  classes to `source`'s own classpath, or nothing."
+  {:malli/schema [:=> [:cat :string :map [:maybe :string]] [:maybe :string]]}
+  [source classes program]
+  (let [prefix (cond-> []
+                 (and program (.isDirectory (io/file program))) (conj program)
                  (= :hit (:seon.dev-cache/status classes)) (conj (:seon.dev-cache/path classes)))]
     (when (seq prefix)
       (str/join java.io.File/pathSeparator
@@ -608,15 +658,16 @@
                       (dependency-classes (repository-root) source environment)
                       {:seon.dev-cache/status :skipped
                        :seon.dev-cache/reason :nuke-reads-no-derived-state})
-            program-classes? (.isDirectory (io/file source program-classes-directory))
-            classpath (start-classpath source classes)
+            program (when reuse-classes? (program-classes (repository-root) source classes))
+            program-classes? (boolean (and program (.isDirectory (io/file program))))
+            _ (when program (prune-program-classes! (repository-root) program))
+            classpath (start-classpath source classes program)
             argv (cond-> ["clojure"]
                    classpath (into ["-Scp" classpath])
                    true (into [(str "-J-Dseon.operator.root=" root)
                                (str "-J-Dseon.repository.root=" source)
                                (str "-J-XX:HeapDumpPath=" (.getCanonicalPath heap))
-                               "-M:dev:test" "-e" (launch-form request (.getLocalPort callback)
-                                                                 (.getCanonicalPath (io/file source)))]))
+                               "-M:dev:test" "-e" (launch-form request (.getLocalPort callback) program)]))
             builder (doto (ProcessBuilder. ^java.util.List argv)
                       (.directory (io/file source))
                       (.redirectErrorStream true)
