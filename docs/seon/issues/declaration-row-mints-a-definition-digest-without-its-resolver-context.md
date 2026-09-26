@@ -24,8 +24,15 @@ Production settlement never reaches the mint, because `seon.sci.eval/definition-
 first. Three turn-test fixtures reached it by handing `seon.fn/analyze-form` rows to settlement; they now
 use `program-row` (0d3b96015).
 
-## Proposed fix (src/seon/program.cljc, root grant needed)
+## Proposed fix (src/seon/program.cljc granted; test/seon/program_test.clj held)
 
 Mint only for namespace and schema rows, the families whose digest takes no resolver context. A function
-or test row without a digest then refuses by name as "missing :seon.program/definition-digest"
-at the entity schema, not as a mismatch.
+or test row without a digest then refuses at the writer by the missing key. Every production function/test
+path digests through `definition-digest-of` before this stage (`seon.sci.eval/definition-row`,
+`seon.fn` source rows at `src/seon/fn.clj:1552`), and `:seon.program/declaration-row` does not require the
+digest on those families, so the output contract holds. The patch is `tmp/fix-turn-test-reds-program-mint.patch`.
+
+It must land in the same slice as `program_test`'s `reader-events-have-one-canonical-declaration-row`
+(`test/seon/program_test.clj:833`, asserting a 64-character digest on every case). That assertion should
+expect a digest on the namespace cases only. The file is held by impl-shape-mirror-malli, so the mint stays
+until its owner or root takes both.

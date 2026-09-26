@@ -1,6 +1,6 @@
 ---
 type: landing
-status: landed (0d3b96015, 2c9d6aa3b); tests owed to root; four producer fixes wait on held files
+status: landed (0d3b96015, 2c9d6aa3b accepted; round 2 6380f2d0c); tests owed to root; producer fixes in held files wait on their owners
 lane: fix-turn-test-reds-opus
 created: 2026-09-26
 ---
@@ -123,14 +123,96 @@ custody, it returns a turn id. Fix (2c9d6aa3b): `submit!` runs under the candida
 refused submission fails at once with its value. Not proven: the armed graph closing that turn, and the merge
 and write-back steps. Only root's run proves them.
 
+## Round 2 (root, verify-0610.out.d): digest class A, unowned class B, fresh-store config class C
+
+### A. "The stored definition digest … is not the one its definition produces", fixed at test_support (6380f2d0c)
+
+The members in 0610 are db-test `arity-components-and-callers-are-checked-in-the-final-state` (001),
+test-runner-test `a-metadata-only-change-changes-the-reach-digest` (004) and publication-validation
+`documentation-writes-do-not-check-unrelated-arities-or-renderers` (009). No fn-test member carries this class
+in 002; its reds are dependency analysis, missing schema and spec-transaction assertions.
+
+- Producer: `support/revised-row`'s 3-arity pulled the namespace row with `db/pull '[*]` and passed nil when
+  the namespace was not yet stored. The fixture writes its namespace beside the row, so the digest lacked the
+  resolver context the writer uses. `program-row` already did it right (the stored row via
+  `seon.db/declaration-value`, else the canonical `namespace-row`). That lookup is now one private
+  `digest-namespace-row`, shared by both. REPL, isolated branch of the live store: HEAD's revised-row refused
+  the db-test arity world and the fixed copy committed it. For a stored namespace (`seon.id`), revisions digest
+  identically before and after, so the change is neutral where the namespace exists. This clears db-test arity.
+- test-runner-test minted its changed test row's digest through `program/declaration-row`, which holds no
+  resolver context (issue below). It now uses `revised-row`: first write ok, digests differ, source kept,
+  second write commits.
+- publication-validation upserted `{:seon.fn/sym seon.id/id :seon.fn/doc …}` with no digest. A doc is owned,
+  so the stored digest no longer matched. It now writes `support/revision`, which commits. The report's
+  attributes are `#{:seon.fn/doc :seon.program/definition-digest :db/txInstant}`, and the assertion now
+  expects that. The test still uses `with-redefs-fn` over `seon.db` Vars, which violates the no-with-redefs
+  ruling; that is left to its owner.
+- `program.cljc` (granted): minting fn/test digests only for namespace and schema rows is correct, but it
+  reds `program_test`'s `reader-events-have-one-canonical-declaration-row` (held). I reverted it, saved it as
+  `tmp/fix-turn-test-reds-program-mint.patch`, and recorded the pairing in the issue. None of the listed
+  members needs it.
+
+### B. "Complete component validation refused: unowned-entity" (both files held; hunks verified)
+
+The writer rule (`src/seon/db.clj:3719`, identity-less entities must be owned) is the law. The producers are
+the two fixtures, which write identity-less, ownerless entity maps. There is no shared test_support producer.
+Members in 0610: db-test `a-store-without-program-schema-admits-its-writes` (001) and web-debug
+`reverse-blocks-do-not-depend-on-the-graph-page` (008). error-test in 018 carries `missing-component-schema`
+(a component attribute with no schema), which is a different class and left to its owner.
+
+- `test/seon/db_test.clj:2044-2047` (fix-write-cost-opus): install an identity attribute with the dial and write
+  the dial under it. Replace the two `transacted!` forms with
+  `[{:db/ident :sample.schemaless/id :db/valueType :db.type/string :db/cardinality :db.cardinality/one :db/unique :db.unique/identity} {:db/ident :seon.config.eval.result/blob-threshold …}]`
+  and `[{:sample.schemaless/id "dial" :seon.config.eval.result/blob-threshold 4096}]`. REPL, fresh file store
+  under the member's projection: the bare map is refused `unowned-entity`, the identified one commits, and the
+  read answers `[4096]`.
+- `test/seon/render/web_debug_test.clj:558-571` (impl-debug-page-ui-opus): add
+  `{:db/ident ::id :db/valueType :db.type/string :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}`
+  to the extra schema, and write `{::id "left" ::left …}`, `{::id "right" …}`, `{::id "hidden" …}`. REPL on an
+  isolated branch: bare is refused `unowned-entity`, identified commits, and the reverse query finds the entity.
+  The page assertions after the write are not probed.
+
+### C. `config/apply!` on a fresh in-memory store (mcp-test artifact-lifecycle, mcp_test.clj:217): no fix here
+
+Reproduced on a fresh memory store with the installed attributes. The first refusal is
+`Nothing found for entity id [:seon.db.process/id "seon.db.process/config"]`: boot writes the process rows
+(`seon.cluster/missing-process-rows`, `src/seon/cluster.clj:1306`, written at `:1570`) before config, and the
+fixture has none. With boot's process rows written first, apply is refused next: "Configuration names
+functions with no program row: [:seon.call-preparation/supplier my.program/supplied-context …]". That check
+(`require-functions!`, config.clj:645) resolves function symbols to current rows, which is correct. The names
+are old (73ba7c155, 803d463ef), so neither 178a67487 nor 0d3b96015 causes this: a program-less store can never
+take a config apply. Fixing config would break the function-row law, and seeding process rows alone moves the
+refusal one step. Options, simplest first:
+1. **Recommended now:** run the scenario that needs config (`jvm-exceptions-keep-the-whole-cause`) on the
+   branched member world, and keep only the blob-identity scenarios on the fresh store (test-side, in
+   mcp_test.clj, held by delete-r8-r6-r10 and impl-floor-fipp).
+2. Seed the fresh store with process rows and the program partition: seconds per store, and it copies
+   boot's work.
+3. The ruled target: an in-memory branch of the prepared commit gives blob isolation and program rows
+   (fast-harness lane).
+
+### Round-2 root runs
+
+```sh
+bin/test-check default --test seon.db-test/arity-components-and-callers-are-checked-in-the-final-state
+bin/test-check default --test seon.test-runner-test/a-metadata-only-change-changes-the-reach-digest
+bin/test-check default --test seon.publication-validation-test/documentation-writes-do-not-check-unrelated-arities-or-renderers
+bin/test-check default --ns seon.turn-test
+```
+
+Verification limit: round 1's load-string syntax copies read the running archive's files (the JVM's working
+directory is `data/source/<commit>`), not the working tree. Round 1's syntax proof is therefore clj-kondo
+only; round 2's copies were loaded by absolute path.
+
 ## Deleted / net lines
 
 | Commit | Files | + | − |
 |---|---|---:|---:|
 | 0d3b96015 | turn_test, test_support, instrument_test | 54 | 70 |
 | 2c9d6aa3b | write_back_test | 10 | 5 |
+| 6380f2d0c | test_support, test_runner_test, publication_validation_test | 25 | 22 |
 
-Test net **−11**, src 0. Deleted: three hand-built `analyze-form` row paths in turn_test (≈45 lines). Added: the
+Test net **−8** across both rounds, src 0. Deleted: three hand-built `analyze-form` row paths in turn_test (≈45 lines). Added: the
 `held-handle` agent-id guard, the docstring note and the custody wrapper.
 
 ## Root runs
