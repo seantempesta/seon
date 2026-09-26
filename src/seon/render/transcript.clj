@@ -1390,8 +1390,7 @@
                    (catch clojure.lang.ExceptionInfo failure
                      (let [refusal (ex-data failure)]
                        (if (and (:seon.instrument/fn refusal)
-                                (:seon.instrument/check refusal)
-                                (:seon.instrument/explanations refusal))
+                                (:seon.instrument/check refusal))
                          refusal
                          (throw failure)))))
         entries (:seon.render.history/entries acquired)
