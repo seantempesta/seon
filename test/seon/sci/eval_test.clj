@@ -2349,6 +2349,20 @@
     (is (= "A" (value "(parity-str/upper-case \"a\")")))
     (is (= #{1 2} (value "(do (require '[clojure.set :as parity-set]) (parity-set/union #{1} #{2}))")))))
 
+(deftest letfn-and-an-inline-protocol-record-evaluate-in-an-agent-fork
+  ;; A var born in a fork (letfn's anonymous vars, a def predeclared at
+  ;; analysis) belongs to the fork's generation; unstamped, SCI's copy on write
+  ;; took it as inherited (issue letfn-and-defrecord-with-an-inline-protocol-
+  ;; fail-in-the-agent-repl). Only a fork carries a generation.
+  (test-support/with-database
+   (fn [connection]
+     (test-support/seed-cluster! connection "fork-born-vars")
+     (let [ctx (test-support/fork-cluster-ctx connection)
+           value (fn [source] (:seon.sci.admit/value (run-in ctx source 2000)))]
+       (is (some? (:sci/generation @(:env ctx))) "the agent ctx is a fork")
+       (is (= :done (value "(letfn [(f [x] (if (pos? x) (g (dec x)) :done)) (g [x] (f x))] (f 3))")))
+       (is (= 1 (value "(do (defprotocol P (m [_])) (defrecord R [a] P (m [_] a)) (m (->R 1)))")))))))
+
 (deftest both-entrances-classify-one-failure-identically
   (test-support/with-database
    (fn [connection]
