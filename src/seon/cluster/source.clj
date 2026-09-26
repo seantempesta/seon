@@ -821,11 +821,16 @@
                          (when (:seon.error/at written) (throw (ex-info "The merge delta was refused." written)))
                          (into delta (map #(vector :seon.test/sym (:seon.test/sym %))) (:seon.issue/tests subject))))
               gate ((requiring-resolve 'seon.cluster/candidate-gate!) source held-store s write! (constantly #{}))
-              run (:seon.source/gate-run gate)]
-          (if (:seon.error/at run) run
-              (assoc (select-keys gate [:seon.test/passed? :seon.source/tally])
-                     :seon.source/candidate s :seon.test.run/id (:seon.test.run/id run)
-                     :datahike/expected-basis-t (db/basis-t head) :parents #{c-id}))))
+              run (:seon.source/gate-run gate)
+              ;; Missing coverage refuses by name: every issue test is a member.
+              answered (set (map :seon.test/sym (:seon.test/results run)))
+              unselected (vec (remove answered (map :seon.test/sym (:seon.issue/tests subject))))]
+          (cond
+            (:seon.error/at run) run
+            (seq unselected) (refuse "The gate answered none of these issue tests." unselected)
+            :else (assoc (select-keys gate [:seon.test/passed? :seon.source/tally])
+                         :seon.source/candidate s :seon.test.run/id (:seon.test.run/id run)
+                         :datahike/expected-basis-t (db/basis-t head) :parents #{c-id}))))
       (finally (run! #(when-not (:seon.error/at %) (d/release-materialized-db %)) [base branch])))))
 
 (defn accept-merge!

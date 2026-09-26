@@ -19,12 +19,12 @@
             [seon.turn :as turn]))
 
 (defn- fixture-source
-  "One small namespace: a callee, its caller and the test that reaches both."
+  "One small namespace: a callee and its caller. The test reaching both is the
+  agent's, written at its REPL, as a lane writes one."
   [fixture-ns]
-  (str "(ns " fixture-ns "\n  \"Write-back fixture.\"\n  (:require [clojure.test :as t]))\n\n"
+  (str "(ns " fixture-ns "\n  \"Write-back fixture.\")\n\n"
        "(defn callee\n  \"Add one.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (+ x 1))\n\n"
-       "(defn caller\n  \"Call the callee.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (callee x))\n\n"
-       "(t/deftest caller-check\n  (t/is (= 3 (caller 2))))\n"))
+       "(defn caller\n  \"Call the callee.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (callee x))\n"))
 
 (defn- digests
   "Definition digest by identity of each declaration in `rows`."
@@ -47,7 +47,38 @@
                                                                     [:seon.turn/id run-id])))))
     run-id))
 
-(deftest ^{:seon.test/long "One agent turn, one prepare-merge! (a nested seon.test/run on a new candidate commit; 60 s is merge-test's measured bound for one prepare) and three analyses of a one-file fixture."
+(defn- with-agent!
+  "Create `agent-id` in `fixture-ns` on `connection`'s branch, arm it, call
+  `body` with its request, then disarm it and close its channels."
+  [connection cluster-name agent-id fixture-ns body]
+  (let [environment (support/environment cluster-name connection)
+        ctx (support/fork-cluster-ctx connection cluster-name)
+        routing (support/attempt-routing connection)
+        faults (async/chan (async/sliding-buffer 16))]
+    (with-open [launcher (support/closeable
+                          (flow/start-work-launcher!
+                           {:seon.env/environment environment
+                            :seon.flow/configuration (select-keys (config/effective (db/db connection) cluster-name)
+                                                                  flow/flow-workload-attributes)})
+                          flow/stop-work-launcher!)]
+      (let [handle (support/cluster-handle
+                    {:seon.env/environment environment :seon.db/connection connection :seon.cluster/name cluster-name
+                     :seon.sci.eval/ctx ctx :seon.flow/work-launcher @launcher
+                     :seon.flow/executor (cluster/projection-executor (:seon.sci.eval/projection-state ctx))
+                     :seon.db.process/id cluster/boot-process-identity})
+            request {:seon.turn.loop/cluster handle :seon.agent/routing routing :seon.agent/id agent-id}]
+        (swap! routing assoc :seon.agent/fault-channel faults)
+        (support/transacted! connection (support/agent-tx @connection agent-id fixture-ns))
+        (agent/arm! request)
+        (try
+          (body request)
+          (finally
+            (agent/disarm! request)
+            (doseq [channel [faults (:seon.cluster.wake/channel handle)
+                             (:seon.render/context-channel handle) (:seon.turn.loop/completion handle)]]
+              (async/close! channel))))))))
+
+(deftest ^{:seon.test/long "Two agent turns (the test on H, the replacement on C), one prepare-merge! (a nested seon.test/run on a new candidate commit; 60 s is merge-test's measured bound for one prepare) and three analyses of a one-file fixture."
            :seon.test/long-ms 90000}
   an-agent-replacement-merges-and-writes-back-its-exact-span
   (let [target (support/execution-handle nil)
@@ -73,6 +104,9 @@
             base-text (slurp file)
             [start stop] (:seon.fn/form-span (first (filter #(= callee (program/row-identity %)) rows)))
             _ (support/transacted! h-conn (fn/reconcile-tx (db/db h-conn) rows (mapv program/row-identity rows)))
+            ;; The test is the agent's own, written at its REPL on H before the lane forks.
+            _ (with-agent! h-conn cluster-name (str agent-id "-author") fixture-ns
+                #(submit! % "(clojure.test/deftest caller-check (clojure.test/is (= 3 (caller 2))))"))
             _ (support/transacted! h-conn [{:seon.issue/id issue :seon.issue/title "Write back" :seon.issue/status :open
                                             :seon.issue/severity :cleanup :seon.issue/problem "Replace the callee."
                                             :seon.issue/tests #{[:seon.test/sym (symbol (str fixture-ns) "caller-check")]}}])
@@ -80,35 +114,10 @@
             _ (registry/branch! {:seon.store/store store :seon.store/branch c
                                  :seon.cluster.registry/from (db/commit-id (db/db h-conn))})
             candidate (agent/acquire-context! target nil {:seon.agent/branch c})
-            c-conn (:seon.db/connection candidate)
-            environment (support/environment cluster-name c-conn)
-            ctx (support/fork-cluster-ctx c-conn cluster-name)
-            routing (support/attempt-routing c-conn)
-            faults (async/chan (async/sliding-buffer 16))]
+            c-conn (:seon.db/connection candidate)]
         (try
-          (with-open [launcher (support/closeable
-                                (flow/start-work-launcher!
-                                 {:seon.env/environment environment
-                                  :seon.flow/configuration (select-keys (config/effective (db/db c-conn) cluster-name)
-                                                                        flow/flow-workload-attributes)})
-                                flow/stop-work-launcher!)]
-            (let [handle (support/cluster-handle
-                          {:seon.env/environment environment :seon.db/connection c-conn :seon.cluster/name cluster-name
-                           :seon.sci.eval/ctx ctx :seon.flow/work-launcher @launcher
-                           :seon.flow/executor (cluster/projection-executor (:seon.sci.eval/projection-state ctx))
-                           :seon.db.process/id cluster/boot-process-identity})
-                  request {:seon.turn.loop/cluster handle :seon.agent/routing routing :seon.agent/id agent-id}]
-              (swap! routing assoc :seon.agent/fault-channel faults)
-              ;; The agent is assigned the fixture namespace on C, so its `defn` replaces the file's declaration.
-              (support/transacted! c-conn (support/agent-tx @c-conn agent-id fixture-ns))
-              (agent/arm! request)
-              (try
-                (submit! request replacement)
-                (finally
-                  (agent/disarm! request)
-                  (doseq [channel [faults (:seon.cluster.wake/channel handle)
-                                   (:seon.render/context-channel handle) (:seon.turn.loop/completion handle)]]
-                    (async/close! channel))))))
+          ;; The agent is assigned the fixture namespace on C, so its `defn` replaces the file's declaration.
+          (with-agent! c-conn cluster-name agent-id fixture-ns #(submit! % replacement))
           (testing "the agent's evaluation settled one replacement row on its branch"
             (is (not= (before callee)
                       (:seon.program/definition-digest (db/pull (db/db c-conn) [:seon.program/definition-digest] callee)))))
