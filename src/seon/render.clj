@@ -586,8 +586,9 @@
       'seon.render.value/render-ai)))
 
 (defn- explicit-value
-  "A map's own inline render for OUTPUT's face: a renderer symbol, or the
-  rendered data itself. Each face is independent; nil when the value names none."
+  "A map's own inline render for OUTPUT's face: a renderer symbol, an inline
+  function (invoked under the same arm as a named producer), or the rendered
+  data itself. Each face is independent; nil when the value names none."
   {:malli/schema [:=> [:cat :seon.schema/value :seon.render/output]
                   [:maybe [:tuple :seon.render/output :seon.schema/value]]]}
   [value output]
@@ -1107,12 +1108,15 @@
      #(sci.kernel/invoke
        (cond->
         {:seon.sci.eval/ctx ctx
-         :seon.fn/sym selected
          :seon.sci.eval/args [argument]
          :seon.sci.admit/unbounded? true
          :seon.sci.eval/time-limit-ms time-limit-ms
          :seon.sci.admit/caps caps
          :seon.config/on-core-error on-core-error}
+         ;; A named producer is resolved; a value's own inline function is
+         ;; applied as it is, under the same arm (kernel/invoke).
+         (qualified-symbol? selected) (assoc :seon.fn/sym selected)
+         (fn? selected) (assoc :seon.sci.eval/function selected)
          ;; A request without a database leaves the key absent, and the
          ;; runtime supplies it; never a stored nil.
          (:seon.db/db request) (assoc :seon.db/db (:seon.db/db request))
@@ -1122,14 +1126,15 @@
 
 (defn- invocation-unknown
   "The typed unknown for a producer that did not return, else nil."
-  {:malli/schema [:=> [:cat :map :seon.render/output :qualified-symbol :map] [:or :nil :seon.render/unknown]]}
+  {:malli/schema [:=> [:cat :map :seon.render/output [:or :qualified-symbol [:fn clojure.core/fn?]] :map] [:or :nil :seon.render/unknown]]}
 
   [request output selected result]
   (when-let [reason (get unknown-reason-by-outcome
                          (get-in result [:seon.sci.admit/record
                                          :seon.eval/outcome]))]
-    (unknown (cond-> {:seon.render.unknown/reason reason
-                      :seon.render.unknown/producer selected}
+    (unknown (cond-> {:seon.render.unknown/reason reason}
+               ;; An inline function has no name to report.
+               (qualified-symbol? selected) (assoc :seon.render.unknown/producer selected)
                ;; A producer stopped by `time-limit` never produced a
                ;; value: absent is no key, never a stored nil.
                (:seon.sci.admit/value result)
@@ -1140,7 +1145,7 @@
 
 (defn- invoked
   "One producer's returned value, or the typed unknown that replaces it."
-  {:malli/schema [:=> [:cat :map :seon.render/output :qualified-symbol]
+  {:malli/schema [:=> [:cat :map :seon.render/output [:or :qualified-symbol [:fn clojure.core/fn?]]]
                   [:or :seon.render/rendered :seon.render/source-blocks :seon.render/error-result]]}
 
   [request output selected]
@@ -1202,7 +1207,7 @@
     (cond
       (nil? selected) nil
       (refused? selected) {:seon.error/value selected}
-      (not (qualified-symbol? selected))
+      (not (or (qualified-symbol? selected) (fn? selected)))
       {:seon.print/node {:seon.print/face :seon.print/projected
                          :seon.render/output output
                          :seon.print/value (inline-rendered (assoc request :seon.render/value value) output selected)}}
@@ -1217,10 +1222,10 @@
           unavailable {:seon.error/value unavailable}
           (and (valid-projection? projection output rendered) (not (refused? rendered))
                (not (:seon.render/invalid-output rendered)))
-          {:seon.print/node {:seon.print/face :seon.print/projected
-                             :seon.render.call/selected-producer selected
-                             :seon.render/output output
-                             :seon.print/value rendered}}
+          {:seon.print/node (cond-> {:seon.print/face :seon.print/projected
+                                     :seon.render/output output
+                                     :seon.print/value rendered}
+                              (qualified-symbol? selected) (assoc :seon.render.call/selected-producer selected))}
           :else nil)))))
 
 (defn- invoke-producer
@@ -1232,70 +1237,73 @@
     (cond
       (or (:seon.render/refused-member selected) (:seon.render/candidates selected) (:seon.render.unknown/reason selected))
       selected
-      (qualified-symbol? selected) (invoked request output selected)
+      (or (qualified-symbol? selected) (fn? selected)) (invoked request output selected)
       :else (inline-rendered request output selected))))
 
 (defn- raw-output
-  {:malli/schema [:=> [:cat :seon.render/call-request :seon.render/output :qualified-symbol]
+  {:malli/schema [:=> [:cat :seon.render/call-request :seon.render/output :seon.schema/value]
                   [:or :seon.render/rendered :seon.render/source-blocks :seon.render/error-result]]}
   [request output selected]
-  (let [projection (request-projection request)
-        rendered (invoked request output selected)
-        ;; Optional source/observation contracts declare absence explicitly.
-        ;; An ordinary text renderer returning nil has violated its contract.
-        declared-absence?
-        (and (nil? rendered)
-             (some #(m/validate % nil {:registry (:seon.schema.projection/registry projection)})
-                   (schema/function-matching-outputs-in
-                    projection selected
-                    [(render-invocation-argument projection request selected)])))]
-    (case output
-      :seon.render/ai
-      (if (or declared-absence? (string? rendered) (or (:seon.render.unknown/reason rendered) (:seon.render/invalid-output rendered) (:seon.render/refused-member rendered))
-              (valid-projection? projection :seon.render/source-blocks rendered))
-        rendered
-        (let [observation
-              {:seon.error/fix "Return a value satisfying the renderer's declared output contract."
-               :seon.error/at (Date.)
-               :seon.error/layer :seon.render/output
-               :seon.error/operation 'seon.render/raw-output
-               :seon.render/invalid-output :ai
-               :seon.error/message "The selected AI renderer did not return text."
-               :seon.error/data {:seon.render/output rendered}
-               :seon.error/expected "a value satisfying the requested render output"
-               :seon.error/offending rendered}]
-          observation))
+  (if-not (or (qualified-symbol? selected) (fn? selected))
+    ;; A value's own rendered data is its face as given.
+    (inline-rendered request output selected)
+    (let [projection (request-projection request)
+          rendered (invoked request output selected)
+          ;; Optional source/observation contracts declare absence explicitly.
+          ;; An ordinary text renderer returning nil has violated its contract.
+          declared-absence?
+          (and (nil? rendered) (qualified-symbol? selected)
+               (some #(m/validate % nil {:registry (:seon.schema.projection/registry projection)})
+                     (schema/function-matching-outputs-in
+                      projection selected
+                      [(render-invocation-argument projection request selected)])))]
+      (case output
+        :seon.render/ai
+        (if (or declared-absence? (string? rendered) (or (:seon.render.unknown/reason rendered) (:seon.render/invalid-output rendered) (:seon.render/refused-member rendered))
+                (valid-projection? projection :seon.render/source-blocks rendered))
+          rendered
+          (let [observation
+                {:seon.error/fix "Return a value satisfying the renderer's declared output contract."
+                 :seon.error/at (Date.)
+                 :seon.error/layer :seon.render/output
+                 :seon.error/operation 'seon.render/raw-output
+                 :seon.render/invalid-output :ai
+                 :seon.error/message "The selected AI renderer did not return text."
+                 :seon.error/data {:seon.render/output rendered}
+                 :seon.error/expected "a value satisfying the requested render output"
+                 :seon.error/offending rendered}]
+            observation))
 
-      :seon.render/html
-      (if (or declared-absence? (or (:seon.render.unknown/reason rendered) (:seon.render/invalid-output rendered) (:seon.render/refused-member rendered))
-              (hiccup/hiccup? rendered))
-        rendered
-        (let [observation
-              {:seon.error/fix "Return a value satisfying the renderer's declared output contract."
-               :seon.error/at (Date.)
-               :seon.error/layer :seon.render/output
-               :seon.error/operation 'seon.render/raw-output
-               :seon.render/invalid-output :html
-               :seon.error/message "The selected HTML renderer did not return Hiccup."
-               :seon.error/data {:seon.render/output rendered}
-               :seon.error/expected "a value satisfying the requested render output"
-               :seon.error/offending rendered}]
-          observation))
+        :seon.render/html
+        (if (or declared-absence? (or (:seon.render.unknown/reason rendered) (:seon.render/invalid-output rendered) (:seon.render/refused-member rendered))
+                (hiccup/hiccup? rendered))
+          rendered
+          (let [observation
+                {:seon.error/fix "Return a value satisfying the renderer's declared output contract."
+                 :seon.error/at (Date.)
+                 :seon.error/layer :seon.render/output
+                 :seon.error/operation 'seon.render/raw-output
+                 :seon.render/invalid-output :html
+                 :seon.error/message "The selected HTML renderer did not return Hiccup."
+                 :seon.error/data {:seon.render/output rendered}
+                 :seon.error/expected "a value satisfying the requested render output"
+                 :seon.error/offending rendered}]
+            observation))
 
-      :seon.render/form
-      (if (valid-projection? projection :seon.render/form rendered)
-        rendered
-        (let [observation
-              {:seon.error/fix "Return a value satisfying the renderer's declared output contract."
-               :seon.error/at (Date.)
-               :seon.error/layer :seon.render/output
-               :seon.error/operation 'seon.render/raw-output
-               :seon.render/invalid-output :form
-               :seon.error/message "The selected form renderer did not return a form."
-               :seon.error/data {:seon.render/output rendered}
-               :seon.error/expected "a value satisfying the requested render output"
-               :seon.error/offending rendered}]
-          observation)))))
+        :seon.render/form
+        (if (valid-projection? projection :seon.render/form rendered)
+          rendered
+          (let [observation
+                {:seon.error/fix "Return a value satisfying the renderer's declared output contract."
+                 :seon.error/at (Date.)
+                 :seon.error/layer :seon.render/output
+                 :seon.error/operation 'seon.render/raw-output
+                 :seon.render/invalid-output :form
+                 :seon.error/message "The selected form renderer did not return a form."
+                 :seon.error/data {:seon.render/output rendered}
+                 :seon.error/expected "a value satisfying the requested render output"
+                 :seon.error/offending rendered}]
+            observation))))))
 
 (defn render-ai
   "Render one value as text through the unique selected live SCI Var."

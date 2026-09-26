@@ -934,6 +934,19 @@
             (:seon.render.value/text
              (value/prepare (registered-unit connection {:seon.render/ai "just text" :x 1}))))))))
 
+(deftest a-value-s-own-inline-function-renders-it
+  ;; The master override's third form (AGENTS render law): an inline function
+  ;; is invoked under the same arm as a named producer, at the root or nested;
+  ;; one that throws is its typed unknown, never a missing value.
+  (support/with-database
+   (fn [connection]
+     (let [text #(:seon.render.value/text (value/prepare (render-request connection %)))]
+       (is (= "hello 1" (text {:seon.render/ai (fn [unit] (str "hello " (:x unit))) :x 1})))
+       (is (= "{:a \"inner\"}" (text {:a {:seon.render/ai (fn [_] "inner")}})))
+       (is (= :refused (:seon.render.unknown/reason
+                        (edn/read-string
+                         (text {:seon.render/ai (fn [_] (throw (ex-info "boom" {})))})))))))))
+
 (deftest a-cut-continues-from-its-node-path-and-absolute-offset
   ;; One-render-path §3g: a cut's coordinates are the walk node, the path and
   ;; the absolute offset; the same selection answers from there, and a node
