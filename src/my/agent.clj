@@ -61,7 +61,7 @@
 
   The branch is the one my supplied connection holds. The mode is the one my
   acquisition of that branch decided (seon.cluster.agent/acquire-context!),
-  read from its context-state entry; neither is derived from a cluster name.
+  read from its entry in my execution's roster; neither is derived from a cluster name.
 
   Example:
   (my.agent/branch)"
@@ -70,10 +70,10 @@
                   [:map [:seon.agent/branch :seon.agent/branch]
                    [:seon.agent/mode :seon.agent/mode]]]}
   [{agent-id :seon.agent/id
-    {connection :seon.db/connection contexts :seon.agent/context-state} :my.program/context}]
+    {connection :seon.db/connection roster :seon.agent/routing} :my.program/context}]
   ;; Mode is relative to the acquiring parent, so only this agent's own entry answers.
   (let [held (get-in (db/db connection) [:config :branch])
-        mode (:seon.agent/mode (get (some-> contexts deref) [held agent-id]))]
+        mode (:seon.agent/mode (get-in (some-> roster deref) [:seon.agent/contexts [held agent-id]]))]
     (when-not (and held mode)
       (throw (ex-info "No acquisition of this agent holds its connection's branch."
                       {:seon.agent/id agent-id :seon.agent/branch held})))

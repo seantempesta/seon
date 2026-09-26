@@ -3376,7 +3376,6 @@
              ;; process-local ports and structural dials, which are not
              ;; environment members.
              :seon.env/environment (env/of ctx)
-             :seon.agent/context-state (atom {})
              :seon.sci.eval/projection-state
              (:seon.sci.eval/projection-state ctx)
              :seon.db/connection connection
@@ -3444,7 +3443,21 @@
              {:proc (flow/var-process
                      #'cluster.agent/armer-step :io
                      (env/carry {:seon.turn.loop/cluster handle
-                                 :seon.agent/routing routing}
+                                 :seon.agent/routing routing
+                                 ;; THE ROUTING DELIVERY (F1 §4): one listener per
+                                 ;; cluster, living exactly as long as the armer proc.
+                                 :seon.cluster.wake/route
+                                 {:seon.cluster.wake/connection (:seon.db/connection handle)
+                                  :seon.cluster.wake/channels
+                                  (fn [] (cluster.agent/channels routing))
+                                  :seon.cluster.wake/fenced?
+                                  (fn [agent-eid channel]
+                                    (cluster.agent/fenced-route? routing agent-eid channel))
+                                  :seon.cluster.wake/armer-channel (:seon.cluster.wake/channel handle)
+                                  :seon.cluster.wake/render-channel
+                                  (:seon.render.web/render-channel view)
+                                  :seon.render.web/interest (:seon.render.web/interest view)
+                                  :seon.cluster.wake/key :seon.agent/route}}
                                 environment))}
              :seon.render.web/render
              {:proc (flow/var-process
@@ -3464,10 +3477,10 @@
   its SCI program remains unacquired until evaluation. Recovery has already
   closed interrupted turns, and pending durable work is derived by the prime.
 
-  ORDER IS THE CONTRACT. The cluster graph starts first because the
-  fan-out taps ITS channels; the routing listener comes after the
-  fan-out because its fault channel is THE FAN-OUT'S; the armer prime
-  comes LAST, after the listener, so an agent created between the
+  ORDER IS THE CONTRACT. The cluster graph starts first, and its armer
+  proc registers the routing listener as it starts (the listener's
+  lifetime is that proc's); the armer prime comes LAST, after the
+  listener, so an agent created between the
   prime's derivation and the listener's registration cannot exist —
   anything committed earlier is in the facts the prime's pass reads.
   This is the wiring whose absence meant every core fault in a live
@@ -3537,17 +3550,7 @@
            (fn [{graph :seon.flow/graph}]
              (swap! routing assoc :seon.flow/graph graph))}})
         pages-mult (::pages-mult joins)]
-    ;; THE ROUTING DELIVERY (F1 §4): one listener per cluster
-    (wake/route! {:seon.cluster.wake/connection connection
-                  :seon.cluster.wake/channels
-                  (fn [] (cluster.agent/channels routing))
-                  :seon.cluster.wake/fenced?
-                  (fn [agent-eid channel]
-                    (cluster.agent/fenced-route? routing agent-eid channel))
-                  :seon.cluster.wake/armer-channel armer-channel
-                  :seon.cluster.wake/render-channel render-channel
-                  :seon.render.web/interest render-interest
-                  :seon.cluster.wake/key :seon.agent/route})
+    ;; The armer proc registered the routing listener as the graph started.
     ;; BOOT IS ONE WAKE through the ordinary render path. The listener is
     ;; already registered and the cold interest is `:all`, so commits before
     ;; this offer are covered by the same newest-database derivation as every
@@ -3577,8 +3580,8 @@
 
 (defn disarm-agents!
   "Unwind the armed layers of ONE instance, newest first.
-  The routing LISTENER goes first so nothing new is routed while the
-  graphs unwind. An explicit armer quiescence event then proves every
+  An explicit armer quiescence event removes the routing listener, so
+  nothing new is routed while the graphs unwind, proves every
   earlier arm wake has settled and closes that input, while the render
   proc remains available to active agent turns. Each agent graph is
   then joined; only after those turns exit does the cluster graph stop
@@ -3602,10 +3605,6 @@
   ;; holding sockets belonging to somebody outside this process
   (when-let [served (:seon.render.web/served instance)]
     (web/stop! served))
-  (when-let [handle (:seon.turn.loop/cluster instance)]
-    (wake/unlisten! {:seon.cluster.wake/connection
-                     (:seon.db/connection handle)
-                     :seon.cluster.wake/key :seon.agent/route}))
   (let [handle (:seon.turn.loop/cluster instance)
         backstop-ms (when handle
                       (:seon.config.agent/turn-completion-backstop-ms

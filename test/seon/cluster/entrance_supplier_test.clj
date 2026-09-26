@@ -48,8 +48,10 @@
              :seon.proof/rostered? before
              :seon.proof/isolated? (not (identical? connection (:seon.db/connection execution)))
              :seon.proof/carried? (and (identical? held (:seon.store/store supplied))
-                                      (identical? (:seon.agent/context-state context)
-                                                  (:seon.agent/context-state supplied))
+                                      ;; the isolated execution's own roster, recorded by the caller's
+                                      (identical? (:seon.agent/routing supplied)
+                                                  (get-in @(:seon.agent/routing context)
+                                                          [:seon.agent/children branch]))
                                       (identical? (:seon.db/connection execution)
                                                   (:seon.db/connection supplied)))})
           (finally (agent/release-context! execution)))]
@@ -68,7 +70,7 @@
                          :seon.ns/name 'seon.cluster.entrance-supplier-test}))
      (let [ctx (support/fork-cluster-ctx connection "acquisition")
            source {:seon.db/connection connection :seon.cluster/name "acquisition"
-                   :seon.sci.eval/ctx ctx :seon.agent/context-state (atom {})
+                   :seon.sci.eval/ctx ctx :seon.agent/routing (agent/routing)
                    :seon.store/store held}
            live (agent/acquire-context! source "supplier-live")]
        (try

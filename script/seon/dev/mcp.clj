@@ -501,8 +501,9 @@
           connection# (:seon.db/connection handle#)
           own# (get-in @connection# [:config :branch])
           branch# ~(some-> branch keyword)
-          held# (filterv (fn [[[held-branch# _#] _#]] (= branch# held-branch#))
-                         (some-> (:seon.agent/context-state handle#) deref))
+          held# (vec (some-> (get-in (some-> (:seon.agent/routing handle#) deref)
+                                     [:seon.agent/children branch#])
+                             deref :seon.agent/contexts))
           refuse# (fn [message# data#]
                     (merge {:seon.error/at (java.util.Date.) :seon.error/layer :seon.dev.mcp/branch
                             :seon.error/operation '~(symbol "seon.dev.mcp" (str "branch-" action))

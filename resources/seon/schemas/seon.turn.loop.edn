@@ -254,7 +254,6 @@
                  ; references the one key again.
                  :cluster
                  [:map
-                  [:seon.agent/context-state {:optional true} :seon.agent/context-state]
                   [:seon.db/connection :seon.db/connection]
                   [:seon.cluster/name :seon.cluster/name]
                   [:seon.db.process/id :seon.db.process/id]

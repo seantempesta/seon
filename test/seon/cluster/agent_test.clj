@@ -1129,24 +1129,24 @@
    (fn [connection]
      (test-support/transacted! connection (created-agent-tx connection "shared-acquisition" "shared"))
      (let [parent (test-support/execution-handle connection)
-           contexts (:seon.agent/context-state parent)
+           roster (:seon.agent/routing parent)
            key [(live-branch connection) "shared"]
            reservations (atom 0)
            both-reserved (CountDownLatch. 1)
            watch-key (Object.)
-           _ (add-watch contexts watch-key
+           _ (add-watch roster watch-key
                         (fn [_ _ _ held]
-                          (when (:seon.cluster.agent/acquiring (get held key))
+                          (when (:seon.cluster.agent/acquiring (get-in held [:seon.agent/contexts key]))
                             (case (swap! reservations inc)
                               1 (test-support/await-event! both-reserved ::second-reserved)
                               2 (.countDown both-reserved)
                               nil))))
            acquisitions (try (mapv deref (mapv (fn [_] (future (agent/acquire-context! parent "shared")))
                                                (range 2)))
-                             (finally (remove-watch contexts watch-key)))]
+                             (finally (remove-watch roster watch-key)))]
        (is (identical? (first acquisitions) (second acquisitions))
            "same-key callers share one acquisition")
-       (is (identical? (first acquisitions) (get @contexts key))
+       (is (identical? (first acquisitions) (get-in @roster [:seon.agent/contexts key]))
            "the settled entry is the shared handle, with no reservation left")))))
 
 (deftest turn-start-has-the-same-declared-loud-completion-backstop

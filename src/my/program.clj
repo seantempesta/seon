@@ -423,7 +423,7 @@
       (merge {:seon.sci.eval/ctx ctx :my.program/base-ctx base
               :seon.db/connection connection
               :seon.cluster/name (:seon.boot/cluster-name environment)}
-             (select-keys environment [:seon.store/store :seon.agent/context-state]))
+             (select-keys environment [:seon.store/store :seon.agent/routing]))
       (seon.error.refusal/diagnostic (java.util.Date.) :seon.program/write 'my.program/supplied-context
        {:seon.program/missing-context-members (into #{} (keep (fn [[member value]] (when-not value member)))
               [[:my.program/executing-ctx ctx] [:my.program/base-ctx base]

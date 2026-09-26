@@ -1804,10 +1804,10 @@
                      ctx)
                    (catch Throwable failure
                      (throw (release! failure [#(store/release-branch! connection) retire!]))))]
-      ;; The execution's value with this request's own world: fresh context
-      ;; state and routing, so member entries and graphs stay the request's.
+      ;; The execution's value with this request's own world: a fresh roster,
+      ;; so member contexts and graphs stay the request's.
       (assoc execution
-             :seon.agent/context-state (atom {}) :seon.agent/routing (@routing)
+             :seon.agent/routing (@routing)
              :seon.sci.eval/base-ctx ctx :seon.sci.eval/ctx ctx
              :seon.env/environment environment
              :seon.db/connection connection :seon.db/db database

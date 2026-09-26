@@ -24,10 +24,12 @@
        (catch Throwable failure failure)))
 
 (defn- retains-branch?
+  "Whether the parent roster still records `handle`'s roster for its branch."
   {:malli/schema [:=> [:cat :seon.agent/execution-handle] :boolean]}
   [handle]
-  (boolean (some (fn [[[branch _] _]] (= branch (:seon.agent/branch handle)))
-                 @(:seon.agent/context-state handle))))
+  (let [roster (:seon.agent/routing handle)]
+    (identical? roster (get-in @(:seon.agent/parent @roster)
+                               [:seon.agent/children (:seon.agent/branch handle)]))))
 
 (deftest a-failing-connection-release-still-unlinks-and-forgets-the-context
   ;; The injected release releases the connection and then fails, so the
@@ -48,7 +50,7 @@
     (is (= :connection (:seon.proof/forced (ex-data failure))))
     (is (empty? (.getSuppressed ^Throwable failure)))
     (is (not (contains? (registry/roster held) branch)) "the branch is still unlinked")
-    (is (not (retains-branch? handle)) "the context state no longer retains the branch")))
+    (is (not (retains-branch? handle)) "the parent roster no longer records the branch")))
 
 (deftest every-release-failure-surfaces-with-the-later-ones-suppressed
   (let [handle (isolated-handle)
@@ -69,7 +71,7 @@
         (is (= :connection (:seon.proof/forced (ex-data failure))))
         (is (= [:unlink] (mapv #(:seon.proof/forced (ex-data %)) (.getSuppressed ^Throwable failure)))
             "the unlink failure rides the first cause as suppressed")
-        (is (not (retains-branch? handle)) "the context state is removed after both failures"))
+        (is (not (retains-branch? handle)) "the parent roster drops the branch after both failures"))
       (finally
         (registry/retire-branch! {:seon.store/store held :seon.store/branch branch})))
     (is (not (contains? (registry/roster held) branch)))))

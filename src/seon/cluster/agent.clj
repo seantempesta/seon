@@ -91,6 +91,7 @@
             [seon.render.route :as route]
             [seon.flow :as seon.flow]
             [seon.schedule :as schedule]
+            [seon.cluster.wake :as wake]
             [seon.sci.eval :as sci.eval]
             [seon.sci.reader :as reader]
             [seon.schema.edn :as schema.edn])
@@ -593,14 +594,25 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn routing
-  "A fresh routing entry: the process-local map atom arming rebuilds.
+  "A fresh roster: the one process-local atom of one execution's live objects.
   `:seon.agent/armed` by agent id (the management view); `:seon.agent/channels` by
   recipient ENTITY id (the wake handler's one-lookup delivery);
-  `:seon.flow/graph` the cluster graph, joined before it resumes,
-  read by oversight on every render path that holds this entry."
+  `:seon.agent/contexts` the execution handles acquired on this execution's branch,
+  by `[branch agent-id]`; `:seon.agent/children` the roster of each other branch
+  acquired through it, by branch; `:seon.flow/graph` the cluster graph, joined
+  before it resumes, read by oversight on every render path that holds this entry."
   {:malli/schema [:=> [:cat] :seon.agent/routing]}
   []
-  (atom {:seon.agent/armed {} :seon.agent/channels {}}))
+  (atom {:seon.agent/armed {} :seon.agent/channels {} :seon.agent/contexts {}}))
+
+(defn- child-roster!
+  "The roster `roster` records for `branch`, recorded when absent. The child
+  names its parent, so the release that owns its branch removes the record."
+  {:malli/schema [:=> [:cat :seon.agent/routing :seon.agent/branch] :seon.agent/routing]}
+  [roster branch]
+  (let [fresh (doto (routing) (swap! assoc :seon.agent/parent roster))]
+    (get-in (swap! roster update-in [:seon.agent/children branch] #(or % fresh))
+            [:seon.agent/children branch])))
 
 (defn armed
   "The armed entry for `agent-id`, or nil."
@@ -861,9 +873,9 @@
   An owning handle first stops and joins every graph armed in its routing
   (`stop-owned-graphs!`); a failed join throws before anything closes. Live
   handles own nothing; borrowed branches persist. Then the connection release,
-  the branch unlink and the context-state removal are each attempted even when
-  an earlier one throws; the first cause is then rethrown whole, carrying every
-  later cause as suppressed."
+  the branch unlink and the removal of its roster from the parent's children are
+  each attempted even when an earlier one throws; the first cause is then
+  rethrown whole, carrying every later cause as suppressed."
   {:malli/schema [:=> [:cat :seon.agent/execution-handle] :nil]}
   [handle]
   (let [owns-connection? (:seon.agent/owns-connection? handle)
@@ -880,45 +892,46 @@
                   (registry/retire-branch!
                    {:seon.store/store (:seon.store/store handle)
                     :seon.store/branch (:seon.agent/branch handle)}))
-               #(when (or owns-connection? owns-branch?)
-                  (swap! (:seon.agent/context-state handle)
-                         (fn [contexts]
-                           (into {} (remove (fn [[[branch _] _]]
-                                              (= branch (:seon.agent/branch handle))))
-                                 contexts))))])]
+               #(let [roster (:seon.agent/routing handle)]
+                  (when-let [parent (and (or owns-connection? owns-branch?)
+                                         (:seon.agent/parent @roster))]
+                    (swap! parent update :seon.agent/children
+                           (fn [children]
+                             (cond-> children
+                               (identical? roster (get children (:seon.agent/branch handle)))
+                               (dissoc (:seon.agent/branch handle)))))))])]
     (throw-causes! causes))
   nil)
 
 (defn- acquire-once!
-  "Acquire `key` in `contexts` once per concurrent demand, holding no monitor.
+  "Acquire `key` in `roster`'s contexts once per concurrent demand, holding no monitor.
   `swap-vals!` reserves the key with a delay of `(acquire previous)`; a caller
   finding one in flight derefs it, so same-key callers share one handle and
   other keys run in parallel. Settling (the handle, or previous on failure)
   applies only while this reservation holds the key, so a release wins."
-  {:malli/schema [:=> [:cat :seon.agent/context-state
+  {:malli/schema [:=> [:cat :seon.agent/routing
                        [:tuple :seon.agent/branch [:maybe :seon.agent/id]]
                        [:fn clojure.core/ifn?]]
                   :seon.agent/execution-handle]}
-  [contexts key acquire]
-  (let [reserve (fn [held]
-                  (let [entry (get held key)]
+  [roster key acquire]
+  (let [path [:seon.agent/contexts key]
+        reserve (fn [held]
+                  (let [entry (get-in held path)]
                     (if (::acquiring entry)
                       held
-                      (assoc held key (assoc entry ::acquiring (delay (acquire entry)))))))
-        entry (get (second (swap-vals! contexts reserve)) key)
+                      (assoc-in held path (assoc entry ::acquiring (delay (acquire entry)))))))
+        entry (get-in (second (swap-vals! roster reserve)) path)
         pending (::acquiring entry)
         previous (not-empty (dissoc entry ::acquiring))
         settle! (fn [value]
-                  (swap! contexts
+                  (swap! roster
                          (fn [held]
-                           (cond (not (identical? pending (::acquiring (get held key)))) held
-                                 value (assoc held key value)
-                                 :else (dissoc held key)))))]
+                           (cond (not (identical? pending (::acquiring (get-in held path)))) held
+                                 value (assoc-in held path value)
+                                 :else (update held :seon.agent/contexts dissoc key)))))]
     (try
       (let [acquired @pending]
-        (settle! (if (identical? contexts (:seon.agent/context-state acquired))
-                   acquired
-                   previous))
+        (settle! acquired)
         acquired)
       (catch Throwable failure
         (settle! previous)
@@ -932,8 +945,10 @@
   connection value the handle carries, never re-derived from a cluster name.
   An isolation request allocates a fresh branch off the captured commit (or
   current head); a named branch without isolation selects an existing branch,
-  as the MCP tool does. The existing context state
-  retains the handles and private SCI objects across evaluation boundaries."
+  as the MCP tool does. One roster per execution retains the handles and
+  private SCI objects across evaluation boundaries: the handle's own for its
+  live branch, and for any other branch the child roster the handle's records,
+  so a branch execution's contexts, graphs and release are its own."
   {:malli/schema
    [:function
     [:=> [:cat :seon.agent/context-source :seon.agent/id]
@@ -943,7 +958,7 @@
      :seon.agent/execution-handle]]}
   ([handle agent-id] (acquire-context! handle agent-id {}))
   ([handle agent-id options]
-   (let [contexts (:seon.agent/context-state handle)
+   (let [parent-roster (:seon.agent/routing handle)
          parent (:seon.db/connection handle)
          database (db/db parent)
          ;; The handle carries its world: the branch its connection holds is live.
@@ -960,20 +975,19 @@
                                 [:seon.agent/id agent-id]))))
          held-store (or (:seon.store/store options) (:seon.store/store handle)
                         (:seon.store/store (env/of source-ctx)))]
-     (when-not (and contexts branch)
-       (throw (ex-info "Acquisition requires context state and an explicit agent branch."
+     (when-not (and parent-roster branch)
+       (throw (ex-info "Acquisition requires the handle's roster and an explicit agent branch."
                        {:seon.agent/id agent-id :seon.agent/branch branch})))
      (when (and (:seon.agent/isolate? options) (= branch live-branch))
        (throw (ex-info "Isolation cannot borrow the live cluster branch."
                        {:seon.agent/branch branch})))
-     (acquire-once! contexts [branch agent-id] (fn [previous]
-       (let [key [branch agent-id]
-             ;; An entry still acquiring its first handle holds no connection yet.
-             branch-owner (some (fn [[[held-branch _] execution]]
-                                  (when (and (= branch held-branch)
-                                             (:seon.db/connection execution))
-                                    execution)) @contexts)
-             isolated? (not= branch live-branch)
+     (let [isolated? (not= branch live-branch)
+           roster (if isolated? (child-roster! parent-roster branch) parent-roster)]
+     (try
+     (acquire-once! roster [branch agent-id] (fn [previous]
+       (let [;; An entry still acquiring its first handle holds no connection yet.
+             branch-owner (some (fn [[_ execution]] (when (:seon.db/connection execution) execution))
+                                (:seon.agent/contexts @roster))
              create? (and isolated? (nil? previous)
                           (or (:seon.agent/isolate? options)
                               (nil? (:seon.agent/branch options))))
@@ -990,10 +1004,7 @@
              _ (when (and create? (not (:seon.cluster/created? created)))
                  (throw (ex-info "Isolation requires a fresh owned branch."
                                  {:seon.agent/branch branch})))
-             allocated (atom nil)
-             ;; An isolated world holds its own context state: an inherited row
-             ;; naming the parent's branch can never reach the parent's handles.
-             held-contexts (if (:seon.agent/isolate? options) (atom {}) contexts)]
+             allocated (atom nil)]
          (try
            (let [borrowed (or (:seon.db/connection branch-owner)
                             (when (and isolated? (not create?) (nil? previous))
@@ -1044,7 +1055,7 @@
                                      {:seon.sci.eval/acquisition-recording-error failure})))
                  _ (env/replace-environment!
                     (:seon.sci.eval/projection-state base)
-                    (cond-> (assoc (env/of base) :seon.agent/context-state held-contexts)
+                    (cond-> (assoc (env/of base) :seon.agent/routing roster)
                       held-store (assoc :seon.store/store held-store)))
                  ctx (if (nil? agent-id)
                        base
@@ -1063,14 +1074,9 @@
                             :seon.sci.eval/ctx ctx
                             :seon.sci.eval/base-ctx base
                             :seon.env/environment (env/of ctx)
-                            :seon.agent/context-state held-contexts
-                            ;; The attempt owns the routing its graphs arm in, so
+                            ;; The execution owns the roster its graphs arm in, so
                             ;; its release can stop and join them before closing.
-                            :seon.agent/routing
-                            (or (:seon.agent/routing previous)
-                                (:seon.agent/routing branch-owner)
-                                (when-not isolated? (:seon.agent/routing handle))
-                                (routing))
+                            :seon.agent/routing roster
                             :seon.agent/branch branch
                             ;; Reacquiring an isolated handle through itself keeps its mode.
                             :seon.agent/mode (or (:seon.agent/mode previous) (if isolated? :isolated :live))
@@ -1080,10 +1086,6 @@
                             (boolean (or create? (:seon.agent/owns-branch? previous)))}
                             agent-id (assoc :seon.agent/id agent-id)
                             held-store (assoc :seon.store/store held-store))]
-             ;; An isolated world's own state; the parent's entry is settled by
-             ;; `acquire-once!`.
-             (when-not (identical? held-contexts contexts)
-               (swap! held-contexts assoc key acquired))
              acquired)
            (catch Throwable failure
              (when-let [connection @allocated]
@@ -1093,7 +1095,13 @@
                (try (registry/retire-branch!
                      {:seon.store/store held-store :seon.store/branch branch})
                     (catch Throwable cleanup (.addSuppressed failure cleanup))))
-             (throw failure)))))))))
+             (throw failure))))))
+       ;; A failed first acquisition leaves no empty child recorded.
+       (catch Throwable failure
+         (when (and isolated? (empty? (:seon.agent/contexts @roster)))
+           (swap! parent-roster update :seon.agent/children
+                  #(cond-> % (identical? roster (get % branch)) (dissoc branch))))
+         (throw failure)))))))
 
 (defn arm!
   "Arm one agent's graph: stamp → start → resume → route → prime.
@@ -1455,6 +1463,11 @@
                           (count (:seon.agent/armed @(:seon.agent/routing
                                             state)))))})
   ([args]
+   ;; THE ROUTE LISTENER'S LIFETIME IS THIS PROC'S. Flow calls this arity on
+   ;; the thread that starts the graph (`flow/impl.clj:263`), so a supplied
+   ;; route is registered before `start-graph!` returns and before boot's
+   ;; prime; the stop transition and the quiescence request remove it.
+   (some-> (:seon.cluster.wake/route args) wake/route!)
    (assoc args
           ::flow/in-ports {:seon.agent/arm (:seon.cluster.wake/channel
                                   (:seon.turn.loop/cluster args))}))
@@ -1481,6 +1494,8 @@
      (async/offer! (:seon.cluster.wake/channel
                     (:seon.turn.loop/cluster state))
                    :seon.agent/arm-prime))
+   (when (= ::flow/stop transition)
+     (some-> (:seon.cluster.wake/route state) wake/unlisten!))
    state)
   ([state _input message]
    (cond
@@ -1489,6 +1504,8 @@
 
      (:seon.agent/quiesce message)
      (do
+       ;; Nothing new is routed while the agent graphs unwind.
+       (some-> (:seon.cluster.wake/route state) wake/unlisten!)
        (async/put! (:seon.agent/quiesce message) :seon.agent/quiesced)
        [state nil])
 

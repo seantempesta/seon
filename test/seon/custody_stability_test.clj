@@ -51,7 +51,7 @@
     ["seon.sci.eval/fork-candidate-ctx" :seon.sci.eval/ctx]
     ;; Reviewed 2026-09-16. `acquire-context!` IS the per-agent context
     ;; acquisition owner: it forks the cluster ctx once per agent and keeps
-    ;; the fork under the cluster's context-state monitor, so the custody it
+    ;; the fork in its execution's roster, so the custody it
     ;; returns is the custody it just minted for that agent.
     ["seon.cluster.agent/acquire-context!" :seon.sci.eval/ctx]
     ;; `carry-connection-projection-state!` returns the very connection it was

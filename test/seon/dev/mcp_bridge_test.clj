@@ -642,14 +642,14 @@
   (let [instances @@(ns-resolve 'seon.cluster (symbol "running-instances"))
         cluster (first (sort (keys instances)))
         store (:seon.store/store (get instances cluster))
-        context-state (:seon.agent/context-state (:seon.turn.loop/cluster (get instances cluster)))
+        roster (:seon.agent/routing (:seon.turn.loop/cluster (get instances cluster)))
         consume (ns-resolve 'seon.cluster 'consume-mcp-projection!)
         branch (str "lane-mcp-test-" (random-uuid))
         run (fn [action b] (eval (read-string ((bridge-var 'branch-form) cluster action b))))
         sci (fn [source & [on-branch]]
               (let [form ((bridge-var 'sci-evaluation-form) source cluster 'user false on-branch)]
                 (try (:seon.eval/shown (eval (read-string form))) (finally (consume)))))
-        held #(some (fn [[[held-branch _] _]] (= (keyword branch) held-branch)) @context-state)]
+        held #(some? (get-in @roster [:seon.agent/children (keyword branch)]))]
     (is (some? store) "a running cluster supplies the store")
     (try
       (is (:seon.cluster/created? (run "create" branch)))

@@ -96,7 +96,7 @@
                               :seon.cluster/name "acquisition"}))))
      (let [ctx (support/fork-cluster-ctx connection "acquisition")
            handle {:seon.db/connection connection :seon.cluster/name "acquisition"
-                   :seon.sci.eval/ctx ctx :seon.agent/context-state (atom {})
+                   :seon.sci.eval/ctx ctx :seon.agent/routing (agent/routing)
                    :seon.sci.admit/caps (config/result-caps config/defaults)
                    :seon.config.eval/time-limit-ms 5000
                    :seon.config/on-core-error :panic

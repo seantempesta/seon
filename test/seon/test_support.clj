@@ -250,7 +250,7 @@
   "The execution handle the agent entrance retains for `connection`, or nil.
 
   `seon.cluster.agent/acquire-context!` keeps every handle it acquires in the
-  context state its environment carries; the connection's carried projection
+  roster its environment carries; the connection's carried projection
   state is that environment. No registry beside it is consulted."
   {:malli/schema [:=> [:cat [:or :nil :seon.db/connection]]
                   [:or :nil :seon.agent/execution-handle]]}
@@ -264,7 +264,7 @@
       (some (fn [[[_ agent-id] handle]]
               (when (and (nil? agent-id) (identical? connection (:seon.db/connection handle)))
                 handle))
-            (some-> (:seon.agent/context-state environment) deref)))))
+            (some-> (:seon.agent/routing environment) deref :seon.agent/contexts)))))
 
 (defn execution-handle
   "The executing test's handle: the one held for `connection`, else for this
@@ -312,7 +312,7 @@
 (defn fork-cluster-ctx
   "Fork the executing handle's context onto `connection` through the production fork.
   Custody, projection and environment repointing belong to sci.eval; a named
-  cluster environment keeps the entrance's context state and held store."
+  cluster environment keeps the entrance's roster and held store."
   {:malli/schema [:function
                   [:=> [:cat :seon.db/connection] :seon.sci.eval/ctx]
                   [:=> [:cat :seon.db/connection [:maybe :seon.boot/cluster-name]]
@@ -331,7 +331,7 @@
                (env/refuse-incomplete-environment!
                 (env/environment
                  (cond-> {:seon.boot/cluster-name cluster-name
-                          :seon.agent/context-state (:seon.agent/context-state handle)}
+                          :seon.agent/routing (:seon.agent/routing handle)}
                    (:seon.store/store handle)
                    (assoc :seon.store/store (:seon.store/store handle)))))))))))
 
@@ -388,8 +388,7 @@
   defaulted: those are the caller's world."
   [handle]
   (let [decisions config/defaults]
-    (merge {:seon.agent/context-state (atom {})
-            :seon.agent/routing (attempt-routing (:seon.db/connection handle))
+    (merge {:seon.agent/routing (attempt-routing (:seon.db/connection handle))
             :seon.cluster.wake/channel (async/chan (async/sliding-buffer 1))
             :seon.render/context-channel (async/chan (async/sliding-buffer 1))
             :seon.turn.loop/completion (async/promise-chan)

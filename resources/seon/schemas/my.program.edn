@@ -4,7 +4,7 @@
   [:my.program/base-ctx :seon.sci.eval/ctx]
   [:seon.cluster/name {:optional true} :seon.cluster/name]
   [:seon.store/store {:optional true} :seon.store/store]
-  [:seon.agent/context-state {:optional true} :seon.agent/context-state]]
+  [:seon.agent/routing {:optional true} :seon.agent/routing]]
  :my.program/read-request [:map [:seon.db/db :seon.db/database-value]]
  :my.program/subject-request
  [:map [:seon.db/db :seon.db/database-value]

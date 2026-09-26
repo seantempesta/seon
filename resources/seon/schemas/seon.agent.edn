@@ -3,15 +3,13 @@
  :context-source [:map
   [:seon.db/connection :seon.db/connection]
   [:seon.sci.eval/ctx :seon.sci.eval/ctx]
-  [:seon.agent/context-state :seon.agent/context-state]
   [:seon.cluster/name :seon.cluster/name]
   [:seon.store/store {:optional true} :seon.store/store]
   [:my.program/base-ctx {:optional true} :seon.sci.eval/ctx]
   [:seon.sci.eval/base-ctx {:optional true} :seon.sci.eval/ctx]
-  [:seon.agent/routing {:optional true} :seon.agent/routing]]
+  [:seon.agent/routing :seon.agent/routing]]
  :execution-handle [:map
   [:seon.cluster/name :seon.cluster/name]
-  [:seon.agent/context-state :seon.agent/context-state]
   [:seon.sci.eval/base-ctx :seon.sci.eval/ctx]
   [:seon.db/connection :seon.db/connection]
   [:seon.db/db :seon.db/database-value]
@@ -23,7 +21,7 @@
   [:seon.agent/mode :seon.agent/mode]
   [:seon.agent/owns-connection? :boolean]
   [:seon.agent/owns-branch? :boolean]
-  [:seon.agent/routing {:description "The routing this attempt's graphs arm in; release stops and joins them before it closes."} :seon.agent/routing]
+  [:seon.agent/routing {:description "The roster this execution's contexts are held in and its graphs arm in; release stops and joins them before it closes."} :seon.agent/routing]
   [:seon.store/store {:optional true} :seon.store/store]]
  :acquisition-options [:map
   [:seon.agent/branch {:optional true} :seon.agent/branch]
@@ -119,15 +117,10 @@
                       {:description
                        "The namespace this agent is assigned to work in by default; not unique — several agents may share one, and an agent may `in-ns` anywhere its REPL reaches."}
                       :seon.db/ref],
-                     :context-state
-                     [:fn
-                      {:description "Process-local agent SCI contexts owned by one cluster, retained across graph arming."
-                       :error/message "must be an atom containing the cluster's agent contexts"
-                       :gen/gen seon.flow/atom-reference-generator}
-                      seon.flow/atom-reference?],
                      :routing
                      [:fn
-                      {:error/message
+                      {:description "One execution's roster: armed graphs and mailboxes, held contexts by [branch agent-id], and the rosters of branches acquired through it."
+                       :error/message
                        "must be a process-local atom containing agent routing state"
                        :gen/gen seon.flow/atom-reference-generator}
                       seon.flow/atom-reference?],
