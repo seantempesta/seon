@@ -645,6 +645,9 @@
         roster (:seon.agent/routing (:seon.turn.loop/cluster (get instances cluster)))
         consume (ns-resolve 'seon.cluster 'consume-mcp-projection!)
         branch (str "lane-mcp-test-" (random-uuid))
+        ;; A fresh name per run: a symbol this file spells would be reached by
+        ;; this very test, and the defn's entry gate would run it inside itself.
+        probe (str "lane-probe-" (subs (str (random-uuid)) 0 8))
         run (fn [action b] (eval (read-string ((bridge-var 'branch-form) cluster action b))))
         sci (fn [source & [on-branch]]
               ;; The prepl evaluates the bridge's form with no custody bound; a test
@@ -659,9 +662,10 @@
     (try
       (is (:seon.cluster/created? (run "create" branch)))
       (is (:seon.error/message (run "create" branch)) "an existing name refuses; never shared silently")
-      (is (= "#'user/lane-mcp-probe" (sci "(defn lane-mcp-probe \"Add 41.\" {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 41))" branch)))
-      (is (= "42" (sci "(lane-mcp-probe 1)" branch)) "the hosted agent's next run on the branch calls the def")
-      (is (nil? ((requiring-resolve 'sci.core/resolve) (:seon.sci.eval/ctx (get instances cluster)) 'user/lane-mcp-probe))
+      (is (= (str "#'user/" probe)
+             (sci (str "(defn " probe " \"Add 41.\" {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 41))") branch)))
+      (is (= "42" (sci (str "(" probe " 1)") branch)) "the hosted agent's next run on the branch calls the def")
+      (is (nil? ((requiring-resolve 'sci.core/resolve) (:seon.sci.eval/ctx (get instances cluster)) (symbol "user" probe)))
           "the shared context never sees it")
       (is (contains? (set (:seon.dev.mcp/branches (run "list" nil))) (keyword branch)))
       (is (:seon.dev.mcp/retired? (run "retire" branch)))
