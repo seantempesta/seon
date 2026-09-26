@@ -647,9 +647,13 @@
         branch (str "lane-mcp-test-" (random-uuid))
         run (fn [action b] (eval (read-string ((bridge-var 'branch-form) cluster action b))))
         sci (fn [source & [on-branch]]
-              (let [form ((bridge-var 'run-form) source cluster nil false on-branch "bridge-test")]
-                (try (-> (eval (read-string form)) :seon.dev.mcp/evaluations last :seon.eval/shown)
-                     (finally (consume)))))
+              ;; The prepl evaluates the bridge's form with no custody bound; a test
+              ;; member's custody would refuse the hosted branch's writes.
+              (let [form ((bridge-var 'run-form) source cluster nil false on-branch "bridge-test")
+                    result (try ((requiring-resolve 'seon.db/call-with-custody) {} #(eval (read-string form)))
+                                (finally (consume)))]
+                (or (-> result :seon.dev.mcp/evaluations last :seon.eval/shown)
+                    (:seon.error/message result))))
         held #(some? (get-in @roster [:seon.agent/children (keyword branch)]))]
     (is (some? store) "a running cluster supplies the store")
     (try
@@ -713,7 +717,8 @@
     (try
       (is (not (:isError (execute "create"))))
       (let [fork (get @@(bridge-var 'window-bases) [root cluster branch])
-            _ (eval (read-string ((bridge-var 'run-form) "1" cluster nil false branch "bridge-test")))
+            _ ((requiring-resolve 'seon.db/call-with-custody) {}
+               #(eval (read-string ((bridge-var 'run-form) "1" cluster nil false branch "bridge-test"))))
             _ (consume)
             first-window (window fork)
             connection ((requiring-resolve 'seon.cluster.registry/active-branch-connection)

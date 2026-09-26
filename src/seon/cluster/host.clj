@@ -107,7 +107,12 @@
             claim (::host (swap! roster update ::host #(or % (delay (start! request execution)))))]
         (try @claim
              (catch Throwable failure
-               (swap! roster (fn [held] (cond-> held (identical? claim (::host held)) (dissoc ::host))))
+               ;; A refused start holds nothing: its claim goes, and so does the
+               ;; execution acquired for it (a retired agent's branch otherwise
+               ;; keeps a connection its retirement cannot see).
+               (when (identical? claim (::host (first (swap-vals! roster (fn [held] (cond-> held (identical? claim (::host held)) (dissoc ::host)))))))
+                 (try (agent/release-context! execution)
+                      (catch Throwable cleanup (.addSuppressed failure cleanup))))
                (throw failure))))))
 
 (defn retire!

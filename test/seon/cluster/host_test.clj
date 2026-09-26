@@ -83,6 +83,14 @@
             (drive/run-receipts @(get-in hosted [:seon.turn.loop/cluster :seon.db/connection]) [run-id]))
       result)))
 
+(defn- branch-db
+  "The current value of `branch`, read through a fresh acquisition released
+  after the read: a retired host has released the connection it ran on."
+  [handle branch]
+  (let [execution (agent/acquire-context! handle nil {:seon.agent/branch branch})]
+    (try (db/db (:seon.db/connection execution))
+         (finally (agent/release-context! execution)))))
+
 (defn- refused-by?
   "Whether `value` carries the run writer's refusal `rule` anywhere in its data."
   [rule value]
@@ -98,9 +106,9 @@
         (is (= ["#'my.agents.host-probe/host-probe"]
                (hosted-run! hosted "(defn host-probe \"Add one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")))
         (is (= ["2"] (hosted-run! hosted "(host-probe 1)")) "the agent's next run calls its def")
-        (let [branch-db @(get-in hosted [:seon.turn.loop/cluster :seon.db/connection])]
-          (is (= branch (get-in branch-db [:config :branch])))
-          (is (some? (:db/id (db/pull branch-db [:db/id] probe))) "the row is on the branch"))
+        (let [database @(get-in hosted [:seon.turn.loop/cluster :seon.db/connection])]
+          (is (= branch (get-in database [:config :branch])))
+          (is (some? (:db/id (db/pull database [:db/id] probe))) "the row is on the branch"))
         (is (= parent-commit (db/commit-id (db/db connection))) "the parent head did not move")
         (is (nil? (:db/id (db/pull (db/db connection) [:db/id] probe))) "the parent never sees the row")
         (is (identical? (:seon.agent/routing hosted)
@@ -114,12 +122,11 @@
   (with-host-world {}
     (fn [{:keys [handle branch!]}]
       (let [branch (branch!)
-            hosted (host-on! handle branch "mcp/retiring")
-            connection (get-in hosted [:seon.turn.loop/cluster :seon.db/connection])]
+            hosted (host-on! handle branch "mcp/retiring")]
         (is (= ["1"] (hosted-run! hosted "1")))
         (is (nil? (host/retire! hosted)))
         (is (some? (:seon.agent/admission-closed-tx
-                    (db/pull @connection [:seon.agent/admission-closed-tx] [:seon.agent/id "mcp/retiring"]))))
+                    (db/pull (branch-db handle branch) [:seon.agent/admission-closed-tx] [:seon.agent/id "mcp/retiring"]))))
         (is (nil? (host/hosted handle branch)) "the parent roster no longer records the host")))))
 
 (deftest colliding-sibling-hosts-deliver-independently-and-one-retires-while-the-other-runs
@@ -130,8 +137,8 @@
             eid #(db/q '[:find ?e . :where [?e :seon.agent/id "mcp/twin"]]
                        @(get-in % [:seon.turn.loop/cluster :seon.db/connection]))]
         (is (= (eid a) (eid b)) "siblings forked from one commit give the new agent one entity id")
-        (is (= ["1"] (hosted-run! a "(def twin-side 1) twin-side")) (pr-str (hosted-run! a "twin-side")))
-        (is (= ["2"] (hosted-run! b "(def twin-side 2) twin-side")))
+        (is (= "1" (last (hosted-run! a "(def twin-side 1) twin-side"))))
+        (is (= "2" (last (hosted-run! b "(def twin-side 2) twin-side"))))
         (host/retire! a)
         (is (nil? (host/hosted handle (get-in a [:seon.turn.loop/cluster :seon.agent/branch]))))
         (is (= ["2"] (hosted-run! b "twin-side")) "the sibling still runs after the other retired")
@@ -151,7 +158,7 @@
         (let [before (or (closed-runs @connection) 0)
               sent (db/call-with-custody {:seon.db/connection connection}
                      #(message/send! {:my.message/to "mcp/listener" :my.message/content "hello"} connection "root"))]
-          (is (:seon.message/id sent) (pr-str sent))
+          (is (:seon.message/id sent) (str (:seon.error/message sent) " " (vec (sort (keys sent)))))
           (support/await-event! connection ::message-answered
                                 (fn [_] (< before (or (closed-runs @connection) 0))))
           (is (< before (closed-runs @connection)) "the branch's route listener woke the idle agent"))))))
@@ -191,16 +198,16 @@
   ;; the second submission arrives, and retirement joins it before releasing.
   (with-host-world {:seon.config.eval/time-limit-ms 1000}
     (fn [{:keys [handle branch!]}]
-      (let [hosted (host-on! handle (branch!) "mcp/busy")
+      (let [branch (branch!)
+            hosted (host-on! handle branch "mcp/busy")
             custody (select-keys hosted [:seon.turn.loop/cluster :seon.agent/routing :seon.agent/id])
             submit! #(as-host hosted (fn [] (agent/submit-source! (assoc custody :seon.agent/segmenter 'seon.cluster.reply/code-sources
                                                                         :seon.cluster.reply/text %))))
             first-run (submit! "(loop [] (recur))")
-            second-run (submit! "1")
-            connection (get-in hosted [:seon.turn.loop/cluster :seon.db/connection])]
+            second-run (submit! "1")]
         (is (:seon.turn/id first-run) (pr-str first-run))
         (is (refused-by? :seon.turn/agent-already-running second-run) "the live run still owns the agent")
         (host/retire! hosted)
-        (is (some? (:seon.turn/closed-tx (db/pull @connection [:seon.turn/closed-tx]
+        (is (some? (:seon.turn/closed-tx (db/pull (branch-db handle branch) [:seon.turn/closed-tx]
                                                   [:seon.turn/id (:seon.turn/id first-run)])))
             "retirement returned only after the run exited")))))
