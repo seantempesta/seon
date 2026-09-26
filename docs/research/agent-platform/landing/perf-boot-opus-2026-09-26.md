@@ -156,3 +156,55 @@ Stopped for root: the cause is clear, but the fix changes a root-ruled rule.
      a cut seam goes unpublished until the next change to that file. The ordinary per-file reconcile limits that.
   3. Also fix `434fed5a3a67`: hash only the aliases a definition resolves. This is a program.cljc change of
      ~20 lines that also narrows adoption and test selection.
+
+## Resume 2 (owner ruling: keep full reach, fix re-analysis cost) — measured, stopped for a ruling
+
+The ruling was fix it if clear; the cause is spread over many functions, so I stopped. I took cluster.clj from
+cache-central as instructed but edited nothing this round.
+
+**Replay of the bb07fdf08 `:all` publication** (all 819 inputs, scratch branch, `tmp/perf-boot-opus/replay2.clj`), warm,
+under root's concurrent test load: **43.6 s**. `analyze-rows` took 34.8 s. The rest of `populate-source!`: contract
+projection 2.3 s, contract rows 0.5 s, reconciliation transaction ~5 s. The transaction wrote 974 changed identities
+out of 9,518 rows, so the reconcile already writes only differing rows. Boot pays this cold: 81.6 s store→branch.
+
+**Stack sampling of one `analyze-rows`** (`tmp/perf-boot-opus/sample.clj`, 50 ms samples; quieter window: 21.0 s,
+386 samples):
+
+| where (inclusive samples) | share | what |
+|---|---|---|
+| clj-kondo `run!` (sequential) | 118 (31%) | ~6 s |
+| `analyzer/analyze` after kondo | 85 (22%) | parsed-facts (a second parse of every file) 26, attributed-usages 26, of which O(usages × definitions per file) `contains-position?` 19, normalized-entries 25 |
+| `analyzed-artifacts` outside `analyze` | 131 (34%) | analysis-rows-by-file 60, artifact 32, a third parse and sexpr of every file for `mentioned` 21, declared-function-targets 12 |
+| `analyzed-files` outside artifacts | 50 (13%) | `file-rows` previous rows 27 (1.5 s), assert-capability-contracts! 17 |
+
+Other armed costs in the window: `seon.schema/canonical-value-string` was called 1,122,608 times. It recurses through
+its armed Var, so each value node pays the wrapper (1.8 s). `seon.db/with-declarations` ×14,067 took 3.8 s, and
+`fs/relative-path` ×11,434 up to 2.2 s under load, because it canonicalizes on the filesystem each call.
+
+**clj-kondo is not the lever.** I ran it on the whole program (499 .clj/.cljc) on scratch cache copies
+(`tmp/perf-boot-opus/kondo-par.clj`). Sequential and `:parallel true` took 6.5 s and 6.9 s warm. The first cold run
+took 33.8 s. Both modes give identical findings and identical analysis, except 3 `:meta` values whose `#()` gensyms
+differ from run to run anyway. The "parallel corrupts" premise behind 9e635c7dc did not reproduce, but parallel buys
+nothing warm here.
+
+**The owner's cache hint does not help this case.** A per-file cache keyed by [file digest, analyzer identity] misses
+on every file exactly when the identity changes. So `:all` cost is raw derivation speed. Our post-kondo work is about
+2.5× kondo's own time.
+
+Options (simplest first):
+1. **Targeted algorithmic fixes in fn.clj/analyzer.clj**, ~60–80 changed lines, net ≈ 0, est. 21 s → ~10 s warm:
+   - derive `mentioned` and the parsed facts from kondo's own analysis or one shared parse (deletes two of the
+     three parses);
+   - sorted-span lookup in `innermost-span` (O(log n) per usage);
+   - make the recursive `canonical-value-string` call itself, not its armed Var;
+   - drop the whole-population `file-rows` pull on `:all`.
+2. **(Recommended) Option 1 plus per-file parallel derivation.** Kondo runs once over everything, then
+   `analysis-rows-by-file`, `artifact` and the span attribution run per file on an executor (the work is already
+   grouped by `:filename`). ~100 lines in fn.clj/analyzer.clj, est. ~7–9 s warm (kondo-bound), cold boot ~25–30 s.
+   Needs analyzer.clj ownership, and seon.fs for `relative-path`.
+3. **Keep a warm analysis across restarts.** Store per-file artifacts keyed by [file digest, analyzer identity] in
+   the store, so a move whose analyzer identity is unchanged skips analysis entirely. This does not help `:all`,
+   which the ruling makes the case that matters. Listed for completeness.
+
+Nothing is committed for this resume, so nothing new needs a restart. The next step waits on root's pick and on
+analyzer.clj/fs.clj ownership.
