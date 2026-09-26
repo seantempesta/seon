@@ -1,6 +1,7 @@
 (ns seon.fn.caller-lint-test
   "Caller files are relinted only when a callee's signature changes (B1 §2a step 9)."
   (:require [clojure.test :refer [deftest is]]
+            [seon.db :as db]
             [seon.fn]
             [seon.test-support :as support]))
 
@@ -9,7 +10,11 @@
   ;; callers in many files.
   (let [connection (:seon.db/connection (support/execution-handle nil))
         callee [:seon.fn/sym (symbol "seon.id" "digest")]
-        callers-after #(seon.fn/caller-files (support/transacted! connection [(assoc % :db/id callee)]))]
+        ;; Each edit lands with the digest the writer admits for the
+        ;; stored row's final value (`support/revision`).
+        callers-after #(seon.fn/caller-files
+                        (support/transacted! connection
+                                             [(support/revision (db/db connection) callee %)]))]
     (is (= #{} (callers-after {:seon.fn/doc "A changed docstring."}))
         "a docstring edit relints no caller")
     (is (= #{} (callers-after {:seon.fn/source "(defn digest [length parts] :changed-body)"}))
