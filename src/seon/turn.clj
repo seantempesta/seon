@@ -2759,20 +2759,16 @@
        (wake/agent-wake-datoms (db/history db) eid (wake-attribute-set db :listened))))
     0))
 
-(defn episode-runs
-  "Count ordinary turns since issue assignment, or the latest outside wake.
-  Provider attempts and replies accepted after opening consume the bound.
-  An agent also spends a turn when an ordinary call closes before a provider
-  attempt. Generated openings and same-transaction system turns remain free.
-  Issue budgets are total across resumes; messages do not refill them."
-  {:malli/schema [:=> [:cat :seon.db/database-value
-                       :seon.agent/id]
+(defn- spent-runs
+  "`episode-runs` with the agent's outside-wake anchor when the caller already
+  holds it; nil reads it here, and only when no issue assignment anchors the count."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id [:maybe [:int {:min 0}]]]
                   [:or :seon.turn.work/episode-runs :seon.error/value]]}
-  [db agent-id]
+  [db agent-id outside-t]
   (let [issue-t (db/q '[:find ?t . :in $ ?agent-id :where
                          [?agent :seon.agent/id ?agent-id]
                          [?issue :seon.issue/agent ?agent ?t]] db agent-id)
-        since (or issue-t (outside-wake-t db agent-id))
+        since (or issue-t outside-t (outside-wake-t db agent-id))
         replies (db/q '[:find [?run ...] :in $ ?agent-id ?since :where
                          [?agent :seon.agent/id ?agent-id]
                          [?run :seon.turn/agent ?agent]
@@ -2790,11 +2786,20 @@
                           [?run :seon.turn.work/situation :call]
                           [?run :seon.turn/closed-tx ?closed]
                           [(> ?closed ?tx)]] db agent-id since)]
-    (or (some #(when (and (map? %)
-                          (contains? % :seon.error/at)
-                          (contains? % :seon.error/layer)
-                          (contains? % :seon.error/operation)) %) [issue-t replies closed])
+    (or (some #(when (db/read-refusal? %) %) [issue-t replies closed])
         (count (into (set replies) closed)))))
+
+(defn episode-runs
+  "Count ordinary turns since issue assignment, or the latest outside wake.
+  Provider attempts and replies accepted after opening consume the bound.
+  An agent also spends a turn when an ordinary call closes before a provider
+  attempt. Generated openings and same-transaction system turns remain free.
+  Issue budgets are total across resumes; messages do not refill them."
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.agent/id]
+                  [:or :seon.turn.work/episode-runs :seon.error/value]]}
+  [db agent-id]
+  (spent-runs db agent-id nil))
 
 (defn- max-episode-runs
   "Read the issue budget, otherwise the agent override or cluster default."
@@ -2808,10 +2813,7 @@
         (db/q '[:find ?budget . :in $ ?id :where
                 [?agent :seon.agent/id ?id] [?issue :seon.issue/agent ?agent]
                 [?issue :seon.issue/budget ?budget]] database agent-id)]
-    (if (and (map? issue-budget)
-             (contains? issue-budget :seon.error/at)
-             (contains? issue-budget :seon.error/layer)
-             (contains? issue-budget :seon.error/operation))
+    (if (db/read-refusal? issue-budget)
       issue-budget
       (or issue-budget
           (db/q '[:find ?value . :in $ ?id
@@ -2830,10 +2832,7 @@
   [database agent-id]
   (let [limit (max-episode-runs database agent-id)
         spent (episode-runs database agent-id)]
-    (or (some #(when (and (map? %)
-                          (contains? % :seon.error/at)
-                          (contains? % :seon.error/layer)
-                          (contains? % :seon.error/operation)) %) [limit spent])
+    (or (some #(when (map? %) %) [limit spent])
         (long (max 0 (- (or limit 0) spent))))))
 
 (defn- opening-deferred?
@@ -2855,54 +2854,38 @@
   [db agent-id]
   (let [limit (max-episode-runs db agent-id)]
     (cond
-      (and (map? limit)
-           (contains? limit :seon.error/at)
-           (contains? limit :seon.error/layer)
-           (contains? limit :seon.error/operation)) limit
+      (map? limit) limit
       (nil? limit) true
       :else
-      (let [declarations-refusal (wake/declarations-refusal db)]
-        (if (and (map? declarations-refusal)
-                 (contains? declarations-refusal :seon.error/at)
-                 (contains? declarations-refusal :seon.error/layer)
-                 (contains? declarations-refusal :seon.error/operation))
-          declarations-refusal
-          (let [spent (episode-runs db agent-id)]
-            (cond
-              (and (map? spent)
-                   (contains? spent :seon.error/at)
-                   (contains? spent :seon.error/layer)
-                   (contains? spent :seon.error/operation)) spent
-              (>= spent limit) true
-              :else
-              ;; A terminal provider refusal leaves the wake unanswered, but
-              ;; cannot itself authorize another attempt. A new outside wake
-              ;; moves this basis and permits another turn.
-              (let [since (outside-wake-t db agent-id)
-                    failed-attempt
-                    (if (and (map? since)
-                             (contains? since :seon.error/at)
-                             (contains? since :seon.error/layer)
-                             (contains? since :seon.error/operation))
-                      since
-                      (db/q '[:find ?turn .
-                              :in $ ?agent-id ?since
-                              :where
-                              [?agent :seon.agent/id ?agent-id]
-                              [?turn :seon.turn/agent ?agent]
-                              [?turn :seon.turn/id _ ?tx]
-                              [(>= ?tx ?since)]
-                              [?turn :seon.turn/closed-tx _]
-                              (not [?turn :seon.turn/reply _])
-                              [?turn :seon.turn/attempts ?attempt]
-                              [?attempt :seon.ai.attempt/error _]]
-                            db agent-id since))]
-                (if (and (map? failed-attempt)
-                         (contains? failed-attempt :seon.error/at)
-                         (contains? failed-attempt :seon.error/layer)
-                         (contains? failed-attempt :seon.error/operation))
-                  failed-attempt
-                  (some? failed-attempt))))))))))
+      (if-some [declarations-refusal (wake/declarations-refusal db)]
+        declarations-refusal
+        ;; ONE ANCHOR READ: the outside-wake anchor bounds the count (absent
+        ;; an issue) and the failed-attempt window alike.
+        (let [since (outside-wake-t db agent-id)
+              spent (spent-runs db agent-id since)]
+          (cond
+            (map? spent) spent
+            (>= spent limit) true
+            :else
+            ;; A terminal provider refusal leaves the wake unanswered, but
+            ;; cannot itself authorize another attempt. A new outside wake
+            ;; moves this basis and permits another turn.
+            (let [failed-attempt
+                  (db/q '[:find ?turn .
+                          :in $ ?agent-id ?since
+                          :where
+                          [?agent :seon.agent/id ?agent-id]
+                          [?turn :seon.turn/agent ?agent]
+                          [?turn :seon.turn/id _ ?tx]
+                          [(>= ?tx ?since)]
+                          [?turn :seon.turn/closed-tx _]
+                          (not [?turn :seon.turn/reply _])
+                          [?turn :seon.turn/attempts ?attempt]
+                          [?attempt :seon.ai.attempt/error _]]
+                        db agent-id since)]
+              (if (db/read-refusal? failed-attempt)
+                failed-attempt
+                (some? failed-attempt)))))))))
 
 (defn deferred-triggers
   "The pending message wakes deferred by the turn bound or provider refusal.
