@@ -265,8 +265,10 @@
         (is (true? (:seon.dev.mcp/windowed? oversized-result)))
         (is (true? (:seon.dev.mcp/retrievable? oversized-result)))
         ;; A page is the floor's selection at the path (one-render-path §3g).
+        ;; The page opens the string literal with its first characters; a
+        ;; closed 16-character literal would claim the string ends there.
         (is (str/starts-with? (:seon.dev.mcp/text retained-message)
-                              (pr-str (subs oversized-message 0 16)))
+                              (str "\"" (subs oversized-message 0 16)))
             "an oversized cause pages by digest")
         (is (= (count oversized-message)
                (:seon.render.data/total retained-message))))
