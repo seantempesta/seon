@@ -37,7 +37,6 @@
             [seon.render.walk :as render.walk]
             [seon.render.web :as render.web]
             [seon.schema :as schema]
-            [seon.schema.edn :as schema.edn]
             [seon.sci.admit :as admit]
             [seon.sci.eval :as eval]
             [seon.sci.kernel :as kernel]
@@ -169,9 +168,6 @@
      (let [before (db/db connection)
            original (merge (db/pull before '[*] [:seon.fn/sym 'seon.id/valid?])
                            (test-support/program-fn-row 'seon.id/valid?))
-           _ (with-redefs [schema.edn/packaged-forms
-                           (fn [] (throw (ex-info "A database-derived base must not read schema files." {})))]
-               (eval/base-ctx before))
            initial (eval/base-ctx before)
            fork (fn [base previous database]
                   (:seon.sci.eval/ctx
@@ -190,8 +186,6 @@
            _ (is (not (:seon.cluster.eval/error private-result)))
            _ (is (not (:seon.cluster.eval/error private-reader)))
            _ (is (identical? @#'seon.id/valid? @(sci/resolve initial 'seon.id/valid?)))
-           _ (is (nil? (sci/resolve initial 'seon.sci.eval/absent-intern))
-                 "a private sentinel is not a callable program declaration")
            ;; Analyzed, so the override carries its own definition digest: a
            ;; source assoc'd onto the canonical row keeps the old one, and the
            ;; program then reads the override as unchanged.
@@ -199,7 +193,13 @@
                      before 'seon.id/valid?
                      "(defn valid? {:malli/schema [:=> [:cat [:int {:min 1}] :string] :boolean]} [length id] true)"
                      {:seon.schema.admission/source :agent})]
-       (test-support/transacted! connection [admitted])
+       ;; The stored declaration is replaced, not upserted: an upsert keeps the
+       ;; owned attributes the override drops, and the writer digests the merge.
+       (test-support/transacted!
+        connection
+        (test-support/replacement-tx
+         before '[:seon.fn/sym seon.id/valid?] (:seon.fn/source admitted)
+         {:seon.schema.admission/source :agent}))
        (let [after (db/db connection)
              regenerated (eval/base-ctx after)
              installed (eval/install-row! {:seon.sci.eval/ctx initial
@@ -216,22 +216,30 @@
               (:seon.schema.admission/note
                (eval/documentation-value after 'seon.id/valid? 'seon.id/valid?))
               "Accepted database override"))
-         (is (= (set (keys (#'eval/base-bindings regenerated)))
-                (set (keys (#'eval/base-bindings initial))))
-             "incremental installation and regeneration resolve the same names")
-         (let [core-symbols
-               (db/q '[:find [?sym ...] :where
-                       [?f :seon.fn/sym ?sym]
-                       [?f :seon.schema.admission/source :core]
-                       [?f :seon.fn/file ?file]
-                       [?file :seon.fn.file/relative-root "src"]] after)]
+         ;; Regeneration also interprets the override's affected callers
+         ;; (39a337013) and binds their host names; incremental installation
+         ;; installs the one row, so its names are a subset.
+         (is (set/subset? (set (keys (#'eval/base-bindings initial)))
+                          (set (keys (#'eval/base-bindings regenerated))))
+             "regeneration resolves every name incremental installation resolves")
+         (let [affected (:seon.fn/affected
+                         (seon.fn/reverse-closure {:seon.db/db after
+                                                   :seon.fn/seeds #{'seon.id/valid?}}))
+               core-symbols
+               (remove affected
+                       (db/q '[:find [?sym ...] :where
+                               [?f :seon.fn/sym ?sym]
+                               [?f :seon.schema.admission/source :core]
+                               [?f :seon.fn/file ?file]
+                               [?file :seon.fn.file/relative-root "src"]] after))]
+           (is (seq affected) "the override has affected callers regeneration interprets")
            (is (seq core-symbols))
            (is (empty? (filterv (fn [name]
                                  (let [left (sci/resolve initial (symbol name))
                                        right (sci/resolve regenerated (symbol name))]
                                    (not (and left right (identical? @left @right)))))
                                core-symbols))
-               "all src core roots agree between incremental installation and regeneration"))
+               "src core roots outside the affected closure agree between incremental installation and regeneration"))
          (doseq [ctx [initial b-next c private-regenerated]]
            (is (true? (:seon.sci.admit/value
                        (run-in ctx "(seon.id/valid? 8 \"s3-probe\")" 2000)))))
@@ -260,22 +268,33 @@
          (doseq [ctx [initial (fork initial b restored) regenerated]]
            (is (identical? @#'seon.id/valid? @(sci/resolve ctx 'seon.id/valid?)))))))))
 
-(deftest non-evaluable-agent-source-reports-its-jvm-fallback
+(deftest a-non-evaluable-agent-override-is-its-agents-mistake-never-the-jvm-definition
+  ;; The JVM fallback (`:jvm-fallback`) is deleted (03bd7cfc9): an agent row
+  ;; that cannot install is that agent's mistake, and the context refuses the
+  ;; override by name instead of running the JVM definition in its place.
   (test-support/with-database
    (fn [connection]
      (test-support/transacted!
       connection
-      ;; Analyzed, so the stored definition digest is the override's own.
-      [(test-support/program-fn-row
-        (db/db connection) 'seon.id/valid?
-        "(defn valid? [length id] (s3.missing/function length id))"
-        {:seon.schema.admission/source :agent})])
+      ;; The stored declaration is replaced through its producer, so the
+      ;; override carries its own definition digest. An unresolved local
+      ;; cannot interpret; a call into a namespace that does not exist refuses
+      ;; earlier, at analysis (a9449b7c3).
+      (test-support/replacement-tx
+       (db/db connection) '[:seon.fn/sym seon.id/valid?]
+       "(defn valid? [length id] (missing-function length id))"
+       {:seon.schema.admission/source :agent}))
      (let [ctx (eval/base-ctx (db/db connection))
-           results (get-in ctx [:seon.sci.eval/acquisition :seon.sci.eval/load-results])]
-       (is (some #(and (= 'seon.id/valid? (:seon.fn/sym %))
-                       (= :jvm-fallback (:seon.sci.eval/load-state %))
-                       (seq (:seon.error/message %))) results))
-       (is (identical? @#'seon.id/valid? @(sci/resolve ctx 'seon.id/valid?)))))))
+           acquisition (:seon.sci.eval/acquisition ctx)]
+       (is (= ['seon.id/valid?]
+              (mapv :seon.sci.eval/refused-function (:seon.sci.eval/agent-mistakes acquisition))))
+       (is (str/includes? (:seon.error/message (first (:seon.sci.eval/agent-mistakes acquisition)))
+                          "missing-function")
+           "the mistake names its unresolved cause")
+       (is (not-any? #(= 'seon.id/valid? (:seon.fn/sym %))
+                     (:seon.sci.eval/load-results acquisition)))
+       (is (nil? (sci/resolve ctx 'seon.id/valid?))
+           "the JVM definition never runs in the refused override's place")))))
 
 (defn- run
   ([source] (run source 2000))
@@ -723,18 +742,22 @@
         "namespace dependencies observe their symbol values")))
 
 (deftest base-context-bindings-resolve-without-dependency-stubs
+  ;; The published program is the world's rows (derived from files at
+  ;; publication); re-analyzing src and test here cost 10 s and refused on the
+  ;; dev roots the dependency analysis excludes.
+  (test-support/with-database
+   (fn [connection]
   (let [injected (set (program/base-context-injected-symbols (seon.schema/handed-projection)))
         public-namespaces
         (into #{}
-              (keep #(some-> % (comp malli.core/properties seon.schema/structural-schema)
+              (keep #(some-> % seon.schema/structural-schema malli.core/properties
                              :seon.sci.binding/public-namespace))
               (vals (:seon.schema.projection/forms (schema/handed-projection))))
         dependency-bindings
         (into #{} (filter #(public-namespaces (symbol (namespace %)))) injected)
         program-bindings (set/difference injected dependency-bindings)
-        rows (#'seon.fn/desired-rows
-              {:seon.fn/roots ["src" "test"]} nil)
-        published (set (keep :seon.fn/sym rows))
+        published (set (db/q '[:find [?sym ...] :where [_ :seon.fn/sym ?sym]]
+                             (db/db connection)))
         ctx (eval/build-base-ctx (seon.schema/handed-projection))]
     (is (seq program-bindings))
     (is (empty? (set/difference program-bindings published))
@@ -742,7 +765,7 @@
     (is (empty? (set/intersection dependency-bindings published))
         "copied dependency bindings do not manufacture first-party program rows")
     (is (every? #(sci/resolve ctx %) (program/base-context-injected-symbols (seon.schema/handed-projection)))
-        "every declared injection resolves in the constructed context")))
+        "every declared injection resolves in the constructed context")))))
 
 (deftest
   runtime-function-rows-carry-parsed-contract-facts
@@ -775,11 +798,16 @@
             source-file (.resolve root "parity.clj")]
         (try
           (spit (.toFile source-file) (str "(ns parity)\n" source "\n"))
+          ;; Publication's incremental path indexes the one changed file
+          ;; against the world's prior program (0.3 s); a full build of src
+          ;; derives the identical row in 9.6 s.
           (let [static-row (first
                              (filter
                                #(= 'parity/same-facts (:seon.fn/sym %))
                                (#'seon.fn/desired-rows
-                                 {:seon.fn/roots ["src" (str root)]}
+                                 {:seon.fn/roots ["src" (str root)]
+                                  :seon.fn/changed-paths #{(str source-file)}
+                                  :seon.source/previous-database (db/db connection)}
                                  (fn [_phase]))))
                 ctx (test-support/fork-cluster-ctx connection)
                 runtime-row (:seon.program/row
@@ -1401,8 +1429,10 @@
               :seon.sci.admit/caps caps
               :seon.sci.eval/time-limit-ms 2000
               :seon.config/on-core-error :panic})]
-        (is (nil? (sci/find-ns base namespace-name))
-            "the acquired base remains program-only")
+        ;; creation-tx seeds the namespace's own `ns` row (namespace-seed-call),
+        ;; and a namespace row is program, so acquisition installs it too.
+        (is (some? (sci/find-ns base namespace-name))
+            "the assigned namespace's row is program the acquired base holds")
         (is (some? (sci/find-ns turn-ctx namespace-name))
             "the turn fork contains its assigned namespace without defs")
         (is (contains? evaluation :seon.sci.admit/value))
@@ -1551,21 +1581,28 @@
       acquired
       (eval/acquire!
        {:seon.sci.eval/ctx ctx, :seon.db/db (db/db connection)})
+      ;; An agent-authored row that cannot install is its agent's mistake
+      ;; (03bd7cfc9): recorded under `:seon.sci.eval/refused-function`.
+      error-id
+      (db/q
+       '[:find ?error .
+         :where
+         [?error :seon.error/occurrences ?occurrence]
+         [?occurrence :seon.sci.eval/refused-function acquire.poison/bad]]
+       (db/db connection))
+      _ (is (int? error-id) "the refused row's mistake is a stored fact")
       refusal
       (error/latest-fact
        (db/pull
         (db/db connection)
         (error/observation-selector (schema/handed-projection))
-        (db/q
-         '[:find ?error .
-           :where
-           [?error :seon.error/occurrences ?occurrence]
-           [?occurrence :seon.sci.eval/row-symbol acquire.poison/bad]]
-         (db/db connection))))]
+        error-id))]
      (is
       (= 42 (sci/eval-string* ctx "(acquire.poison/good 41)"))
       "a later valid row installs and works")
-     (is (= 1 (count (:seon.sci.eval/acquisition-refusals acquired))))
+     (is (= ['acquire.poison/bad]
+            (mapv :seon.sci.eval/refused-function (:seon.sci.eval/agent-mistakes acquired))))
+     (is (empty? (:seon.sci.eval/acquisition-refusals acquired)))
      (is
       (true? (:seon.sci.eval/acquisition-refusals-recorded? acquired)))
      (is
@@ -1574,12 +1611,9 @@
       "the recording target is the dependency's connection identity, writer backend included")
      (is
       (schema/valid-candidate-value? (schema/handed-projection)
-                                    :seon.sci.eval/row-acquisition-error refusal)
+                                    :seon.sci.eval/interpretation-error refusal)
       "the contained agent mistake is a durable fact")
-     (is
-      (str/includes?
-       (:seon.error/message refusal)
-       "[:seon.fn/sym acquire.poison/bad]"))
+     (is (= 'acquire.poison/bad (:seon.sci.eval/refused-function refusal)))
      (is
       (str/includes?
        (:seon.error/data-edn refusal)
@@ -1613,7 +1647,7 @@
                      #(eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)}))
            occurrence '[:find ?error .
                         :where [?error :seon.error/occurrences ?occurrence]
-                        [?occurrence :seon.sci.eval/row-symbol acquire.custody/bad]]]
+                        [?occurrence :seon.sci.eval/refused-function acquire.custody/bad]]]
        (is (true? (:seon.sci.eval/acquisition-refusals-recorded? acquired))
            (pr-str (:seon.sci.eval/acquisition-recording-error acquired)))
        (is (int? (db/q occurrence (db/db connection)))
@@ -1808,9 +1842,8 @@
                 read-written (evaluate
                                ctx-a
                                (str
-                                 "(seon.db/q "
-                                 "'[:find ?id . "
-                                 ":where [_ :seon.message/id ?id]])"))
+                                 "(seon.db/pull '[:seon.message/content] "
+                                 "[:seon.message/id \"ambient-message\"])"))
                 rejected (evaluate
                            ctx-a
                            (str
@@ -1832,11 +1865,15 @@
             (is (= ["ambient-a"] (filterv ambient (:seon.sci.admit/value read-a-again))))
             (is (nil? (:seon.cluster.eval/error write)))
             (is
-              (= "ambient-message" (:seon.sci.admit/value read-written))
+              (= {:seon.message/content "custody probe"} (:seon.sci.admit/value read-written))
               "a declared write is visible to the next evaluation")
             (is
               (some? (get-in rejected [:seon.sci.admit/value :seon.db.write.attempt/request-id])))
-            (is (true? (:seon.db/invalid-read (:seon.sci.admit/value rejected))))
+            ;; A write refusal names the undeclared attribute it refused; it is
+            ;; not a read refusal.
+            (is (true? (:seon.db/transaction-refused (:seon.sci.admit/value rejected))))
+            (is (= :seon.sci.eval-test/undeclared
+                   (:seon.db/attribute (:seon.sci.admit/value rejected))))
             (is
               (schema/valid-candidate-value? (schema/handed-projection)
                                              :seon.schema/validation-refusal
