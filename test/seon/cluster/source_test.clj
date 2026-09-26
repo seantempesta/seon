@@ -394,9 +394,8 @@
           (is (:seon.task/changed? (issue/index-tasks! {:seon.db/connection h-conn :seon.task/basis {}
                                                          :seon.task/files {"resources/seon/tasks/scratch.merge-tasks.edn"
                                                                            "[#:seon.task{:name \"merge-task\" :kind :function :intent \"Merge.\"}]"}})))
-          (is (= :transaction/stale-basis (get-in (source/accept-merge! target held-store proposal) [:seon.error/data :error])))
-          (is (= "Merge." (intent)))
-          (is (:db-after (source/accept-merge! target held-store (prepare))))
+          ;; The task write touches no merged row, so the same proposal now merges.
+          (is (:seon.source/commit-id (source/accept-merge! target held-store proposal)))
           (is (= #{handle} (issue/open-tasks (db/db h-conn) [:seon.fn/sym (sym "merge-tasked")])))
           (is (= "Merge." (intent)))))
       (finally
