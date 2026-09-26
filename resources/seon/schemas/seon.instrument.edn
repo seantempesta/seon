@@ -41,7 +41,10 @@
                     :seon.config.error/max-evidence-bytes]
                    [:seon.profile/definition-digests
                     {:optional true}
-                    :seon.profile/definition-digests]],
+                    :seon.profile/definition-digests]
+                   ;; The adoption's supplied-default rows: each armed
+                   ;; contract's call preparation is decided from them.
+                   [:seon.db/db {:optional true} :seon.db/database-value]],
  :seon.instrument/loaded-var
  [:fn {:error/message "must be a loaded Clojure Var"
        :gen/gen seon.instrument/loaded-var-generator}
