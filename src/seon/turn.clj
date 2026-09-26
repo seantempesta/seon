@@ -3335,13 +3335,8 @@
            (when (get-in evaluation [:seon.program/row :seon.fn/spec])
              (get-in evaluation [:seon.program/row :seon.fn/sym]))]
     (let [database (:seon.db/db form)
-          analysis (seon.fn/analyze-forms
-                    database [(assoc (select-keys form [:seon.cluster.eval/source
-                                                        :seon.cluster.eval/ns])
-                                     :seon.program/row (:seon.program/row evaluation))])
-          _ (when (:seon.fn/namespace-unresolvable analysis)
-              (throw (ex-info (:seon.error/message analysis) analysis)))
-          [_ analyzed-row] (first analysis)
+          ;; the row admission analyzed; the gate never re-analyzes it
+          analyzed-row (:seon.program/row evaluation)
           test-symbols (seon.fn/gate-set database function-symbol)
           seed (accretion/seed-for receipt-id)
           candidate
@@ -3509,21 +3504,6 @@
              {:seon.turn.loop/failed-step
               (or (:seon.error/operation (error/refusal failure)) 'seon.turn/phase)})
        {:seon.error/declared-schema :seon.turn.loop/phase-failed-error}))))
-
-(defn- analyze-submitted
-  "Analyze a pass's declarations; a failure becomes the phase's flat refusal.
-
-  Every analysis refusal, `:seon.fn/dependency-analysis-missing-error`
-  included, is returned on the form that earned it: the run settles and
-  closes with it. Routing it through `seon.fault/fault!` panicked this turn's
-  step before settlement and left the run open with nothing recorded (its
-  declared schema does not extend `:seon.error/base`, so the fault itself
-  could not be stored)."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :map]]
-                  [:or [:vector [:tuple :map [:maybe :seon.program/row]]]
-                   :seon.fn/namespace-unresolvable-error :seon.turn.loop/phase-failed-error]]}
-  [database requests]
-  (phase #(seon.fn/analyze-forms database requests)))
 
 (defn- closing-settlement?
   "True when this settlement closes the ordinary turn.
@@ -5014,65 +4994,22 @@
                                    (cond-> (fold-source evaluation)
                                      reader-event
                                      (assoc :seon.sci.eval/event reader-event)))))
-                      evaluations)}))
-            ;; Only declarations are analyzed: an ordinary form's static
-            ;; call edges are not program rows, and its receipt asserts none.
-            ;; The run's database predates this batch's namespace declarations.
-            ;; A declaration is analyzed against the namespace row an earlier
-            ;; form of the batch declared (its `ns` aliases), as SCI evaluated
-            ;; it, else the stored one (`seon.fn/runtime-analysis-batch`).
-            submitted
-            (:submitted
-             (reduce
-              (fn [{namespaces :namespaces :as batch}
-                   [index {form :seon.turn.loop/admitted-form evaluation :seon.sci.eval/evaluation}]]
-                (if-let [row (:seon.program/row evaluation)]
-                  (let [declared (or (:seon.fn/sym row) (:seon.test/sym row))
-                        namespace-row (some->> declared namespace symbol (get namespaces))]
-                    (cond-> (update batch :submitted conj
-                                    [index
-                                     (cond-> {:seon.cluster.eval/source (:seon.cluster.eval/source form)
-                                              :seon.cluster.eval/ns (:seon.cluster.eval/ns form)
-                                              :seon.program/row row}
-                                       namespace-row (assoc :seon.fn/namespace-row namespace-row))])
-                      (:seon.ns/name row) (assoc-in [:namespaces (:seon.ns/name row)] row)))
-                  batch))
-              {:namespaces {} :submitted []}
-              (map-indexed vector evaluated)))
-            analyzed
-            (cond
-              (:seon.turn.loop/phase-failed evaluated) evaluated
-              (seq submitted) (analyze-submitted database (mapv second submitted))
-              :else [])]
-        (if (or (:seon.turn.loop/phase-failed analyzed)
-                (:seon.fn/namespace-unresolvable analyzed))
+                      evaluations)}))]
+        ;; Admission analyzed each declaration once, against the namespace
+        ;; SCI evaluated it in (`seon.sci.eval/admit-program-change!`); its
+        ;; row is the evaluation's, and the settlement writer re-derives it.
+        (if (:seon.turn.loop/phase-failed evaluated)
           (do
-            ;; THE REFUSAL BELONGS ON THE FORM THAT EARNED IT. Without the
-            ;; ordinal this settled a turn-level fault and closed the run,
-            ;; leaving the evaluation this pass had just appended with a
-            ;; source and NEITHER shown NOR error — an appended form whose
-            ;; outcome no query can name, which `next-ordinal` then walks
-            ;; past. That is absence of signal read as health. `settle!`
-            ;; carries the ordinal through `refusal-terminal-data`, which
-            ;; records the refusal as this evaluation's shown text and
-            ;; error before closing.
+            ;; THE REFUSAL BELONGS ON THE FORM THAT EARNED IT: `settle!`
+            ;; carries the ordinal through `refusal-terminal-data`.
             (settle! {:seon.turn.loop/cluster cluster
                       :seon.turn.loop/now now
                       :seon.agent/id agent-id
                       :seon.turn/id run-id
                       :seon.cluster.eval/ordinal first-ordinal
-                      :seon.error/value (or (when (vector? evaluated)
-                                              (restore-evaluations! evaluated analyzed))
-                                            analyzed)})
+                      :seon.error/value evaluated})
             (report :error (count evaluated)))
-          (let [evaluated
-                (reduce
-                 (fn [all [[index _] [_ row]]]
-                   (cond-> all
-                     row (assoc-in [index :seon.sci.eval/evaluation :seon.program/row] row)))
-                 evaluated
-                 (map vector submitted analyzed))
-                gated evaluated
+          (let [gated evaluated
                 requests
                 (mapv
                  (fn [{ordinal :seon.cluster.eval/ordinal evaluation :seon.sci.eval/evaluation}]
