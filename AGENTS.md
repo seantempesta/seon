@@ -306,8 +306,8 @@ root.
   serialization; cite the seam first. Reads, renders, probes and evaluations never invalidate derived state; count
   misses and recompute only reached invalid inputs.
 - **One central cache, bounded and configured.** Every Seon cache is a kind in `seon.cache` (Caffeine), keyed by
-  content so nothing is invalidated, weighed at insert and bounded by one configured byte budget; dependencies keep
-  their own caches (Datahike's) under configured dials; no `memoize` or atom holds derived state. Link shared caches
+  content so nothing is invalidated, weighed at insert and bounded by one configured byte budget; dependencies and external
+  tools keep their own caches where correct (Datahike's, clj-kondo's) under configured dials; no `memoize` or atom holds derived state. Link shared caches
   into every root, snapshot and run. A cached SCI context is worth only the evaluation cost it saves: evict it rather
   than grow.
 
