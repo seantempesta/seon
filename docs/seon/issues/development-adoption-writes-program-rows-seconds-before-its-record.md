@@ -46,3 +46,10 @@ test check started during a reload refuses nothing.
 Secondary (`src/seon/test.clj:1669`): the drift line calls the published head
 "loaded"; it is the published, not-yet-adopted commit. Wording only; the refusal
 to reuse while publication leads adoption is right.
+
+## Evidence 2026-09-26 (root)
+
+- `bin/seon init --dev default --changed <111 files>` took 11.0 s; a following 8-file adoption (flow, print, value and
+  their tests) took 27.0 s. The profile's top growth both times was `seon.cluster/refresh-source!` (3 calls, 32.9 s total),
+  then `seon.schema/call-with-projection` (86 calls, 18.4 s). An 8-file change costing more than a 111-file one says the
+  cost follows the reload's dependents or projection rebuilds, not the changed inputs. Over ten seconds: a defect.
