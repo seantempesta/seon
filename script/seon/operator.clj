@@ -395,26 +395,28 @@
                            (java.io.File. ~source (str ~program-classes-directory ".staging-"
                                                        (:seon.boot/pid identity#))))
                 _# (some-> staging# .mkdirs)
-                [heads# loaded#]
+                ;; The boot's own requires (arming loads the rest of the
+                ;; program) compile under the same binding.
+                [heads# result#]
                 (binding [*compile-path* (if staging# (.getPath staging#) *compile-path*)
                           *compile-files* (boolean staging#)]
-                  [~(some-> (:seon.operator/capture-heads request) head-capture-form)
-                   (try (require '~'seon.cluster.boot) nil (catch Throwable cause# cause#))])
-                _# (when staging#
-                     (if (or loaded# (.isDirectory final#))
-                       (doseq [file# (reverse (file-seq staging#))] (.delete ^java.io.File file#))
-                       (java.nio.file.Files/move (.toPath staging#) (.toPath final#)
-                                                 (into-array java.nio.file.CopyOption
-                                                             [java.nio.file.StandardCopyOption/ATOMIC_MOVE]))))
-                _# (when heads# (.write writer# (str (pr-str heads#) "\n")) (.flush writer#))
-                result# (try
-                          (some-> loaded# throw)
-                          ((resolve '~'seon.cluster.boot/request!)
-                           (assoc '~(dissoc request :seon.operator/capture-heads)
-                                  :seon.boot/prepl-server listener#))
-                          (catch Throwable cause#
-                            {:seon.error/message (ex-message cause#)
-                             :seon.error/cause (Throwable->map cause#)}))]
+                  (let [heads# ~(some-> (:seon.operator/capture-heads request) head-capture-form)]
+                    (when heads# (.write writer# (str (pr-str heads#) "\n")) (.flush writer#))
+                    [heads#
+                     (try
+                       (require '~'seon.cluster.boot)
+                       ((resolve '~'seon.cluster.boot/request!)
+                        (assoc '~(dissoc request :seon.operator/capture-heads)
+                               :seon.boot/prepl-server listener#))
+                       (catch Throwable cause#
+                         {:seon.error/message (ex-message cause#)
+                          :seon.error/cause (Throwable->map cause#)}))]))]
+            (when staging#
+              (if (or (:seon.error/message result#) (.isDirectory final#))
+                (doseq [file# (reverse (file-seq staging#))] (.delete ^java.io.File file#))
+                (java.nio.file.Files/move (.toPath staging#) (.toPath final#)
+                                          (into-array java.nio.file.CopyOption
+                                                      [java.nio.file.StandardCopyOption/ATOMIC_MOVE]))))
             ;; The capture's holder of the store ends once boot holds its own.
             (when (:seon.operator/heads heads#)
               ((resolve '~'seon.cluster/release-root-store!) ~(:seon.operator/capture-heads request)))
