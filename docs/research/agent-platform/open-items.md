@@ -39,6 +39,12 @@ callers to an existing component/function/test that does the same thing better (
 - **Where context executes** (owner 2026-09-26): in the same context the agent runs in — root's in its cluster; an
   isolated experimental agent's fully contained (nothing escapes SCI, database changes only on its private fork) so root
   merges back what it wants. No separate render fork. Authority comes only from held custody (AGENTS.md).
+- **Rulings of 2026-09-26 afternoon (owner):** (1) *Gate selection* — when fn A changes, run the tests that exercise (call) A
+  and those exercising A's callers; call reach, never symbol mentions; a docstring-only edit runs no tests; most modifications
+  select a contained set (survey of the average case in progress). (2) *Render forms* go through the same mechanism as the agent's
+  own forms, in the agent's env, recorded the same way — ONE SYSTEM (no transient/unrecorded render path). (3) *Boot reads the
+  committed archive*, never the working tree. (4) *Change detection is by digest*: updating a definition updates its digest;
+  differing digests = changed; reuse keys on digests.
 - **AI renders are REPL entries, evaluated; HTML renders are hiccup** (owner 2026-09-26, refining the same-day "text"
   ruling). An AI render returns `;;` comments and forms; the one REPL path evaluates each form read-only in the viewing
   agent's SCI world (disposable fork, cached by content digest) and prints form + result — the context is a `clojure.main`
