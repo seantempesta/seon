@@ -332,7 +332,7 @@
 
 (defn- integer-digits
   "An upper bound on a BigInteger's decimal spelling, from its bit length."
-  {:malli/schema [:=> [:cat [:fn {:error/message "must be a BigInteger"} (fn [x] (instance? java.math.BigInteger x))]] :int]}
+  {:malli/schema [:=> [:cat :seon.schema/value] :int]}
   [^java.math.BigInteger b]
   (+ 2 (long (Math/ceil (* (.bitLength b) (Math/log10 2))))))
 
@@ -392,7 +392,7 @@
 (defn- held-order
   "Members in held order; an exact hash map or set of at most 64 exact
   keywords is sorted, identity attributes first (design §3b)."
-  {:malli/schema [:=> [:cat :seon.schema/value [:set :qualified-keyword] [:fn {:error/message "must decide a member's key"} ifn?]] :seon.schema/value]}
+  {:malli/schema [:=> [:cat :seon.schema/value [:set :qualified-keyword] [:fn clojure.core/ifn?]] :seon.schema/value]}
   [x identity-attributes key-of]
   (let [members (seq x)]
     (if (and (#{clojure.lang.PersistentHashMap clojure.lang.PersistentHashSet} (class x))
