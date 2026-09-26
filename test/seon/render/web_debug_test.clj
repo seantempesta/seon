@@ -258,7 +258,7 @@
                              [repeated
                               {:seon.cluster.eval/source "#:seon.repl{:value 124}"
                                :seon.cluster.eval/error "Only the REPL writes responses."
-                               :seon.cluster.eval/triage-edn
+                               :seon.eval/shown
                                (pr-str {:seon.error/data {:seon.sci.reader/phase "reply"
                                                         :seon.sci.reader/line 2
                                                         :seon.sci.reader/column 1}})

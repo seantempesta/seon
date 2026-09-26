@@ -1,6 +1,5 @@
 (ns seon.render.transcript-test
   (:require [clojure.core.async :as async]
-            [clojure.main :as main]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
@@ -276,13 +275,6 @@
     (is (not (str/includes? rendered forbidden))
         (str "session contains invented display grammar: " forbidden))))
 
-(defn- arithmetic-triage-edn
-  []
-  (try
-    (/ 1 0)
-    (catch Throwable throwable
-      (pr-str (main/ex-triage (Throwable->map throwable))))))
-
 (defn- transaction-instant
   "The instant Datahike stamped on one committed fixture transaction.
 
@@ -362,10 +354,12 @@
          :seon.cluster.eval/ordinal 0
          :seon.cluster.eval/at (between decline self)
          ;; AN ERROR IS TERMINAL: `:value` and `:error` are mutually
-         ;; exclusive facts of one evaluation (`src/seon/repl.clj:155`), so a
-         ;; failed evaluation stores no shown text beside its error.
+         ;; exclusive facts of one evaluation, and a failed evaluation's shown
+         ;; text is its whole flat error as the floor printed it.
          :seon.cluster.eval/error "No such namespace: missing.function"
-         :seon.cluster.eval/triage-edn (arithmetic-triage-edn)
+         :seon.eval/shown (pr-str {:seon.error/message "Execution error (ArithmeticException) at (REPL:1:1).\nDivide by zero"
+                                   :seon.error/chain [{:seon.error/throwable-class "java.lang.ArithmeticException"
+                                                       :seon.error/message "Divide by zero"}]})
          :seon.error/at (java.util.Date. 0) :seon.error/layer :seon.render.transcript-test/fixture :seon.error/operation 'seon.render.transcript-test/stored-evaluations-are-terminal-transcript-values :seon.render/refused-member :seon.render/output
          :seon.problems/id "problem-eval-error"
          :seon.cluster.eval/interrupted-at (between decline self)
@@ -430,7 +424,7 @@
           (is (every? :id html-rows) "entries keep their data-transcript-id")
           (is (str/includes? html "waiting for the peer review")))))))
 
-(deftest error-receipt-without-triage-has-an-execution-error-face
+(deftest error-receipt-without-shown-text-names-its-message
   (support/with-database
     (fn [connection]
       (support/transacted!
@@ -450,20 +444,17 @@
             html-entry (html-entry-node html-value
                                         "eval-error-without-triage")
             html-text (get-in html-entry [2 1 1])]
-        ;; THE ERROR IS A KEY, NOT A LOOSE LINE. Clojure's own concise
-        ;; execution-error face rides `:error` inside the one response map,
-        ;; so it can never be mistaken for a form the agent wrote.
+        ;; THE ERROR IS A KEY, NOT A LOOSE LINE: an evaluation that saved no
+        ;; shown text names its stored message under `:error`, one readable
+        ;; string, never an invented location or class.
         (testing "the AI projection presents the form and an execution error"
           (is (str/includes? ai (str agent-prompt "(missing.function/call)")))
-          (is (str/includes? ai ":error \"Execution error"))
-          (is (str/includes? ai "No such namespace: missing.function"))
+          (is (str/includes? ai ":error \"No such namespace: missing.function\""))
           (is (not (str/includes? ai ":value "))
               "exactly one of :value and :error answers a form"))
         (testing "the HTML entry structurally identifies the same error face"
           (is (= "true" (get-in html-entry [1 :data-transcript-error])))
-          (is (str/includes? html-text ":error \"Execution error"))
-          (is (str/includes? html-text
-                             "No such namespace: missing.function")))))))
+          (is (str/includes? html-text ":error \"No such namespace: missing.function\"")))))))
 
 (deftest the-transcript-is-whole-and-the-ai-boundary-elides-it
   ;; THE RULED SHAPE (owner ruling, 2026-09-07; AGENTS §2.4): presentation
@@ -1403,39 +1394,41 @@
     (is (true? (:seon.fault/committed? receipt)) (pr-str receipt))))
 
 (defn- settled-evaluation!
-  "Settle evaluation `ordinal` of the fixture run, returning its settlement tx."
-  ([connection ordinal] (settled-evaluation! connection "branch-errors" ordinal))
-  ([connection run-id ordinal]
-  (let [report (support/transacted!
-                connection
-                [{:seon.cluster.eval/id (turn/receipt-identity run-id ordinal)
-                  :seon.cluster.eval/run [:seon.turn/id run-id]
-                  :seon.cluster.eval/ordinal ordinal
-                  :seon.cluster.eval/at (java.util.Date.)
-                  :seon.cluster.eval/read-basis-transaction (db/basis-t @connection)
-                  :seon.eval/shown (str ordinal)
-                  :seon.cluster.eval/source (str "(identity " ordinal ")")}])]
-    (db/basis-t (:db-after report)))))
+  "Settle one-evaluation run `run-id` of the fixture agent as the settlement
+  writer does: its receipt saves the fault window (`seon.turn/fault-window`,
+  (the agent's previous settlement, now]) and the run closes with it."
+  [connection run-id ordinal]
+  (support/transacted! connection [{:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id]
+                                    :seon.turn/opened-tx "datomic.tx"}])
+  (let [faults (#'turn/fault-window @connection agent-id run-id)]
+    (support/transacted!
+     connection
+     [(cond-> {:seon.cluster.eval/id (turn/receipt-identity run-id 0)
+               :seon.cluster.eval/run [:seon.turn/id run-id]
+               :seon.cluster.eval/ordinal 0
+               :seon.cluster.eval/at (java.util.Date.)
+               :seon.cluster.eval/read-basis-transaction (db/basis-t @connection)
+               :seon.eval/shown (str ordinal)
+               :seon.cluster.eval/source (str "(identity " ordinal ")")}
+        (seq faults) (assoc :seon.cluster.eval/faults faults))
+      {:db/id [:seon.turn/id run-id] :seon.turn/closed-tx "datomic.tx"}])))
 
 ;; Requirement 8.3: each evaluation's response carries the open errors its
 ;; branch recorded after the previous evaluation settled, up to its own
 ;; settlement: an error during N reads in N's response, once, and another
-;; branch's errors never read at all.
-(deftest an-evaluations-branch-errors-read-in-its-own-response-once
+;; branch's errors never read at all. The window is the one its settlement
+;; saved, never reconstructed from occurrence counters.
+(deftest ^{:seon/tasks #{"3638f3f3bd57" "b331d31540bb"}} an-evaluations-branch-errors-read-in-its-own-response-once
   (support/with-database
    (fn [connection]
-     (support/transacted!
-      connection
-      (into (agents-tx connection agent-id)
-            [{:seon.turn/id "branch-errors" :seon.turn/agent [:seon.agent/id agent-id]
-              :seon.turn/opened-tx "datomic.tx"}]))
-     (settled-evaluation! connection 0)
+     (support/transacted! connection (agents-tx connection agent-id))
+     (settled-evaluation! connection "branch-errors-0" 0)
      (core-fault! connection "branch-errors" "raised while evaluation one ran")
-     (settled-evaluation! connection 1)
+     (settled-evaluation! connection "branch-errors-1" 1)
      (support/with-database
       (fn [sibling]
         (core-fault! sibling "branch-errors-sibling" "raised on a sibling branch")))
-     (settled-evaluation! connection 2)
+     (settled-evaluation! connection "branch-errors-2" 2)
      (let [entries (transcript/history-entries (unit connection))
            responses (into {} (map (juxt :seon.render.history/form
                                          :seon.render.history/printed-value))
@@ -1467,17 +1460,15 @@
          (support/transacted!
           attempt
           (into (agents-tx attempt agent-id)
-                (concat (agent/creation-tx {:seon.agent/id "worker" :seon.ns/name 'my.agents.worker
-                                            :seon.cluster/name cluster-name :seon.agent/branch origin})
-                        [{:seon.turn/id "cluster-copy" :seon.turn/agent [:seon.agent/id agent-id]
-                          :seon.turn/opened-tx "datomic.tx"}])))
+                (agent/creation-tx {:seon.agent/id "worker" :seon.ns/name 'my.agents.worker
+                                    :seon.cluster/name cluster-name :seon.agent/branch origin})))
          (registry/branch! {:seon.store/store store :seon.store/branch home
                             :seon.cluster.registry/from (db/commit-id (db/db attempt))})
          (let [cluster (db/carry-connection-projection-state!
                         (store/open-branch! store home)
                         (:seon.sci.eval/projection-state (meta attempt)))]
            (try
-             (settled-evaluation! cluster "cluster-copy" 0)
+             (settled-evaluation! cluster "cluster-copy-0" 0)
              (let [receipt (db/call-with-custody
                             {:seon.db/connection cluster}
                             #(fault/fault! (env/environment
@@ -1490,7 +1481,7 @@
                                             :seon.db.process/id "transcript-test"
                                             :seon.agent/id "worker"}))]
                (is (true? (:seon.fault/committed? receipt)) (pr-str receipt)))
-             (settled-evaluation! cluster "cluster-copy" 1)
+             (settled-evaluation! cluster "cluster-copy-1" 1)
              (let [responses (into {} (map (juxt :seon.cluster.eval/ordinal :seon.render.history/printed-value))
                                    (transcript/history-entries (unit cluster)))]
                (is (= #{0 1} (set (keys responses))) "each entry names its evaluation's ordinal")

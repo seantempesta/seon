@@ -48,7 +48,7 @@
    :seon.eval/renderer
    {:seon.eval/renderer-fn [:seon.fn/sym]}
    :seon.cluster.eval/error
-   :seon.cluster.eval/triage-edn
+   :seon.cluster.eval/diagnostics
    :seon.cluster.eval/interrupted-at
    :seon.cluster.eval/output
    :seon.cluster.eval/comment
@@ -283,7 +283,7 @@
      ::renderer (or (some-> (get-in receipt [:seon.eval/renderer-fn :seon.fn/sym]) symbol)
                     (:seon.eval/renderer receipt))
      ::error (:seon.cluster.eval/error receipt)
-     ::triage-edn (:seon.cluster.eval/triage-edn receipt)
+     ::diagnostics (:seon.cluster.eval/diagnostics receipt)
      ::problem-id (:seon.problems/id receipt)
      ::interrupted-at (:seon.cluster.eval/interrupted-at receipt)
      ::comment (:seon.cluster.eval/comment receipt)
@@ -344,57 +344,33 @@
     result))
 
 (defn- branch-errors
-  "The new open errors on `db`'s branch in each settled evaluation's window,
-  keyed by evaluation entity id, for `:all` settled evaluations or the `shown`
-  set: (previous settlement tx, this settlement tx]
-  through `seon.error/occurred-since` as of this settlement, so later
-  recurrences and resolutions never rewrite an earlier response. A reply's
-  forms settle in one transaction; that window belongs to its last form. The
-  first evaluation's window opens at its read basis. The branch's occurrence
-  history selects the windows worth reading. A cluster-branch copy of another
-  branch's core fault is written there for the cluster's agents to act on, so
-  it reads in their window with its origin branch (`seon.fault/record!`). A
-  window whose as-of read refuses answers with that refusal, a typed unknown
-  the response shows."
+  "The errors each settled evaluation's settlement saved on it
+  (`:seon.cluster.eval/faults`, `seon.turn/fault-window`: the window
+  (previous settlement, this settlement], read once by the writer), keyed by
+  evaluation entity id, for `:all` of the agent's evaluations or the `shown`
+  set, each as its recorded observation (`seon.error/latest-fact`) with its
+  resolution when resolved. Nothing is reconstructed from occurrence counters.
+  A refused read is thrown whole."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id
                        [:or [:= :all] [:set :int]]]
-                  [:map-of :int [:or [:vector {:min 1} :seon.repl/branch-error]
-                                 :seon.db/error-result]]]}
+                  [:map-of :int [:vector {:min 1} :map]]]}
   [db agent-id shown]
-  (let [occurred (into (sorted-set)
-                       (read-or-throw
-                        (db/q '[:find [?tx ...]
-                                :where [?o :seon.error.occurrence/last-at _ ?tx true]]
-                              (db/history db))))
-        settled (when (seq occurred)
-                  (read-or-throw
-                   (db/q '[:find ?e ?ordinal ?tx :in $ ?agent-id
-                           :where [?agent :seon.agent/id ?agent-id]
-                           [?run :seon.turn/agent ?agent]
-                           [?e :seon.cluster.eval/run ?run]
-                           [?e :seon.cluster.eval/ordinal ?ordinal]
-                           (or [?e :seon.eval/shown _ ?tx]
-                               [?e :seon.cluster.eval/error _ ?tx]
-                               [?e :seon.cluster.eval/interrupted-at _ ?tx])]
-                         db agent-id)))
-        ;; [tx last-form first-form] per settlement transaction, oldest first
-        batches (->> settled (group-by peek)
-                     (map (fn [[tx rows]]
-                            [tx (first (apply max-key second rows))
-                             (first (apply min-key second rows))]))
-                     (sort-by first))
-        opening (when-some [[_ _ first-form] (first batches)]
-                  (:seon.cluster.eval/read-basis-transaction
-                   (read-or-throw
-                    (db/pull db [:seon.cluster.eval/read-basis-transaction] first-form))))]
+  (let [rows (read-or-throw
+              (db/q '[:find ?e ?error :in $ ?agent-id
+                      :where [?agent :seon.agent/id ?agent-id] [?run :seon.turn/agent ?agent]
+                      [?e :seon.cluster.eval/run ?run] [?e :seon.cluster.eval/faults ?error]]
+                    db agent-id))
+        selector (when (seq rows) (error/observation-selector (db/carried-projection db)))]
     (into {}
-          (keep (fn [[since [tx eid]]]
-                  (when (and since (or (= :all shown) (contains? shown eid)) (seq (subseq occurred > since <= tx)))
-                    ;; an unreadable window is a typed unknown in the
-                    ;; response, never an absence of errors
-                    (let [found (error/occurred-since (db/as-of db tx) since)]
-                      (when (or (map? found) (seq found)) [eid found])))))
-          (map vector (cons opening (map first batches)) batches))))
+          (keep (fn [[eid group]]
+                  (when (or (= :all shown) (contains? shown eid))
+                    [eid (mapv (fn [[_ error]]
+                                 (let [pulled (read-or-throw (db/pull db selector error))
+                                       resolved (read-or-throw (error/resolution db (:seon.error/signature pulled)))]
+                                   (cond-> (error/latest-fact pulled)
+                                     resolved (assoc :seon.error/resolution resolved))))
+                               group)])))
+          (group-by first rows))))
 
 (defn- history
   ([db run-id agent-id limit]
@@ -506,8 +482,8 @@
                                           (::print-level entry))
       (::error entry) (assoc :seon.cluster.eval/error
                              (::error entry))
-      (::triage-edn entry) (assoc :seon.cluster.eval/triage-edn
-                                  (::triage-edn entry))
+      (::diagnostics entry) (assoc :seon.cluster.eval/diagnostics
+                                   (::diagnostics entry))
       (::output entry) (assoc :seon.cluster.eval/output
                               (::output entry))
       (::ending-ns entry) (assoc :seon.sci.eval/ending-ns (::ending-ns entry))
@@ -1731,7 +1707,7 @@
                  {:seon.eval/renderer-fn [:db/id :seon.fn/sym]} :seon.cluster.eval/error
                  :seon.cluster.eval/output :seon.error/at :seon.error/layer :seon.error/operation :seon.error/data-edn
                  :seon.cluster.eval/read-basis-transaction
-                 :seon.cluster.eval/interrupted-at :seon.cluster.eval/triage-edn
+                 :seon.cluster.eval/interrupted-at :seon.cluster.eval/diagnostics
                  :seon.eval/duration-ms :seon.sci.eval/ending-ns
                  :seon.print/length :seon.print/level
                  {:seon.cluster.eval/ns [:seon.ns/name]}
@@ -2001,7 +1977,7 @@
 (defn- evaluation-match [by-eid saved]
   {::turn (get by-eid (get-in saved [:seon.cluster.eval/run :db/id]))
    ::detail (let [form (::value (readable-shown (:seon.cluster.eval/source saved)))]
-              (cond (= "reply" (get-in (::value (readable-shown (:seon.cluster.eval/triage-edn saved))) [:seon.error/data :seon.sci.reader/phase]))
+              (cond (= "reply" (get-in (::value (readable-shown (:seon.eval/shown saved))) [:seon.error/data :seon.sci.reader/phase]))
                     "Agent-written REPL response"
                     (and (seq? form) (symbol? (first form))) (str (first form))
                     :else "Unreadable reply form"))})
@@ -2017,7 +1993,7 @@
   [by-eid evaluations]
   (finding :fabricated "Fabricated responses"
            (map #(evaluation-match by-eid %)
-                (filter #(= "reply" (get-in (::value (readable-shown (:seon.cluster.eval/triage-edn %))) [:seon.error/data :seon.sci.reader/phase])) evaluations))))
+                (filter #(= "reply" (get-in (::value (readable-shown (:seon.eval/shown %))) [:seon.error/data :seon.sci.reader/phase])) evaluations))))
 
 (defn- empty-reply-problem
   "Detect settled replies that produced no evaluation evidence."
