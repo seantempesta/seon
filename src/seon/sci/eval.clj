@@ -2812,6 +2812,17 @@
                (when-let [row (get namespace-row-by-name namespace-name)]
                  (sci/install-namespace-bindings!
                   ctx namespace-name (row-bindings row))))
+             ;; Rows carry no definition order, and SCI resolves a body's
+             ;; free symbols when it analyzes it. Declare every new Var of
+             ;; the namespace first, as Clojure's `declare` does, so a caller
+             ;; installed before its callee resolves the Var the callee binds.
+             (when-let [undeclared
+                        (seq (keep (fn [[sym]]
+                                     (when-not (sci/resolve ctx (symbol sym))
+                                       (symbol (name sym))))
+                                   (get function-rows-by-ns namespace-name)))]
+               (sci/binding [sci/ns (sci/create-ns namespace-name)]
+                 (sci/eval-form ctx (list* 'declare undeclared))))
              (reduce
               install-row
               (cond-> state

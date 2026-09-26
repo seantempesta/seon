@@ -2582,3 +2582,33 @@
        (kernel/ensure-function! ctx (db/db connection) function)
        (is (= ::private-definition @(sci/resolve ctx function))
            "the first install keeps the context's own definition")))))
+
+(deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program interpreting two agent rows; branch acquisitions measured 985-1,681 ms in branch-execution-test."
+           :seon.test/long-ms 8000}
+  a-caller-named-before-its-callee-is-acquired-with-its-namespace
+  ;; Issue a-namespaces-functions-install-in-name-order: acquisition installs
+  ;; a namespace's rows in no definition order, so a caller whose name sorts
+  ;; before its callee must still resolve it (Clojure's `declare`).
+  (test-support/with-database
+   (fn [connection]
+     (db/call-with-custody {:seon.db/connection connection}
+      (fn []
+        (let [ctx (test-support/fork-cluster-ctx connection)
+              declared! (fn [sym source]
+                          (test-support/transacted!
+                           connection
+                           (#'turn/row-tx (db/db connection) {}
+                            (test-support/program-fn-row (db/db connection) sym source))))]
+          (declared! 'seon.sci.eval-test/zz-order-callee
+                     "(defn ^{:malli/schema [:=> [:cat :int] :int]} zz-order-callee [x] (inc x))")
+          (declared! 'seon.sci.eval-test/aa-order-caller
+                     "(defn ^{:malli/schema [:=> [:cat :int] :int]} aa-order-caller [x] (zz-order-callee x))")
+          (eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)})
+          (is (= [] (filterv #(some #{'seon.sci.eval-test/aa-order-caller
+                                      'seon.sci.eval-test/zz-order-callee}
+                                    [(or (:seon.sci.eval/refused-function %)
+                                        (:seon.sci.eval/row-symbol %))])
+                             (:seon.test/acquisition-refusals (eval/acquired-program ctx))))
+              "neither row is refused at acquisition")
+          (is (= 2 (sci/eval-string* ctx "(seon.sci.eval-test/aa-order-caller 1)"))
+              "the caller named first calls its callee")))))))
