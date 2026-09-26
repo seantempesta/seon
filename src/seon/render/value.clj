@@ -482,6 +482,13 @@
                                     (str (.-name ^sci.lang.Namespace space) "/"))
                                   (when (identical? (class sym) clojure.lang.Symbol)
                                     (.getName ^clojure.lang.Symbol sym)))}})
+      ;; A namespace is its name, as clojure.main prints it (#namespace[user]):
+      ;; the final `name` field of a Clojure or SCI namespace, both final classes.
+      (or (identical? c clojure.lang.Namespace) (identical? c sci.lang.Namespace))
+      (let [n (if (identical? c sci.lang.Namespace) (.-name ^sci.lang.Namespace x) (.-name ^clojure.lang.Namespace x))]
+        (if (identical? (class n) clojure.lang.Symbol)
+          (scalar ::print/symbol n (str "#namespace[" n "]"))
+          {:kind :scalar :node {::print/face ::print/object ::print/class (.getName c)}}))
       (identical? c Class) {:kind :scalar :node {::print/face ::print/class ::print/name (.getName ^Class x)}}
       (and (instance? Throwable x) (throwable-safe c))
       (assoc (classify (throwable-value x) identity-attributes limit) :prefix "#error " :face ::print/throwable)

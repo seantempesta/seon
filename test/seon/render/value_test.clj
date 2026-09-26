@@ -962,6 +962,14 @@
        (is (= expected (text {:seon.turn/agent eid})))
        (is (= expected (text {:seon.turn/agent {:db/id eid}})))))))
 
+(deftest vars-and-namespaces-print-by-name
+  ;; As clojure.main prints them: #'ns/name and #namespace[name], from their
+  ;; final fields, in either world (dogfood cycle 3).
+  (let [text #(:seon.render.value/text (value/prepare (unit %)))]
+    (is (= "#'user/f" (text (sci/eval-string "(defn f [] 1) #'f"))))
+    (is (= "#namespace[user]" (text (sci/eval-string "*ns*"))))
+    (is (= "#namespace[clojure.core]" (text (the-ns 'clojure.core))))))
+
 (deftest a-cut-continues-from-its-node-path-and-absolute-offset
   ;; One-render-path §3g: a cut's coordinates are the walk node, the path and
   ;; the absolute offset; the same selection answers from there, and a node
