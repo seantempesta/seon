@@ -128,3 +128,31 @@ recovery path.
    and `--ns seon.cluster.program-change-test`, `--ns seon.cluster.publication-adoption-test`, `--ns seon.cluster.publication-delta-test`.
 3. Apply the fn.clj patch through its owner (cause 1), then re-measure a move that changes a schema resource.
 4. Mark fault `fa60ad84…` resolved (f83931226).
+
+## Resume 2026-09-26 ~21:35Z — c029d48cb move: total 128 s, ready 89.5 s (8e4ac24c9: 42 s / 28.5 s)
+
+Stopped for root: the cause is clear, but the fix changes a root-ruled rule.
+
+- **Layers (pid 86089):** store 1,205 ms → branch **83,483 ms** → ready 89,479 ms. Adoption `request!` 16.8 s:
+  `development-source-refresh!` 16.2 s = `adopt-rows!` 13.1 s (one transact 12.7 s; `validate-write-report` max
+  6.7 s, `report-arity-comparison` 2.8 s) + `published-changes` 2.5 s. There is no `call-with-program-change` row:
+  fa6f8e8b0 works (`loaded-identity` = the published commit 6ab83943).
+- **Cause:** the boot publication was `:all`. `:seon.source/analyzer-digest` changed (fc3a14dd… → 210d648c…)
+  because **147 of the 430 declarations in analyzer reach** changed digest: the new seon.cache fns, db/schema/edn
+  edits, and all 20 seon.program declarations. The last came only from program.cljc's require change, since the
+  definition digest hashes the namespace resolver context. So boot re-analyzed and republished all 818 inputs
+  (24,419 datoms), and the adoption rewrote them. This is the "~27 s warm per analyzer-reach commit" the move-to-head
+  issue records as a root ruling; 82 s is its cold cost with 58 changed inputs. Nothing else regressed: the caller
+  re-lint patch (d10d79061) removed that pass.
+- **Tasks (patch for held files):** `tmp/perf-boot-opus/tasks-2.edn`, which holds `70007bd30a2e` (analyzer reach),
+  `434fed5a3a67` (resolver context in digests) and their subject marks.
+- **Options for root** (simplest first):
+  1. Keep the ruling and accept ~80 s cold for any commit touching db/schema/fn/cache/program. Zero cost; the
+     10-s law is broken on most platform commits.
+  2. **(Recommended)** Make the analyzer identity what the rows derive from: `src/seon/fn/analyzer.clj` +
+     `seon.fn`'s row-derivation fns + the kondo config/version, cut at the database/schema/cache seams, which only
+     read prior rows for reuse. ~30 lines in `analyzer-reach`/`analyzer-declarations` (cluster.clj, cache-central
+     holds it) plus a regression that a db.clj body edit is `:selected`. Risk: a row-shaping change hidden behind
+     a cut seam goes unpublished until the next change to that file. The ordinary per-file reconcile limits that.
+  3. Also fix `434fed5a3a67`: hash only the aliases a definition resolves. This is a program.cljc change of
+     ~20 lines that also narrows adoption and test selection.
