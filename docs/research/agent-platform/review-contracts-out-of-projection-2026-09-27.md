@@ -3,13 +3,290 @@ type: design-review
 date: 2026-09-27
 status: complete; design revision required
 reviewer: Astra
-design-commit: a3d6847a123dda476c11adbdbd56c23b23de9e9a
-source-baseline: bef6b105e75291f555de4500f8abeb9dc74a45a2
+design-commit: 21e3a70682ee012376c0ceb2e2113cc5605fe85c
+source-baseline: 21e3a70682ee012376c0ceb2e2113cc5605fe85c
 verdict: REVISE
 task: 12913e5cd6b0
 ---
 
 # Review: contracts outside the schema projection
+
+## Third-round verdict — a760a6d08 + retention ruling 21e3a7068
+
+**REVISE.** The revised traversal, final-writer selection and slice order address the principal earlier findings.
+Root's one-entry-per-population retention choice remains viable. The outstanding issues concern the registry that
+entry actually owns, reference derivation when equal populations have different compiled objects, and the
+retention policy's concurrency and sizing guarantees. Two read-only witnesses below demonstrate correctness
+failures if the proposed key and walker are composed directly with existing projection overlays and callers.
+The design needs these boundaries specified before implementation; this verdict does not reopen the choice
+between root's three retention options.
+
+Here **D** is `docs/research/agent-platform/contracts-out-of-projection-design-2026-09-27.md` at `21e3a7068`,
+including revision `a760a6d08`. **P** is the inspected, uncommitted prototype
+`tmp/defn-scan-opus/scoped-refs-probe.clj`. Source citations in this section use `21e3a7068`; Malli remains
+`43c6dca8d2d8df3162b13725939954807be4a4ed`. Installed core.cache is **1.1.234**; its cited source paths below are
+inside `/Users/sean/.m2/repository/org/clojure/core.cache/1.1.234/core.cache-1.1.234.jar`.
+The named landing note still ends with the digest-refusal investigation at lines 249–280. Neither revision commit
+updates that note; D and P supply the new design and prototype evidence. Earlier verdicts below are historical.
+
+### N1–N5 disposition
+
+| Finding | Disposition | Evidence and remaining work |
+|---|---|---|
+| N1: named-schema bindings and host Var schemas | Partially resolved | D:108–129 includes population bindings, direct bindings and an uncached path for non-EDN authored forms. This fixes the original two independently constructed binding populations and avoids keying a Var's old value while compiling its new value. However, the projection's binding member is not necessarily the binding map its registry compiled against. T1 below gives an equal-key/different-validator witness. |
+| N2: retention, refusals and symbol independence | Partially resolved | D:78–103 keeps source identities, stored rows and the advisory memo outside the shared product; D:106–107 excludes every refusal. D:354–378 selects a bounded population table. The table must own one actual population, exclude legacy registries and independent equal registry copies, and specify concurrent insertion, dial acquisition and the slot measurement. T1 and T3–T4. |
+| N3: scoped traversal and migration | Traversal approach resolved; integration and migration evidence incomplete | D:187–207 and P:5–43 use actual node scope and a scoped recursion guard, including nested reuse. D:214–225,292–294 requires repair and descendant-owner discovery. P:45–65 compares old/new recomputation, not stored arity facts, and silently skips missing compiled entries. Also the new identity test must use the canonical context belonging to the compiled product. T2. |
+| N4: writer selection, render relations and stored descriptors | Resolved at design level | D:237–257 includes asserted/retracted function admission, descendant-only changes, affected renderer contracts and declaring-schema closure. D:218–225 keeps stored-field derivation in program; D:261–263 shares the pure early decision without re-entering a checked report. These are implementation obligations, not installed proof. |
+| N5: acquisition timing and load direction | The two named findings are resolved | D:83–88 keeps preparation/program downstream of schema; D:176–178,288–302 defers admission acquisition and resource/range removal to S4 and early checks to S3. The binder move is assigned in S1. The new walker argument migration still needs explicit treatment (T2); it is not supplied by the old set-of-names signature. |
+
+### T1 — Bind a population entry to the registry's actual construction inputs
+
+**Cross-population reuse is not yet safe as written.** D:114–115 calls
+`:seon.schema.projection/predicate-functions` the bindings the population compiled against. The installed
+`with-predicate-functions` only associates that member; it changes neither registry nor compiled schemas
+(`src/seon/schema.clj:401–414`). An actual caller uses this overlay for a contract humanizer
+(`test/seon/instrument_test.clj:1530–1539`). That caller's addition is legitimate, but the member cannot also
+serve as proof of immutable registry construction inputs for every overlay.
+
+Read-only witness: construct A with named `:review/value` bound to `int?`, then overlay its binding member with
+`string?`. Construct B with the same forms and `string?` from the start. D's population key is equal for the
+overlay and B, while `[:=> [:cat :review/value] :int]` accepts inputs `[1]`/`["x"]` as **[true false]** and
+**[false true]**, respectively. The body took **0.372 ms**, MCP event **4 ms**. This is a Malli/key witness;
+the proposed seam is not installed.
+
+There is a separate retention issue even when content equality is sound. Two independent registries with equal
+construction inputs can supply two different contract forms to the same table. Each contract retains the
+registry it was compiled against (`malli/core.cljc:2634–2639`). The same probe confirms equal population keys
+but nonidentical retained registries. One table can therefore keep multiple independently allocated populations
+while §10 charges one. Content equality is sufficient for semantic reuse; it does not imply object sharing.
+
+**Required boundary:** the entry owns one immutable schema compilation base, its actual resolved construction
+inputs and its canonical reference context. Every inner miss compiles against that held base, not the latest
+caller's registry. Keep contract-only predicate overlays in the inner binding inputs; distinguish them from the
+bindings already captured by named schemas. If a supported input cannot establish that provenance, compile it
+uncached rather than publishing it under an inferred population key. A different actual shape/binding/admission/
+purity population must select a different entry; an independently rebuilt equal population may share the held
+base and products.
+
+This boundary matters **before S4**. D:96 uses the caller's projection registry, while D:288–301 preserves legacy
+producers until S4. Today's registry contains both shapes and function contracts (`schema.clj:536–581`). A
+read-only probe on default at basis **536872024** found **3,548 shapes and 2,405 symbol registry entries** reachable
+from the options of the tiny contract `[:=> [:cat :int] :int]`; the options retain the identical caller registry
+(**1.187 ms** body, **4 ms** event). A 512-slot table using that registry can retain the old whole-program
+contract population outside its slots. The shape-only key also omits those symbol entries' meanings.
+
+Specify the S1–S3 bridge: use the existing shape-construction owner to supply a closed shape-only base, or leave
+legacy-backed compilations uncached until that base exists. Merely filtering the outer registry map is not proof
+of release: retained compiled children keep their own options, and the lazy registry's provider closes over its
+prepared definitions (`schema.clj:558–565`; `malli/registry.cljc:81–95`). Do not retain a whole projection,
+database, source row, prepared wrapper, table handle or advisory memo in an inner product. Direct predicate
+callables are permitted inputs, but their captured objects also need an explicit retention accounting boundary.
+
+### T2 — Keep canonical references paired with the compiled world; compare actual stored facts
+
+The prototype correctly fixes the reported shadowing case **within one compilation world**. Its identity test
+is not transferable to another independently compiled, equal population. With two fresh canonical maps
+`{:review/value (m/schema :int)}`, compile a contract against the first and run P's walker with each map:
+
+```clojure
+{:same-forms true
+ :own-canonical #{:review/value}
+ :other-equal-population-canonical #{}}
+```
+
+The body took **0.588 ms**, MCP event **13 ms**. For the second map, the identity check fails and traversal
+descends through the first population's canonical target to `:int`, losing the canonical dependency.
+This can occur when a cached contract survives eviction/reconstruction of the separately cached projection.
+
+D:78–79 already returns per-arity reference sets with the compiled contract. Preserve that pairing through
+`program/contract-facts` and other consumers, or pass the canonical context captured with the compiled value.
+Do not re-walk a cache hit against the current caller's canonical object map. Today's `arity-row` recomputes
+all three sets (`src/seon/program.cljc:1033–1038`); adding only the compiled-contract argument at D:276 does not
+specify this conversion.
+
+Also replace every caller of `compiled-references` in the S1 slice. Its current signature takes only a set of
+names (`schema.clj:64–79`). The callers include the preflight reference graph (`710–742`), incremental direct
+references (`744–765`), `direct-references` (`882–900`), admission (`1600–1604`), function dependency derivation
+(`2211`, `2689`) and program arity facts. The first two deliberately compile against `reference-registry`, whose
+canonical targets are reference sentinels, not fully compiled shapes (`686–708`). Pass those authoritative
+targets from that exact registry; do not force full canonical compilation before the cycle check, or recover
+the canonical scope from a potentially shadowed child. The correction can remain one walker with explicit
+inputs; it needs no second index.
+
+**Migration evidence correction:** P:52 queries only function symbols; P:56 skips any missing compiled schema;
+P:60–61 compares the two walkers. It never pulls stored arity rows. Thus D:209–213 proves walker agreement for
+the compiled entries examined, not that this store's facts are valid. Nor does agreement prove there are no
+shadowing registries: a shadow can leave the same reference set. The earlier review's 2,355-row stored-fact
+comparison was at another basis and cannot complete this 2,357-row observation by implication.
+
+S3's gate must capture one database value, enumerate every surviving contracted row, refuse missing compiled/
+arity evidence, derive canonical facts under its final candidate population, and compare them with pulled stored
+facts. Normalize absent many-valued empty sets; do not count them as missing work. Repair through the canonical
+writer before indexed selection is authoritative. Keep old/new walker agreement as separate compatibility
+evidence. Correct the design's current claim and carry the comparison as a reproducible check in the implementation.
+
+### T3 — Specify concurrent table ownership, eviction and dial lifetime
+
+The root ruling bounds **cache-owned retention**, not every live compiled contract. Arming and preparation
+deliberately retain compiled values outside the cache (`src/seon/instrument.clj:608–625`; D:83–88,137–142).
+Eviction cannot make those values disappear. Reword D:372–378 accordingly: eviction removes the cache's root;
+an active caller or installed wrapper remains a legitimate owner. A weak-reference probe must first release
+those owners and await relevant cache maintenance. It must not require immediate garbage collection or invalidate
+a callable that is still executing.
+
+Specify the following small protocol rather than leaving “core.cache LRU” to imply it:
+
+1. One mutable LRU holder belongs only to the outer entry. Each operation acquires that entry and releases its
+   handle on return; compiled products have no backreference to the holder. Do not put the holder on a long-lived
+   projection or wrapper, which would keep all slots after outer eviction.
+2. Compute a miss against the acquired entry's base. Atomically publish only an eligible successful product into
+   that same holder, retaining at most the configured number of slots. Hits update LRU recency. A refused,
+   oversized or host-bypass result is returned without insertion, even transiently.
+3. If outer entry E1 is evicted while a miss is compiling, the caller can finish with E1's value. A later lookup
+   may create E2. The old completion must not reinsert E1 or put a product compiled against E1 into E2 by doing a
+   fresh outer lookup. Temporary retention by active operations is distinct from the steady cache budget.
+
+The dependency supplies atomic LRU updates, but not the whole proposed policy. In core.cache 1.1.234,
+`clojure/core/cache/wrapped.clj:25–34` is a plain lookup (no LRU hit update); `:38–70` installs the miss result
+through `swap!` and has no retention predicate. Its delay prevents repeated computation during one call's CAS
+retries; independent concurrent callers can still compute the same miss. Do not reuse it unchanged for refusal
+or oversize filtering, and do not claim one compile per concurrent miss from that API. Derive before the atomic
+eligible insertion; allow and measure duplicate work unless a measured cost warrants dependency-supported
+single-flight. Outer `seon.cache/lookup` coalesces outer construction, not inner contract compiles
+(`src/seon/cache.clj:148–175`).
+
+D:362–371 omits the dial from entry identity while making both threshold and insertion-time weight depend on it.
+Specify one effective retention policy for the shared process entry and its acquisition lifetime. If a dial change
+must affect existing populations, replace/recharge the outer entry at that owner; do not grow a table under its
+old weight. Define what happens when clusters sharing a population request different values. An immutable
+construction-time policy is also coherent if its apply semantics are declared. The seam's explicit inputs must
+carry that boundary choice; reading a dial at arming without passing it onward is insufficient.
+
+Required implementation evidence: same-key concurrent misses, distinct-key pressure at the threshold, refusal/
+oversize nonretention, outer eviction during an inner compile, and policy changes. No concurrency experiment or
+eviction/GC experiment was run during this review.
+
+### T4 — Make the slot charge measurable and the admission rule executable
+
+D:368–371 reserves `population charge + capacity × slot charge`; this is a reasonable conservative reservation
+for a bounded table with **one held base**. It is not yet a retained-memory guarantee. The existing population
+formula is calibrated from one workload (`src/seon/schema.clj:2335–2338`), and `seon.cache` explicitly calls its
+weights estimates (`src/seon/cache.clj:14–25`). A count of schema forms does not bound arbitrary forms or callable
+captures. The 16 KB slot ceiling is a target awaiting evidence, not a measured result.
+
+S1 must name the measurement tool and object boundary, then commit the measurement script and results:
+
+- Measure the population root once, including its key, registry, validation base and holder overhead. Check
+  schema populations with different form sizes and resolved bindings; distinguish shared allocation from objects
+  retained only because of this root. Do not describe two independently charged outer entries (projection and
+  contract-population) as globally charging shared objects exactly once.
+- Measure the incremental slot graph: inner key/authored form, local registries, binding map/captures, compiled
+  contract, reference sets and LRU bookkeeping. Exclude only the **same held** population graph, not every object
+  of a registry-related class. A whole-graph traversal of the contract alone will include the population and
+  cannot substantiate a 16 KB slot.
+- Include post-use size. Malli schemas have mutable lazy derived-value caches (`malli/core.cljc:345–359`);
+  validators and explainers created after insertion can increase retention. Cover the products these consumers
+  actually force, multi-arity/local-recursive contracts, large literals/registries, and branch predicate closures.
+- Specify the runtime eligibility calculation. Calibration on samples alone cannot determine that a new authored
+  form exceeds the slot charge. Supply a conservative size rule backed by those measurements, or a bounded
+  measurement at a miss with measured cost. If eligibility cannot be established, return the compiled product
+  uncached. Charge keys too. Never walk the population on an ordinary cache hit.
+
+Report estimate, observed retained size, safety margin, bypass rate and measurement/compile timings separately.
+If real contracts exceed the 16 KB target, bypass them as ruled; do not silently raise the ceiling. Large-form
+and multiple-population evidence must measure retained roots after dropping probe references, not merely assert
+that the LRU count is at most 512. Memory and slot-sizing costs were not measured in this review.
+
+### Slice-1 consequences and remaining document corrections
+
+The next revision can preserve the selected architecture. S1 must establish T1's actual population/base ownership,
+T2's compiled-value/reference pairing and complete caller conversion, and T3–T4's bounded table policy and
+measurement before enabling retention. Keep S4's producer/admission cut deferred as already specified. S3 must
+compare actual stored facts rather than call P's current `compare-stored` as its gate.
+
+Preserve the existing contract normalization when moving the binder: the current armed fallback invokes
+`schema/compilable-form` **before** `bind-contract-predicates` (`instrument.clj:600–604`). That normalization also
+widens component children and carries generator properties (`schema.clj:274–324`); D:90–98 names only the binder.
+State both transformations and compile from the same resolved bindings used in the key. For host compiled-schema
+objects, clarify that their own options survive (Malli `schema`, `core.cljc:2605–2608`); bypassing retention is not
+the same as refusing every option other than `:registry` as D:95 currently says.
+
+Remove D:106's superseded flat `::function-contract` lookup spelling and D:128's count of those lookups: the
+outer cache now counts population loads, not inner contract misses. Use explicit probe-local counts for bypass
+and inner compilation evidence. Add config-resource ownership and retention/measurement work to S1's file/size
+estimate (D:271,306–319); the current estimate does not price them. None of these corrections requires a new
+program registry or a second acceptance path.
+
+### Third-round evidence and limits
+
+`bin/seon status` and MCP `runtime_status` selected default pid **20656**, start instant
+**2026-09-26T22:20:53.537Z**, running archive **9bbc3568edf72598b3d0c418e8b93c0e6c0c5a11**. Readiness had no
+missing layers, but health was **faulted**, with **3 open faults**, **78 failed-test records**, and **27–28 unknown
+failed-test records** during the two observations. These pre-existing observations are not passes or failures
+of this unimplemented design. They did not prevent the bounded read-only probes.
+
+All three successful probes used MCP JVM mode, explicit root `/Users/sean/src/seon`, cluster `default`,
+`read_only true`, and local bindings only, one probe at a time. `ns-resolve` confirmed `function-contract` is
+not installed. The registry-retention probe first had one unmatched delimiter and returned a reader failure;
+the corrected form supplied the successful observation above. No tests, restarts, branches, Var changes,
+publication or adoption were performed. Allocation and retained memory remain unmeasured. Only this review file
+is edited; foreign staged/untracked work is excluded from its commit.
+
+The two correctness witnesses are reproducible with these local forms (the second inlines P's traversal; it does
+not load the prototype or define a Var):
+
+```clojure
+(let [forms {:review/value [:fn 'review/p]}
+      mk (fn [p]
+           {:seon.schema.projection/forms forms
+            :seon.schema.projection/predicate-functions {'review/p p}
+            :seon.schema.projection/registry
+            (malli.registry/composite-registry
+             {:review/value (malli.core/schema [:fn p])} (malli.core/default-schemas))})
+      a (mk int?) b (mk string?)
+      overlay (assoc a :seon.schema.projection/predicate-functions {'review/p string?})
+      key-of (fn [p] (mapv p [:seon.schema.projection/forms
+                              :seon.schema.projection/schema-admissions
+                              :seon.schema.projection/pure-predicate-symbols
+                              :seon.schema.projection/predicate-functions]))
+      compile-in (fn [p form]
+                   (malli.core/function-schema form
+                    {:registry (:seon.schema.projection/registry p)}))
+      form [:=> [:cat :review/value] :int]
+      accepts (fn [c]
+                (let [v (malli.core/validator (:input (malli.core/-function-info c)))]
+                  [(v [1]) (v ["x"])]))
+      a2 (mk int?) c1 (compile-in a form)
+      c2 (compile-in a2 [:=> [:cat :review/value] :string])]
+  {:overlay-key-equal (= (key-of overlay) (key-of b))
+   :overlay-inputs (accepts (compile-in overlay form))
+   :rebuilt-inputs (accepts (compile-in b form))
+   :equal-population-key (= (key-of a) (key-of a2))
+   :retained-registries-identical
+   (identical? (:registry (malli.core/options c1)) (:registry (malli.core/options c2)))})
+
+(let [ca {:review/value (malli.core/schema :int)}
+      cb {:review/value (malli.core/schema :int)}
+      ra (malli.registry/composite-registry ca (malli.core/default-schemas))
+      compiled (malli.core/function-schema [:=> [:cat :review/value] :int] {:registry ra})]
+  (letfn [(children [node]
+            (keep (fn [c] (cond (malli.core/schema? c) c
+                                (and (vector? c) (malli.core/schema? (peek c))) (peek c)))
+                  (malli.core/children node)))
+          (refs [canonical node seen acc]
+            (if (malli.core/-ref-schema? node)
+              (let [k (malli.core/-ref node) scope (:registry (malli.core/options node))]
+                (cond
+                  (nil? k) (reduce #(refs canonical %2 seen %1) acc (children node))
+                  (and (contains? canonical k)
+                       (identical? (malli.registry/schema scope k) (get canonical k))) (conj acc k)
+                  (contains? seen [scope k]) acc
+                  :else (refs canonical (malli.core/deref node) (conj seen [scope k]) acc)))
+              (reduce #(refs canonical %2 seen %1) acc (children node))))]
+    {:same-forms (= (update-vals ca malli.core/form) (update-vals cb malli.core/form))
+     :own-canonical (refs ca compiled #{} #{})
+     :other-equal-population-canonical (refs cb compiled #{} #{})}))
+```
 
 ## Revised-design verdict — a3d6847a1
 
