@@ -3682,8 +3682,13 @@
         ;; A refused profile is passed on, never rendered with as a profile.
         _ (when (:seon.render/refused-member profile)
             (throw (ex-info (:seon.error/message profile) profile)))
+        ;; Read only through the floor's classification (one-render-path
+        ;; §3g): an exact small persistent map, keys compared by identity.
+        ;; `get` on an arbitrary result can run a tree map's comparator or a
+        ;; host Map's `.get` before anything is printed.
+        checked? (some? (render.value/keyword-entry value :seon.instrument/check))
         value (if (and connection
-                       (:seon.instrument/check value)
+                       checked?
                        ((schema/projection-validator (render/request-projection request)
                                                      :seon.instrument/contract-error) value)
                        (not (:seon.error/result-id value)))
@@ -3697,7 +3702,7 @@
                           (:seon.sci.admit/caps request)
                           (assoc :seon.sci.admit/caps (:seon.sci.admit/caps request)))))
                 value)
-        function-name (when (and (map? value) (contains? value :seon.instrument/check))
+        function-name (when (some? (render.value/keyword-entry value :seon.instrument/check))
                         (:seon.instrument/fn value))
         database (when function-name
                    (or (:seon.db/db request)

@@ -556,6 +556,16 @@
     :else (count (print/emit-text node {::print/width 0 ::print/length nil ::print/level nil
                                         ::print/namespace-maps? false}))))
 
+(defn keyword-entry
+  "The value at keyword `k` in an exact persistent array or hash map of at
+  most 64 entries, found by comparing keys with `identical?`; nil otherwise.
+  Never calls `get`, a comparator or a host Map on an unclassified value."
+  {:malli/schema [:=> [:cat :seon.schema/value :keyword] :seon.schema/value]}
+  [value k]
+  (when (and (#{clojure.lang.PersistentArrayMap clojure.lang.PersistentHashMap} (class value))
+             (<= (count value) sorted-bound))
+    (some (fn [entry] (when (identical? (key entry) k) (val entry))) value)))
+
 (defn- cut-text
   {:malli/schema [:=> [:cat :map] :string]}
   [node]
