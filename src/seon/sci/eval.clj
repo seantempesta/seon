@@ -254,22 +254,19 @@
   acquired into the context before any form runs, so none reaches here; an
   unloaded namespace answers nil and SCI reports it as not found.
 
-  The copies are born in the requiring context, so they carry its SCI
-  generation as a `def` there does (`sci.impl.utils/generation-meta`, `utils.cljc:359`): the
-  agent's private layer, which `regenerate-agent-context!` carries across turns
-  by generation, keeps them with the namespace and alias SCI registered."
+  The copies carry no SCI generation: the agent defined none of them, so the
+  definition authority (`turn-interns`) never reads them as its program change.
+  `regenerate-agent-context!` carries them because the agent's base never had
+  their namespace."
   {:malli/schema [:=> [:cat [:map [:namespace :symbol] [:ctx :map]]] [:maybe :map]]}
   [{namespace-name :namespace ctx :ctx}]
   (when-let [host (find-ns namespace-name)]
-    (let [sci-namespace (sci/create-ns namespace-name)
-          env @(:env ctx)]
+    (let [sci-namespace (sci/create-ns namespace-name)]
       (sci/add-namespace!
        ctx namespace-name
        (into {:obj sci-namespace}
              (map (fn [[intern-name host-var]]
-                    (let [copied (copy-host-var host-var sci-namespace)]
-                      (alter-meta! copied #(sci.utils/generation-meta env %))
-                      [intern-name copied])))
+                    [intern-name (copy-host-var host-var sci-namespace)]))
              (ns-publics host)))
       {})))
 
@@ -3085,8 +3082,11 @@
 (defn- regenerate-agent-context!
   "Fork the replacement base and carry the private layer as actual objects.
 
-  Owned private Vars keep their roots, including captured values. Inherited
-  program bindings are replaced. A JVM restart has no entering context and
+  The private layer is what the agent's own evaluation added: Vars its SCI
+  generation defined, and Vars at a path the base it forked from never had (a
+  namespace it required from the JVM, `load-host-namespace`). Owned private
+  Vars keep their roots, including captured values. Inherited program bindings
+  are replaced. A JVM restart has no entering context and
   consequently preserves no private objects. No database read restores them.
   An unavailable execution's private layer is the unrestored one, so it
   carries nothing: the context is the base acquired at the branch head."
@@ -3104,7 +3104,8 @@
               :when (sci.utils/var? entry)
               :let [path [namespace-name local-name]
                     root (if (sci.vars/hasRoot entry) @entry absent-intern)]
-              :when (and (= generation (:sci/generation (meta entry)))
+              :when (and (or (= generation (:sci/generation (meta entry)))
+                             (not (contains? previous path)))
                          (not (changed? namespace-name local-name))
                          (not (or (when-let [prior (get previous path)]
                                     (same-program-root? root (first prior)))

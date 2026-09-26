@@ -2642,15 +2642,27 @@
        (is (= 2 (sci/eval-string* ctx "(+ 1 1)")))))))
 
 (deftest a-namespace-an-agent-requires-keeps-its-vars-at-the-next-turn
-  ;; The dependency Vars `load-host-namespace` copies are the agent's own, as a
-  ;; def is: the turn after the require still resolves the alias's Vars.
+  ;; A required dependency namespace is a library, not the agent's program
+  ;; change: the require is admitted (no unindexed-change refusal naming the
+  ;; library's Vars), and the next turn still resolves the alias's Vars.
   (test-support/with-database
    (fn [connection]
-     (let [request {:seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)
-                    :seon.db/db (db/db connection) :seon.agent/id "requires"}
-           entering (:seon.sci.eval/ctx (eval/fork-for-turn request))]
-       (sci/eval-string* entering "(require '[malli.core :as m])")
+     (let [database (db/db connection)
+           request {:seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)
+                    :seon.db/db database :seon.agent/id "requires"}
+           entering (:seon.sci.eval/ctx (eval/fork-for-turn request))
+           run (fn [ctx source]
+                 (eval/evaluate {:seon.schema/projection (schema/handed-projection)
+                                 :seon.cluster.eval/source source
+                                 :seon.sci.admit/caps caps
+                                 :seon.sci.eval/time-limit-ms 10000
+                                 :seon.config/on-core-error :panic
+                                 :seon.sci.eval/ctx ctx
+                                 :seon.db/db database}))
+           required (run entering "(require '[malli.core :as m])")]
+       (is (nil? (:seon.cluster.eval/error required)) (pr-str (:seon.sci.admit/value required)))
+       (is (true? (:seon.sci.admit/value (run entering "(m/validate int? 1)"))))
        (let [next-turn (:seon.sci.eval/ctx
                         (eval/fork-for-turn (assoc request :seon.sci.eval/agent-ctx entering)))]
          (is (some? (sci/resolve next-turn 'malli.core/validate)))
-         (is (true? (sci/eval-string* next-turn "(m/validate int? 1)"))))))))
+         (is (true? (:seon.sci.admit/value (run next-turn "(m/validate int? 1)")))))))))
