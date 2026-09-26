@@ -11,6 +11,44 @@ design: docs/research/agent-platform/cache-central-design-2026-09-26.md (option 
 
 ## Broken or unproven first
 
+- **Fixed in `b6913c392`: `558446356` over-reached (Astra F5, and the turn tests' "requires a matching cluster
+  row").**
+  - **The failure:** every reader was made to require the JVM's newest dials. A retained branch, or a test world
+    whose row an older program wrote, refused because it lacks `:seon.config.cache/max-bytes`. A branch-local dial
+    was dropped.
+  - **Reproduced on pid 32187:** retracting the dial from the default row with `d/with` makes the committed code
+    answer `missing [:seon.config.cache/max-bytes]`.
+  - **Fix:** the row's dials are now the union of its carried projection's and `declared-projection`'s.
+    - A required dial the row lacks answers its declared `:seon.config/default` by schema name ("require no
+      more").
+    - A required dial without a default still refuses.
+    - Boot's applied row still reads the value that was applied.
+  - **Checked at the REPL on pid 32187, with the default row minus the dial:**
+    - the dial reads its default, 512,000,000;
+    - the answer validates against `:seon.config/effective`;
+    - every other dial is equal to what the current code answers.
+  - **Cost:** `effective` takes **115 µs** armed on pid 32187 (after `af7ba85b7`), against 1,250–3,260 µs before
+    it.
+  - **Tests:**
+    - `cluster-scoped-config-refuses-an-omitted-cluster` still checks the entry refusals for compile and apply.
+      The stale assertion that `effective` refuses by arity is gone: call-time defaults now supply its cluster.
+    - `sparse-file-reading-does-not-compile-a-second-time` now asserts at most one declaration generation.
+    - New regressions:
+      - `a-seeded-cluster-reads-its-own-row-on-the-member-branch`;
+      - `a-row-written-before-a-dial-existed-reads-its-declared-default`. It uses a `d/with` retraction to stand
+        for the older program's row.
+    - The config tests have not run on the new code yet. `test-check` runs the committed archive, so they wait for
+      the restart.
+  - **Not fixed:** `config-loads-the-packaged-population-in-a-fresh-jvm` spawns a JVM (10–29 s against the 5 s
+    bound). A longer bound over 10 s needs owner authorization, so it is left for root.
+- **Fixed in `4709253e6`: zero-weight cache entries (Astra F3).**
+  - **The failure:** Caffeine never evicts a zero-weight entry by size, and a contract-only projection was weighed
+    by its forms alone, so it weighed 0.
+  - **Fix:** every retained entry now weighs at least 256 B. `build-projection` weighs 2.2 KB per declaration,
+    counting schema forms and function contracts alike.
+  - **Regression:** `a-zero-weight-value-still-counts-against-the-budget`. In a bare JVM, 5 tests and 22 assertions
+    pass.
+
 - **Fixed in `af7ba85b7`: the per-call cost of `558446356`.** Measured armed on pid 86089 at `c029d48cb`, with 200
   calls per probe:
 
