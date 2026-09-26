@@ -2204,6 +2204,30 @@
               (:seon.error/member (db/transact! connection [namespace-row (digested widened)]))))
        (test-support/transacted! connection [namespace-row (digested namespace-row)])))))
 
+(deftest a-namespace-row-change-re-derives-its-declarations-digests
+  ;; CLASS: a function's digest includes its namespace's resolver context, so
+  ;; a require added to the namespace changes its meaning; the declaration kept
+  ;; its old digest because only touched rows were checked. The writer
+  ;; re-derives every declaration of a namespace row it writes, in the same
+  ;; transaction.
+  (test-support/with-database
+   (fn [connection]
+     (let [namespace-row (test-support/namespace-row (db/db connection) 'sample.rederive)
+           row (test-support/program-fn-row (db/db connection) 'sample.rederive/f "(defn f [x] x)")
+           _ (test-support/transacted! connection [namespace-row row])
+           required (program/declaration-row (db/carried-projection (db/db connection))
+                                             {:seon.ns/name 'sample.rederive :seon.ns/requires #{'clojure.set}
+                                              :seon.ns/source "(ns sample.rederive (:require [clojure.set]))"}
+                                             :all :agent)
+           _ (test-support/transacted! connection [required])
+           database (db/db connection)
+           stored (db/pull database '[*] [:seon.fn/sym 'sample.rederive/f])
+           stored-namespace (@#'seon.db/declaration-value database (db/identity-attributes database)
+                             (:db/id (db/pull database [:db/id] [:seon.ns/name 'sample.rederive])))]
+       (is (not= (:seon.program/definition-digest row) (:seon.program/definition-digest stored)))
+       (is (= (db/definition-digest-of (db/carried-projection database) row stored-namespace)
+              (:seon.program/definition-digest stored)))))))
+
 (deftest render-declarations-require-their-final-function-row
   (test-support/with-database
    (fn [connection]

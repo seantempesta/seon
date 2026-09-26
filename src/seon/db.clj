@@ -4311,6 +4311,29 @@
     row)
    (some-> namespace-row (@stored-namespace-context))))
 
+(defn- namespace-digests-tx
+  "Transaction data re-deriving, on the transaction's own value `database`, the
+  digest of every function and test of `namespaces` (the namespace rows this
+  transaction writes) that its definition under the stored namespace row no
+  longer produces: a require or alias change changes their resolver context.
+  Declarations the transaction writes itself (`written`) keep the writer's check."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection [:set :symbol]
+                       [:set :seon.program/declaration-identity]]
+                  [:vector [:tuple [:= :db/add] :int [:= :seon.program/definition-digest] :string]]]}
+  [database projection namespaces written]
+  (let [identity-attrs (identity-attributes database)]
+    (vec (for [namespace-name namespaces
+               :let [namespace-entity (:e (first (d/datoms database :avet :seon.ns/name namespace-name)))]
+               :when namespace-entity
+               :let [namespace-row (declaration-value projection database identity-attrs namespace-entity)]
+               [family namespace-attribute] [[:seon.fn/sym :seon.fn/ns] [:seon.test/sym :seon.test/ns]]
+               :when (get (dbi/-schema database) namespace-attribute)
+               entity (d/q '[:find [?e ...] :in $ ?a ?n :where [?e ?a ?n]] database namespace-attribute namespace-entity)
+               :let [row (declaration-value projection database identity-attrs entity)
+                     derived (definition-digest-of projection row namespace-row)]
+               :when (and (not (written [family (get row family)])) (not= derived (:seon.program/definition-digest row)))]
+           [:db/add entity :seon.program/definition-digest derived]))))
+
 (defn- write-digest-error
   "The first function or test row this report changed whose stored definition
   digest is not the one its final value produces with its namespace's resolver
@@ -4618,11 +4641,17 @@
   the final-report validator in its metadata, values encoded by `projection`."
   {:malli/schema [:=> [:cat :seon.schema/projection :seon.store/transaction] :map]}
   [projection transaction]
-  (schema.datahike/encode-transaction-in
-   projection
-   (jdk-integers->long
-    (assoc-in (if (map? transaction) transaction {:tx-data transaction})
-              [:tx-meta :datahike/validate-report] (write-report-validator projection)))))
+  (let [request (schema.datahike/encode-transaction-in
+                 projection
+                 (jdk-integers->long
+                  (assoc-in (if (map? transaction) transaction {:tx-data transaction})
+                            [:tx-meta :datahike/validate-report] (write-report-validator projection))))
+        rows (filter map? (:tx-data request))
+        ;; A namespace row written here re-derives its declarations' digests in this transaction.
+        namespaces (into #{} (keep #(when (:seon.program/definition-digest %) (:seon.ns/name %))) rows)
+        written (into #{} (keep #(some (fn [a] (when-some [v (get % a)] [a v])) [:seon.fn/sym :seon.test/sym])) rows)]
+    (cond-> request
+      (seq namespaces) (update :tx-data #(conj (vec %) [:db.fn/call namespace-digests-tx projection namespaces written])))))
 
 (defn- write-refusal
   "The declared value of a write that threw: the validator's refusal, a Seon
