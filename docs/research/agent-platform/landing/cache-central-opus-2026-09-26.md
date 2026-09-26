@@ -11,7 +11,27 @@ design: docs/research/agent-platform/cache-central-design-2026-09-26.md (option 
 
 ## Broken or unproven first
 
-- **RESET NEEDED.** Caffeine 3.2.4 is a new dependency. Default (pid 75849) does not have it on its classpath, so it
+- **Default cannot boot current HEAD, and this lane did not cause it.** Root restarted default onto HEAD at 21:08Z.
+  The boot of pid 80850 was refused during task indexing: "seon.program is refused: handle-mismatch".
+  - The cause is task `0d8be4a76ab3` in `resources/seon/tasks/seon.program.edn`, added by contract-cost in
+    `2d047c99c`.
+  - Its handle must be `(seon.issue/task-handle 'seon.program "a-defn-scans-every-projection-form-per-call"
+    :function)` = **`400bcf52dd53`**, evaluated in the JVM.
+  - The operator fell back to commit `6ab830be…` (pid 81135), which does not contain `seon.cache`.
+  - Root fixes that id and restarts.
+- **Live evidence from pid 80850 before it was refused.** The failed boot did load `seon.cache` and served
+  `runtime_status` with `:seon.cache/status`: budget 512,000,000 B and 32,307,200 B weighted. Per kind:
+
+  | kind | misses | hits | bytes (est.) | load |
+  |---|---|---|---|---|
+  | `seon.schema.edn/packaged-population` | 1 | 15 | 1,327,500 | 86 ms |
+  | `seon.schema/declaration-projection` | 2 | 5 | 4,754,100 | 174 ms |
+  | `seon.schema/projection` | 2 | 0 | 26,225,600 | 504 ms |
+
+  So the new classpath resolves, the namespaces load, the dial's declared default applies and the status block
+  renders. Hits after boot were not observed.
+
+- **RESET NEEDED** (once the task id above is fixed). Caffeine 3.2.4 is a new dependency. Default (pid 75849) does not have it on its classpath, so it
   cannot load `seon.cache` or any namespace that requires it: `seon.schema`, `seon.schema.edn`, `seon.program`,
   `seon.cluster` and `seon.cluster.boot`.
   - An in-place adoption of `92b22cbf1` would fail its reload with `ClassNotFoundException`. Only a restart onto
@@ -219,6 +239,7 @@ Compiled Malli validators and explainers can become a kind now, with no further 
 
 ## Cleanup
 
-- The branch `cache-central-opus` is retired.
+- The branch `cache-central-opus` was retired through the MCP `branch` tool. Retire returned an NPE during the
+  21:08Z restart window and succeeded afterwards.
 - The JVM-mode session `cache-central-opus` read only.
 - The bare-JVM probes and snapshot are under `tmp/cache-central-opus/`.
