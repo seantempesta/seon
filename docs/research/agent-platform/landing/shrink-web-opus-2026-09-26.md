@@ -128,3 +128,28 @@ Plan: `docs/research/agent-platform/shrink-plan-render-web-transcript-value-2026
 
 In web-test, expect green on `transaction-refusals-map-to-http-without-success` and the new
 `a-route-throw-answers-a-bounded-500-inside-the-handler`. `two-tabs…` is expected red until it is resolved.
+
+## Runs on default pid 32187 (fa4e4bccf, includes 8303cd5a3)
+
+| namespace | before (pid 12212, triage) | after (pid 32187) |
+|---|---|---|
+| `seon.render.web-test` | 420 pass / 25 fail / 2 error, 120 s | 451 pass / 18 fail / 3 error, 120 s (check bound; `unrelated-transaction-reuses…` unfinished at the bound) |
+| `seon.render.web-context-test` | reds incl. `unrelated-adoption` render counts | 52 pass / 2 fail / 2 error, 26 s |
+
+- **Now green:** `transaction-refusals-map-to-http-without-success`, the new
+  `a-route-throw-answers-a-bounded-500-inside-the-handler`, and `runtime-evaluation-drops-a-closed-debug-pages-package`.
+  The test run also passes `unrelated-adoption`'s renderer-count assertion.
+- **`unrelated-adoption` is still red on its last assertion**, "the page shows the newly adopted commit". The status
+  renderer ran twice, but the body lacks the new commit. On the live JVM the status block does print the adopted
+  commit. The cause is not found and is not proven to be S1.
+- **two-tabs: the block is the fleet table, not S1 (live JVM evidence).** On default at an unchanged basis
+  (536872313 before and after), one tab join made one pass that invoked exactly one producer,
+  `seon.oversight/html-table`, and re-serialized one surface (`surface-html` ×1). `oversight/fleet-value` includes
+  `:seon.render.web/render :seon.oversight/passes N`, the render proc's own pass count (`oversight.clj:83`, shown at
+  `:349`). Every pass therefore changes the fleet table, and so the package: a join's derive-all pass always repaints.
+  - The fleet argument is computed outside `render-call` (its read evidence is `[]`), so read evidence, and S1, play
+    no part.
+  - The fix belongs in the oversight owner: a page must not display the rendering proc's own pass counter, or the
+    fleet must omit volatile counters.
+  - The code is old (9c0ecae86, 2026-09-22), so what changed the test's outcome today is probably the fixture (the
+    test handle now carries routing), not render. This is unverified.
