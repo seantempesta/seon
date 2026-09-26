@@ -139,13 +139,17 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn steward-call
-  "Make `agent-id` the steward of `namespace-name` only when it has none.
+  "Make `agent-id` the steward of `namespace-name` only when it has none, and
+  only on the branch the agent works on.
 
   Invoked as `[:db.fn/call #'steward-call agent-id namespace-name]`, so
   Datahike supplies the mid-transaction database and the decision is made
   where the fact is — no caller pre-read that the writer would re-decide.
   Assignment is not stewardship: a second agent assigned the same namespace
-  leaves the first agent's stewardship standing."
+  leaves the first agent's stewardship standing. A row whose
+  `:seon.agent/branch` names another branch than this database's (a hosted
+  agent's row on its cluster) claims nothing here: its namespace's faults
+  route to this branch's stewards, and its claims belong on its own branch."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.agent/id :seon.ns/name]
                   :seon.store/transaction-data]}
@@ -155,10 +159,13 @@
                         :where
                         [?namespace :seon.ns/name ?namespace-name]
                         [?namespace :seon.ns/steward ?steward]]
-                      database namespace-name)]
-    (when (or (:seon.db/invalid-read steward) (:seon.schema/expected-value steward))
-      (throw (ex-info (:seon.error/message steward) steward)))
-    (if steward
+                      database namespace-name)
+        works-on (db/q '[:find ?branch . :in $ ?id :where [?agent :seon.agent/id ?id] [?agent :seon.agent/branch ?branch]]
+                       database agent-id)]
+    (doseq [read [steward works-on]]
+      (when (or (:seon.db/invalid-read read) (:seon.schema/expected-value read))
+        (throw (ex-info (:seon.error/message read) read))))
+    (if (or steward (and works-on (not= works-on (get-in database [:config :branch]))))
       []
       [[:db/add [:seon.ns/name namespace-name] :seon.ns/steward
         [:seon.agent/id agent-id]]])))
