@@ -395,5 +395,5 @@
              ;; bound: the floor lays it out whole and cuts it only beyond this
              ;; ceiling. Raw values keep the profile's token budget, length and
              ;; level. Unit: estimated tokens (`seon.ai.tokens/estimate`).
-             :rendered-token-ceiling [:int {:min 1, :seon.config/dial true, :seon.print/default 50000}],
+             :rendered-token-ceiling [:int {:min 1, :seon.config/dial true, :seon.config/optional true, :seon.print/default 50000}],
              :unknown-kind [:maybe :keyword]}
