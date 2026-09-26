@@ -380,3 +380,21 @@
      (is (= (:seon.config.eval/time-limit-ms config/defaults)
             (:seon.config.eval/time-limit-ms (test-support/cluster-handle {:seon.db/connection connection})))
          "a handle naming no cluster keeps the shipped decisions"))))
+
+(deftest a-seeded-cluster-records-the-source-commit-a-fork-records
+  ;; CLASS: `seed-cluster!` wrote no :seon.source/commit-id, so every agent test
+  ;; request in a seeded world refused "The cluster records no adopted source
+  ;; commit". It now writes the row a fork records (registry/fork-row) with the
+  ;; executing member's cluster's adopted commit.
+  (test-support/with-database
+   (fn [connection]
+     (test-support/seed-cluster! connection "seeded-source")
+     (let [database (db/db connection)
+           own (:seon.source/commit-id
+                (db/pull database [:seon.source/commit-id]
+                         [:seon.cluster/name (:seon.cluster/name (test-support/execution-handle connection))]))
+           seeded (db/pull database [:seon.source/commit-id {:seon.cluster/config [:seon.config/cluster]}]
+                           [:seon.cluster/name "seeded-source"])]
+       (is (uuid? own) "the executing member's cluster names its adopted commit")
+       (is (= own (:seon.source/commit-id seeded)))
+       (is (= "seeded-source" (get-in seeded [:seon.cluster/config :seon.config/cluster])))))))

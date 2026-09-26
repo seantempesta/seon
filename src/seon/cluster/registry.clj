@@ -237,6 +237,15 @@
 
           (throw failure))))))
 
+(defn fork-row
+  "The cluster row a fork records: its name, its config row and the exact source
+  commit its program descends from, which a test request's world branches from."
+  {:malli/schema [:=> [:cat :seon.boot/cluster-name :seon.source/commit-id] :map]}
+  [cluster-name source-commit]
+  {:seon.cluster/name cluster-name
+   :seon.cluster/config [:seon.config/cluster cluster-name]
+   :seon.source/commit-id source-commit})
+
 (defn- record-fork!
   "Record the exact source commit with the new branch's cluster row."
   {:malli/schema [:=> [:cat :seon.store/store :seon.boot/cluster-name
@@ -258,9 +267,7 @@
                    result (db/transact!
                            connection
                            {:tx-data [(:seon.config/desired-row compiled)
-                                      {:seon.cluster/name cluster-name
-                                       :seon.cluster/config [:seon.config/cluster cluster-name]
-                                       :seon.source/commit-id source-commit}]})]
+                                      (fork-row cluster-name source-commit)]})]
                (when-not (:db-after result)
                  (throw (ex-info "The fork's source commit could not be recorded." result))))))))
       (finally (store/release-branch! connection))))

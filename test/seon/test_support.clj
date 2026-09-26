@@ -908,6 +908,14 @@
     (db/call-with-custody {:seon.db/connection connection}
                           #(cluster/ensure-cluster-entity!
                             connection cluster-name cluster/boot-process-identity)))
+   ;; The row a fork records (registry/fork-row): the seeded cluster descends
+   ;; from the program the executing member's own cluster adopted, which a
+   ;; test request's world branches from.
+   (when-let [source-commit
+              (:seon.source/commit-id
+               (db/pull (db/db connection) [:seon.source/commit-id]
+                        [:seon.cluster/name (:seon.cluster/name (execution-handle connection))]))]
+     (transacted! connection [(registry/fork-row cluster-name source-commit)]))
    nil))
 
 (defn preserving-instrumentation-state
