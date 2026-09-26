@@ -47,6 +47,16 @@ Default pid 87270, 2026-09-26, scratch namespace, 8 consecutive trivial root run
 - In both kinds of window, `call-with-projection-state` x6 ranked first at 218-259 ms, more than the run's
   own elapsed time.
 
+## Evidence 2026-09-26 (fix-test-request-cost): a delegating arity counts every call twice
+
+The dogfood report's `seon.db/with-declarations x13680` for one `my.test/check` is 6,840 reads. The
+3-arity delegates to the armed 4-arity (`src/seon/db.clj:1679-1703`), so one read grows the cell twice.
+The same window showed `seon.db/read-declarations x6882`, one per read. Of those reads, 6,297 were
+`seon.db/datoms`: three AVET reads for each of about 2,100 names the reverse walk from
+`seon.effect/request*` visits (`seon.fn/reverse-closure`, `src/seon/fn.clj:1786-1788`). Total time was
+56 ms. The count pointed at the wrong owner. The time sat in `seon.db/q` (84 calls, 887 ms) and two
+writes. Landing: `docs/research/agent-platform/landing/fix-test-request-cost-2026-09-26.md`.
+
 ## Owner and direction
 
 Owner: `src/seon/profile.clj`, with `seon.instrument` (`timed`).

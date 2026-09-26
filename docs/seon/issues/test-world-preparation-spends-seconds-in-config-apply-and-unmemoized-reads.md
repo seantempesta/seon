@@ -82,3 +82,23 @@ requests on an unchanged program took 1,555, 1,730 and 1,720 ms, each with `:seo
 evidence for an unchanged program and test was never reused, and `clean-request-handle` paid its ~1 s each
 time. `seon.db/with-declarations` ran 13,680 times for one member. Its cost is proportional to something
 other than the change (the program? the selection?), which the explanation cannot say.
+
+## Evidence 2026-09-26 (fix-test-request-cost): where a changed one-test check's second goes
+
+Default pid 55348 (archive 04f3a159b). Branch agent, one test, JVM probes against its execution:
+
+- `clean-request-handle` took 972–1,025 ms per request. Two parts dominate:
+  - The overlay write, 8 datoms on the fresh request-branch connection, took 480–620 ms. Only 211 ms
+    of it is in armed code (`seon.db/write-report-error`, with `report-arity-comparison` at 183 ms).
+    The rest is unarmed, presumably the Datahike commit (queue item D15).
+  - `seon.sci.eval/acquire!` took 414–450 ms. It misses the base-context memo because the request
+    branch's commit is new; `program-identity` is memoized by commit id
+    (`src/seon/sci/eval.clj:3085`).
+- `seon.test.runner/program-written-since?` took 75 ms on every admission, even when nothing was
+  written after the basis. `SinceDB` filters each of the 170 program attributes' whole history under a
+  time predicate (`reference-code/datahike/src/datahike/db.cljc:729`).
+- `seon.test/definition-digests` took 38 ms on the current value and 180 ms as-of. The attribute
+  `or` leaves the attribute unbound; with it bound, the same read takes about 1 ms.
+
+Landing, cuts and remaining options:
+`docs/research/agent-platform/landing/fix-test-request-cost-2026-09-26.md`.
