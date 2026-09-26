@@ -169,6 +169,8 @@ after the REPL-entry stage; F10/F11 prompt regeneration with the render design; 
 **F. Review debt (Astra).** P3b diff; 2(i) diff; R1 diff; roster slice; references-as-refs re-review status; harness S1.
 
 ### Operating checklist
+- ONE PERSPECTIVE (owner, repeated): root acts as an agent at root's REPL (MCP SCI) — merges, proposal review, task
+  work — never JVM-mode calls into internals (read-only diagnosis only). A missing agent entrance is a defect to fix.
 - After `bin/seon start --head`, read its WHOLE result and then `bin/seon status` `:seon.operator/source-root`: a move
   whose JVM misses readiness or adoption falls back to the previous archive and still prints a pid and ready-ms
   (operator.clj:1319-1352). 2026-09-26 root filtered the output and ran three test passes against a stale archive.
