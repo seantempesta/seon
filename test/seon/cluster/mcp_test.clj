@@ -454,10 +454,10 @@
           (is (= value (eval requery))
               "the advertised requery reads the complete stored value"))
         (let [absent (apply str (repeat 64 "0"))]
-          (is (= absent
-                 (:seon.dev.mcp/value-not-found
+          (is (= [:gone [:seon.blob/digest absent]]
+                 ((juxt :seon.render.walk/continuation-reason :seon.render.walk/continuation-node)
                   (cluster/mcp-get-value cluster-name absent [] 0)))
-              "an unknown digest is a typed value-not-found refusal"))
+              "an unknown digest is the one continuation owner's :gone refusal"))
         (is (not= content-digest (apply str (repeat 64 "0")))))
       (finally
         (swap! running-instances dissoc cluster-name)))))

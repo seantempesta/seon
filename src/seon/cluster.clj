@@ -55,11 +55,11 @@
                         [seon.oversight :as oversight]
             [seon.problems :as problems]
             [seon.render :as render]
-            [seon.render.data :as render.data]
             [seon.program :as program]
             [seon.render.value :as render.value]
             [seon.schedule :as schedule]
             [seon.sci.admit :as admit]
+            [seon.render.walk :as render.walk]
             [seon.render.web :as web]
             [seon.sci.eval :as sci.eval]
             [taoensso.timbre :as log]
@@ -402,12 +402,16 @@
                         (if artifact-backed?
                           "the cluster has no database connection"
                           "the value has no durable MCP artifact")))
-               ;; The floor selects the held value itself (one-render-path
-               ;; §3g): admission only decides and writes the stored artifact;
-               ;; nothing is reconstructed from it before printing.
+               ;; The first page and every continuation select ONE backing
+               ;; (one-render-path §3g): a stored value's page is selected
+               ;; from the artifact `get_value` continues, so a cut's path and
+               ;; offset address the value it was cut from; an unstored one
+               ;; is the held value, whose cuts advertise no continuation.
                projection
                (render.value/prepare
-                {:seon.render/value value
+                {:seon.render/value (if (and artifact-backed? connection)
+                                      (render.value/artifact-value artifact)
+                                      value)
                  :seon.render/profile profile
                  :seon.render.value/root [:seon.blob/digest content-digest]
                  :seon.sci.admit/caps caps})
@@ -420,7 +424,7 @@
                stored-digest (when (and artifact-backed? connection)
                                (blob/put! connection content))]
            (cond-> {:seon.dev.mcp/value
-                    (admit/semantic-value projected-node)
+                    (if (:seon.error/at projection) projection (admit/semantic-value projected-node))
                     :seon.dev.mcp/windowed? artifact-backed?}
              artifact-backed?
              (assoc :seon.blob/digest content-digest
@@ -498,61 +502,36 @@
   [cluster-name content-digest path offset]
   (if-let [connection (:seon.boot/cluster-connection
                        (mcp-instance cluster-name))]
-    (if-let [content (blob/get connection content-digest)]
-      (let [stored (render.value/read-artifact content)
-            found (when-not (:seon.render.value/unreadable-artifact stored)
-                    (render.data/at
-                     (render.value/artifact-value stored)
-                     {:seon.render.data/path path
-                      :seon.render.data/offset offset}))
-            effective (mcp-effective cluster-name nil)]
-        (cond
-          ;; Another kind of blob, or unreadable content: refused by name.
-          (:seon.render.value/unreadable-artifact stored)
-          (assoc stored :seon.blob/digest content-digest)
-
-          (or (:seon.config/error-key effective)
+    (let [effective (mcp-effective cluster-name nil)]
+      (if (or (:seon.config/error-key effective)
               (:seon.db/invalid-read effective) (:seon.schema/expected-value effective))
-          effective
-
-          (not (contains? found :seon.render.data/value)) found
-
-          ;; A page is the floor's selection of the value at the path, from
-          ;; the absolute offset, under the MCP profile (design §3g): the
-          ;; same text an agent reads, with the cut's coordinates beside it.
-          :else
-          (let [value (:seon.render.data/value found)
-                profile (assoc (render/agent-render-profile effective)
-                               :seon.render.profile/id :seon.render.profile/mcp
-                               :seon.print/requery-refusal "continue with get_value at this digest and path from the next-offset")
-                projection (render.value/prepare
-                            {:seon.render/value value
-                             :seon.render/profile profile
-                             :seon.render.value/root [:seon.blob/digest content-digest]
-                             :seon.render.data/cursor {:seon.render.data/path path
-                                                       :seon.render.data/offset offset}
-                             :seon.sci.admit/caps (config/result-caps effective)})
-                tree (:seon.render.value/tree projection)
-                cut (some #(when (and (map? %) (= :seon.print/elided (:seon.print/face %))
-                                      (= path (:seon.render.data/path %)))
-                             %)
-                          (tree-seq coll? seq tree))
-                total (cond (string? value) (count value)
-                            (counted? value) (count value))]
+        effective
+        ;; A page is the one continuation owner's selection at the path and
+        ;; absolute offset (design §3g), over the artifact the first page was
+        ;; selected from: the same text an agent reads, with the cut's
+        ;; coordinates beside it. This adapter reads nothing itself.
+        (let [projection (render.walk/continue
+                          {:seon.render.walk/continuation-node [:seon.blob/digest content-digest]
+                           :seon.db/connection connection
+                           :seon.render.data/cursor {:seon.render.data/path path :seon.render.data/offset offset}
+                           :seon.render/profile (assoc (render/agent-render-profile effective)
+                                                       :seon.render.profile/id :seon.render.profile/mcp
+                                                       :seon.print/requery-refusal "continue with get_value at this digest and path from the next-offset")
+                           :seon.sci.admit/caps (config/result-caps effective)})
+              tree (:seon.render.value/tree projection)
+              cut (some #(when (and (map? %) (= :seon.print/elided (:seon.print/face %))
+                                    (= path (:seon.render.data/path %)))
+                           %)
+                        (tree-seq coll? seq tree))
+              total (or (:seon.render.data/total tree) (:seon.render.data/total cut))]
+          (if (:seon.error/at projection)
+            (assoc projection :seon.blob/digest content-digest)
             (cond-> {:seon.dev.mcp/text (:seon.render.value/text projection)
                      :seon.render.data/path path
                      :seon.render.data/offset offset
                      :seon.render.value/beyond-end? (boolean (and total (>= offset total) (pos? total)))}
               total (assoc :seon.render.data/total total)
-              cut (assoc :seon.render.data/next-offset (:seon.render.data/next-offset cut))))))
-      {:seon.dev.mcp/value-not-found content-digest
-       :seon.error/at (java.util.Date.)
-       :seon.error/layer :seon.cluster/operation
-       :seon.error/operation 'seon.cluster/mcp-get-value
-       :seon.error/message
-       "No blob has this digest: an explicit GC sweep collected it, or it was never stored. Evaluate the form again to store its value."
-       :seon.error/expected "a stored blob at the requested digest"
-       :seon.blob/digest content-digest})
+              cut (assoc :seon.render.data/next-offset (:seon.render.data/next-offset cut)))))))
     {:seon.dev.mcp/remainder-not-retrievable content-digest
      :seon.error/at (java.util.Date.)
      :seon.error/layer :seon.cluster/operation
