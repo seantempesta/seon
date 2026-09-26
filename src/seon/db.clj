@@ -4613,6 +4613,41 @@
               :seon.error.basis/t (dbi/-max-tx database)})
       (assoc-in [:seon.error/data :seon.db.write.attempt/transaction] transaction)))
 
+(defn- prepared-write
+  "The request the writer applies for `transaction`: JDK integers as longs,
+  the final-report validator in its metadata, values encoded by `projection`."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.store/transaction] :map]}
+  [projection transaction]
+  (schema.datahike/encode-transaction-in
+   projection
+   (jdk-integers->long
+    (assoc-in (if (map? transaction) transaction {:tx-data transaction})
+              [:tx-meta :datahike/validate-report] (write-report-validator projection)))))
+
+(defn- write-refusal
+  "The declared value of a write that threw: the validator's refusal, a Seon
+  transition refusal verbatim, Datahike's classified abort, else a diagnostic
+  whose outcome is unknown."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/transaction :seon.error/throwable]
+                  :seon.db/error-result]}
+  [database transaction throwable]
+  (let [data (error.refusal/refusal throwable)]
+    (cond
+      (:datahike/validation-refusal data) (:datahike/validation-refusal data)
+      (:seon.error/at data) data
+      (some? (:error data)) (rejected-value database transaction throwable data)
+      :else
+      (write-observation
+       database transaction
+       (error.refusal/diagnostic
+        {:seon.error/at (java.util.Date.)
+         :seon.error/layer :seon.db/database-write
+         :seon.error/operation 'seon.db/transact!
+         :seon.error/throwable throwable
+         :seon.error/message (or (ex-message throwable) (.getName (class throwable)))
+         :seon.error/data (or data {})
+         :seon.db/transaction-outcome-unknown true})))))
+
 (defn- transact-call
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.db/connection :seon.store/transaction]
@@ -4628,12 +4663,6 @@
                 declared-bound
                 (:seon.config/default
                  (m/properties (mr/schema (:seon.schema.projection/registry projection) bound-attribute)))
-                prepared
-                (jdk-integers->long
-                 (let [request (stamp-receipt transaction)
-                       request (if (map? request) request {:tx-data request})]
-                   (assoc-in request [:tx-meta :datahike/validate-report]
-                             (write-report-validator projection))))
                 ;; Every write, system writes included, is bounded by the
                 ;; branch's dial (lane-flow-owns-running-machinery.md N3,
                 ;; R6): a synchronous fault writer must never park forever.
@@ -4641,8 +4670,7 @@
                 (if (seq configured-bounds)
                   (apply min configured-bounds)
                   declared-bound)
-                request
-                (schema.datahike/encode-transaction-in projection prepared)
+                request (prepared-write projection (stamp-receipt transaction))
                 timeout (Object.)
                 ;; One deadline covers admission and acknowledgement: the
                 ;; writer's put! into its transaction queue runs inside the
@@ -4692,39 +4720,26 @@
                   :seon.error/data (merge evidence {:seon.error/member bound-attribute})}))
               report))))
     (catch Throwable throwable
-      (let [data (error.refusal/refusal throwable)]
-        (cond
-          (:datahike/validation-refusal data)
-          (:datahike/validation-refusal data)
+      (let [failure (write-refusal database transaction throwable)]
+        (when (and (:seon.db/transaction-outcome-unknown failure) (panic-on-core-error? connection))
+          (throw (ex-info (:seon.error/message failure) failure throwable)))
+        failure))))
 
-          ;; A Seon transition refusal returns its own value verbatim.
-          (:seon.error/at data)
-          data
-
-          ;; A Datahike abort keeps the dependency's classification.
-          (some? (:error data))
-          (rejected-value database transaction throwable data)
-
-          :else
-          (let [failure
-                (write-observation
-                 database transaction
-                 (error.refusal/diagnostic
-                  {:seon.error/at (java.util.Date.)
-                   :seon.error/layer :seon.db/database-write
-                   :seon.error/operation 'seon.db/transact!
-                   :seon.error/throwable throwable
-                   :seon.error/message
-                   (or (ex-message throwable)
-                       (.getName (class throwable)))
-                   :seon.error/data (or data {})
-                   :seon.db/transaction-outcome-unknown true}))]
-            (when (panic-on-core-error? connection)
-              (throw
-               (ex-info (:seon.error/message failure)
-                        failure
-                        throwable)))
-            failure))))))
+(defn with
+  "The value `transaction` would leave on `database`, never committed: the
+  writer's own checks and final-report validator (`prepared-write`), applied
+  by Datahike's `with`, carrying `database`'s projection state. A refusal is
+  the writer's declared value (`write-refusal`)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/transaction]
+                  [:or :seon.db/database-value :seon.db/error-result]]}
+  [database transaction]
+  (try
+    (let [projection (carried-projection database)]
+      (or (write-error database projection transaction)
+          (carry-projection-state (:db-after (d/with database (prepared-write projection transaction)))
+                                  (:seon.sci.eval/projection-state (meta database)))))
+    (catch Throwable throwable
+      (write-refusal database transaction throwable))))
 
 (defn- missing-transaction-data-error
   {:malli/schema [:=> [:cat :seon.schema/value] [:or :nil :seon.db/invalid-request-error]]}

@@ -4725,6 +4725,15 @@
        :seon.error/message "(my.agent/done) must be the last form of your reply; a disposition cannot precede another reply form."
        :seon.error/data {:seon.cluster.eval/source source}}))))
 
+(defn- settled-value
+  "The value `row`'s settlement leaves on `database`: its writer transaction
+  data (`row-tx`) applied through `seon.db/with`, never committed. A refusal
+  throws: settlement refuses the same row."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/row] :seon.db/database-value]}
+  [database row]
+  (let [value (db/with database (row-tx database {:seon.program/row row} row))]
+    (if (:seon.error/at value) (throw (ex-info (str (:seon.error/message value)) value)) value)))
+
 (defn evaluate-sources
   "Evaluate ordered sources in one fork without settling or staging them.
 
@@ -4764,14 +4773,21 @@
     (loop [remaining (seq sources)
            ordinal first-ordinal
            namespace-name starting-namespace
-           results []]
+           results []
+           working nil]
       (if-let [source (first remaining)]
         (let [form (assoc source :seon.cluster.eval/ns
                           [:seon.ns/name namespace-name])
-              database (or snapshot (db/db connection))
-              settled (into {} (keep #(let [row (get-in % [:seon.sci.eval/evaluation :seon.program/row])]
-                                         (when (:seon.ns/name row) [(:seon.ns/name row) row])))
-                            results)
+              ;; The run as its settlement will leave it: each later form reads
+              ;; the earlier forms' declarations, rebuilt only when another
+              ;; writer moved the value they were applied to.
+              latest (or snapshot (db/db connection))
+              [_ database :as working]
+              (if (= (db/commit-id latest) (first working))
+                working
+                [(db/commit-id latest)
+                 (reduce settled-value latest
+                         (keep #(get-in % [:seon.sci.eval/evaluation :seon.program/row]) results))])
               captured (atom [])
               _ (await-turn-part! cluster :seon.sci.eval/evaluation
                                   (:seon.config.eval/time-limit-ms cluster))
@@ -4797,10 +4813,7 @@
                              ;; around the form and its shown result only, so
                              ;; install, identity, profile and gate reads stay out.
                              :seon.db/read-evidence-sink captured)
-                handle (assoc :seon.repl/handle handle)
-                ;; The namespace rows earlier forms will settle: a definition
-                ;; digests with the row its transaction leaves stored.
-                (seq settled) (assoc :seon.sci.eval/settled-namespaces settled))
+                handle (assoc :seon.repl/handle handle))
               evaluation
               (render/call-with-walk-context
                {:seon.db/db database
@@ -4844,7 +4857,7 @@
                      evaluation
                      {:seon.cluster.eval/at at
                      :seon.cluster.eval/read-evidence (db/read-evidence @captured)
-                     :seon.cluster.eval/read-basis-transaction (db/basis-t database)})
+                     :seon.cluster.eval/read-basis-transaction (db/basis-t latest)})
               evaluation (cond-> evaluation
                            handle (assoc :seon.repl/handle handle))]
           (when (and entity-id
@@ -4868,7 +4881,10 @@
               results
               (recur (next remaining) (inc ordinal)
                      (or (:seon.sci.eval/ending-ns evaluation) namespace-name)
-                     results))))
+                     results
+                     (cond-> working
+                       (:seon.program/row evaluation)
+                       (update 1 settled-value (:seon.program/row evaluation)))))))
         results))))
 
 (defn preview-sources

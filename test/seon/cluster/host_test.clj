@@ -249,3 +249,19 @@
           (is (= [#:seon.ns.alias{:local 'str :target-ns 'clojure.string}]
                  (:seon.ns/aliases (db/pull (database) [{:seon.ns/aliases [:seon.ns.alias/local :seon.ns.alias/target-ns]}]
                                             [:seon.ns/name 'my.agents.switch-declared])))))))))
+
+(deftest a-run-reads-its-earlier-declarations
+  ;; Before the run's working value, a redefinition that broke a test defined
+  ;; earlier in the same run installed ungated: the gate read the connection,
+  ;; where the run's rows land only at settlement.
+  (with-host-world {}
+    (fn [{:keys [handle branch!]}]
+      (let [hosted (host-on! handle (branch!) "mcp/one-run")
+            shown (hosted-run! hosted (str "(defn run-square \"Square x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* x x))\n"
+                                           "(clojure.test/deftest run-square-test (clojure.test/is (= 16 (run-square 4))))\n"
+                                           "(defn run-square \"Square x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* x x x))\n"
+                                           "(run-square 4)"))]
+        (is (= "#'my.agents.host-probe/run-square" (first shown)) (pr-str shown))
+        (is (re-find #"install refused" (str (nth shown 2))) "the gate ran the earlier test and refused the break")
+        (is (= "16" (last shown)) "the first body stays installed within the run")
+        (is (= ["16"] (hosted-run! hosted "(run-square 4)")) "and after it settles")))))
