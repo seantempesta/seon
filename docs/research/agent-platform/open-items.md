@@ -36,6 +36,9 @@ callers to an existing component/function/test that does the same thing better (
   mode keywords) → one composer (topological: definitions before uses; turns by tx; each node once, later refs back-point;
   renders cached by content digest + face). Renderers MAY read the stable db value they are handed. Root gets a standing
   root task. `:seon.render/units` is to be deleted (the walk replaces it). The debug page shows it: `/agent/{id}/debug?n=0..3`.
+- **Where context executes** (owner 2026-09-26): in the same context the agent runs in — root's in its cluster; an
+  isolated experimental agent's fully contained (nothing escapes SCI, database changes only on its private fork) so root
+  merges back what it wants. No separate render fork. Authority comes only from held custody (AGENTS.md).
 - **AI renders are REPL entries, evaluated; HTML renders are hiccup** (owner 2026-09-26, refining the same-day "text"
   ruling). An AI render returns `;;` comments and forms; the one REPL path evaluates each form read-only in the viewing
   agent's SCI world (disposable fork, cached by content digest) and prints form + result — the context is a `clojure.main`

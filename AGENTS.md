@@ -166,7 +166,9 @@ Private experiments remain possible; local green never implies shared acceptance
 - **Authority comes only from held custody** (owner 2026-09-26). Agent code, render entries and tests obtain a
   connection or capability only as the custody their caller already holds: no function conjures another branch's
   connection, the process connection, or an effect handler outside admission. Every program function is callable, with
-  authority only from its custody. Renders evaluate on a throwaway fork (no connection, the run's working value).
+  authority only from its custody. An agent's context executes in the same context the agent runs in: root's in its
+  cluster; an isolated (experimental) agent's inside its SCI containment with every database change on its own private
+  fork, so nothing escapes by default and root merges back only what it wants.
 - **Pass the world explicitly.** Carry database/connection, projection, environment,
   render profile, proc and settlement inputs, including profiling/test ownership.
   Custody elides agent db/conn only; it does not authorize more ambient services.
