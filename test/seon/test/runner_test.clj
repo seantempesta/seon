@@ -48,7 +48,7 @@
            (:seon.test/failing-assertions result)))
     (is (str/includes? output "assertion-report-uses-bounded-value-renderer"))
     (is (str/includes? output "runner_test.clj:99"))
-    (is (str/includes? output ":seon.print/omitted"))
+    (is (re-find #"…\+?\d+" output) "the one cut face names what was omitted")
     (is (str/includes? output (#'runner/report-value options ctx)))
     (is (< (count output) 1500) "The small supplied profile bounds the SCI world.")
     (is (not (str/includes? output "value1999")))))
@@ -80,7 +80,7 @@
         stored (:seon.test.failure/reports (first (#'runner/captured-results @capture)))]
     (is (< (count failed) 20000) (str "the red report printed " (count failed) " chars"))
     (is (< (count errored) 20000) (str "the error report printed " (count errored) " chars"))
-    (is (str/includes? failed ":seon.print/omitted") "the elision is named")
+    (is (re-find #"…\+?\d+" failed) "the cut names what was omitted")
     (is (= huge (:seon.test.failure/message (first stored)))
         "the stored failure keeps the whole message for the blob tier")))
 

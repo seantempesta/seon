@@ -64,7 +64,11 @@
 
 (defn bounded-text
   "`value` as at most `limit` characters (rule 3 over `datum`); `…` marks the
-  limit, `#unprintable[value-class failure-class]` a value whose printing throws."
+  limit, `#unprintable[value-class failure-class]` a value whose printing throws.
+
+  The projection-free core for when the projection, profile or admission is
+  what broke; kept beside the selection by root ruling 2026-09-26, with
+  `floor`, because diagnosis must survive the renderer failing."
   {:malli/schema [:function [:=> [:cat :seon.schema/value] :string]
                   [:=> [:cat :seon.schema/value [:int {:min 1}]] :string]]}
   ([value] (bounded-text value (:chars text-limits)))
@@ -119,7 +123,11 @@
 (defn floor
   "An unhandled Throwable as bounded text from the Throwable alone, one block
   of `link-lines` per cause. The leaf an error's rendering degrades to, never a
-  stored member."
+  stored member.
+
+  It keeps Seon's first-party frames: panics and test failures must keep the
+  whole cause (AGENTS.md, root ruling 2026-09-26). The one-render-path rule
+  that acquires no frames governs only the generic floor's selection."
   {:malli/schema [:=> [:cat :seon.error/throwable] :string]}
   [throwable]
   (let [chain (causes throwable)

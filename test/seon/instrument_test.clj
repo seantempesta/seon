@@ -715,10 +715,9 @@
     (is (str/includes? ai "100") ai)
     (is (not (str/includes? ai "139"))
         "the AI projection stops at the profile's child bound")
-    (is (str/includes? ai ":seon.print/bound-by :seon.render.profile/max-children") ai)
-    (is (str/includes? ai ":seon.print/omitted 37") ai)
-    (is (str/includes? ai ":seon.render.data/total 40")
-        "the elision counts what it omitted and what was there")
+    ;; One cut face (one-render-path §3e): the shown members, then `…N`
+    ;; counting what was omitted of the 40 that were there.
+    (is (str/includes? ai "[100 101 102 …37]") ai)
     (is (str/includes? ai "(get-in result/eaudit [:seon.error/problems 0 :seon.error/offending])")
         "and it hands back the form that requeries the leaf it elided")
     (is (= [] (remove #(str/includes? html (str %)) member))

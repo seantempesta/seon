@@ -424,7 +424,7 @@
     (is (< (count output) bound) (str "the gate log printed " (count output) " chars"))
     (doseq [field [:seon.test.failure/expected :seon.test.failure/actual]]
       (is (< (count (get first-report field)) bound) (str field " is bounded by the render profile"))
-      (is (str/includes? (get first-report field) ":seon.print/omitted") (str field " names its elision")))
+      (is (re-find #"…\+?\d+" (get first-report field)) (str field " names its cut")))
     (is (= (:seon.test/failure-identity first-report)
            (#'runner/failure-identity options (symbol test-var) event))
         "the identity is stable across renders")
