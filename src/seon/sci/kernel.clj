@@ -14,7 +14,9 @@
   thread that actually runs the work. The deadline is a latch shared by the
   arm's value, so every thread serving one evaluation observes one deadline,
   counts into one entrance total, and is reachable by one `interrupt!`."
-  (:require [clojure.test.check.generators :as gen]
+  (:require [clojure.main :as main]
+            [clojure.string :as str]
+            [clojure.test.check.generators :as gen]
             [sci.core :as sci]
             [sci.impl.utils :as sci.utils]
             [sci.interrupt :as sci.interrupt]
@@ -535,6 +537,21 @@
     (assoc link :seon.error/data data)
     (dissoc link :seon.error/data)))
 
+(defn- execution-error-text
+  "`clojure.main`'s own text for one exception an agent's code threw:
+  `ex-triage` names the root class and message, and SCI's location (the
+  form's line, column and file) stands where clojure.main names its compiled
+  frame, which here would be the interpreter's own."
+  {:malli/schema [:=> [:cat :seon.error/throwable] [:string {:min 1}]]}
+  [throwable]
+  (let [{:keys [line column file]} (ex-data throwable)]
+    (str/trim
+     (main/ex-str
+      (cond-> (dissoc (main/ex-triage (Throwable->map throwable)) :clojure.error/symbol)
+        true (assoc :clojure.error/source (or file "REPL"))
+        (int? line) (assoc :clojure.error/line line)
+        (int? column) (assoc :clojure.error/column column))))))
+
 (defn failure-value
   "Preserve an existing structural refusal and accrete guard evidence.
   Otherwise return the kernel declared-schema with the observed evaluation duration;
@@ -579,8 +596,7 @@
           (cond->> (if timed-out?
                      (str "Ran out of time after "
                           (:seon.eval/duration-ms diagnostic-record) "ms.")
-                     (or (ex-message throwable)
-                         (.getName (class throwable))))
+                     (execution-error-text throwable))
             subject (str "Invocation of " subject " failed: ")))
         :seon.error/data (merge (cond-> evidence
         throwable-data
@@ -588,8 +604,9 @@
 
         (:sci.impl/symbol throwable-data)
         (assoc :seon.sci.eval/symbol (:sci.impl/symbol throwable-data))) {:seon.sci.admit/record diagnostic-record})
-        :seon.error/throwable throwable
-        :seon.error/expected :successful-evaluation}
+        ;; An agent's own exception is an ordinary value, not a refusal:
+        ;; it names no expected requirement it failed.
+        :seon.error/throwable throwable}
         ;; Absent, never stored nil: a failure without a failing symbol or
         ;; subject (a reader error) names no offending value.
         (when-let [offending (or (:sci.impl/symbol throwable-data) subject)]
