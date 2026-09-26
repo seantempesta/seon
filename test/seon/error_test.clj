@@ -58,14 +58,14 @@
            observation (test-support/refusal-data
                         #(@#'sci.eval/acquisition-refusal row
                           (ex-info "row installation failed" {:seon.error-test/cause 42})))]
-       (is (= (second lookup) (:seon.sci.eval/row-member observation)))
+       (is (= (second lookup) (:seon.sci.eval/row-symbol observation)))
        (is (= "row installation failed"
               (get-in observation [:seon.sci.eval/acquisition-observation
                                    :seon.error.evidence/value])))
        (is (not (contains? observation :seon.sci.eval/requested-program)))
        (is (schema/valid-candidate-value? projection :seon.sci.eval/row-acquisition-error observation))
        (is (not (schema/valid-candidate-value? projection :seon.sci.eval/acquisition-error observation)))
-       (when (:seon.sci.eval/row-member observation)
+       (when (:seon.sci.eval/row-symbol observation)
          ;; the producer names its declared schema (required since a86e93e21);
          ;; the writer keeps that schema's distinguishing members
          (let [recording (error/recording database
@@ -79,7 +79,7 @@
            (is (schema/valid-candidate-value? projection :seon.sci.eval/row-acquisition-error stored))
            (is (= (:seon.sci.eval/acquisition-observation observation)
                   (dissoc (:seon.sci.eval/acquisition-observation stored) :db/id)))
-           (is (= (second lookup) (:seon.sci.eval/row-member stored)))
+           (is (= (second lookup) (:seon.sci.eval/row-symbol stored)))
            (is (not (contains? stored :seon.sci.eval/requested-program))))))))))
 
 (deftest error-identity-and-occurrences-are-owned-by-the-writer

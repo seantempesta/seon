@@ -268,7 +268,7 @@
                                                  :seon.error/operation 'seon.sci.eval/build-base-ctx
                                                  :seon.error/message "Interpreter binding is unavailable; load its declared JVM namespace."
                                                  :seon.error/offending qualified
-                                                 ::row-member qualified
+                                                 ::row-symbol qualified
                                                  ::acquisition-observation {:seon.error.evidence/attribute :seon.fn/sym
                                                                             :seon.error.evidence/value qualified}
                                                  :seon.error/expected :seon.sci.eval/loaded-binding})))
@@ -1966,7 +1966,7 @@
                        (when location (str " at " location)) ".")
                   diagnostic
                   (seon.error.refusal/diagnostic (java.util.Date.) ::acquisition 'seon.sci.eval/host-namespace!
-                   {:seon.sci.eval/row-member namespace-name
+                   {:seon.sci.eval/row-symbol namespace-name
                     :seon.sci.eval/acquisition-observation {:seon.error.evidence/attribute :seon.error/message
                      :seon.error.evidence/value cause-message}
                     :seon.error/message message
@@ -1983,7 +1983,7 @@
               (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.eval/program 'seon.sci.eval/host-namespace!
                {:seon.error/message "Loaded source defined no namespace; correct its namespace declaration."
                 :seon.error/offending namespace-name
-                ::row-member namespace-name
+                ::row-symbol namespace-name
                 ::acquisition-observation {:seon.error.evidence/attribute :seon.error/message
                                            :seon.error.evidence/value "Loaded source defined no namespace."}
                 :seon.error/member :seon.ns/name
@@ -2406,7 +2406,8 @@
       failure-data
       (cond->
        (seon.error.refusal/diagnostic (java.util.Date.) ::acquisition 'seon.sci.eval/acquisition-refusal
-        {:seon.sci.eval/row-member (second identity)
+        {(if (= :seon.schema/key (first identity)) :seon.sci.eval/row-schema-key :seon.sci.eval/row-symbol)
+         (second identity)
       :seon.sci.eval/acquisition-observation {:seon.error.evidence/attribute :seon.error/message
        :seon.error.evidence/value cause-message}
       :seon.error/message "Program row could not be installed; correct the reported acquisition evidence."
@@ -2425,7 +2426,8 @@
              [::acquisition-refused
               (get-in refusal [:seon.error/data ::acquisition-row])
               (or (:seon.sci.eval/refused-function refusal)
-                  (:seon.sci.eval/row-member refusal))
+                  (:seon.sci.eval/row-symbol refusal)
+                  (:seon.sci.eval/row-schema-key refusal))
               (:seon.error/operation refusal)
               (get-in refusal [:seon.error/data ::acquisition-cause-message])]))
 

@@ -82,7 +82,7 @@
 (defn- recorded-refusal
   "The stored acquisition refusal of `function` on `connection`'s branch, or nil.
   An agent row that cannot interpret is its agent's mistake, recorded with
-  `:seon.sci.eval/refused-function`, not `:seon.sci.eval/row-member`."
+  `:seon.sci.eval/refused-function`, not `:seon.sci.eval/row-symbol`."
   {:malli/schema [:=> [:cat :seon.db/connection :qualified-symbol] [:maybe :int]]}
   [connection function]
   (db/q '[:find ?error . :in $ ?function

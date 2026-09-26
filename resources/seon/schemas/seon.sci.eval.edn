@@ -280,12 +280,21 @@
   :seon.error/base
   [:map
    {:seon.db/attributes true}
-   [:seon.sci.eval/row-member :seon.sci.eval/row-member]
+   ;; exactly one names the observed member: a symbol, or a schema row's key
+   [:seon.sci.eval/row-member {:optional true} :seon.sci.eval/row-member]
+   [:seon.sci.eval/row-symbol {:optional true} :seon.sci.eval/row-symbol]
+   [:seon.sci.eval/row-schema-key {:optional true} :seon.sci.eval/row-schema-key]
    [:seon.sci.eval/acquisition-observation :seon.sci.eval/acquisition-observation]]]
 
  :seon.sci.eval/row-member
- [:or {:description "The program name observed while acquiring a row: a namespace, function or test symbol, or a schema keyword. A value observation, never a ref; deleting the named declaration leaves this evidence unchanged."}
+ [:or {:description "RETIRING (two adoptions): installed as a string, so a symbol could not be stored. No producer or reader remains; row-symbol and row-schema-key replace it. Its declaration goes in the next adoption, once no stored row schema requires it."}
   :symbol :qualified-keyword]
+
+ :seon.sci.eval/row-symbol
+ [:symbol {:description "The namespace, function or test symbol observed while acquiring a row, stored as a native symbol. A value observation, never a ref; deleting the named declaration leaves this evidence unchanged. Replaces :seon.sci.eval/row-member, which installed as a string."}]
+
+ :seon.sci.eval/row-schema-key
+ [:qualified-keyword {:description "The schema key observed while acquiring a schema row, stored as a native keyword. A value observation, never a ref."}]
 
  :seon.sci.eval/acquisition-error
  [:and

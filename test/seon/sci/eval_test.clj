@@ -885,7 +885,7 @@
                                         :seon.error.evidence/value])]
         (is (schema/valid-candidate-value? (schema/handed-projection)
                                           :seon.sci.eval/row-acquisition-error data))
-        (is (= probe-namespace (:seon.sci.eval/row-member data)))
+        (is (= probe-namespace (:seon.sci.eval/row-symbol data)))
         (is (str/includes? cause-message "absent.namespace"))
         (is (str/ends-with? (:clojure.error/source location)
                             "unresolved_var_probe.clj"))
@@ -1560,7 +1560,7 @@
          '[:find ?error .
            :where
            [?error :seon.error/occurrences ?occurrence]
-           [?occurrence :seon.sci.eval/row-member acquire.poison/bad]]
+           [?occurrence :seon.sci.eval/row-symbol acquire.poison/bad]]
          (db/db connection))))]
      (is
       (= 42 (sci/eval-string* ctx "(acquire.poison/good 41)"))
@@ -1613,7 +1613,7 @@
                      #(eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)}))
            occurrence '[:find ?error .
                         :where [?error :seon.error/occurrences ?occurrence]
-                        [?occurrence :seon.sci.eval/row-member acquire.custody/bad]]]
+                        [?occurrence :seon.sci.eval/row-symbol acquire.custody/bad]]]
        (is (true? (:seon.sci.eval/acquisition-refusals-recorded? acquired))
            (pr-str (:seon.sci.eval/acquisition-recording-error acquired)))
        (is (int? (db/q occurrence (db/db connection)))
