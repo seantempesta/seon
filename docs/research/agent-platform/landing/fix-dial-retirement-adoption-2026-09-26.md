@@ -110,3 +110,22 @@ The fix is general, so the next dial deletion needs no two-step retirement.
    `--test seon.schema-in-place-test/a-required-key-retires-with-its-entity-schema-in-one-transaction`,
    `--ns seon.config-test`, `--ns seon.schema-in-place-test`, `--ns seon.turn-work-test`,
    `--ns seon.db-test`, `--ns seon.db-error-test`, `--ns seon.error-test`, `--test seon.operator-test/operator-reads-refusals-that-carry-vars-and-objects`.
+
+## Follow-up: reported settlement refusal after e6b559711 (not reproduced)
+
+Root reported that a branch settlement (`:smoke-5`) was refused with "Transaction report validation rejected." on HEAD
+447dcb22a. I tried to reproduce it on live default (pid 21381, loaded commit 6ab81595, `validate-write-report` and
+`attempted-transaction` loaded) using fresh MCP branches `fix-dial-smoke` and `fix-dial-smoke-b`. Both branches are
+now retired. Runs, all settled with correct values and no exception flags:
+- `(+ 1 2)`
+- `(defn smoke-inc "Adds one." {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))`
+- `(smoke-inc 1)`
+- the defn plus the call in a `do`
+- the defn plus two calls as three forms in one run
+- a `deftest` plus a call
+
+A bad argument, `(smoke-inc "a")`, returned the declared contract refusal. A redefinition returned "Fix the contract
+or the function and re-evaluate the defn." That was expected: the redefinition makes `smoke-inc-test`, which reaches
+it, fail. It was not a writer refusal. `data/clusters/default/logs/seon.log` has no "validation rejected" line after
+18:40:17Z, which was the original dial failure under pid 15369. Nothing was logged since this JVM booted at 18:56Z.
+Needed from root: `:smoke-5`'s exact forms and its turn id, or the MCP reply. I did not fix anything blind.
