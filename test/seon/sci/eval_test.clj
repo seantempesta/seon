@@ -166,8 +166,16 @@
                           :seon.agent/id "s3-fixture"
                           :seon.ns/name 'my.agents.s3-fixture}))
      (let [before (db/db connection)
+           ;; The indexed row, analyzed from the world's stored source through
+           ;; the production path (0.3 s); the one-argument form built the
+           ;; whole-checkout manifest (15 s cold).
+           canonical (test-support/program-fn-row
+                      before 'seon.id/valid?
+                      (:seon.fn/source (db/pull before [:seon.fn/source]
+                                                [:seon.fn/sym 'seon.id/valid?]))
+                      {:seon.schema.admission/source :core})
            original (merge (db/pull before '[*] [:seon.fn/sym 'seon.id/valid?])
-                           (test-support/program-fn-row 'seon.id/valid?))
+                           canonical)
            initial (eval/base-ctx before)
            fork (fn [base previous database]
                   (:seon.sci.eval/ctx
@@ -205,7 +213,7 @@
              installed (eval/install-row! {:seon.sci.eval/ctx initial
                                             :seon.db/db after
                                             :seon.program/row
-                                            (assoc (test-support/program-fn-row 'seon.id/valid?)
+                                            (assoc canonical
                                                    :seon.schema.admission/source :agent
                                                    :seon.fn/source (:seon.fn/source admitted))})
              b-next (fork initial b after)
@@ -261,7 +269,7 @@
              regenerated (eval/base-ctx restored)]
          (eval/install-row! {:seon.sci.eval/ctx initial :seon.db/db restored
                              :seon.program/row
-                             (assoc (test-support/program-fn-row 'seon.id/valid?)
+                             (assoc canonical
                                     :seon.fn/source (:seon.fn/source original))})
          (is (nil? (:seon.schema.admission/note
                     (eval/documentation-value restored 'seon.id/valid? 'seon.id/valid?))))
@@ -428,7 +436,7 @@
             :seon.print/level 2}
            (:seon.print/options evaluation)))))
 
-(deftest
+(deftest ^{:seon.test/fixture-observation "Reloads the JVM namespace seon.sci.eval, which every cluster in the process shares; a branch isolates no loaded Var, so on a shared JVM the reload replaces default's roots and generator Vars mid-run."}
   the-evaluator-remains-live-after-its-namespace-reloads
   (test-support/preserving-instrumentation-state
     (fn []

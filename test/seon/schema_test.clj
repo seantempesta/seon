@@ -1136,8 +1136,17 @@
       (is (false? ((schema/projection-validator projection :seon.fn/arities) [{}]))
           "an empty map is not a component entity"))
     (testing "the canonical indexed function row validates"
-      (is ((schema/projection-validator projection :seon.fn/fn)
-           (test-support/program-fn-row 'seon.id/id))))
+      ;; The indexed source analyzed through the production path against the
+      ;; member's world (0.3 s, the stored digest); the one-argument form built
+      ;; the whole-checkout manifest (15 s cold) and refused on the dev roots.
+      (test-support/with-database
+       (fn [connection]
+         (let [database (seon.db/db connection)
+               source (:seon.fn/source (seon.db/pull database [:seon.fn/source]
+                                                     [:seon.fn/sym 'seon.id/id]))]
+           (is (string? source) "the world holds the indexed row")
+           (is ((schema/projection-validator projection :seon.fn/fn)
+                (test-support/program-fn-row database 'seon.id/id source)))))))
     (testing "shape selection still picks each row's own family"
       (let [projection (schema/build-projection forms)
             matches (fn [value]
