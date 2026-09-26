@@ -225,8 +225,9 @@
             :seon.program/conflict #{[:seon.fn/sym (f :conflict)]}}
            (dissoc (apply program/three-way maps) :seon.program/conflict-digests)))
     (is (not-any? #(contains? % [:seon.fn/sym (f :same)]) maps) "Unchanged rows are never read")
-    (is (= :seon.program/scope
-           (refusal (with base [{:seon.ns/name 'scoped :seon.program/definition-digest digest-b}]))))
+    (is (= #{[:seon.ns/name 'scoped]}
+           (program/changed-identities base (with base [{:seon.ns/name 'scoped :seon.program/definition-digest digest-b}]) bound))
+        "a namespace row (its requires) is a change like any declaration")
     (is (= :seon.program/read-bound
            (:seon.program/missing-evidence
             (program/changed-identities base branch {:seon.program/max-datoms 1}))))

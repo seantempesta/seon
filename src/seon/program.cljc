@@ -589,7 +589,7 @@
      "Declarations whose digest `database` asserted or retracted after `base`
   (a value, or a basis-t on `database`'s own lineage),
   deleted ones named by history: `digest-map`'s scoping identities. Only
-  functions and tests may change; another or no family, missing history and
+  functions, tests and namespaces may change; another or no family, missing history and
   more than `:seon.program/max-datoms` changed entities refuse by name.
   Datahike indexes no transaction prefix: this walks the digest's history."
      {:malli/schema
@@ -611,7 +611,7 @@
                      past entities (vec (:seon.program/compared-families
                                          (declaration-families (carried database))))))
            identities (when-not (:seon.error/at rows) (into #{} (map (comp vec rest)) rows))
-           outside (into #{} (remove (comp #{:seon.fn/sym :seon.test/sym} first)) identities)]
+           outside (into #{} (remove (comp #{:seon.fn/sym :seon.test/sym :seon.ns/name} first)) identities)]
        (cond
          (:seon.error/at rows)
          (refuse :seon.program/history "The changes since the base need readable history."
@@ -624,7 +624,7 @@
                  "A changed digest belongs to no compared declaration family."
                  {:seon.error/expected-key :seon.program/declaration-identity})
          (seq outside)
-         (refuse :seon.program/scope "Only function and test declarations may change here."
+         (refuse :seon.program/scope "Only function, test and namespace declarations may change here."
                  {:seon.error/offending outside})
          :else identities))))
 
