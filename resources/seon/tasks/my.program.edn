@@ -17,4 +17,15 @@
              :intent "breaks for a contract change takes the contract only as a string, titles every plan issue 'must be repaired before retracting', lists the subject as its own caller, and never states the arity mismatch (call sites show the old arity only); the install gate does not consult it for an arity-changing redefinition."
              :must-read #{my.program/breaks}
              :evidence #{"docs/research/agent-platform/dogfood-maintainer-opus-2026-09-26.md"
-                         "docs/seon/issues/breaks-for-a-contract-change-plans-a-retraction.md"}}]
+                         "docs/seon/issues/breaks-for-a-contract-change-plans-a-retraction.md"}}
+ #:seon.task{:id "5087cea7800e"
+             :name "breaks-costs-seconds-on-a-hub"
+             :kind :function
+             :intent "my.program/breaks takes 7.8 s on a hub (seon.db/q, armed): proposed-plan -> gate-sets with ~2M datom calls; ns-unmap! and native-call-refusal inherit it. Selection must follow call reach per the owner ruling and stay sub-second."
+             :must-read #{my.program/breaks}
+             :evidence #{"docs/research/agent-platform/docs-exploration-2026-09-26.md"}}
+ #:seon.task{:id "2497b961dccc"
+             :name "refusal-names-nonexistent-define"
+             :kind :function
+             :intent "native-call-refusal tells agents to use my.program/define!, which does not exist (src/my/program.clj:791); a refusal's fix must name a real entrance."
+             :evidence #{"docs/research/agent-platform/docs-exploration-2026-09-26.md"}}]

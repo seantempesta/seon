@@ -31,4 +31,9 @@
              :intent "A stop that misses armer quiescence keeps the route listener: a wedged proc cannot run its own stop transition. Recommended option 2 queues flow/stop even on a miss (about 15 lines in disarm-agents!)."
              :must-read #{seon.cluster/disarm-agents!}
              :evidence #{"docs/research/agent-platform/landing/inv-lifecycle-storage-opus-2026-09-26.md"
-                         "docs/seon/issues/a-cluster-stop-that-misses-armer-quiescence-keeps-the-route-listener.md"}}]
+                         "docs/seon/issues/a-cluster-stop-that-misses-armer-quiescence-keeps-the-route-listener.md"}}
+ #:seon.task{:id "d8f73961e44f"
+             :name "adoption-write-costs-sixteen-seconds"
+             :kind :function
+             :intent "start --head spends 15.9 s in the adoption write, mostly seon.db with-declarations x18,794; over the one-second rule. Cost must follow the changed declarations."
+             :evidence #{"docs/research/agent-platform/landing/fix-dial-retirement-adoption-2026-09-26.md"}}]
