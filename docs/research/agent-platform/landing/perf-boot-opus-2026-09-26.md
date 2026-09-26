@@ -208,3 +208,51 @@ Options (simplest first):
 
 Nothing is committed for this resume, so nothing new needs a restart. The next step waits on root's pick and on
 analyzer.clj/fs.clj ownership.
+
+## Resume 3 — option 1 landed (46ad08a41) + audit F10; RESET NEEDED
+
+Ownership: I took `src/seon/cluster.clj` (released by cache-central) and `fn/analyzer.clj` and `fs.clj` (row 703).
+`schema.clj`: only the `canonical-value-string` change, which root allowed to stay; defn-scan-opus owns the file.
+
+**Measurements** (live default, bb07fdf08 inputs, all 819 files, `tmp/perf-boot-opus/ab.clj`):
+- Unarmed scratch copies, HEAD vs this tree, same inputs, alternating runs: **10.9 / 11.2 s → 9.2 / 9.4 s** (−16%).
+  Rows are equal: 9,518 = 9,518, set-equal.
+- Armed live `analyze-rows` in a quiet window: 10.9 s (kondo 3.6 s, analyzer post-processing 2.4 s, the rest ~4.8 s).
+  The earlier 21–35 s numbers were machine load (concurrent test runs), not our code.
+- `canonical-value-string` on the same rows: 309–370 ms armed-recursive → 181–214 ms local, output equal.
+
+**Remaining cost at boot.** What's left of the 81.6 s boot store→branch: this ~9 s warm analysis, ~2.8 s of contract
+rows, a ~5 s transaction, and JIT-cold multipliers. Option 2 (per-file parallel derivation) would cut into the ~5 s
+of post-kondo derivation. That is a ~5 s warm gain, not enough to meet the 10 s law, and kondo cold dominates at boot.
+My recommendation: measure the next boot before starting a second slice.
+
+**What changed:**
+- `analyzer/parsed-facts` is the one parse of each captured source. It also yields `::mentioned-symbols`, so
+  `analyzed-artifacts` no longer parses and sexprs every file a third time.
+- `innermost-span` binary-searches start-ordered spans instead of sorting a filter over every span, per usage. It
+  keeps the same answer rule: the last start among containing spans, ties in original order.
+- The previous rows are read as names only (`:seon.ns/name`, `:seon.fn/sym`), not the whole rows.
+- `fs/canonical-relative-path` is pure for canonical paths under a canonical directory; `artifact` uses it.
+- The canonical printer recurses through a local fn.
+
+**Audit F10:**
+- Boot reads `source/current` once. It hands that commit to `published-program` (now `[store commit-id]`) and to
+  `name-loaded-program!`.
+- The loaded inputs now include every packaged schema resource, which with the source files are what arming compiles
+  from. Supplied defaults come from the same pre-adoption cluster database on both paths.
+- REPL proof: 330 inputs in 84 ms. The current commit is named; the parent and a one-resource-changed map name nothing.
+- New regression: `seon.cluster.program-change-test/the-loaded-program-inputs-include-every-arming-input`.
+- Not added: Astra's multi-cluster and publication-during-arming boot regressions. They need a destructive boot
+  harness, which is root's.
+
+**Static check:** `seon.contracts-compile-test/check` over the 7 changed files → `[]`.
+
+**Root runs after the restart** (this commit changes the analyzer identity, so expect one full republication; report
+its store→branch ms):
+1. `bin/test-check default --ns seon.cluster.program-change-test`
+2. `bin/test-check default --test seon.schema-test/canonical-encoding-remains-byte-identical-after-dispatch-reorder`,
+   then `--ns seon.schema-encoding-test`
+3. `bin/test-check default --ns seon.fn.caller-lint-test`, `--ns seon.fn.publication-cache-test`,
+   `--ns seon.fn.incremental-deletion-test`, `--ns seon.fn.analyzer-test`
+4. `bin/test-check default --ns seon.fs-test` (if present) and `--ns seon.cluster.publication-delta-test`
+5. Read `:seon.boot/layers` and confirm `development-source-refresh!` shows no reload/arming growth.
