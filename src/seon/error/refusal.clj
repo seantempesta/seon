@@ -1,5 +1,6 @@
 (ns seon.error.refusal
-  "Pure diagnostic construction and cause-chain reading for error boundaries.")
+  "Diagnostic construction and cause-chain reading for error boundaries. An
+  error holds references, never copies: every world in it is referenced here.")
 
 (def ^:private machinery-namespace-prefixes
   ;; DERIVED FROM WHAT THESE FRAMES ARE, exactly as
@@ -83,29 +84,125 @@
   (when throwable
     (first (stack-frames (peek (cause-links throwable))))))
 
+;;; WORLDS ARE REFERENCED, NEVER COPIED (owner 2026-09-26). Which values are
+;;; worlds is the registry's answer, not a class roster: every schema declared
+;;; `:seon.schema/identity-only` (a database value, a connection, a schema
+;;; projection, an environment, an SCI context) names the projection of its
+;;; value to identity data — exactly what value admission stores in its place
+;;; (`seon.sci.admit/open-node`, admit.clj:305-346). LOAD-CYCLE BOUNDARY:
+;;; `seon.schema` requires this namespace, so its two seams are resolved once,
+;;; at first use.
+(defonce ^:private schema-seam
+  (delay {:handed (requiring-resolve 'seon.schema/handed-projection)
+          :projector (requiring-resolve 'seon.schema/identity-only-projector)}))
+
+(defn- operation-projection
+  "The projection handed to the operation running now, or nil."
+  []
+  ((:handed @schema-seam)))
+
+(defn- identity-projector
+  [projection]
+  (if projection ((:projector @schema-seam) projection) (constantly nil)))
+
+(defn- referenced
+  "`value` with every world inside it replaced by its identity; a collection
+  holding no world is returned identical."
+  [project value]
+  (if-some [declared (project value)]
+    (referenced project (:seon.schema/identity-value declared))
+    (cond
+      (record? value) value
+      (or (map? value) (vector? value))
+      (reduce-kv (fn [held k v]
+                   (let [r (referenced project v)]
+                     (if (identical? r v) held (assoc held k r))))
+                 value value)
+      (set? value)
+      (let [members (map (fn [v] [v (referenced project v)]) value)]
+        (if (every? (fn [[v r]] (identical? v r)) members)
+          value
+          (into (empty value) (map second) members)))
+      :else value)))
+
+(defn references
+  "`value` with every world in it — any value a schema declares
+  identity-only in `projection` — replaced by that world's identity data:
+  a database is its name and basis-t, a connection its id, a projection its
+  fingerprint, an environment or SCI context the references it holds. Maps,
+  vectors and sets are entered; records, sequences and other objects are
+  not. Without a projection nothing is recognized and `value` is returned."
+  {:malli/schema [:=> [:cat [:maybe :map]
+                       [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Error evidence is arbitrary producer data; only registry-declared worlds inside it are replaced.", :gen/elements [nil false 0 "" :k [] {}]}]]
+                  [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Returns the supplied data with its worlds referenced.", :gen/elements [nil false 0 "" :k [] {}]}]]}
+  [projection value]
+  (referenced (identity-projector projection) value))
+
+(defn- link
+  [project ^Throwable throwable relation]
+  (let [frames (filterv first-party-frame? (stack-frames throwable))
+        message (ex-message throwable)
+        data (ex-data throwable)]
+    (cond-> (merge {:seon.error/throwable-class (.getName (class throwable))} relation)
+      (seq message) (assoc :seon.error/message message)
+      data (assoc :seon.error/data (referenced project data))
+      (seq frames) (assoc :seon.error/frames frames))))
+
 (defn chain
-  "The whole cause chain, outermost to root: per link its class, message and
-  `ex-data` (what `Throwable->map`, `clojure/core_print.clj:473`, reads), its
-  own first-party frames, and the chains of the throwables it suppressed — a
-  cleanup failure `.addSuppressed` kept beside the primary, which no cause
-  link reaches. A link without a message, data, first-party frame or
-  suppressed throwable omits the member."
-  {:malli/schema [:=> [:cat :seon.error/throwable] :seon.error/chain]}
-  [^Throwable throwable]
-  (mapv (fn [^Throwable link]
-          (let [frames (filterv first-party-frame? (stack-frames link))
-                suppressed (mapv chain (.getSuppressed link))
-                message (ex-message link)
-                data (ex-data link)]
-            (cond-> {:seon.error/throwable-class (.getName (class link))}
-              (seq message) (assoc :seon.error/message message)
-              data (assoc :seon.error/data data)
-              (seq frames) (assoc :seon.error/frames frames)
-              (seq suppressed) (assoc :seon.error/suppressed suppressed))))
-        (cause-links throwable)))
+  "The whole cause chain as FLAT links: first the primary chain, outermost to
+  root, as `Throwable->map` (`clojure/core_print.clj:473`) reads it — per link
+  its class, message, `ex-data` with worlds referenced, and first-party frames
+  — then every throwable a link suppressed (`.addSuppressed`: a cleanup
+  failure no cause link reaches) and that throwable's own causes. A suppressed
+  link names the index of the link that suppressed it
+  (`:seon.error/suppressed-by`); each of its causes names the index of the
+  link it caused (`:seon.error/cause-of`). A throwable seen once is not linked
+  again, so a cause cycle ends at its first repeat. The projection
+  recognizes worlds; the one-argument form uses the operation's handed one."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.error/throwable] :seon.error/chain]
+                  [:=> [:cat :seon.error/throwable [:maybe :map]] :seon.error/chain]]}
+  ([throwable] (chain throwable (operation-projection)))
+  ([throwable projection]
+   (let [project (identity-projector projection)]
+     (loop [pending [[throwable nil]] seen #{} links []]
+       (if-let [[head relation] (first pending)]
+         (let [own (vec (take-while (complement seen) (cause-links head)))
+               start (count links)
+               links (into links
+                           (map-indexed
+                            (fn [i t]
+                              (link project t (when relation
+                                                (if (zero? i) relation
+                                                    {:seon.error/cause-of (+ start i -1)})))))
+                           own)
+               suppressed (for [[i ^Throwable t] (map-indexed vector own)
+                                s (.getSuppressed t)]
+                            [s {:seon.error/suppressed-by (+ start i)}])]
+           (recur (into (subvec pending 1) suppressed) (into seen own) links))
+         links)))))
+
+(defn without-links
+  "`links` (a `chain`) without the links `drop?` selects, every remaining
+  relation renumbered to the kept positions. A relation naming a dropped link
+  names the nearest kept link after it (else before it), so a suppressed
+  failure stays attached to the chain it rode."
+  {:malli/schema [:=> [:cat :seon.error/chain [:=> [:cat :seon.error/link] :any]]
+                  [:vector :seon.error/link]]}
+  [links drop?]
+  (let [kept (into [] (remove (comp drop? links)) (range (count links)))
+        position (fn [old] (let [after (first (filter #(>= % old) kept))]
+                             (.indexOf ^java.util.List kept (or after (peek kept)))))
+        renumber (fn [entry k] (cond-> entry (find entry k) (update k position)))]
+    (mapv #(-> (links %)
+               (renumber :seon.error/suppressed-by)
+               (renumber :seon.error/cause-of))
+          kept)))
 
 (defn diagnostic
-  "Preserve the supplied observation, consuming only its optional Throwable.
+  "Preserve the supplied observation, consuming only its optional Throwable,
+  with every world in it referenced (`references`, under the operation's
+  handed projection).
   From the Throwable derive the outermost exception class, the whole cause
   `:seon.error/chain`, the ROOT cause's first complete stack frame, and —
   when the observation states none — the root cause's message."
@@ -121,16 +218,19 @@
     [:=> [:cat :seon.error/at :seon.error/layer :seon.error/operation :map]
      :seon.error/base]]}
   ([{:seon.error/keys [throwable message] :as observation}]
+  (let [projection (operation-projection)
+        observation (references projection (dissoc observation :seon.error/throwable))]
   (if throwable
-    (let [links (chain throwable)
+    (let [links (chain throwable projection)
           frame (root-frame throwable)
-          root-message (:seon.error/message (peek links))]
-      (cond-> (assoc (dissoc observation :seon.error/throwable)
+          root-message (:seon.error/message
+                        (nth links (dec (count (cause-links throwable)))))]
+      (cond-> (assoc observation
                      :seon.error/exception-class (symbol (.getName (class throwable)))
                      :seon.error/chain links)
         frame (assoc :seon.error/frame frame)
         (and (nil? message) root-message) (assoc :seon.error/message root-message)))
-    observation))
+    observation)))
   ([at layer operation members]
    (diagnostic (merge {:seon.error/at at :seon.error/layer layer
                        :seon.error/operation operation}

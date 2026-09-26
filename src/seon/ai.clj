@@ -728,8 +728,7 @@
   {:malli/schema [:=> [:cat :string :string] :seon.ai/unparseable-body-error]}
   [payload reason]
   (vary-meta (seon.error.refusal/diagnostic (java.util.Date.) :seon.ai/request 'seon.ai/unreadable-stream-data
-   {:seon.error/offending payload
-       :seon.error/message (str "The provider stream carried unreadable data: " reason ".")
+   {:seon.error/message (str "The provider stream carried unreadable data: " reason ".")
        :seon.error/data {::body payload}
        :seon.ai/unreadable-response-member "body"
        :seon.error/expected "provider JSON with a textual assistant response"}) assoc :seon.error/declared-schema :seon.ai/unparseable-body-error))
@@ -1410,7 +1409,6 @@
             (vary-meta {:seon.error/at (java.util.Date.)
        :seon.error/layer :seon.ai/request
        :seon.error/operation 'seon.ai/send-request
-       :seon.error/offending body
        :seon.error/message (str "The provider answered " status ".")
        :seon.error/data {::status status
                                ::body body

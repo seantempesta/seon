@@ -288,8 +288,12 @@
               [:seon.error/throwable-class :seon.error/throwable-class]
               [:seon.error/message {:optional true} :seon.error/message]
               [:seon.error/data {:optional true} :seon.error/data]
-              [:seon.error/frames {:optional true} :seon.error/frames]],
-             :chain [:vector {:min 1 :description "The whole cause chain of a recorded Throwable, outermost to root. Evidence, not an attribute: it rides the observation and its admitted evidence content."} :seon.error/link],
+              [:seon.error/frames {:optional true} :seon.error/frames]
+              [:seon.error/suppressed-by {:optional true} :seon.error/suppressed-by]
+              [:seon.error/cause-of {:optional true} :seon.error/cause-of]],
+             :suppressed-by [:int {:min 0 :description "The index in the same chain of the link that suppressed this throwable (Throwable.addSuppressed): a cleanup failure kept beside the primary, which no cause link reaches."}],
+             :cause-of [:int {:min 0 :description "The index in the same chain of the suppressed-chain link this throwable caused; primary-chain links carry no relation."}],
+             :chain [:vector {:min 1 :description "The whole cause chain of a recorded Throwable as flat links: the primary chain outermost to root, then suppressed throwables and their causes, each naming its relation by index. Evidence, not an attribute: it rides the observation and its admitted evidence content."} :seon.error/link],
              :exception-class [:symbol {:description "Throwable class as data; throwable-class retains the historical string evidence."}],
              :regressions [:set :seon.db/ref],
              :issue :seon.db/ref,

@@ -165,8 +165,13 @@
                                     :seon.program/subject 'sample/missing})]
        (is ((seon.schema/projection-validator projection :seon.program/read-refused-error) failed))
        (is (= 'my.program/callers (:seon.program/read-operation failed)))
-       (is (= {:sample/evidence 42}
-              (:seon.program/read-exception-data failed)))
+       (is (= [{:seon.error/throwable-class "clojure.lang.ExceptionInfo"
+                :seon.error/message "The read failed."
+                :seon.error/data {:sample/evidence 42}}]
+              (mapv #(dissoc % :seon.error/frames) (:seon.error/chain failed)))
+           "the read failure is its whole cause chain")
+       (is (= {:seon.program/subject 'sample/missing} (:seon.error/offending failed))
+           "the request is referenced by its subject, never copied")
        (is ((seon.schema/projection-validator projection :seon.program/context-unavailable-error) missing))
        (is (= #{:my.program/executing-ctx :my.program/base-ctx :seon.db/connection}
               (:seon.program/missing-context-members missing)))

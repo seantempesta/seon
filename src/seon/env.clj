@@ -78,6 +78,17 @@
   (and (instance? clojure.lang.IAtom value)
        (environment? @value)))
 
+(defn- members-of
+  "What a refusal holds for a supplied carrier: a map is its member names, any
+  other value its type — never the members, which are worlds (a connection,
+  a projection, an SCI context) an error references and never copies."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A refusal describes whatever value was supplied in place of an environment or carrier.", :gen/elements [nil false 0 "" :k [] {}]}]]
+                  [:or [:vector :any] :symbol]]}
+  [value]
+  (if (map? value)
+    (vec (sort-by str (keys value)))
+    (symbol (pr-str (type value)))))
+
 (defn environment-state
   "Create the one replacement reference for a cluster's immutable environment."
   {:malli/schema
@@ -87,10 +98,9 @@
     (throw
      (ex-info "Environment state requires a complete environment value."
               (seon.error.refusal/diagnostic (java.util.Date.) ::construction 'seon.env/environment-state
-               {:seon.error/offending environment
+               {:seon.error/offending (members-of environment)
     ::expected-schema :seon.env/environment
-    :seon.error/message "Environment state requires an environment value."
-    :seon.env/supplied (str (type environment))}))))
+    :seon.error/message "Environment state requires an environment value."}))))
   (atom environment))
 
 (defn replace-environment!
@@ -103,10 +113,9 @@
     (throw
      (ex-info "Environment replacement requires an environment value."
               (seon.error.refusal/diagnostic (java.util.Date.) ::construction 'seon.env/replace-environment!
-               {:seon.error/offending environment
+               {:seon.error/offending (members-of environment)
     ::expected-schema :seon.env/environment
-    :seon.error/message "Environment replacement requires an environment value."
-    :seon.env/supplied (str (type environment))}))))
+    :seon.error/message "Environment replacement requires an environment value."}))))
   (reset! state environment))
 
 (defn advance-projection!
@@ -209,15 +218,12 @@
   {:malli/schema [:=> [:cat :map :map] :seon.env/incomplete-environment-error]}
   [{member :seon.env/member layer :seon.env/layer} supplied]
   (seon.error.refusal/diagnostic (java.util.Date.) ::construction 'seon.env/absent-member-error
-   {:seon.error/offending supplied
+   {:seon.error/offending (members-of supplied)
     ::missing-member member
     ::provided-member-count (count supplied)
-    ::available-members (set (keys supplied))
     :seon.error/message (str "The " (name (or layer :unknown)) " layer did not supply "
         member "; an environment is never partially handed out.")
-    :seon.error/data {:seon.env/layer layer
-                     :seon.env/member member
-                     :seon.env/supplied (vec (sort (keys supplied)))}}))
+    :seon.error/data {:seon.env/layer layer}}))
 
 (defn- construct
   {:malli/schema [:=> [:cat :seon.schema/value :boolean]
@@ -226,10 +232,9 @@
   [supplied boot?]
   (if-not (map? supplied)
     (seon.error.refusal/diagnostic (java.util.Date.) ::construction 'seon.env/construct
-     {:seon.error/offending supplied
+     {:seon.error/offending (members-of supplied)
     ::expected-schema :map
-    :seon.error/message "An environment is constructed from a map of members."
-    :seon.error/data {:seon.env/supplied (str (type supplied))}})
+    :seon.error/message "An environment is constructed from a map of members."})
     (or
      ;; Dependency order is the schema's entry order, so the FIRST absent
      ;; member names the earliest layer that did not stand. Member SHAPES
@@ -289,18 +294,16 @@
      (ex-info
       "Scoping requires an environment; there is nothing to narrow."
       (seon.error.refusal/diagnostic (java.util.Date.) ::construction 'seon.env/scope
-       {:seon.error/offending carried
+       {:seon.error/offending (members-of carried)
     ::boundary ::scope
     ::provided-member-count (if (map? carried) (count carried) 0)
-    ::available-members (if (map? carried) (set (keys carried)) #{})
     :seon.error/message "Scoping requires a carried environment value."
-    :seon.error/data {:seon.env/supplied (str (type carried))}
     :seon.error/member :seon.env/environment
     :seon.error/expected :seon.env/environment}))))
   (let [outside (vec (sort (remove @turn-members (keys supplied))))]
     (if (seq outside)
       (seon.error.refusal/diagnostic (java.util.Date.) ::construction 'seon.env/scope
-       {:seon.error/offending supplied
+       {:seon.error/offending (members-of supplied)
     ::unscopable-members outside
     :seon.error/message "Only turn-layer members may be scoped onto an existing environment."
     :seon.error/expected @turn-members
@@ -345,8 +348,7 @@
   (if-let [agent-id (:seon.agent/id carried-environment)]
     agent-id
     (seon.error.refusal/diagnostic (java.util.Date.) ::construction 'seon.env/supplied-agent-id
-     {:seon.error/offending carried-environment
-    ::agent-environment (:seon.boot/cluster-name carried-environment)
+     {::agent-environment (:seon.boot/cluster-name carried-environment)
     :seon.error/message "This call's environment carries no agent id; pass one explicitly."
     :seon.error/data {:seon.env/member :seon.agent/id}
     :seon.error/member :seon.agent/id
@@ -360,14 +362,11 @@
   [carrier-map boundary]
   (or (of carrier-map)
       (seon.error.refusal/diagnostic (java.util.Date.) ::construction 'seon.env/require-environment
-       {:seon.error/offending carrier-map
+       {:seon.error/offending (members-of carrier-map)
     ::boundary boundary
     ::provided-member-count (count carrier-map)
-    ::available-members (set (keys carrier-map))
     :seon.error/message (str "Crossing " boundary " requires its cluster's environment under "
             carrier ".")
-    :seon.error/data {:seon.env/boundary boundary
-        :seon.env/supplied (vec (sort (keys carrier-map)))}
     :seon.error/member :seon.env/environment
     :seon.error/expected :seon.env/environment})))
 
@@ -419,7 +418,6 @@
     (throw
      (ex-info "A long-lived environment owner requires environment state."
               (seon.error.refusal/diagnostic (java.util.Date.) ::construction 'seon.env/carry-state
-               {:seon.error/offending state
+               {:seon.error/offending (members-of state)
     ::expected-schema :seon.sci.eval/projection-state
-    :seon.error/message "A long-lived environment owner requires environment state."
-    :seon.env/supplied (str (type state))})))))
+    :seon.error/message "A long-lived environment owner requires environment state."})))))

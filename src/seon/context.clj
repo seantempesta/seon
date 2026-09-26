@@ -375,9 +375,13 @@
             (throw
              (ex-info
               "Context capture requires exactly one rendered or refusal arm."
-              {:seon.context/capture-request request
+              ;; the request is referenced by its run and basis, never
+              ;; copied: it carries the database and the rendered context
+              (cond-> {:seon.turn/id run-id
                :seon.context/rendered-arm? (some? rendered-arm)
-               :seon.context/refusal-arm? (some? refusal-arm)})))
+               :seon.context/refusal-arm? (some? refusal-arm)}
+                (db/database-value? database)
+                (assoc :seon.db/basis-t (db/basis-t database))))))
         db (or (:seon.db/db rendered) database)
         ; the database interface, not a map key: an as-of/history value
         ; carries no top-level :max-tx entry. `basis-t` is the reader for

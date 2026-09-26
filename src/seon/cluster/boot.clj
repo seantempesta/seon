@@ -463,10 +463,16 @@
                 (dissoc request :seon.config/manifest :seon.config/environment :seon.boot/prepl-server))
         name (:seon.boot/cluster-name config)
         paths (cluster/cluster-paths (:seon.boot/root config) name)
+        ;; A partial boot stays in the one instance roster under its name;
+        ;; the failure references it (name, reached layers, process), never
+        ;; carries the live instance — its connection, context and graphs.
         failed (fn [cause instance]
                  (ex-info (ex-message cause)
-                          (cond-> (diagnostic (ex-message cause) (or (ex-data cause) {}) :boot-failed cause)
-                            instance (assoc :seon.boot/instance instance))
+                          (cond-> (assoc (diagnostic (ex-message cause) (or (ex-data cause) {}) :boot-failed cause)
+                                         :seon.boot/cluster-name name)
+                            instance (merge (select-keys instance [:seon.boot/layers])
+                                            (select-keys (:seon.boot/advertisement instance)
+                                                         [:seon.boot/pid :seon.boot/start-instant])))
                           cause))
         ;; Each publication stamps the boot layers it adds with the
         ;; milliseconds since this start began (`boot-timeline`).
@@ -746,7 +752,7 @@
       ;; recorded in the requested cluster.
       (let [refused? (= :refused (:seon.cluster.boot/disposition (ex-data cause)))
             response (diagnostic (if refused? (ex-message cause) (render.value/floor cause))
-                                 (dissoc (or (ex-data cause) request) :seon.boot/instance :seon.boot/prepl-server)
+                                 (dissoc (or (ex-data cause) request) :seon.boot/prepl-server)
                                  (if refused? :refused :operation-failed) cause)]
         (if refused?
           response

@@ -528,7 +528,7 @@
                              {:seon.error/member :seon.error/declared-schema
                              :seon.error/refused-schema declared-schema
                              :seon.error/expected declared-schema
-                             :seon.error/offending observation})))))
+                             :seon.error/offending (error.refusal/references projection observation)})))))
 
 (defn prepare
   "Prepare one bounded fact under the producer-supplied named schema.
@@ -563,7 +563,8 @@
         projected-source (:seon.sci.admit/value admitted)
         instrument-data (contract-violation-data projected-source)
         flow? (map? source)
-        error-value (if failure (refusal failure) source)
+        error-value (error.refusal/references projection
+                                              (if failure (refusal failure) source))
         operation (:seon.error/operation error-value)
         ;; A failure's own declared operation wins; else the observing
         ;; boundary's, which is stable where a thrower's class name is not.
@@ -572,7 +573,7 @@
                      boundary-operation
                      (stack-failing-function failure))
         frame (error.refusal/root-frame failure)
-        chain (when failure (error.refusal/chain failure))
+        chain (when failure (error.refusal/chain failure projection))
         observation (merge (cond-> (seon.error.refusal/diagnostic at (or boundary-layer :seon.error/normalization)
                                                                   (or function 'seon.error/normalize)
                                     {})

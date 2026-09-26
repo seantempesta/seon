@@ -837,7 +837,9 @@
       (error-value
        :seon.config.eval.result/max-source
        "Clojure source exceeds the declared character bound; submit a smaller source."
-       {::text text ::length (count text)
+       ;; the over-bound text is referenced by its length, never copied: the
+       ;; caller holds it, and it is by definition too large to carry again
+       {::length (count text)
         :seon.config.eval.result/max-source (::max-source reading-context)}
        {::length (count text) ::source-bound (::max-source reading-context)})
 

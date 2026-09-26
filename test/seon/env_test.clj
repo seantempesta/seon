@@ -29,14 +29,13 @@
       (is (not (sut/environment? refusal)))
       (is (= :seon.boot/cluster-name (:seon.env/missing-member refusal)))
       (is (= :store (get-in refusal [:seon.error/data :seon.env/layer])))
-      (is (= :seon.boot/cluster-name
-             (get-in refusal [:seon.error/data :seon.env/member])))))
+      (is (= [] (:seon.error/offending refusal))
+          "the supplied carrier is its member names, never its members")))
 
   (testing "boot refuses at the FIRST layer that did not stand"
     (let [refusal (sut/boot-environment {:seon.boot/cluster-name "layers"})]
       (is (= :branch (get-in refusal [:seon.error/data :seon.env/layer])))
-      (is (= :seon.db/connection
-             (get-in refusal [:seon.error/data :seon.env/member])))))
+      (is (= :seon.db/connection (:seon.env/missing-member refusal)))))
 
   (testing "subset construction is ordinary: fewer layers, same constructor"
     (let [environment (sut/environment {:seon.boot/cluster-name "subset"})]
@@ -278,9 +277,7 @@
   (testing "the proc construction seam"
     (let [refusal (test-support/refusal-data
                    #(flow/var-process #'inert-step :io {}))]
-      (is (= :seon.flow/var-process (:seon.env/boundary refusal)))
-      (is (= :seon.flow/var-process
-             (get-in refusal [:seon.error/data :seon.env/boundary])))))
+      (is (= :seon.flow/var-process (:seon.env/boundary refusal)))))
 
   (testing "the work launcher"
     ;; ITS REQUEST DECLARES THE ENVIRONMENT, so under the contracts every

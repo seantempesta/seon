@@ -35,14 +35,17 @@
                  (:seon.program/blocked-subject (ex-data failure))
                  (:seon.program/read-operation (ex-data failure)))
            (ex-data failure)
+           ;; The request is referenced (its subject and the basis read),
+           ;; never copied: it carries the database. The failure is the
+           ;; whole cause chain, from which the class is derived.
            (seon.error.refusal/diagnostic (java.util.Date.) :seon.program/read 'my.program/read-result
             {:seon.error/message (str "Cannot read program facts: " (ex-message failure))
              :seon.program/read-operation operation
-             :seon.error/exception-class (symbol (.getName (class failure)))
-             :seon.error/offending request
-             :seon.error/expected :seon.program/breakage
-             :seon.program/read-failure-message (or (ex-message failure) "Program fact read failed.")
-             :seon.program/read-exception-data (or (ex-data failure) {})})))))
+             :seon.error/throwable failure
+             :seon.error/offending
+             (cond-> (select-keys request [:seon.program/subject])
+               (:seon.db/db request) (assoc :seon.db/basis-t (db/basis-t (:seon.db/db request))))
+             :seon.error/expected :seon.program/breakage})))))
 
 (defn- subject-identities [subject]
   (cond

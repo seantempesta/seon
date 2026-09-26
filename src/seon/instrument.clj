@@ -280,9 +280,12 @@
       :else description)))
 
 (defn- violation
-  "Retain the actual offending values; the error render pair owns projection."
-  {:malli/schema [:=> [:cat [:or :nil :seon.sci.admit/caps] :qualified-keyword :map]  :seon.error/base]}
-  [_caps kind data]
+  "Retain the actual offending values with every world in them referenced
+  (`seon.error.refusal/references` under the arming projection): a database,
+  connection, projection, environment or SCI context argument is its
+  identity, never a copy. The error render pair owns presentation."
+  {:malli/schema [:=> [:cat :seon.schema/projection :qualified-keyword :map]  :seon.error/base]}
+  [projection kind data]
   (let [function-symbol (:fn-name data)
            {arglists ::arglists :as lookup} (diagnostic-arglists function-symbol)
            arguments (:args data)
@@ -377,6 +380,7 @@
            offending (if arity? (:arity data) value)
            paths (into [] (comp (map :seon.error/path) (remove empty?)) problems)
            caller (caller-frame)]
+       (seon.error.refusal/references projection
        (merge {:seon.error/at (java.util.Date.)
          :seon.error/layer :seon.instrument/invocation
          :seon.error/operation function-symbol
@@ -399,7 +403,7 @@
            caller (assoc ::caller caller))
           (when arity?
             (select-keys lookup [:seon.instrument.lookup/status
-                                 :seon.instrument.lookup/cause])))))
+                                 :seon.instrument.lookup/cause]))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Interpreted function contracts
@@ -546,9 +550,9 @@
   declares (`::arity-ordinal`, fixed when the wrapper was armed) and the
   check. It is never re-derived from the compiled schema the value failed: a
   compiled predicate is a callable, not a name."
-  {:malli/schema [:=> [:cat :seon.sci.admit/caps :qualified-keyword :map [:vector :map]] :seon.instrument/refusal-result]}
-  [caps kind data arities]
-  (let [base (merge (violation caps kind (assoc data ::boundary? true))
+  {:malli/schema [:=> [:cat :seon.schema/projection :qualified-keyword :map [:vector :map]] :seon.instrument/refusal-result]}
+  [projection kind data arities]
+  (let [base (merge (violation projection kind (assoc data ::boundary? true))
                     {:seon.error/at (java.util.Date.)
                      :seon.error/layer :seon.instrument/invocation
                      :seon.error/operation (:fn-name data)
@@ -586,7 +590,7 @@
 
 (defn- compiled-wrapper
   {:malli/schema [:=> [:cat :seon.schema/projection :qualified-symbol :seon.schema/value :seon.instrument/callable :seon.sci.admit/caps [:? [:or :nil :map]]] :seon.instrument/callable]}
-  [projection function-symbol authored original caps & [policy]]
+  [projection function-symbol authored original _caps & [policy]]
   (let [contract (get (:seon.schema.projection/function-contracts projection)
                       function-symbol authored)
         retained (mr/schema (:seon.schema.projection/registry projection) function-symbol)
@@ -596,9 +600,6 @@
                  ((mi/-f->original schema/compilable-form)
                   contract
                   ((mi/-f->original schema/predicate-functions-in) projection))))
-        caps (assoc caps
-                    :seon.config.eval.result/max-bytes
-                    (:seon.config.error/max-evidence-bytes policy))
         options {:registry (mr/composite-registry
                             (:seon.schema.projection/registry projection)
                             (mr/var-registry))}
@@ -646,7 +647,8 @@
                                                         ": the refusal could not be built: "
                                                         (ex-message failure))
                                :seon.error/throwable failure}
-                        offending (assoc :seon.error/offending (val offending))))]))
+                        offending (assoc :seon.error/offending
+                                         (seon.error.refusal/references projection (val offending)))))]))
         ;; A BOUND FIRING IS ITS OWN REPORT: explaining re-checks the value, so
         ;; an evaluation deadline can fire mid-refusal (or mid-validation,
         ;; which Malli reports as ::invalid-schema-at-call). SCI's interrupt
@@ -658,7 +660,7 @@
                     (do (reraise-bound! (:exception data))
                         (minimal kind data (:exception data)))
                     (try
-                      (let [value (boundary-refusal caps kind
+                      (let [value (boundary-refusal projection kind
                                                     (assoc data :fn-name function-symbol
                                                            ::arity-ordinal (arity-ordinal data))
                                                     arities)]

@@ -790,6 +790,8 @@
         (is (= 8 (get-in result [:seon.error/data
                                  :seon.config.eval.result/max-bytes]))
             "and it names the declared bound it was measured against")
+        (is (nil? (find result :seon.error/offending))
+            "the over-bound request is referenced by its marker, never copied")
         (is (str/includes? (:seon.error/message result)
                            ":seon.config.eval.result/max-bytes"))
         (is (nil? (db/pull (db/db connection) [:seon.effect/id]

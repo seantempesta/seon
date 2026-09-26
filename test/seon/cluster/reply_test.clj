@@ -313,13 +313,18 @@
       (let [result (checked text 'user bound)]
         (is (m/validate expected result {:registry registry}) (pr-str result))
         (is (inst? (:seon.error/at result)))
-        (is (= text (:seon.cluster.reply/text result)))
+        (if (= :seon.cluster.reply/unreadable-error expected)
+          (is (= [text nil 7] [(:seon.cluster.reply/unreadable result) (:seon.cluster.reply/text result)
+                               (get-in result [:seon.error/data :seon.sci.reader/length])])
+              "over the bound the text is carried once; the reader references it by length")
+          (is (= text (:seon.cluster.reply/text result))))
         (when (= :seon.cluster.reply/no-forms-error expected)
           (is (false? (m/validate expected (dissoc result :seon.cluster.reply/text)
                                   {:registry registry}))
               "the boolean marker cannot replace authored reply evidence"))
         (is (= 'seon.cluster.reply/sources (:seon.error/operation result)))
-        (is (= text (get-in result [:seon.error/data :seon.cluster.reply/text])))))
+        (when-not (= :seon.cluster.reply/unreadable-error expected)
+          (is (= text (get-in result [:seon.error/data :seon.cluster.reply/text]))))))
     (doseq [args [[""] ["Only prose here." 'user]]]
       (is (m/validate :seon.cluster.reply/no-forms-error
                       (apply checked args) {:registry registry})))

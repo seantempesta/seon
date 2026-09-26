@@ -800,8 +800,9 @@
              ;; handed, and the refusal names it and the bytes reached.
              (if-some [marker (admit/missing-marker projected-request)]
                (seon.error.refusal/diagnostic (Date.) :seon.effect/execution 'seon.effect/request*
+                ;; over the bound, the request is referenced by the bytes
+                ;; its admission reached (the marker), never copied
                 {:seon.error/message "Reduce the capability request to fit the declared admission bounds."
-        :seon.error/offending request
         :seon.effect/unadmitted-owner owner-sym
         :seon.error/data (assoc marker :seon.config.eval.result/max-bytes
                                (:seon.config.eval.result/max-bytes (:seon.sci.admit/caps dials)))

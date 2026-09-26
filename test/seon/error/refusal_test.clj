@@ -4,7 +4,10 @@
   (:require [clojure.test :refer [deftest is testing]]
             [malli.instrument :as mi]
             [seon.config :as config]
+            [my.program :as program]
+            [seon.context :as context]
             [seon.db :as db]
+            [seon.env :as env]
             [seon.error :as error]
             [seon.error.refusal :as error.refusal]
             [seon.instrument :as instrument]
@@ -178,21 +181,86 @@
         cleanup (ex-info "cleanup" {:seon.probe/step :release} (IllegalStateException. "closed"))
         _ (.addSuppressed ^Throwable primary cleanup)
         links (error.refusal/chain primary)]
-    (is (= ["primary" "root"] (mapv :seon.error/message links))
-        "the cause links stay the primary's own")
-    (is (= [[{:seon.error/throwable-class "clojure.lang.ExceptionInfo" :seon.error/message "cleanup"
-              :seon.error/data {:seon.probe/step :release}}
-             {:seon.error/throwable-class "java.lang.IllegalStateException" :seon.error/message "closed"}]]
-           (mapv #(mapv (fn [link] (dissoc link :seon.error/frames)) %)
-                 (:seon.error/suppressed (first links))))
-        "the suppressed cleanup failure keeps its whole chain on the link that suppressed it")
-    (is ((schema/projection-validator (schema/handed-projection) :seon.error/base)
-         (error.refusal/diagnostic (assoc observation :seon.error/throwable primary)))))
+    (is (= [{:seon.error/throwable-class "clojure.lang.ExceptionInfo" :seon.error/message "primary"
+             :seon.error/data {:seon.probe/step :work}}
+            {:seon.error/throwable-class "clojure.lang.ExceptionInfo" :seon.error/message "root"
+             :seon.error/data {:seon.probe/step :leaf}}
+            {:seon.error/throwable-class "clojure.lang.ExceptionInfo" :seon.error/message "cleanup"
+             :seon.error/data {:seon.probe/step :release} :seon.error/suppressed-by 0}
+            {:seon.error/throwable-class "java.lang.IllegalStateException" :seon.error/message "closed"
+             :seon.error/cause-of 2}]
+           (mapv #(dissoc % :seon.error/frames) links))
+        "the primary chain first; the suppressed cleanup and its cause follow as flat links naming their relation")
+    (let [diagnosed (error.refusal/diagnostic (assoc observation :seon.error/throwable primary))]
+      (is (= "root" (:seon.error/message diagnosed)) "the root message is the primary chain's root")
+      (is ((schema/projection-validator (schema/handed-projection) :seon.error/base) diagnosed)))
+    (is (= [[0 "primary" nil] [1 "cleanup" 0] [2 "closed" nil]]
+           (map-indexed (fn [i link] [i (:seon.error/message link)
+                                      (:seon.error/suppressed-by link)])
+                        (error.refusal/without-links links #(= "root" (:seon.error/message %)))))
+        "dropping a link renumbers every relation to the kept positions"))
   (testing "a cause cycle ends at its first repeat"
     (let [a (Exception. "a") b (Exception. "b" a)]
       (.initCause a b)
       (is (= ["b" "a"] (mapv :seon.error/message (error.refusal/chain b))))
       (is (vector? (error.refusal/root-frame b))))))
+
+(defn- printed-bytes
+  "Printed size of `value`, or nil past `bound`: a copied world prints
+  megabytes (a projection past 2 GB), so printing stops at the bound."
+  [value bound]
+  (let [n (volatile! 0)
+        over (ex-info "over the bound" {::over true})
+        count! (fn [k] (when (> (vswap! n + k) bound) (throw over)))
+        writer (proxy [java.io.Writer] []
+                 (write ([x] (count! (if (string? x) (count x) 1)))
+                        ([_ _ length] (count! length)))
+                 (flush []) (close []))]
+    (try (binding [*print-length* nil *print-level* nil] (pr value writer)) @n
+         (catch clojure.lang.ExceptionInfo e (when-not (identical? e over) (throw e))))))
+
+(deftest ^{:seon/tasks #{"480378b94c9b"}} every-producer-references-the-worlds-it-was-handed
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           projection (schema/handed-projection)
+           environment (env/environment {:seon.boot/cluster-name "refs"})
+           world? (some-fn db/database-value? db/connection-object? schema/projection-value?
+                           env/environment?)
+           worlds {:seon.db/db database :seon.db/connection connection
+                   :seon.schema/projection projection :seon.probe/environment environment}
+           carrier (assoc worlds :seon.probe/member 1)
+           caps (config/result-caps (test-support/effective-config))
+           contracted (instrument/wrap-interpreted
+                       'seon.probe/f "[:=> [:cat :map :int] :int]" projection caps (fn [_ n] n))
+           failure (doto (ex-info "outer" {:seon.probe/request carrier}
+                                  (ex-info "inner" {:seon.db/db database}))
+                     (.addSuppressed (ex-info "cleanup" {:seon.db/connection connection})))
+           produced
+           {:diagnostic (error.refusal/diagnostic
+                         (assoc observation :seon.error/offending carrier
+                                :seon.error/throwable failure))
+            :contract-violation (test-support/refusal-data #(contracted carrier "not an int"))
+            :require-environment (env/require-environment carrier :seon.probe/boundary)
+            :scope (test-support/refusal-data #(env/scope carrier {}))
+            :program-read (#'program/read-result
+                           {:seon.db/db database :seon.program/subject 'sample/missing}
+                           'my.program/callers
+                           #(throw (ex-info "The read failed." carrier)))
+            :context-capture (test-support/refusal-data
+                              #(context/capture-tx {:seon.turn/id "refs" :seon.db/db database}))}]
+       (is (nil? (printed-bytes worlds 16384)) "a copied world is over the bound")
+       (doseq [[producer error] produced]
+         (testing (name producer)
+           (is (map? error))
+           (is (not-any? world? (tree-seq coll? seq error))
+               "no world anywhere in the error: each is its identity")
+           (is (printed-bytes error 16384) "the error prints in kilobytes")))
+       (is (= {:db-name (:db-name (db/database-value-identity database))
+               :t (db/basis-t database)}
+              (select-keys (get-in produced [:diagnostic :seon.error/chain 1 :seon.error/data :seon.db/db])
+                           [:db-name :t]))
+           "a cause link's database is its name and basis")))))
 
 (deftest constructor-output-keeps-the-producing-contract
   (let [projection (-> (schema/handed-projection)

@@ -52,8 +52,8 @@
      :seon.cluster.reply/refused-tag-error]]}
   [marker message data]
   (merge marker
-          {::text (::text data)
-           :seon.error/at (java.util.Date.)
+          (select-keys data [::text])
+          {:seon.error/at (java.util.Date.)
            :seon.error/layer :seon.cluster.reply/source
            :seon.error/operation 'seon.cluster.reply/sources
            :seon.error/message message
@@ -357,10 +357,11 @@
   ([text namespace-name max-source]
    (let [admission-events (parsed-events text namespace-name max-source)]
      (if (some? (:seon.sci.reader/source-bound admission-events))
+       ;; over the bound the text is carried once, as the unreadable
+       ;; evidence; the reader's data references it by length and bound
        (refused {::unreadable text}
                 (:seon.error/message admission-events)
-                (merge {::text text}
-                       (:seon.error/data admission-events)))
+                (:seon.error/data admission-events))
        (loop [source text
               recovered-lines #{}]
          (let [events (parsed-events source namespace-name (count source))
