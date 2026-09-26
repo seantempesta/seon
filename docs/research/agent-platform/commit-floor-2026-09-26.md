@@ -2,7 +2,7 @@
 type: research
 lane: commit-floor-research-opus
 date: 2026-09-26
-status: measured; konserve fork fix committed (b8d92d1, unpushed); Seon validator cause filed (task 4bb788513862); owner options at the end
+status: measured; konserve fork fix reviewed and committed (08465d6, unpushed); Seon validator cause filed (task 4bb788513862); owner options at the end
 ---
 
 # Why one small settlement commit costs ~118 ms (2026-09-26)
@@ -78,31 +78,50 @@ the unexplained 176-193 ms of the one-commit landing.
 
 ## Causes ranked by ms, with fixes
 
-### 1. Two drive flushes per key (−57 to −62 ms per commit) — FIXED ON THE FORK, pending adoption
+### 1. Two drive flushes per key (−57 to −62 ms per commit) — FIXED ON THE FORK, reviewed, pending adoption
 
 - **Model error:** konserve pays a whole-drive flush (blob + directory) for every key, although only one
   ordering matters: the mutable branch head must not become durable before the immutable values it names.
   Datahike already awaits every node and the commit record before issuing the head
   (`writing.cljc:423-434`, :557-572).
-- **Fix (konserve fork `b8d92d1`, unpushed):** an optional protocol `PDataSyncBackingStore/-sync-data`
-  (storage_layout.cljc), implemented by the filestore as `fsync(2)` through a read-only descriptor
-  (`RandomAccessFile`/`FileDescriptor.sync`; Jimfs keeps `force`). `update-blob` then pushes every blob
-  with `-sync-data`; an `{:immutable? true}` key moves with no barrier; a mutable key pays `-sync-store`
-  (directory `F_FULLFSYNC`: every earlier key's data and rename durable) before its move and again after it.
-  Two drive flushes per commit instead of 30. Linux keeps its guarantee (`fsync` there is durable per file;
-  the pre-move directory sync makes earlier renames durable).
-- **What changes:** an immutable key's rename becomes durable at the next mutable write in the store, which is
-  the first moment anything can reference it. Seon writes no standalone immutable keys (`seon.blob` uses
-  `k/bassoc` without the marker); a process crash is unaffected (the data reached the device).
-- **Measured, real konserve code in default's JVM, commit order:** 70.9 / 76.0 ms → **14.8 / 14.0 ms** p50
-  (`konserve_probe.cljc`); python emulation 79.5 / 83.0 → 16.0 / 16.8. Round trip of nodes, record and head,
-  `:immutable?` meta kept, no `.new` leftovers.
-- Lines: src +47 / −5 (3 files), test +28 (`immutable-values-are-durable-through-the-next-mutable-write`).
-- Expected: settlement ~118 → ~55-60 ms; `(inc 1)` ~136 → ~75-80 ms; cross-lane force contention ÷15.
-- **Root runs:** push the fork; bump `deps.edn` konserve `:git/sha` and the `reference-code/konserve` gitlink
-  to `b8d92d1`; restart default; the konserve tests `konserve.filestore-test` (this lane could not: no extra
-  JVM); repeat `tmp/commit-floor-research-opus/probe.clj` `e2e` + `raw-batch` for the after numbers.
-  Task `b08e692710dc` (amended).
+- **Fix (konserve fork `08465d6` on `b8d92d1`, unpushed), after Astra's review
+  (`review-konserve-sync-2026-09-27.md`, ACCEPT-AFTER-FIXES):**
+  - A store opts in with `:defer-immutable-sync? true` (default off). Without it every write runs the
+    parent's exact sequence: the writer's own `-sync`, close, move, `-sync-store`.
+  - `konserve.impl.defaults/sync-plan` decides per write. `:per-write` applies without the opt-in or when
+    the backing's `-deferred-sync?` is false (Linux, custom filesystems: only the local filesystem on macOS
+    defers). `:deferred` applies to an `{:immutable? true}` key that was absent before its write:
+    `fsync(2)` and move, no barrier. `:barriered` covers every other write of an opted-in store: `fsync(2)`,
+    directory `F_FULLFSYNC`, move, directory `F_FULLFSYNC`. So a replaced existing immutable key is flushed
+    before it becomes visible (review finding A), and the head's first barrier makes every deferred key
+    durable before the head moves.
+  - `io-operation` captures the destination's existence before `-create-blob` opens it with `CREATE`, and
+    passes it as `:existed?`. Absence is never inferred from the overwrite fast path. An empty file left by
+    a crashed `CREATE` counts as existing, so it is replaced durably.
+- **Contract (review finding B):** only a store that opts in accepts that its new immutable keys are durable
+  at the next barriered write. Their completion and write hook report staging, not durable publication.
+  Seon opts in only for the Datahike store, whose every reference to such a key is a later head write.
+  Existence is checked under konserve's per-key write serialization. Concurrent writes of one key through
+  two konserve store objects already share its `.new` staging path, so they are outside konserve's model
+  before and after this change.
+- **Measured.** Real konserve code in default's JVM, commit order (13 nodes, record, head); the fork's
+  `update-blob` is copied into a scratch namespace:
+  - First run (b8d92d1, quiet): 70.9 / 76.0 ms → **14.8 / 14.0 ms**.
+  - After the review fixes, on a loaded machine: parent 86.0 / 88.0 ms; **new keys 12.1 / 12.0 ms**;
+    rewriting existing keys 84.0 ms (barriered, as intended).
+  - Python emulation: 79.5 / 83.0 → 16.0 / 16.8 ms.
+  - Fork tests, run in this lane: `clojure -M:test -n konserve.filestore-test -n konserve.filestore-jimfs-test`
+    gives 31 tests, 784 assertions, 0 failures. They include
+    `sync-plan-defers-only-new-immutable-keys-of-an-opted-in-store` and
+    `an-opted-in-store-publishes-in-datahike-order-and-replaces-immutable-keys`.
+- Expected: settlement ~118 → ~55-60 ms; `(inc 1)` ~136 → ~75-80 ms; cross-lane force contention ÷15. The
+  saving holds only while Datahike's node writes are to absent keys. Every commit in the JFR windows wrote
+  distinct node addresses; re-count after adoption.
+- **Root runs:** push the fork; apply `tmp/commit-floor-research-opus/patches/adopt-konserve-deferred-sync.patch`
+  (pins `deps.edn` konserve to `08465d69bc65…` and sets the store's `:config {:defer-immutable-sync? true}`
+  in `seon.cluster.store/datahike-configuration`); move the `reference-code/konserve` gitlink; restart
+  default. Verify that Datahike accepts the store `:config` on reopen, then repeat `probe.clj` `e2e` and
+  `raw-batch`, and count forces per commit with JFR (expect 2). Task `b08e692710dc`.
 
 ### 2. The validator reads every turn the agent ever ran (−11 to −13 ms now, growing) — Seon, `seon.db`
 
@@ -143,7 +162,7 @@ the unexplained 176-193 ms of the one-commit landing.
 
 ## Options for the owner (simplest viable first)
 
-1. **Adopt the konserve fork commit only.** Root pushes, pins, restarts, runs `konserve.filestore-test`.
+1. **Adopt the konserve fork commit only.** Root pushes, applies the adoption patch, restarts.
    - Result: settlement ~118 → ~55-60 ms; `(inc 1)` ~136 → ~75-80 ms; far less cross-lane disk contention.
    - Guarantee: the head is durable only after every value it names (unchanged); immutable keys are durable
      at the next mutable write.
@@ -163,8 +182,8 @@ the unexplained 176-193 ms of the one-commit landing.
 
 - The fork change was measured through the real `update-blob` code copied into a scratch namespace (Vars of
   default are never redefined), not through a restarted default; the end-to-end after number is root's.
-- Konserve's own tests were not run (no extra JVM). `clj-kondo --cache false` on the three changed files:
-  no errors.
+- Konserve's filestore tests ran green on 08465d6 (31 / 784). No power-loss or fault-injection test exists;
+  the durability argument is the review's composition of Apple's and POSIX's documented interfaces.
 - Machine load varied (another session's ffmpeg, other lanes' tests; root restarted default twice during the
   lane); every table row names its window's conditions or is a p50 of ≥ 20 in a quiet window.
 - Evidence files: `tmp/commit-floor-research-opus/` (`run-2..5.edn`, `scratch-*.edn`, `jfr/*.jfr`, the
