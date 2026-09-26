@@ -1053,19 +1053,16 @@
           :seon.error/data {:seon.db/read-request request}})))))
 
 (defn- index-pattern-change
-  [changes pattern]
-  (let [entity (:seon.db/pattern-entity pattern)
-        attribute (:seon.db/pattern-attribute pattern)
-        value (find pattern :seon.db/pattern-value)
-        [index components]
-        (cond
-          entity [:eavt (cond-> [entity] attribute (conj attribute))]
-          (and attribute value (db.utils/indexing? changes attribute))
-          [:avet [attribute (val value)]]
-          attribute [:aevt [attribute]]
-          :else [:eavt []])]
-    (some #(when (or (nil? value) (= (val value) (:v %))) %)
-          (apply d/datoms changes index components))))
+  "The first changed datom matching a retained read pattern, found by the
+  query's own matcher (`datahike.db.interface/search`, db/interface.cljc:77;
+  index choice in db/search.cljc:186). `d/datoms` refuses an attribute the
+  schema does not install (db/utils.cljc:189) where the query that retained
+  the pattern matched nothing, so a witness through it could throw on
+  evidence its read settled."
+  [changes {entity :seon.db/pattern-entity
+            attribute :seon.db/pattern-attribute
+            value :seon.db/pattern-value}]
+  (first (dbi/search changes [entity attribute value])))
 
 (declare read-evidence-current? datom->data schema-database)
 

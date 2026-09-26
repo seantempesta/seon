@@ -2645,6 +2645,35 @@
            (pr-str changes))
        (is (< elapsed-ms 100.0) (str "the witness took " elapsed-ms " ms"))))))
 
+;; Class: a retained pattern is witnessed by the matcher its query used. A
+;; read over an attribute set naming uninstalled attributes (the contract-finding
+;; report row's keys, 2026-09-26) matched nothing; its witness through
+;; `d/datoms` refused the attribute and root's graph panicked at every turn.
+(deftest a-pattern-over-an-uninstalled-attribute-witnesses-no-change
+  (test-support/with-database
+   (fn [connection]
+     (let [captured (atom [])
+           basis (db/basis-t @connection)
+           _ (binding [db/*read-evidence-sink* captured]
+               (db/q '[:find [?f ...] :where [?f :seon.fn/sym _]] @connection))
+           uninstalled :seon.fn.contract/finding
+           widened (mapv (fn [evidence]
+                           (-> evidence
+                               (dissoc :seon.db/read-request :seon.db/read-result-digest)
+                               (update-in [:datahike.read/dependency-plan :datahike.query.dependency/sources]
+                                          (fn [sources]
+                                            (mapv #(update % :seon.db/read-index-patterns conj
+                                                           {:seon.db/pattern-attribute uninstalled})
+                                                  sources)))))
+                         (db/read-evidence @captured))]
+       (is (not (contains? (:schema @connection) uninstalled)))
+       (test-support/transacted!
+        connection [(test-support/revision @connection [:seon.fn/sym 'seon.db/transact!] {:seon.fn/doc "moved"})])
+       (is (seq widened))
+       (is (false? (db/read-evidence-current? @connection widened)))
+       (is (= [:seon.fn/sym] (distinct (map :a (db/read-evidence-changes @connection widened basis))))
+           "the installed pattern witnesses its change; the uninstalled one witnesses none")))))
+
 (deftest equal-revisions-prove-a-read-current-without-scanning-history
   (test-support/with-database
    (fn [connection]
