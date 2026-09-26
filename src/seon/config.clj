@@ -21,6 +21,7 @@
             [seon.reconcile :as reconcile]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
+            [seon.cache]
             [seon.schema.datahike :as schema.datahike]
             [malli.core :as m]
             [malli.registry :as mr]
@@ -370,11 +371,25 @@
    :seon.config/initialization
    (admit-initialization projection (get document initialization-key []))})
 
+(defn- declared-projection
+  "The declaration projection of this JVM's schema resources: the one population
+  config compiles rows from, writes them with and reads them by.
+
+  Retained in the process cache under the resources' declaration stamp, so an
+  edit misses by construction; a hit costs the stamp (210 file stats, ~1.3 ms
+  armed, measured 2026-09-26) where rebuilding the key walked every form
+  (~6.4 ms)."
+  {:malli/schema [:=> [:cat] :seon.schema/projection]}
+  []
+  (seon.cache/lookup ::declared-projection (schema.edn/declaration-stamp)
+                     #(* 1300 (count (:seon.schema.projection/forms %)))
+                     #(schema/declaration-projection (schema.edn/packaged-forms))))
+
 (defn default-population
   "Read and admit the shipped initialization entity rows."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   []
-  (let [projection (schema/declaration-projection (schema.edn/packaged-forms))]
+  (let [projection (declared-projection)]
     (:seon.config/initialization
      (admitted-default-document projection (default-document)))))
 
@@ -427,7 +442,7 @@
   absence decisions are resolved only by `compile-manifest`."
   {:malli/schema [:=> [:cat] :map]}
   []
-  (let [projection (schema/declaration-projection (schema.edn/packaged-forms))]
+  (let [projection (declared-projection)]
     (validate-default-decisions
      projection
      (:seon.config/decisions
@@ -437,7 +452,7 @@
   "Read and validate one sparse plain-EDN overlay without compiling it."
   {:malli/schema [:=> [:cat :string] :seon.config/manifest]}
   [path]
-  (validate-layer (schema/declaration-projection (schema.edn/packaged-forms))
+  (validate-layer (declared-projection)
                   (read-edn-map path)))
 
 (def development-manifest-path
@@ -552,7 +567,7 @@
          :seon.error/expected "a value for each required configuration key"} assoc :seon.error/declared-schema :seon.config/error)
        nil))
     (let [document (default-document)
-          projection (schema/declaration-projection (schema.edn/packaged-forms))
+          projection (declared-projection)
           initialization (admit-initialization projection (get document initialization-key []))
           compiled (compile-settings projection document request)
           ;; The row records which dials a layer above the shipped defaults
@@ -716,7 +731,7 @@
                             (remove #(contains? installed %)))
                       rows)]
     (when (seq missing)
-      (let [projection (schema/declaration-projection (schema.edn/packaged-forms))
+      (let [projection (declared-projection)
             result (db/transact!
                     connection
                     ;; The schema population's own accretion shape (`seon.cluster/accrete-schema-population!`).
@@ -852,16 +867,22 @@
 (declare effective-in)
 
 (defn effective
-  "Read one cluster's effective config from its carried projection."
+  "Read one cluster's effective config row.
+
+  Its dials are the ones this JVM's declarations name: the population
+  [[compile-manifest]] compiled the row from and [[apply-compiled!]] wrote it
+  with (installing any attribute the branch lacked), and whose
+  `:seon.config/effective` contract the answer is checked against. Never the
+  branch's carried projection: a branch adopts the checkout's declarations
+  after boot, so a dial the checkout added was dropped from a row that held
+  it and the answer refused its own contract (boot 2026-09-26, the new
+  `:seon.config.cache/max-bytes`)."
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.boot/cluster-name]
     [:or :seon.config/effective :seon.config/error
      :seon.schema/validation-refusal :seon.db/invalid-read-error]]}
   [db cluster-name]
-  (if-let [projection (or (db/carried-projection db)
-                          (schema/handed-projection))]
-    (effective-in db cluster-name projection)
-    (db/projection-fallback 'seon.config/effective)))
+  (effective-in db cluster-name (declared-projection)))
 
 (defn- effective-in
   {:malli/schema
@@ -869,8 +890,7 @@
          :seon.boot/cluster-name :seon.schema/projection]
     [:or :seon.config/effective :seon.config/error :seon.db/invalid-read-error]]}
   [db cluster-name projection]
-  (let [forms (:seon.schema.projection/forms projection)
-        row (db/pull db '[*] [:seon.config/cluster cluster-name])]
+  (let [row (db/pull db '[*] [:seon.config/cluster cluster-name])]
     ;; A refused read is not an absent row. Reading the refusal's own keys as
     ;; the config row reports every dial missing and blames the facts; the
     ;; cause here is the read, so return the read's refusal unchanged.
