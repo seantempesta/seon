@@ -4,6 +4,7 @@
   (`seon.cluster.source/write-back!`)."
   (:require [clojure.core.async :as async]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
@@ -146,6 +147,73 @@
             (testing "a moved head refuses before any file is read"
               (support/transacted! h-conn [{:seon.issue/id issue :seon.issue/title "Written back"}])
               (is (= :head-moved (:seon.source/write-back-refused (source/write-back! request))))))))
+          (finally
+            (agent/release-context! candidate))))
+      (finally
+        (doseq [b @made] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))
+        (support/delete-recursively! root)))))
+
+(deftest ^{:seon.test/long "One agent turn on C, one prepare-merge! (a nested seon.test/run on a new candidate commit; 60 s is merge-test's measured bound for one prepare) and two analyses of a one-file fixture."
+           :seon.test/long-ms 90000}
+  an-agent-addition-merges-and-writes-back-both-declarations
+  ;; An agent adds a function and its test at the REPL on its lane; the merge
+  ;; carries both as additions and write-back appends both to the namespace's file.
+  (let [target (support/execution-handle nil)
+        store (:seon.store/store target)
+        h-conn (:seon.db/connection target)
+        cluster-name (:seon.cluster/name target)
+        suffix (id/id)
+        fixture-ns (symbol (str "wbadd" suffix ".core"))
+        path (str "src/wbadd" suffix "/core.clj")
+        root (str "tmp/write-back-add-test-" suffix)
+        file (io/file root path)
+        added-fn [:seon.fn/sym (symbol (str fixture-ns) "triple")]
+        added-test [:seon.test/sym (symbol (str fixture-ns) "triple-check")]
+        function-source "(defn triple\n  \"Triple.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (* 3 x))"
+        test-source "(clojure.test/deftest triple-check (clojure.test/is (= 9 (triple 3))))"
+        issue (str "write-back-add-" suffix)
+        c (keyword (str "write-back-add-c-" suffix))
+        made (volatile! [c])]
+    (io/make-parents file)
+    (spit file (fixture-source fixture-ns))
+    (try
+      (let [rows (fn/analyze-rows {:seon.fn/root root :seon.fn/roots ["src"]})
+            base-text (slurp file)
+            _ (support/transacted! h-conn (fn/reconcile-tx (db/db h-conn) rows (mapv program/row-identity rows)))
+            before (digests rows)
+            _ (registry/branch! {:seon.store/store store :seon.store/branch c
+                                 :seon.cluster.registry/from (db/commit-id (db/db h-conn))})
+            candidate (agent/acquire-context! target nil {:seon.agent/branch c})
+            c-conn (:seon.db/connection candidate)]
+        (try
+          (with-agent! c-conn cluster-name (str "write-back-add-" suffix) fixture-ns
+            (fn [request] (submit! request function-source) (submit! request test-source)))
+          ;; The issue lives on the lane with the test it names.
+          (support/transacted! c-conn [{:seon.issue/id issue :seon.issue/title "Add triple" :seon.issue/status :open
+                                        :seon.issue/severity :cleanup :seon.issue/problem "Add a triple function."
+                                        :seon.issue/tests #{added-test}}])
+          (testing "the head lacks both additions before the merge"
+            (is (every? #(nil? (:db/id (db/pull (db/db h-conn) [:db/id] %))) [added-fn added-test])))
+          (let [proposal (source/prepare-merge! target store c issue)
+                _ (some->> (:seon.source/candidate proposal) (vswap! made conj))
+                _ (is (true? (:seon.test/passed? proposal)) (pr-str proposal))
+                report (when (:seon.test/passed? proposal) (source/accept-merge! target store proposal))
+                _ (is (:db-after report) (pr-str report))]
+            (when (:db-after report)
+              (let [written (source/write-back! {:seon.db/connection h-conn :seon.source/accepted report :seon.fn/root root})
+                    text (slurp file)]
+                (testing "both additions are appended to the namespace's file, the rest untouched"
+                  (is (= #{added-fn added-test} (set (get-in written [:seon.source/written :seon.source/added]))) (pr-str written))
+                  (is (str/starts-with? text base-text))
+                  (is (str/includes? text function-source))
+                  (is (str/includes? text test-source)))
+                (testing "the file reindexed from disk declares the merged program"
+                  (let [reindexed (digests (fn/analyze-rows {:seon.fn/root root :seon.fn/roots ["src"]}))]
+                    (is (= (set (conj (keys before) added-fn added-test)) (set (keys reindexed))))
+                    (is (= (select-keys (digests (db/pull-many (db/db h-conn) [:seon.fn/sym :seon.test/sym :seon.program/definition-digest]
+                                                                [added-fn added-test]))
+                                        [added-fn added-test])
+                           (select-keys reindexed [added-fn added-test]))))))))
           (finally
             (agent/release-context! candidate))))
       (finally

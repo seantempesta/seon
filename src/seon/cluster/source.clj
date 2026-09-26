@@ -779,10 +779,13 @@
     (if (vector? rows) (fn/reconcile-tx onto rows (vec delta)) rows)))
 
 (defn prepare-merge!
-  "Test `candidate`'s function and test replacements since its merge base with
+  "Test `candidate`'s function and test changes since its merge base with
   `source`'s head H on a fresh branch S of H through the save gate, with the
-  issue's tests, and answer the proposal `accept-merge!` takes. A conflict
-  answers the three-way value; an addition, deletion or empty delta refuses."
+  issue's tests, and answer the proposal `accept-merge!` takes. A change is a
+  replacement, an addition (absent at the base) or a retraction (absent on the
+  candidate), as `seon.program/three-way` classifies it; one reconcile
+  transaction applies all three. A conflict answers the three-way value; an
+  empty delta refuses."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.store/store :seon.store/branch :seon.issue/id]
                   [:or [:map [:seon.source/candidate :seon.store/branch] [:seon.test.run/id :seon.test.run/id]
                         [:seon.test/passed? :boolean] [:seon.source/tally :string]
@@ -800,7 +803,8 @@
         maps (when (set? changed)
                (mapv #(program/digest-map % (assoc bound :seon.program/identities changed)) [base branch head]))
         three (when (and maps (not-any? :seon.error/at maps)) (apply program/three-way maps))
-        delta (:seon.program/changed-on-branch three)
+        delta (when three (into (:seon.program/changed-on-branch three)
+                                (concat (:seon.program/added three) (:seon.program/retracted three))))
         tx (when (seq delta) (replacement branch head delta))
         subject (db/pull branch [:db/id {:seon.issue/tests [:seon.test/sym]}] [:seon.issue/id issue])
         refuse #(refused :seon.program/scope %1 {:seon.error/offending %2})]
@@ -809,8 +813,6 @@
         (not (set? changed)) changed
         (not three) (some #(when (:seon.error/at %) %) maps)
         (seq (:seon.program/conflict three)) three
-        (some seq ((juxt :seon.program/added :seon.program/retracted) three))
-        (refuse "Only replacements of existing functions and tests merge here." three)
         (empty? delta) (refuse "The candidate changes nothing the head lacks." three)
         (:seon.error/at tx) tx
         (not (:db/id subject)) (refuse "The issue is absent on the candidate." issue)
@@ -835,8 +837,8 @@
 
 (defn accept-merge!
   "Merge exactly the program tested by `prepare-merge!`'s proposal into
-  `source`: the named run on S complete, every member green, every replaced
-  function reached by one, and S's program unwritten since. The writer
+  `source`: the named run on S complete, every member green, every added or
+  replaced function reached by one, and S's program unwritten since. The writer
   refuses a moved head (expected basis-t) before any datom lands; the merge
   commit's parents add the candidate and S's head. A task handle the merged
   program names with no task admitted on the head refuses, by handle and holder."
@@ -865,7 +867,10 @@
             ;; S forked from H at `basis`: comparable on S's own lineage.
             delta (program/changed-identities basis tested {:seon.program/max-datoms 10000})
             uncovered (when (set? delta)
+                        ;; A retracted function has nothing to cover: its surviving
+                        ;; callers are the writer's refs and the run's reaching tests.
                         (for [[a f] delta :when (= :seon.fn/sym a)
+                              :when (:db/id (db/pull tested [:db/id] [a f]))
                               :when (not-any? green (fn/gate-sets {:seon.db/db tested :seon.fn/seeds #{f}}))] f))
             tx (when (seq delta) (replacement tested head delta))
             ;; Decided on `head`; the write's expected basis-t refuses a moved head.
@@ -948,66 +953,95 @@
       nil
       (finally (Files/deleteIfExists (.toPath staged))))))
 
+(defn- namespace-path
+  "The one file `database` records declaring namespace `namespace-name`, or nil."
+  {:malli/schema [:=> [:cat :seon.db/database-value :symbol] [:maybe :map]]}
+  [database namespace-name]
+  (let [files (db/q '[:find [(pull ?file [:seon.fn.file/relative-path :seon.fn.file/relative-root
+                                          :seon.fn.file/digest]) ...]
+                      :in $ ?name :where [?ns :seon.ns/name ?name] [?ns :seon.fn/file ?file]]
+                    database namespace-name)]
+    (when (= 1 (count files)) (first files))))
+
 (defn write-back!
-  "Write the function and test replacements of `accepted` (`accept-merge!`'s
-  report on `connection`) into their one source file under `root`: each
-  declaration's recorded byte span takes its accepted source.
+  "Write the function and test changes of `accepted` (`accept-merge!`'s report
+  on `connection`) into their one source file under `root`: a replaced
+  declaration's recorded byte span takes its accepted source, a retracted one's
+  span (and the blank lines before it) goes, and an added one is appended to its
+  namespace's file.
 
   Proven before installation. Refuses by reason unless the branch head is still
-  the accepted commit; every replaced declaration's before-state names one file
-  and a span holding its source; the file's bytes are the ones its declarations
-  were analyzed from; and the ordinary analyzer (`seon.fn/analyze-rows` over the
-  candidate text) reindexes the candidate to the accepted digests with every
-  other declaration of the file unchanged. The disk bytes are checked again,
-  then the candidate is installed by an atomic rename. Publishing the changed
-  path stays with the publication owner."
+  the accepted commit; every change names one file (a replaced or retracted
+  declaration by its before-state, an added one by its namespace's file) and
+  every before-state a span holding its source; the file's bytes are the ones its
+  declarations were analyzed from; and the ordinary analyzer (`seon.fn/analyze-rows`
+  over the candidate text) reindexes the candidate to exactly the file's
+  declarations after the merge, every other one unchanged. The disk bytes are
+  checked again, then the candidate is installed by an atomic rename. Publishing
+  the changed path stays with the publication owner."
   {:malli/schema [:=> [:cat :seon.source/write-back-request]
                   [:or :seon.source/written :seon.source/write-back-error]]}
   [{connection :seon.db/connection report :seon.source/accepted root :seon.fn/root}]
   (let [before (:db-before report) after (:db-after report)
         changed (program/changed-identities before after {:seon.program/max-datoms 10000})
-        replaced (when (set? changed) (vec (sort-by str changed)))
-        base-rows (when replaced
-                (db/pull-many before [:seon.fn/form-span :seon.fn/source :seon.test/source
-                                      {:seon.fn/file [:seon.fn.file/relative-path :seon.fn.file/relative-root
-                                                      :seon.fn.file/digest]}]
-                              replaced))
-        accepted (when replaced
-                   (db/pull-many after [:seon.fn/sym :seon.test/sym :seon.program/definition-digest
-                                        :seon.fn/source :seon.test/source] replaced))
+        identities (when (set? changed) (vec (sort-by str changed)))
+        pull (fn [database identity]
+               (let [row (db/pull database [:db/id :seon.fn/sym :seon.test/sym :seon.fn/form-span :seon.fn/source
+                                            :seon.test/source :seon.program/definition-digest
+                                            {:seon.fn/file [:seon.fn.file/relative-path :seon.fn.file/relative-root
+                                                            :seon.fn.file/digest]}]
+                                  identity)]
+                 (when (:db/id row) row)))
+        rows (for [identity identities] [identity (pull before identity) (pull after identity)])
         source-of #(or (:seon.fn/source %) (:seon.test/source %))
-        files (into #{} (map :seon.fn/file) base-rows)
+        file-of (fn [[[_ declared] was _]]
+                  (if was (:seon.fn/file was) (namespace-path before (symbol (namespace declared)))))
+        files (into #{} (map file-of) rows)
         {path :seon.fn.file/relative-path base-digest :seon.fn.file/digest
          relative-root :seon.fn.file/relative-root} (first files)
         file (io/file root (str path))
         base-bytes (when (and (= 1 (count files)) path (.isFile file)) (Files/readAllBytes (.toPath file)))
-        spans (mapv :seon.fn/form-span base-rows)
+        before-rows (keep second rows)
         span-text (fn [[start stop]] (String. (java.util.Arrays/copyOfRange ^bytes base-bytes (int start) (int stop)) "UTF-8"))
+        ;; A retraction takes the blank lines that separated it from the form before.
+        from-blank (fn [start] (loop [begin start n 0]
+                                 (if (and (< n 2) (pos? begin) (= 10 (aget ^bytes base-bytes (dec begin))))
+                                   (recur (dec begin) (inc n)) begin)))
+        edits (fn [] (vec (for [[_ was now] rows]
+                            (cond
+                              (and was now) [(:seon.fn/form-span was) (source-of now)]
+                              was (let [[start stop] (:seon.fn/form-span was)] [[(from-blank start) stop] ""])
+                              :else (let [end (alength ^bytes base-bytes)]
+                                      [[end end] (str (when-not (= 10 (aget ^bytes base-bytes (dec end))) "\n")
+                                                      "\n" (source-of now) "\n")])))))
         refuse (fn [reason message evidence]
                  (write-back-refusal reason message (cond-> evidence path (assoc :seon.source/path path))))]
     (cond
       (not (set? changed)) changed
       (not= (db/commit-id (db/db connection)) (db/commit-id after))
       (refuse :head-moved "The branch head moved after the accepted merge." {:seon.error/offending (db/commit-id after)})
-      (empty? replaced) (refuse :no-replacement "The accepted merge replaced no declaration." {})
-      (or (not= 1 (count files)) (nil? path) (some nil? spans) (some (comp nil? source-of) accepted))
-      (refuse :one-file "Each replacement needs its source, and its before-state one file and span."
-              {:seon.error/offending replaced})
-      (nil? base-bytes) (refuse :file-absent "The replaced declarations' file is absent under the root." {})
+      (empty? identities) (refuse :no-replacement "The accepted merge changed no declaration." {})
+      (or (not= 1 (count files)) (nil? path) (some (comp nil? :seon.fn/form-span) before-rows)
+          (some (fn [[_ _ now]] (and now (nil? (source-of now)))) rows))
+      (refuse :one-file "Each change needs its source, one file, and its before-state's span."
+              {:seon.error/offending identities})
+      (nil? base-bytes) (refuse :file-absent "The changed declarations' file is absent under the root." {})
       (not= base-digest (sha-256 base-bytes))
       (refuse :file-changed "The file changed after its declarations were analyzed." {:seon.error/offending base-digest})
-      (not= (mapv span-text spans) (mapv source-of base-rows))
+      (not= (mapv (comp span-text :seon.fn/form-span) before-rows) (mapv source-of before-rows))
       (refuse :span-mismatch "A recorded span no longer holds its declaration's source." {})
       :else
-      (let [candidate (spliced base-bytes (mapv #(vector %1 (source-of %2)) spans accepted))
+      (let [candidate (spliced base-bytes (edits))
             reindexed (declaration-digests
                        (fn/analyze-rows {:seon.fn/root (str root) :seon.fn/roots [relative-root]
                                          :seon.fn/changed-paths #{path}
                                          :seon.fn.analyzer/sources {(.getCanonicalPath file)
                                                                     (String. ^bytes candidate "UTF-8")}}))
-            expected (merge (file-digests before path) (declaration-digests accepted))
+            expected (merge (apply dissoc (file-digests before path) identities)
+                            (declaration-digests (keep #(nth % 2) rows)))
             differing (vec (sort-by str (filter #(not= (get expected %) (get reindexed %))
-                                                (into (set (keys expected)) (keys reindexed)))))]
+                                                (into (set (keys expected)) (keys reindexed)))))
+            kind (fn [pick] (vec (keep (fn [[identity was now]] (when (pick was now) identity)) rows)))]
         (cond
           (seq differing)
           (refuse :not-equivalent "The reindexed candidate does not declare exactly the accepted program."
@@ -1019,6 +1053,9 @@
             (install! (.getPath file) candidate)
             {:seon.source/changed-paths [path]
              :seon.source/written {:seon.source/path path :seon.source/base-digest base-digest
-                                   :seon.source/candidate-digest (sha-256 candidate) :seon.source/replaced replaced}}
+                                   :seon.source/candidate-digest (sha-256 candidate)
+                                   :seon.source/replaced (kind #(and %1 %2))
+                                   :seon.source/added (kind #(and (not %1) %2))
+                                   :seon.source/retracted (kind #(and %1 (not %2)))}}
             (catch Exception failure
               (refuse :install-failed "The proven candidate could not be installed." {:seon.error/throwable failure}))))))))
