@@ -1672,6 +1672,21 @@
            (is (contains? (:seon.schema.projection/forms derived) ::incremental-declaration))
            (println "incremental load-projection" {:derived-ms derived-ms :full-ms full-ms})))))))
 
+(deftest a-compiled-generator-names-its-generator-by-symbol
+  ;; A `:gen/gen` resolved to its Var's value at compile time went stale on a
+  ;; reload: a derived projection kept the old generator object while a full
+  ;; build took the new one, so equal forms compiled unequal. Malli resolves
+  ;; the symbol when it generates (malli.generator/-create-from-gen).
+  (test-support/with-database
+   (fn [connection]
+     (let [projection (schema/projection-from-database (seon.db/db connection))
+           compiled (mr/schema (:seon.schema.projection/registry projection)
+                               :seon.sci.eval/sci-var)
+           generators (keep #(when (map? %) (:gen/gen %)) (tree-seq coll? seq (m/form compiled)))]
+       (is (= ['seon.sci.eval/sci-var-generator] generators))
+       (is (m/validate compiled (mg/generate compiled {:seed 20260926}))
+           "the named generator still generates a valid value")))))
+
 (deftest a-stored-declaration-naming-a-deleted-predicate-stays-readable
   ;; A resume reads the published commit before the changed files replace its
   ;; rows; a contract there may name a predicate the loaded files deleted

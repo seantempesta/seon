@@ -319,12 +319,9 @@
   (walk/postwalk
    (fn [value]
      (cond
-       (and (map? value)
-            (qualified-symbol? (:gen/gen value)))
-       (assoc value :gen/gen
-              (some-> (:gen/gen value) requiring-resolve deref
-                      (vary-meta assoc ::generator-symbol (:gen/gen value))))
-
+       ;; A `:gen/gen` symbol stays a symbol: Malli resolves it to the loaded
+       ;; Var's current value when it generates (malli.generator/-create-from-gen,
+       ;; malli.core/-loaded-qualified-value), so a reload is never stale here.
        (and (vector? value) (= :and (first value))
             (not (and (map? (second value)) (:gen/gen (second value))))
             (some #(and (vector? %) (= :fn (first %))
@@ -683,10 +680,6 @@
         canonical
         (letfn [(canonicalize [value reference-kind]
                   (cond
-                    (and (= :generator reference-kind)
-                         (qualified-symbol? (::generator-symbol (meta value))))
-                    (::generator-symbol (meta value))
-
                     (callable? value)
                     (let [predicate (callable-symbol value)]
                       (if reference-kind
@@ -721,9 +714,7 @@
                                       :seon.schema/value v
                                       })))
                                  [(canonicalize k false)
-                                  (canonicalize v
-                                                (when (= :gen/gen k)
-                                                  :generator))]))
+                                  (canonicalize v false)]))
                           value)
 
                     (set? value)
@@ -3149,8 +3140,8 @@
   projection cannot override the supplied database's declaration rows."
   {:malli/schema
    [:function
-    [:=> [:catn [:seon.schema/database-value :map]] ::projection]
-    [:=> [:catn [:seon.schema/database-value :map]
+    [:=> [:catn [:seon.schema/database-value :seon.db/database-value]] ::projection]
+    [:=> [:catn [:seon.schema/database-value :seon.db/database-value]
                  [::projection ::projection]] ::projection]]}
   ([db] (@database-projection db))
   ([db _reusable-projection] (@database-projection db)))
