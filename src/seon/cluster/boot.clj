@@ -332,7 +332,7 @@
   stored and delivered."
   {:malli/schema [:=> [:cat :string :seon.error/throwable] :nil]}
   [thread-name throwable]
-  (let [instances (filterv map? (vals @running-instances))
+  (let [instances (vec (vals @running-instances))
         environment (carried-environment throwable)]
     (if-not environment
       (uncaught-emergency! thread-name throwable
@@ -393,32 +393,39 @@
                 (dissoc request :seon.config/manifest :seon.config/environment :seon.boot/prepl-server))
         name (:seon.boot/cluster-name config)
         paths (cluster/cluster-paths (:seon.boot/root config) name)
-        reservation (Object.)
-        _ (locking running-instances
-            (when (get @running-instances name)
-              (refuse! "Cluster already has an instance." {:seon.boot/cluster-name name}))
-            (swap! running-instances assoc name reservation))
         latest (atom nil)
+        failed (fn [cause]
+                 (ex-info (ex-message cause)
+                          (assoc (diagnostic (ex-message cause) (or (ex-data cause) {}) :boot-failed cause)
+                                 :seon.boot/instance @latest)
+                          cause))
         publish! (fn [value]
                    (reset! latest value)
                    (swap! running-instances assoc name value)
-                   value)]
-    (try
-      (let [listener (or (:seon.boot/prepl-server request)
-                         (server/start-server
-                          {:name (server-name name) :accept 'seon.operator.prepl/io-prepl
-                           :address (:seon.boot/prepl-host config)
-                           :port (:seon.boot/prepl-port config)
-                           :args [:cluster-name name]}))
-            advertisement (merge (process/current-identity)
-                                 {:seon.boot/cluster-name name
-                                  :seon.boot/prepl-host (:seon.boot/prepl-host config)
-                                  :seon.boot/prepl-port (.getLocalPort listener)})
-            instance (publish! {:seon.boot/config config
-                                :seon.boot/advertisement advertisement
+                   value)
+        ;; The first value in the table is already an instance: acquiring the
+        ;; listener under the claim lock leaves no window in which the table
+        ;; holds a placeholder that its readers would have to filter.
+        instance (locking running-instances
+                   (when (get @running-instances name)
+                     (refuse! "Cluster already has an instance." {:seon.boot/cluster-name name}))
+                   (let [listener (try (or (:seon.boot/prepl-server request)
+                                           (server/start-server
+                                            {:name (server-name name) :accept 'seon.operator.prepl/io-prepl
+                                             :address (:seon.boot/prepl-host config)
+                                             :port (:seon.boot/prepl-port config)
+                                             :args [:cluster-name name]}))
+                                       (catch Throwable cause (throw (failed cause))))]
+                     (publish! {:seon.boot/config config
+                                :seon.boot/advertisement
+                                (merge (process/current-identity)
+                                       {:seon.boot/cluster-name name
+                                        :seon.boot/prepl-host (:seon.boot/prepl-host config)
+                                        :seon.boot/prepl-port (.getLocalPort ^java.net.ServerSocket listener)})
                                 :seon.boot/prepl-server listener
-                                :seon.boot/executors (cluster/root-executors)})
-            ;; The cluster the launcher opened this JVM for (it supplies the
+                                :seon.boot/executors (cluster/root-executors)})))]
+    (try
+      (let [;; The cluster the launcher opened this JVM for (it supplies the
             ;; listener) is its development cluster: the development overlay
             ;; lies under any `--config` manifest.
             manifest (merge (when (:seon.boot/prepl-server request) (config/development-manifest))
@@ -434,15 +441,11 @@
           (publish! (assoc stood :seon.boot/ready-ms
                            (quot (- (System/nanoTime) began) 1000000)))))
       (catch Throwable cause
-        (when (or (nil? @latest)
-                  (= :seon.cluster.store/held-elsewhere (:seon.cluster.store/rule (ex-data cause)))
-                  (= :seon.cluster.store/held-by-this-process (:seon.cluster.store/rule (ex-data cause))))
+        (when (#{:seon.cluster.store/held-elsewhere :seon.cluster.store/held-by-this-process}
+               (:seon.cluster.store/rule (ex-data cause)))
           (server/stop-server (server-name name))
           (swap! running-instances dissoc name))
-        (throw (ex-info (ex-message cause)
-                        (assoc (diagnostic (ex-message cause) (or (ex-data cause) {}) :boot-failed cause)
-                               :seon.boot/instance @latest)
-                        cause))))))
+        (throw (failed cause))))))
 
 (defn readiness
   "Read each acquired layer; missing values are explicit, including partial boot."
@@ -469,12 +472,17 @@
   {:malli/schema [:=> [:cat :seon.boot/instance] :nil]}
   [instance]
   (let [name (get-in instance [:seon.boot/config :seon.boot/cluster-name])
-        marker (Object.)
+        ;; The claim marks the instance itself, so the table's readers keep
+        ;; seeing an instance while its layers are released, and a second
+        ;; stop of the same instance finds it already claimed.
         claimed? (locking running-instances
-                   (when (identical? (:seon.boot/prepl-server instance)
-                                     (:seon.boot/prepl-server (get @running-instances name)))
-                     (swap! running-instances assoc name marker)
-                     true))]
+                   (let [current (get @running-instances name)]
+                     (when (and current
+                                (identical? (:seon.boot/prepl-server instance)
+                                            (:seon.boot/prepl-server current))
+                                (not (:seon.boot/stopping current)))
+                       (swap! running-instances assoc name (assoc current :seon.boot/stopping true))
+                       true)))]
     (when claimed?
       (try
         (cluster/disarm-agents! instance)
@@ -499,7 +507,7 @@
 (defn- selected-instance
   {:malli/schema [:=> [:cat [:maybe :string]] :seon.boot/instance]}
   [name]
-  (let [instances (into {} (filter (comp map? val)) @running-instances)
+  (let [instances @running-instances
         selected (if name (get instances name)
                      (when (= 1 (count instances)) (val (first instances))))]
     (or selected (refuse! "Select one live cluster instance."
@@ -534,7 +542,7 @@
   {:malli/schema [:=> [:cat [:maybe :string] :seon.error/throwable] :seon.env/environment]}
   [name failure]
   (or (carried-environment failure)
-      (let [instances (filterv map? (if name [(get @running-instances name)] (vals @running-instances)))]
+      (let [instances (vec (vals (cond-> @running-instances name (select-keys [name]))))]
         (when (= 1 (count instances)) (env/of (:seon.sci.eval/ctx (first instances)))))
       (throw (ex-info "SEON CORE FAULT (panic): no live cluster database to record this failure in."
                       {:seon.boot/cluster-name (or name :absent)} failure))))
@@ -570,7 +578,7 @@
                                            observation
                                            (cluster/runtime-observation-ai
                                             {:seon.render/value observation}))))
-                                     (filter (comp map? val) @running-instances))})
+                                     @running-instances)})
                   (:seon.operator/verbose? request)
                   (assoc :seon.operator/footprint (fs/footprint (str (io/file root "data")))))
         :open (let [instance (selected-instance name)]
@@ -622,7 +630,7 @@
                               :seon.operator/total-ms (quot (- (System/nanoTime) began) 1000000)}}
                             (select-keys started [:seon.source/commit-id])))
                    (finally (cluster/release-root-store! dir))))
-        :down (do (doseq [instance (filter map? (vals @running-instances))] (stop! instance))
+        :down (do (doseq [instance (vals @running-instances)] (stop! instance))
                   {:seon.operator/stopped-processes [identity]
                    :seon.operator/process-exit? (empty? @running-instances)})
         :config-apply

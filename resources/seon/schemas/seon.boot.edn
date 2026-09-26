@@ -81,7 +81,8 @@
              [:seon.agent/routing
               {:optional true}
               :seon.agent/routing]
-             [:seon.boot/ready-ms {:optional true} [:int {:min 0}]]],
+             [:seon.boot/ready-ms {:optional true} [:int {:min 0}]]
+             [:seon.boot/stopping {:optional true} [:= true]]],
             :log-dir [:string {:min 1}],
             :overrides
             [:map

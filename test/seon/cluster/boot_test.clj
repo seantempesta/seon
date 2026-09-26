@@ -228,13 +228,24 @@
         (let [replacement (boot/start! (assoc config :seon.boot/cluster-name name))]
           (boot/stop! old)
           (is (identical? replacement (get @runtime/running-instances name)))
-          (let [release store/release-branch!]
-            (with-redefs [store/release-branch!
-                          (fn [connection]
-                            (if (identical? connection (:seon.boot/cluster-connection replacement))
-                              (throw (ex-info "injected release refusal" {}))
-                              (release connection)))]
-              (is (thrown? clojure.lang.ExceptionInfo (boot/stop! replacement))))
+          (let [release store/release-branch!
+                refusal (with-redefs [store/release-branch!
+                                      (fn [connection]
+                                        (if (identical? connection (:seon.boot/cluster-connection replacement))
+                                          (throw (ex-info "injected release refusal"
+                                                          {:entry (get @runtime/running-instances name)
+                                                           :second-stop (boot/stop! replacement)}))
+                                          (release connection)))]
+                          (try (boot/stop! replacement) nil
+                               (catch clojure.lang.ExceptionInfo e (ex-data e))))]
+            ;; A stopping instance stays an instance in the table (its
+            ;; readers hand the table to contracts over maps), and it is
+            ;; claimed: a second stop of it does nothing.
+            (is (true? (:seon.boot/stopping (:entry refusal))) (pr-str (type (:entry refusal))))
+            (is (identical? (:seon.boot/prepl-server replacement) (:seon.boot/prepl-server (:entry refusal))))
+            (is (contains? refusal :second-stop))
+            (is (nil? (:second-stop refusal)))
+            (is (identical? replacement (get @runtime/running-instances name)))
             (is (.isValid (:seon.store/lock (:seon.store/store replacement))))
             (is (= 2 (client/prepl-value! (:seon.boot/advertisement replacement) "(+ 1 1)" event-ms)))))))))
 
@@ -295,7 +306,7 @@
             (is (thrown? clojure.lang.ExceptionInfo (client/advertisements root))
                 "Unknown identity must refuse, never masquerade as absent.")
             (finally (spit path original))))
-        (evaluate! root "(do (locking seon.operator.runtime/running-instances (swap! seon.operator.runtime/running-instances assoc \"reserved-sibling\" :starting)) true)")
+        (evaluate! root "(do (locking seon.operator.runtime/running-instances (swap! seon.operator.runtime/running-instances assoc \"reserved-sibling\" {:seon.boot/config {:seon.boot/cluster-name \"reserved-sibling\"}})) true)")
         (let [result (client/request! (assoc (request root :stop)
                                       :seon.boot/cluster-name "default" :seon.operator/force? true))]
           (is (:seon.error/at result) (pr-str result))

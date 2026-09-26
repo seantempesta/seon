@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: fixed (committed, unadopted)
 severity: platform
 created: 2026-09-25
 tags: [issue, boot, stop, projection]
@@ -27,3 +27,15 @@ The fault is in the producer's shape. `boot.clj:358` filters `map?` for the same
 
 The process still exited, but a stop that faults is not a clean stop. Fix at the producer: make the marker a
 declared map (or keep it out of the map of instances) and delete the reader-side `map?` filter.
+
+## Fix (2026-09-26, lost-error-seams lane)
+
+The table now only ever holds instances.
+- `start!` acquires its listener and publishes its first instance under the claim lock, so the reservation `Object`
+  is gone.
+- `stop!` claims by marking the instance itself `:seon.boot/stopping true`. This is declared optional on
+  `:seon.boot/instance`. A second stop of the same instance, or a stop of a name with no entry, claims nothing.
+  The absent-name case previously claimed, because `identical? nil nil` is true.
+- The five reader-side `map?` filters in `boot.clj` are deleted.
+- The regression is in `seon.cluster.boot-test/stop-instance`: it observes the table mid-stop through the injected
+  release refusal.
