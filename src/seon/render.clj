@@ -277,11 +277,14 @@
     (= #{:source} (branches output))))
 
 (defn- source-producer?
-  "Read source intent from input-compatible indexed return contracts."
+  "Read source intent from input-compatible indexed return contracts.
+  Only a named producer has indexed contracts; a value's own inline
+  function or rendered data never reads as source."
   [projection selected arguments]
-  (let [outputs (schema/function-matching-outputs-in
-                 projection selected arguments)]
-    (and (seq outputs) (every? source-return? outputs))))
+  (and (qualified-symbol? selected)
+       (let [outputs (schema/function-matching-outputs-in
+                      projection selected arguments)]
+         (and (seq outputs) (every? source-return? outputs)))))
 
 (defn- ambiguity
 

@@ -915,6 +915,16 @@
                                 (db/db connection))))
        (is (= refusal (value/transacted refusal (db/db connection))))))))
 
+(deftest a-value-s-own-rendered-data-is-its-ai-face
+  ;; The master override (AGENTS render law): a value's own :seon.render/ai
+  ;; key may be the rendered data itself. Only a named producer has indexed
+  ;; contracts to read source intent from, so rendered data is shown as given.
+  (support/with-database
+   (fn [connection]
+     (is (= "just text"
+            (:seon.render.value/text
+             (value/prepare (registered-unit connection {:seon.render/ai "just text" :x 1}))))))))
+
 (deftest a-cut-continues-from-its-node-path-and-absolute-offset
   ;; One-render-path §3g: a cut's coordinates are the walk node, the path and
   ;; the absolute offset; the same selection answers from there, and a node
