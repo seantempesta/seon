@@ -3670,7 +3670,6 @@
                            (into (set (keys before-namespace-state))
                                  (keys after-namespace-state)))))]
     {:seon.program/row row
-     :seon.sci.eval/context-row context-row
      :seon.sci.eval/namespace-changed? namespace-changed?}))
 
 (defn- failure-text
@@ -4309,7 +4308,17 @@
                   ;; is bound here and around its shown result, never around
                   ;; acquisition, identity checks or install.
                   (let [value (binding [db/*read-evidence-sink* form-sink]
-                                (sci/eval-form execution-ctx form))]
+                                ;; This thread is the REPL thread for this
+                                ;; form. SCI attaches the form's location to a
+                                ;; throw only on the ctx's :main-thread-id,
+                                ;; set once at `sci/init` on whichever thread
+                                ;; built the context (sci/impl/opts.cljc:332,
+                                ;; utils.cljc:125-135); elsewhere it assumes an
+                                ;; enclosing try and drops the location.
+                                (sci/eval-form
+                                 (assoc execution-ctx :main-thread-id
+                                        (.getId (Thread/currentThread)))
+                                 form))]
                     (vreset! ending-namespace (sci/ns-name @sci/ns))
                     value)
                   (finally
@@ -4355,8 +4364,7 @@
               :else (eval-form!))
             _ (when-let [declared-ns (:seon.ns/name base-declared-row)]
                 (vreset! ending-namespace declared-ns))
-            {reader-row :seon.program/row
-             context-row :seon.sci.eval/context-row}
+            {reader-row :seon.program/row}
             (unmap-row
              {:seon.sci.eval/execution-ctx execution-ctx
               :seon.sci.eval/before-interns before-interns
@@ -4410,7 +4418,10 @@
                 (advance-context-projection!
                  evaluation-ctx (db/db connection) next-projection))
             ;; Durable declarations are installed only after the row commits.
-            value (if context-row (:seon.ns/name context-row) evaluated-value)
+            ;; The form's own value, as SCI returned it: `require` answers
+            ;; nil, and `(do (require ...) x)` answers x. A namespace-context
+            ;; row is persistence, never the shown value.
+            value evaluated-value
               ;; INSIDE the boundary, BEFORE disarm: an infinite lazy
               ;; sequence dies at the time limit here rather than in the
               ;; receipt writer
