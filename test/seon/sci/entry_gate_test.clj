@@ -238,3 +238,37 @@
             (value "(do (defn pending \"M.\" [x] x) (ns-unmap 'scratch.entry-gate 'pending) (defn bare \"No contract.\" [x] x))")))
        (is (= [true false] (value "[(some? (resolve 'pending)) (bound? #'pending)]"))
            "a refused redefinition-then-unmap puts the unbound Var back unbound")))))
+
+(deftest a-top-level-do-admits-each-child-before-the-next-runs
+  ;; Clojure evaluates a top-level `do`'s children as top-level forms
+  ;; (Compiler.java:7742-7748): a later child calls the earlier child's
+  ;; admitted, armed definition. A def a failed form leaves is said loudly.
+  (support/with-database
+   (fn [connection]
+     (let [ctx (support/fork-cluster-ctx connection)
+           value #(:seon.sci.admit/value (evaluate-in ctx %))
+           contract "{:malli/schema [:=> [:cat :int] :int]}"
+           called (evaluate-in ctx (str "(do (defn inc1 \"Inc.\" " contract " [x] (inc x)) (inc1 \"a\"))"))]
+       (is (= :input (:seon.instrument/check (:seon.sci.admit/value called)))
+           (str "the call inside the do meets the armed contract: " (pr-str (:seon.sci.admit/value called))))
+       (is (re-find #"NOT ADMITTED.*scratch\.entry-gate/inc1" (str (:seon.cluster.eval/output called)))
+           (str "the failed form says its definition is no row: " (pr-str (:seon.cluster.eval/output called))))
+       (is (= :input (:seon.instrument/check (value "(inc1 \"a\")")))
+           "the private definition a failed form left stays armed")
+       (let [admitted (evaluate-in ctx (str "(do (do (defn inc2 \"Inc.\" " contract " [x] (inc x))) (inc2 1))"))]
+         (is (= 2 (:seon.sci.admit/value admitted)))
+         (is (= 'scratch.entry-gate/inc2 (get-in admitted [:seon.program/row :seon.fn/sym]))
+             "a nested do's definition is the form's one row")
+         (is (not (:seon.cluster.eval/output admitted))))
+       (is (= :input (:seon.instrument/check (value "(inc2 \"a\")"))))
+       (let [failed (evaluate-in ctx (str "(let [] (defn inc3 \"Inc.\" " contract " [x] (inc x)) "
+                                          "(throw (ex-info \"boom\" {})))"))]
+         (is (re-find #"NOT ADMITTED.*scratch\.entry-gate/inc3" (str (:seon.cluster.eval/output failed)))
+             "any failed form's surviving definition is said, not only a do's"))
+       (is (not (re-find #"NOT ADMITTED"
+                         (str (:seon.cluster.eval/output (evaluate-in ctx "(do (def data 1) (throw (ex-info \"boom\" {})))")))))
+           "private data is no program definition")
+       (is (= '[scratch.entry-gate/one scratch.entry-gate/two]
+              (:seon.sci.eval/declarations
+               (value (str "(do (defn one \"D.\" " contract " [x] x) (defn two \"D.\" " contract " [x] x) (two \"a\"))"))))
+           "a second declaration refuses at its own child, before a later child runs")))))

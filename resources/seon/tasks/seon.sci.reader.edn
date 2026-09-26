@@ -4,4 +4,10 @@
              :intent "The anti-fabrication refusal (reader.cljc:567-577) applies to every reader, so MCP, tests and agent code cannot read {:seon.repl/value 1} as data. The provider request already stops at '#:seon.repl'; move the check to provider-reply planning (seon.cluster.reply) so it guards only model replies (agent-centric F14)."
              :must-read #{seon.sci.reader/read-events}
              :evidence #{"docs/research/agent-platform/landing/delete-r8-r6-r10-2026-09-26.md"
-                         "docs/research/agent-platform/landing/standing-deletion-2026-09-26.md"}}]
+                         "docs/research/agent-platform/landing/standing-deletion-2026-09-26.md"}}
+ #:seon.task{:id "1ef8af9c225f"
+             :name "reader-head-check-is-a-second-declaration-derivation"
+             :kind :function
+             :intent "The reader derives function and test declarations by a top-level head check (function-declaration, reader.cljc:252, test-declaration :306: (first form) resolves to defn/deftest), beside admission's one derivation from clj-kondo's analysis (seon.sci.eval/analyzed-rows -> seon.fn/source-rows). Admission never reads these facts (seon.sci.eval/row uses only schema, ns and deletion facts), but seon.turn's read-only-evaluation classifier (turn.clj:2024, program/declaration-row over source events) does, so (do (defn f ...)) reads there as declaring nothing. Make that classifier read the evaluation's admitted row, then delete the reader's function/test head checks."
+             :must-read #{seon.sci.reader/read-events seon.sci.eval/admit-program-change! seon.program/declaration-row}
+             :evidence #{"docs/research/agent-platform/landing/fix-do-defn-opus-2026-09-26.md"}}]

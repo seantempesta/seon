@@ -961,7 +961,9 @@
   declaration: several, or one beside a removal, refuse as
   `:seon.sci.eval/multiple-declarations-error`; a change its analysis does not
   declare refuses as `:seon.sci.eval/unindexed-change-error`; an uncontracted
-  function as `:seon.sci.eval/declaration-absent-error`. `program-change`
+  function as `:seon.sci.eval/declaration-absent-error`. The names an earlier
+  child of the same top-level `do` declared (`:seon.sci.eval/declared`) count
+  toward the one declaration. `program-change`
   decides the match by provenance. Contracts are validated and armed inside
   this boundary, and any refusal or throw restores the whole change before it
   leaves. Answers the admitted rows."
@@ -972,7 +974,8 @@
     before :seon.sci.eval/before-owned before-namespaces :seon.sci.eval/before-namespaces
     reader-row :seon.sci.eval/reader-row namespace-row :seon.sci.eval/namespace-row
     restore! :seon.sci.eval/restore
-    namespace-unmap? :seon.sci.eval/namespace-unmap?}]
+    namespace-unmap? :seon.sci.eval/namespace-unmap?
+    earlier :seon.sci.eval/declared}]
   (try
     (let [definitions (program-definitions before-namespaces before (turn-interns ctx))
           {matched ::matched unindexed ::unmatched declared ::declared}
@@ -981,7 +984,7 @@
                             (analyzed-rows database projection source namespace-row)
                             source start)
             {})
-          declared (cond-> (vec declared)
+          declared (cond-> (into (vec earlier) declared)
                      reader-row (conj (program-identity-name reader-row)))
           removed (when-not namespace-unmap?
                     (into [] (comp (map (fn [[n i _]] (symbol (str n) (str i))))
@@ -1013,6 +1016,58 @@
       (if-let [unavailable (restore! nil failure)]
         (throw (ex-info (:seon.error/message unavailable) unavailable failure))
         (throw failure)))))
+
+(defn- unadmitted-notice
+  "The loud line for the functions and tests a failed form defined: a failed
+  evaluation admits nothing, so each stays a private definition of this
+  context with no program row. Nil when it defined none."
+  {:malli/schema [:=> [:cat [:maybe [:map-of :qualified-symbol :map]]] [:maybe :string]]}
+  [definitions]
+  (when-let [names (seq (sort-by str (keep (fn [[qualified entry]]
+                                             (when (program-value? entry) qualified))
+                                           definitions)))]
+    (str ";; NOT ADMITTED: this form failed, so " (str/join ", " names)
+         " stayed a private definition with no program row (no tests, no merge)."
+         " Evaluate the definition again once its form succeeds.")))
+
+(defn- top-level-do?
+  "Whether `form` is a `do`, whose children a top-level evaluation treats as
+  top-level forms: Clojure's `Compiler/eval` (`reference-code/clojure/src/jvm/
+  clojure/lang/Compiler.java:7742-7748`) and SCI's `eval-form*`
+  (`reference-code/sci/src/sci/impl/interpreter.cljc:34-43`) both unroll it."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [form]
+  (and (seq? form) (= 'do (first form))))
+
+(defn- top-level-evaluation
+  "Evaluate `form` as a top-level form, in order: a `do`'s children are each
+  top-level; any other form runs through `eval!` and then the one definition
+  authority, `admit!`, over what it changed since its own `capture!`, after
+  the names earlier children declared. A later child therefore calls an
+  earlier child's admitted, armed definition, as two top-level forms would.
+  Folds into `folded` (start with no rows and no names) the last value
+  (`(do)` is nil), the admitted rows and the names declared."
+  {:malli/schema
+   [:=> [:cat
+         [:map [:seon.sci.eval/eval! [:=> [:cat :any] :any]]
+          [:seon.sci.eval/capture! [:=> [:cat] :seon.sci.eval/capture]]
+          [:seon.sci.eval/admit! [:=> [:cat :seon.sci.eval/capture [:vector :seon.sci.eval/program-name]]
+                                  [:maybe [:vector :map]]]]]
+         [:map [:seon.sci.eval/value {:optional true} :any]
+          [:seon.sci.eval/rows [:vector :map]]
+          [:seon.sci.eval/declared [:vector :seon.sci.eval/program-name]]]
+         :any]
+    [:map [:seon.sci.eval/value :any]
+     [:seon.sci.eval/rows [:vector :map]]
+     [:seon.sci.eval/declared [:vector :seon.sci.eval/program-name]]]]}
+  [{eval! ::eval! capture! ::capture! admit! ::admit! :as stages} folded form]
+  (if (top-level-do? form)
+    (reduce #(top-level-evaluation stages %1 %2) (assoc folded ::value nil) (rest form))
+    (let [capture (capture!)
+          value (eval! form)
+          rows (vec (admit! capture (::declared folded)))]
+      (cond-> (assoc folded ::value value ::rows (into (::rows folded) rows))
+        (seq rows) (update ::declared conj (program-identity-name (first rows)))))))
 
 (defn- bindings
   [ctx _namespace-name before _source _form _observed-built-in-calls]
@@ -4452,7 +4507,8 @@
                                                     'seon.sci.kernel/failure-value)
                                        record)]
           (failed-evaluation
-           (cond-> {:seon.sci.eval/admitted admitted
+           (cond-> {:seon.sci.eval/output-prefix (unadmitted-notice definitions)
+                    :seon.sci.eval/admitted admitted
                     :seon.sci.admit/caps caps
                     :seon.sci.eval/printed printed
                     :seon.sci.eval/namespace-name namespace-name
@@ -4533,8 +4589,9 @@
             before-namespace-state (when namespace-unmap? before-namespaces)
             before-interns (when namespace-unmap?
                              (sci/namespace-interns execution-ctx))
-            eval-form!
-            (fn []
+            ;; Runs `evaluate!` on this form's ctx inside its REPL frame.
+            eval-in-form!
+            (fn [evaluate!]
               (sci/binding [sci/ns namespace-object
                             sci/out printed
                             sci/err printed
@@ -4561,10 +4618,9 @@
                                 ;; built the context (sci/impl/opts.cljc:332,
                                 ;; utils.cljc:125-135); elsewhere it assumes an
                                 ;; enclosing try and drops the location.
-                                (sci/eval-form
+                                (evaluate!
                                  (assoc execution-ctx :main-thread-id
-                                        (.getId (Thread/currentThread)))
-                                 form))]
+                                        (.getId (Thread/currentThread)))))]
                     (vreset! ending-namespace (sci/ns-name @sci/ns))
                     value)
                   (finally
@@ -4578,8 +4634,32 @@
                                   :seon.print/level @sci/print-level}]
                       (vreset! print-options ending)
                       (reset! print-session ending))))))
+            eval-form! #(eval-in-form! (fn [ctx] (sci/eval-form ctx form)))
             projection
             (evaluation-projection {:seon.sci.eval/ctx evaluation-ctx})
+            ;; The one definition authority, over the program change made
+            ;; since `capture`, after the names `declared` earlier in this form.
+            admit!
+            (fn [{owned ::owned namespaces ::namespaces} reader-row declared]
+              (when-let [database (:seon.db/db request)]
+                (admit-program-change!
+                 (cond->
+                  {:seon.sci.eval/ctx execution-ctx
+                   :seon.db/db database
+                   :seon.sci.eval/current-db (if connection (db/db connection) database)
+                   :seon.schema/projection projection
+                   ;; Analyze exactly the bytes the reader accepted as this form.
+                   :seon.cluster.eval/source (or (:seon.sci.reader/source event) source)
+                   :seon.sci.eval/form-start [(:seon.sci.reader/line event 1)
+                                              (:seon.sci.reader/column event 1)]
+                   :seon.sci.eval/before-owned owned
+                   :seon.sci.eval/before-namespaces namespaces
+                   :seon.sci.eval/namespace-row
+                   (assoc (binding-rows before-reader-context) :seon.ns/name namespace-name)
+                   :seon.sci.eval/restore restore!
+                   :seon.sci.eval/namespace-unmap? (boolean namespace-unmap?)
+                   :seon.sci.eval/declared declared}
+                   reader-row (assoc :seon.sci.eval/reader-row reader-row)))))
             {base-declared-row :seon.sci.eval/base-declared-row
              live-declaration? :seon.sci.eval/live-declaration?
              schema-value :seon.sci.eval/schema-value
@@ -4607,7 +4687,22 @@
               (or (:seon.schema/key base-declared-row)
                   (when unregister-key schema-value))
 
+              ;; Each child of a top-level `do` is a top-level form, admitted
+              ;; before the next runs (`top-level-evaluation`).
+              (top-level-do? form)
+              (eval-in-form! #(top-level-evaluation
+                               {::eval! (partial sci/eval-form %)
+                                ::capture! (fn [] (context-capture execution-ctx))
+                                ;; Admission's reads are not the form's reads.
+                                ::admit! (fn [capture declared]
+                                           (binding [db/*read-evidence-sink* nil]
+                                             (admit! capture nil declared)))}
+                               {::rows [] ::declared []}
+                               form))
+
               :else (eval-form!))
+            top-level (when (top-level-do? form) evaluated-value)
+            evaluated-value (if top-level (::value top-level) evaluated-value)
             _ (when-let [declared-ns (:seon.ns/name base-declared-row)]
                 (vreset! ending-namespace declared-ns))
             {reader-row :seon.program/row}
@@ -4622,25 +4717,13 @@
               :seon.sci.eval/namespace-name namespace-name
               :seon.sci.eval/namespace-unmap? namespace-unmap?
               :seon.db/db (if connection (db/db connection) (:seon.db/db request))})
+            ;; A top-level `do` admitted its children's definitions as they
+            ;; ran; what remains is the form's own reader row, counted with them.
             var-rows
-            (when-let [database (:seon.db/db request)]
-              (admit-program-change!
-               (cond->
-               {:seon.sci.eval/ctx execution-ctx
-                :seon.db/db database
-                :seon.sci.eval/current-db (if connection (db/db connection) database)
-                :seon.schema/projection projection
-                ;; Analyze exactly the bytes the reader accepted as this form.
-                :seon.cluster.eval/source (or (:seon.sci.reader/source event) source)
-                :seon.sci.eval/form-start [(:seon.sci.reader/line event 1)
-                                           (:seon.sci.reader/column event 1)]
-                :seon.sci.eval/before-owned before-owned
-                :seon.sci.eval/before-namespaces before-namespaces
-                :seon.sci.eval/namespace-row
-                (assoc (binding-rows before-reader-context) :seon.ns/name namespace-name)
-                :seon.sci.eval/restore restore!
-                :seon.sci.eval/namespace-unmap? (boolean namespace-unmap?)}
-               reader-row (assoc :seon.sci.eval/reader-row reader-row))))
+            (if top-level
+              (into (::rows top-level)
+                    (admit! (context-capture execution-ctx) reader-row (::declared top-level)))
+              (admit! capture reader-row []))
             var-row (first var-rows)
             row (or var-row reader-row)
             next-projection

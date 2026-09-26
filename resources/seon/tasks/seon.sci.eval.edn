@@ -132,4 +132,10 @@
              :kind :function
              :intent "smoke-6 (default b4b90d405, about one minute after readiness) recorded :seon.eval/duration-ms 284-495 ms for each trivial form of a fresh branch run; the same forms on a fresh branch 30 minutes later took 0-3 ms (a new defn 73 ms, its first call 23 ms). Not reproduced warm: at the next restart, profile the first eight forms (seon.profile/begin + explain, JFR) and name what each recomputes while cold."
              :must-read #{seon.sci.eval/evaluate seon.sci.eval/fork-for-turn}
-             :evidence #{"docs/research/agent-platform/landing/perf-eval-overhead-2026-09-26.md" "tmp/orchestrator/smoke-6-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/perf-eval-overhead-2026-09-26.md" "tmp/orchestrator/smoke-6-2026-09-26.md"}}
+ #:seon.task{:id "3411720c27cf"
+             :name "a-do-with-two-definitions-refuses-instead-of-admitting-both"
+             :kind :function
+             :intent "A top-level do's children are admitted one by one (top-level-evaluation), but an evaluation still settles one :seon.program/row, so (do (defn a ...) (defn b ...)) refuses as multiple-declarations-error at b's child and restores a, where Clojure defines both. Admitting both needs settlement (seon.turn) to carry a vector of rows per evaluation; until then the refusal is loud and names both."
+             :must-read #{seon.sci.eval/top-level-evaluation seon.sci.eval/admit-program-change!}
+             :evidence #{"docs/research/agent-platform/landing/fix-do-defn-opus-2026-09-26.md"}}]
