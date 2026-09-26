@@ -524,6 +524,17 @@
             (.set thread-arm displaced)
             (.remove thread-arm)))))))
 
+(defn- without-interrupt-marker
+  "One cause-chain link without SCI's private interrupt marker.
+  `sci.interrupt/interrupt!` tags its ex-data with an opaque identity object
+  (`sci.impl.utils/interrupt-marker`) that `interrupted?` reads; it is never
+  evidence."
+  {:malli/schema [:=> [:cat :seon.error/link] :seon.error/link]}
+  [link]
+  (if-let [data (not-empty (dissoc (:seon.error/data link) :sci.impl/interrupt))]
+    (assoc link :seon.error/data data)
+    (dissoc link :seon.error/data)))
+
 (defn failure-value
   "Preserve an existing structural refusal and accrete guard evidence.
   Otherwise return the kernel declared-schema with the observed evaluation duration;
@@ -540,7 +551,10 @@
    diagnostic-record]
   (when (fault/carried-receipt throwable) (throw throwable))
   (let [timed-out? (= :time (:seon.eval/outcome diagnostic-record))
-        throwable-data (not-empty (dissoc (ex-data throwable) :sci.impl/interrupt))
+        ;; The whole cause chain, read once; the outermost link's data is the
+        ;; throwable's own ex-data.
+        links (mapv without-interrupt-marker (error.refusal/chain throwable))
+        throwable-data (:seon.error/data (first links))
         evidence (cond-> {:seon.sci.eval/throwable (.getName (class throwable))
                           :seon.sci.admit/record diagnostic-record}
                    subject (assoc :seon.fn/sym subject))
@@ -556,7 +570,8 @@
         (not (string? (:seon.error/message existing)))
         (assoc :seon.error/message
                (or (ex-message throwable) "The operation was refused.")))
-      (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.kernel/evaluation 'seon.sci.kernel/failure-value
+      (assoc
+       (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.kernel/evaluation 'seon.sci.kernel/failure-value
        {:seon.sci.kernel/guard-observation {:seon.error.evidence/attribute :seon.eval/duration-ms
          :seon.error.evidence/value (:seon.eval/duration-ms diagnostic-record)}
         :seon.error/message (or (:seon.error/message existing)
@@ -574,7 +589,8 @@
         (assoc :seon.sci.eval/symbol (:sci.impl/symbol throwable-data))) {:seon.sci.admit/record diagnostic-record})
         :seon.error/throwable throwable
         :seon.error/expected :successful-evaluation
-        :seon.error/offending (or (:sci.impl/symbol throwable-data) subject)}))))
+        :seon.error/offending (or (:sci.impl/symbol throwable-data) subject)})
+       :seon.error/chain links))))
 
 (defn unarmed-record
   "The diagnostic record for a failure that never reached an arm."
