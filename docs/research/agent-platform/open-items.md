@@ -153,6 +153,9 @@ EXISTING store (prove adoption on a branch of the live store, never only on a fr
   (`reconcile-tx`/`exact-replacement-tx`) is used — verify every production redefinition path.
 
 ### Operating checklist
+- After `bin/seon start --head`, read its WHOLE result and then `bin/seon status` `:seon.operator/source-root`: a move
+  whose JVM misses readiness or adoption falls back to the previous archive and still prints a pid and ready-ms
+  (operator.clj:1319-1352). 2026-09-26 root filtered the output and ran three test passes against a stale archive.
 - Publish/adopt: `bin/seon init --dev default --changed <existing paths only>`; park dirty lane files first; after a fork or
   dependency bump run `(seon.fn.analyzer/analyze-dependencies!)` (or the shell form) before restart.
 - Tests: root runs serially with `tmp/orchestrator/run-verify2.sh LIST OUT`; never in a publication window; `--include-long`
