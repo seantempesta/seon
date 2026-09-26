@@ -772,7 +772,11 @@
                              (assoc :seon.render.walk/attribute
                                     (scoped-attribute member)))
                            rendered (render/render-call render-request)
-                           failure (when (or (:seon.render/refused-member rendered) (:seon.render.unknown/reason rendered) (:seon.render/invalid-output rendered)) rendered)
+                           ;; AI output is text and HTML is hiccup: a map
+                           ;; is a refusal or a declared error the pair
+                           ;; returned (e.g. a bounded read's
+                           ;; `:seon.db/invalid-read`), never output.
+                           failure (when (map? rendered) rendered)
                            failure-outcome
                            (when (and failure owner)
                              (render/renderer-failure
