@@ -153,6 +153,18 @@
           (is (#'turn/read-only-evaluation? @connection doc-entry))
           (is (not (#'turn/read-only-evaluation?
                      @connection (dissoc doc-entry :seon.cluster.eval/read-evidence))))
+          ;; Class (2026-09-26): root's prepare-merge!, accept-merge! and
+          ;; write-back! wrote to other branches and files, left no receipt
+          ;; here, and were promoted to reads a system turn evaluates again.
+          ;; Their reads named another branch or an uncommitted value.
+          (doseq [[label revision] [["another branch" #(assoc % :datahike.cache/connection-id
+                                                              [(random-uuid) :merge-branch])]
+                                    ["an uncommitted value" #(dissoc % :datahike.cache/connection-id)]]]
+            (is (not (#'turn/read-only-evaluation?
+                      @connection
+                      (update doc-entry :seon.cluster.eval/read-evidence
+                              (fn [reads] (update (vec reads) 0 update :datahike.read/revision revision)))))
+                (str "a read of " label " is not a read of this agent's database")))
           (support/transacted! connection [[:db/add [:example/order "c1"] :example/amount 39]])
           (let [plan (#'turn/system-plan @connection []
                                         (#'turn/latest-evaluations @connection "juniper"))

@@ -1999,12 +1999,26 @@
                     [?evaluation :seon.cluster.eval/source]]
                   database agent-id))))
 
-(defn- read-only-evaluation? [database evaluation]
+(defn- read-only-evaluation?
+  "True when a successful evaluation only read this agent's database, so a
+  system turn may evaluate it again. Every read must name this database's
+  committed connection (`:datahike.cache/connection-id`, the identity Datahike
+  keys its query cache on, datahike db.cljc:444): a read of another branch or
+  of an uncommitted value is what a merge, a test run or a write-back does on
+  its way to writing there, and this database holds no receipt for it (root's
+  prepare-merge!, accept-merge! and write-back! evaluations were promoted,
+  2026-09-26). Absent receipts and effects are necessary, not sufficient."
+  [database evaluation]
   (let [events (source-events evaluation)
         evaluation-id (:db/id evaluation)
-        run-id (get-in evaluation [:seon.cluster.eval/run :db/id])]
+        run-id (get-in evaluation [:seon.cluster.eval/run :db/id])
+        evidence (:seon.cluster.eval/read-evidence evaluation)
+        own (:datahike.cache/connection-id (:cache-context database))]
     (and (nil? (:seon.cluster.eval/error evaluation))
-         (seq (:seon.cluster.eval/read-evidence evaluation))
+         (seq evidence)
+         (some? own)
+         (every? #(= own (get-in % [:datahike.read/revision :datahike.cache/connection-id]))
+                 evidence)
          (vector? events)
          (not-any? #(program/declaration-row (db/carried-projection database) % :all :agent) events)
          (nil? (db/q '[:find ?transaction . :in $ ?evaluation
