@@ -1,6 +1,7 @@
 (ns seon.config-test
   "Acceptance proofs for the one manifest compiler and config apply."
   (:require [malli.core] [clojure.edn :as edn]
+            [datahike.api]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -496,20 +497,56 @@
             "the refused reconcile committed nothing")))))
 
 (deftest cluster-scoped-config-refuses-an-omitted-cluster
+  ;; compile and apply name no cluster to default from, so an omitted cluster
+  ;; refuses at entry. `effective` declares `:seon.boot/cluster-name`, which the
+  ;; running evaluation's environment supplies by schema name (call-time
+  ;; defaults): the omitted read answers that cluster, exactly as naming it.
   (test-support/with-database
    (fn [connection]
      (let [basis (:max-tx @connection)]
        (doseq [[caller invoke]
                [['seon.config/compile-manifest #(config/compile-manifest {})]
-                ['seon.config/apply! #(config/apply! {:seon.db/connection connection})]
-                ['seon.config/effective #(apply config/effective [(db/db connection)])]]]
+                ['seon.config/apply! #(config/apply! {:seon.db/connection connection})]]]
          (let [refusal (test-support/refusal-data invoke)]
-           (if (= caller 'seon.config/effective)
-             (do (is (= 1 (:seon.instrument/arity refusal)))
-                 (is (seq (:seon.instrument/declared-arities refusal))))
-             (is (= :input (:seon.instrument/check refusal))))
+           (is (= :input (:seon.instrument/check refusal)))
            (is (= caller (:seon.instrument/fn refusal)))))
        (is (= basis (:max-tx @connection)))))))
+
+(deftest a-seeded-cluster-reads-its-own-row-on-the-member-branch
+  ;; Class regression (shrink-turn 2026-09-26): tests that seed their own
+  ;; cluster read "requires a matching cluster row", because the reader
+  ;; required a dial the world's rows predated. The seeded row is read on the
+  ;; member branch it was written to.
+  (test-support/with-database
+   (fn [connection]
+     (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "seeded-proof"
+                     :seon.config/manifest {:seon.config.eval/time-limit-ms 4321}})
+     (let [effective (config/effective (db/db connection) "seeded-proof")]
+       (is (nil? (:seon.error/at effective)) (pr-str effective))
+       (is (= 4321 (:seon.config.eval/time-limit-ms effective)))))))
+
+(deftest a-row-written-before-a-dial-existed-reads-its-declared-default
+  ;; Accretion (Astra F5, 2026-09-26): a retained branch's row, written by a
+  ;; program older than a declared-default dial, lacks it. The reader requires
+  ;; nothing of it: the dial answers its declared default by schema name, and
+  ;; every dial the row holds reads as held.
+  (test-support/with-database
+   (fn [connection]
+     (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "older-row"
+                     :seon.config/manifest {:seon.config.eval/time-limit-ms 4321}})
+     (let [dial :seon.config.cache/max-bytes
+           declared (get (schema.edn/packaged-forms) dial)
+           older (:db-after (datahike.api/with
+                             (db/db connection)
+                             [[:db/retract [:seon.config/cluster "older-row"] dial
+                               (get (db/pull (db/db connection) [dial] [:seon.config/cluster "older-row"]) dial)]]))
+           effective (config/effective older "older-row")]
+       (is (nil? (get (db/pull older [dial] [:seon.config/cluster "older-row"]) dial))
+           "the row genuinely lacks the dial")
+       (is (nil? (:seon.error/at effective)) (pr-str effective))
+       (is (= (:seon.config/default (malli.core/properties (schema/structural-schema declared)))
+              (get effective dial)))
+       (is (= 4321 (:seon.config.eval/time-limit-ms effective)))))))
 
 (deftest zero-overlay-compilation-resolves-every-registered-config-attribute
   (let [compiled (config/compile-manifest {:seon.boot/cluster-name "default"})
@@ -629,7 +666,8 @@
                         (config/apply! {:seon.boot/cluster-name "default"
                                         :seon.db/connection connection}
                                        (str path)))]
-           (is (= 1 @acquisitions) "file apply acquires one declaration generation")
+           (is (<= @acquisitions 1)
+               "file apply acquires at most one declaration generation (none when the process cache holds it)")
            (is (false? (:seon.reconcile/converged? result)))
            (is (= 1234 (:seon.config.eval/time-limit-ms
                            (config/effective (db/db connection) "default")))))))

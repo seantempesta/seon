@@ -868,38 +868,45 @@
 (declare effective-in)
 
 (defn effective
-  "Read one cluster's effective config row.
+  "Read one cluster's effective config row, as this JVM's code reads it.
 
-  Its dials are the ones this JVM's declarations name: the population
-  [[compile-manifest]] compiled the row from and [[apply-compiled!]] wrote it
-  with (installing any attribute the branch lacked), and whose
-  `:seon.config/effective` contract the answer is checked against. Never the
-  branch's carried projection: a branch adopts the checkout's declarations
-  after boot, so a dial the checkout added was dropped from a row that held
-  it and the answer refused its own contract (boot 2026-09-26, the new
-  `:seon.config.cache/max-bytes`)."
+  The row keeps its branch's own vocabulary: every dial its carried projection
+  declares (a branch-local dial included) and every dial this JVM declares
+  ([[declared-projection]], whose `:seon.config/effective` contract the answer
+  is checked against). A required dial the row lacks because an older program
+  wrote it takes its declared default by schema name: a dial added later
+  requires nothing of rows written before it (accretion). Boot's applied row
+  holds the dials the checkout added before the branch adopts their
+  declarations (`apply-compiled!` installs the attribute), so they are read
+  from the row, never from the default. A required dial with no declared
+  default still refuses."
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.boot/cluster-name]
     [:or :seon.config/effective :seon.config/error
      :seon.schema/validation-refusal :seon.db/invalid-read-error]]}
   [db cluster-name]
-  (effective-in db cluster-name (declared-projection)))
+  (if-let [projection (or (db/carried-projection db)
+                          (schema/handed-projection))]
+    (effective-in db cluster-name projection (declared-projection))
+    (db/projection-fallback 'seon.config/effective)))
 
 (defn- effective-in
   {:malli/schema
    [:=> [:cat [:or :seon.db/database-value :seon.db/error-result]
-         :seon.boot/cluster-name :seon.schema/projection]
+         :seon.boot/cluster-name :seon.schema/projection :seon.schema/projection]
     [:or :seon.config/effective :seon.config/error :seon.db/invalid-read-error]]}
-  [db cluster-name projection]
+  [db cluster-name projection declared]
   (let [row (db/pull db '[*] [:seon.config/cluster cluster-name])]
     ;; A refused read is not an absent row. Reading the refusal's own keys as
     ;; the config row reports every dial missing and blames the facts; the
     ;; cause here is the read, so return the read's refusal unchanged.
     (if (:seon.db/invalid-read row)
       row
-      (let [config-effective (select-keys row (dial-attributes projection))
-            missing (vec (sort (set/difference (required-dial-attributes projection)
-                                               (set (keys config-effective)))))]
+      (let [required (required-dial-attributes declared)
+            config-effective
+            (merge (select-keys (registration-defaults declared) required)
+                   (select-keys row (into (dial-attributes declared) (dial-attributes projection))))
+            missing (vec (sort (set/difference required (set (keys config-effective)))))]
         (if (and row (empty? missing))
           config-effective
           (let [available
