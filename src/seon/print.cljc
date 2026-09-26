@@ -209,15 +209,37 @@
   [options]
   (merge (option-defaults) options))
 
+(defn path-step
+  "The member one path step names in `parent`, or `missing`.
+
+  Design one-render-path §3b. The floor emits a typed step wherever a plain key
+  would be ambiguous: `[:seon.render.data/entry i :seon.render.data/key]` or
+  `[... :seon.render.data/val]` is entry `i` of a map in its iteration order,
+  `[:seon.render.data/nth i]` member `i` of a set or seq. A plain step is
+  `get-in`'s: a map key, or a sequence index."
+  {:malli/schema [:=> [:cat :seon.schema/value :seon.schema/value :seon.schema/value] :seon.schema/value]}
+  [parent step missing]
+  (let [tag (when (vector? step) (first step))
+        index (when tag (second step))]
+    (cond
+      (= tag :seon.render.data/entry)
+      (let [entry (when (and (map? parent) (nat-int? index)) (nth (seq parent) index nil))]
+        (case (when entry (nth step 2 nil))
+          :seon.render.data/key (key entry)
+          :seon.render.data/val (val entry)
+          missing))
+      (= tag :seon.render.data/nth)
+      (if (and (or (sequential? parent) (set? parent)) (nat-int? index)) (nth (seq parent) index missing) missing)
+      (map? parent) (if-some [entry (find parent step)] (val entry) missing)
+      (and (sequential? parent) (nat-int? step)) (nth parent step missing)
+      (set? parent) (if (contains? parent step) step missing)
+      :else missing)))
+
 (defn value-at
-  "Read a path through maps, sets, vectors, and lists without changing keys."
+  "Read a path of `path-step`s; nil where it leaves the value."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}] :seon.render.data/path] :seon.schema/value]}
   [value path]
-  (reduce (fn [parent key]
-            (if (and (sequential? parent) (integer? key) (not (neg? key)))
-              (nth parent key nil)
-              (get parent key)))
-          value path))
+  (reduce #(path-step %1 %2 nil) value path))
 
 (defn compare-values
   "Order whole values structurally without rendering their contents or invoking pairs."
@@ -369,11 +391,15 @@
       ;; ONE CUT FACE (design §3e): `…N` after shown members, `"prefix"…+N`
       ;; after a string's shown characters, `…?` for a pending tail. The cut's
       ;; coordinates stay on the node for HTML and continuation.
-      ::elided [(text-op ::elision
-                         (case (::elision-unit node)
-                           :characters (str (literal (or (::prefix node) "")) "…+" (::omitted node))
-                           :pending "…?"
-                           (str "…" (::omitted node "?"))))]
+      ;; A cut with an expander (`::href`, the continuation at its path and
+      ;; next offset) is a link in HTML; the text face is the same.
+      ::elided (let [text (case (::elision-unit node)
+                            :characters (str (literal (or (::prefix node) "")) "…+" (::omitted node))
+                            :pending "…?"
+                            (str "…" (::omitted node "?")))]
+                 [(if-some [href (::href node)]
+                    (text-op ::elision text [:a {:class (css-class ::elision) :href href} text])
+                    (text-op ::elision text))])
       ::pruned [(text-op ::prune "#")]
       ::projected (let [output (:seon.render/output node)]
                     (cond

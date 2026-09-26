@@ -1892,14 +1892,11 @@ handle))}}
         (is (str/includes? body ":alpha"))
         (is (str/includes? body (str "value=" digest)))))))
 
-(deftest data-serves-a-five-megabyte-attribute-whole-with-its-handle
-  ;; RULED (2026-09-07): HTML renders the stored value with NO limits, and the
-  ;; character cap that used to clip a string during admission was a display
-  ;; decision that is now gone — elision happens only where AI context is
-  ;; generated. So `/data` serves the whole attribute, and the assertion that
-  ;; matters is that it is COMPLETE and still navigable, not that it was cut.
-  ;; The presentation bound this surface still wants is filed, not faked:
-  ;; docs/seon/issues/the-data-route-has-no-presentation-bound-for-a-string.md
+(deftest data-serves-a-five-megabyte-attribute-as-one-page-that-continues
+  ;; One-render-path §3 (owner-adopted 2026-09-26; supersedes the 2026-09-07
+  ;; unbounded-HTML ruling; Astra F1): HTML is the same selection as AI under
+  ;; one B, so `/data` serves a page of the attribute, and its cut is an
+  ;; expander at the same path and next offset: all of it stays reachable.
   (with-server
     (fn [connection server _context]
       (let [namespace-name 'my.agents.w3-data-cap
@@ -1916,16 +1913,18 @@ handle))}}
                                           "&path=" path "&offset=0"))
               body (.body response)]
           (is (= 200 (.statusCode response)))
-          (is (< (* 5 1024 1024) (count body))
-              "the stored value is served whole, never a window of itself")
+          (is (< (count body) (* 1024 1024))
+              "one page, never a second unbounded selection")
+          (is (re-find #"href=\"[^\"]*offset=\d+" body)
+              "the cut is an expander at its next offset")
           (is (str/includes? body "seon-data-panel"))
           (is (str/includes? body (str "entity=" entity))
               "and it retains a handle back to the same root"))))))
 
-(deftest a-five-megabyte-value-is-elided-for-ai-and-complete-for-html
-  ;; THE OWNER'S RULING, BOTH HALVES AT ONCE (2026-09-07): elision happens at
-  ;; the AI context generation boundary and nowhere else, and HTML is not
-  ;; bounded. Before this `seon.print/fit` was the identity, so one stored
+(deftest a-five-megabyte-value-is-one-bounded-selection-in-both-faces
+  ;; One-render-path §3 (owner-adopted 2026-09-26, Astra F1): both faces are
+  ;; one selection under the profile's B; the 2026-09-07 unbounded-HTML half
+  ;; is retired. Before this `seon.print/fit` was the identity, so one stored
   ;; 5 MiB string rendered 5,242,987 bytes of `/ai` for a single evaluation
   ;; (measured, research/verify-storage-bound-2026-09-07.md B2) — a value
   ;; elided NOWHERE, in storage or in context.
@@ -1966,8 +1965,8 @@ handle))}}
            (is (pos? (count prefix)) ai)
            (is (= (count huge) (+ (count (edn/read-string (str "\"" prefix "\""))) (parse-long omitted)))))
          (is (str/includes? ai "(seon.print/value-at ") "and one legend names the requery")
-         (is (<= (count huge) (count html-string))
-             "the HTML projection serves the whole value, unbounded")
+         (is (< (count html-string) (count huge))
+             "the HTML projection is the same bounded selection")
          ;; THE STRUCTURAL HALF. A wide collection's cut is minted by
          ;; `fit-children`, which carries no prefix, and a collection cut
          ;; therefore rode an absent prefix as a STORED NIL into
@@ -1991,8 +1990,8 @@ handle))}}
                     (+ (dec (count shown)) (parse-long (subs (str cut) 1))))))
            (is (str/includes? wide-ai "(seon.print/value-at ")
                "and one legend names the requery")
-           (is (str/includes? wide-html "4999")
-               "while HTML serves the whole collection")))))))
+           (is (not (str/includes? wide-html ">4999<"))
+               "and HTML shows the same cut collection")))))))
 
 (deftest each-agent-has-an-isolated-debug-route
   (with-server

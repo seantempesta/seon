@@ -435,7 +435,7 @@
   "One history value as the value renderer's text, the one clipping spot.
   Without an SCI context the renderer skips declared pairs and prints the
   value structurally (`seon.render.value/value-node*`)."
-  {:malli/schema [:=> [:cat :seon.render/unit [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A transcript history value is an arbitrary Clojure value; the value renderer owns its presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}]] [:or :string :seon.render.value/missing-root-identity-error]]}
+  {:malli/schema [:=> [:cat :seon.render/unit [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A transcript history value is an arbitrary Clojure value; the value renderer owns its presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}]] [:or :string :seon.render.value/missing-root-identity-error :seon.render.value/insufficient-floor-budget-error]]}
   [unit value]
   ;; Transcript values are immutable history entries. Give the shared value
   ;; floor an explicit, content-stable block identity when this internal

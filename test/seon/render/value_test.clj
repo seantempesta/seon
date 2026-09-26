@@ -461,14 +461,15 @@
                        {:seon.config.eval.result/max-bytes 1})]
     (is (= 68 (:seon.print/omitted (last (tree-cuts (value/prepare request))))))
     (is (str/includes? (value/render-ai request) "…68"))
-    (is (str/includes? (hiccup/->string (value/render-html request)) ">99<"))
+    (is (str/includes? (hiccup/->string (value/render-html request)) "…68")
+        "HTML shows the same selection and the same cut as the text")
     (is (not (str/includes? (value/render-ai request) "over-bound")))))
 
 (deftest elision-is-a-requeryable-structural-value
   ;; THE SECOND AND THIRD BOUNDS. The AI projection is cut by the render
   ;; profile — the one place presentation elides — and the cut is ordinary
   ;; data naming what was omitted, the bound that made it, and how to ask
-  ;; again. HTML is not bounded at all: the same unit serves every item.
+  ;; again. HTML is the same selection: its cut is the same continuation.
   (let [handle 'result/e0123456789ab
         raw (vec (range 100))
         profile (render/agent-render-profile (support/effective-config))
@@ -496,13 +497,12 @@
     (let [text (:seon.render.value/text projection)]
       ;; One cut face and one legend naming how to read on (design §3d).
       (is (str/includes? text (str "…" (- (count raw) kept) "]")) text)
-      (is (str/includes? text "(get-in result/e0123456789ab [...])") text)
+      (is (str/includes? text "(seon.print/value-at result/e0123456789ab [...])") text)
       (is (= '(seon.print/value-at result/e0123456789ab [])
              (:seon.print/requery-form elision))))
-    (is (not (str/includes? html "seon-print-elision"))
-        "HTML is not bounded at all — it elides nothing to requery")
-    (is (str/includes? html ">99<")
-        "the last item of the whole value reaches the page")))
+    (is (str/includes? html "seon-print-elision")
+        "HTML shows the one selection, not a second unbounded one")
+    (is (not (str/includes? html ">99<")))))
 
 (deftest a-map-beyond-the-child-bound-costs-the-bound-not-its-size
   ;; The AI render keeps the first `max-children` members in the map's held
@@ -669,10 +669,10 @@
            (:seon.print/requery-form node)))
     (is (= (count large) (:seon.render.data/total node)))
     (is (pos? (:seon.print/omitted node)))
-    (is (= (pr-str large)
-           (lexical-hiccup-text (value/render-html (probe-unit large)))))))
+    (is (str/includes? (lexical-hiccup-text (value/render-html (probe-unit large)))
+                       (str "…+" (:seon.print/omitted node))))))
 
-(deftest depth-cuts-name-the-bound-and-html-keeps-the-leaf
+(deftest depth-cuts-name-the-bound-in-both-faces
   (let [raw {:a {:b {:c {:d {:e "last-leaf"}}}}}
         request (probe-unit raw)
         ai (value/render-ai request)
@@ -681,8 +681,8 @@
            (map :seon.print/bound-by (tree-cuts (value/prepare request)))))
     (is (= [[:a :b :c :d]] (map :seon.render.data/path (tree-cuts (value/prepare request)))))
     (is (str/includes? ai "{:d {…1}}") ai)
-    (is (str/includes? html "last-leaf"))
-    (is (not (str/includes? html "seon-print-elision")))))
+    (is (not (str/includes? html "last-leaf")))
+    (is (str/includes? html "seon-print-elision"))))
 
 (deftest an-explicit-pull-keeps-its-nested-shape-in-shown-text
   (support/with-database
@@ -711,7 +711,7 @@
        (is (= "shape" (get-in parsed [:seon.agent/namespace :seon.ns/steward :seon.agent/id])) shown)
        (is (= (:seon.sci.admit/value result) parsed) shown)))))
 
-(deftest large-values-have-bounded-ai-work-and-complete-html
+(deftest large-values-have-bounded-work-in-both-faces
   (doseq [[label raw terminal]
           [[:vector (vec (range 100000)) ">99999<"]
            [:string (.repeat "x" (* 5 1024 1024)) nil]]]
@@ -726,10 +726,9 @@
           html-ms (/ (- end middle) 1e6)]
       (println "VALUE-RENDERER" label "AI-ms" ai-ms "HTML-ms" html-ms)
       (is (< ai-ms 100.0) (str label " AI took " ai-ms " ms"))
-      (is (str/includes? ai "(get-in result/e0123456789ab [...])") ai)
-      (if terminal
-        (is (str/includes? (hiccup/->string html) terminal))
-        (is (= (pr-str raw) (lexical-hiccup-text html)))))))
+      (is (< html-ms 100.0) (str label " HTML took " html-ms " ms"))
+      (is (str/includes? ai "(seon.print/value-at result/e0123456789ab [...])") ai)
+      (is (not (str/includes? (hiccup/->string html) (or terminal (subs raw 0 1000))))))))
 
 (deftest elision-forms-execute-in-the-real-sci-context
   (support/with-database
@@ -1009,3 +1008,82 @@
        (is (= [[:rows] 64 36] ((juxt :seon.render.data/path :seon.render.data/next-offset :seon.print/omitted) next-cut))
            "every expansion shows new members and keeps absolute coordinates")
        (is (= :gone (:seon.render.walk/continuation-reason gone)))))))
+
+(deftest one-selection-bounds-both-faces-and-each-cut-expands-in-place
+  ;; Astra F1 (2026-09-26): HTML selected a second tree with every bound
+  ;; lifted. Both faces now come from the one selection under one B, and an
+  ;; HTML cut is a link to the same continuation at its path and offset.
+  (let [request (assoc (probe-unit (vec (range 3000))) :seon.render.value/route-base "/data?value=abc")
+        projection (value/prepare request :seon.render/html)
+        cut (last (tree-cuts projection))
+        leaves (filter #(and (map? %) (= :seon.print/number (:seon.print/face %)))
+                       (tree-seq coll? seq (:seon.render.value/tree projection)))
+        html (hiccup/->string (:seon.render.value/html projection))]
+    (is (= (:seon.render.value/tree projection) (:seon.render.value/tree (value/prepare request))))
+    (is (= (:seon.render.data/next-offset cut) (count leaves)))
+    (is (str/includes? html (str "offset=" (:seon.render.data/next-offset cut))) html)
+    (is (not (str/includes? html ">2999<")))))
+
+(deftest a-composite-key-cut-addresses-the-key-it-was-cut-from
+  ;; Astra F2 (2026-09-26): a key's cut carried the entry ordinal as a plain
+  ;; step, which `at` read as the map key 0 and so continued another value.
+  (support/with-database
+   (fn [connection]
+     (let [value (array-map (vec (range 50)) :x 0 :zero #{[1] [2] [3] [4]} :set)
+           ctx (:seon.sci.eval/ctx
+                (evaluation/fork-for-turn {:seon.sci.eval/ctx (support/fork-cluster-ctx connection)
+                                           :seon.db/db (db/db connection) :seon.agent/id "root"}))
+           _ (evaluation/bind-result! ctx 'result/e0123456789ab value)
+           cuts (tree-cuts (value/prepare (probe-unit value)))
+           key-cut (first (filter #(= [[:seon.render.data/entry 0 :seon.render.data/key]] (:seon.render.data/path %)) cuts))
+           set-cut (first (filter #(= [[:seon.render.data/entry 2 :seon.render.data/key]] (:seon.render.data/path %)) cuts))
+           next-page ((requiring-resolve 'seon.render.walk/continue)
+                      {:seon.render.walk/continuation-node 'result/e0123456789ab :seon.sci.eval/ctx ctx
+                       :seon.sci.admit/caps caps :seon.render/profile probe-profile
+                       :seon.render.data/cursor {:seon.render.data/path (:seon.render.data/path key-cut)
+                                                 :seon.render.data/offset (:seon.render.data/next-offset key-cut)}})]
+       (is (= (vec (range 50)) (print/value-at value (:seon.render.data/path key-cut))) (pr-str cuts))
+       (is (= 50 (:seon.render.data/total key-cut)))
+       (is (str/starts-with? (value/render-ai-data next-page) "[3 4 5") (pr-str next-page))
+       (is (= 4 (count (print/value-at value (:seon.render.data/path set-cut)))) (pr-str cuts))
+       (is (= :zero (print/value-at value [0])) "a plain step keeps get-in's meaning")))))
+
+(deftest an-unaffordable-root-or-first-member-is-the-declared-refusal
+  ;; Astra F4 (2026-09-26): the root was installed unconditionally and a page
+  ;; whose first member could not fit repeated its own offset forever.
+  (let [at-budget (fn [tokens raw]
+                    (value/prepare (assoc (probe-unit raw) :seon.render/profile
+                                          (assoc probe-profile :seon.render.profile/token-budget tokens))))
+        valid? (schema/projection-validator (schema/handed-projection)
+                                            :seon.render.value/insufficient-floor-budget-error)
+        root (at-budget 1 "abcdefghijklmnop")
+        member (at-budget 20 {:a 1 :b 2})]
+    (is (valid? root) (pr-str root))
+    (is (= [(tokens/estimate-chars 1) 18] ((juxt :seon.render.value/budget :seon.render.value/needed) root)))
+    (is (valid? member) (pr-str member))
+    (is (< (:seon.render.value/budget member) (:seon.render.value/needed member)))
+    (is (= "42" (:seon.render.value/text (at-budget 1 42))) "a root that fits whole needs no legend")))
+
+(deftest a-stored-value-continues-over-the-backing-its-first-page-selected
+  ;; Astra F3 (2026-09-26): MCP selected the held value but continued over
+  ;; the stored artifact, whose sorted map reads back as a hash map in another
+  ;; order. The one owner continues the artifact the first page selected.
+  (support/with-database
+   (fn [connection]
+     (let [original {:t (into (sorted-map) (map (fn [i] [i (str i)])) (range 100))}
+           artifact (value/artifact (admit/admit {:seon.sci.admit/value original :seon.sci.admit/interrupt-fn (fn [])
+                                                  :seon.sci.admit/caps caps :seon.config/on-core-error :record}))
+           digest ((requiring-resolve 'seon.blob/put!) connection (value/artifact-edn artifact))
+           backing (value/artifact-value artifact)
+           request (fn [path offset]
+                     {:seon.render.walk/continuation-node [:seon.blob/digest digest] :seon.db/connection connection
+                      :seon.sci.admit/caps caps :seon.render/profile probe-profile
+                      :seon.render.data/cursor {:seon.render.data/path path :seon.render.data/offset offset}})
+           first-page (value/prepare (assoc (probe-unit backing) :seon.render.value/root [:seon.blob/digest digest]))
+           cut (first (filter #(= [:t] (:seon.render.data/path %)) (tree-cuts first-page)))
+           next-page ((requiring-resolve 'seon.render.walk/continue) (request [:t] (:seon.render.data/next-offset cut)))
+           expected (key (nth (seq (:t backing)) (:seon.render.data/next-offset cut)))]
+       (is (str/starts-with? (value/render-ai-data next-page) (str "{" expected " ")) (pr-str next-page))
+       (is (= :unavailable (:seon.render.walk/continuation-reason
+                            ((requiring-resolve 'seon.render.walk/continue)
+                             (dissoc (request [:t] 0) :seon.db/connection)))))))))

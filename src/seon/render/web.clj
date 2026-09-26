@@ -3566,42 +3566,12 @@
         value-digest (get query "value")
         entity? (contains? query "entity")
         entity (query-entity (get query "entity"))
+        ;; A stored value's page is its continuation (`seon.render.walk/continue`,
+        ;; design §3g): the one owner reads the artifact the first page was
+        ;; selected from, navigates and selects; this route only adapts it.
         root-value
         (cond
-          value?
-          (try
-            (if-let [content (blob/get connection value-digest)]
-              (let [stored (value/read-artifact content)]
-                (if (:seon.render.value/unreadable-artifact stored)
-                  (assoc stored :seon.blob/digest value-digest)
-                  (value/artifact-value stored)))
-              (let [observation
-                    (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.web/render 'seon.render.web/data-response
-                     {:seon.error/message "No stored value has this digest."
-                     :seon.error/fix "Supply the expected member and repeat the requested operation."
-                     :seon.render.web/value-not-found value-digest
-                     :seon.blob/digest value-digest
-                     :seon.error/expected "a stored value at the requested digest"})]
-                observation))
-            (catch Throwable failure
-              ;; The complete throwable is a delivered core fault; the page
-              ;; shows the declared unreadable-value error.
-              (entrance-fault! (env/of (:seon.sci.eval/ctx service))
-                               (ex-info "A stored value could not be read."
-                                        {:seon.blob/digest value-digest}
-                                        failure)
-                               :seon.render.web/data 'seon.render.web/data-response)
-              (let [observation
-                    (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.web/render 'seon.render.web/data-response
-                     {:seon.error/message (or (ex-message failure)
-                                                                        "The stored value is unreadable.")
-                     :seon.error/fix "Supply the expected member and repeat the requested operation."
-                     :seon.render.web/value-unreadable value-digest
-                     :seon.error/member :seon.blob/digest
-                     :seon.error/expected "a readable stored value"
-                     :seon.error/data {:seon.render.web/page-exception-class (symbol (.getName (class failure)))}})]
-                observation)))
-
+          value? nil
           entity?
           (when-let [eid (some-> (when entity
                                    (db/pull db [:db/id] entity))
@@ -3621,7 +3591,7 @@
          effective
          [:seon.render.value/max-collection])
         cursor (data/parse-cursor (get query "path") (get query "offset"))
-        found (data/at root-value cursor)
+        found (when-not value? (data/at root-value cursor))
         opened-value (if (contains? found :seon.render.data/value)
                        (:seon.render.data/value found)
                        found)
@@ -3652,15 +3622,24 @@
                :seon.sci.eval/time-limit-ms
                (:seon.config.eval/time-limit-ms service)
                :seon.config/on-core-error
-               (:seon.config/on-core-error service)
-               :seon.render/value opened-value}
+               (:seon.config/on-core-error service)}
                (not (:seon.config/missing-effective effective))
                (assoc :seon.render/profile
-                      (render/agent-render-profile effective)))]
+                      (render/agent-render-profile effective)))
+        page (if value?
+               (render.walk/continue (assoc unit :seon.render.walk/continuation-node [:seon.blob/digest value-digest]
+                                            :seon.db/connection connection))
+               (value/prepare (assoc unit :seon.render/value opened-value) :seon.render/html))]
     {:status 200
      :headers {"content-type" "text/html; charset=utf-8"}
      :body (shell {:seon.agent/id id
-                   :seon.render/page [(value/render-html unit)]
+                   ;; A refused page (gone, malformed, over budget) is shown
+                   ;; as the refusal value it is, at the root.
+                   :seon.render/page
+                   [(if (:seon.error/at page)
+                      (value/render-html (assoc unit :seon.render/value page
+                                                :seon.render.data/cursor (data/parse-cursor nil nil)))
+                      (value/render-html-data page))]
                    :seon.render.web/feed-url
                    (route/path ::route/feed {:id id})})}))
 

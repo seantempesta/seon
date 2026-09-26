@@ -391,16 +391,18 @@
       (or pending? (and more? (not (counted? x)))) (assoc :pending? true))))
 
 (defn- held-order
-  "Members in held order; an exact hash map or set of at most 64 exact
-  keywords is sorted, identity attributes first (design §3b)."
+  "Members in held order, each `[index member]` with `index` its place in
+  `seq`: an exact hash map or set of at most 64 exact keywords is sorted,
+  identity attributes first (design §3b). A typed path step names the
+  index, so a sorted display still addresses the held value."
   {:malli/schema [:=> [:cat :seon.schema/value [:set :qualified-keyword] [:fn clojure.core/ifn?]] :seon.schema/value]}
   [x identity-attributes key-of]
-  (let [members (seq x)]
+  (let [members (map-indexed vector x)]
     (if (and (#{clojure.lang.PersistentHashMap clojure.lang.PersistentHashSet} (class x))
              (<= (count x) sorted-bound)
-             (every? #(identical? (class (key-of %)) clojure.lang.Keyword) members))
-      (sort-by (fn [member] (let [k (key-of member)]
-                              [(if (contains? identity-attributes k) 0 1) (namespace k) (name k)]))
+             (every? #(identical? (class (key-of (second %))) clojure.lang.Keyword) members))
+      (sort-by (fn [[_ member]] (let [k (key-of member)]
+                                  [(if (contains? identity-attributes k) 0 1) (namespace k) (name k)]))
                members)
       members)))
 
@@ -457,13 +459,16 @@
           (scalar ::print/number x (str x "M"))
           (scalar ::print/number x (str "#bigdec[≈" (integer-digits u) " digits]"))))
       (#{clojure.lang.PersistentArrayMap clojure.lang.PersistentHashMap clojure.lang.PersistentTreeMap} c)
-      {:kind :map :face ::print/map :open "{" :close "}" :total (count x)
-       :members (if (identical? c clojure.lang.PersistentHashMap) (held-order x identity-attributes key) (seq x))}
+      ;; A keyword key is looked up by name only where `find` compares it by
+      ;; hash and identity: exact array and hash maps, never a comparator.
+      {:kind :map :face ::print/map :open "{" :close "}" :total (count x) :indexed? true
+       :lookup? (not (identical? c clojure.lang.PersistentTreeMap))
+       :members (held-order x identity-attributes key)}
       (#{clojure.lang.PersistentVector clojure.lang.MapEntry} c)
       {:kind :coll :face ::print/vector :open "[" :close "]" :total (count x) :members (seq x)}
       (#{clojure.lang.PersistentHashSet clojure.lang.PersistentTreeSet} c)
-      {:kind :coll :face ::print/set :open "#{" :close "}" :total (count x) :ordered? true
-       :members (if (identical? c clojure.lang.PersistentHashSet) (held-order x identity-attributes identity) (seq x))}
+      {:kind :coll :face ::print/set :open "#{" :close "}" :total (count x) :ordered? true :indexed? true
+       :members (held-order x identity-attributes identity)}
       ;; Every seq and every other Sequential prints as a list, as Clojure's
       ;; printer prints it; a vector type prints as a vector.
       (instance? clojure.lang.ISeq x) (list-row x x limit)
@@ -642,12 +647,6 @@
                    state)))]
     (reduce flip state (rseq path))))
 
-(defn- settle-in
-  "`settle` with the changed state last, for threading."
-  {:malli/schema [:=> [:cat :map :int :int :map] :map]}
-  [before id width state]
-  (settle before state id width))
-
 (defn- declared
   "What the render pairs say about a reached map (design §2): nil, the
   producer's print node `{::print/node n}`, or a value to select in its
@@ -702,10 +701,8 @@
                                                 ::print/requery-refusal "renderer text beyond its ceiling"})
                                 declared)]
                  (assoc base :kind :leaf :node declared :rendered? true))
-               (let [children (:max-children context)
-                     ;; A root continuation pages from its absolute offset.
-                     limit (if (= Long/MAX_VALUE children) (:realize-cap context) (+ (:offset context 0) children))
-                     c (classify value identity-attributes limit)]
+               (let [;; A root continuation pages from its absolute offset.
+                     c (classify value identity-attributes (+ (:offset context 0) (:max-children context)))]
                  (case (:kind c)
                    :scalar (assoc base :kind :leaf :node (:node c))
                    :name (if (<= (count (:text c)) scalar-bound)
@@ -715,7 +712,7 @@
                    :string (let [shown (min chunk-width (:total c) (:max-string context))]
                              (assoc base :kind :string :value (:value c) :total (:total c)
                                     :shown shown :shown-width (escaped-width (:value c) 0 shown)))
-                   (merge base (select-keys c [:kind :face :name :open :close :total :pending? :prefix :ordered?])
+                   (merge base (select-keys c [:kind :face :name :open :close :total :pending? :prefix :ordered? :indexed? :lookup?])
                           {:pending (:members c) :outside (:prefix c)}))))
         node (if (= :leaf (:kind node)) (assoc node :width (leaf-width (:node node) depth)) node)]
     (assoc node :flat (flat-width node))))
@@ -753,10 +750,9 @@
         grown (-> node (assoc :shown to)
                   (update :shown-width + (if (= :name (:kind node)) (- to (:shown node))
                                              (escaped-width text (:shown node) to))))
-        next (cond->> (assoc-in state [:nodes (:id node)] grown)
-               (:charge? context) (settle-in state (:id node) (:width context)))]
+        next (settle state (assoc-in state [:nodes (:id node)] grown) (:id node) (:width context))]
     (when (and (> to (:shown node))
-               (or (not (:charge? context)) (<= (charge next) (:budget context))))
+               (<= (charge next) (:budget context)))
       (cond-> next
         (< to (:total node))
         (push-work (max (:shell work) (inc (:k work))) (:depth node) (inc (:k work))
@@ -797,65 +793,103 @@
   [state work context]
   (when (<= (:ord work) (:max-children context))
   (let [parent (get-in state [:nodes (:parent work)])
-        [member & more] (:pending parent)
+        [held & more] (:pending parent)
         ordinal (:ord work)
         depth (inc (:depth parent))
         shell (max (:shell work) depth ordinal)
         indent (+ (:indent parent) (nest parent))
         next-id (:next-id state)
-        index (+ (:base parent 0) (dec ordinal))
+        ;; The member's coordinate in the held value (`seon.print/path-step`):
+        ;; a map or set member carries its iteration index; a sequence member
+        ;; is its absolute position.
+        [index member] (if (:indexed? parent) held [(+ (:base parent 0) (dec ordinal)) held])
         [added kid]
         (if (= :map (:kind parent))
           (let [entry-id next-id
-                k (make-node context (key member) (+ 1 next-id) depth (conj (:path parent) index) entry-id {:indent indent})
+                k (make-node context (key member) (+ 1 next-id) depth
+                             (conj (:path parent) [:seon.render.data/entry index :seon.render.data/key])
+                             entry-id {:indent indent})
                 v (make-node context (reference-value context (key member) (val member))
-                             (+ 2 next-id) depth (conj (:path parent) (key member)) entry-id
-                             {:indent (+ indent (if (< (:depth parent) nest-cap) 2 0))})]
+                             (+ 2 next-id) depth
+                             (conj (:path parent) (if (and (:lookup? parent) (keyword? (key member)))
+                                                    (key member)
+                                                    [:seon.render.data/entry index :seon.render.data/val]))
+                             entry-id {:indent (+ indent (if (< (:depth parent) nest-cap) 2 0))})]
             [[{:kind :entry :id entry-id :depth (:depth parent) :indent indent :parent (:id parent)
                :kids [(:id k) (:id v)] :n 0 :sum 0} k v] entry-id])
           (let [c (make-node context member next-id depth
-                             (conj (:path parent) (if (= ::print/set (:face parent)) member index))
+                             (conj (:path parent) (if (:indexed? parent) [:seon.render.data/nth index] index))
                              (:id parent) {:indent indent})]
             [[c] next-id]))
         grown (-> (reduce #(assoc-in %1 [:nodes (:id %2)] %2) state added)
                   (assoc :next-id (+ next-id (count added)))
                   (update :rendered + (transduce (comp (filter :rendered?) (map :width)) + 0 added))
                   (update-in [:nodes (:id parent)] #(-> % (update :kids conj kid) (update :n inc) (assoc :pending more))))
-        next (cond->> grown (:charge? context) (settle-in state kid (:width context)))]
-    (when (or (not (:charge? context)) (<= (charge next) (:budget context)))
+        next (settle state grown kid (:width context))]
+    (cond
+      (<= (charge next) (:budget context))
       (cond-> (reduce #(schedule %1 %2 shell context) next (remove #(= :entry (:kind %)) added))
         (and (seq more) (< ordinal (:max-children context)))
-        (push-work (max (:shell work) depth (inc ordinal)) depth (inc ordinal) (update work :ord inc)))))))
+        (push-work (max (:shell work) depth (inc ordinal)) depth (inc ordinal) (update work :ord inc)))
+      ;; The root's first member is the least any page must show (§3c):
+      ;; its charge is what an insufficient budget reports.
+      (and (zero? (:id parent)) (zero? (:n parent))) (assoc state :first-refused (charge next))))))
+
+(defn- insufficient-budget
+  "The declared refusal when B cannot show the root, or a page's first member
+  (design §3c): a cut that repeated its own offset would make no progress."
+  {:malli/schema [:=> [:cat :map :int] :seon.render.value/insufficient-floor-budget-error]}
+  [context needed]
+  (assoc (refusal/diagnostic (java.util.Date.) :seon.render.value/select 'seon.render.value/prepare
+          {:seon.error/message (str "The floor budget of " (:budget context) " characters cannot show this value's "
+                                    "first part, which needs " needed ".")
+           :seon.error/member :seon.render.profile/token-budget
+           :seon.error/expected "a budget covering the root, its first member and the legend"
+           :seon.error/offending (:budget context)
+           :seon.error/data {:seon.render.data/path (:root-path context [])}
+           :seon.error/fix "Raise :seon.render.profile/token-budget, or read a deeper path."})
+         :seon.render.value/budget (:budget context)
+         :seon.render.value/needed needed))
 
 (defn- select-nodes
-  "Shell-order selection of `value` under the context's budget."
-  {:malli/schema [:=> [:cat :seon.schema/value :map] :map]}
+  "Shell-order selection of `value` under the context's budget, or the
+  insufficient-budget refusal when the root or its first member cannot fit."
+  {:malli/schema [:=> [:cat :seon.schema/value :map] [:or :map :seon.render.value/insufficient-floor-budget-error]]}
   [value context]
   (let [offset (:offset context 0)
         root (make-node context value 0 0 (:root-path context []) nil {:indent 0 :outside nil})
-        ;; A continuation starts the root collection at its absolute offset
-        ;; (design §3g); its members keep their absolute ordinals.
+        text-key (if (= :name (:kind root)) :text :value)
+        ;; A continuation starts the root at its absolute offset (design
+        ;; §3g): a string or name at its character, a collection at its
+        ;; member, which keeps its absolute ordinal.
         root (cond-> root
-               (and (pos? offset) (= :string (:kind root)))
+               (and (pos? offset) (#{:string :name} (:kind root)))
                (as-> node (let [start (min offset (:total node))
-                                shown (min chunk-width (- (:total node) start) (:max-string context))]
-                            (assoc node :value (subs (:value node) start) :total (- (:total node) start)
-                                   :shown shown :shown-width (escaped-width (subs (:value node) start) 0 shown)
-                                   :base start)))
+                                text (subs (text-key node) start)
+                                shown (min chunk-width (count text) (:max-string context))]
+                            (assoc node text-key text :total (count text) :shown shown :base start
+                                   :shown-width (if (= :name (:kind node)) shown (escaped-width text 0 shown)))))
                (and (pos? offset) (#{:map :coll} (:kind root)))
                (-> (assoc :base offset) (update :pending #(seq (drop offset %))))
                true (as-> node (assoc node :flat (flat-width node))))
         state {:nodes {0 root} :queue (sorted-map) :seq 0 :next-id 1 :extras 0
                :rendered (if (:rendered? root) (:width root) 0) :reserve (:legend context)}
-        state (settle {:nodes {}} state 0 (:width context))]
-    (loop [state (schedule state root 0 context)]
-      (if-let [[key work] (first (:queue state))]
-        (let [state (update state :queue dissoc key)
-              admitted (case (:op work)
-                         :chunk (admit-chunk state work context)
-                         :member (admit-member state work context))]
-          (recur (or admitted state)))
-        state))))
+        state (settle {:nodes {}} state 0 (:width context))
+        ;; The root is mandatory: with its cut it needs the legend too.
+        root-charge (- (charge state) (if (more? root) 0 (:legend context)))]
+    (if (> root-charge (:budget context))
+      (insufficient-budget context root-charge)
+      (let [state (loop [state (schedule state root 0 context)]
+                    (if-let [[key work] (first (:queue state))]
+                      (let [state (update state :queue dissoc key)
+                            admitted (case (:op work)
+                                       :chunk (admit-chunk state work context)
+                                       :member (admit-member state work context))]
+                        (recur (or admitted state)))
+                      state))]
+        (if (and (:first-refused state) (zero? (get-in state [:nodes 0 :n])))
+          (insufficient-budget context (:first-refused state))
+          state)))))
 
 (defn- cut-node
   "The one tail cut of a node that shows less than it holds."
@@ -873,8 +907,8 @@
                   (not (:pending? node))
                   (assoc ::print/bound-by (if (= bound :seon.render.profile/token-budget)
                                             (or (::print/bound-by (:profile context)) bound)
-                                            bound)))]
-    (print/elision
+                                            bound)))
+        cut (print/elision
      (case (:kind node)
        (:string :name) (assoc request ::print/omitted (- (:total node) (:shown node))
                               ::print/elision-unit :characters
@@ -884,7 +918,11 @@
        (if (:pending? node)
          (assoc request ::print/elision-unit :pending :seon.render.data/next-offset (+ (:base node 0) (:n node)))
          (assoc request ::print/omitted (- (:total node) (:base node 0) (:n node)) ::print/elision-unit :children
-                :seon.render.data/next-offset (+ (:base node 0) (:n node)) :seon.render.data/total (:total node)))))))
+                :seon.render.data/next-offset (+ (:base node 0) (:n node)) :seon.render.data/total (:total node)))))]
+    ;; The HTML expander is the same continuation, at the cut's coordinates.
+    (if-some [href (path-url (:unit context) (:path node) (:seon.render.data/next-offset cut))]
+      (assoc cut ::print/href href)
+      cut)))
 
 (defn- tree
   "The selected nodes as one print-node tree, built with an explicit stack."
@@ -941,7 +979,7 @@
                                                          :seon.render.data/path []})))]
     (str ";; …N = N more, …+N = N more characters, …? = not yet realized. "
          (cond
-           (qualified-symbol? source) (str "Read any part with (get-in " source " [...]).")
+           (qualified-symbol? source) (str "Read any part with (seon.print/value-at " source " [...]).")
            form (str "Read any part with (seon.print/value-at " (pr-str (second form)) " [...]).")
            :else (str "Not retrievable: " (or (:seon.print/requery-refusal profile) "no source identity") ".")))))
 
@@ -951,9 +989,11 @@
   {:malli/schema
    [:function
     [:=> [:cat :seon.render/unit]
-     [:or :nil :seon.render.value/projection :seon.render.value/missing-root-identity-error]]
+     [:or :nil :seon.render.value/projection :seon.render.value/missing-root-identity-error
+      :seon.render.value/insufficient-floor-budget-error]]
     [:=> [:cat :seon.render/unit :seon.render/output]
-     [:or :nil :seon.render.value/projection :seon.render.value/missing-root-identity-error]]]}
+     [:or :nil :seon.render.value/projection :seon.render.value/missing-root-identity-error
+      :seon.render.value/insufficient-floor-budget-error]]]}
   ([unit]
    (prepare unit :seon.render/ai))
   ([unit output]
@@ -963,7 +1003,9 @@
      (if (:seon.render.value/root-description id)
        id
        (let [profile (render-profile unit)
-             ai? (= output :seon.render/ai)
+             ;; ONE SELECTION FOR BOTH FACES (design §3): HTML is the same
+             ;; tree under the same B; its cuts are expanders, never a
+             ;; second, unbounded selection.
              options (cond-> (assoc (print-options unit)
                                     :seon.print/length nil
                                     :seon.print/level nil)
@@ -974,31 +1016,28 @@
              context {:unit unit :output output :profile profile
                       :requery (select-keys profile [:seon.print/requery-id :seon.print/requery-refusal])
                       :identity-attributes (if database (set (db/identity-attributes database)) #{})
-                      :width (if ai? (:seon.print/width options) 0)
-                      :charge? ai?
-                      :budget (if ai? (tokens/estimate-chars (:seon.render.profile/token-budget profile)) Long/MAX_VALUE)
-                      :legend (if ai? (inc (count legend)) 0)
-                      :max-children (if ai? (:seon.render.profile/max-children profile) Long/MAX_VALUE)
-                      :max-depth (if ai? (:seon.render.profile/max-depth profile) Long/MAX_VALUE)
-                      :max-string (or (when ai? (:seon.render.profile/max-string-length profile)) Long/MAX_VALUE)
+                      :width (:seon.print/width options)
+                      :budget (tokens/estimate-chars (:seon.render.profile/token-budget profile))
+                      :legend (inc (count legend))
+                      :max-children (:seon.render.profile/max-children profile)
+                      :max-depth (:seon.render.profile/max-depth profile)
+                      :max-string (or (:seon.render.profile/max-string-length profile) Long/MAX_VALUE)
                       :offset (max 0 (long (get-in unit [:seon.render.data/cursor :seon.render.data/offset] 0)))
-                      ;; The complete HTML face realizes a lazy seq no further
-                      ;; than admission's collection bound.
-                      :realize-cap (or (get-in unit [:seon.sci.admit/caps :seon.config.eval.result/max-collection])
-                                       (:seon.config.eval.result/max-collection @@config-defaults))
                       :root-path path
                       :ceiling (tokens/estimate-chars (or (:seon.print/rendered-token-ceiling profile)
                                                           (:seon.print/rendered-token-ceiling (print/default-options))))}
-             state (select-nodes (:seon.render/value unit) context)
-             cut? (boolean (some more? (vals (:nodes state))))
+             state (select-nodes (:seon.render/value unit) context)]
+         (if (:seon.error/at state)
+           state
+       (let [cut? (boolean (some more? (vals (:nodes state))))
              selected (tree (:nodes state) context)
              emitted (print/emit-both selected options)
-             text (cond-> (:seon.print/text emitted) (and ai? cut?) (str "\n" legend))
+             text (cond-> (:seon.print/text emitted) cut? (str "\n" legend))
              limit (- (charge state) (if cut? 0 (:legend context)))]
          ;; The charge is the laid-out length (design §3d); a longer text is
          ;; the allocator's defect, never a second attempt. Declared renderer
          ;; text lays out on its own terms and is exempt.
-         (when (and ai? (zero? (:rendered state)) (> (count text) limit))
+         (when (and (zero? (:rendered state)) (> (count text) limit))
            (let [refusal (refusal/diagnostic (java.util.Date.) :seon.render.value/select 'seon.render.value/prepare
                           {:seon.error/message "The floor's saved text exceeded its charge."
                            :seon.error/expected "text length at most the charge"
@@ -1015,7 +1054,7 @@
                    (:seon.print/hiccup emitted)]}
            (:seon.render.call/selected-producer selected)
            (assoc :seon.render.call/selected-producer
-                  (:seon.render.call/selected-producer selected))))))))
+                  (:seon.render.call/selected-producer selected))))))))))
 
 (defn render-ai-data
   "Return the text sink result from one already prepared projection."
@@ -1095,7 +1134,7 @@
 (defn- render-prepared
   [unit output]
   (let [projection (prepare unit output)]
-    (if (:seon.render.value/root-description projection)
+    (if (:seon.error/at projection)
       projection
       (if (= output :seon.render/html)
         (render-html-data projection)
@@ -1104,13 +1143,15 @@
 (defn render-ai
   "Render any floor unit through the admitted text sink."
   {:malli/schema [:=> [:cat :seon.render/unit]
-                  [:or :string :seon.render.value/missing-root-identity-error]]}
+                  [:or :string :seon.render.value/missing-root-identity-error
+                   :seon.render.value/insufficient-floor-budget-error]]}
   [unit]
   (render-prepared unit :seon.render/ai))
 
 (defn render-html
   "Render any floor unit through the admitted hiccup sink."
   {:malli/schema [:=> [:cat :seon.render/unit]
-                  [:or :seon.render/hiccup :seon.render.value/missing-root-identity-error]]}
+                  [:or :seon.render/hiccup :seon.render.value/missing-root-identity-error
+                   :seon.render.value/insufficient-floor-budget-error]]}
   [unit]
   (render-prepared unit :seon.render/html))

@@ -12,6 +12,7 @@
             [clojure.edn :as edn]
             [seon.db :as db]
             [seon.error :as error]
+            [seon.print :as print]
             [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
@@ -52,22 +53,10 @@
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}] :seon.render.data/cursor] [:or [:map [:seon.render.data/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}]]] :seon.render.data/no-such-path-error]]}
   [value {:keys [:seon.render.data/path]}]
   (reduce (fn [found step]
-            (let [inner (:seon.render.data/value found)
-                  missing (Object.)
-                  index-step? (and (sequential? inner) (int? step) (< -1 step))
-                  indexed (when index-step?
-                            (nth inner step missing))]
-              (cond
-                (and (map? inner) (contains? inner step))
-                {:seon.render.data/value (get inner step)}
-
-                (and index-step? (not (identical? missing indexed)))
-                {:seon.render.data/value indexed}
-
-                (and (set? inner) (contains? inner step))
-                {:seon.render.data/value step}
-
-                :else
+            (let [missing (Object.)
+                  inner (print/path-step (:seon.render.data/value found) step missing)]
+              (if-not (identical? missing inner)
+                {:seon.render.data/value inner}
                 (reduced
                  (assoc
                   {:seon.error/at (java.util.Date.)
@@ -75,7 +64,7 @@
                     :seon.error/operation 'seon.render.data/at
                     :seon.error/message "The requested path has no value at this step."
                     :seon.error/member :seon.render.data/path
-                    :seon.error/expected "a present map key, set member, or sequence index"
+                    :seon.error/expected "a present map key, set member, sequence index, or typed entry/nth step"
                     :seon.error/offending value
                     :seon.error/data {:seon.render.data/step step
                      :seon.render.data/path path

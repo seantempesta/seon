@@ -130,13 +130,14 @@
 
  ; A cut's continuation over the walk's nodes (one-render-path design §3g):
  ; a node designator, the cut's path and absolute offset, the caller's custody.
- :seon.render.walk/continuation-node [:or :qualified-symbol :seon.render.walk/lookup]
+ :seon.render.walk/continuation-node [:or :qualified-symbol [:tuple [:= :seon.blob/digest] :seon.blob/digest] :seon.render.walk/lookup]
  :seon.render.walk/continuation-reason [:enum :stale :gone :unavailable :malformed]
  :seon.render.walk/continue-request
  [:map
   [:seon.render.walk/continuation-node :seon.render.walk/continuation-node]
   [:seon.render.data/cursor :seon.render.data/cursor]
   [:seon.db/db {:optional true} :seon.db/db]
+  [:seon.db/connection {:optional true} :seon.db/connection]
   [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx]]
  :seon.render.walk/continuation-error
  [:and :seon.error/base

@@ -231,6 +231,7 @@
                 [:seon.print/requery-id
                  {:optional true}
                  :seon.print/requery-id]
+                [:seon.print/href {:optional true} :seon.print/href]
                 [:seon.print/requery-refusal
                  {:optional true}
                  :seon.print/requery-refusal]
@@ -308,6 +309,8 @@
              [:sequential {:description "Executable Clojure form retrieving the omitted value."}
               :seon.schema/value],
              :requery-refusal [:string {:min 1}],
+             ; A cut's expander: the continuation URL at its path and next offset.
+             :href [:string {:min 1}],
              :bound-by :qualified-keyword,
              :text :string,
              :prefix :string,

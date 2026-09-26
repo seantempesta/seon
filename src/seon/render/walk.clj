@@ -34,6 +34,7 @@
   (:require [seon.error.refusal]
             [clojure.string :as str]
             [datahike.pull-api :as pull-api]
+            [seon.blob :as blob]
             [seon.db :as db]
             [seon.cluster.wake :as wake]
             [seon.eval :as evaluation]
@@ -806,14 +807,16 @@
   path and selected again from its absolute offset (one-render-path §3g).
 
   A result handle names an evaluation's live object in the caller's SCI
-  context (`:gone` once evicted or after a restart); a lookup ref names an
+  context (`:gone` once evicted or after a restart); `[:seon.blob/digest d]`
+  names an MCP value's stored artifact, read through the caller's connection,
+  the same backing its first page was selected from; a lookup ref names an
   entity at the caller's database value. The same floor selects the value,
   so the answer is an ordinary prepared projection."
   {:malli/schema [:=> [:cat :seon.render.walk/continue-request]
                   [:or :seon.render.value/projection :seon.render.value/missing-root-identity-error
                    :seon.render.walk/continuation-error :seon.render.data/no-such-path-error :seon.db/error-result]]}
   [{node :seon.render.walk/continuation-node cursor :seon.render.data/cursor database :seon.db/db ctx :seon.sci.eval/ctx
-    :as request}]
+    connection :seon.db/connection :as request}]
   (let [refusal (fn [reason message]
                   (assoc (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.walk/continue 'seon.render.walk/continue
                           {:seon.error/message message :seon.error/member :seon.render.walk/continuation-node
@@ -825,6 +828,15 @@
           (if-some [entry (some-> (:seon.sci.eval/result-objects ctx) deref (find (subs (name node) 1)))]
             {:value (val entry)}
             (refusal :gone "The result is no longer retained by this context."))
+          (and (vector? node) (= :seon.blob/digest (first node)))
+          (if-some [content (when connection (blob/get connection (second node)))]
+            (let [stored (render.value/read-artifact content)]
+              (if (:seon.render.value/unreadable-artifact stored)
+                (refusal :malformed (:seon.render.value/unreadable-artifact stored))
+                {:value (render.value/artifact-value stored)}))
+            (refusal (if connection :gone :unavailable)
+                     (if connection "No blob has this digest: a GC sweep collected it, or it was never stored."
+                         "A stored value's continuation needs the connection that holds it.")))
           database
           (let [pulled (db/pull database '[*] node)]
             (cond (:seon.db/invalid-read pulled) pulled
