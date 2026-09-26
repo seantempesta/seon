@@ -1854,9 +1854,8 @@
       (is (not= first-digest (digest-for edited-rows function-identity)))
       (test-support/with-database
         (fn [connection]
-          (let [projection (db/carried-projection (db/db connection))
-                schema-row (first (schema/canonical-schema-rows
-                                   projection {:sample.definition-digest/value :string}))
+          (let [schema-row (first (test-support/schema-rows
+                                   (db/db connection) [[:sample.definition-digest/value :string]]))
                 rows (conj first-rows schema-row)]
             (test-support/transacted!
              connection (seon.fn/reconcile-tx (db/db connection) rows []))
