@@ -65,3 +65,41 @@ Under the state architecture adopted in 39a026318 (one roster per scope), this s
 roster holds. `boot/stop!` and `web/stop!` never reach it, so it holds a loopback port and its worker threads until the
 JVM exits once any generation realizes it. This is the only http-kit server in the process that no cluster instance owns.
 Inventory row: `docs/research/agent-platform/system-state-opinion-2026-09-26.md` §3.1.
+
+## SCI sample: the design (2026-09-26, fix-turn-test-reds; read-only, edit sequenced by root)
+
+**What `generator-ctx` serves.** Only contract generation. `seon.sci.eval/ctx-generator`
+(`src/seon/sci/eval.clj:186-188`) is the `:gen/gen` of the `:seon.sci.eval/ctx` schemas
+(`resources/seon/schemas/seon.sci.eval.edn:192`, `:197`). `test/seon/public_contract_test.clj:95` lists it with
+`sci.eval/ctx?`, and `test/seon/schema_test.clj:287` names it. No runtime path reads the context. The
+`defonce ^:private generator-ctx` (`:183-184`) exists only so every generated sample is the same delayed
+`(sci/init {})`.
+
+**Why it matters beyond sample sharing.** A top-level `defonce` is a program declaration, so installation binds
+it into agent SCI: `@@#'seon.sci.eval/generator-ctx` returns the live context
+([agent-sci-reaches-the-private-generator-context](agent-sci-reaches-the-private-generator-context.md)). Live host
+objects belong in a roster, not in Vars. This one needs no owner at all.
+
+**Move: derive the sample per generation; delete the Var.** A fresh `(sci/init {})` costs 0.04 ms (20 samples in
+0.81 ms, all distinct and all `seon.sci.eval/ctx?`, default 33ea69298). This is the same shape as the
+`socket-server-generator` fix (`ac831976b`).
+
+```clojure
+;; src/seon/sci/eval.clj:183-188
+-(defonce ^:private generator-ctx
+-  (delay (sci/init {})))
+-
+-(def ctx-generator
+-  "A real ctx — honest by constructing an instance."
+-  (gen/fmap (fn [_] @generator-ctx) (gen/return nil)))
++(def ctx-generator
++  "A real ctx, honest by constructing a fresh one per sample: no Var holds a
++  live context, and no sample's mutation reaches the next."
++  (gen/fmap (fn [_] (sci/init {})) (gen/return nil)))
+```
+
+Installation then needs no privacy rule. In the same slice:
+- `test/seon/custody_stability_test.clj` drops `seon.sci.eval/generator-ctx` from its forbidden roots (`:261`) and
+  from the deref sources (`:275`), a test of deleted machinery. The three operator roots stay.
+- `test/seon/public_contract_test.clj`'s lifecycle table gains `[sci.eval/ctx? sci.eval/ctx-generator]` with a
+  fresh-sample assertion (two samples are not `identical?`), the issue's standing regression.
