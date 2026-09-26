@@ -223,9 +223,9 @@ root.
   prevent overlap until exit. SCI interrupts interpreted code, not arbitrary host calls; keep isolation where
   termination cannot be guaranteed.
 - **Recover facts, not execution.** Close interrupted runs and mark unfinished evaluations; never resume interrupted
-  execution or serialize private objects or live results. An agent form's own evaluation settlement returns once
+  execution or serialize private objects or live results. A run's settlement (every form the run parsed and evaluated, in one transaction) returns once
   applied in order; its durability follows through the database owner's one fire-and-forget write, kept only while
-  measurably faster. A crash may lose the newest such forms; recovery closes them and the agent redoes the work — do
+  measurably faster. A crash may lose the newest such runs; recovery closes them and the agent redoes the work — do
   not represent the in-between state. Everything with consequences beyond the form (merges, write-back, tasks,
   config, schema adoption, boot and publication records, faults, branch lifecycle, deliveries) is durable before its
   caller is answered.
