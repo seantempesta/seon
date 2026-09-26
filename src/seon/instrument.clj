@@ -539,23 +539,6 @@
 
 (def ^:dynamic ^:private *compiling-contract* false)
 
-(defn- observation-location
-  "Ordered schema or value path, preserving arbitrary observed keys."
-  {:malli/schema [:=> [:cat :seon.sci.admit/caps [:sequential :seon.schema/value]] :map]}
-  [caps path]
-  (cond-> {:seon.error.location/length (count path)}
-    (seq path)
-    (assoc :seon.error.location/segments
-           (set (map-indexed
-                 (fn [ordinal key-value]
-                   (let [projected (error/project-observation caps key-value)]
-                     {:seon.error.location.segment/ordinal ordinal
-                      :seon.error.location.segment/key
-                      {:seon.error.key/projection (:seon.instrument/actual projected)
-                       :seon.error.key/capped? (:seon.error/capped? projected)
-                       :seon.error.key/bound-bytes
-                       (:seon.error.projection/bound-bytes projected)}})) path)))))
-
 (defn- expected-shape
   "The identity of the schema a value failed: a digest of its authored form
   (`schema/canonical-definition` reads bound predicates back to their names)."
@@ -583,31 +566,16 @@
                               :seon.instrument.arity/min (:min info)}
                        (:max info) (assoc :seon.instrument.arity/max (:max info)))) arities)))
       (let [check (case kind :malli.core/invalid-input :input
-                            :malli.core/invalid-output :output :guard)
-            contract (get data check)
-            checked (case check :input (:args data) :output (:value data)
-                               [(:args data) (:value data)])
-            explanation (m/explain contract checked)
-            items (map-indexed
-                   (fn [ordinal problem]
-                     {:seon.instrument.explanation/ordinal ordinal
-                      :seon.instrument.explanation/schema-location
-                      (observation-location caps (:path problem))
-                      :seon.instrument.explanation/value-location
-                      (observation-location caps (:in problem))
-                      :seon.instrument.explanation/expected-shape
-                      (expected-shape projection (:schema problem))
-                      :seon.instrument.explanation/actual
-                      (error/project-observation caps (:value problem))
-                      :seon.instrument.explanation/humanization-unavailable
-                      "The original problem is represented by its schema and value paths."})
-                   (:errors explanation))]
+                            :malli.core/invalid-output :output :guard)]
+        ;; The problems (path, expected form, offending value) are
+        ;; `violation`'s `:seon.error/problems`, from its one `m/explain`.
+        ;; A second explanation here copied them as pre-printed projection
+        ;; strings nested seven levels deep: one missing key printed as
+        ;; 34,518 bytes over MCP (2026-09-26). Values stay values; the
+        ;; floor printer bounds them at the edge.
         (assoc base :seon.instrument/check check
-               :seon.error/expected-shape (expected-shape projection contract)
-               :seon.error/location (observation-location caps [])
-               :seon.instrument/explanations
-               {:seon.instrument.explanations/count (count items)
-                :seon.instrument.explanations/items (set items)})))))
+               :seon.error/expected-shape (expected-shape projection (get data check))
+               :seon.error/location {:seon.error.location/length 0})))))
 
 (defn- compiled-wrapper
   {:malli/schema [:=> [:cat :seon.schema/projection :qualified-symbol :seon.schema/value :seon.instrument/callable :seon.sci.admit/caps [:? [:or :nil :map]]] :seon.instrument/callable]}

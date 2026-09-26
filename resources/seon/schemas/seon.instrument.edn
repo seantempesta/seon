@@ -102,7 +102,6 @@
   [:seon.instrument/fn :seon.instrument/fn]
   [:seon.instrument/arity :seon.instrument/arity]
   [:seon.instrument/check :seon.instrument/check]
-  [:seon.instrument/explanations :seon.instrument/explanations]
   [:seon.error/expected-shape :seon.error/expected-shape]
   [:seon.error/location :seon.error/location]
   [:seon.error/offending-projection

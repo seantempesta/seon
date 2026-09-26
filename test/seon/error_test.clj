@@ -1388,6 +1388,21 @@
     (is (str/starts-with? href "/data?"))
     (is (str/includes? href "%3Aseon.error%2Fid"))))
 
+(deftest a-declared-refusal-prints-its-own-message-and-members
+  ;; A refusal whose `:seon.error/expected` is no Malli schema is not a
+  ;; schema problem: it leads with its own message and shows its members,
+  ;; with no fabricated "expected the declared requirement (nil)" frame and
+  ;; no filler lines (error-text-opus, 2026-09-26).
+  (let [prose (error/instrumentation-prose
+               {:seon.error/at #inst "2026-09-26T00:00:00Z"
+                :seon.error/layer ::rendering
+                :seon.error/operation 'seon.cluster.source/write-back!
+                :seon.error/message "The staged file base changed."
+                :seon.error/offending {:seon.fs/path "src/a.clj"}})]
+    (is (= (str "The staged file base changed.\n"
+                "Got: {:seon.fs/path \"src/a.clj\"}")
+           prose))))
+
 (deftest specialist-renderers-use-their-declared-evidence
   (test-support/with-database
    (fn [_connection]
@@ -1401,8 +1416,9 @@
                   :seon.instrument/expected ":my.fs/read-request"
                   :seon.instrument/args "[{:my.fs/path 42}]"
                   :seon.error/message "The call violated its contract."})]
-      (is (str/includes? prose "Contract violation in my.fs/read input"))
-      (is (str/includes? prose "path 42"))))
+      (is (str/starts-with? prose "The call violated its contract."))
+      (is (str/includes? prose "Expected: :my.fs/read-request"))
+      (is (str/includes? prose "Got: [{:my.fs/path 42}]"))))
   (testing "AI attempt prose exposes the decision attributes"
     (let [prose (error/ai-prose
                  {:seon.error/at #inst "2026-09-22T00:00:00Z"

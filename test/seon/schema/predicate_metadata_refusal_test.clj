@@ -3,7 +3,6 @@
             [malli.core :as m]
             [malli.registry :as mr]
             [seon.config :as config]
-            [seon.error :as error]
             [seon.instrument :as instrument]
             [seon.schema :as schema]
             [seon.schema.internal :as internal]
@@ -24,9 +23,6 @@
            wrapped (#'instrument/compiled-wrapper projection operation authored
                     (fn [_] []) caps policy)
            refusal (support/refusal-data #(wrapped nil))
-           explanations (:seon.instrument/explanations refusal)
-           item (first (:seon.instrument.explanations/items explanations))
-           actual (:seon.instrument.explanation/actual item)
            fingerprint (fn [form]
                          (#'instrument/expected-shape projection
                           (m/schema (schema/compilable-form form predicates) options)))]
@@ -44,16 +40,13 @@
        (is (= :input (:seon.instrument/check refusal)))
        (is (= operation (:seon.instrument/fn refusal)))
        (is (= operation (:seon.error/operation refusal)))
-       (is (= 1 (:seon.instrument.explanations/count explanations)))
-       (is (= 1 (count (:seon.instrument.explanations/items explanations))))
+       (is (= 1 (count (:seon.error/problems refusal))))
        (is (= (fingerprint [:cat [:fn 'malli.core/schema?]])
               (:seon.error/expected-shape refusal)))
-       (is (= (fingerprint [:fn 'malli.core/schema?])
-              (:seon.instrument.explanation/expected-shape item)))
-       (is (= (error/project-observation
-               (assoc caps :seon.config.eval.result/max-bytes
-                      (:seon.error.projection/bound-bytes actual)) nil)
-              actual))
+       (is (= [:fn 'malli.core/schema?]
+              (schema/canonical-definition
+               (:seon.error/expected (first (:seon.error/problems refusal)))
+               predicates)))
        (is (= [] (wrapped (m/schema [:map]))))
        (let [anonymous (try
                          (schema/canonical-definition [:fn (fn [_] true)] predicates)

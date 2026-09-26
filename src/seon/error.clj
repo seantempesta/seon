@@ -1063,16 +1063,14 @@
                       (explain-problem
                        {:seon.error/problem {:schema compiled :value offending}
                         :seon.error/path [] :seon.error/argument (str member)}))]
-        {:seon.error/problems [(or problem
-              {:seon.error/argument (str member)
-               :seon.error/path (get evidence :seon.db/path [])
-               :seon.error/expected expected
-               :seon.error/expected-description "the declared requirement"
-               :seon.error/offending offending
-               :seon.error/actual-description (value-description offending)
-               :seon.error/fix (str (:seon.error/message fact)
-                                    " Inspect the named requirement before retrying.")})]
-         :seon.error/operation (:seon.error/operation evidence)})
+        ;; A SCHEMA PROBLEM ONLY FROM MALLI: when `expected` is no schema, or
+        ;; the offending value satisfies it, the refusal is the producer's
+        ;; own declared message and members, never a fabricated
+        ;; "expected the declared requirement (nil)" sentence.
+        (if problem
+          {:seon.error/problems [problem]
+           :seon.error/operation (:seon.error/operation evidence)}
+          data))
 
       :else data)))
 
@@ -1112,7 +1110,7 @@
                  (str " Result contract: " (refusal-value-text unit result-contract nil) "."))
                (when (and (zero? index) (:seon.instrument/caller data))
                  (str " Called from " (:seon.instrument/caller data) "."))
-               " Example: " (or example "No docstring example is available."))))
+               (when example (str " Example: " example)))))
         problems))
       nil)))
 
@@ -1125,31 +1123,27 @@
         data (if (:seon.error/data-edn fact)
                (flat-data fact)
                fact)
-        operation (or (:seon.error/operation data)
-                      (:seon.instrument/fn fact))
-        member (or (:seon.error/member data)
-                   (:seon.instrument/arm fact))
-        expected (or (:seon.error/expected data)
-                     (:seon.instrument/expected fact))
-        received (or (:seon.error/offending data)
-                     (:seon.instrument/args fact))]
-    (if-let [prose (refusal-text error-value fact data)]
-      prose
-      (if operation
-      (str (when-let [message (:seon.error/message fact)] (str message "\n"))
-           "Contract violation in " operation " " (name member)
-           ": expected " (pr-str expected)
-           ", received " (pr-str received)
-           (if (= :arguments member)
-             ". The call was stopped before the function ran. "
-             ". The function returned an invalid value. ")
-           (when (:seon.error/id fact)
-             (evidence-prose fact))
-           (when-let [documentation (:seon.error/doc fact)]
-             (str "\n" (pr-str {:seon.error/doc documentation}))))
-      (str (:seon.error/message fact)
-           (when (:seon.error/id fact)
-             (str " " (evidence-prose fact))))))))
+        data (when (map? data) data)
+        ;; A stored fact's instrument payloads are already bounded text; a
+        ;; live value's members are values the floor printer bounds here.
+        member-text (fn [data-key fact-key]
+                      (if-some [entry (find data data-key)]
+                        (refusal-value-text error-value (val entry) nil)
+                        (get fact fact-key)))]
+    (or (refusal-text error-value fact data)
+        ;; A declared refusal prints its own message and members.
+        (let [expected (member-text :seon.error/expected :seon.instrument/expected)
+              received (member-text :seon.error/offending :seon.instrument/args)]
+          (str/join "\n"
+                    (remove nil?
+                            [(or (not-empty (:seon.error/message fact))
+                                 (not-empty (:seon.error/message data))
+                                 (str (or (:seon.error/operation data) (:seon.instrument/fn fact)
+                                          "An operation")
+                                      " refused without a message."))
+                             (when expected (str "Expected: " expected))
+                             (when received (str "Got: " received))
+                             (when (:seon.error/id fact) (evidence-prose fact))]))))))
 
 (defn- notice-ai-prose
   "Describe recorded evidence and why this recipient receives its first notification."

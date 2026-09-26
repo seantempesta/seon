@@ -1422,8 +1422,33 @@
            (pr-str refusal))
        (is (= :input (:seon.instrument/check refusal)))
        (is (= 'seon.db/database-value-identity (:seon.instrument/fn refusal)))
-       (is (pos? (get-in refusal [:seon.instrument/explanations
-                                 :seon.instrument.explanations/count] 0)))))))
+       (is (seq (:seon.error/problems refusal)))))))
+
+(deftest a-missing-key-refusal-holds-values-and-names-the-key
+  ;; One missing key once came back over MCP as 34,518 bytes: a second
+  ;; explanation copied the problems as pre-printed floor-printer node
+  ;; strings nested seven levels deep (error-text-opus, 2026-09-26). The
+  ;; refusal holds its problems as values and its message names the key.
+  (test-support/with-database
+   (fn [_]
+     (let [projection (schema/handed-projection)
+           wrapped (#'instrument/compiled-wrapper
+                    projection 'seon.instrument-test/needs-db
+                    [:=> [:cat [:map [:seon.db/db :seon.db/database-value]]] :any]
+                    (fn [_] :ran) (config/result-caps config/defaults)
+                    {:seon.config/on-core-error :panic
+                     :seon.config.error/max-evidence-bytes 8192})
+           refusal (test-support/refusal-data #(wrapped {:seon.db/connection :absent}))
+           message (:seon.error/message refusal)
+           printed (pr-str refusal)]
+       (is ((schema/projection-validator projection :seon.instrument/contract-error) refusal)
+           printed)
+       (is (not (find refusal :seon.instrument/explanations)))
+       (is (not (str/includes? printed "#:seon.print")) printed)
+       (is (= [[:seon.db/db]] (mapv :seon.error/path (:seon.error/problems refusal))))
+       (is (str/includes? message "at [:seon.db/db]") message)
+       (is (< (count message) 400) message)
+       (is (< (count printed) 2000) printed)))))
 
 (deftest the-caller-frame-is-part-of-the-refusal-sentence
   (arm-prefix-contract!)
