@@ -950,6 +950,18 @@
                         (edn/read-string
                          (text {:seon.render/ai (fn [_] (throw (ex-info "boom" {})))})))))))))
 
+(deftest a-reference-prints-as-its-referent-s-identity
+  ;; A non-component ref attribute's entity id prints as the referent's
+  ;; identity lookup (dogfood cycle 2: `:my.note/agent 34185`), never an eid.
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "ref-floor")
+     (let [[eid id] (db/q '[:find [?e ?id] :where [?e :seon.agent/id ?id]] (db/db connection))
+           expected (str "{:seon.turn/agent [:seon.agent/id " (pr-str id) "]}")
+           text #(:seon.render.value/text (value/prepare (registered-unit connection %)))]
+       (is (= expected (text {:seon.turn/agent eid})))
+       (is (= expected (text {:seon.turn/agent {:db/id eid}})))))))
+
 (deftest a-cut-continues-from-its-node-path-and-absolute-offset
   ;; One-render-path §3g: a cut's coordinates are the walk node, the path and
   ;; the absolute offset; the same selection answers from there, and a node

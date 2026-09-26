@@ -739,6 +739,36 @@
         (push-work (max (:shell work) (inc (:k work))) (:depth node) (inc (:k work))
                    (update work :k inc))))))
 
+(defn- referent-identity
+  "The referent of entity id `eid` named by its identity: `[attribute value]`
+  for the first identity attribute it holds, else `[:db/id eid]`."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:set :qualified-keyword] :int] [:vector :seon.schema/value]]}
+  [database identity-attributes eid]
+  (let [attributes (sort-by str identity-attributes)
+        entity (db/pull database (into [:db/id] attributes) eid)]
+    (or (some #(when-some [v (get entity %)] [% v]) attributes)
+        [:db/id eid])))
+
+(defn- reference-value
+  "A non-component reference attribute's value as its referent's identity,
+  never an entity id: an eid or a bare {:db/id n} becomes the referent's
+  lookup ref. Any other value, or a key that is not such an attribute, is
+  itself."
+  {:malli/schema [:=> [:cat :map :seon.schema/value :seon.schema/value] :seon.schema/value]}
+  [context attribute value]
+  (let [database (:seon.db/db (:unit context))
+        properties (when (and database (identical? (class attribute) clojure.lang.Keyword))
+                     (get (:schema (db/schema-database database)) attribute))
+        one (fn [v]
+              (let [eid (cond (int? v) v
+                              (and (map? v) (= [:db/id] (keys v))) (:db/id v))]
+                (if eid (referent-identity database (:identity-attributes context) eid) v)))]
+    (cond
+      (not (and (= :db.type/ref (:db/valueType properties)) (not (:db/isComponent properties)))) value
+      (= :db.cardinality/many (:db/cardinality properties))
+      (if (or (vector? value) (set? value)) (into (empty value) (map one) value) value)
+      :else (one value))))
+
 (defn- admit-member
   {:malli/schema [:=> [:cat :map :map :map] [:maybe :map]]}
   [state work context]
@@ -755,7 +785,8 @@
         (if (= :map (:kind parent))
           (let [entry-id next-id
                 k (make-node context (key member) (+ 1 next-id) depth (conj (:path parent) index) entry-id {:indent indent})
-                v (make-node context (val member) (+ 2 next-id) depth (conj (:path parent) (key member)) entry-id
+                v (make-node context (reference-value context (key member) (val member))
+                             (+ 2 next-id) depth (conj (:path parent) (key member)) entry-id
                              {:indent (+ indent (if (< (:depth parent) nest-cap) 2 0))})]
             [[{:kind :entry :id entry-id :depth (:depth parent) :indent indent :parent (:id parent)
                :kids [(:id k) (:id v)] :n 0 :sum 0} k v] entry-id])
