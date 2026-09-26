@@ -2002,21 +2002,18 @@
      (let [stored-attributes (set (schema.datahike/database-attributes-core-in projection))
            specs (into {} specs)
            caller-counts (into {} caller-counts)
-           schema-nodes
-           (fn [slot]
-             (let [nodes (volatile! [])]
-               (m/walk slot (fn [node _ _ _] (vswap! nodes conj node) nil))
-               @nodes))
            structural-findings
            (fn [slot]
-             (into []
-                   (keep (fn [node]
-                           (cond
-                             (and (= :map (m/type node)) (empty? (m/children node)))
-                             [:seon.fn.contract.finding/bare-map (m/form node)]
-                             (= :maybe (m/type node))
-                             [:seon.fn.contract.finding/maybe (m/form node)])))
-                   (schema-nodes slot)))
+             (schema.internal/fold-walk
+              slot
+              (fn [node _path]
+                (cond
+                  (and (= :map (m/type node)) (empty? (m/children node)))
+                  [[:seon.fn.contract.finding/bare-map (m/form node)]]
+                  (= :maybe (m/type node))
+                  [[:seon.fn.contract.finding/maybe (m/form node)]]
+                  :else []))
+              {}))
            permissive-findings
            (fn [slot guarded?]
              (into []
@@ -2055,16 +2052,15 @@
                                         permissive))
                      [[:seon.fn.contract.finding/unguarded-variadic (m/form slot)]])
                    unstorable
-                   (into []
-                         (comp
-                          (keep #(when (m/-ref-schema? %) (m/-ref %)))
-                          (filter stored-attributes)
-                          (remove #(schema.datahike/storable-attribute-in?
-                                    projection %))
-                          (map #(vector
-                                 :seon.fn.contract.finding/unstorable-attribute
-                                 %)))
-                         (schema-nodes slot))]
+                   (schema.internal/fold-walk
+                    slot
+                    (fn [node _path]
+                      (let [reference (when (m/-ref-schema? node) (m/-ref node))]
+                        (if (and (stored-attributes reference)
+                                 (not (schema.datahike/storable-attribute-in? projection reference)))
+                          [[:seon.fn.contract.finding/unstorable-attribute reference]]
+                          [])))
+                    {})]
                (mapv (fn [[finding form]]
                        {:seon.fn.contract/position position
                         :seon.fn.contract/form form

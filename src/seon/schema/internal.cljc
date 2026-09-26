@@ -15,6 +15,26 @@
 
 (def ^:private undefined-types #{:any :some})
 
+(defn fold-walk
+  "Every node's items from one `malli.core/walk`, children before parents.
+
+  `node-items` answers one node's own items from `[schema path]`. The walk
+  returns the callback's folded result (`malli.core/walk`), so each node
+  answers `{::items [...]}`: its walked children's items in order, then its
+  own. A map entry hands its walked child as the third member of
+  `[key properties child]` (`malli.core/-inner-entries`); a leaf or an
+  unfollowed ref hands raw children, which carry no `::items`."
+  {:malli/schema [:=> [:cat [:fn 'malli.core/schema?] [:fn 'clojure.core/ifn?] :map]
+                  [:vector :seon.schema/value]]}
+  [schema node-items options]
+  (::items
+   (m/walk schema
+           (fn [node path children _options]
+             {::items (into (into [] (mapcat #(::items (if (and (vector? %) (= 3 (count %))) (peek %) %)))
+                                  children)
+                            (node-items node path))})
+           options)))
+
 (defn- nilable-union?
   "`[:maybe X]`, or `[:or ... :nil ...]`, which accepts the same values."
   {:malli/schema [:=> [:cat [:fn 'malli.core/schema?]] :boolean]}
@@ -325,26 +345,14 @@
   (assert-error-declaration! request)
   (let [authored?
         (= :agent (:seon.schema.admission/source admission))
-        advisories (volatile! [])
         walk-options
         {::m/walk-schema-refs #(not (contains? canonical-keys %))
          ::m/walk-refs #(not (contains? canonical-keys %))}]
-    (m/walk
+    (fold-walk
      compiled
-     (fn [schema path _children _options]
+     (fn [schema path]
        (let [schema-type (m/type schema)
              properties (or (m/properties schema) {})]
-         ;; An undefined slot is advice, never a refusal (owner ruling
-         ;; 2026-09-24); its recorded justification silences it. A stored
-         ;; attribute still needs a Datahike value type, which
-         ;; `seon.schema.datahike` refuses where it derives storage.
-         (when (and (contains? undefined-types schema-type)
-                    (not (justified-polymorphism? properties)))
-           (vswap! advisories conj
-                   {:seon.schema.advisory/kind :seon.schema.advisory/undefined
-                    :seon.schema/identity identity
-                    :seon.schema/path (vec path)
-                    :seon.schema/schema-type schema-type}))
          (when (and authored? (= :fn schema-type))
            (let [predicate (guarded-predicate-symbol schema)
                  prebound?
@@ -377,7 +385,19 @@
                      "function, then re-register this contract after the "
                      "execution planner admits that graph.")
                 {:seon.schema/predicate unproved}))))
-         (when (nilable-union? schema)
+         (into
+          ;; An undefined slot is advice, never a refusal (owner ruling
+          ;; 2026-09-24); its recorded justification silences it. A stored
+          ;; attribute still needs a Datahike value type, which
+          ;; `seon.schema.datahike` refuses where it derives storage.
+          (if (and (contains? undefined-types schema-type)
+                   (not (justified-polymorphism? properties)))
+            [{:seon.schema.advisory/kind :seon.schema.advisory/undefined
+              :seon.schema/identity identity
+              :seon.schema/path (vec path)
+              :seon.schema/schema-type schema-type}]
+            [])
+          (when (nilable-union? schema)
            (cond
              (and authored? (map-value-maybe? compiled path))
              (contract-error!
@@ -398,13 +418,10 @@
               {})
 
              :else
-             (vswap! advisories conj
-                     {:seon.schema.advisory/kind :seon.schema.advisory/maybe
-                      :seon.schema/identity identity
-                      :seon.schema/path (vec path)})))
-         schema))
-     walk-options)
-    @advisories))
+             [{:seon.schema.advisory/kind :seon.schema.advisory/maybe
+               :seon.schema/identity identity
+               :seon.schema/path (vec path)}])))))
+     walk-options)))
 
 (defn map-required-attrs
   "Required keys of a compiled entity composition, excluding Malli's default."

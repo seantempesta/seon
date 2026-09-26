@@ -62,27 +62,19 @@
 (defn compiled-references
   "Canonical registry keys directly referenced by one compiled schema.
 
-   A fold over Malli's own walker (`malli.core/walk` returns the callback's
-   result), which distinguishes references from keyword data. Canonical refs
-   are recorded but not followed; local property-registry refs are followed
-   so canonical refs nested behind them are still visible. Each node answers
-   `{::references set}`; a map entry's walked child is the third member of its
-   `[key properties child]` triple (`malli.core/-inner-entries`), and a leaf or
-   an unfollowed ref hands its raw children, which carry no such key."
+   A fold over Malli's own walker (`internal/fold-walk`), which distinguishes
+   references from keyword data. Canonical refs are recorded but not
+   followed; local property-registry refs are followed so canonical refs
+   nested behind them are still visible."
   {:malli/schema [:=> [:cat [:fn malli.core/schema?] [:set :keyword]] [:set :keyword]]}
   [compiled canonical-keys]
-  (::references
-   (m/walk
-    compiled
-    (fn [schema _path children _options]
-      {::references
-       (into (let [reference (when (m/-ref-schema? schema) (m/-ref schema))]
-               (if (contains? canonical-keys reference) #{reference} #{}))
-             (mapcat (fn [child]
-                       (::references (if (and (vector? child) (= 3 (count child))) (peek child) child))))
-             children)})
-    {::m/walk-schema-refs #(not (contains? canonical-keys %))
-     ::m/walk-refs #(not (contains? canonical-keys %))})))
+  (set (internal/fold-walk
+        compiled
+        (fn [schema _path]
+          (let [reference (when (m/-ref-schema? schema) (m/-ref schema))]
+            (if (contains? canonical-keys reference) [reference] [])))
+        {::m/walk-schema-refs #(not (contains? canonical-keys %))
+         ::m/walk-refs #(not (contains? canonical-keys %))})))
 
 (defn- reference-cycle
   "First deterministic cycle in `graph` reachable from `roots`, or nil."
