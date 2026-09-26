@@ -707,13 +707,16 @@
   the frames of first-party host code the form called
   (`seon.error.refusal/called-frames`), never the evaluator that ran it.
   The evaluation's duration, allocation and outcome stay on its record.
-  An existing structural refusal is preserved with the chain around it.
+  The value is a `:seon.sci.kernel/execution-error`; a fired deadline also
+  names its guard observation (`:seon.sci.kernel/error`). An existing
+  structural refusal is preserved with the chain around it and the author's
+  class, which every alternative carries.
   A core fault already recorded by this propagation (its receipt anywhere in
   the cause chain, `seon.fault/carried-receipt`) is rethrown, never turned
   into an ordinary evaluation value: its panic reaches the caller."
   {:malli/schema
    [:=> [:cat :seon.sci.kernel/failure-request [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A kernel failure can carry any thrown or returned value; normalization must preserve evidence of an unrecognized failure.", :gen/elements [nil false 0 "" :k [] {}]}] :seon.sci.admit/record]
-    :seon.error/base]}
+    [:or :seon.sci.kernel/execution-error :seon.sci.kernel/error]]}
   [{subject :seon.fn/sym}
    throwable
    diagnostic-record]

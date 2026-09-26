@@ -456,7 +456,7 @@
   (let [evaluation (run "leaked")]
     (is (failed? evaluation)
         "one evaluation's def cannot reach the next")
-    (is ((schema/projection-validator (schema/handed-projection) :seon.sci.kernel/error) (:seon.sci.admit/value evaluation)))))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.sci.kernel/execution-error) (:seon.sci.admit/value evaluation)))))
 
 (deftest a-live-context-preserves-definition-value-class-and-metadata
   (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))
@@ -619,7 +619,7 @@
                {:fn-name 'seon.sci.eval-test/compiled-runtime-victim
                 :arity 9})]
           (is (failed? evaluation) source)
-          (is ((schema/projection-validator (schema/handed-projection) :seon.sci.kernel/error) refusal)
+          (is ((schema/projection-validator (schema/handed-projection) :seon.sci.kernel/execution-error) refusal)
               source)
           (is (str/includes? (:seon.error/message refusal)
                              "metadata is read-only from SCI")
@@ -2390,8 +2390,8 @@
                           (deadlined-in nil "(loop [i 0] (recur (inc i)))" 50))
            invoked-cut (invoked-value ctx database 'user/probe-spin [0] 50)]
        (testing "an agent mistake"
-         (is ((schema/projection-validator (schema/handed-projection) :seon.sci.kernel/error) evaluated-throw))
-         (is ((schema/projection-validator (schema/handed-projection) :seon.sci.kernel/error) invoked-throw))
+         (is ((schema/projection-validator (schema/handed-projection) :seon.sci.kernel/execution-error) evaluated-throw))
+         (is ((schema/projection-validator (schema/handed-projection) :seon.sci.kernel/execution-error) invoked-throw))
          (is (= 'user/probe-throw (:seon.error/offending invoked-throw)))
          (is (str/ends-with? (:seon.error/message evaluated-throw) "\nboom"))
          (is (str/starts-with? (:seon.error/message invoked-throw)

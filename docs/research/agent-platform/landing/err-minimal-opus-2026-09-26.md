@@ -2,7 +2,7 @@
 type: landing
 created: 2026-09-26
 lane: err-minimal-opus
-status: committed, unadopted and untested (RESET NEEDED; one patch for root)
+status: committed, unadopted and untested (RESET NEEDED; root patch applied; schema split fix-up)
 ---
 
 # Landing: err-minimal-opus (an agent's own exception as minimal complete data, like clojure.main), 2026-09-26
@@ -29,15 +29,29 @@ every first-party frame, because that is `chain`'s default.
    the reset, root runs the "after" probe through MCP. Proven at the JVM REPL: copies of the new `refusal.clj` and
    `failure-value` were loaded into scratch namespaces (since removed) and run on real SCI throws, plus a real armed
    contract refusal. The results are below.
-2. **Apply `tmp/err-minimal-opus/root-files.patch` with this commit**, because none of its files are mine. It covers:
-   - `seon.sci.kernel.edn`: `:seon.sci.kernel/error`'s guard-observation becomes optional. It is the one kernel error
-     schema: an agent exception, or a guard's refusal or timeout, which names the observation.
-   - `render.clj`: `unknown-map` reads `:seon.error/exception-class` instead of the deleted
-     `[:seon.error/data :seon.sci.eval/throwable]`.
-   - Three tests that used guard-observation or the data record as a marker (`instrument_test` :530, `armed_test`
-     :234, `contracts_plan_test` :71). They now assert the fired guard's observation or `:seon.error/offending`.
-   - Without the patch, eval_test's `both-entrances-classify-one-failure-identically` validates an agent exception
-     against the old schema and goes red.
+2. **Root applied `tmp/err-minimal-opus/root-files.patch`.** It made `:seon.sci.kernel/error`'s only domain member
+   optional, and HEAD c1c2bdbcd could not boot as a result: "A named error schema requires a non-base domain member"
+   (internal.cljc:278). The fix-up commit splits the schema at the producer:
+   - **`:seon.sci.kernel/error`** is the kernel guard's refusal. Its guard observation is REQUIRED again. It covers a
+     fired deadline, a symbol with no installed Var, and an unadmittable failure.
+   - **`:seon.sci.kernel/execution-error`** (new) is an agent's own exception. It requires what `failure-value`
+     always carries, `:seon.error/exception-class`, and has an optional `:seon.sci.eval/stacktrace`.
+   - **`failure-value`'s contract** is now `[:or :seon.sci.kernel/execution-error :seon.sci.kernel/error]` (it was
+     bare `:seon.error/base`). Every value it returns carries the author's class. A timeout also names its guard, and
+     an existing refusal passes through with that class assoc'd.
+   - **eval_test** validates agent exceptions against execution-error (:459, :622, :2393, :2394). Cuts and guard
+     refusals still validate against `:seon.sci.kernel/error`.
+   - **Proven at the REPL** (`projection-with-schema` over the live projection with the checkout forms):
+     - the optional-guard form refuses with the boot's exact message;
+     - both new forms are admitted;
+     - the 480-byte `(/ 1 0)` value validates against execution-error and the `:or` contract, and fails without
+       exception-class.
+   - **Static checks:**
+     - `contracts-compile-test/check` over kernel, refusal and eval_test: `[]` (85 ms). The check is live: it
+       refuses an unknown key.
+     - clj-kondo over src, script and test: 0 errors.
+   - This may also settle task `e13e5a9c557f` ("none of its declared error alternatives matches"), because
+     failure-value now declares its alternatives. That is unverified.
 3. **Contract refusals still carry instrument's bookkeeping.** This includes `:seon.instrument/arglists`, arity, arm,
    caller, check, fn, malli and problem-count, the `expected-shape`/`data-blob` digests, and `doc`/`shown`/`result-id`.
    This is instrument.clj's producer, not one of my files. It is logged as task `a57e8b27de67`
