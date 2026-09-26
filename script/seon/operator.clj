@@ -1562,7 +1562,10 @@
           [(get-in child [:seon.error/cause :cause])
            (:seon.error/message child)
            (get-in evidence [:seon.operator/adoption :seon.error/message])
-           (:seon.error/message (peek (:seon.error/chain result)))])))
+           ;; the primary chain's root: suppressed links (flat, naming their
+           ;; relation) follow it
+           (:seon.error/message (last (remove #(or (:seon.error/suppressed-by %) (:seon.error/cause-of %))
+                                              (:seon.error/chain result))))])))
 
 (defn exit-code
   "0 success; 3 ready on an older program because HEAD failed (nuke); 4 failed
