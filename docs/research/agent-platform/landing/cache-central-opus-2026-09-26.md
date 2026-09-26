@@ -11,6 +11,36 @@ design: docs/research/agent-platform/cache-central-design-2026-09-26.md (option 
 
 ## Broken or unproven first
 
+- **Fixed in `558446356`, the root cause of both boot refusals: `config/effective` read the row by the branch's
+  carried projection.**
+  - `apply-compiled!` writes the row from this JVM's packaged declarations, and installs any attribute the branch
+    lacks.
+  - `effective` selected dials by the branch's program, which adopts those declarations only after boot. A dial the
+    checkout added was therefore dropped from a row that held it.
+  - The answer then failed its own armed `:seon.config/effective` contract: `loop-handle` ← `arm-agents!` after
+    root's `0dc665873`, and `configure!` before it.
+  - **Chosen fix: one population.** Writer, reader and contract all use config's `declared-projection`. The six
+    `(schema/declaration-projection (schema.edn/packaged-forms))` sites in `config.clj` now go through it, and it is
+    held in `seon.cache` under the declaration stamp.
+  - **Rejected alternatives:**
+    - Adopting before reads (b) would move the adoption write into boot's critical path. A declarations-only
+      accretion would be refused on a retirement that the old program rows still reference. This is the
+      `start --head` incident class.
+    - Optional-with-default (a) would leave C's readers getting nil for a new dial during the window before
+      adoption.
+    - Compiled-at-boot (c) fixes one site at a time.
+  - **Cost:** an `effective` call was about 0.03 ms (a carried-projection memo hit). It is now about **1.3 ms**
+    armed, almost all of it `declaration-stamp` (210 file stats, measured on pid 82779). At three reads per agent
+    form that is about 4 ms per form. A cheaper stamp, keyed on the loaded commit instead of file mtimes, would
+    remove it. Root decides.
+  - **Unproven live.** Default runs `8e4ac24c9`, which does not have the dial. Checks run:
+    - contracts compile check on HEAD plus the change: 0 findings;
+    - `clj-kondo --cache false`: 0 errors.
+
+    The regression needs the platform boot test described below. A store that predates a dial cannot be built in
+    one JVM: a raw `d/with` retraction of a declaration leaves the stored composites naming it, and projection
+    derivation refuses (probed on pid 82779).
+
 - **Fixed in `02fe65932`: HEAD `0fdfbcd8c` failed boot with an NPE in `seon.cache/configure!`.**
   - **Cause:** `boot-dials` (`config/effective`) keeps only the dials the *store's* program declares, and that
     program adopts the checkout's declarations only after boot. `apply-compiled!` had installed and written
