@@ -140,7 +140,12 @@
                       [:seon.agent/id :seon.agent/id]
                       [:seon.turn/starting-ns {:optional true}
                        :seon.turn/starting-ns]
+                      [:seon.agent/segmenter {:optional true}
+                       :seon.agent/segmenter]
                       [:seon.cluster.reply/text :seon.cluster.reply/text]],
+                     :segmenter
+                     [:qualified-symbol
+                      {:description "The function that segments a submission's text into sources: seon.turn/planned-sources for a model reply (the default), seon.cluster.reply/code-sources for code. It must declare planned-sources' contract."}],
                      :source-submission-result
                      [:map
                       [:seon.turn/id :seon.turn/id]],

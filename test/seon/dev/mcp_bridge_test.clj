@@ -357,13 +357,15 @@
         jvm-form ((bridge-var 'remote-evaluation-form)
                   evaluation "jvm" "fixture" namespace-symbol)
         sci-form ((bridge-var 'remote-evaluation-form)
-                   evaluation "sci" "fixture" namespace-symbol)]
+                   (assoc evaluation :seon.dev.mcp/namespace? true) "sci" "fixture" namespace-symbol)]
     (try
       (is (= [42 namespace-symbol] (eval (read-string jvm-form))))
       (is (= 41 (var-get (ns-resolve namespace-symbol 'answer))))
       (is (str/includes? sci-form
                          "[:seon.ns/name (quote mcp.chosen.namespace)]"))
-      (is (str/includes? sci-form "seon.sci.eval/evaluate"))
+      (is (str/includes? sci-form "seon.cluster.agent/evaluate-source!")
+          "SCI without a branch is one ordinary run of root, not a bridge evaluator")
+      (is (str/includes? sci-form "seon.cluster.reply/code-sources"))
       (finally
         (in-ns original-namespace)
         (when (find-ns namespace-symbol)

@@ -409,27 +409,75 @@
         ;; as an agent's is (`acquire-context!` reuses [branch nil]), so a def
         ;; is callable in the next evaluation there; the `branch` tool's
         ;; retire releases it.
-        (let [handle# (when ~branch
-                        ((requiring-resolve 'seon.cluster.agent/acquire-context!)
-                         (assoc cluster# :seon.store/store (:seon.store/store instance#))
-                         nil {:seon.agent/branch (keyword ~branch)}))]
+        (let [handle# ((requiring-resolve 'seon.cluster.agent/acquire-context!)
+                       (assoc cluster# :seon.store/store (:seon.store/store instance#))
+                       nil {:seon.agent/branch (keyword ~branch)})]
           ((requiring-resolve 'seon.sci.eval/evaluate)
            ;; THE KEYS `evaluate` DECLARES.
            {:seon.cluster.eval/source ~source
             :seon.cluster.eval/ns [:seon.ns/name '~namespace-symbol]
-            :seon.sci.eval/ctx (if handle# (:seon.sci.eval/ctx handle#)
-                                   (:seon.sci.eval/ctx instance#))
+            :seon.sci.eval/ctx (:seon.sci.eval/ctx handle#)
             :seon.sci.admit/caps (:seon.sci.admit/caps cluster#)
             :seon.sci.eval/time-limit-ms
             (:seon.config.eval/time-limit-ms cluster#)
             :seon.config/on-core-error
             (:seon.config/on-core-error cluster#)}))))))))
 
+(defn- root-run-form
+  "The prepl form that evaluates `source` as one ordinary run of root on the
+  cluster's own branch (`seon.cluster.agent/evaluate-source!`), segmented as
+  code, and answers the settled run with its receipts in order. An explicit
+  namespace starts the run there; otherwise root continues where it ended."
+  {:malli/schema [:=> [:cat :string :string [:maybe :symbol] :boolean] :string]}
+  [source cluster namespace-symbol read-only?]
+  (pr-str
+   `(do
+      ((requiring-resolve 'seon.cluster/project-next-prepl-value!)
+       {:seon.dev.mcp/project? false :seon.dev.mcp/read-only? ~read-only?})
+      (let [handle# (:seon.turn.loop/cluster
+                     (get @@(requiring-resolve 'seon.operator.runtime/running-instances) ~cluster))]
+        (if-not (:seon.agent/routing handle#)
+          {:seon.error/at (java.util.Date.)
+           :seon.error/layer :seon.dev.mcp/evaluation
+           :seon.error/operation 'seon.cluster.agent/evaluate-source!
+           :seon.error/message ~(str "Cluster '" cluster "' has a live JVM REPL, but its agents are not armed; "
+                                     "SCI evaluation is unavailable.")
+           :seon.dev.mcp/cluster ~cluster}
+          (let [result# ((requiring-resolve 'seon.cluster.agent/evaluate-source!)
+                         (cond-> {:seon.turn.loop/cluster handle# :seon.agent/routing (:seon.agent/routing handle#)
+                                  :seon.agent/id "root" :seon.agent/segmenter 'seon.cluster.reply/code-sources
+                                  :seon.cluster.reply/text ~source}
+                           '~namespace-symbol (assoc :seon.turn/starting-ns [:seon.ns/name '~namespace-symbol])))]
+            (if (or (:seon.error/at result#) (not (:seon.turn/id result#)))
+              result#
+              (assoc result# :seon.dev.mcp/evaluations
+                     ((requiring-resolve 'seon.eval.drive/run-receipts)
+                      @(:seon.db/connection handle#) [(:seon.turn/id result#)])))))))))
+
+(defn- run-events
+  "The prepl events of a root run: one per settled evaluation, its stored shown
+  text as the value, and an error flagged as the event's exception."
+  {:malli/schema [:=> [:cat [:vector :map]] [:vector :map]]}
+  [events]
+  (let [terminal (some #(when (= :ret (:tag %)) %) events)
+        value (try (edn/read-string (:val terminal)) (catch Throwable _ nil))]
+    (if-let [evaluations (:seon.dev.mcp/evaluations value)]
+      (into (filterv #(not= :ret (:tag %)) events)
+            (map (fn [{shown :seon.eval/shown error :seon.cluster.eval/error ordinal :seon.cluster.eval/ordinal}]
+                   (cond-> {:tag :ret :val (or shown error) :seon.cluster.eval/ordinal ordinal
+                            :seon.turn/id (:seon.turn/id value)}
+                     error (assoc :exception true))))
+            evaluations)
+      (cond->> events
+        (:seon.error/at value) (mapv #(if (identical? % terminal) (assoc % :exception true) %))))))
+
 (defn- remote-evaluation-form
-  [{:seon.dev.mcp/keys [source read-only? branch]} mode cluster namespace-symbol]
+  [{:seon.dev.mcp/keys [source read-only? branch namespace?]} mode cluster namespace-symbol]
   (case mode
     "jvm" (jvm-evaluation-form source namespace-symbol (true? read-only?))
-    "sci" (sci-evaluation-form source cluster namespace-symbol (true? read-only?) branch)))
+    "sci" (if branch
+            (sci-evaluation-form source cluster namespace-symbol (true? read-only?) branch)
+            (root-run-form source cluster (when namespace? namespace-symbol) (true? read-only?)))))
 
 (defn- branch-name!
   "A lane names its branch; blank, non-string or colon-led names refuse."
@@ -603,21 +651,24 @@
               (remote-evaluation-form
                (assoc (:seon.dev.mcp/evaluation validation)
                       :seon.dev.mcp/read-only? (true? (:read_only request))
-                      :seon.dev.mcp/branch (:branch request))
+                      :seon.dev.mcp/branch (:branch request)
+                      :seon.dev.mcp/namespace? (some? (:namespace request)))
                mode cluster namespace-symbol)
               {:keys [writer endpoint] :as session}
               (current-clj-session! root cluster session-id)]
           (.write ^java.io.Writer writer (str remote-form "\n"))
           (.flush ^java.io.Writer writer)
-          (let [events (mapv (fn [event]
+          (let [collected (collect-prepl-response! session timeout-ms)
+                root-run? (and (= "sci" mode) (nil? (:branch request)))
+                events (mapv (fn [event]
                                (-> event
-                                   shown-event
+                                   (cond-> (not root-run?) shown-event)
                                    ;; SCI's namespace is the response's; the
                                    ;; host prepl *ns* would mislabel it.
                                    (cond-> (= "sci" mode) (dissoc :ns))
                                    (dissoc :form)))
-                             (collect-prepl-response! session timeout-ms))
-                terminal (some #(when (= :ret (:tag %)) %) events)
+                             (if root-run? (run-events collected) collected))
+                terminal (some #(when (= :ret (:tag %)) %) (reverse events))
                 response {:seon.dev.mcp/runtime "clj"
                           :seon.dev.mcp/root root
                           :seon.dev.mcp/cluster cluster
@@ -630,7 +681,7 @@
                           :seon.dev.mcp/events events}
                 window (branch-errors! session timeout-ms
                                        [root cluster (when (= "sci" mode) (:branch request))])]
-            (cond-> (if (:exception terminal)
+            (cond-> (if (or (:exception terminal) (some :exception events))
                       (mcp-error (assoc response :seon.dev.mcp/failure :evaluation))
                       (mcp-success response))
               window (update :content conj {:type "text"
@@ -785,15 +836,15 @@
 
 (def tools
   [{:name "eval_clj"
-    :description "Evaluate exactly one Clojure form in a selected operator root, cluster, namespace, and mode; the returned MCP content renders directly into the calling agent/orchestrator context. JVM mode uses the live io-prepl; the session keeps no result (*1/*2/*3/*e stay nil), so bind what you need to a name. It binds no cluster custody; at a development REPL, (seon.cluster.boot/connection \"default\") supplies the explicit connection to pass to seon.db. SCI mode (`sci`) evaluates through seon.sci.eval/evaluate with admission caps, contracts, print grammar, and time limit. An optional branch (made by the `branch` tool) selects that branch's context through the agent acquisition entrance and RETAINS it: a def is callable in later evaluations there and by agents acquiring that branch, until `branch` retire releases it. It is private SCI state, never program rows: no turn settles it, so it is neither merged nor tested by seon.test/run (which runs the branch's rows). Without a branch it MUTATES the cluster's shared SCI ctx, so a debug def enters the live agents' world. Either way it creates NO run or receipts because the run loop owns those facts. Oversized values settle into the selected cluster's blob tier and return a retrievable digest. Discovery derives from current advertisements and exact operating-system process identities on every call; the default session reconnects after JVM replacement."
+    :description "Evaluate exactly one Clojure form in a selected operator root, cluster, namespace, and mode; the returned MCP content renders directly into the calling agent/orchestrator context. JVM mode uses the live io-prepl; the session keeps no result (*1/*2/*3/*e stay nil), so bind what you need to a name. It binds no cluster custody; at a development REPL, (seon.cluster.boot/connection \"default\") supplies the explicit connection to pass to seon.db. SCI mode (`sci`) without a branch is ONE ORDINARY RUN OF ROOT on the cluster's own branch (seon.cluster.agent/evaluate-source!): the code is segmented as code (every form, several allowed), each form read and evaluated in root's context under the entry gate, settled as root's recorded evaluations, and answered as one event per evaluation with its saved shown text. A defn becomes a program row on the cluster. An explicit namespace starts the run there; otherwise root continues where its last evaluation ended. With a branch (made by the `branch` tool), SCI evaluates in that branch's retained context through the agent acquisition entrance: private SCI state, never program rows, no run or receipts, until `branch` retire releases it (a hosted branch agent replaces this). Oversized values settle into the selected cluster's blob tier and return a retrievable digest. Discovery derives from current advertisements and exact operating-system process identities on every call; the default session reconnects after JVM replacement."
     :inputSchema {:type "object"
-                  :properties {:code {:type "string" :description "Exactly one Clojure form; wrap an intentional sequence in (do ...)."}
+                  :properties {:code {:type "string" :description "Clojure code. JVM mode and SCI with a branch evaluate exactly one form (wrap a sequence in (do ...)); SCI without a branch evaluates every form in order as one run."}
                                :root {:type "string" :description "Operator root path. Defaults to the repository root used by bin/seon."}
                                :cluster {:type "string" :description "Cluster name within root. Defaults to this MCP server's own cluster; ambiguous live matches fail with their candidate list."}
                                :namespace {:type "string" :description "Clojure namespace for either mode. Defaults to user; a missing JVM namespace is created and refers clojure.core."}
                                :read_only {:type "boolean" :description "Declare that this evaluation changes no runtime code or mutable state; preserves retained pages. Omitted or false conservatively invalidates them."}
-                               :mode {:type "string" :enum ["jvm" "sci"] :description "jvm evaluates in the host io-prepl; sci evaluates through the cluster's shared SCI ctx. Defaults to jvm."}
-                               :branch {:type "string" :description "SCI only: a branch the `branch` tool created, without a leading colon. Its retained context persists across calls; omission uses the shared cluster context."}
+                               :mode {:type "string" :enum ["jvm" "sci"] :description "jvm evaluates in the host io-prepl; sci without a branch is an ordinary run of root; with a branch, the branch's retained context. Defaults to jvm."}
+                               :branch {:type "string" :description "SCI only: a branch the `branch` tool created, without a leading colon. Its retained context persists across calls; omission makes the evaluation a run of root on the cluster."}
                                :session_id {:type "string" :description "Stateful io-prepl session id. Defaults to 'default'."}
                                :timeout_ms {:type "integer" :minimum 1 :maximum 120000}}
                   :required ["code"]}}

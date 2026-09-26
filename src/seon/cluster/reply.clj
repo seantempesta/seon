@@ -396,3 +396,28 @@
                                 "Your reply began with a response; send a form."
                                 "Your reply had no form; only comments/prose. Send a form.")
                               {::text text}))))))))))))
+
+(defn code-sources
+  "Every form the one reader reads from `text`, each as one source, in order.
+
+  The segmenter for code, not a reply: an outside agent's evaluation, a file, a
+  generated form. Nothing is prose, so a bare number or a top-level reader
+  conditional is a form. Reading here only finds each form's exact span; the
+  evaluator reads it again in its armed context after the previous form ran. A
+  span the reader cannot read stays a source, so the ordinary evaluator records
+  its reader diagnostic; text with no form refuses as no forms."
+  {:malli/schema
+   [:=> [:catn
+         [:text :seon.cluster.reply/text]
+         [:namespace-name :seon.ns/name]
+         [:max-source :seon.config.eval.result/max-source]]
+    [:or :seon.cluster.reply/sources :seon.cluster.reply/no-forms-error]]}
+  [text namespace-name max-source]
+  (let [events (parsed-events text namespace-name max-source)]
+    (cond
+      (map? events) [{:seon.cluster.eval/source text :seon.ns/name namespace-name}]
+      (empty? events) (refused {::no-forms true} "Your evaluation had no form. Send a form." {::text text})
+      :else (mapv (fn [{::keys [ns] :as event}]
+                    (cond-> {:seon.cluster.eval/source (subs text (form-start text event) (::end event))}
+                      ns (assoc :seon.ns/name ns)))
+                  events))))

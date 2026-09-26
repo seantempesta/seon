@@ -68,6 +68,8 @@
             [clojure.core.async.impl.protocols :as async.protocols]
             [clojure.core.async.flow :as flow]
             [clojure.string :as str]
+            [datahike.api :as d]
+            [seon.await :as await]
             [seon.bootstrap :as bootstrap]
             [seon.ai :as ai]
             [seon.turn :as turn]
@@ -611,6 +613,25 @@
 
 (declare submit-source-in-projection)
 
+(defn- segmenter
+  "The function that segments a submission's text into its ordered sources:
+  `seon.turn/planned-sources` for a model reply unless the request names another
+  stage, which must declare exactly that default's contract. A symbol that
+  resolves to nothing, or to a function with another contract, refuses by name."
+  {:malli/schema [:=> [:cat [:maybe :qualified-symbol] :seon.agent/id]
+                  [:or :seon.instrument/callable :seon.agent/source-submission-refused-error]]}
+  [stage agent-id]
+  (let [default #'turn/planned-sources
+        chosen (if stage (try (requiring-resolve stage) (catch Exception _ nil)) default)]
+    (if (and (var? chosen) (= (:malli/schema (meta chosen)) (:malli/schema (meta default))))
+      chosen
+      (seon.error.refusal/diagnostic (Date.) :seon.agent/source-submission `submit-source!
+       {:seon.agent/refused-source-agent agent-id
+        :seon.error/message "The segmenter must name a function declaring seon.turn/planned-sources' contract."
+        :seon.error/member :seon.agent/segmenter
+        :seon.error/expected (:malli/schema (meta default))
+        :seon.error/offending stage}))))
+
 (defn submit-source!
   "Submit system-authored source through the ordinary durable run path.
 
@@ -638,8 +659,10 @@
     routing :seon.agent/routing
     agent-id :seon.agent/id
     starting-ns :seon.turn/starting-ns
+    stage :seon.agent/segmenter
     text :seon.cluster.reply/text}]
   (let [connection (:seon.db/connection handle)
+        segment (segmenter stage agent-id)
         database @connection
         namespace-name
         (if starting-ns
@@ -655,6 +678,8 @@
                 [?namespace :seon.ns/name ?namespace-name]]
                 database agent-id))]
     (cond
+      (map? segment) segment
+
       (or (:seon.db/invalid-read namespace-name)
           (:seon.schema/expected-value namespace-name))
       (assoc namespace-name :seon.agent/refused-source-agent agent-id)
@@ -670,7 +695,7 @@
       (let [max-source
             (get-in handle [:seon.sci.admit/caps
                             :seon.config.eval.result/max-source])
-            sources (turn/planned-sources text namespace-name max-source)]
+            sources (segment text namespace-name max-source)]
         (if (:seon.cluster.reply/no-forms sources)
           (assoc sources :seon.agent/refused-source-agent agent-id)
           (let [run-id (turn/next-id database (:seon.cluster/name handle) agent-id)
@@ -700,6 +725,74 @@
                     :seon.error/expected :seon.agent/wake
                     :seon.error/offending run-id
                     :seon.error/data {:seon.turn/id run-id}}))))))))))
+
+(defn- latest-ending-namespace
+  "The namespace `agent-id`'s latest evaluation ended in, when a namespace row
+  still names it: where a submission without a starting namespace continues."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
+                  [:or :nil :seon.ns/name :seon.db/error-result]]}
+  [database agent-id]
+  (let [rows (db/q '[:find ?at ?ordinal ?ending
+                     :in $ ?agent-id
+                     :where [?agent :seon.agent/id ?agent-id] [?run :seon.turn/agent ?agent]
+                     [?evaluation :seon.cluster.eval/run ?run] [?evaluation :seon.cluster.eval/at ?at]
+                     [?evaluation :seon.cluster.eval/ordinal ?ordinal]
+                     [?evaluation :seon.sci.eval/ending-ns ?ending] [_ :seon.ns/name ?ending]]
+                   database agent-id)]
+    (if (map? rows) rows (some-> (last (sort-by (fn [[at ordinal]] [(inst-ms at) ordinal]) rows)) (nth 2)))))
+
+(defn evaluate-source!
+  "Evaluate `text` as one ordinary run of the agent and answer that run once it
+  has settled: `submit-source!`, then the run's terminal fact awaited under the
+  cluster's `:seon.config.agent/turn-completion-backstop-ms`.
+
+  The listener is registered before the submission and the durable state is
+  read once after it, so a run that closed before the listener saw it is not
+  missed. At the bound the answer is the await's declared timeout carrying the
+  run id: the run keeps its ownership, the agent stays busy until it settles,
+  and nothing replays. Without a starting namespace the agent continues in the
+  namespace its latest evaluation ended in, when a row still names it."
+  {:malli/schema [:=> [:cat :seon.agent/source-submission-request]
+                  [:or :seon.agent/source-submission-result :seon.agent/source-submission-refused-error
+                   :seon.await/timeout-error :seon.db/error-result]]}
+  [{handle :seon.turn.loop/cluster agent-id :seon.agent/id :as request}]
+  (let [connection (:seon.db/connection handle)
+        database @connection
+        run-id (atom nil)
+        closed (async/promise-chan)
+        closed? #(when-let [id @run-id]
+                   (some? (:seon.turn/closed-tx (db/pull % [:seon.turn/closed-tx] [:seon.turn/id id]))))
+        listener (keyword "seon.cluster.agent" (str "evaluate-source-" (id/id)))
+        continuation (when-not (:seon.turn/starting-ns request) (latest-ending-namespace database agent-id))
+        bound (:seon.config.agent/turn-completion-backstop-ms
+               (config/effective database (:seon.cluster/name handle)))]
+    (cond
+      (map? continuation) continuation
+      (not (pos-int? bound))
+      (seon.error.refusal/diagnostic (Date.) :seon.agent/source-submission `evaluate-source!
+       {:seon.agent/refused-source-agent agent-id
+        :seon.error/message "The cluster declares no turn-completion bound to await the run under."
+        :seon.error/member :seon.config.agent/turn-completion-backstop-ms
+        :seon.error/offending bound})
+      :else
+      (do
+        (d/listen connection listener (fn [report] (when (closed? (:db-after report)) (async/offer! closed true))))
+        (try
+          (let [submitted (submit-source! (cond-> request
+                                            continuation (assoc :seon.turn/starting-ns [:seon.ns/name continuation])))]
+            (if-not (:seon.turn/id submitted)
+              submitted
+              (do (reset! run-id (:seon.turn/id submitted))
+                  (when (closed? @connection) (async/offer! closed true))
+                  (let [awaited (await/await!
+                                 {:seon.await/bound {:seon.await/config-attribute :seon.config.agent/turn-completion-backstop-ms
+                                                     :seon.await/config-value bound}
+                                  :seon.await/diagnostic {:seon.error/layer :seon.agent/source-submission
+                                                          :seon.error/operation `evaluate-source!
+                                                          :seon.error/offending (:seon.turn/id submitted)}
+                                  :seon.await/port-operations [closed]})]
+                    (if (true? awaited) submitted (assoc awaited :seon.turn/id (:seon.turn/id submitted)))))))
+          (finally (d/unlisten connection listener)))))))
 
 (defn fenced?
   "True when this agent is QUARANTINED: armed, routed, mailbox closed.
