@@ -3533,9 +3533,10 @@
                                [a (some-> (mr/schema (:seon.schema.projection/registry projection) a)
                                           m/properties :seon.db/component-schema)]))
                       components)
-        seen (volatile! #{})
-        rows (volatile! {})
-        owners (volatile! {})
+        ;; One validation traversal's memo: charged [phase eid] visits, rows
+        ;; and owner edges by [phase eid]. A volatile because the row reader
+        ;; charges through a callback (`write-entity-value`) that no loop owns.
+        traversal (volatile! {::seen #{} ::rows {} ::owners {}})
         fail! (fn [cause data]
                 (throw (ex-info "Owned entity validation refused."
                                 {::owned-refusal
@@ -3553,18 +3554,18 @@
                                   ::transaction-refused true)})))
         charge! (fn [phase entity-id]
                   (let [cache-key [phase entity-id]]
-                    (when-not (@seen cache-key)
-                      (when (>= (count @seen) limit)
-                        (fail! ::validation-node-limit {::entity entity-id ::visited (count @seen)}))
-                      (vswap! seen conj cache-key))))
+                    (when-not ((::seen @traversal) cache-key)
+                      (when (>= (count (::seen @traversal)) limit)
+                        (fail! ::validation-node-limit {::entity entity-id ::visited (count (::seen @traversal))}))
+                      (vswap! traversal update ::seen conj cache-key))))
         row (fn [phase database entity-id]
               (let [cache-key [phase entity-id]]
                 (charge! phase entity-id)
-                (if-let [entry (find @rows cache-key)]
+                (if-let [entry (find (::rows @traversal) cache-key)]
                   (val entry)
                   (let [value (write-entity-value database projection attribute-plans entity-id
                                                   #(charge! phase %))]
-                    (vswap! rows assoc cache-key value)
+                    (vswap! traversal assoc-in [::rows cache-key] value)
                     value))))
         ;; The component attributes that can reference anything in each
         ;; phase: installed there and holding at least one datom, paired with
@@ -3593,7 +3594,7 @@
         owners-of (fn [phase database entity-id]
                   (let [cache-key [phase entity-id]]
                     (charge! phase entity-id)
-                    (if-let [entry (find @owners cache-key)]
+                    (if-let [entry (find (::owners @traversal) cache-key)]
                       (val entry)
                       (let [value
                             (if (> (long entity-id) (long new-after))
@@ -3619,7 +3620,7 @@
                                                         [(:e datom) attribute])
                                                       (dbi/search database [nil searched entity-id]))))
                                     (owner-attributes database)))]
-                        (vswap! owners assoc cache-key value)
+                        (vswap! traversal assoc-in [::owners cache-key] value)
                         value))))
         owning-ancestors (fn [phase database seeds]
                     (loop [pending (vec seeds) visited #{}]
@@ -3640,45 +3641,49 @@
       (let [prior (owning-ancestors :before before seeds)
             current (owning-ancestors :after after (into seeds prior))
             roots (filterv #(empty? (owners-of :after after %)) current)
-            expanded (volatile! {})
-            visited (volatile! #{})]
-        ;; Iterative postorder avoids using JVM stack depth as the graph bound.
-        (doseq [root roots]
-          (loop [pending [[root false]] active #{}]
-            (when-let [[entity-id exit?] (peek pending)]
-              (let [value (row :after after entity-id)
-                    child-edges (into []
-                                      (mapcat (fn [[a v]]
-                                                (when (components a)
-                                                  (map #(vector a %) (if (db.utils/multival? after a) v [v])))))
-                                      value)]
-                (cond
-                  exit?
-                  (let [whole (reduce (fn [result [a child]]
-                                        (if (db.utils/multival? after a)
-                                          (update result a (fnil conj []) (get @expanded child))
-                                          (assoc result a (get @expanded child))))
-                                      (apply dissoc value components) child-edges)]
-                    (vswap! expanded assoc entity-id whole)
-                    (vswap! visited conj entity-id)
-                    (recur (pop pending) (disj active entity-id)))
+            ;; Iterative postorder avoids using JVM stack depth as the graph
+            ;; bound; the complete values and completed ids are its loop state.
+            {expanded ::expanded visited ::visited}
+            (reduce
+             (fn [walk root]
+               (loop [pending [[root false]] active #{} {expanded ::expanded visited ::visited :as walk} walk]
+                 (if-let [[entity-id exit?] (peek pending)]
+                   (let [value (row :after after entity-id)
+                         child-edges (into []
+                                           (mapcat (fn [[a v]]
+                                                     (when (components a)
+                                                       (map #(vector a %) (if (db.utils/multival? after a) v [v])))))
+                                           value)]
+                     (cond
+                       exit?
+                       (let [whole (reduce (fn [result [a child]]
+                                             (if (db.utils/multival? after a)
+                                               (update result a (fnil conj []) (get expanded child))
+                                               (assoc result a (get expanded child))))
+                                           (apply dissoc value components) child-edges)]
+                         (recur (pop pending) (disj active entity-id)
+                                {::expanded (assoc expanded entity-id whole) ::visited (conj visited entity-id)}))
 
-                  (@visited entity-id) (recur (pop pending) active)
-                  (active entity-id) (fail! ::component-cycle {::entity entity-id ::root root})
-                  :else
-                  (do
-                    (doseq [[a child] child-edges]
-                      (when-not (get (:seon.schema.projection/forms projection) (get targets a))
-                        (fail! ::missing-component-schema {::attribute a ::entity entity-id}))
-                      (when (> (count (owners-of :after after child)) 1)
-                        (fail! ::multiple-component-owners
-                               {::entity child ::owners (owners-of :after after child)}))
-                      (when (empty? (row :after after child))
-                        (fail! ::missing-component {::entity child ::owner entity-id ::attribute a})))
-                    (recur (into (conj (pop pending) [entity-id true])
-                                 (map (fn [[_ child]] [child false]) child-edges))
-                           (conj active entity-id))))))))
-        (when-let [entity-id (first (remove @visited current))]
+                       (visited entity-id) (recur (pop pending) active walk)
+                     (active entity-id) (fail! ::component-cycle {::entity entity-id ::root root})
+                     :else
+                     (do
+                       (doseq [[a child] child-edges]
+                         (when-not (get (:seon.schema.projection/forms projection) (get targets a))
+                           (fail! ::missing-component-schema {::attribute a ::entity entity-id}))
+                         (when (> (count (owners-of :after after child)) 1)
+                           (fail! ::multiple-component-owners
+                                  {::entity child ::owners (owners-of :after after child)}))
+                         (when (empty? (row :after after child))
+                           (fail! ::missing-component {::entity child ::owner entity-id ::attribute a})))
+                       (recur (into (conj (pop pending) [entity-id true])
+                                    (map (fn [[_ child]] [child false]) child-edges))
+                              (conj active entity-id)
+                              walk))))
+                   walk)))
+             {::expanded {} ::visited #{}}
+             roots)]
+        (when-let [entity-id (first (remove visited current))]
           (fail! ::component-cycle {::entity entity-id}))
         (let [;; A function's documentation/source coordinates do not alter
               ;; prepared arities. Only its call facts, arity relation,
@@ -3709,7 +3714,7 @@
                              tx-data))))]
         (or
          (some (fn [root]
-                 (let [value (get @expanded root)
+                 (let [value (get expanded root)
                        identities (merge (select-keys (row :before before root) identity-attrs)
                                          (select-keys value identity-attrs))]
                    (when (or (not (some identities [:seon.fn/sym :seon.test/sym]))
@@ -3726,7 +3731,7 @@
                      (when-let [refusal (write-entity-error after projection attribute-plans entity-id identities value [target])]
                        (update refusal :seon.error/data assoc
                                ::owner parent ::attribute attribute ::component-schema target)))))
-               @expanded))))
+               expanded))))
       (catch clojure.lang.ExceptionInfo exception
         (if-let [refusal (::owned-refusal (ex-data exception))] refusal (throw exception))))))
 
@@ -4246,20 +4251,20 @@
    (declaration-value (carried-projection database) database identity-attrs entity-id))
   ([projection database identity-attrs entity-id]
    (let [plans (write-attribute-plans projection database)
-         many (volatile! #{})
-         row (reduce (fn [row {:keys [a v]}]
-                       (let [installed (get (dbi/-schema database) a)
-                             v (cond (not= :db.type/ref (:db/valueType installed)) v
-                                     (:db/isComponent installed)
-                                     (declaration-value projection database identity-attrs v)
-                                     :else (or (some #(some->> (first (d/datoms database :eavt v %)) :v (vector %))
-                                                     identity-attrs)
-                                               v))]
-                         (if (= :db.cardinality/many (:db/cardinality installed))
-                           (do (vswap! many conj a) (update row a (fnil conj []) v))
-                           (assoc row a v))))
-                     {} (d/datoms database :eavt entity-id))]
-     (reduce (fn [row a] (update row a (or (::normalize-many (get plans a)) set))) row @many))))
+         [row many]
+         (reduce (fn [[row many] {:keys [a v]}]
+                   (let [installed (get (dbi/-schema database) a)
+                         v (cond (not= :db.type/ref (:db/valueType installed)) v
+                                 (:db/isComponent installed)
+                                 (declaration-value projection database identity-attrs v)
+                                 :else (or (some #(some->> (first (d/datoms database :eavt v %)) :v (vector %))
+                                                 identity-attrs)
+                                           v))]
+                     (if (= :db.cardinality/many (:db/cardinality installed))
+                       [(update row a (fnil conj []) v) (conj many a)]
+                       [(assoc row a v) many])))
+                 [{} #{}] (d/datoms database :eavt entity-id))]
+     (reduce (fn [row a] (update row a (or (::normalize-many (get plans a)) set))) row many))))
 
 (defn definition-digest-of
   "The definition digest the writer admits for function or test `row`:
