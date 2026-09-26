@@ -374,7 +374,8 @@
   declaration-stamp]` in the process cache: an edit changes the stamp, so it
   misses by construction. Weight: 375 bytes per form (1.32 MB / 3,514 forms,
   cache-central design 2026-09-26)."
-  {:malli/schema [:=> [:cat] :map]}
+  {:seon/tasks #{"f20577d4eb4c"}
+   :malli/schema [:=> [:cat] :map]}
   []
   (seon.cache/lookup ::packaged-population
                      [(str (io/resource default-resource)) (declaration-stamp)]

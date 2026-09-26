@@ -559,8 +559,10 @@
 (declare missing-contract install-function-contract!)
 
 (defn- program-value?
-  "Whether an intern's root makes it a program declaration: a function or test."
-  {:malli/schema [:=> [:cat :seon.sci.eval/intern] :boolean]}
+  "Whether a definition's root makes it a program declaration: a function or
+  test. It reads only the root and its metadata, so it takes the binding shape
+  that both an intern and a failed form's surviving definition carry."
+  {:malli/schema [:=> [:cat :seon.sci.eval/binding] :boolean]}
   [{value :seon.sci.eval/value metadata :seon.sci.eval/metadata}]
   (and (not (identical? absent-intern value))
        (boolean (or (fn? value) (:test metadata)))))

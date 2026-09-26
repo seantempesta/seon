@@ -962,7 +962,8 @@
   (`registry/plain-cutoff`), under Datahike's safe point against in-flight
   writers. Runs only when `effective` carries
   `:seon.config.maintenance/collect? true`; answers nil when collection is off."
-  {:malli/schema [:=> [:cat :seon.store/store :seon.config/effective]
+  {:seon/tasks #{"534966f34876"}
+   :malli/schema [:=> [:cat :seon.store/store :seon.config/effective]
                   [:or :nil :seon.cluster.registry/inventory]]}
   [store effective]
   (when (true? (:seon.config.maintenance/collect? effective))

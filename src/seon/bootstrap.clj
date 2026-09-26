@@ -15,7 +15,8 @@
 
 (defn help-value
   "Read the REPL instructions and tools from this program version."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
+  {:seon/tasks #{"2c66ac931003"}
+   :malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
                   :seon.help/help]}
   [database agent-id]
   ;; The fixed prose belongs to this definition; the source read records

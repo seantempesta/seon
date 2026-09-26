@@ -55,7 +55,8 @@
                (my.shell/run! {:my.shell/argv [\"printf\" \"%s\" \"Verified.\"]
                                :my.shell/cwd \".\"}))]
     (my.background/poll {:my.background/result work}))"
-  {:malli/schema [:=> [:cat [:map [:my.background/result :my.background/result]]] [:or :my.background/receipt :my.background/invalid-result-error :my.background/missing-result-error]]}
+  {:seon/tasks #{"7bfe767bec09"}
+   :malli/schema [:=> [:cat [:map [:my.background/result :my.background/result]]] [:or :my.background/receipt :my.background/invalid-result-error :my.background/missing-result-error]]}
   [request]
   (background/poll (:my.background/result request)))
 

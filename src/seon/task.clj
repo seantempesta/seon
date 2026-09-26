@@ -2,6 +2,7 @@
   "Runtime tasks (spec 7.8): create a task, assign it to an agent's branch and
   record a merge proposal. Tasks live on the cluster, so every write goes to
   the task home through the one task writer (`seon.issue/adopt-tasks-tx`)."
+  {:seon/tasks #{"2fe9c6b7fe31"}}
   (:require [seon.db :as db]
             [seon.error.refusal :as refusal]
             [seon.id :as id]

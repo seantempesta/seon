@@ -257,7 +257,8 @@
         [:seon.render/ai :seon.render/html]))
 
 (defn- proposed-plan
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/subject [:or :nil :seon.program/callers] [:or :nil :seon.program/call-sites]] :seon.program/plan]}
+  {:seon/tasks #{"5087cea7800e"}
+   :malli/schema [:=> [:cat :seon.db/database-value :seon.program/subject [:or :nil :seon.program/callers] [:or :nil :seon.program/call-sites]] :seon.program/plan]}
   [database subject caller-symbols sites]
   (let [names (sort caller-symbols)
         stored (vec names)
@@ -293,7 +294,8 @@
 
   Example:
   (my.program/breaks {:seon.program/subject 'seon.turn/open?})"
-  {:malli/schema [:=> [:cat :my.program/breaks-request]
+  {:seon/tasks #{"0a149b4c6d27"}
+   :malli/schema [:=> [:cat :my.program/breaks-request]
                   [:or :seon.program/breakage :seon.program/read-refused-error :seon.program/not-found-error]]}
   [{database :seon.db/db subject :seon.program/subject :as request}]
   (read-result
@@ -457,7 +459,8 @@
 
   Example:
   (my.program/propose-merge! {})"
-  {:malli/schema [:=> [:cat [:map [:my.program/context :my.program/context] [:seon.db/connection :seon.db/connection]
+  {:seon/tasks #{"70bf0e12569e"}
+   :malli/schema [:=> [:cat [:map [:my.program/context :my.program/context] [:seon.db/connection :seon.db/connection]
                              [:seon.agent/id :seon.agent/id]]]
                   [:or :seon.message/message :seon.task/refused-error :seon.task/conflict-error :seon.error/value]]}
   [{context :my.program/context connection :seon.db/connection agent-id :seon.agent/id}]
@@ -607,7 +610,8 @@
   The declaration owner follows historical file provenance over this same
   database value. This does not assert JVM write-back or SCI loadability.
   Example: (my.program/overrides)"
-  {:malli/schema [:=> [:cat :my.program/read-request]
+  {:seon/tasks #{"70bf0e12569e"}
+   :malli/schema [:=> [:cat :my.program/read-request]
                   [:or [:vector :seon.fn/sym] :seon.program/read-refused-error]]}
   [{database :seon.db/db :as request}]
   (read-result request 'my.program/overrides
@@ -800,7 +804,8 @@
   The SCI hook calls this before supplied-default preparation. Intern and
   alter-var-root remain available for private bindings with no program row.
   Example: called by the installed SCI call-preparation hook."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.schema/value :seon.schema/arguments]
+  {:seon/tasks #{"2497b961dccc" "20e88abfc982"}
+   :malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.schema/value :seon.schema/arguments]
                   :seon.schema/value]}
   [ctx callee arguments]
   (let [metadata (meta callee)

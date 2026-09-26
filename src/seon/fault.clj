@@ -223,7 +223,8 @@
     check or bound. A two-link cycle held one core for about seven minutes on
     2026-09-26. [[seon.render.value/floor]] walks the same chain safely. Task
     [[task:465ff60ccda0]]."
-  {:malli/schema [:=> [:cat [:or :seon.error/throwable :map]] [:or :nil :seon.fault/recorded]]}
+  {:seon/tasks #{"465ff60ccda0"}
+   :malli/schema [:=> [:cat [:or :seon.error/throwable :map]] [:or :nil :seon.fault/recorded]]}
   [failure]
   (when (instance? Throwable failure)
     (some (comp :seon.fault/recorded ex-data)

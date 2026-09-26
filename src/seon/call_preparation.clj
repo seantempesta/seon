@@ -966,7 +966,8 @@
 
   Caller presence is tested by argument occupancy and `contains?`, never
   truthiness: a supplied nil reaches ordinary Malli input validation."
-  {:malli/schema
+  {:seon/tasks #{"775e3222a980"}
+   :malli/schema
    [:=> [:cat :seon.call-preparation/snapshot :seon.env/environment
          [:maybe :seon.call-preparation/plan] :seon.schema/arguments]
     [:or :seon.schema/arguments :seon.call-preparation/ambiguous-call-error :seon.call-preparation/unavailable-error :seon.call-preparation/invalid-supplied-value-error]]}

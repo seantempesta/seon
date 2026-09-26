@@ -346,7 +346,8 @@
   The original root and member order stay byte-identical. Each new member is
   appended at its first occurrence; repeated subjects collapse to the member
   already acquired from the same immutable database value."
-  {:malli/schema [:=> [:cat :map [:vector :map]] :map]}
+  {:seon/tasks #{"3c8d05fc3de9"}
+   :malli/schema [:=> [:cat :map [:vector :map]] :map]}
   [acquisition additions]
   (reduce
    (fn [joined addition]

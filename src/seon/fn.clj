@@ -1212,7 +1212,8 @@
   namespace; it defaults to the checkout's cache (`shared-dependency-analysis`).
   A host call into a namespace it lacks refuses as
   `:seon.fn/dependency-analysis-missing-error`."
-  {:malli/schema
+  {:seon/tasks #{"56e90b0bf6b7"}
+   :malli/schema
    [:function
     [:=> [:cat :seon.db/database-value
           [:vector [:map
@@ -1812,7 +1813,8 @@
 (defn- gate-sets-in
   "Select tests through surviving named edges in one immutable database.
    Acquire identity and genuine declaration-ref joins once per operation."
-  {:malli/schema [:=> [:cat :seon.db/database-value
+  {:seon/tasks #{"e4c8eac6a69a"}
+   :malli/schema [:=> [:cat :seon.db/database-value
                        [:sequential :qualified-symbol]]
                   [:or [:map-of :qualified-symbol :seon.fn/reverse-closure-result] :seon.db/invalid-read-error]]}
   [database function-symbols]
@@ -1957,7 +1959,8 @@
   answers, per seed, the conservative reverse closure through calls,
   references and declared edges that destructive isolation reads
   (`seon.test/destructive-reach`), never selection."
-  {:malli/schema
+  {:seon/tasks #{"e4c8eac6a69a"}
+   :malli/schema
    [:function
     [:=> [:cat :seon.fn/gate-request]
      [:or [:vector :seon.test/sym] :seon.db/invalid-read-error]]

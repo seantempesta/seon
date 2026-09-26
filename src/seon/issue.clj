@@ -1115,7 +1115,8 @@
   "Show the issue's status and exact verification form as one data block.
   The done condition the agent reads every turn is derived here, so a
   detector-resolved issue names its detector and the exact form to run."
-  {:malli/schema [:=> [:cat [:or :seon.issue/issue :seon.render/unit]] :string]}
+  {:seon/tasks #{"dea15d688116"}
+   :malli/schema [:=> [:cat [:or :seon.issue/issue :seon.render/unit]] :string]}
   [unit]
   (status-text (status-view unit)))
 
@@ -1299,7 +1300,9 @@
       :else false)))
 
 
-(defn- require-test-refs! [database references]
+(defn- require-test-refs!
+  {:seon/tasks #{"68dd03f5e3a2"}}
+  [database references]
   (doseq [reference references]
     (when-not (:seon.test/sym
                (db/pull database [:seon.test/sym]

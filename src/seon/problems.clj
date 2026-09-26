@@ -270,6 +270,7 @@
   `work/deferred-triggers` — so the state vanishes the moment the next
   outside trigger's run resets the count. Nothing here reads a counter
   or a flag, because none exists."
+  {:seon/tasks #{"41a8e43ce5a4"}}
   [db]
   (->> (db/q '[:find [?agent-id ...]
               :where [_ :seon.agent/id ?agent-id]]

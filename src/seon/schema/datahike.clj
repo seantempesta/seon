@@ -352,6 +352,7 @@
      (symbol namespace-name local-name))})
 
 (defn- canonical-print-string
+  {:seon/tasks #{"befc26639ad0"}}
   [value]
   (binding [*print-length* nil
             *print-level* nil
@@ -362,6 +363,7 @@
     (pr-str value)))
 
 (defn- storage-compare
+  {:seon/tasks #{"befc26639ad0"}}
   [left right]
   (compare (canonical-print-string left)
            (canonical-print-string right)))

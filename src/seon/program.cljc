@@ -39,7 +39,8 @@
   "Attributes declared by program entity schemas in this compiled projection.
    Other writers' entries are excluded. Schema-row properties come from the
    same bridge that projects them onto stored schema declarations."
-  {:malli/schema [:=> [:cat :seon.schema/projection] [:set :qualified-keyword]]}
+  {:seon/tasks #{"e457c998969e"}
+   :malli/schema [:=> [:cat :seon.schema/projection] [:set :qualified-keyword]]}
   [projection]
   ;; A function of the projection value, derived once per projection
   ;; (~50 ms each over the packaged population).
@@ -386,7 +387,8 @@
    The digest includes authored definition, resolver context and effective
    semantic metadata. Storage provenance, position and derived graph
    observations are deliberately excluded."
-  {:malli/schema
+  {:seon/tasks #{"0798a2fb94f3"}
+   :malli/schema
    [:function
     [:=> [:cat :map] :seon.program/definition-digest]
     [:=> [:cat :map [:maybe :map]] :seon.program/definition-digest]]}

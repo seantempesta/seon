@@ -250,6 +250,7 @@
 (declare resolved-operation)
 
 (defn- function-declaration
+  {:seon/tasks #{"5f48e860a402"}}
   [form namespace-name context]
   (when (seq? form)
     (let [operation (first form)
@@ -304,6 +305,7 @@
             (assoc :seon.fn/workload workload)))))))
 
 (defn- test-declaration
+  {:seon/tasks #{"5f48e860a402"}}
   [form namespace-name context]
   (when (and (seq? form)
              (= 'clojure.test/deftest
@@ -491,6 +493,7 @@
   "Read `text`'s forms from character offset `from` into events. Recovery
   resumes the same text at a later offset, so every event, form and nested
   form carries the coordinates of `text` itself."
+  {:seon/tasks #{"430c53fde483"}}
   [text reading-context from]
   (let [ctx (or (::ctx reading-context) (sci/init {}))
         source-reader (sci/source-reader text)

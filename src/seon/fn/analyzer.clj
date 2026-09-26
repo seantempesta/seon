@@ -503,7 +503,8 @@
   is marked. A directory entry carries no mark: an analysis reaching one of
   its namespaces with no current entry rebuilds it from the file the classpath
   loads (`classpath-source`)."
-  {:malli/schema [:=> [:cat] [:maybe [:map [::unanalyzed-jars [:vector :string]] [:summary :map]]]]}
+  {:seon/tasks #{"547fc42c47a5"}
+   :malli/schema [:=> [:cat] [:maybe [:map [::unanalyzed-jars [:vector :string]] [:summary :map]]]]}
   []
   (let [missing (unanalyzed-jars cache-directory (dependency-entries))]
     (when (seq missing)

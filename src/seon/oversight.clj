@@ -198,7 +198,8 @@
 (defn flow-status
   "Return the current agent and plumbing Flow observations for one instance,
   under the cluster its context's environment names."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.boot/instance]
+  {:seon/tasks #{"ed8c6db31a85"}
+   :malli/schema [:=> [:cat :seon.db/database-value :seon.boot/instance]
                   [:or :seon.oversight/fleet :seon.oversight/unavailable
                    :seon.config/error :seon.schema/validation-refusal
                    :seon.db/invalid-read-error]]}

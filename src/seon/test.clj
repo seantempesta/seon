@@ -1821,7 +1821,8 @@
   branch off the checkpoint's head, which roots that commit for its members,
   and writes `program-overlay-tx`'s rows there. Older checkpoints of the
   cluster are retired once no connection holds them."
-  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.db/connection
+  {:seon/tasks #{"c86d834ab695" "845e1bce2592"}
+   :malli/schema [:=> [:cat :seon.agent/context-source :seon.db/connection
                        :seon.cluster/name :seon.config/effective]
                   :seon.agent/execution-handle]}
   [execution recording cluster effective]

@@ -1008,7 +1008,8 @@
   such write has the program digest of its `basis-t` value, which lets the
   writer's in-transaction value (no commit id, so no memo) confirm a digest
   its caller derived instead of deriving it again."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/basis-t]
+  {:seon/tasks #{"f868dc9e74f5"}
+   :malli/schema [:=> [:cat :seon.db/database-value :seon.db/basis-t]
                   [:or :boolean :seon.db/invalid-read-error]]}
   [database basis-t]
   (let [written (db/q '[:find ?entity . :in $ [?attribute ...] :where [?entity ?attribute]]
@@ -1608,7 +1609,8 @@
   Admitted runs complete members without recreating program rows. Legacy
   unadmitted runs retain the existing latest-result replacement until their
   callers migrate to pre-execution admission."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test.run/completion]
+  {:seon/tasks #{"32db32ffe15c"}
+   :malli/schema [:=> [:cat :seon.db/database-value :seon.test.run/completion]
                   :seon.test.runner/record-tx]}
   [database completion]
   (let [run-id (get-in completion [:seon.test.run/provenance :seon.test.run/id])

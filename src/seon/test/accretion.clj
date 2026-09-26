@@ -200,7 +200,8 @@
 
   Effectful and non-generatable candidates are explicit skipped outcomes.
   A failure retains test.check's shrunk arguments and Malli's explanation."
-  {:malli/schema
+  {:seon/tasks #{"62a5644dd469"}
+   :malli/schema
    [:=> [:cat :seon.test.accretion/auto-check-request]
     :seon.test.accretion/auto-check-result]}
   [{database :seon.db/db
