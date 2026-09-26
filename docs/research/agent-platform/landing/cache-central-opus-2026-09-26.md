@@ -30,9 +30,15 @@ design: docs/research/agent-platform/cache-central-design-2026-09-26.md (option 
   - **Regression:** `seon.cache-calibration-test/every-kind-is-charged-what-it-was-measured-to-retain` holds every
     kind's charge within 1.25× of its measurement. Current ratios are 0.998–1.015. Two runs of the same kind differed
     by 2.3%.
+  - **Fixed in `09ec9f80c`: the double charge.** `config/declared-projection` held the same object as the
+    declaration-projection entry under a kind of its own, so it was charged twice (about 9 MB).
+    - It is now one entry. Config calls `schema/declaration-projection` directly, and the config kind is gone.
+    - The ~6.4 ms per-call walk over the predicate Vars moved into a new alias kind,
+      `:seon.schema/declaration-predicates`, keyed by the forms. It is calibrated at 72 B per entry (5.1 KB in
+      total).
+    - Both are covered by the calibration test, and `the-packaged-declaration-projection-is-one-entry` checks that
+      config's value is the declaration-projection entry and that no config kind exists.
   - **Still uncalibrated:**
-    - `config/declared-projection` holds the same object as the declaration-projection entry, so it is charged
-      twice, about 9 MB over.
     - The base context in `sci/eval` (the patch) still uses MAT's 6.9 MB per context.
     - The Datahike caches are outside `seon.cache`.
 - **Seen in passing: after `2f2b51861` (required-only supply), every JVM-mode MCP reply carries a diagnostic.**
