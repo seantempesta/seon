@@ -1,0 +1,22 @@
+;; The one process cache (src/seon/cache.clj). Values only: nothing here is stored.
+{:seon.cache/cache [:fn {:error/message "must be a cache seon.cache/create built"} seon.cache/cache?]
+ :seon.cache/max-bytes [:int {:min 1 :description "The byte budget in force: estimated bytes."}]
+ :seon.cache/weighted-bytes [:int {:min 0 :description "Estimated bytes the retained entries weigh."}]
+ :seon.cache/hits [:int {:min 0}]
+ :seon.cache/misses [:int {:min 0 :description "Derivations started: one per key however many callers missed together."}]
+ :seon.cache/evictions [:int {:min 0}]
+ :seon.cache/bytes [:int {:description "Estimated bytes this kind retains."}]
+ :seon.cache/load-ms [:int {:min 0 :description "Wall milliseconds spent deriving missed values."}]
+ :seon.cache/kind-status
+ [:map
+  [:seon.cache/hits :seon.cache/hits]
+  [:seon.cache/misses :seon.cache/misses]
+  [:seon.cache/evictions :seon.cache/evictions]
+  [:seon.cache/bytes :seon.cache/bytes]
+  [:seon.cache/load-ms :seon.cache/load-ms]]
+ :seon.cache/kinds [:map-of :qualified-keyword :seon.cache/kind-status]
+ :seon.cache/status
+ [:map {:description "The process cache: its budget, the bytes it weighs, and per-kind counters since the JVM began."}
+  [:seon.cache/max-bytes :seon.cache/max-bytes]
+  [:seon.cache/weighted-bytes :seon.cache/weighted-bytes]
+  [:seon.cache/kinds :seon.cache/kinds]]}

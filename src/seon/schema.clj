@@ -22,6 +22,7 @@
             [seon.id :as id]
             [malli.registry :as mr]
             [clojure.core.cache.wrapped :as cache]
+            [seon.cache]
             [clojure.core.reducers :as reducers]
             [clojure.set :as set]
             [clojure.walk :as walk]
@@ -1297,11 +1298,6 @@
                         " must declare a nonempty :seon.config/display-label.")} assoc :seon.error/declared-schema :seon.schema/validation-refusal)]
       (throw (ex-info (:seon.error/message refusal) refusal)))))
 
-;; Declaration projections are pure functions of their forms and the predicate
-;; Vars those name; no owner holds them, so a bounded core.cache memo does.
-(def ^:private declared-projections
-  (cache/lru-cache-factory {} :threshold 8))
-
 (defn declaration-projection
   "One immutable projection over the declaration population in hand.
 
@@ -1321,11 +1317,14 @@
    (let [predicates (into {} (keep (fn [sym]
                                     (when-let [f (runtime-predicate sym)] [sym f])))
                           (into #{} (mapcat predicate-symbols-in) (vals forms)))]
-     ;; Equal forms naming the same predicate Vars answer the built value
-     ;; (~340 ms / ~410 MB per packaged build, perf-profile 2026-09-26).
-     (cache/lookup-or-miss
-      declared-projections [forms predicates]
-      (fn [_]
+     ;; A pure function of its forms and the predicate Vars they name: equal
+     ;; inputs answer the built value from the process cache (~340 ms /
+     ;; ~410 MB per packaged build, perf-profile 2026-09-26). Weight: 1.3 KB
+     ;; per form (9.0 MB / 2 packaged projections / 3,514 forms, cache-central design).
+     (seon.cache/lookup
+      ::declaration-projection [forms predicates]
+      #(* 1300 (count (:seon.schema.projection/forms %)))
+      (fn []
         (let [dependencies (canonical-reference-graph forms predicates)
               _ (assert-acyclic-references!
                  forms (keys forms) dependencies)
@@ -2295,14 +2294,6 @@
     (with-compiled-cache projection))))
 
 
-;; A projection is a pure function of its forms, contracts, options and the
-;; predicate Vars they name, and a build costs ~390 ms / ~570 MB allocated over
-;; the packaged population (perf-profile 2026-09-26); callers ask again for the
-;; same inputs many times per operation. No owner holds derived projections,
-;; so this bounded core.cache memo keys them by those inputs.
-(def ^:private built-projections
-  (cache/lru-cache-factory {} :threshold 8))
-
 (defn build-projection
   "Build and validate one immutable runtime projection.
 
@@ -2320,7 +2311,10 @@
    candidate registry.
    Pure at its boundary: validation uses only build-scoped coordination and
    performs no default-registry, database, or var mutation, so a build without
-   a supplied projection answers equal inputs from `built-projections`."
+   a supplied projection answers equal inputs from the process cache
+   (`seon.cache`, kind `:seon.schema/projection`): a build costs ~390 ms /
+   ~570 MB allocated over the packaged population (perf-profile 2026-09-26),
+   and concurrent callers of equal inputs share one build."
   {:malli/schema
    [:function
     [:=> [:catn [::forms :map]] :map]
@@ -2341,8 +2335,11 @@
      (let [options (assoc options :seon.schema/predicate-functions
                           (predicate-bindings forms function-contracts
                                               (:seon.schema/predicate-functions options {})))]
-       (cache/lookup-or-miss built-projections [forms function-contracts options]
-                             (fn [_] (projection-build forms function-contracts options)))))))
+       ;; Weight: 3.7 KB per form (52 MB / 4 projections / 3,514 forms,
+       ;; cache-central design 2026-09-26).
+       (seon.cache/lookup ::projection [forms function-contracts options]
+                          #(* 3700 (count (:seon.schema.projection/forms %)))
+                          #(projection-build forms function-contracts options))))))
 
 (defn- projection-fingerprint-from-data
   [projection]

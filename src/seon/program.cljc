@@ -12,7 +12,7 @@
             ;; CLJ-only: `seon.schema.edn` has no CLJS side, and the two uses
             ;; below already sit inside a `#?(:clj …)` branch.
             #?(:clj [seon.schema.edn :as schema.edn])
-            #?(:clj [clojure.core.cache.wrapped :as cache])))
+            #?(:clj [seon.cache])))
 
 (defn- source-family?
   "Does this identity attribute's property map declare a source declaration
@@ -271,13 +271,6 @@
                                          m/properties))
                 (keys (:seon.schema.projection/forms projection)))))
 
-#?(:clj
-   ;; The same core.cache wrapped LRU `seon.schema.edn` holds its packaged
-   ;; populations in, keyed by the same declaration stamp: the current
-   ;; authored files and the one before an edit.
-   (defonce ^:private authored-shapes-memo
-     (cache/lru-cache-factory {} :threshold 2)))
-
 (defn- authored-shapes
   "The shapes the AUTHORED declaration resources currently define.
 
@@ -296,8 +289,10 @@
   derivation, so the reload that fixes the declaration derives again."
   []
   #?(:clj
-     (cache/lookup-or-miss authored-shapes-memo (schema.edn/declaration-stamp)
-                           (fn [_] (shapes-in (schema/build-projection (schema.edn/packaged-forms)))))
+     ;; Weight: 4 KB per row family (a shape is a handful of attribute sets).
+     (seon.cache/lookup ::authored-shapes (schema.edn/declaration-stamp)
+                        #(* 4096 (count %))
+                        #(shapes-in (schema/build-projection (schema.edn/packaged-forms))))
      :cljs (shapes-in (schema/build-projection (schema/registered-schemas)))))
 
 (defn shapes

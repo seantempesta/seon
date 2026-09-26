@@ -13,7 +13,7 @@
   schema key and, for loaded forms, its source resource. This namespace
   reads classpath and in-memory data only; database installation belongs
   to cluster population."
-  (:require [clojure.core.cache.wrapped :as cache]
+  (:require [seon.cache]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -369,22 +369,17 @@
                          (.listFiles (io/file url)))))
       [[(.toExternalForm url) -1 (.getLastModified (.openConnection url))]])))
 
-(def ^:private packaged-population-cache-size
-  "Populations retained, one per `[resource-url declaration-stamp]`: the
-  current authored files and the one before an edit; an older stamp derives
-  again. A race may derive one twice; the derivation is pure."
-  2)
-
-;; The same core.cache wrapped LRU `seon.db`'s projection memo uses.
-(defonce ^:private packaged-populations
-  (cache/lru-cache-factory {} :threshold packaged-population-cache-size))
-
 (defn- packaged-population
+  "The population the resources declare, one per `[resource-url
+  declaration-stamp]` in the process cache: an edit changes the stamp, so it
+  misses by construction. Weight: 375 bytes per form (1.32 MB / 3,514 forms,
+  cache-central design 2026-09-26)."
   {:malli/schema [:=> [:cat] :map]}
   []
-  (cache/lookup-or-miss packaged-populations
-                        [(str (io/resource default-resource)) (declaration-stamp)]
-                        (fn [_] (resource-population default-resource))))
+  (seon.cache/lookup ::packaged-population
+                     [(str (io/resource default-resource)) (declaration-stamp)]
+                     #(* 375 (count (::declared-forms %)))
+                     #(resource-population default-resource)))
 
 (defn declaration-digest
   "Stable digest of the merged schema declaration set."

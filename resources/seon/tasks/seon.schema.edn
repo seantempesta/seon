@@ -43,12 +43,6 @@
              :intent "A refusal of any contract holding [:fn ns/pred] armed from Var metadata cannot be built: canonicalization tries to invert compiled predicates. Model fix (Astra M3): preserve the admitted declarative form at arming; never canonicalize a compiled schema while building a refusal."
              :must-read #{seon.schema/canonical-definition seon.instrument/compiled-wrapper}
              :evidence #{"docs/research/agent-platform/landing/agent-path-2-2026-09-26.md"}}
- #:seon.task{:id "f20577d4eb4c"
-             :name "projection-memos-stampede-and-swap-on-every-hit"
-             :kind :function
-             :intent "seon.schema/build-projection (schema.clj:2344), seon.schema/declaration-projection (:1326) and seon.schema.edn/packaged-population (edn.clj:385) call clojure.core.cache.wrapped/lookup-or-miss with an undelayed derivation. That function builds one delay per CALLER, not per key (core.cache 1.1.234 wrapped.clj), so N concurrent misses of one key derive N times: measured 8 derivations for 8 concurrent misses (tmp/cache-central-design-opus/bench.clj), at about 390 ms and 570 MB allocated per projection build. It also swap!s the atom on every hit: 400-860 ns per hit single-threaded and 760-1,800 ns under 8 threads, against 14-23 ns for cache/lookup. Derive once per key (a stored delay, as seon.db/arity-base already does) and read hits without a swap."
-             :must-read #{seon.schema/build-projection seon.schema/declaration-projection seon.schema.edn/packaged-population}
-             :evidence #{"docs/research/agent-platform/cache-central-design-2026-09-26.md"}}
  #:seon.task{:id "5c8cf0549616"
              :name "map-validation-throws-on-sorted-maps-with-foreign-keys"
              :kind :function

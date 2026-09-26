@@ -17,8 +17,7 @@
   reads around the complete nested walk.
 
   Issue: docs/seon/issues/value-admission-resolves-the-declaration-population-per-node.md"
-  (:require [clojure.core.cache.wrapped :as cache]
-            [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing]]
             [seon.config :as config]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
@@ -51,14 +50,11 @@
       @reads)))
 
 (defn- one-population-reads
-  "Reads performed by one packaged acquisition with no population retained.
-
-  The packaged population is retained under its declaration stamp, so a
-  worker JVM that acquired it once already would otherwise measure zero and
-  read the retention as behaviour."
+  "Reads of one population derivation: the value the process cache retains
+  under its declaration stamp, derived directly, so a JVM that already holds
+  it still measures one acquisition."
   []
-  (cache/seed @#'schema.edn/packaged-populations {})
-  (reads-of schema.edn/packaged-forms))
+  (reads-of #(@#'schema.edn/resource-population schema.edn/default-resource)))
 
 (def ^:private carrier-symbols
   '[*candidate-forms-overlay* *projection* *projection-state* *packaged-forms*])

@@ -25,6 +25,9 @@
         ;; seon.print lays text out with fipp's engine; the same version
         ;; malli already brings (reference-code/fipp is v0.6.29).
         fipp/fipp {:mvn/version "0.6.29"}
+        ;; seon.cache: the one process cache for derived values, bounded in
+        ;; estimated bytes, one derivation per key (cache-central design 2026-09-26).
+        com.github.ben-manes.caffeine/caffeine {:mvn/version "3.2.4"}
 
         org.replikativ/datahike
         {:local/root "reference-code/datahike"

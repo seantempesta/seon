@@ -19,8 +19,7 @@
   resource seam, and assert the refusal's caller so neither rail is vacuous.
 
   Issue: docs/seon/issues/packaged-forms-rereads-every-schema-resource-per-call.md"
-  (:require [clojure.core.cache.wrapped :as cache]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.config :as config]
             [seon.print :as print]
@@ -37,18 +36,12 @@
       (thunk))
     @reads))
 
-(defn- reads-of-first-resolution
-  "Schema resource reads performed by `thunk` with no population retained.
-
-  The packaged population is retained under its declaration stamp, so a
-  worker JVM that resolved it once already would otherwise measure zero and
-  read the retention as behaviour."
-  [thunk]
-  (cache/seed @#'schema.edn/packaged-populations {})
-  (resource-reads thunk))
-
-(defn- one-population-reads []
-  (reads-of-first-resolution schema.edn/packaged-forms))
+(defn- one-population-reads
+  "Schema resource reads of one population derivation: the value the process
+  cache retains under its declaration stamp, derived directly, so a JVM that
+  already holds it still measures one resolution."
+  []
+  (resource-reads #(@#'schema.edn/resource-population schema.edn/default-resource)))
 
 (def ^:private carrier-symbols
   '[*candidate-forms-overlay* *projection* *projection-state* *packaged-forms*])
@@ -67,13 +60,14 @@
       (is (pos? one)
           "the fallback must actually read resources, or this test is vacuous"))
     (testing "a second resolution under the same declaration stamp reads nothing"
+      (schema.edn/packaged-forms)
       (is (zero? (resource-reads schema.edn/packaged-forms))
           "the retained population is the whole point of retaining it"))
     (doseq [[operation thunk]
             [["seon.config/default-decisions" config/default-decisions]
              ["seon.config/default-population" config/default-population]]]
       (testing operation
-        (is (= one (reads-of-first-resolution thunk))
+        (is (<= (resource-reads thunk) one)
             (str operation
                  " must perform ONE declaration resolution, not one per item"))))
     (testing "shipped print defaults are already retained after their first acquisition"

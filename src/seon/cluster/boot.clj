@@ -12,6 +12,7 @@
             [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
             [seon.cluster.store :as store]
+            [seon.cache :as cache]
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
@@ -60,6 +61,8 @@
                 (cluster/seed-root-agent! connection cluster-name process)
                 [instance process])))
            boot-dials (config/effective (db/db connection) cluster-name)
+           ;; The process cache's byte budget is this cluster's dial.
+           _ (cache/configure! (:seon.config.cache/max-bytes boot-dials))
            arm-request {:seon.flow/commit-fault!
                         #(fault/record! connection cluster-name process
                                         (config/result-caps boot-dials) %)

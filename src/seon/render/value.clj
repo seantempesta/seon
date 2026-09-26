@@ -415,13 +415,16 @@
   (+ 2 (long (Math/ceil (* (.bitLength b) (Math/log10 2))))))
 
 (defn- throwable-safe?
-  "True when a Throwable class runs only Throwable's own accessors."
+  "True when a Throwable class runs only Throwable's own accessors.
+
+  Asked per printed Throwable link, never memoized: four `getMethod` lookups
+  (about 1 µs) are cheaper than a process holder keyed by `Class`, which pinned
+  every Throwable class and its loader (task 6e5637a4afc8)."
   {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
   [^Class c]
   (every? (fn [m] (= Throwable (.getDeclaringClass (.getMethod c ^String m (make-array Class 0)))))
           ["getMessage" "getCause" "getStackTrace" "getSuppressed"]))
 
-(def ^:private throwable-safe (memoize throwable-safe?))
 
 (defn- throwable-value
   "A Throwable as plain data: type, message and ex-data per link, cycles
@@ -431,7 +434,7 @@
   (loop [^Throwable link t seen [] via []]
     (cond
       (or (nil? link) (some #(identical? % link) seen)) {:via via}
-      (not (throwable-safe (class link))) {:via (conj via {:type (symbol (.getName (class link)))})}
+      (not (throwable-safe? (class link))) {:via (conj via {:type (symbol (.getName (class link)))})}
       :else (recur (.getCause link) (conj seen link)
                    (conj via (cond-> {:type (symbol (.getName (class link)))}
                                (.getMessage link) (assoc :message (.getMessage link))
@@ -585,7 +588,7 @@
                                {::print/face ::print/class ::print/name (str type-name)}
                                {::print/face ::print/object ::print/class (.getName c)})})
       (identical? c Class) {:kind :scalar :node {::print/face ::print/class ::print/name (.getName ^Class x)}}
-      (and (instance? Throwable x) (throwable-safe c))
+      (and (instance? Throwable x) (throwable-safe? c))
       (assoc (classify (throwable-value x) identity-attributes limit) :prefix "#error " :face ::print/throwable)
       :else
       {:kind :scalar :node {::print/face ::print/object

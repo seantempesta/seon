@@ -48,6 +48,7 @@
             [seon.fs :as fs]
             [seon.instrument :as instrument]
             [seon.profile :as profile]
+            [seon.cache :as cache]
             [seon.id :as id]
             [seon.test.cache :as test.cache]
             [seon.operator.runtime :as operator.runtime
@@ -619,6 +620,8 @@
              ;; JVM, one line each: the top five by total and by maximum, and
              ;; the five slowest of those whose maximum exceeded one second.
              :seon.dev.mcp/profile (profile/summary (profile/cells) 5)
+             ;; The process cache: budget, estimated bytes, per-kind counters.
+             :seon.cache/status (cache/status)
              ;; Loaded first-party Vars whose root is not their namespace's
              ;; own compile: a redefinition outside a reload, named.
              :seon.dev.mcp/replaced-roots
@@ -667,7 +670,8 @@
                 (for [row (:seon.oversight/agents flow) proc (:seon.oversight/procs row)] proc))
         roots (:seon.dev.mcp/replaced-roots observation)]
     (cond-> (select-keys observation [:seon.dev.mcp/cluster :seon.dev.mcp/health
-                                      :seon.dev.mcp/problem-counts :seon.dev.mcp/resolved-fault-count])
+                                      :seon.dev.mcp/problem-counts :seon.dev.mcp/resolved-fault-count
+                                      :seon.cache/status])
       (:seon.dev.mcp/readiness observation)
       (assoc :seon.dev.mcp/readiness (select-keys (:seon.dev.mcp/readiness observation)
                                                   [:seon.boot/missing-layers :seon.boot/ready-ms

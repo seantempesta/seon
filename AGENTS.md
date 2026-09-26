@@ -305,10 +305,11 @@ root.
   `versioning.cljc` for lineage, `history`/`as-of` for time, `d/listen` for notification and the writer for
   serialization; cite the seam first. Reads, renders, probes and evaluations never invalidate derived state; count
   misses and recompute only reached invalid inputs.
-- **Caches are a library, bounded and configured.** Every cache is `clojure.core.cache` (or the dependency's own,
-  such as Datahike's), never hand-rolled; bounded with an eviction policy (LRU by default) whose size is a
-  configuration dial, not a code constant. Link shared caches into every root, snapshot and run. A cached SCI
-  context is worth only the evaluation cost it saves: evict it rather than grow.
+- **One central cache, bounded and configured.** Every Seon cache is a kind in `seon.cache` (Caffeine), keyed by
+  content so nothing is invalidated, weighed at insert and bounded by one configured byte budget; dependencies keep
+  their own caches (Datahike's) under configured dials; no `memoize` or atom holds derived state. Link shared caches
+  into every root, snapshot and run. A cached SCI context is worth only the evaluation cost it saves: evict it rather
+  than grow.
 
 ## Operating and collaborating
 
