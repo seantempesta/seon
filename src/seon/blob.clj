@@ -307,23 +307,12 @@
   [connection staged-writes commit-roots!]
   (if (seq staged-writes)
     (let [permit (gc-guard/acquire-reachability-permit!
-                  (store-id connection) :blob)
-          release! #(gc-guard/release-reachability-permit! permit)
-          result (try
-                   (run! #(publish-staged! connection %) staged-writes)
-                   (commit-roots!)
-                   (catch Throwable failure (release!) (throw failure)))
-          pending (when (map? result) (:seon.db/durable result))]
-      ;; AN APPLIED WRITE IS NOT YET A ROOT: its report carries the pending
-      ;; commit (`seon.db/transact-applied!`), so the permit is held until that
-      ;; commit resolves and no collection reclaims a blob it names. A failed
-      ;; commit reaches its caller's route through `transact-applied!`; here it
-      ;; only ends the permit.
-      (if pending
-        (Thread/startVirtualThread
-         ^Runnable (fn [] (try (deref pending) (catch Throwable _ nil) (finally (release!)))))
-        (release!))
-      result)
+                  (store-id connection) :blob)]
+      (try
+        (run! #(publish-staged! connection %) staged-writes)
+        (commit-roots!)
+        (finally
+          (gc-guard/release-reachability-permit! permit))))
     (commit-roots!)))
 
 (defn put!

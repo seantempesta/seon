@@ -220,14 +220,7 @@
                   [:seon.turn.loop/forms-run [:int {:min 0}]]
                   [:seon.turn.loop/outcome :seon.turn.loop/outcome]
                   [:seon.turn.loop/refusal {:optional true}
-                   :seon.turn.loop/refusal]
-                  [:seon.turn.loop/applied {:optional true}
-                   :seon.turn.loop/applied]],
-                 ; The value a settlement's write left, applied by the writer
-                 ; and possibly not yet committed (`seon.db/transact-applied!`):
-                 ; the agent's next pass starts from it when the connection
-                 ; has not caught up, so its next form sees this one's writes.
-                 :applied :seon.db/database-value,
+                   :seon.turn.loop/refusal]],
                  :refusal :seon.error/value,
                  :write-refusals [:int {:min 1}],
                  :parked :seon.error/value,

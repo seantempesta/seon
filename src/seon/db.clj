@@ -11,9 +11,7 @@
             [editscript.core :as editscript]
             [editscript.edit :as editscript.edit]
             [malli.core :as m]
-            [clojure.core.async :as async]
             [datahike.api :as d]
-            [datahike.writer]
             [datahike.connector :as connector]
             [datahike.connections :as connections]
             [datahike.constants :as const]
@@ -4702,26 +4700,11 @@
          :seon.error/data (or data {})
          :seon.db/transaction-outcome-unknown true})))))
 
-(defn- durable-watch!
-  "Hand `pending`'s durable outcome to `durable-failed!` when it is a failure.
-  A virtual thread waits on the commit, so neither the writer nor the caller
-  does; a committed report is the ordinary outcome and calls nothing."
-  {:malli/schema [:=> [:cat :seon.await/blocking-deref :seon.instrument/callable] :nil]}
-  [pending durable-failed!]
-  (Thread/startVirtualThread
-   ^Runnable (fn []
-               (when-let [failure (try (let [report @pending]
-                                         (when-not (map? report) report))
-                                       (catch Throwable failure failure))]
-                 (durable-failed! failure))))
-  nil)
-
 (defn- transact-call
   {:malli/schema
-   [:=> [:cat :seon.db/database-value :seon.db/connection :seon.store/transaction
-         [:maybe :seon.instrument/callable]]
+   [:=> [:cat :seon.db/database-value :seon.db/connection :seon.store/transaction]
     [:or :seon.db/transaction-report :seon.db/error-result]]}
-  [database connection transaction durable-failed!]
+  [database connection transaction]
   (try
     (let [projection (carried-projection database)]
       (or (write-error database projection transaction)
@@ -4747,26 +4730,13 @@
                 ;; (datahike/writer.cljc:46-55, 393-402).
                 started (System/nanoTime)
                 ;; Parents make it Datahike's merge: same fence and validator.
-                ;; An applied write awaits the writer's application, in order,
-                ;; and hands the commit to `durable-watch!` (datahike fork,
-                ;; writer.cljc `transact!` with an `applied` port).
-                applied (when durable-failed! (async/promise-chan))
-                pending (cond (:parents request) (d/merge-db! connection request)
-                              applied (datahike.writer/transact! connection request applied)
-                              :else (d/transact! connection request))
-                remaining #(max 0 (- write-time-limit-ms
-                                     (quot (- (System/nanoTime) started) 1000000)))
+                pending ((if (:parents request) d/merge-db! d/transact!) connection request)
                 report
                 (try
-                  (if applied
-                    (let [[value port] (async/alts!! [applied (async/timeout (remaining))] :priority true)]
-                      (cond (not= port applied) timeout
-                            (instance? Throwable value) (throw value)
-                            ;; only an applied write has a commit to watch: a
-                            ;; refusal at application is answered above
-                            :else (do (durable-watch! pending durable-failed!)
-                                      (assoc value :seon.db/durable pending))))
-                    (deref pending (remaining) timeout))
+                  (deref pending
+                         (max 0 (- write-time-limit-ms
+                                   (quot (- (System/nanoTime) started) 1000000)))
+                         timeout)
                   (catch Throwable throwable
                     ;; Datahike's throwable-promise wraps the JDK timeout in
                     ;; ExceptionInfo. Preserve every delivered writer error.
@@ -4959,41 +4929,6 @@
                            (:v datom) (:added datom)])
                         (:tx-data report))}))))
 
-(defn- transact-through
-  "The one validated write path of `transact!` and `transact-applied!`: answers
-  the committed report, or with `durable-failed!` the applied one."
-  {:malli/schema
-   [:=> [:cat [:or :seon.db/connection :seon.error/value] :seon.store/transaction
-         [:maybe :seon.instrument/callable]]
-    [:or :seon.db/transaction-report :seon.db/transaction-refused-error]]}
-  [connection transaction durable-failed!]
-   (let [database (when (connection? connection) (resolve-database-value connection))
-         result
-         (or
-          (missing-transaction-data-error transaction)
-          (cond
-            (not (connection-object? connection)) connection
-
-            (not (connection? connection))
-            (dependency-error
-             'seon.db/transact!
-             (ex-info "The explicit transaction connection is not live."
-                      {::connection (connection-identity connection)}))
-
-            (not (db.utils/db? database)) database
-
-            :else
-            (or (foreign-connection-error database connection transaction)
-                (transact-call database connection transaction durable-failed!))))]
-     (if-not (:db-after result)
-       (let [refusal (assoc result :seon.db/transaction-refused true)]
-         (if (:seon.db.write.attempt/request-id refusal)
-           refusal
-           (if (database-value? database)
-             (write-observation database transaction refusal)
-             (vary-meta (assoc refusal :seon.db.write.attempt/request-id (id/id)) assoc :seon.error/declared-schema :seon.db.write/validation-refusal))))
-       result)))
-
 (defn transact!
   "Validate authored transaction data and commit through the calling connection.
 
@@ -5031,29 +4966,29 @@
   ([transaction]
    (transaction-result (transact! (current-connection) transaction)))
   ([connection transaction]
-   (transact-through connection transaction nil)))
+   (let [database (when (connection? connection) (resolve-database-value connection))
+         result
+         (or
+          (missing-transaction-data-error transaction)
+          (cond
+            (not (connection-object? connection)) connection
 
-(defn transact-applied!
-  "Write `transaction` through `transact!`'s validated path and answer once the
-  writer has APPLIED it, in writer order, without waiting for its durable
-  commit: the report's `:db-after` is the writer's uncommitted value, which
-  every later transaction on this connection builds on, and its
-  `:seon.db/durable` is the pending commit (deref answers the committed report
-  or the writer's failure). Readers of the connection see it once the commit
-  lands; listeners fire then.
+            (not (connection? connection))
+            (dependency-error
+             'seon.db/transact!
+             (ex-info "The explicit transaction connection is not live."
+                      {::connection (connection-identity connection)}))
 
-  Durability follows. A failed commit is terminal for the writer (Datahike
-  refuses every later write with `:writer-shut-down`) and is handed to
-  `durable-failed!` with its throwable, off the writer's thread: the caller
-  names what it lost and stops loudly there. Refusals at application answer
-  here exactly as `transact!`'s do.
+            (not (db.utils/db? database)) database
 
-  Use it only for writes nobody needs durable before their caller is
-  answered (AGENTS \"Recover facts, not execution\"): an agent form's own
-  evaluation settlement is the one caller."
-  {:malli/schema
-   [:=> [:cat [:or :seon.db/connection :seon.error/value] :seon.store/transaction
-         :seon.instrument/callable]
-    [:or :seon.db/transaction-report :seon.db/transaction-refused-error]]}
-  [connection transaction durable-failed!]
-  (transact-through connection transaction durable-failed!))
+            :else
+            (or (foreign-connection-error database connection transaction)
+                (transact-call database connection transaction))))]
+     (if-not (:db-after result)
+       (let [refusal (assoc result :seon.db/transaction-refused true)]
+         (if (:seon.db.write.attempt/request-id refusal)
+           refusal
+           (if (database-value? database)
+             (write-observation database transaction refusal)
+             (vary-meta (assoc refusal :seon.db.write.attempt/request-id (id/id)) assoc :seon.error/declared-schema :seon.db.write/validation-refusal))))
+       result))))

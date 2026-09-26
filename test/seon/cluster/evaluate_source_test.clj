@@ -87,6 +87,11 @@
                                                          :seon.cluster.reply/text "1"))]
               (is (= :seon.agent/segmenter (:seon.error/member refused)) (pr-str refused))
               (is (= before (runs)))))
+          (testing "the answer's value is readable where the caller reads it: the MCP bridge reads its connection"
+            ;; Reply-when-applied (fcee85161) answered before the settlement
+            ;; committed; the bridge read the connection and returned no event
+            ;; for (inc 1) (default pid 70849, 2026-09-26). Deleted whole.
+            (is (= ["2"] (shown connection (code "(inc 1)")))))
           (testing "the run is written in the one transaction that settles it; submission commits nothing"
             (let [before (db/db connection)
                   result (code "(+ 1 2)")

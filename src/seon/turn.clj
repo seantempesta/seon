@@ -3744,29 +3744,6 @@
            :seon.blob/staged-writes (into (vec (:seon.blob/staged-writes submission))
                                           (:seon.blob/staged-writes transaction)))))
 
-(defn- settlement-lost!
-  "The durable commit of an applied settlement failed: the writer is stopped
-  (Datahike's terminal commit failure), so the fault names the runs whose
-  shown results were lost and goes to `seon.fault/fault!`, which cannot store
-  it and so runs this agent's stop and throws."
-  {:malli/schema [:=> [:cat :seon.turn.loop/cluster [:vector :seon.turn.loop/settle-evaluation-request]
-                       :seon.error/throwable]
-                  :nil]}
-  [cluster requests failure]
-  (let [runs (into [] (comp (map :seon.turn/id) (distinct)) requests)
-        agent-id (:seon.agent/id (first requests))]
-    (fault/fault! (env/of cluster)
-                  (ex-info (str "The durable commit of applied settlement(s) for run(s) " (pr-str runs)
-                                " failed; their shown results are lost and the writer has stopped.")
-                           {:seon.turn/id (first runs) :seon.agent/id agent-id} failure)
-                  (cond-> {:seon.error/layer :seon.turn/settlement
-                           :seon.error/operation `settle-batch!
-                           :seon.db.process/id (:seon.db.process/id cluster)
-                           :seon.agent/id agent-id}
-                    (:seon.fault/stop-request! cluster)
-                    (assoc :seon.fault/stop-request! (:seon.fault/stop-request! cluster))))
-    nil))
-
 (defn- settle-batch!
   "Settle every evaluated form and all turn side effects in one transaction."
   {:malli/schema
@@ -3835,13 +3812,8 @@
          #(let [transaction (with-submission cluster (transaction))]
             (blob/with-publication!
              connection (:seon.blob/staged-writes transaction)
-             ;; THE AGENT'S FORM IS ANSWERED ONCE ITS SETTLEMENT IS APPLIED;
-             ;; durability follows (AGENTS "Recover facts, not execution").
-             ;; A failed commit stops the writer; `settlement-lost!` names the
-             ;; runs it lost and stops this agent loudly.
-             (fn [] (db/transact-applied!
-                     connection {:tx-data (:seon.db/tx-data transaction)}
-                     (partial settlement-lost! cluster requests))))))]
+             (fn [] (db/transact!
+                     connection {:tx-data (:seon.db/tx-data transaction)})))))]
     ;; SUCCESS IS THE WRITER'S TRANSACTION REPORT (`db/transact!` answers
     ;; `:seon.db/transaction-result` or its refused error); any other value,
     ;; a refused phase included, is the refusal the arm below settles.
@@ -5221,8 +5193,8 @@
                         (:seon.turn.loop/undisposed? last-prepared)
                         ;; a folded close (close-folded-call) closed it in the settlement
                         (::closed-tx (db/pull (:db-after outcome) [::closed-tx] [::id run-id])))
-                  (assoc (report :closed (count gated)) :seon.turn.loop/applied (:db-after outcome))
-                  (assoc (report :released (count gated)) :seon.turn.loop/applied (:db-after outcome)))))))))))
+                  (report :closed (count gated))
+                  (report :released (count gated)))))))))))
 (defn- close-turn
   {:malli/schema [:=> [:cat [:map
                             [:seon.turn.loop/cluster :seon.turn.loop/cluster]
@@ -5846,14 +5818,7 @@
                       now (Date.)
                       request {:seon.agent/id agent-id
                                :seon.db.process/id process}
-                      ;; THE NEWER OF THE COMMITTED VALUE AND THIS AGENT'S LAST
-                      ;; APPLIED SETTLEMENT: an applied write may not have
-                      ;; committed yet, and the agent's next form starts after it.
-                      database (let [committed (db/db connection)
-                                     applied (:seon.turn.loop/applied state)]
-                                 (if (and applied (> (db/basis-t applied) (db/basis-t committed)))
-                                   applied
-                                   committed))
+                      database (db/db connection)
                       ;; A SUBMISSION IS ITS OWN WORK: its run's open is applied
                       ;; to this one value by the writer's own functions, and a
                       ;; refusal (a run already open, admission closed) answers
@@ -5893,7 +5858,7 @@
                                                    :seon.db/db basis)))
                                    :seon.turn.work/next next}
                                   now)
-                          _ (when reply (async/offer! reply (dissoc report :seon.turn.loop/applied)))
+                          _ (when reply (async/offer! reply report))
                           _ (when-let [opened (:seon.turn/id report)]
                               (reset! (:seon.agent/run-id turn-bound) opened))
                           refusal (:seon.turn.loop/refusal report)
@@ -5943,8 +5908,6 @@
                       [(let [run-id (:seon.turn/id report)]
                          (cond-> (dissoc state :seon.turn/id
                                          :seon.turn.loop/write-refusals)
-                           (:seon.turn.loop/applied report)
-                           (assoc :seon.turn.loop/applied (:seon.turn.loop/applied report))
                            run-id (assoc :seon.turn/id run-id)
                            (pos? refusals)
                            (assoc :seon.turn.loop/write-refusals refusals)
@@ -5954,7 +5917,7 @@
                                    agent-id (:seon.turn/id report)
                                    refusal refusals bound))))
                 ;; flow's own report channel: observation, never a dependency
-                       {::flow/report [(dissoc report :seon.turn.loop/applied)]}])))
+                       {::flow/report [report]}])))
          (finally
            ;; An answered reply keeps its value; one never answered (the pass
            ;; escaped or was interrupted) closes, so its caller's await ends now.
