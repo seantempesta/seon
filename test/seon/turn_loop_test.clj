@@ -326,6 +326,8 @@
                     :seon.cluster.prompt/derivation-observation
                     {:seon.error.evidence/attribute :seon.error/message
                      :seon.error.evidence/value message}}
+           ;; The cluster's world exists before its handle reads its config.
+           _ (test-support/seed-cluster! connection cluster-name)
            cluster (test-support/cluster-handle
                    {:seon.db/connection connection
                     :seon.cluster/name cluster-name
@@ -337,9 +339,6 @@
                     (config/result-caps config/defaults)
                     :seon.config.error/recurrence-limit 3
                     :seon.config.message/max-chain 8})]
-       (config/apply! {:seon.db/connection connection
-                       :seon.boot/cluster-name cluster-name})
-       (test-support/seed-cluster! connection cluster-name)
        (test-support/transacted!
                     connection
                     (cluster.agent/creation-tx
@@ -427,6 +426,15 @@
            overlays (atom [])
            overlay-values (atom [])
            requests (atom [])
+           ;; ONE APPLY. `config/apply!` EXACT-reconciles the desired row, so the
+           ;; overlay applied first and `seed-cluster!`'s empty manifest second
+           ;; left the shipped models behind — the call then read
+           ;; "deepseek-flash", not "before-apply". The cluster is seeded WITH its
+           ;; overlay, before its handle reads its config.
+           _ (test-support/seed-cluster!
+              connection cluster-name
+              {:seon.config.ai/model "before-apply"
+               :seon.config.ai.backup/model "backup-before-apply"})
            cluster (test-support/cluster-handle
                    {:seon.db/connection connection
                     :seon.cluster/name cluster-name
@@ -453,15 +461,6 @@
                                :seon.ai/finish-reason "stop"}
                               {:seon.ai/text "(identity 2)"
                                :seon.ai/finish-reason "stop"}])]
-       ;; ONE APPLY. `config/apply!` EXACT-reconciles the desired row, so the
-       ;; overlay applied first and `seed-cluster!`'s empty manifest second
-       ;; left the shipped models behind — the call then read
-       ;; "deepseek-flash", not "before-apply". The cluster is seeded WITH its
-       ;; overlay.
-       (test-support/seed-cluster!
-        connection cluster-name
-        {:seon.config.ai/model "before-apply"
-         :seon.config.ai.backup/model "backup-before-apply"})
        (test-support/transacted!
                     connection
                     (cluster.agent/creation-tx
@@ -625,6 +624,7 @@
   (testing "a supervisor hears about a worker's refused phases — once"
     (test-support/with-database
      (fn [connection]
+       (test-support/seed-cluster! connection "refused-phase")
        (test-support/transacted! connection
                                  (test-support/agents-tx @connection ["worker" "supervisor"]))
        (is (= [[] [] ["supervisor"] [] [] []]
@@ -637,6 +637,7 @@
   (testing "the failing agent is never mailed about its own refusal"
     (test-support/with-database
      (fn [connection]
+       (test-support/seed-cluster! connection "refused-phase")
        (test-support/transacted! connection (test-support/agent-tx @connection "worker"))
        (is (= [[] [] [] [] [] []]
               (mapv (fn [_] (refuse-phase! connection "worker" "worker"))
@@ -703,6 +704,7 @@
             run-id "undisposed-run"
             message-id "undisposed-trigger"
             terminal-data (private-loop-fn 'evaluation-terminal-data)]
+        (test-support/seed-cluster! connection "undisposed")
         (test-support/transacted!
                      connection
                      (into [(test-support/namespace-row @connection 'my.agents.undisposed-agent)]
@@ -909,6 +911,7 @@
       (commit-run! connection
                    {:held? true
                     :planned? true})
+      (test-support/seed-cluster! connection "install-refusal")
       ;; The freeze already minted ordinal 0 with its start instant; there is
       ;; no separate receipt to start.
       (let [cluster (test-support/cluster-handle

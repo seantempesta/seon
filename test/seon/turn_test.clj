@@ -857,7 +857,7 @@
           :seon.cluster.eval/error "Divide by zero"
           :seon.eval/shown (pr-str {:seon.error/message "Divide by zero"
                                     :seon.error/exception-class 'java.lang.ArithmeticException})})]
-    (is (str/includes? rendered ":error {:seon.error/message \"Divide by zero\""))
+    (is (str/includes? rendered ":error #:seon.error{:message \"Divide by zero\"") rendered)
     (is (str/includes? rendered "java.lang.ArithmeticException"))
     (is (not (str/includes? rendered "Form ")))
     (is (not (str/includes? rendered "failed:")))))
@@ -2190,11 +2190,14 @@
   (support/with-database
    (fn [connection]
      (support/transacted! connection (support/agent-tx @connection "dial-reader"))
-     (let [handle (support/cluster-handle
-                   {:seon.db/connection connection
-                    :seon.cluster/name "no-such-dial-cluster"
-                    :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
-                    :seon.db.process/id cluster/boot-process-identity})
+     ;; The handle is built from the shipped decisions (no cluster world), then
+     ;; names the missing cluster: `cluster-handle` itself refuses a cluster
+     ;; with no config row, and the refusal under test is the dial read's.
+     (let [handle (assoc (support/cluster-handle
+                          {:seon.db/connection connection
+                           :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
+                           :seon.db.process/id cluster/boot-process-identity})
+                         :seon.cluster/name "no-such-dial-cluster")
            refused (try (turn/write-refusal-bound (db/db connection) handle "dial-reader")
                         nil
                         (catch clojure.lang.ExceptionInfo error (ex-data error)))]
@@ -2297,7 +2300,12 @@
            receipt (:seon.fault/recorded (ex-data terminal))
            failure (if receipt (ex-cause terminal) terminal)]
        (is (instance? Throwable terminal))
-       (is (= :seon.agent/turn-transform (:seon.error/operation (ex-data failure)))
+       ;; The producer declares the error's identity; the completion event
+       ;; that missed its bound is the evidence it names.
+       (is (= 'seon.turn/turn-completion-error (:seon.error/operation (ex-data failure)))
+           (pr-str (ex-data terminal)))
+       (is (= :seon.agent/turn-transform
+              (get-in (ex-data failure) [:seon.error/data :seon.error/operation]))
            (pr-str (ex-data terminal)))
        (when (and receipt (not (:seon.fault/committed? receipt)))
          (is (= 1 @stops) "an unstorable fault requested the owner's stop once"))))))
