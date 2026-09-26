@@ -61,8 +61,13 @@
                 (cluster/seed-root-agent! connection cluster-name process)
                 [instance process])))
            boot-dials (config/effective (db/db connection) cluster-name)
-           ;; The process cache's byte budget is this cluster's dial.
-           _ (cache/configure! (:seon.config.cache/max-bytes boot-dials))
+           ;; The process cache's byte budget: a process setting, acquired
+           ;; like `:seon.config.db/keep-history?` from the compiled config
+           ;; this boot just applied. The store's own dials (`boot-dials`)
+           ;; follow its program, which adopts the checkout's declarations
+           ;; only after boot, so a dial the checkout added is absent there.
+           _ (cache/configure! (get-in compiled-config [:seon.config/effective
+                                                        :seon.config.cache/max-bytes]))
            arm-request {:seon.flow/commit-fault!
                         #(fault/record! connection cluster-name process
                                         (config/result-caps boot-dials) %)
