@@ -158,9 +158,7 @@
                           :seon.test.accretion/seed]
                          [:seon.sci.eval/time-limit-ms
                           :seon.sci.eval/time-limit-ms]
-                         [:seon.sci.admit/caps :seon.sci.admit/caps]
-                         [:seon.config/on-core-error
-                          :seon.config/on-core-error]],
+                         [:seon.sci.admit/caps :seon.sci.admit/caps]],
                         :candidate-auto-check-request
                         [:map
                          [:seon.sci.eval/ctx :seon.sci.eval/ctx]
@@ -172,9 +170,7 @@
                           :seon.test.accretion/seed]
                          [:seon.sci.eval/time-limit-ms
                           :seon.sci.eval/time-limit-ms]
-                         [:seon.sci.admit/caps :seon.sci.admit/caps]
-                         [:seon.config/on-core-error
-                          :seon.config/on-core-error]],
+                         [:seon.sci.admit/caps :seon.sci.admit/caps]],
                         :candidate-request
                         [:map
                          [:seon.test.accretion/evaluation
@@ -193,9 +189,7 @@
                           :seon.test.accretion/seed]
                          [:seon.sci.eval/time-limit-ms
                           :seon.sci.eval/time-limit-ms]
-                         [:seon.sci.admit/caps :seon.sci.admit/caps]
-                         [:seon.config/on-core-error
-                          :seon.config/on-core-error]],
+                         [:seon.sci.admit/caps :seon.sci.admit/caps]],
                         :candidate-ctx :seon.sci.eval/ctx,
                         :evaluation :seon.sci.eval/evaluation,
                         :results :seon.test.runner/captured-results,

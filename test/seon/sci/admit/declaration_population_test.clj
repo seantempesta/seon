@@ -37,10 +37,7 @@
   ([value projection]
    (cond-> {:seon.sci.admit/value value
             :seon.sci.admit/interrupt-fn (fn [] nil)
-            :seon.sci.admit/caps caps
-            ;; the dial is `:record` or `:panic`; `:degrade` was never one
-            ;; of them, and only an armed contract said so
-            :seon.config/on-core-error :record}
+            :seon.sci.admit/caps caps}
      projection (assoc :seon.schema/projection projection))))
 
 (defn- reads-of

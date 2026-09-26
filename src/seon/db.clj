@@ -3100,13 +3100,6 @@
 ;;; Writes through the one synchronous transaction boundary
 ;;; ---------------------------------------------------------------------------
 
-(defn- panic-on-core-error?
-  [connection]
-  (= :panic
-     (d/q '[:find ?mode .
-            :where [_ :seon.config/on-core-error ?mode]]
-          (d/db connection))))
-
 (defn- jdk-integers->long
   "Normalize submitted storage data, preserving transaction-function arguments.
    A function receives its in-memory request unchanged; the same conversion
@@ -4751,10 +4744,7 @@
                   :seon.error/data (merge evidence {:seon.error/member bound-attribute})}))
               report))))
     (catch Throwable throwable
-      (let [failure (write-refusal database transaction throwable)]
-        (when (and (:seon.db/transaction-outcome-unknown failure) (panic-on-core-error? connection))
-          (throw (ex-info (:seon.error/message failure) failure throwable)))
-        failure))))
+      (write-refusal database transaction throwable))))
 
 (defn with
   "The value `transaction` would leave on `database`, never committed: the

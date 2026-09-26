@@ -162,9 +162,7 @@
                  [:seon.sci.admit/caps :seon.sci.admit/caps]
                  [:seon.db/read-evidence-sink
                   {:optional true}
-                  :seon.db/read-evidence-sink]
-                 [:seon.config/on-core-error
-                  :seon.config/on-core-error]],
+                  :seon.db/read-evidence-sink]],
                 :function
                 [:fn {:description "An agent function value (an inline render function) invoked through the same arm and admission as a named Var; the request names it instead of :seon.fn/sym."
                       :error/message "must be an agent function value"
@@ -206,8 +204,6 @@
                  [:seon.sci.admit/caps :seon.sci.admit/caps]
                  [:seon.sci.eval/time-limit-ms
                   :seon.sci.eval/time-limit-ms]
-                 [:seon.config/on-core-error
-                  :seon.config/on-core-error]
                  [:seon.sci.eval/ctx
                   {:optional true}
                   :seon.sci.eval/ctx]

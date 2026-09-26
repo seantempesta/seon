@@ -77,7 +77,6 @@
     :seon.schema/projection @packaged-projection
     ;; production disposition by default: these trials are about the
     ;; codec, and the panic case has its own test
-    :seon.config/on-core-error :record
     ;; EVERY DECLARED MEMBER, exactly like production: the record schema
     ;; requires `:seon.eval/host-interop-count`, and a fixture that omits a
     ;; declared input is the defect (§5.1) — invisible for as long as the
@@ -367,29 +366,16 @@
                   (cons [_ _] nil)
                   (empty [_] nil)
                   (equiv [_ _] false))]
-    (testing ":record degrades — the marker, and the run continues"
+    (testing "a projection failure degrades to its marker, and the run continues"
       (let [admitted (admit/admit (request {:hostile hostile}))]
         (is (string? (:seon.sci.admit/edn admitted)))
         (is (str/includes? (:seon.sci.admit/edn admitted)
                            ":seon.print/failed")
             "the member that could not be projected says so where it stood")))
-    (testing ":panic throws hard and loud — a hole in OUR codec"
-      (let [data (try
-                   (admit/admit
-                    (assoc (request {:hostile hostile})
-                           :seon.config/on-core-error :panic))
-                   ::committed
-                   (catch Exception failure (ex-data failure)))]
-        (is (= (symbol (.getName (class hostile))) (:seon.sci.admit/failed-class data)))
-        (is (= 'seon.sci.admit/rethrow-or-degrade! (:seon.error/operation data)))
-        (is (identical? hostile (:seon.error/offending data)))))
-    (testing "an ordinary opaque value is NOT a failure in either mode"
-      (doseq [mode [:record :panic]]
-        (let [admitted (admit/admit
-                        (assoc (request {:fine (get @escape-kinds :sci-fn)})
-                               :seon.config/on-core-error mode))]
-          (is (string? (:seon.sci.admit/edn admitted))
-              (str mode ": a marker is the codec working, not failing")))))))
+    (testing "an ordinary opaque value is NOT a failure"
+      (let [admitted (admit/admit (request {:fine (get @escape-kinds :sci-fn)}))]
+        (is (string? (:seon.sci.admit/edn admitted))
+            "a marker is the codec working, not failing")))))
 
 (deftest render-admission-can-preserve-a-complete-value-under-the-same-guard
   (let [{:keys [interrupt-fn calls]} (armed)
@@ -532,7 +518,7 @@
      (let [refusal
            (test-support/agent-value
             (test-support/fork-cluster-ctx connection)
-            "(seon.sci.admit/admit {:seon.sci.admit/value [1 2 3], :seon.sci.admit/caps {}, :seon.sci.admit/interrupt-fn (fn []), :seon.config/on-core-error :record})")]
+            "(seon.sci.admit/admit {:seon.sci.admit/value [1 2 3], :seon.sci.admit/caps {}, :seon.sci.admit/interrupt-fn (fn [])})")]
        (is (= :input (:seon.instrument/check refusal)))
        (is (= 'seon.sci.admit/admit (:seon.instrument/fn refusal)))
        (is (str/includes? (pr-str refusal)

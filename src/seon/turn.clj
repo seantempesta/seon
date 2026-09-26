@@ -1927,8 +1927,7 @@
                 :seon.render/captured-calls calls
                 :seon.render/captured-invocations invocations
                 :seon.sci.admit/caps (:seon.sci.admit/caps handle)
-                :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms handle)
-                :seon.config/on-core-error (:seon.config/on-core-error handle)})]
+                :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms handle)})]
     (or (some (fn [unit]
                 (let [failure (:seon.error/value unit)]
                   (when-not (and (:seon.print/bound-by failure)
@@ -3363,8 +3362,7 @@
             :seon.test.accretion/seed seed
             :seon.sci.eval/time-limit-ms
             (:seon.config.eval/time-limit-ms cluster)
-            :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
-            :seon.config/on-core-error (:seon.config/on-core-error cluster)})
+            :seon.sci.admit/caps (:seon.sci.admit/caps cluster)})
           check (:seon.test.accretion/auto-check candidate)
           report
           (accretion/gate-report
@@ -3552,8 +3550,7 @@
                                 :seon.agent/id agent-id :seon.boot/cluster-name (:seon.cluster/name cluster)
                                 :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
                                 :seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
-                                :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms cluster)
-                                :seon.config/on-core-error (:seon.config/on-core-error cluster)}
+                                :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms cluster)}
                          nil))
 
 (defn- evaluation-terminal-data
@@ -3584,8 +3581,6 @@
                           {:seon.sci.admit/value settled
                            :seon.sci.admit/interrupt-fn (constantly nil)
                            :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
-                           :seon.config/on-core-error
-                           (:seon.config/on-core-error cluster)
                            :seon.schema/projection
                            (db/carried-projection database)})]
             (merge (dissoc evaluation :seon.eval/renderer) admitted
@@ -4279,9 +4274,7 @@
            :seon.cluster.eval/ordinal form-ordinal
            :seon.boot/cluster-name (:seon.cluster/name cluster)
            :seon.sci.eval/time-limit-ms
-           (:seon.config.eval/time-limit-ms cluster)
-           :seon.config/on-core-error
-           (:seon.config/on-core-error cluster)}
+           (:seon.config.eval/time-limit-ms cluster)}
            run-id (assoc :seon.turn/id run-id)
            (:seon.flow/work-launcher cluster)
            (assoc :seon.flow/work-launcher
@@ -4543,9 +4536,7 @@
                             :seon.sci.eval/ctx
                             (:seon.sci.eval/ctx cluster)
                             :seon.sci.eval/time-limit-ms
-                            (:seon.config.eval/time-limit-ms cluster)
-                            :seon.config/on-core-error
-                            (:seon.config/on-core-error cluster)})))
+                            (:seon.config.eval/time-limit-ms cluster)})))
           refusal
           (when (or (:seon.turn.loop/phase-failed rendered)
                     (:seon.cluster.prompt/error-agent-id rendered))
@@ -4684,9 +4675,7 @@
                                       :seon.error/reason :failover})
                        :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
                        :seon.sci.eval/time-limit-ms
-                       (:seon.config.eval/time-limit-ms cluster)
-                       :seon.config/on-core-error
-                       (:seon.config/on-core-error cluster)}))
+                       (:seon.config.eval/time-limit-ms cluster)}))
 
               (and (= :backoff disposition) (seq waits))
               (do
@@ -4837,8 +4826,7 @@
                 :seon.agent/id agent-id
                 :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
                 :seon.sci.eval/ctx ctx
-                :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms cluster)
-                :seon.config/on-core-error (:seon.config/on-core-error cluster)}
+                :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms cluster)}
                #(gate-function-install
                  cluster ctx agent-id
                  (if run-id (receipt-identity run-id ordinal)
@@ -5297,8 +5285,8 @@
   (`opening-deferred?`), so this is the one pass that can say so: its wakes
   stay unanswered and the terminal event, a reply completing the episode
   (`seon.run/complete`), never arrived. Agent and run identity are untouched,
-  so a new outside wake resumes the agent. Under `:panic` `seon.fault/fault!`
-  throws to the turn's caller."
+  so a new outside wake resumes the agent. `seon.fault/fault!` throws to the
+  turn's caller only when the fault cannot be stored."
   {:malli/schema [:=> [:cat :seon.turn.loop/cluster :seon.agent/id :seon.turn.loop/turn-report] :nil]}
   [cluster agent-id result]
   (when-not (= :released (:seon.turn.loop/outcome result))
@@ -5606,7 +5594,7 @@
   the consecutive count and the declared bound; the proc stops re-firing, so
   the storm that filled the store a gigabyte a minute becomes one durable
   fact on the problems surface. `seon.fault/fault!` stores and delivers it;
-  under `:panic` its throw reaches `var-process`, which stops the graph."
+  a fault it cannot store throws to `var-process`, which stops the graph."
   [cluster agent-id run-id refusal refusals bound]
   (let [diagnostic (write-refusal-error agent-id run-id refusal refusals bound)]
     (fault/fault! (env/of cluster) (ex-info (:seon.error/message diagnostic) diagnostic)
@@ -5619,9 +5607,9 @@
 (defn- record-turn-backstop-fault!
   "Record the fault of a turn whose completion bound fired, on the backstop's
   thread, and answer the terminal throwable disarm joins: the recorded
-  failure under `:record`, else the panic whole (its receipt, refused outcome
-  and suppressed causes, caused by the failure). The execution owner's stop
-  is requested before a panic records (`:seon.fault/stop-request!`)."
+  failure, else the unrecorded fault's throw whole (its receipt, refused
+  outcome and suppressed causes, caused by the failure), after the execution
+  owner's stop request (`:seon.fault/stop-request!`)."
   [{:seon.agent/keys [agent-id timeout-ms expected process] armed-run :seon.agent/run-id :as bound}]
   (let [run-id @armed-run
         failure
@@ -5637,7 +5625,7 @@
                          (:seon.fault/stop-request! bound)
                          (assoc :seon.fault/stop-request! (:seon.fault/stop-request! bound))))
          failure
-         (catch Throwable panic panic))))
+         (catch Throwable unrecorded unrecorded))))
 
 (defn- arm-turn-completion-backstop!
   "Arm the live bound after the ready permit is consumed.

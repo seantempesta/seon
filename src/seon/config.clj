@@ -60,8 +60,7 @@
      ", max " (:seon.config.ai/max-tokens unit) " output tokens); "
      "evaluation " (:seon.config.eval/time-limit-ms unit) " ms; Flow "
      (:seon.config.flow.compute/concurrency unit) " compute / "
-     (:seon.config.flow.io/concurrency unit) " I/O; core faults "
-     (name (:seon.config/on-core-error unit)) ".")))
+     (:seon.config.flow.io/concurrency unit) " I/O.")))
 
 (defn render-html
   "`:seon.render/html` — one readable effective-configuration card."
@@ -82,9 +81,7 @@
       [:div [:dt "Flow concurrency"]
        [:dd (str (:seon.config.flow.compute/concurrency unit)
                  " compute / "
-                 (:seon.config.flow.io/concurrency unit) " I/O")]]
-      [:div [:dt "Core faults"]
-       [:dd (name (:seon.config/on-core-error unit))]]]]))
+                 (:seon.config.flow.io/concurrency unit) " I/O")]]]]))
 
 (def ^:private available-processors
   :seon.config/available-processors)

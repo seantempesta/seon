@@ -30,7 +30,6 @@
                [:seon.sci.admit/caps :seon.sci.admit/caps]
                [:seon.sci.eval/time-limit-ms
                 :seon.sci.eval/time-limit-ms]
-               [:seon.config/on-core-error :seon.config/on-core-error]
                [:seon.render/ai {:optional true} :qualified-symbol]
                [:seon.render/html {:optional true} :qualified-symbol]
                [:seon.render/form {:optional true} :qualified-symbol]

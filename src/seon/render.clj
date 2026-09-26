@@ -209,7 +209,6 @@
                               :seon.render.call/id
                               :seon.sci.admit/caps
                               :seon.sci.eval/time-limit-ms
-                              :seon.config/on-core-error
                               :seon.db/connection
                               :seon.render.data/total
                               :seon.render/distance
@@ -844,7 +843,6 @@
       (invocation-argument-evidence projection request selected)
       (select-keys request [:seon.sci.admit/caps
                             :seon.sci.eval/time-limit-ms
-                            :seon.config/on-core-error
                             :seon.agent/id
                             :seon.render/namespace
                             :seon.render.call/source-output?])]}))
@@ -1091,7 +1089,6 @@
   [{ctx :seon.sci.eval/ctx
     caps :seon.sci.admit/caps
     time-limit-ms :seon.sci.eval/time-limit-ms
-    on-core-error :seon.config/on-core-error
     :as request}
    selected]
   (let [projection (request-projection request)
@@ -1119,8 +1116,7 @@
          :seon.sci.eval/args [argument]
          :seon.sci.admit/unbounded? true
          :seon.sci.eval/time-limit-ms time-limit-ms
-         :seon.sci.admit/caps caps
-         :seon.config/on-core-error on-core-error}
+         :seon.sci.admit/caps caps}
          ;; A named producer is resolved; a value's own inline function is
          ;; applied as it is, under the same arm (kernel/invoke).
          (qualified-symbol? selected) (assoc :seon.fn/sym selected)
@@ -1734,7 +1730,7 @@
 (defn call-with-walk-context
   "Call `body` with one agent's ambient walk custody."
   {:malli/schema
-   [:=> [:catn [:seon.render.walk/context [:map [:seon.agent/id :seon.agent/id] [:seon.db/db {:optional true} :seon.db/database-value] [:seon.sci.admit/caps {:optional true} :seon.sci.admit/caps] [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx] [:seon.sci.eval/time-limit-ms {:optional true} :seon.sci.eval/time-limit-ms] [:seon.config/on-core-error {:optional true} :seon.config/on-core-error] [:seon.db/connection {:optional true} :seon.db/connection]]] [:seon.render.walk/body [:fn clojure.core/ifn?]]] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}]]}
+   [:=> [:catn [:seon.render.walk/context [:map [:seon.agent/id :seon.agent/id] [:seon.db/db {:optional true} :seon.db/database-value] [:seon.sci.admit/caps {:optional true} :seon.sci.admit/caps] [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx] [:seon.sci.eval/time-limit-ms {:optional true} :seon.sci.eval/time-limit-ms] [:seon.db/connection {:optional true} :seon.db/connection]]] [:seon.render.walk/body [:fn clojure.core/ifn?]]] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}]]}
   [context body]
   (binding [*walk-context* context
             db/*conn*
@@ -1866,9 +1862,7 @@
                       :seon.render/distance depth
                       :seon.sci.admit/caps caps
                       :seon.sci.eval/time-limit-ms
-                      (:seon.sci.eval/time-limit-ms *walk-context*)
-                      :seon.config/on-core-error
-                      (:seon.config/on-core-error *walk-context*)}
+                      (:seon.sci.eval/time-limit-ms *walk-context*)}
                       (:seon.turn/id *walk-context*)
                       (assoc :seon.turn/id (:seon.turn/id *walk-context*))
                       (:seon.render/retained-calls *walk-context*)

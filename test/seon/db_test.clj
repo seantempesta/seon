@@ -488,8 +488,7 @@
      (test-support/transacted! connection (test-support/agent-tx @connection "wildcard-agent"))
      (test-support/preserving-instrumentation-state
       (fn []
-       (instrument/apply! {:seon.config/on-core-error :panic
-                          :seon.schema/projection (schema/handed-projection)})
+       (instrument/apply! {:seon.schema/projection (schema/handed-projection)})
          (is (= "wildcard-agent"
                 (:seon.agent/id
                  (db/pull @connection '[*]
@@ -1149,8 +1148,7 @@
            {:seon.sci.admit/value
             {:probe/report (db/transact! connection [])}
             :seon.sci.admit/interrupt-fn (fn [])
-            :seon.sci.admit/caps (config/result-caps effective)
-            :seon.config/on-core-error :record}
+            :seon.sci.admit/caps (config/result-caps effective)}
            admitted (admit/admit request)
            semantic (:seon.sci.admit/value admitted)
            report (:probe/report semantic)

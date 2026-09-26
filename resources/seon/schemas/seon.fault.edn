@@ -9,11 +9,10 @@
              [:set {:description "The recipients of the notifications the writer selected for the fault's current opening, read from the transaction's own report; an empty set is committed but undeliverable."}
               :seon.agent/id],
              :stop-request!
-             [:fn {:description "The execution owner's stop request, called before recording under :panic and after a failed recording under :record."
+             [:fn {:description "The execution owner's stop request, called when a fault's recording did not commit."
                    :error/message "must be a function of no arguments"
                    :gen/schema [:=> [:cat] :nil]}
               clojure.core/ifn?],
-             :policy [:enum :record :panic],
              :committed? :boolean,
              :outcome :map,
              :context
@@ -30,12 +29,11 @@
               [:seon.error/obligation {:optional true} :seon.error/obligation]],
              :recorded
              [:map
-              {:description "The receipt of one core fault recorded once per propagation; a panic carries it in its ex-data."}
+              {:description "The receipt of one core fault recorded once per propagation; an unrecorded fault's throw carries it in its ex-data."}
               [:seon.boot/cluster-name :seon.boot/cluster-name]
               [:seon.error/layer :seon.error/layer]
               [:seon.error/operation :seon.error/operation]
               [:seon.fault/committed? :seon.fault/committed?]
-              [:seon.fault/policy :seon.fault/policy]
               [:seon.error/signature {:optional true} :seon.error/signature]
               [:seon.error.occurrence/id {:optional true} :seon.error.occurrence/id]
               [:seon.fault/delivered-to {:optional true} :seon.fault/delivered-to]]}

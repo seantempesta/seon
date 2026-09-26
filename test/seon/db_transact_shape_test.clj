@@ -39,8 +39,7 @@
       "(seon.db-transact-shape-test/transaction-result-shape)"
       :seon.sci.eval/ctx ctx
       :seon.sci.admit/caps caps
-      :seon.sci.eval/time-limit-ms 2000
-      :seon.config/on-core-error :panic})))
+      :seon.sci.eval/time-limit-ms 2000})))
 
 (deftest transact-return-shape-is-independent-of-dynamic-custody
   (test-support/with-database

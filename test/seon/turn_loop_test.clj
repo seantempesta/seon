@@ -169,7 +169,6 @@
                 :seon.sci.admit/caps
                 (config/result-caps config/defaults)
                 :seon.sci.eval/time-limit-ms 2000
-                :seon.config/on-core-error :panic
                 :seon.boot/cluster-name cluster-name
                 :seon.agent/id agent-id
                 :seon.turn/id run-id
@@ -213,8 +212,7 @@
                                 :seon.render/context-channel channel
                                 :seon.turn.loop/completion channel
                                 :seon.sci.admit/caps (config/result-caps defaults)
-                                :seon.config.eval/time-limit-ms 2000
-                                :seon.config/on-core-error :panic})
+                                :seon.config.eval/time-limit-ms 2000})
                 outcome
                 (try
                   (first
@@ -335,7 +333,6 @@
                     :seon.sci.eval/ctx
                     (test-support/fork-cluster-ctx connection)
                     :seon.config.eval/time-limit-ms 2000
-                    :seon.config/on-core-error :record
                     :seon.sci.admit/caps
                     (config/result-caps config/defaults)
                     :seon.config.error/recurrence-limit 3
@@ -437,7 +434,6 @@
                     :seon.sci.eval/ctx
                     (test-support/fork-cluster-ctx connection)
                     :seon.config.eval/time-limit-ms 2000
-                    :seon.config/on-core-error :panic
                     :seon.sci.admit/caps
                     (config/result-caps (test-support/effective-config))
                     :seon.config.error/recurrence-limit 3
@@ -761,7 +757,6 @@
                {:seon.db/db @connection
                 :seon.sci.eval/ctx (sci.eval/cluster-ctx @connection)
                 :seon.sci.eval/time-limit-ms 1000
-                :seon.config/on-core-error :record
                 :seon.sci.admit/caps
                 (assoc
                  (config/result-caps (test-support/effective-config))
@@ -1003,8 +998,6 @@
       :seon.sci.admit/caps (config/result-caps decisions)
       :seon.sci.eval/time-limit-ms
       (:seon.config.eval/time-limit-ms decisions)
-      :seon.config/on-core-error
-      (:seon.config/on-core-error decisions)
       :seon.db/connection connection})))
 
 (defn- closed-at
@@ -1152,8 +1145,6 @@
                 :seon.sci.admit/caps (config/result-caps decisions)
                 :seon.sci.eval/time-limit-ms
                 (:seon.config.eval/time-limit-ms decisions)
-                :seon.config/on-core-error
-                (:seon.config/on-core-error decisions)
                 :seon.db/connection connection}))
             requests
             (mapv (fn [ordinal]

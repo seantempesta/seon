@@ -40,7 +40,6 @@
    :seon.config.bootstrap/beyond-closure-token-budget 512
    :seon.config.error/recurrence-limit 2
    :seon.config.error/escalate-to "root"
-   :seon.config/on-core-error :record
    :seon.config.maintenance/min-usable-bytes 1048576
    :seon.config.maintenance/min-usable-ratio 0.01
    :seon.config.maintenance/log-max-bytes 1024
@@ -181,14 +180,12 @@
                                 [:seon.config.eval/time-limit-ms
                                  :seon.config.error/recurrence-limit
                                  :seon.config.error/escalate-to
-                                 :seon.config/on-core-error
                                  :seon.config.message/max-chain])
                    (select-keys
                     handle
                     [:seon.config.eval/time-limit-ms
                      :seon.config.error/recurrence-limit
                      :seon.config.error/escalate-to
-                     :seon.config/on-core-error
                      :seon.config.message/max-chain]))))
           (testing "AI settings remain live facts rather than armed values"
             (is (= (select-keys applied

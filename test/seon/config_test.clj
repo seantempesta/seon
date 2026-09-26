@@ -200,7 +200,7 @@
               ::config/invalid-initialization-value
               :seon.db.process/id]
              ["a row must have an identity attribute"
-              [{:seon.config/on-core-error :panic}]
+              [{:seon.config.eval/time-limit-ms 1234}]
               ::config/invalid-initialization-identity
               nil]
              ["a row cannot have two identity attributes"
@@ -521,14 +521,14 @@
          {:seon.config/manifest
           {:seon.config.flow.compute/queue-depth 11
            :seon.config.db/keep-history? false
-           :seon.config/on-core-error :record}
+           :seon.config.eval/time-limit-ms 1234}
           :seon.config/environment
           {:seon.config.flow.compute/queue-depth 12}
           :seon.boot/cluster-name "alpha"})
         effective (:seon.config/effective compiled)]
     (is (= 12 (:seon.config.flow.compute/queue-depth effective))
         "explicit environment wins over the selected sparse overlay")
-    (is (= :record (:seon.config/on-core-error effective))
+    (is (= 1234 (:seon.config.eval/time-limit-ms effective))
         "the sparse overlay wins over shipped defaults")
     (is (false? (:seon.config.db/keep-history? effective))
         "an isolated root may select the non-temporal representation")
@@ -574,14 +574,14 @@
         (config/compile-manifest
          {:seon.boot/cluster-name "default" :seon.config/manifest
           (array-map
-           :seon.config/on-core-error :record
+           :seon.config.eval/time-limit-ms 1234
            :seon.config.flow.compute/queue-depth 22)})
         right
         (config/compile-manifest
          {:seon.config/manifest
           (array-map
            :seon.config.flow.compute/queue-depth 22
-           :seon.config/on-core-error :record)
+           :seon.config.eval/time-limit-ms 1234)
           :seon.boot/cluster-name "other"})]
     (is (= (:seon.config/effective left)
            (:seon.config/effective right)))
@@ -592,9 +592,9 @@
   (let [directory (io/file "tmp/config-test")
         path (io/file directory "override.edn")]
     (.mkdirs directory)
-    (spit path "{:seon.config/on-core-error :record}\n")
+    (spit path "{:seon.config.eval/time-limit-ms 1234}\n")
     (try
-      (is (= {:seon.config/on-core-error :record}
+      (is (= {:seon.config.eval/time-limit-ms 1234}
              (config/read-manifest (str path)))
           "selection reads a sparse overlay; compile owns all merging")
       (test-support/with-database
@@ -610,7 +610,7 @@
                                        (str path)))]
            (is (= 1 @acquisitions) "file apply acquires one declaration generation")
            (is (false? (:seon.reconcile/converged? result)))
-           (is (= :record (:seon.config/on-core-error
+           (is (= 1234 (:seon.config.eval/time-limit-ms
                            (config/effective (db/db connection) "default")))))))
       (finally
         (.delete path)
@@ -652,27 +652,27 @@
             (config/apply!
              {:seon.boot/cluster-name "default" :seon.db/connection connection
               :seon.config/manifest
-              {:seon.config/on-core-error :record}})
+              {:seon.config.eval/time-limit-ms 1234}})
             committed-basis (:max-tx @connection)
             converged
             (config/apply!
              {:seon.boot/cluster-name "default" :seon.db/connection connection
               :seon.config/manifest
-              {:seon.config/on-core-error :record}})]
+              {:seon.config.eval/time-limit-ms 1234}})]
         (is (false? (:seon.reconcile/converged? result)))
         (is (true? (:seon.reconcile/converged? converged)))
         (is (zero? (:seon.reconcile/operations converged)))
         (is (= committed-basis (:max-tx @connection))
             "a converged apply writes no transaction")
-        (is (= :record
-               (:seon.config/on-core-error
+        (is (= 1234
+               (:seon.config.eval/time-limit-ms
                 (config/effective @connection "default"))))
         (is (= config/managing-process-identity
                (db/q
                 '[:find ?process-id .
                   :where
                   [?entity :seon.config/cluster "default"]
-                  [?entity :seon.config/on-core-error _ ?tx]
+                  [?entity :seon.config.eval/time-limit-ms _ ?tx]
                   [?tx :seon.db/process ?process]
                   [?process :seon.db.process/id ?process-id]]
                 @connection)))))))

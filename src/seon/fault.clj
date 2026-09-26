@@ -3,7 +3,8 @@
 
   `record!` commits one escaped failure through `seon.error`'s recording
   (signature, occurrence identity and the writer-decided wake are its own);
-  `fault!` applies the one policy to that committed outcome. Every producer
+  `fault!` returns its receipt beside the caller's result, and stops the
+  execution owner only when storage fails. Every producer
   calls `fault!` on its own thread: there is no fault channel or committer."
   (:require [clojure.core.async.flow :as-alias flow.core]
             [seon.blob :as blob]
@@ -186,16 +187,9 @@
         [{:seon.error/message message} failure nil nil]))))
 
 
-(defn policy
-  "The one decision: `:record` only when record mode's write committed.
-  Every other pair — panic mode, an absent or unknown dial, a refused, thrown
-  or outcome-unknown write — panics, production included."
-  {:malli/schema [:=> [:cat [:or :nil :keyword] :boolean] [:enum :record :panic]]}
-  [mode committed?]
-  (if (and (= :record mode) committed?) :record :panic))
-
 (defn carried-receipt
-  "The receipt a panic already carries anywhere in `failure`'s cause chain."
+  "The receipt an unrecorded fault's throw already carries anywhere in
+  `failure`'s cause chain."
   {:malli/schema [:=> [:cat [:or :seon.error/throwable :map]] [:or :nil :seon.fault/recorded]]}
   [failure]
   (when (instance? Throwable failure)
@@ -203,20 +197,21 @@
           (take-while some? (iterate ex-cause failure)))))
 
 (defn fault!
-  "Record one core fault on the caller's thread, wake its responsible agent,
-  and apply [[policy]]. Returns the `:seon.fault/recorded` receipt under
-  `:record`; under `:panic` throws an `ex-info` whose data carries the receipt
-  and whose cause is `failure` itself. A failure already carrying a receipt
-  was recorded by this propagation: it is rethrown, never recounted.
+  "Record one core fault on the caller's thread and wake its responsible
+  agent. Returns the `:seon.fault/recorded` receipt when the write committed:
+  the fault is data beside the caller's result, and the caller continues.
+  When storage fails (a refused, thrown or outcome-unknown write) the
+  execution owner's declared `:seon.fault/stop-request!` runs and an
+  `ex-info` is thrown whose data carries the receipt and whose cause is
+  `failure` itself: the one case in which a graph stops. A failure already
+  carrying a receipt was recorded by this propagation: it is rethrown,
+  never recounted.
 
   The wake is the writer's decision (`seon.error/commit-call`): the
   namespace steward, else the configured `:seon.config.error/escalate-to`.
   The receipt names, as `:seon.fault/delivered-to`, the recipients of the
   notifications the writer selected for the fault's current opening, read from
-  the transaction's own report. The dial is read once, BEFORE the write: under
-  `:panic` (or an unreadable dial) the execution owner's declared
-  `:seon.fault/stop-request!` runs first, so a stalled or failing recording
-  cannot stand between the panic and the stop. No write is retried."
+  the transaction's own report. No write is retried."
   {:malli/schema [:=> [:cat :seon.env/environment [:or :seon.error/throwable :seon.error/base]
                        :seon.fault/context]
                   :seon.fault/recorded]}
@@ -230,13 +225,6 @@
                  (config/result-caps (config/effective (db/db connection) cluster-name)))
         agent-id (:seon.agent/id context)
         throwable? (instance? Throwable failure)
-        [mode read-failure]
-        (try [(:seon.config/on-core-error (config/effective (db/db connection) cluster-name))]
-             (catch Throwable read-failure [nil read-failure]))
-        ;; the owner's stop request never prevents the recording it precedes
-        request-stop! #(when-let [stop-request! (:seon.fault/stop-request! context)]
-                         (try (stop-request!) nil (catch Throwable stop-failure stop-failure)))
-        early-stop-failure (when (not= :record mode) (request-stop!))
         [fact outcome occurrence recipients]
         (record! connection cluster-name (:seon.db.process/id context) caps
                  {:seon.error/source
@@ -250,24 +238,23 @@
                       (when throwable? (:seon.error/declared-schema (meta (ex-data failure))))
                       :seon.flow/exception-error)})
         committed? (= :seon.flow/committed outcome)
-        stop-failure (or early-stop-failure
-                         (when (and (= :record mode) (not committed?)) (request-stop!)))
         receipt (cond-> {:seon.boot/cluster-name cluster-name
                          :seon.error/layer (:seon.error/layer context)
                          :seon.error/operation (:seon.error/operation context)
-                         :seon.fault/committed? committed?
-                         :seon.fault/policy (policy mode committed?)}
+                         :seon.fault/committed? committed?}
                   (:seon.error/signature fact) (assoc :seon.error/signature (:seon.error/signature fact))
                   occurrence (assoc :seon.error.occurrence/id (second occurrence))
                   recipients (assoc :seon.fault/delivered-to recipients))]
-    (if (= :record (:seon.fault/policy receipt))
+    (if committed?
       receipt
-      (let [panic (ex-info (str "SEON CORE FAULT (panic): "
-                                (or (:seon.error/message fact) (ex-message failure)))
-                           (cond-> {:seon.fault/recorded receipt}
-                             (not throwable?) (assoc :seon.error/base failure)
-                             (map? outcome) (assoc :seon.fault/outcome outcome))
-                           (when throwable? failure))]
-        (doseq [suppressed [outcome read-failure stop-failure] :when (instance? Throwable suppressed)]
-          (.addSuppressed panic suppressed))
-        (throw panic)))))
+      (let [stop-failure (when-let [stop-request! (:seon.fault/stop-request! context)]
+                           (try (stop-request!) nil (catch Throwable stop-failure stop-failure)))
+            unrecorded (ex-info (str "SEON CORE FAULT (not recorded): "
+                                     (or (:seon.error/message fact) (ex-message failure)))
+                                (cond-> {:seon.fault/recorded receipt}
+                                  (not throwable?) (assoc :seon.error/base failure)
+                                  (map? outcome) (assoc :seon.fault/outcome outcome))
+                                (when throwable? failure))]
+        (doseq [suppressed [outcome stop-failure] :when (instance? Throwable suppressed)]
+          (.addSuppressed unrecorded suppressed))
+        (throw unrecorded)))))

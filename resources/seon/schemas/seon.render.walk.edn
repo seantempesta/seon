@@ -45,8 +45,6 @@
                     [:seon.sci.admit/caps :seon.sci.admit/caps]
                     [:seon.sci.eval/time-limit-ms
                      :seon.sci.eval/time-limit-ms]
-                    [:seon.config/on-core-error
-                     :seon.config/on-core-error]
                     [:seon.render/distance
                      {:optional true}
                      :seon.render/distance]],
@@ -61,8 +59,6 @@
                     [:seon.sci.admit/caps :seon.sci.admit/caps]
                     [:seon.sci.eval/time-limit-ms
                      :seon.sci.eval/time-limit-ms]
-                    [:seon.config/on-core-error
-                     :seon.config/on-core-error]
                     [:seon.render/distance
                      {:optional true}
                      :seon.render/distance]],

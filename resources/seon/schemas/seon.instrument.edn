@@ -28,8 +28,6 @@
                    [:seon.instrument/changed-identities
                     {:optional true}
                     :seon.instrument/changed-identities]
-                   [:seon.config/on-core-error
-                    :seon.config/on-core-error]
                    [:seon.schema/projection
                     {:optional true}
                     :seon.schema/projection]

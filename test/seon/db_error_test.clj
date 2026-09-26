@@ -8,7 +8,7 @@
   (test-support/with-database
    (fn [connection]
      (test-support/apply-config! connection "writer-refusal"
-                                 {:seon.config/on-core-error :record})
+                                 {})
      (let [transaction [[:db.fn/call (fn [_] (throw (ex-info "unclassified writer failure" {::evidence 42})))]]
            result (db/transact! connection transaction)]
        (is ((schema/projection-validator (schema/handed-projection)

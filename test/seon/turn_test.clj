@@ -2008,7 +2008,7 @@
                           (str "Agent " (pr-str agent-id)))]
         ;; the fault is recorded through `seon.fault/fault!` in the cluster's
         ;; world: record mode, so the step returns, with root to deliver to
-        (support/seed-cluster! connection cluster-name {:seon.config/on-core-error :record})
+        (support/seed-cluster! connection cluster-name {})
         (cluster/seed-root-agent! connection cluster-name cluster/boot-process-identity)
         (checked-transact! connection (support/agent-tx @connection agent-id))
         (async/>!! completion :seon.agent/ready)
@@ -2166,8 +2166,7 @@
                             :seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
                             :seon.render/profile (render/agent-render-profile configuration)
                             :seon.sci.admit/caps (config/result-caps configuration)
-                            :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)
-                            :seon.config/on-core-error :panic})
+                            :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)})
                [settled] (turn/settlement-projection {:seon.db/connection connection} evaluation)
                facts (turn/evaluation-facts
                       {:seon.turn/id "unbound-receipt-turn"
@@ -2305,8 +2304,8 @@
        (is (instance? Throwable terminal))
        (is (= :seon.agent/turn-transform (:seon.error/operation (ex-data failure)))
            (pr-str (ex-data terminal)))
-       (when (= :panic (:seon.fault/policy receipt))
-         (is (= 1 @stops) "the panic requested the owner's stop once"))))))
+       (when (and receipt (not (:seon.fault/committed? receipt)))
+         (is (= 1 @stops) "an unstorable fault requested the owner's stop once"))))))
 
 (defn- terminal-fixture
   "A seeded cluster, agent `printer`, and one open run `run-id` whose `sources`
@@ -2378,8 +2377,7 @@
                                :seon.sci.eval/ctx (:seon.sci.eval/ctx handle) :seon.db/db (db/db connection)
                                :seon.render/profile (render/agent-render-profile configuration)
                                :seon.sci.admit/caps (config/result-caps configuration)
-                               :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)
-                               :seon.config/on-core-error :panic})})
+                               :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)})})
                           (range 2) ["(+ 1 1)" "(* 3 3)"])
            prepared (mapv (fn [{ordinal :seon.cluster.eval/ordinal evaluation :seon.sci.eval/evaluation}]
                             {:seon.turn.loop/receipt {:seon.turn/id run-id :seon.cluster.eval/ordinal ordinal

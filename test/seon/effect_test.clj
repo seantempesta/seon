@@ -200,7 +200,6 @@
     :seon.boot/cluster-name "default"
     :seon.flow/work-launcher launcher
     :seon.sci.admit/caps (config/result-caps config/defaults)
-    :seon.config/on-core-error :record
     ;; Handed explicitly, exactly as `seon.sci.eval` hands it: a DETACHED
     ;; handler rebuilds this frame from the submission, and without it any
     ;; declaration it resolves refuses with :seon.schema/missing-projection.
@@ -851,7 +850,6 @@
               :seon.sci.admit/caps (config/result-caps effective)
               :seon.sci.eval/time-limit-ms
               (:seon.config.eval/time-limit-ms effective)
-              :seon.config/on-core-error :record
               :seon.sci.eval/ctx ctx
               :seon.agent/id "root"
               :seon.turn/id "effect-run"

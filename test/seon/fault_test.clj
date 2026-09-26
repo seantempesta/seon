@@ -58,16 +58,15 @@
                                 [?agent :seon.agent/id ?to]]
                        database signature))}))
 
-(deftest record-mode-stores-the-whole-fault-and-wakes-the-responsible-agent
+(deftest a-fault-stores-the-whole-fault-and-wakes-the-responsible-agent
   (test-support/with-database
    (fn [connection]
      (let [started (System/nanoTime)
-           receipt (fault/fault! (world connection "fault-record" {:seon.config/on-core-error :record})
+           receipt (fault/fault! (world connection "fault-record" {})
                                  (nested-failure) context)
            elapsed-ms (/ (- (System/nanoTime) started) 1e6)
            {:keys [row woken]} (stored connection (:seon.error/signature receipt))
            occurrence (first (:seon.error/occurrences row))]
-       (is (= :record (:seon.fault/policy receipt)))
        (is (true? (:seon.fault/committed? receipt)))
        (is (string? (:seon.error.occurrence/id receipt)))
        (is (= 'clojure.lang.ExceptionInfo (:seon.error/exception-class row)))
@@ -92,7 +91,7 @@
   ;; declares its own operation keeps it.
   (test-support/with-database
    (fn [connection]
-     (let [environment (world connection "fault-boundary" {:seon.config/on-core-error :record})
+     (let [environment (world connection "fault-boundary" {})
            thrown (fn [] (IllegalStateException. "one thrower"))
            at (fn [operation failure]
                 (fault/fault! environment failure (assoc context :seon.error/operation operation)))
@@ -115,7 +114,7 @@
   ;; evidence even though another error schema stores that attribute.
   (test-support/with-database
    (fn [connection]
-     (let [environment (world connection "fault-attributes" {:seon.config/on-core-error :record})
+     (let [environment (world connection "fault-attributes" {})
            occurrence (fn [declared-schema extra]
                         (let [receipt (fault/fault! environment
                                                     (merge {:seon.error/at (java.util.Date.)
@@ -139,37 +138,38 @@
        (is (true? (:seon.db/transaction-refused kept)) (pr-str kept))
        (is (= "r1" (:seon.db.write.attempt/request-id kept)))))))
 
-(deftest panic-mode-stores-then-throws-its-receipt-and-a-rethrow-is-not-recounted
+(deftest ^{:seon/tasks #{"6b8d26a16ce7"}}
+  a-stored-fault-returns-its-receipt-beside-the-result-and-a-carried-receipt-is-not-recounted
+  ;; Task 6b8d26a16ce7: there is no core-error dial. A fault whose write
+  ;; commits is data beside the caller's result: `fault!` returns, never throws.
   (test-support/with-database
    (fn [connection]
-     (let [environment (world connection "fault-panic" {:seon.config/on-core-error :panic
-                                                            :seon.config.error/escalate-to "root"})
+     (let [environment (world connection "fault-stored" {:seon.config.error/escalate-to "root"})
            failure (nested-failure)
-           panic (try (fault/fault! environment failure context) nil
-                      (catch clojure.lang.ExceptionInfo thrown thrown))
-           receipt (:seon.fault/recorded (ex-data panic))]
-       (is (some? panic) "panic mode throws")
-       (is (identical? failure (ex-cause panic)) "the original is the real cause")
-       (is (= :panic (:seon.fault/policy receipt)))
-       (is (true? (:seon.fault/committed? receipt)) "it stores before it throws")
-       (let [rethrown (try (fault/fault! environment panic context) nil
+           receipt (fault/fault! environment failure context)]
+       (is (true? (:seon.fault/committed? receipt)) "it stores and returns")
+       (is (not (contains? receipt :seon.fault/policy)) "no policy is decided")
+       (let [carried (ex-info "SEON CORE FAULT (not recorded): carried"
+                              {:seon.fault/recorded receipt} failure)
+             rethrown (try (fault/fault! environment carried context) nil
                            (catch Throwable thrown thrown))
-             wrapped (ex-info "enclosing boundary" {} panic)
+             wrapped (ex-info "enclosing boundary" {} carried)
              propagated (try (fault/fault! environment wrapped context) nil
                              (catch Throwable thrown thrown))
              {:keys [row woken]} (stored connection (:seon.error/signature receipt))]
-         (is (identical? panic rethrown) "a carried receipt propagates unchanged")
+         (is (identical? carried rethrown) "a carried receipt propagates unchanged")
          (is (identical? wrapped propagated) "found through a cause-preserving wrapper")
          (is (= 1 (:seon.error.occurrence/count (first (:seon.error/occurrences row))))
              "the propagation counted once")
          (is (contains? woken "root") "a manifest naming root wakes it"))))))
 
-(deftest an-unknown-write-outcome-panics-in-both-modes-without-retry
-  (doseq [mode [:record :panic]]
+(deftest an-unknown-write-outcome-stops-and-throws-without-retry
+  ;; storage failing is the one case in which a fault throws (task 6b8d26a16ce7)
+  (let [mode :unknown]
     (test-support/with-database
      (fn [connection]
        (let [cluster-name (str "fault-unknown-" (name mode))
-             environment (world connection cluster-name {:seon.config/on-core-error mode})
+             environment (world connection cluster-name {})
              ;; the bound is for the fault's write alone: set last, so the
              ;; world's own seeding writes never run under it
              _ (test-support/apply-config! connection cluster-name
@@ -198,8 +198,7 @@
            (let [panic (try (fault/fault! environment (nested-failure) context) nil
                             (catch clojure.lang.ExceptionInfo thrown thrown))
                  receipt (:seon.fault/recorded (ex-data panic))]
-             (is (some? panic) (str mode " panics"))
-             (is (= :panic (:seon.fault/policy receipt)))
+             (is (some? panic) "an unstorable fault throws")
              (is (false? (:seon.fault/committed? receipt)))
              (is (true? (get-in (ex-data panic) [:seon.fault/outcome
                                                  :seon.db/transaction-outcome-unknown])))
@@ -222,7 +221,7 @@
          (fn [attempt]
            (let [origin (get-in (db/db attempt) [:config :branch])
                  store (:seon.store/store (test-support/execution-handle attempt))]
-             (test-support/apply-config! attempt cluster-name {:seon.config/on-core-error :record})
+             (test-support/apply-config! attempt cluster-name {})
              (test-support/transacted!
               attempt (into (test-support/agents-tx @attempt ["root"])
                             (agent/creation-tx {:seon.agent/id "worker" :seon.ns/name 'my.agents.worker

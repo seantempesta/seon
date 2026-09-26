@@ -56,7 +56,6 @@
                       (support/fork-cluster-ctx connection)}
             settings (assoc (support/effective-config)
                             :seon.config.eval/time-limit-ms 1000
-                            :seon.config/on-core-error :record
                             :seon.config.eval.result/max-depth 8
                             :seon.config.eval.result/max-collection 32
                             :seon.config.eval.result/max-string 4096

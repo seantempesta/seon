@@ -181,8 +181,7 @@
   (merge (select-keys request-context
                       [:seon.db/db :seon.sci.eval/ctx :seon.schema/projection
                        :seon.env/environment :seon.sci.eval/projection-state])
-         {:seon.sci.admit/caps (:seon.sci.admit/caps request-context)
-          :seon.config/on-core-error (:seon.config/on-core-error request-context)}))
+         {:seon.sci.admit/caps (:seon.sci.admit/caps request-context)}))
 
 (defn- admitted-value
   [dials value]
@@ -636,8 +635,7 @@
                 [:seon.db/connection
                  :seon.db/db :seon.sci.eval/ctx :seon.schema/projection
                  :seon.env/environment :seon.sci.eval/projection-state
-                 :seon.sci.admit/caps
-                 :seon.config/on-core-error])
+                 :seon.sci.admit/caps])
    {:seon.effect/id effect-id
     :seon.effect/opened-at opened-at
     ::owner-sym owner-sym

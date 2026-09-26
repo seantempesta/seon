@@ -33,9 +33,8 @@
   `admit-value` returns that answer without the serialized EDN key; `admit`
   adds `:seon.sci.admit/edn` for storage callers. Admission
   preserves supplied evaluation diagnostics. SCI interrupts propagate. Other
-  projection failures panic or degrade to markers according to
-  `:seon.config/on-core-error`. Admission opens no resources and writes no
-  durable state."
+  projection failures degrade to markers naming the failure. Admission opens
+  no resources and writes no durable state."
   (:require [clojure.test.check.generators :as gen]
             ;; sci.lang and sci.impl.types are loaded for their deftypes:
             ;; the class literals below do not exist until their defining
@@ -496,8 +495,9 @@
                                       (.getName (class failure)))})))
 
 (defn- rethrow-or-degrade!
-  "The two throwables admission must never swallow, then R41's one dial."
-  [state value failure]
+  "Rethrow the two throwables admission must never swallow; every other
+  projection failure degrades to its marker."
+  [failure]
   ;; the interrupt is the one throwable admission must not swallow
   ;; resolved at call time because the guarded kernel requires this
   ;; namespace: the owner of "is this sci's interrupt?" sits above
@@ -506,22 +506,7 @@
     (throw failure))
   ;; nor the storage bound: reaching it ends the whole admission
   (when (over-bound? failure)
-    (throw failure))
-  ;; R41 DECIDES THIS, not local judgement (owner ruling reversing
-  ;; the drafted marker-only choice): a value the total codec cannot
-  ;; project is a core degradation, so development panics on it
-  ;; immediately and production degrades.
-  (when (= :panic (:on-core-error state))
-    (throw (ex-info "Value admission could not project the supplied value."
-                    (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.admit/projection 'seon.sci.admit/rethrow-or-degrade!
-                     {:seon.error/message "Value admission could not project this value; inspect the codec failure evidence."
-                      :seon.error/offending value
-                      ::failed-class (symbol (.getName (class value)))
-                      :seon.error/exception-class (symbol (.getName (class failure)))
-                      :seon.sci.admit/projection-failure-message (or (ex-message failure) "Projection failed.")
-                      :seon.error/member :seon.sci.admit/value
-                      :seon.error/expected :seon.print/node})
-                    failure))))
+    (throw failure)))
 
 (defn- project
   "Project and emit one value's whole tree, iteratively.
@@ -545,7 +530,7 @@
                 outcome (try
                           (open-node value state)
                           (catch Throwable failure
-                            (rethrow-or-degrade! state value failure)
+                            (rethrow-or-degrade! failure)
                             {::node (failed-node! state mark mark-bytes
                                                   value failure)}))]
             (if-some [node (::node outcome)]
@@ -561,7 +546,7 @@
               outcome (try
                         (frame-advance frame (nth step 1) state)
                         (catch Throwable failure
-                          (rethrow-or-degrade! state (::source frame) failure)
+                          (rethrow-or-degrade! failure)
                           [::done (failed-node! state (::mark frame)
                                                 (::mark-bytes frame)
                                                 (::source frame) failure)]))]
@@ -758,7 +743,6 @@
   {:malli/schema [:=> [:cat :seon.sci.admit/request] [:or :seon.sci.admit/admitted :seon.config/error]]}
   [{::keys [value interrupt-fn caps record unbounded?]
     supplied-projection :seon.schema/projection
-    on-core-error :seon.config/on-core-error
     :as request}]
   (let [supplied-projection
         (or (:seon.schema/projection (meta value))
@@ -770,15 +754,14 @@
            (not (int? (:seon.config.eval.result/max-bytes caps))))
     (missing-bound-refusal caps)
     (admit-walk value interrupt-fn caps record unbounded?
-                supplied-projection on-core-error))))
+                supplied-projection))))
 
 (defn- admit-walk
   [value interrupt-fn caps record unbounded?
-   supplied-projection on-core-error]
+   supplied-projection]
   (let [projection supplied-projection
         builder (StringBuilder.)
         state {:interrupt-fn interrupt-fn
-               :on-core-error on-core-error
                ;; Identity projection is handed by the operation boundary.
                ;; Ordinary scalar/collection admissions never require it.
                :projection projection

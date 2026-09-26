@@ -122,7 +122,6 @@
                [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
                [:seon.boot/cluster-name :seon.boot/cluster-name]
                [:seon.sci.admit/caps :seon.sci.admit/caps]
-               [:seon.config/on-core-error :seon.config/on-core-error]
                [:seon.agent/id {:optional true} :seon.agent/id]
                [:seon.sci.eval/projection-state
                 {:optional true,

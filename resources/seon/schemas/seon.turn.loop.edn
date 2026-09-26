@@ -269,8 +269,6 @@
                   [:seon.sci.admit/caps :seon.sci.admit/caps]
                   [:seon.config.eval/time-limit-ms
                    :seon.config.eval/time-limit-ms]
-                  [:seon.config/on-core-error
-                   :seon.config/on-core-error]
                   [:seon.config.error/recurrence-limit
                    :seon.config.error/recurrence-limit]
                   [:seon.config.error/max-evidence-bytes

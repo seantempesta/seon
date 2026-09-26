@@ -51,8 +51,6 @@
                   [:seon.sci.admit/interrupt-fn
                    :seon.sci.admit/interrupt-fn]
                   [:seon.sci.admit/caps :map]
-                  [:seon.config/on-core-error
-                   :seon.config/on-core-error]
                   [:seon.sci.admit/unbounded?
                    {:optional true}
                    :seon.sci.admit/unbounded?]
