@@ -507,6 +507,67 @@
                 (flow/stop graph)
                 (is (nil? (join!))))))))))
 
+;;; Lost-error seams P1: a panicked proc must not strand its graph. Flow fans
+;;; control out through per-proc taps of 10 behind a control channel of 10
+;;; (`impl.clj:99,150-165`). While a proc is stalled in its step, commands pile
+;;; up; a proc that then stops ITSELF never reads its tap again, and `flow/stop`
+;;; on its own thread blocks on the full control channel, so the graph and
+;;; every later command froze (reproduced 2026-09-25 with 25 queued commands).
+(defn- stalling-work-step
+  ([] {:ins {::work "Messages; :stall waits on the gate, then throws."} :outs {} :workload :io})
+  ([args] (assoc args ::flow/in-ports {::work (::work args)}))
+  ([state _transition] state)
+  ([state _input message]
+   (when (= :stall message)
+     (.countDown ^CountDownLatch (::entered state))
+     (.await ^CountDownLatch (::gate state) 4 TimeUnit/SECONDS)
+     (throw (ex-info "a stalled step failed" {::message message})))
+   (swap! (::seen state) conj message)
+   [state nil]))
+
+(deftest a-panicked-proc-with-saturated-control-still-stops-its-graph
+  (test-support/with-database
+    (fn [connection]
+      (test-support/apply-config! connection "seon.flow-test" {:seon.config/on-core-error :panic})
+      (let [in (async/chan 3)
+            seen (atom [])
+            entered (CountDownLatch. 1)
+            gate (CountDownLatch. 1)
+            {::sut/keys [graph executor]}
+            (binding [*err* (java.io.StringWriter.)]
+              (sut/start-graph!
+               {::sut/graph-definition
+                {:procs {::stalling-work
+                         {:proc (sut/var-process #'stalling-work-step :io
+                                                 {:seon.env/environment
+                                                  (test-support/environment "seon.flow-test" connection)
+                                                  ::work in ::seen seen ::entered entered ::gate gate})}}
+                 :conns []}}))
+            issued (atom 0)
+            done (atom 0)]
+        (async/onto-chan!! in [:stall :after] false)
+        (test-support/await-event! entered ::stalled)
+        (let [commands (vec (repeatedly 25 #(async/thread (swap! issued inc)
+                                                          (flow/ping-proc graph ::stalling-work 50)
+                                                          (swap! done inc))))]
+          (try
+            ;; 25 commands exceed the 20 the stalled proc's tap and the control
+            ;; channel can hold, so the later ones wait inside `send-command`
+            (test-support/await-event! issued ::commands-issued #(= 25 %))
+            (.countDown gate)
+            (binding [*err* (java.io.StringWriter.)]
+              (is (nil? (sut/join-graph! {::sut/executor executor
+                                          :seon.await/bound (join-bound 3000)
+                                          :seon.await/diagnostic {:seon.error/layer :flow
+                                                                  :seon.error/operation ::stalling-work}}))
+                  "the panicked graph stops and joins within its bound"))
+            (doseq [command commands]
+              (test-support/await-event! command ::queued-command-completed (constantly true) 3000))
+            (is (= 25 @done) "every queued command completes once the graph stops")
+            (is (= [] @seen) "the input queued behind the panic never runs")
+            (finally
+              (.countDown gate))))))))
+
 (deftest background-io-submission-is-nonblocking-bounded-and-joined
   (let [entered (CountDownLatch. 1)
         release (CountDownLatch. 1)

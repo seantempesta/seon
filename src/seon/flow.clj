@@ -10,6 +10,7 @@
             [clojure.core.async.flow :as flow]
             [clojure.core.async.flow.impl.graph :as flow.graph]
             [clojure.core.async.flow.spi :as flow.spi]
+            [clojure.core.async.impl.channels :as async.channels]
             [clojure.core.async.impl.protocols :as async.impl]
             [clojure.datafy :as datafy]
             [clojure.test.check.generators :as gen]
@@ -65,6 +66,10 @@
   [value]
   (var? value))
 
+(defn- write-port?
+  [value]
+  (satisfies? async.impl/WritePort value))
+
 (schema/register-core-predicate! 'seon.flow/executor? executor?)
 (schema/register-core-predicate! 'seon.flow/atom-reference? atom-reference?)
 (schema/register-core-predicate! 'seon.flow/java-future? java-future?)
@@ -72,6 +77,7 @@
 (schema/register-core-predicate! 'seon.flow/graph? graph?)
 (schema/register-core-predicate! 'seon.flow/channel? channel?)
 (schema/register-core-predicate! 'seon.flow/step-var? step-var?)
+(schema/register-core-predicate! 'seon.flow/write-port? write-port?)
 
 (defn- graph-executor
   "One graph's own proc-loop executor: a virtual thread per task, running in
@@ -207,15 +213,23 @@
   values stay on the throwables), and answers true so the caller stops the
   graph; the step still returns to Flow, because a stop transition must exit
   for the graph's join to complete (`impl.clj:181,317-320`). Answers false
-  when the fault was recorded and the graph continues."
-  {:malli/schema [:=> [:cat ::step-var :map :seon.error/throwable] :boolean]}
-  [step-var args failure]
+  when the fault was recorded and the graph continues. A supplied `stop!` is
+  the owner's stop request (`:seon.fault/stop-request!`): `fault!` calls it
+  BEFORE recording under `:panic`, so the stop never waits on a stalled or
+  failing write, nor on the printing below."
+  {:malli/schema [:function
+                  [:=> [:cat ::step-var :map :seon.error/throwable] :boolean]
+                  [:=> [:cat ::step-var :map :seon.error/throwable [:maybe :seon.fault/stop-request!]] :boolean]]}
+  ([step-var args failure]
+   (proc-failed! step-var args failure nil))
+  ([step-var args failure stop!]
   (try
     (fault/fault! (env/of args) failure
-                  (merge {:seon.error/layer ::proc
-                          :seon.error/operation (symbol step-var)
-                          :seon.db.process/id (process/id (process/current-identity))}
-                         (select-keys (env/of args) [:seon.agent/id])))
+                  (cond-> (merge {:seon.error/layer ::proc
+                                  :seon.error/operation (symbol step-var)
+                                  :seon.db.process/id (process/id (process/current-identity))}
+                                 (select-keys (env/of args) [:seon.agent/id]))
+                    stop! (assoc :seon.fault/stop-request! stop!)))
     false
     (catch Throwable panic
       (let [receipt (:seon.fault/recorded (ex-data panic))]
@@ -229,21 +243,47 @@
             (println (render.value/floor panic))
             (println (render.value/floor failure)))
           (flush))
-        true))))
+        true)))))
 
-(defn- stop-panicked-graph!
-  "Stop the graph whose proc panicked, from that proc's own thread, never
-  joining it. The proc's own control tap receives Flow's stop first: the
-  loop reads control before any input (`impl.clj:287-295`), so no queued
-  input runs after the panic. `flow/stop` then stops every other proc and
-  closes the graph's channels without awaiting any exit
-  (`impl.clj:174-183`). A graph not started by `start-graph!` names no
-  graph; only its panicked proc stops. The graph reference is the promise
-  channel `start-graph!` fills before any proc starts, polled, never awaited."
-  {:malli/schema [:=> [:cat ::channel [:maybe ::channel]] [:maybe :boolean]]}
+(defn- request-graph-stop!
+  "Request the whole graph's stop on a virtual thread, never the panicked proc's.
+
+  `flow/stop` takes Flow's lock and puts its command with a blocking `>!!`
+  onto a control channel of 10, fanned out by a mult to per-proc taps of 10
+  (`impl.clj:71-75,99,150-165,174-183`). A proc that stops ITSELF through its
+  own tap never reads that tap again, so about twenty later commands (pings)
+  wedge the mult and every command after them, `flow/stop` included, blocks
+  forever; and `flow/stop` on the panicked proc's own thread, while its tap is
+  full, deadlocks on itself. So the panicked proc keeps reading control (its
+  inputs closed by `::flow/input-filter`) and the graph-wide stop is sent from
+  another thread: every proc, the panicked one included, receives the one
+  stop through the mult. A graph not started by `start-graph!` names no graph;
+  only its panicked proc stops, through its own tap. The graph reference is the
+  promise channel `start-graph!` fills before any proc starts, polled."
+  {:malli/schema [:=> [:cat ::channel [:maybe ::channel]] :boolean]}
   [control graph-ref]
-  (async/put! control #::flow{:command ::flow/stop :to ::flow/all})
-  (some-> graph-ref async/poll! flow/stop))
+  (if-let [graph (some-> graph-ref async/poll!)]
+    (do (Thread/startVirtualThread ^Runnable (fn [] (flow/stop graph))) true)
+    (async/put! control #::flow{:command ::flow/stop :to ::flow/all})))
+
+(defn- fault-port
+  "The `::flow/error` output a proc's loop reports to (`impl.clj:312-319`),
+  disposed on the reporting thread: `>!!` commits the synchronous handler under
+  its lock and `dispose!` runs before the completed box returns
+  (`impl/protocols.clj:18-29`, `async.clj:200-211`). It replaces Flow's sliding
+  graph error channel (`impl.clj:102`), which drops faults and which `flow/stop`
+  closes before an unwinding proc reports (`impl.clj:179`). Only Flow's
+  synchronous `>!!` is served; an inactive handler is refused with nil."
+  {:malli/schema [:=> [:cat :seon.instrument/callable] ::write-port]}
+  [dispose!]
+  (reify async.impl/WritePort
+    (put! [_ report handler]
+      (.lock ^java.util.concurrent.locks.Lock handler)
+      (let [committed (try (when (async.impl/active? handler) (async.impl/commit handler))
+                           (finally (.unlock ^java.util.concurrent.locks.Lock handler)))]
+        (when committed
+          (dispose! report)
+          (async.channels/box true))))))
 
 (defn var-process
   "Build one Flow proc launcher from a step VAR and a pinned workload.
@@ -287,21 +327,28 @@
          ;; transition or transform is one fault through `fault!`. A recorded
          ;; fault keeps the proc's state; a panic stops the graph, except
          ;; while the proc already acknowledges a stop
-         step (fn [control graph-ref]
-                (let [failed! (fn [failure stopping?]
-                                (when (and (proc-failed! step-var args failure) (not stopping?))
-                                  (stop-panicked-graph! control graph-ref)))]
+         ;; a panicked proc reads no further input until the graph's stop
+         ;; reaches it: Flow reads control regardless of the filter
+         closed (fn [state] (assoc state ::flow/input-filter (constantly false)))
+         step (fn [stop!]
+                (let [failed! (fn [failure]
+                                (let [panicked? (proc-failed! step-var args failure stop!)]
+                                  (when panicked? (stop!))
+                                  panicked?))]
                   (fn
                     ([] (step-var))
                     ([init-args] (step-var (dissoc init-args ::graph-ref)))
                     ([state transition]
                      (try (step-var state transition)
                           (catch Throwable failure
-                            (failed! failure (= ::flow/stop transition)) state)))
+                            (if (and (failed! failure) (not= ::flow/stop transition))
+                              (closed state)
+                              state))))
                     ([state input message]
                      (try (step-var state input message)
-                          (catch Throwable failure (failed! failure false) [state nil]))))))
-         launcher (flow/process (step nil nil) options)]
+                          (catch Throwable failure
+                            [(cond-> state (failed! failure) closed) nil]))))))
+         launcher (flow/process (step (fn [])) options)]
      (reify
        core.protocols/Datafiable
        (datafy [_]
@@ -311,11 +358,33 @@
        (describe [_]
          (flow.spi/describe launcher))
        (start [_ start-options]
-         (flow.spi/start
-          (flow/process (step (get-in start-options [:ins ::flow/control])
-                              (get-in start-options [:args ::graph-ref]))
-                        options)
-          (update start-options :args #(merge args %))))))))
+         (let [requested (atom false)
+               stop! (fn []
+                       (when (compare-and-set! requested false true)
+                         (request-graph-stop! (get-in start-options [:ins ::flow/control])
+                                              (get-in start-options [:args ::graph-ref]))))
+               ;; a loop-level failure Flow reports outside the step
+               ;; (`send-outputs`, the outer loop) is one fault by reference:
+               ;; the proc's state is named by its pid, never copied
+               dispose! (fn [report]
+                          (try
+                            (let [failure (ex-info "A Flow proc loop failed outside its step."
+                                                   (select-keys report [::flow/pid ::flow/status ::flow/cid
+                                                                        ::flow/op ::flow/count])
+                                                   (::flow/ex report))]
+                              (when (proc-failed! step-var args failure stop!) (stop!)))
+                            (catch Throwable failure
+                              (stop!)
+                              (try (binding [*out* *err*]
+                                     (prn {:seon.error/message "SEON CORE FAULT (unrecorded Flow report)"
+                                           ::flow/pid (::flow/pid report)
+                                           :seon.error/throwable-class (.getName (class failure))}))
+                                   (catch Throwable _ nil)))))]
+           (flow.spi/start
+            (flow/process (step stop!) options)
+            (-> start-options
+                (update :args #(merge args %))
+                (assoc-in [:outs ::flow/error] (fault-port dispose!))))))))))
 
 (defn bounded-platform-executor
   "Create a bounded executor whose workers are platform threads."

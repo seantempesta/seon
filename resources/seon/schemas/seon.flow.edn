@@ -25,6 +25,11 @@
              {:error/message "must be a core.async channel"
               :gen/gen seon.flow/channel-generator}
              seon.flow/channel?],
+            :write-port
+            [:fn
+             {:error/message "must be a core.async write port"
+              :gen/gen seon.flow/channel-generator}
+             seon.flow/write-port?],
             :commit-drop!
             [:=>
              [:cat :seon.error/recording-observation]
