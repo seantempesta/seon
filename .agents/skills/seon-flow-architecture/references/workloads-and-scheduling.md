@@ -49,7 +49,7 @@ memoizes one executor per workload tag for the whole process (`:98-111`).
 
 Seon's `var-process` accepts only `:io` or `:compute`, refuses a missing or
 `:mixed` declaration, a non-Var step and arguments that name no
-`:seon.env/environment`, all at construction (`src/seon/flow.clj:132-184`).
+`:seon.env/environment`, all at construction (`src/seon/flow.clj:286-385`).
 Requiring a Var means re-evaluating the referenced `defn` changes behavior
 without rebuilding the graph.
 
@@ -62,31 +62,22 @@ The process root holds one executor pair,
 - `:io` is core.async's own memoized `(executor-for :io)`, virtual thread per
   task;
 - `:compute` is `seon.flow/bounded-platform-executor`, a fixed platform pool of
-  `availableProcessors` threads (`src/seon/flow.clj:186-190`).
+  `availableProcessors` threads (`src/seon/flow.clj:387-391`).
 
 Do not flatten the roles below into "the executor":
 
 | graph or work | executor it receives | source |
 |---|---|---|
-| each agent graph | `:io-exec` = the handle's `:seon.flow/executor` | `src/seon/cluster/agent.clj:579-580` |
-| the cluster graph (armer, render) | `:io-exec` = the same handle executor | `src/seon/cluster.clj:3347` |
-| that handle executor | `seon.cluster/projection-executor`: root `:io`, binding the cluster's projection state around each task | `src/seon/cluster.clj:3307-3322`, assigned `:3370-3379` |
-| the work-launcher graph | its own `graph-executor`: a virtual thread per proc task, the graph's join | `src/seon/flow.clj:80-100`, started by `start-graph!` `:101` |
+| every graph (each agent, the cluster graph, the work launcher) | its own `graph-executor` as `:io-exec`: a virtual thread per proc task, the graph's join | `src/seon/flow.clj:80-100`, assigned by `start-graph!` `:101-125` |
+| the cluster handle's `:seon.flow/executor` | `seon.cluster/projection-executor`: root `:io`, binding the cluster's projection state around each task | `src/seon/cluster.clj:3409-3424`, assigned `:3486-3488` |
 | launcher I/O submissions | root `:io` as the task executor | `src/seon/flow.clj:610`, dispatched in `execute-io-work!` `:440` |
-| capability handlers | root `:io` | `src/seon/effect.clj:490-492` |
+| capability handlers | root `:io` | `src/seon/effect.clj:465-467` |
 
 Flow's resolver uses core.async's defaults exactly when a graph omits the
 matching override
 (`reference-code/core.async/src/main/clojure/clojure/core/async/flow/impl.clj:50-56,145-148`).
-The work-launcher graph therefore resolves its `:io` proc loops through that
-fallback. The object is the same memoized executor the root holds, so the
-escape is latent, but the projection binding the other graphs carry is absent
-(`docs/seon/issues/flow-work-launcher-graph-omits-its-root-io-executor.md`).
 
-The root `:compute` pool runs only the launcher graph's one `:compute` proc,
-the capacity observer (`src/seon/flow.clj:217-239`). Submitted compute work
-runs on root `:io` virtual threads; its bound is the launcher's admission
-count, not a pool size. The pool is shared by every cluster in the JVM
+The root `:compute` pool is shared by every cluster in the JVM
 (`docs/seon/issues/root-compute-executor-has-no-per-cluster-fairness.md`).
 
 ## Parking, occupation, and pinning
@@ -186,7 +177,7 @@ and leaf workload facts; that reachability owner is still **[TARGET]**.
 
 The only built metadata step is parse-time lifting of explicit
 `:seon.workload` metadata into `:seon.fn/workload`
-(`src/seon/sci/reader.cljc:278-297`).
+(`src/seon/sci/reader.cljc:285-304`).
 
 ## Decision checklist
 

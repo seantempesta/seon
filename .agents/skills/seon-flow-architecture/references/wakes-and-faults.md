@@ -22,19 +22,20 @@ or changing fault capture and `:record`/`:panic` behavior.
 ## The listeners a cluster connection holds
 
 There is one wake ROUTER per cluster, `seon.cluster.wake/route!`
-(`src/seon/cluster/wake.clj:438-548`), registered by `arm-agents!` under the
-key `:seon.agent/route` (`src/seon/cluster.clj:3463-3474`). It is not the only
+(`src/seon/cluster/wake.clj:433-532`), registered by the armer proc as it
+starts (`src/seon/cluster/agent.clj:1527`) under the key
+`:seon.agent/route` (`src/seon/cluster.clj:3440-3453`). It is not the only
 Datahike listener on the connection. At HEAD a cluster connection with N
 armed agents holds 2 + N long-lived listeners:
 
 | key | owner | registered at |
 |---|---|---|
-| `:seon.agent/route` | the wake router | `src/seon/cluster.clj:3463-3474` |
-| a `random-uuid` per agent | each agent's schedule proc, on `::flow/resume` | `src/seon/schedule.clj:795-799` |
-| `::program-identity` | the SCI program-identity observer | `src/seon/sci/eval.clj:2412-2421`, called from `:2713`, `:2782` |
+| `:seon.agent/route` | the wake router | `src/seon/cluster.clj:3440-3453` |
+| a `random-uuid` per agent | each agent's schedule proc, on `::flow/resume` | `src/seon/schedule.clj:761-765` |
+| `::program-identity` | the SCI program-identity observer | `src/seon/sci/eval.clj:3276-3285`, called from `:3618`, `:3693` |
 
 `seon.eval.drive/await-fact!` adds one short-lived listener per wait
-(`src/seon/eval/drive.clj:60-64`). The census is recorded in
+(`src/seon/eval/drive.clj:50-54`). The census is recorded in
 `docs/research/agent-platform/flow-usage-audit-2026-09-23.md` (D3) and
 `docs/seon/issues/one-cluster-holds-two-plus-n-datahike-listeners.md`. The
 call-preparation listener that note names was deleted in `306f32431`; the
@@ -48,17 +49,19 @@ work log: messages and identities are already database facts.
 ## The two hard listener rules
 
 The router's namespace docstring states the rules and the measured routing
-traps (`src/seon/cluster/wake.clj:1-58`).
+traps (`src/seon/cluster/wake.clj:1-65`).
 
-### Never throw
+### Failures reach the connection's handler
 
 At the pinned fork, `transact!` delivers the transaction promise first and
 then notifies every listener independently, inside the go block that settled
-the transaction (`reference-code/datahike/src/datahike/writer.cljc:390-414`).
-Datahike catches each callback's `Throwable` and only logs it
-(`writer.cljc:379-388`). An uncaught listener failure therefore reaches a
-log line and nobody else. Catch at the router boundary and send the failure
-to the fault channel; a returned transaction report never proves delivery.
+the transaction (`reference-code/datahike/src/datahike/writer.cljc:417-441`).
+Datahike catches each callback's `Throwable`; with a `:listener-failure`
+handler on the connection it retires the listener by identity and hands the
+handler the failure, else it only logs it (`writer.cljc:394-415`). The router
+throws a refused delivery into Datahike, whose handler
+(`seon.cluster.store/listen-failures!`, `src/seon/cluster/store.clj:621`)
+stores one fault; a returned transaction report never proves delivery.
 
 ### Never park
 
@@ -67,16 +70,14 @@ a core.async dispatch thread. Use non-blocking `offer!` into already-buffered
 flow inputs. Do not use blocking channel operations, rendering, logging
 transports or model calls in a listener, and keep queries out of it.
 
-The router currently breaks the query rule on one path: when a transaction
-carries a `seon.wake`/`seon.listen`/runtime/schema datom it rebuilds its
-matchers with a Datalog query inside the callback
-(`src/seon/cluster/wake.clj:512-523`, `wake-matchers` at `:397-436`). Its
-catch also `offer!`s a bare `Throwable` and drops the offer's answer
-(`:546-547`). Both are recorded in
+The router breaks the query rule: it derives its matchers with a Datalog
+query from each report's `:db-after` inside the callback
+(`src/seon/cluster/wake.clj:506-507`, `wake-matchers` at `:392-431`). This is
+recorded in
 `docs/seon/issues/the-wake-router-queries-on-the-writer-thread-and-drops-its-own-fault.md`.
 
 A refused transaction does not wake: dispatch is gated on `(map? tx-report)`
-(`writer.cljc:403`). Reasserting an identical value produces no datom, so
+(`writer.cljc:427`). Reasserting an identical value produces no datom, so
 attribute-driven routing produces no wake. Consumers must not depend on a
 "write attempt" that the database does not report.
 
@@ -92,9 +93,10 @@ Reversing the first two steps creates a lost interval between the initial read
 and listener registration.
 
 `arm-agents!` states this order as its contract
-(`src/seon/cluster.clj:3349-3365`): the cluster graph starts, the error fan-out
-joins, `route!` registers (`:3463-3474`), one render wake is offered
-(`:3479`), then the armer's derive-all pass runs directly (`:3483-3488`). Keep
+(`src/seon/cluster.clj:3465-3479`): the cluster graph starts and its armer
+proc registers `route!` (`src/seon/cluster/agent.clj:1527`), one render wake is
+offered (`src/seon/cluster.clj:3551`), then the armer's derive-all pass runs
+directly (`:3556-3561`). Keep
 that direct pass. A synthetic "boot wake" sent before route registration is
 not equivalent.
 
@@ -102,77 +104,47 @@ not equivalent.
 
 | consumer | current interest | source |
 |---|---|---|
-| armer | an asserted attribute declared `:seon.wake/arms true`, or a recipient with no routing entry | `src/seon/cluster/wake.clj:534-535`, `:539-542` |
-| agent mailbox | attributes declared `:seon.wake/listen true` (the value addresses the agent) plus the agent's runtime `:seon.listen` patterns | `wake-matchers` `src/seon/cluster/wake.clj:397-436`; delivery `:536-542` |
-| cluster renderer | at most one wake per report, when a changed attribute is in `:seon.render.web/interest` (`:all` before the first complete derivation) | `src/seon/cluster/wake.clj:510-511`, `:526-528`, `:543-545` |
+| armer | an asserted attribute declared `:seon.wake/arms true`, or a recipient with no routing entry | `src/seon/cluster/wake.clj:520-521`, `:528` |
+| agent mailbox | attributes declared `:seon.wake/listen true` (the value addresses the agent) plus the agent's runtime `:seon.listen` patterns | `wake-matchers` `src/seon/cluster/wake.clj:392-431`; delivery `:522-528` |
+| cluster renderer | at most one wake per report, when a changed attribute is in `:seon.render.web/interest` (`:all` before the first complete derivation) | `src/seon/cluster/wake.clj:508-509`, `:512-514`, `:529-530` |
 
 The render interest is the union of retained reads' attributes, published by
-the render proc (`publish-interest!`, `src/seon/render/web.clj:2068-2080`).
+the render proc (`publish-interest!`, `src/seon/render/web.clj:2011-2023`).
 Every wake target holds one value: the armer and render channels are
-`(sliding-buffer 1)` (`src/seon/cluster.clj:3367`, `:3386`) and a mailbox is a
+`(sliding-buffer 1)` (`src/seon/cluster.clj:3483`, `:3505`) and a mailbox is a
 sliding-one `CountedSlidingBuffer` that counts overwrites
-(`src/seon/cluster/agent.clj:101-128`). A wake says only "look".
+(`src/seon/cluster/agent.clj:108-135`). A wake says only "look".
 
 ## Fault fan-out
 
-Every graph exposes core.async.flow's error and report channels.
-`seon.flow/start-error-fanout!` joins them (`src/seon/flow.clj:1191-1264`):
+Every producer calls `seon.fault/fault!` on its own thread; there is no fault
+channel or committer (`src/seon/fault.clj:1-7`). A Flow proc step's throw is
+recorded by `proc-failed!` on the proc's own thread, and Flow's sliding graph
+error channel is replaced by a synchronous error port
+(`src/seon/flow.clj:202-245`, `fault-port` at `:267-284`).
 
-- each source channel is `mult`ed; monitor taps use sliding buffers;
-- the fault tap is a `CountedDroppingBuffer` (`src/seon/flow.clj:966-1003`),
-  so observation never blocks the producing graph and overflow becomes one
-  synthetic fault carrying the dropped count;
-- each agent graph joins the cluster's fault channel; and
-- the fault committer proc (`fault-committer-step`, `src/seon/flow.clj:1005-1079`)
-  commits each fault as a database fact, in its own graph whose `:io-exec` is
-  supplied (`:1183-1189`).
-
-The error policy (`AGENTS.md:285-306`) says a core fault is committed at the
-owning boundary and never dropped by an overload channel. The installed
-fan-out is an overload channel of capacity 64
-(`src/seon/cluster.clj:3419`), so that half of the policy is **[TARGET]**.
-Core.async's own `error-chan` is also sliding, and a stop-transition error is
-lost by construction
-(`docs/seon/issues/durable-faults-cross-dropping-channels.md`,
-`docs/seon/issues/flow-stop-transition-errors-are-dropped-on-a-closed-error-channel.md`).
-
-Agent mistakes do not belong on the core fault channel. SCI/runtime boundaries
+Agent mistakes do not belong on the core fault route. SCI/runtime boundaries
 return flat `:seon.error` values for the agent to see; reserve flow errors for
 system defects.
 
 ## The config dial
 
-`arm-agents!` hands the fan-out a zero-argument mode reader that reads the
-cluster's effective `:seon.config/on-core-error` on every fault, falling back
-to `:record` when the fact is absent (`src/seon/cluster.clj:3421-3425`). The
-modes are declared at `resources/seon/schemas/seon.config.edn:39-40`; the
-shipped default is `:panic` (`config/default.edn:294`).
-
-Installed behavior (`fault-committer-step`, `src/seon/flow.clj:1054-1066`):
-
-- `:record`: commit the fault; call the panic handler only when the commit was
-  refused;
-- `:panic`: commit the fault, then call the panic handler;
-- a repeated signature is committed and not reported again.
-
-The cluster's panic handler, `emit-core-fault!`
-(`src/seon/cluster.clj:3229-3252`), prints one `SEON CORE FAULT` line to
-stderr and returns nil. It does not throw, stop the graph or mark it failed.
-The owner's `:panic` policy (the operation throws to its caller and the
-failing graph stops and shows as failed, `AGENTS.md:296-300`) and delivery of
-the fault fact to the responsible agent (`AGENTS.md:294-295`) are
-**[TARGET]**. Change the one handler and the committer; do not add per-site
-panic decisions.
+The modes of `:seon.config/on-core-error` are declared at
+`resources/seon/schemas/seon.config.edn:40-41`; the shipped default is
+`:panic` (`config/default.edn:303`). `seon.fault/policy` is the one decision:
+`:record` only when record mode's write committed, else `:panic`
+(`src/seon/fault.clj:189-195`). Under `:panic`, `fault!` throws to its caller
+with the receipt in its data (`src/seon/fault.clj:205-219`). Change that one
+decision; do not add per-site panic decisions.
 
 ## Change checklist
 
 1. Add no listener; derive the interest behind the one router.
-2. Catch everything at the listener boundary and route it with its cause.
-3. Use only non-blocking offers from a listener; keep queries out of it.
-4. Register the route before deriving current work.
-5. Derive interest from declared facts (`:seon.wake/listen`,
+2. Use only non-blocking offers from a listener; keep queries out of it.
+3. Register the route before deriving current work.
+4. Derive interest from declared facts (`:seon.wake/listen`,
    `:seon.wake/arms`, retained reads), not namespace or feature lists.
-6. Route agent mistakes as values and core faults through the fan-out.
-7. Preserve one cluster-level `:record`/`:panic` decision.
-8. Probe transaction latency and identical-value reassertion after listener
+5. Route agent mistakes as values and core faults through `seon.fault/fault!`.
+6. Preserve one cluster-level `:record`/`:panic` decision.
+7. Probe transaction latency and identical-value reassertion after listener
    changes.

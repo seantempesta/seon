@@ -10,17 +10,17 @@ Use this runbook when a scratch cluster fails during startup, especially while
 other lanes are changing the shared tree. Do not restart, stop or mutate
 another lane's cluster to obtain a cleaner signal; lanes never stop, refork or
 reset `default` (`AGENTS.md:333-334`). A boot longer than ten seconds needs the
-owner's explicit authorization (`AGENTS.md:113-114`).
+owner's explicit authorization (`AGENTS.md:307`).
 
 ## 1. Separate launch failure from degraded boot
 
 `seon.cluster.boot/start!` opens the `io-prepl` listener first, then publishes
 the instance into `seon.operator.runtime/running-instances` after every layer
-it stands (`src/seon/cluster/boot.clj:288-341`). A later failure throws with
+it stands (`src/seon/cluster/boot.clj:464-529`). A later failure throws with
 the value that stood under `:seon.boot/instance`; the REPL, the registry entry
 and (once the store stands) the advertisement survive. Only a failure before
 the first publication, or a store held elsewhere, unwinds the listener and the
-registry entry (`:332-337`).
+registry entry (`:517-528`).
 
 Start diagnosis with the exception's `:seon.boot/instance`. If an `io-prepl`
 in that JVM is reachable, ask the owning function for the same answer:
@@ -30,14 +30,14 @@ in that JVM is reachable, ask the owning function for the same answer:
  (get @seon.operator.runtime/running-instances "scratch-name"))
 ```
 
-`readiness` (`src/seon/cluster/boot.clj:489-504`) returns the advertisement,
+`readiness` (`src/seon/cluster/boot.clj:530-545`) returns the advertisement,
 `:seon.boot/missing-layers` (each required layer absent from the instance), the
 agent count, `seon.problems/problems` and `:seon.boot/ready-ms`. The registry
 atom is `resources/seon/operator/runtime.clj:11`.
 
 Read the missing layers in boot order
-(`stand-boot-layers!`, `src/seon/cluster/boot.clj:146-246`, then
-`stand-cluster-runtime!`, `:48-128`):
+(`stand-boot-layers!`, `src/seon/cluster/boot.clj:147-258`, then
+`stand-cluster-runtime!`, `:30-119`):
 
 | First missing layer | Failure boundary |
 |---|---|
@@ -53,16 +53,16 @@ Read the missing layers in boot order
 | `:seon.render.web/served` | web serve failed |
 
 `:seon.boot/ready-ms` is published only after the whole sequence returns
-(`src/seon/cluster/boot.clj:329-331`). Do not infer a higher layer from a pid
+(`src/seon/cluster/boot.clj:515-517`). Do not infer a higher layer from a pid
 or open socket alone.
 
 ## 2. Inspect the advertisement before touching lifecycle
 
 The per-cluster advertisement is `<bootstrap-root>/<cluster-name>/prepl.edn`
-(`cluster-paths`, `src/seon/cluster.clj:765-782`); the operator reads
+(`cluster-paths`, `src/seon/cluster.clj:763-780`); the operator reads
 `<operator-root>/data/clusters/*/prepl.edn` (`script/seon/operator.clj:123-131`).
-Boot writes it once the store stands (`src/seon/cluster/boot.clj:164-167`),
-and `serve!` rewrites it with the web URL (`src/seon/cluster.clj:3019`). JVM
+Boot writes it once the store stands (`src/seon/cluster/boot.clj:165-168`),
+and `serve!` rewrites it with the web URL (`src/seon/cluster.clj:3282`). JVM
 process identity is only `(pid, start-instant)`
 (`src/seon/cluster/process.clj:1-7`).
 
@@ -75,17 +75,16 @@ bin/seon status
 `bin/seon` accepts `--root PATH`, which must name an existing directory, and
 runs `seon.operator` with that operator root (`bin/seon:7-26`). Advertisement
 discovery, the exact-root process scan and every lifecycle command are
-root-scoped (`script/seon/operator.clj:106-131`). The process scan matches the
+root-scoped (`script/seon/operator.clj:123-148`). The process scan matches the
 exact `-Dseon.operator.root=<root>` JVM argument, never a command substring
-(`:121-131`).
+(`:138-148`).
 
 A file's mere presence is not proof of a live cluster: an advertisement counts
 only when its `(pid, start-instant)` matches a live process
-(`matching-handle`, `script/seon/operator.clj:110-121`;
-`seon.cluster/read-advertisement`, `src/seon/cluster.clj:3584`). A JVM that the
+(`matching-handle`, `script/seon/operator.clj:110-121`). A JVM that the
 scan finds but whose endpoint is unreadable makes `status` fail with "An
 exact-root JVM is alive but its endpoint is unavailable."
-(`script/seon/operator.clj:211-218`). The scratch cluster did not survive only
+(`script/seon/operator.clj:251-258`). The scratch cluster did not survive only
 when status names no live advertisement for it and no such exact-root JVM
 remains.
 
@@ -115,7 +114,7 @@ its store, logs and an optional `.env` (`script/seon/operator.clj:323-338`). Use
 same `--root` option with `status`, `logs scratch-name` and
 `stop scratch-name` so discovery and cleanup stay inside that root. MCP
 discovery defaults to the project root and lists another root only when it is
-passed explicitly (`script/seon/dev/mcp.clj:87-94`).
+passed explicitly (`script/seon/dev/mcp.clj:98-100`).
 
 ## 4. Fall back to an isolated in-memory JVM
 

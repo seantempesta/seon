@@ -14,7 +14,7 @@ boundary before adding a mechanism.
 
 `seon.flow/var-process` requires a step Var, explicit `:io` or
 `:compute` workload, and an environment in its arguments
-(`src/seon/flow.clj:132-184`). Using a Var keeps behavior live under
+(`src/seon/flow.clj:286-385`). Using a Var keeps behavior live under
 redefinition; topology changes rebuild the graph.
 
 Core.async's step function arities are describe, init, transition,
@@ -54,14 +54,13 @@ the event that failed to arrive.
 ## Agent context ownership
 
 Installed: each turn forks the current base context (`fork-for-turn`,
-`src/seon/sci/eval.clj:2287-2318`). When the agent's previous context is held,
-`regenerate-agent-context!` (`:2224-2285`) forks the new base and carries the
+`src/seon/sci/eval.clj:3156-3189`). When the agent's previous context is held,
+`regenerate-agent-context!` (`:3082-3154`) forks the new base and carries the
 agent's own private Vars over it as actual objects; inherited program bindings
 are replaced. Base contexts are memoized by program identity in a four-entry
-LRU (`program-cache-policy`, `:2321-2328`). The law is that a context is
-reacquired from its branch head at turn start and cached by commit id, and
-private defs, atoms and result objects stay in memory (`AGENTS.md:175`,
-`:217-218`). Do not restore `:seon.def` rows or rebuild a private layer from
+LRU (`program-cache-policy`, `:3191-3198`). The law is that a context is
+reacquired from its branch head at turn start, and
+private defs, atoms and result objects stay in memory (`AGENTS.md:127-130`). Do not restore `:seon.def` rows or rebuild a private layer from
 the database.
 
 **[TARGET]** (`docs/prds/agent-platform/plan/lane-b2-walk-flow-fork.md` §0,
@@ -84,24 +83,24 @@ path.
 Opening is system turn 0: ordinary submitted source, reply present, no
 provider attempt. Before each agent turn, the system turn projects the declared
 opening and every distinct retained read form; unchanged reads contribute no
-evaluation (`system-turn`, `src/seon/turn.clj:2055`). Include generated and
-agent-written reads, never writes or effects (`AGENTS.md:379-381`).
+evaluation (`system-turn`, `src/seon/turn.clj:2157`). Include generated and
+agent-written reads, never writes or effects (`AGENTS.md:250-251`).
 
 Datahike evidence capture and validity live in `seon.db/read-evidence`
-(`src/seon/db.clj:914`) and `seon.db/read-evidence-current?` (`:1149`).
+(`src/seon/db.clj:920`) and `seon.db/read-evidence-current?` (`:1167`).
 Extend the one mechanism in place rather than introducing a central
 dispatcher, block-specific refresh handlers, or another cache.
 
-The turn has three writes: open (`open-call`, `src/seon/turn.clj:393`); store
-the reply and its ordered evaluations (`plan-call`, `:611`); close
-(`close-tx`, `:430`). Opening while the agent already has an open turn is a
+The turn has three writes: open (`open-call`, `src/seon/turn.clj:421`); store
+the reply and its ordered evaluations (`plan-call`, `:665`); close
+(`close-tx`, `:458`). Opening while the agent already has an open turn is a
 no-op inside the writer, and an open turn refuses a second reply. At boot open
 turns close and unfinished evaluations become interrupted
-(`recover-call`, `:1650`); no interrupted execution resumes.
+(`recover-call`, `:1717`); no interrupted execution resumes.
 
 The prompt is stored evaluations rendered through their entity pair.
 Old shown text remains unchanged. Compaction wipes evaluations and
-regenerates the opening (`compact!`, `src/seon/turn.clj:2268`).
+regenerates the opening (`compact!`, `src/seon/turn.clj:2366`).
 The [runtime diagrams](../../../docs/seon/architecture/agent-runtime.md)
 show both additive sequences.
 
@@ -113,7 +112,7 @@ time. HTML renders the live object, or saved shown text after restart.
 
 Browser delivery stays in the cluster's existing render path.
 The socket writer waits for the dependency's drain-or-close completion:
-`reference-code/http-kit/src/org/httpkit/server.clj:321`.
+`reference-code/http-kit/src/org/httpkit/server.clj:345`.
 Do not infer socket drain from a successful send.
 
 For this wave verify default using the operator and MCP defaults.
