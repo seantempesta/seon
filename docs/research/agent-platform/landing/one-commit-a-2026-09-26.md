@@ -2,7 +2,7 @@
 type: landing
 lane: one-commit-a-opus
 date: 2026-09-26
-status: A (1df3d5769 + fix c672188e6) and B (fcee85161) committed; RESET NEEDED onto fcee85161 to measure the fix and B
+status: A kept (1df3d5769 + fix c672188e6); B measured faster but lost the value at the MCP entrance, deleted whole (de67fdd1a); RESET NEEDED onto de67fdd1a
 ---
 
 # Landing: one durable commit per form (A), then reply-when-applied (B) (2026-09-26)
@@ -65,34 +65,29 @@ The pass answers the reply port with its report; a pass that ends without settli
    blob.clj, turn.clj and two schema files: over the ~100-line presumption. It stays only if measured
    clearly faster than A; otherwise the next slice deletes it whole (fork seam included).
 
-## B: reply once the settlement is applied (fcee85161)
+## B: reply once the settlement is applied — measured, then deleted (de67fdd1a)
 
-Kept only if clearly faster than A (owner). One restart measures both: the probe's `:ms` is B's answer
-and `:durable-ms` is when the branch's committed value holds the run, i.e. when A would have answered on
-the same JVM and code.
+Measured on default pid 70849 (a34078273), probe above, 20 trivial forms on branch `one-commit-a`:
 
-- **Datahike fork** `c6c0f80d` (pushed to origin; gitlink bumped in fcee85161): `transact!` takes an
-  optional `applied` port; the processing loop puts the applied report (or the invocation's failure)
-  on it right after `op-fn`, before the batch commits (`writer.cljc`, ~12 lines). Committed callback,
-  listeners and terminal commit failure unchanged.
-- **One general writer operation** `seon.db/transact-applied!` (`src/seon/db.clj`): the same validated
-  path as `transact!` (`transact-through`, `transact-call`), answering the applied report; a
-  `durable-watch!` virtual thread hands a failed commit to the caller's `durable-failed!`. Only an
-  applied success is watched, so a refusal at application never reads as a storage failure. Not a
-  writer-wide mode: every other caller keeps `transact!` and waits for durability.
-- **One caller, opt-in at the site**: `settle-batch!`'s success commit. `settlement-lost!` names the lost
-  run(s) and calls `seon.fault/fault!`, which cannot store (the writer is stopped), so it runs the agent's
-  stop and throws. Refusal arms (`settle!`, `settle-batch-refusal!`) stay synchronous.
-- **The applied report carries its pending commit** as `:seon.db/durable` (declared in `seon.db.edn`).
-- **The agent's next form sees its previous writes**: the pass keeps the last applied value in its proc
-  state (`:seon.turn.loop/applied`, stripped from the Flow report and the reply) and starts from the
-  newer of it and the connection's committed value. No reader plumbing elsewhere (owner).
-- **Other qualifying callers (not converted)**: writes nobody needs durable before the answer, e.g.
-  profile samples and evaluation read evidence refreshes. Everything with consequences (merge,
-  write-back, tasks, config, schema adoption, boot, faults, branches, messages to root) stays `transact!`.
-- Regressions `test/seon/db_applied_write_test.clj`: an ordinary write answers after its commit; an
-  applied write answers with the writer's value, its `:seon.db/durable` resolves to the committed report,
-  and a later durable write commits after it; the blob permit is held until the commit resolves.
+| answer point | p50 ms | p95 ms |
+|---|---:|---:|
+| B: settlement applied | 40.0 | 46.1 |
+| run durable in the branch's committed value (= where A answers, same JVM and code) | 133.9 | 145.5 |
+| before this lane (two commits, perf-eval-overhead landing, in-JVM) | 155 | |
+
+(A first probe run's durable column read 137/164 ms because the probe's own poll ran 36k queries; the
+probe now queries only when the connection's value moves.)
+
+**Why it was deleted.** Every MCP SCI evaluation answered `"seon.dev.mcp/events":[]`, e.g. `(inc 1)` on a
+fresh branch and as a root run. `evaluate-source!` answered once the settlement was applied, but the
+bridge (`script/seon/dev/mcp.clj` `run-form`) reads the saved response from the connection, which had not
+committed yet. The agent's own observation is a reader of the committed value, so B broke the total REPL
+path. Keeping it would have meant handing the applied value to every observation of the agent's own
+result (the bridge, tests that read the connection after the answer, the next context), which is the
+pending-value plumbing the owner ruled out. Deleted whole: `seon.db/transact-applied!`, `durable-watch!`,
+`transact-through`, `:seon.db/durable`, `settlement-lost!`, the pass's applied state, the blob permit hold,
+`db_applied_write_test`, and the Datahike seam (fork revert `df4bcddb`, pushed; gitlink points at it).
+Regression: `evaluate_source_test` asserts `(inc 1)` answers `"2"` read from the connection at the answer.
 
 ## Evidence
 
@@ -106,8 +101,6 @@ the same JVM and code.
     terminal fact.
   - `test/seon/cluster/host_test.clj`: one submission waits, the next is refused busy, retirement
     answers or closes every reply.
-  - `test/seon/db_applied_write_test.clj` (B): an ordinary `transact!` answers after its commit; an
-    applied write answers with the writer's value and a later durable write commits after it.
 - Static checks before each commit: `seon.contracts-compile-test/check` over the changed files against
   the checkout's schema resources: no findings; both schema EDN files read; each changed namespace
   compiled in a throwaway namespace in default's JVM (removed after).

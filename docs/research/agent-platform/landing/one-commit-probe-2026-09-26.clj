@@ -22,8 +22,13 @@
                      at-answer (- (seon.db/basis-t @conn) b0)
                      id (:seon.turn/id r)
                      durable? #(seon.db/q '[:find ?r . :in $ ?id :where [?r :seon.turn/id ?id]] @conn id)
-                     _ (loop [n 0] (when (and id (not (durable?)) (< n 2000)) (Thread/onSpinWait) (recur (inc n))))
-                     _ (loop [] (when (and id (not (durable?)) (< (/ (- (System/nanoTime) t0) 1e6) 5000)) (Thread/sleep 1) (recur)))
+                     ;; poll the connection's value cheaply; query only when it moved
+                     _ (loop [seen nil]
+                         (let [now @conn]
+                           (when (and id (< (/ (- (System/nanoTime) t0) 1e6) 5000)
+                                      (or (identical? now seen) (not (durable?))))
+                             (Thread/sleep 1)
+                             (recur now))))
                      durable-ms (/ (- (System/nanoTime) t0) 1e6)]
                  {:ms ms :durable-ms durable-ms :ok (boolean id) :err (:seon.error/message r)
                   :commits-at-answer at-answer}))
