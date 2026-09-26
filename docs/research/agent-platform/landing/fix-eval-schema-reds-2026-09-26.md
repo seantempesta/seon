@@ -1,6 +1,6 @@
 ---
 type: landing
-status: landed (b4c1ed00e, 8074989b9); two reds need hunks in files this lane does not own; root runs the tests
+status: landed (b4c1ed00e, 8074989b9, 95b96f4aa, 26f1f40d6); root runs the tests
 lane: fix-eval-schema-reds-opus
 created: 2026-09-26
 ---
@@ -10,56 +10,53 @@ created: 2026-09-26
 Root's runs on default at f240fd666 (`tmp/orchestrator/verify-0720.out.d/004.txt`, `007.txt`)
 showed 13 reds in `seon.sci.eval-test` and 12 failures in `seon.schema-test`. Each red is
 classified below by the three questions, and each class is fixed once where it is produced.
-Two classes are produced in files this lane does not own. Their exact hunks and evidence are
-in the first section.
+Round 2 (root granted kernel.clj and schema/datahike.clj) fixed the two classes whose
+producers are in those files. No red is left without a fix; root runs the tests.
 
-## Still broken (hunks for their owners)
+## Round 2: the two owner fixes (95b96f4aa, 26f1f40d6)
 
-| Red | Class | Owner / hunk |
-|---|---|---|
-| `seon.sci.eval-test/both-entrances-classify-one-failure-identically` (:2311, 2 fails) | surviving-owner defect | `src/seon/sci/kernel.clj` (lost-error-seams lane). Hunk A below |
-| `seon.schema-test/error-declared-schemas-and-their-owned-members-are-storable` (:1420, 6 fails) | surviving-owner defect | `src/seon/schema/datahike.clj` (unowned; the store adopts through `cluster.clj` `declaration-changes`). Hunk B below |
+- **`both-entrances-classify-one-failure-identically` (:2311), surviving-owner defect.** SCI's
+  `interrupt!` tags its ex-data with an opaque marker object that `sci.impl.utils/interrupt-ex?`
+  reads (reference-code/sci/src/sci/interrupt.cljc:42). The cause chain `diagnostic` builds
+  (`seon.error.refusal/chain`, ed2e1a6b6) copies each link's ex-data whole. `failure-value`
+  removed the marker from the top-level data only, so it survived at
+  `[:seon.error/chain 1 :seon.error/data]`. The kernel owns the SCI knowledge, so it is fixed
+  there, with one strip: `failure-value` reads the chain once, strips the marker from each link
+  (`without-interrupt-marker`, contracted on `:seon.error/link`), takes the throwable's data from
+  the outermost link and returns that chain. The chain `diagnostic` derives is replaced by the
+  stripped one; `diagnostic` is unchanged. REPL (pid 7275), scratch copy compared with the
+  installed function on a real SCI time-limit and a thrown ex-info: the marker is gone; the result
+  validates as `:seon.sci.kernel/error` and against the output contract; every link validates;
+  apart from the chain the value is equal; the ex-info case is identical. +19 −3.
+- **`error-declared-schemas-and-their-owned-members-are-storable` (:1420 ×6), surviving-owner
+  defect.** `compiled-storage` (schema/datahike.clj:93-100) merged a named ref's target
+  properties, so an attribute that reuses an identity's value shape
+  (`:seon.turn/compaction-agent-id :seon.agent/id`) installed as `:db.unique/identity`; an error
+  carrying it would upsert onto another entity. `assert-storable-schema!` (:199-213) reads the
+  member's own properties and already treats identity as the declaring attribute's. The ref now
+  drops the target's `:seon.db/identity`/`:seon.db/unique`, and its own properties still apply.
+  A scratch copy compared with the installed function over all 3,477 projection keys: no value-type
+  or cardinality change; identity drops for 48 aliases, of which 6 are installed, exactly the
+  test's six (`:seon.context/selection-agent-id`, `:seon.message/unknown-recipient`,
+  `:seon.sci.eval/schema-refused`, `:seon.test.runner/default-cluster-refused`,
+  `:seon.test.runner/long-test-ns-hook`, `:seon.turn/compaction-agent-id`).
+  **Adoption on the live store**, an isolated branch of default (pid 7275), through the one schema-change
+  mechanism `seon.cluster/attribute-change-tx` with the six declarations less `:db/unique`: each
+  adopts `:replace` (`attribute-adoption`; dropping uniqueness is not an in-place Datahike update,
+  `datahike/schema.cljc:270`), 12 operations, committed through `seon.db/transact!` in 220 ms with no
+  refusal. Afterwards each is installed as the same value type and cardinality without
+  `:db/unique`, and re-adopts `:converged`. The live store and the branch hold **0 datoms** of all six,
+  so the replacement drops nothing. No accretion rename is needed. Introduced when refs began
+  carrying target properties (22a1a0567); the test came with acee1e21f. +7 −1.
 
-**Hunk A: SCI's interrupt marker reaches the cause chain.** `kernel/failure-value`
-(src/seon/sci/kernel.clj:543) removes `:sci.impl/interrupt` from the top-level ex-data only.
-`seon.error.refusal/diagnostic` then builds `:seon.error/chain` from the throwable
-(refusal.clj:75-89, ed2e1a6b6, 2026-09-22). The second link's `:seon.error/data` keeps the
-marker, an opaque `java.lang.Object`. REPL (pid 94554): the marker is at path
-`[:seon.error/chain 1 :seon.error/data]`. The chain is the whole cause, so it stays; only the
-kernel knows this key is SCI's private one. In `failure-value`, wrap the `diagnostic` result:
-
-```clojure
-(update result :seon.error/chain
-        (partial mapv (fn [link]
-                        (let [data (not-empty (dissoc (:seon.error/data link) :sci.impl/interrupt))]
-                          (if data (assoc link :seon.error/data data) (dissoc link :seon.error/data))))))
-```
-
-Proof on the real value, with the scrub applied in a scratch form: `:seon.sci.kernel/error` still
-validates, and no marker is left.
-
-**Hunk B: an alias of an identity attribute inherits `:db/unique`.** `compiled-storage`
-(src/seon/schema/datahike.clj:93-100) merges the target's properties through a named ref. An
-attribute declared as `:seon.turn/compaction-agent-id :seon.agent/id` therefore installs as
-`:db.unique/identity`, so an error carrying that value would upsert onto another error. The gate
-meant to refuse this, `assert-storable-schema!` (:199-213), reads the member's own properties and
-never dereferences, so it agrees with the test, not with the bridge. Identity is a property of
-the attribute being declared, not of the value shape it reuses. The hunk at :100:
-
-```clojure
-(assoc target ::properties (merge (dissoc (::properties target) :seon.db/identity :seon.db/unique)
-                                  properties))
-```
-
-REPL, a scratch copy of `compiled-storage` compared with the installed one over all 3,477
-projection keys: no value-type or cardinality changes; identity drops for 48 aliases. Six of them
-are installed with `:db/unique` today, exactly the test's six: `:seon.context/selection-agent-id`,
-`:seon.message/unknown-recipient`, `:seon.sci.eval/schema-refused`,
-`:seon.test.runner/default-cluster-refused`, `:seon.test.runner/long-test-ns-hook`,
-`:seon.turn/compaction-agent-id`. Adoption on the live store replaces an attribute whose
-uniqueness is dropped, together with its data (`cluster.clj:975-1005`,
-`declaration-property-changes`). Prove that adoption on a branch of the live store before
-landing. Introduced when refs began carrying target properties (22a1a0567); the test came with acee1e21f.
+For the sci.eval owner (root routes it; not fixed here): incremental `install-row!` installs
+the override's one row and does not interpret its affected callers, while regeneration
+(`base-ctx` on the changed database) does (39a337013). Measured on a branch where
+`seon.id/valid?` is overridden: the affected closure has 11 members, and regeneration binds
+701 names that incremental installation does not. Compiled callers direct-link the JVM
+definition, so after an incremental install they still call the JVM definition, not the
+override. `database-provenance-…` now asserts the subset relation and compares roots outside the
+affected closure.
 
 ## Classes, dispositions, commits that introduced them
 
@@ -97,7 +94,7 @@ landing. Introduced when refs began carrying target properties (22a1a0567); the 
 | `evaluation-custody-is-derived-only-from-the-cluster-context` (:1839) | retired assumption | a write refusal is `:seon.db/transaction-refused` naming `:seon.db/attribute`, not an invalid read; the read-back pulls its own message | unknown |
 | `non-evaluable-agent-source-reports-its-jvm-fallback` (error) | test of deleted machinery | `:jvm-fallback` has no src reference. Replaced by `a-non-evaluable-agent-override-is-its-agents-mistake-never-the-jvm-definition`: the mistake names `seon.id/valid?` and its cause, and the JVM definition does not resolve in its place (AGENTS: refuse unsupported overrides by name) | 03bd7cfc9 |
 | `static-and-runtime-contracted-definitions-publish-identical-facts` (9.5 s) | slow test design | publication's incremental path (`:seon.fn/changed-paths` + `:seon.source/previous-database`) indexes the one file: 306 ms, a row equal to the full build's (9,633 ms) | test |
-| `both-entrances-…` | owner defect | Hunk A | ed2e1a6b6 |
+| `both-entrances-…` | owner defect | fixed in kernel.clj, round 2 (95b96f4aa) | ed2e1a6b6 |
 
 The `s3.missing` override now refuses at analysis ("no analysis of s3.missing … fill the cache").
 That is a platform-fault diagnosis for the author's mistake, a call to a namespace that does
@@ -111,7 +108,7 @@ Every edited body was evaluated from the working file in a scratch namespace
 (`tmp/fix-eval-schema-reds/runner.clj`: the file's requires and helpers, then selected
 `deftest`s, run under a member handle acquired isolated off default's cluster and bound to
 `seon.test/*member*`). Default pid 7275 (snapshot 65bf078ec): all eight edited eval members were
-green (pass counts 6, 9, 3, 4, 26, 11, 4, 4), except `both-entrances`. This is diagnostic only:
+green (pass counts 6, 9, 3, 4, 26, 11, 4, 4); `both-entrances` is covered by the round-2 kernel proof. This is diagnostic only:
 the world is a branch of the live cluster, not the member request world, and the scratch copies
 run unarmed. The schema.clj change is **not loaded** in default (hook publication off), so
 schema-test's two fixes are proven on their parts, not by the tests. Default was down from 00:58
@@ -152,14 +149,13 @@ bin/test-check default --ns seon.schema-test        # after adopting src/seon/sc
 bin/test-check default --ns seon.sci.eval-test
 ```
 
-Adopt `src/seon/schema.clj` first. `seon.schema-test` stays red on
-`error-declared-schemas-…` until Hunk B lands; `seon.sci.eval-test` stays red on `both-entrances-…`
-until Hunk A lands.
+Adopt `src/seon/schema.clj`, `src/seon/schema/datahike.clj` (schema change: the six attributes
+replace as above) and `src/seon/sci/kernel.clj` first.
 
 ## Sizes
 
-- src: schema.clj +6 −15 (net −9).
+- src: schema.clj +6 −15, kernel.clj +19 −3, schema/datahike.clj +7 −1 (net +13).
 - tests: schema_test +15; eval_test +91 −54 (net +37, mostly the replacement test and comments).
-- Net: +43, 0 new src machinery. Deleted: compile-time generator resolution (5 lines), generator
+- Net: +65, 0 new src machinery. Deleted: compile-time generator resolution (5 lines), generator
   canonicalization (7 lines), one with-redefs, one assertion of deleted machinery.
-- Released: test/seon/sci/eval_test.clj, test/seon/schema_test.clj, src/seon/schema.clj.
+- Released: test/seon/sci/eval_test.clj, test/seon/schema_test.clj, src/seon/schema.clj, src/seon/sci/kernel.clj, src/seon/schema/datahike.clj.
