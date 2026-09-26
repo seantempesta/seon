@@ -202,3 +202,125 @@ longer exist in those files, so those conversions are already gone.
 Released paths: `src/seon/print.cljc`, `src/seon/render/value.clj`,
 `resources/seon/schemas/seon.print.edn`, `deps.edn`, `test/seon/print_test.clj`,
 `test/seon/render/value_test.clj`, this note.
+
+## Round 2 (root, after 63eb0dbcb was adopted): commits `03f029096`, `890a3de11`
+
+### Broken or open first
+
+1. **My defect in 63eb0dbcb, now fixed.** A bare cut among map entries lost
+   its `:seon.print/elision` key, so a cut map printed an odd number of forms
+   and could not be read back. The live default showed it:
+   `{:db/id 33229, …, :seon.agent/namespace {:db/id 33223}, {:seon.print/bound-by …}}`.
+   This caused the value-test reds `dir-of-a-large-namespace…`,
+   `explicit-structural-results…` and very likely
+   `generated-values-have-deterministic-readable-executable-elisions`.
+2. **Foreign red: `an-explicit-pull-keeps-its-nested-shape-in-shown-text`.**
+   A nested partial pull (`{:seon.ns/name …, :seon.ns/steward …}`) is claimed
+   by the namespace pair through identity ownership. The pair then renders
+   public functions and drops the pulled steward. This is the declared-stage
+   selection (render.clj, identity owners from 0a `9b4a7522f`); it is not the
+   floor. It needs a ruling: an attribute request should stay an attribute
+   request.
+3. **Foreign red: `block-pairs-remain-explicit`.** Probed on default:
+   `render/render-ai` with `:seon.render.call/function
+   'seon.sci.eval/directory-value` selects `seon.render.value/render-ai` (the
+   floor), not `seon.repl/render-directory-ai`. The producer's head-Var
+   return lookup does not reach the directory pair. Owner: render.clj.
+4. **Foreign red: `transcript-test/one-reply-reads-identically…` (6 fails).**
+   The prompt side (`walk/history` → `render-call`) renders every saved
+   evaluation through the floor. The page instead uses `seon.repl/text`.
+   Probed on default: a saved evaluation is valid `:seon.eval/entity`, which
+   carries `seon.repl/render-ai`. But `:seon.cluster.eval/id` now declares
+   `:seon.program/row-schema :seon.cluster.eval/receipt`, which has no pair,
+   so selection reports `:declared :no-match` and falls to the floor. Owner:
+   the identity-owner declaration (0a) or render.clj selection.
+5. **The pair behind the walker's map is `seon.render.ns/render-ai`.** It
+   returns its declared `:seon.db/invalid-read-error` ("datahike
+   query-results budget exceeded") whenever `public-functions`' query exceeds
+   `:max-results` = the caps' `max-collection`. This reproduces on default
+   with max-collection 64 for `my.agents.root`. The file is held by
+   delete-r8-r6-r10. Its fix is to stop bounding a namespace's member query by
+   an admission cap, or to show a count and a continuation.
+6. **Nested renderer prose reads poorly.** Declared AI text nested inside a
+   raw value prints as an escaped string literal (`"…\n(seon.db/pull\n  '[…]"`),
+   because the floor keeps its text readable as EDN. Printing that prose raw
+   would read much better, but it gives up read-back. That trade is a ruling
+   for the owner, and this lane did not make it.
+7. **The ceiling cuts; it does not store.** Past
+   `:seon.print/rendered-token-ceiling`, renderer text becomes an ordinary
+   character cut with a prefix and its requery. It is not a blob reference:
+   writing a blob needs a connection and publication, and a render must not
+   write. Turning a giant into a blob belongs to whoever saves the shown text.
+   Root-level pair output returned by render.clj `raw-output` never reaches
+   the floor, so it has no ceiling at all.
+8. The ceiling is a declared print option (`:seon.print/rendered-token-ceiling`,
+   50,000 estimated tokens), next to `:seon.print/width`. It is not a config
+   fact: making it one needs config/default.edn and render.clj's profile
+   derivation, which this lane does not own. No existing config key fits.
+   `:seon.config.eval.result/blob-threshold` is 4,096 bytes, a storage
+   decision.
+
+### What changed
+
+- `03f029096` render/walk.clj (+5/−1): any map returned as output is a
+  renderer failure (a diagnostic, delivered to the owner). AI output stays
+  text and HTML stays hiccup (owner 2026-09-26). The schemas already say so:
+  `:seon.render/ai [:or :qualified-symbol :string]`, `:seon.render/html [:or
+  :qualified-symbol :seon.render/hiccup]`, `:seon.render/rendered [:or :string
+  hiccup form]`. None was widened.
+- `890a3de11` (+131/−62):
+  - **Provenance budget.** `fit` charges only raw values to the profile
+    budget. An `:ai` `::projected` node (declared renderer text) is never
+    halved; it is cut only beyond the ceiling, and that cut names
+    `:seon.print/rendered-token-ceiling`.
+  - **One ordering owner.** `ordered-children` is used by `fit` and the
+    emitter. It puts scalar nodes in `compare-values`' own order (type, then
+    `compare`) and cuts last. `fit`'s text sort had reordered the walk's
+    selection, which caused the value-test child-bound red.
+  - **The elision key is back.**
+  - **The Sink residue is deleted**, with the `instrument_test.clj:1404`
+    assertion.
+  - **Regressions:** `the-budget-is-chosen-by-provenance` and
+    `a-cut-among-map-entries-reads-back-as-an-entry`.
+
+### Measured on default (PID 87270, which still runs 63eb0dbcb; after = the committed file in a scratch namespace, unarmed)
+
+| render | budget (tokens) | before | after | after fit+emit ms |
+|---|---|---|---|---|
+| root agent row (nested `:seon.agent/runtime` pair) | 150 | 119 | 221 | 7.8 |
+| root agent row | 15,000 | 221 | 221 | 1.4 |
+| turn with its agent (turn pair at the root) | 150 | 140 | 1,899 | 0.15 |
+| turn with its agent | 15,000 | 1,899 | 1,899 | 0.07 |
+| stored error row (error pair) | 150 and 15,000 | 55 | 55 | 0.06 |
+
+At the default budget nothing changes. At a tight budget, the renderer's
+text is kept whole and the raw siblings still show, where before the text
+was cut to an elision. The root agent row at 150 tokens, after:
+
+```
+{:db/id 33229,
+ :seon.agent/branch :cluster-default,
+ :seon.agent/id "root",
+ :seon.agent/namespace {:db/id 33223},
+ :seon.agent/plan {:db/id 33230, :my.plan/agent {:db/id 33229}},
+ :seon.agent/runtime
+   ";; My trigger and listens; (seon.db/pull '[{:seon.agent/runtime [:seon.runtime/turns]}] [:seon.agent/id \"root\"]) reads my turns on demand.\n(seon.db/pull\n  '[{:seon.agent/runtime\n …",
+ :seon.agent/settings {:db/id 33231, :seon.config/agent {:db/id 33229}}}
+```
+
+The balance is right: renderer text is whole, and the raw structure is laid
+out and bounded. The nested prose's escaping is the weak point (item 6).
+
+### Root runs
+
+```
+bin/test-check default --ns seon.print-test
+bin/test-check default --ns seon.render.value-test
+bin/test-check default --ns seon.render.transcript-test
+bin/test-check default --ns seon.render.walk-graph-test
+bin/test-check default --test seon.instrument-test/restoring-instrumentation-state-never-reinstalls-a-replaced-definition
+```
+
+Released: src/seon/render/walk.clj, src/seon/print.cljc,
+resources/seon/schemas/seon.print.edn, test/seon/print_test.clj,
+test/seon/instrument_test.clj, this note.
