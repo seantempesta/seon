@@ -398,7 +398,7 @@ Each `eval_clj` call is one agent run. The bridge decides only custody, the segm
 | `eval_clj` call | Agent and custody | Segmenter | Stage | Lifecycle |
 |---|---|---|---|---|
 | `mode "sci"`, no branch | root, on the cluster's branch (Q2 (b)) | code | SCI | root's run |
-| `mode "sci"`, `branch` | root, on that branch: root's inherited row, armed on the branch's handle by this session, which records that it armed it (UNVERIFIED seam P-RB, below) | code | SCI | root's run on the branch |
+| `mode "sci"`, `branch` | `mcp/<session-id>`, created with `creation-tx` on that branch and hosted there (P3b, below) | code | SCI | that agent's run on the branch |
 | `mode "jvm"` | root, on the cluster's branch (Q1 (a), ruled) | code | JVM | root's run |
 | `mode "jvm"`, `branch` | refused, as today (`mcp.clj:579-583`) | — | — | — |
 | `mode "host"` | none: the diagnostic host prepl, named by the caller | Clojure's | Clojure's | none (ruled exception) |
@@ -447,40 +447,51 @@ retires. If the executor has not exited, the branch and its custody are **not** 
 live run. A branch held by an agent the session did not arm keeps today's refusal (`mcp.clj:476`).
 
 **P-RB was refuted (default, 2026-09-26), so a lane is its own hosted agent** (ruled option (b)). Root's row names
-`:seon.agent/branch :cluster-default`; a lane branch inherits that row, and `acquire-context!` reads the context's
-branch from it (`acquire-context!`, `agent.clj:973-978` at this commit). Separately, `seon.turn` never reads an agent's branch: settlement writes through
-the cluster handle's own connection. An agent row on default pointing at a lane would therefore still settle its
-program rows onto default. The only working branch agent is the write-back regression's, whose loop handle is built
-for the branch's own connection by test-support's `cluster-handle` (`test/seon/test_support.clj:367`).
+`:seon.agent/branch :cluster-default`; a lane inherits that row, and `acquire-context!` acquires an agent on the branch
+its row names (`agent.clj:973-978` at fee0feb7a). A **new** agent created on the lane with `creation-tx` names the lane
+(`branch-call`, `agent.clj:196-206`; probed: `:seon.agent/branch :impl-one-pipeline-wb`), so the existing acquisition
+already selects the hosted branch for it. What is missing is the branch's own execution world and its lifecycle.
 
-**Hosting (P3b, design only; for Astra review before `src/seon/cluster.clj` is edited):**
+**Hosting (P3b), revision after Astra's REVISE** (`review-p3b-hosting-2026-09-26.md`, seven findings, each ruled here
+and probed on disposable branches `impl-one-pipeline-host-a` and `-b`, forked from one commit, retired after):
 
-1. **One production function beside `loop-handle`** (`src/seon/cluster.clj:3457`): `seon.cluster/branch-handle`
-   takes the cluster instance's world (its process, launcher, projection executor, error fan-out and routing) plus a
-   branch connection, and answers the loop handle for that branch: `loop-handle` over the branch's connection with
-   its own wake channel, stream channel and completion, and `:seon.agent/routing` the cluster's. Dials are read from
-   the branch's own database value, so the branch's configuration facts govern its agent. It starts no graph; `arm!`
-   does, exactly as for a cluster agent.
-2. **One fixture system.** test-support's `cluster-handle` becomes a caller of `branch-handle` (a test member's
-   branch is a hosted branch), and its duplicate construction of channels, caps and dials (`test_support.clj:367-402`,
-   about 30 lines) is deleted in the same slice, so agents and tests build a hosted branch the same way.
-3. **Settlement writes through the hosted branch's connection.** It already does: every write in `turn` goes through
-   `(:seon.db/connection cluster)`, which is the branch's own connection in a branch handle. No turn change is needed;
-   the regression proves it (a hosted agent's `defn` lands on the branch, and default's head is unchanged).
-4. **`acquire-context!` takes the branch from custody.** With a branch handle, the live branch is the handle's own
-   connection (`live-branch`, `agent.clj:968`); an agent acquired through it is acquired on that branch, never on
-   the inherited `:seon.agent/branch` row. The row stays history: it records where the agent was created, and
-   `creation-tx`'s `branch-call` sets it from the transacting connection (`agent.clj:196`).
-5. **The MCP session** creates `mcp/<session-id>` with `creation-tx` on the lane branch, hosts it with
-   `branch-handle`, arms it and records both in its session entry. `branch retire` disarms (joining the executor, the
-   actual-exit proof), releases the context and retires the branch; with the executor still live, nothing is released
-   and the answer names the live run. The bridge's retained-context SCI path and its custody refusal retire in the
-   same slice: `sci-evaluation-form` (46 lines), `shown-event`/`decoded-projection-event` (24) and the bridge's
-   `refuse#` custody arm (about 8).
+| # | Finding | Ruling | Probe |
+|---|---|---|---|
+| 1 | P1: the cluster's routing atom is not a cross-branch routing authority | **Accepted.** The host uses the acquired branch execution's own routing, never the parent's; it shares only the parent's fault-channel value. A session addressing a second branch refuses before any allocation. | sibling branches gave the same new agent eid (34623 on both); the acquired execution's routing is not the parent's (`identical?` false) |
+| 2 | P1: a branch connection plus the parent's context is not an isolated world | **Accepted.** The constructor's input is an **acquired branch execution** (`acquire-context!`, which forks through `sci.eval/fork-cluster-ctx`); its base, projection state, environment, context state and routing are used together, and its projection executor is built from that execution's projection state. The JVM's loaded-program identity stays shared, so the existing adoption detection still refuses an overlapping evaluation. | the acquired execution's ctx is neither the parent's nor a sibling's (`identical?` false twice) |
+| 3 | P1: the retirement protocol is incomplete | **Accepted.** Hosted ownership is recorded by the execution owner (the acquired execution's context state), not the bridge's transport session, so a socket timeout cannot lose it; the `branch` tool gains an explicit `session_id` and retires only the host that session created. Retirement first closes admission (submission and re-arm refuse by name for that branch), then disarms (the existing join), then releases the execution; a failed join keeps connection, branch and host, and a retry after exit completes. | source: `submit-source-in-projection` checks no stopping state (`agent.clj:701-726`); `close-clj-session!` drops the entry on timeout (`mcp.clj:195-202`); the `branch` tool has no `session_id` |
+| 4 | P2: no ordinary branch wake listener | **Accepted, as the narrow host.** The host registers `wake/route!` on the branch connection before deriving work, with the branch's routes, and removes it after admission closes; it hosts exactly one agent, and a message to any other agent on that branch is a named refusal, not a silent drop. | the parent connection holds 3 listeners, an acquired branch connection 1 (no wake route) |
+| 5 | P2: do not reclassify `:seon.agent/branch` | **Accepted; withdrawn.** The key keeps its meaning (custody). The host creates its agent on the branch, and checks that the acquired execution's branch equals the agent row's before arming. No acquisition semantics change. | `creation-tx` on a branch writes that branch (probe above) |
+| 6 | P2: the regression is not positive proof; the write-back test is red | **Accepted.** The submission helper retains and asserts the whole submission result before waiting (the red run lost it: `run-id` nil, then a 20 s wait). P3b adds positive cases through real acquisition, armed contracts and Flow: the parent head is unchanged before merge; two siblings with colliding eids deliver independently and one retires while the other still receives; an ordinary message wakes the idle hosted agent; retire races submission and re-arm; a timed-out host call keeps ownership until exit; reload overlap refuses by name. | the red run is root's evidence in the review; its cause was not retained |
+| 7 | P2: an honest price | **Accepted.** Repriced below; the adapters with surviving callers are not credited. | first acquisition of a fresh branch 132.5 ms, the second 8.2 ms (derivation reuse), release included in the probe |
 
-Price: about +45 in `cluster.clj` and `mcp.clj`, −30 in test-support, −78 in the bridge. Proof: a hosted agent's
-`defn` settles on its branch; default's head does not move; two sessions on two branches do not share a context; a
-retire with a live run keeps the branch; the write-back regression runs unchanged over the converted `cluster-handle`.
+**The composition after revision.**
+
+1. `seon.cluster/branch-handle` (beside `loop-handle`) takes the parent instance and **an acquired branch execution**
+   and answers the loop handle for that execution's world: its connection, ctx, projection state, environment,
+   context state and routing; fresh wake, stream and completion channels; the parent's process, launcher and fault
+   channel; a projection executor built from the execution's projection state; dials read from the branch's database,
+   with a config-read refusal returned, never a handle with nil members. It starts no graph.
+2. The host: acquire the execution → `creation-tx` for `mcp/<session-id>` on it → `branch-handle` → register the
+   branch's `wake/route!` listener → `arm!` (after checking the execution's branch equals the agent row's). Failure at
+   any step unwinds the steps before it, in reverse, keeping the whole cause.
+3. `evaluate-source!` is called with the host's handle exactly as `root-run-form` calls it for root:
+   `root-run-form` generalizes to take the custody and agent, so branch SCI and branchless SCI are one adapter.
+4. Retirement: close admission for the branch (the existing lifecycle's stopping state, held until release), disarm
+   (join), remove the listener, release the execution, then retire the branch through the registry.
+5. test-support's `cluster-handle` becomes a thin adapter over `branch-handle` for the executing member's
+   execution, keeping explicit caller overrides; its structural construction goes.
+
+**Price (repriced).** Source about +85: `branch-handle` about 25 with its contract, host/retire lifecycle about 35 in
+`seon.cluster.agent` (admission state, ownership record, unwinding), the generalized adapter about 10 and the
+`branch` tool's `session_id` about 15. Deletions with every caller converted: `sci-evaluation-form` (43 lines,
+`mcp.clj:382-424`) and its dispatch (7, `:474-480`), the bridge's held-context scan and hand-built custody refusal
+(about 20 of `:503-530`) and test-support's structural body (17, `test_support.clj:386-402`): about −87.
+`shown-event` and `decoded-projection-event` are **not** credited here: JVM mode, one-shot tools and the fault window
+still use them (P3m, P4). Tests about +120 for the six cases. Costs to record with the landing, parent against change,
+with allocation and retained memory: branch creation, first and warm acquisition (132.5 ms and 8.2 ms above), first
+arm, a warm one- and two-form hosted run, sibling concurrency and retirement. The writer regression of §2.10 is the
+fix-write-cost lane's.
 
 **What the bridge keeps:** transport, discovery, sessions, and adapters for `runtime_status`, `branch` and `get_value`
 that call owners and encode their answers. `runtime_status`'s observation already renders through its declared AI face (79d052d15). The `branch` tool's
@@ -717,8 +728,8 @@ order P1, P2, P3, P3m, P4, P5, S5 (§6), after the task-context design's increme
 partial migration until P7 (retrieval) and P6 (tests in the composition) land. The flow:
 
 1. A lane creates its branch and opens an MCP SCI session with an explicit `session_id`.
-2. It evaluates `(in-ns 'n)` and then `(defn f …)`. Each call is one run of root on the branch (armed there by the
-   session, P-RB), segmented as code, read once per form and settled by `settle!`; settlement records one row.
+2. It evaluates `(in-ns 'n)` and then `(defn f …)`. Each call is one run of the session's hosted agent on the
+   branch (P3b), segmented as code, read once per form and settled by `settle!`; settlement records one row.
 3. It runs `(my.test/check {:seon.test/changed ['n/f]})` on the branch. The existing harness is used until P6
    lands, and until then there is no "one path for tests" claim.
 4. Root runs `prepare-merge!` with the task, `accept-merge!` with the tested run, and `write-back!` (S5) for the
@@ -939,7 +950,7 @@ renders whole (5.8).
 | **S1** | landed: one definition authority | — | — | — | +59 measured | its landings |
 | **P1** | one finalization point: all result replacements including the disposition's completion, then one print; constructors answer native values; the refusal branch renders through the same owner (the `pr-str`s at `turn.clj:3704`, `:3753` retire, with F10's owner); the evaluator carries the head function as data; the form's sink covers print; the database value supplied to renderers by schema name | `src/seon/sci/eval.clj`, `src/seon/turn.clj` | +40 | −26 | +14 | a refused install, a disposition refusal and a success each save one rendering; a writer-time refusal publishes no speculative success; a completed disposition's value and text agree; a batch refusal uses ordinary selection; failed refusal storage is a core failure; `unrun-evaluation` prints nothing; render reads stay in the form's evidence; preview and refresh comparisons hold |
 | **P2** | read once: segments keep raw source; the loop reads the next form with the stage's reader context and passes the event; the reader's next-event-from-offset entry if missing; remainder kept on refusal; stage keys and their three function schemas; the submission-time stage check | `src/seon/turn.clj`, `src/seon/cluster/reply.clj`, `src/seon/sci/reader.cljc`, `src/seon/cluster/agent.clj` (check only), the turn and eval schemas | +55 | −25 (traced) | +30 | the §2.2 proofs; an incompatible stage symbol refuses before any run |
-| **P3** | P3a landed (branchless SCI; see §2.10 for its measurement, +197 / −21 source with docstrings and contracts). P3b (hosting, §2.6) pending review. MCP SCI is root's run: `evaluate-source!`; P-RB, then root armed on a branch by the session; continuation per stage; `run-receipts`/`current-run` public; retirement without releasing live custody; the `branch` tool's custody refusal and `refuse#` maps (P5, folded) | `src/seon/cluster/agent.clj`, `src/seon/turn.clj` (two contracts), `script/seon/dev/mcp.clj` | +65 | −138 (shown decoding 24, SCI forms 52, `execute-clj-eval` ≈ 54, `refuse#` ≈ 8) | −73 | M1's SCI proofs; the §2.10 measurement with a task-bearing root |
+| **P3** | P3a landed (a690aad68): branchless SCI is one ordinary run of root through `evaluate-source!`, segmented as code; measured in §2.10. P3b (§2.6, revised after Astra's REVISE): the hosted session agent on its branch, one `branch-handle` over an acquired branch execution, the branch's own wake listener, admission-closing retirement, the `branch` tool's custody refusal (P5, folded) | `src/seon/cluster.clj` (beside `loop-handle`), `src/seon/cluster/agent.clj`, `script/seon/dev/mcp.clj`, `test/seon/test_support.clj`, tests | P3a +197 measured; P3b ≈ +85 | P3a −21; P3b ≈ −87 | P3a +176; P3b ≈ −2 | P3a: the evaluate-source regression; P3b: the six cases of §2.6 finding 6 |
 | **P3m** | the fault observation, exactly lost-error design §M (folded here as its "pipeline that owns MCP reply assembly"): the cluster value captured before settlement, saved shown text, the `fault-window` component, the committed-cursor and last-form rules, lineage unknowns, `occurred-since` in place, one budget, outcome and `isError` | the settlement writer, `seon.cluster.eval` schema (+1 attribute and component, +1 error schema, counted once across both plans), `src/seon/error.clj`, `render/transcript.clj`, `mcp.clj` | +45 | −100 (window 55, transcript ≈ 45) | −55 | lost-error §M's class regression rows, including a fault resolved inside the window, a later recurrence leaving earlier saved text unchanged, and a failed settlement not advancing the lower bound |
 | **P4** | MCP JVM mode is root's run with the JVM stage; `mode "host"` with a bounded `valf`; the MCP projection, error summary, marks and dead prepl deleted; `get_value` reduced to the labelled old-artifact adapter (its mark call removed) | new `src/seon/repl/jvm.clj`, `src/seon/turn.clj` (refresh exclusion), `src/seon/cluster.clj`, `mcp.clj`, `resources/seon/operator/prepl.clj`, `script/seon/operator.clj`, the eval schema, `test/seon/cluster/mcp_test.clj`, `test/seon/mcp_test.clj`, `test/seon/render/web_context_test.clj` | +80 | −278 (R6 34, projection/valf/io-prepl 187, marks 31, JVM form 24, lookups 2) | −198 | M1's JVM proofs; `bin/seon status`, `start` and `config apply` read their replies; a large host value is bounded in `mode "host"` |
 | **P5** | folded into P3 (root, 2026-09-25): the `branch` tool's custody refusal joins P3's retirement, and its create policy stays transport over the registry's idempotent `branch!`; the status half landed in 79d052d15 | — | — | — | — | — |
@@ -1001,7 +1012,7 @@ Revision 2's own row numbers 11.x-13.x collided with them and are withdrawn. Wha
 | 7.6 | clarify | Settlement's "diff removes the id from its subjects" is the id's removal from the accepted replacement's attribute map, merged and written back with it (D1) |
 | 7.13 | new | **Write-back is proven before exposure:** accepted replacement rows are spliced into one candidate, proven equal by the ordinary analyzer in memory, fenced by both heads and the file digest, published ordinarily and checked by digest; a failure restores only an unmodified candidate and reports accepted-but-not-written |
 | 8.6 | revise | An MCP JVM evaluation is a run of root's with the JVM evaluator stage, recorded and printed like any evaluation; `mode "host"` names the unrecorded diagnostic prepl, chosen by the caller, never as a fallback (§2.6, Q1) |
-| 8.8 | new | **An MCP evaluation is a run of root's under explicit custody:** on the cluster's branch, or on a lane branch where the session armed root (P-RB); custody selected on every call; completion by listening before submitting, then rechecking by run id; namespace continuation per evaluation stage, the explicit namespace winning; retirement disarms only what the session armed and never releases custody before actual exit; faults arrive as errors in the reply |
+| 8.8 | new | **An MCP evaluation is a run of root's under explicit custody:** on the cluster's branch, or on a lane branch, as the session's own agent hosted there (P3b); custody selected on every call; completion by listening before submitting, then rechecking by run id; namespace continuation per evaluation stage, the explicit namespace winning; retirement disarms only what the session armed and never releases custody before actual exit; faults arrive as errors in the reply |
 | 1.16 | new | **The REPL path is one composition of stage values.** `evaluate-sources` segments, reads each form once, evaluates, finalizes, prints once and builds the record; a submission names its segmenter and evaluation stage as qualified symbols whose declared contracts are the stage schemas by name; record and print are not choosable; the lifecycle owner persists (§2.0) |
 | 1.17 | new | **Code is segmented as code.** An entrant submitting code (MCP, files, generated forms) uses `code-segments`; the reply planner is only for model replies (§0.4, §2.2) |
 | 8.9 | new | **Errors and faults reference the world.** Every error the pipeline produces or returns carries commit id, agent and branch, run or evaluation id and blob digests, never a database value, context, request or connection (§2.4) |
@@ -1022,7 +1033,7 @@ Revision 2's own row numbers 11.x-13.x collided with them and are withdrawn. Wha
   the agent writers (`creation-tx`, `agent.clj:205`, and `seed-root-agent!`); the owner rulings of 20:50Z and 23:00Z.
 - **Not run:** no write, submission, test, adoption, arming or new code.
 - **Unverified, established by the owning slice:**
-  - P-RB: arming root's inherited row on a lane branch's handle (P3's first step);
+  - P-RB is refuted (root's inherited row names the cluster branch); P3b's host replaces it (§2.6);
   - whether `seon.sci.reader/read` offers a next-event-from-offset call (P2);
   - P2's exact deletions, from its call-graph trace;
   - the host change mark's cost (P4);
