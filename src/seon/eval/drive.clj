@@ -376,45 +376,45 @@
         cluster-name (sample-cluster-name)
         episode-id (str sample-id "-" (subs (uuid-text) 0 8))
         agent-id (str "inspect-" (subs (uuid-text) 0 12))
-        instance* (volatile! nil)
-        store* (volatile! nil)
-        grading-branch* (volatile! nil)]
+        ;; One release for every exit: stop the instance, then retire its
+        ;; branches from the store the instance holds.
+        release! (fn [instance grading-branch]
+                   (try
+                     (boot/stop! instance)
+                     (finally
+                       (when-let [store (:seon.store/store instance)]
+                         (when grading-branch
+                           (registry/retire-branch!
+                            {:seon.store/store store :seon.store/branch grading-branch}))
+                         (registry/retire-branch!
+                          {:seon.store/store store
+                           :seon.store/branch (registry/cluster-branch cluster-name)})))))]
     (when-not (and (string? root) (not (str/blank? root)))
       (throw (ex-info "The sample request requires an operator cluster root."
                       {:seon.eval.drive/request request})))
-    (try
-      (let [instance
+    (let [instance
+          (try
             (boot/start!
              {:seon.boot/cluster-name cluster-name
               :seon.boot/root root
               :seon.config/manifest
-              {:seon.config.run/max-episode-runs run-cap}})]
-        (vreset! instance* instance)
-        (vreset! store* (:seon.store/store instance))
-        (let [report
-              (run-episode!
-               instance
-               {:seon.eval.drive/id episode-id
-                :seon.eval.drive/objective
-                (:seon.eval.drive/objective request)
-                :seon.eval.drive/agent-ids [agent-id]
-                :seon.eval.drive/run-cap run-cap
-                :seon.eval.drive/remote-timeout-ms timeout-ms})]
-          (vreset! grading-branch*
-                   (:seon.eval.drive/grading-branch report))
-          (assoc report :seon.eval.drive/sample-id sample-id)))
-      (catch Throwable failure
-        (when-let [instance (:seon.boot/instance (ex-data failure))]
-          (vreset! instance* instance)
-          (vreset! store* (:seon.store/store instance)))
-        (throw failure))
-      (finally
-        (when-let [instance @instance*]
-          (boot/stop! instance))
-        (when-let [store @store*]
-          (when-let [grading-branch @grading-branch*]
-            (registry/retire-branch!
-             {:seon.store/store store :seon.store/branch grading-branch}))
-          (registry/retire-branch!
-           {:seon.store/store store
-            :seon.store/branch (registry/cluster-branch cluster-name)}))))))
+              {:seon.config.run/max-episode-runs run-cap}})
+            (catch Throwable failure
+              ;; A boot that fails partway returns its partial instance.
+              (some-> (:seon.boot/instance (ex-data failure)) (release! nil))
+              (throw failure)))
+          report
+          (try
+            (run-episode!
+             instance
+             {:seon.eval.drive/id episode-id
+              :seon.eval.drive/objective
+              (:seon.eval.drive/objective request)
+              :seon.eval.drive/agent-ids [agent-id]
+              :seon.eval.drive/run-cap run-cap
+              :seon.eval.drive/remote-timeout-ms timeout-ms})
+            (catch Throwable failure
+              (release! instance nil)
+              (throw failure)))]
+      (release! instance (:seon.eval.drive/grading-branch report))
+      (assoc report :seon.eval.drive/sample-id sample-id))))
