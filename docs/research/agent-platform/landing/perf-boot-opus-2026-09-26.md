@@ -670,3 +670,77 @@ had them.
   2. **As ruled.** Unit db required; the 5 host call sites pass a database. The 59 non-readers carry a requirement
      they don't need.
   3. **Rule only, unit unchanged.** Renderers stop getting a db at all; the 44 readers break. Not viable.
+
+## Resume 16 — required-only slice landed (2f2b51861); RESET NEEDED
+
+**Files touched (one commit, each clean immediately before its edit; none skipped):**
+resources/seon/schemas/{seon.call-preparation,seon.db,seon.render}.edn; src/seon/{agent,ai,call_preparation,cluster,effect,error,plan,problems,render,repl,schema,turn}.clj; src/seon/cluster/{agent,message,status}.clj; src/seon/render/{ns,test,transcript,value}.clj; src/seon/sci/eval.clj; test/seon/call_preparation_test.clj; test/seon/cluster/program_change_test.clj; test/seon/render/entity_pairs_test.clj.
+**Checks:** `clj-kondo --lint src script test --cache false` on an archive of HEAD plus the diff reports 0 errors. The contracts compile check over the 23 changed Clojure files returns `[]`. All three schema EDN files read.
+**Deviation from "exactly the 44".** The 44 came from a loose source scan. The committed set is **63**: every renderer whose call closure reads the database, from the program graph (its own or a callee's `:seon.fn/keywords :seon.db/db`, or `seon.db` / `datahike.api` calls, down three callee levels). For example, `cluster.status/render-html` reads through `snapshot`. `seon.cluster.message/render-inbox-html` keeps `:seon.render/unit`, because it takes the database as its own positional input.
+
+### The 138 functions (149 optional fills) and their decisions
+
+**`:seon.render/unit` → `:seon.render/db-unit`, required and supplied (63):** `seon.agent/render-settings-html`, `seon.ai/attempt-ai`, `seon.ai/attempt-html`, `seon.ai/model-ai`, `seon.ai/model-html`, `seon.cluster/render-ai`, `seon.cluster/render-html`, `seon.cluster.agent/render-identity-ai`, `seon.cluster.agent/render-identity-html`, `seon.cluster.agent/render-situation-ai`, `seon.cluster.message/render-html`, `seon.cluster.message/render-inbox-html`, `seon.cluster.status/render-html`, `seon.effect/render-ai`, `seon.effect/render-html`, `seon.error/elision-html`, `seon.error/elision-prose`, `seon.error/faults-form`, `seon.error/index-refusal-prose`, `seon.error/mcp-prose`, `seon.error/notice-prose`, `seon.error/render-ai`, `seon.error/render-faults-ai`, `seon.error/render-faults-html`, `seon.error/render-html`, `seon.plan/render-item-html`, `seon.plan/render-plan-ai`, `seon.plan/render-plan-html`, `seon.problems/block`, `seon.render/render-default-ai-source`, `seon.render/render-form`, `seon.render.ns/function-ai`, `seon.render.ns/function-html`, `seon.render.ns/function-neighbours`, `seon.render.ns/public-functions`, `seon.render.ns/render-ai`, `seon.render.ns/render-html`, `seon.render.ns/task-ai`, `seon.render.ns/task-html`, `seon.render.test/render-ai`, `seon.render.test/render-html`, `seon.render.transcript/floor-text`, `seon.render.transcript/history-entries`, `seon.render.transcript/missing-selected-run`, `seon.render.transcript/render-ai`, `seon.render.transcript/render-captured-prefix`, `seon.render.transcript/render-html`, `seon.render.transcript/render-run-ai`, `seon.render.transcript/render-run-html`, `seon.render.transcript/render-runtime-ai`, `seon.render.transcript/render-runtime-html`, `seon.render.transcript/runtime-owner`, `seon.render.transcript/selected-run-identities`, `seon.render.value/declared`, `seon.render.value/node-id`, `seon.render.value/prepare`, `seon.render.value/render-ai`, `seon.render.value/render-html`, `seon.repl/render-ai`, `seon.repl/render-html`, `seon.sci.eval/evaluated-source`, `seon.turn/render-ai`, `seon.turn/render-html`
+
+**`:seon.render/unit` kept, optional and no longer filled; the renderer never reads a database (40):** `seon.agent/render-settings-ai`, `seon.ai/provider-ai`, `seon.ai/provider-html`, `seon.cluster/runtime-observation-ai`, `seon.cluster.agent/identity-form`, `seon.cluster.agent/render-creation-ai`, `seon.cluster.agent/render-creation-html`, `seon.cluster.agent/situation-form`, `seon.cluster.instruction/instruction-ai`, `seon.cluster.instruction/instruction-html`, `seon.cluster.message/render-ai`, `seon.cluster.status/render-ai`, `seon.config/render-ai`, `seon.config/render-html`, `seon.context/capture-ai`, `seon.context/capture-html`, `seon.error/held-reference`, `seon.error/render-contract-ai`, `seon.oversight/ai-story`, `seon.oversight/html-table`, `seon.print/render-elision-ai`, `seon.render/source-provenance-error`, `seon.render-simplification-test/authored-source`, `seon.render-simplification.fixture-a/namespace-ai`, `seon.render-simplification.fixture-ambiguous/first-ai`, `seon.render-simplification.fixture-ambiguous/second-ai`, `seon.render-simplification.fixture-b/namespace-ai`, `seon.render-source-test/authored-source`, `seon.render-source-test/database-source`, `seon.render.ns/namespace-form`, `seon.render.ns/node-distance`, `seon.render.ns/read-bounds`, `seon.render.ns/schema-ai`, `seon.render.ns/schema-form`, `seon.render.ns/schema-html`, `seon.render.ns/schema-parts`, `seon.render.ns/shown-functions`, `seon.render.transcript/message-form`, `seon.render.web/message-bar-html`, `seon.sci.kernel/render-ai`
+
+**The other optional entries, all kept optional and no longer filled:**
+
+| function | entry | declared in | decision |
+|---|---|---|---|
+| `seon.db/call-with-custody` | `:seon.db/connection` | `:seon.db/custody-request` | optional: absent = no custody |
+| `seon.error/commit-tx` | `:seon.agent/id` | `:seon.error/commit-tx-request` | optional: an error no agent caused (the producer declares identity) |
+| `seon.error/normalize` | `:seon.agent/id` | `:seon.error/normalize-request` | optional: an error no agent caused (the producer declares identity) |
+| `seon.error/notice` | `:seon.agent/id` | `:seon.error/notice-request` | optional: an error no agent caused (the producer declares identity) |
+| `seon.error/notice-ai-prose` | `:seon.agent/id` | `:seon.error/notice` | optional: an error no agent caused (the producer declares identity) |
+| `seon.error/prepare` | `:seon.agent/id` | `:seon.error/prepare-request` | optional: an error no agent caused (the producer declares identity) |
+| `seon.error/recording` | `:seon.agent/id` | `:seon.error/commit-tx-request` | optional: an error no agent caused (the producer declares identity) |
+| `seon.fault/fault!` | `:seon.agent/id` | `:seon.fault/context` | optional: a fault no agent caused (the producer declares identity) |
+| `seon.fn/analysis-projection` | `:seon.db/connection` | `:seon.fn/index-request` | optional: indexing works in the world it is handed |
+| `seon.fn/analyze-rows` | `:seon.db/connection` | `:seon.fn/index-request` | optional: indexing works in the world it is handed |
+| `seon.fn/analyzed-files` | `:seon.db/connection` | `:seon.fn/index-request` | optional: indexing works in the world it is handed |
+| `seon.fn/build-manifest` | `:seon.db/connection` | `:seon.fn/index-request` | optional: indexing works in the world it is handed |
+| `seon.fn/changed-schema-keys` | `:seon.db/connection` | `:seon.fn/index-request` | optional: indexing works in the world it is handed |
+| `seon.fn/desired-rows` | `:seon.db/connection` | `:seon.fn/index-request` | optional: indexing works in the world it is handed |
+| `seon.fn/incremental-projection` | `:seon.db/connection` | `:seon.fn/index-request` | optional: indexing works in the world it is handed |
+| `seon.fn/index!` | `:seon.db/connection` | `:seon.fn/index-request` | optional: indexing works in the world it is handed |
+| `seon.fn/index!` | `:seon.db/connection` | `:seon.fn/index-request` | optional: indexing works in the world it is handed |
+| `seon.fn/reconciled-paths` | `:seon.db/connection` | `:seon.fn/index-request` | optional: indexing works in the world it is handed |
+| `seon.fn/rows` | `:seon.db/connection` | `:seon.fn/index-request` | optional: indexing works in the world it is handed |
+| `seon.instrument/apply!` | `:seon.db/db` | `:seon.instrument/request` | optional: absent = arm without supplied-default rows |
+| `seon.render/call-with-walk-context` | `:seon.db/db` | `inline map` | optional: a walk context without that input |
+| `seon.render/call-with-walk-context` | `:seon.db/connection` | `inline map` | optional: a walk context without that input |
+| `seon.render.walk/continue` | `:seon.db/connection` | `:seon.render.walk/continue-request` | optional: a walk without a live connection |
+| `seon.render.walk/history` | `:seon.db/connection` | `:seon.render.walk/history-request` | optional: a walk without a live connection |
+| `seon.render.walk/neighborhood` | `:seon.db/connection` | `:seon.render.walk/request` | optional: a walk without a live connection |
+| `seon.render.web/shell` | `:seon.agent/id` | `:seon.render.web/page-request` | optional: a page with no viewing agent |
+| `seon.sci.eval/evaluate` | `:seon.db/db` | `:seon.sci.eval/request` | optional: an evaluation without that world input |
+| `seon.sci.eval/evaluate` | `:seon.agent/id` | `:seon.sci.eval/request` | optional: an evaluation without that world input |
+| `seon.sci.eval/evaluated-source` | `:seon.db/db` | `:seon.sci.eval/shown-request` | optional: a print without that world input |
+| `seon.sci.eval/evaluated-source` | `:seon.db/connection` | `:seon.sci.eval/shown-request` | optional: a print without that world input |
+| `seon.sci.eval/evaluated-source` | `:seon.agent/id` | `:seon.sci.eval/shown-request` | optional: a print without that world input |
+| `seon.sci.eval/fork-for-turn` | `:seon.db/connection` | `:seon.sci.eval/defs-fork-request` | optional: a fork without a live connection |
+| `seon.sci.eval/refuse-install` | `:seon.db/db` | `:seon.sci.eval/request` | optional: an evaluation without that world input |
+| `seon.sci.eval/refuse-install` | `:seon.agent/id` | `:seon.sci.eval/request` | optional: an evaluation without that world input |
+| `seon.sci.eval/run-test` | `:seon.db/connection` | `inline map` | optional: absent = no custody |
+| `seon.sci.eval/run-tests` | `:seon.db/connection` | `inline map` | optional: absent = no custody |
+| `seon.sci.eval/shown-result` | `:seon.db/db` | `:seon.sci.eval/shown-request` | optional: a print without that world input |
+| `seon.sci.eval/shown-result` | `:seon.db/connection` | `:seon.sci.eval/shown-request` | optional: a print without that world input |
+| `seon.sci.eval/shown-result` | `:seon.agent/id` | `:seon.sci.eval/shown-request` | optional: a print without that world input |
+| `seon.test/bounded-result` | `:seon.db/connection` | `inline map` | optional: absent = no custody |
+| `seon.test.runner/run-var!` | `:seon.db/connection` | `:seon.db/custody-request` | optional: absent = no custody |
+| `seon.test.runner/run-vars!` | `:seon.db/connection` | `:seon.db/custody-request` | optional: absent = no custody |
+| `seon.turn/evaluate-sources` | `:seon.db/db` | `:seon.turn.loop/evaluate-sources-request` | optional: absent = read the connection's current value |
+| `seon.turn/gate-function-install` | `:seon.db/db` | `:seon.sci.eval/request` | optional: an evaluation without that world input |
+| `seon.turn/gate-function-install` | `:seon.agent/id` | `:seon.sci.eval/request` | optional: an evaluation without that world input |
+
+**Root runs:**
+- `bin/test-check default --ns seon.call-preparation-test`
+- `bin/test-check default --ns seon.cluster.program-change-test`
+- `bin/test-check default --ns seon.cluster.host-test`
+- `bin/test-check default --ns seon.turn-test`
+- `bin/test-check default --ns seon.fn-test`
+- `bin/test-check default --ns seon.instrument-test`
+- `bin/test-check default --ns seon.render.entity-pairs-test`, then the render suites (`seon.render-test`, `seon.render.value-test`, `seon.render.transcript-test`, `seon.render.ns-test`, `seon.render.web-test`)
+- `bin/test-check default --ns seon.test-failure-facts-test`
+- `bin/test-check default --ns seon.schema-test`
