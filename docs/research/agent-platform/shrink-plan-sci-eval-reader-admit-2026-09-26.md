@@ -178,10 +178,9 @@ Fully analysed in audit §0 and D1-D3. The live disagreement: clj-kondo makes a 
 - **Delete in reader.cljc:** `function-declaration` (252, 55 lines) and `test-declaration` (307, 11) (task
   5f48e860a402). Their consumer is turn.clj's `read-only-evaluation?` (turn.clj:2051), which shrink-turn
   holds. Either that lane converts it to read the evaluation's analyzed row, or I send it a patch. About −70.
-- **Blocking owner ruling (audit §3):** is an agent's `(def m {:a 1})` a program row, as it is when a file
-  publishes it? Either data defs become rows everywhere (`missing-contract` exempts arglist-less defs), or
-  `seon.fn/function-definition?` (fn.clj:259, held by perf-boot) narrows. **I will not start S1 without this
-  ruling.** Either answer changes what the REPL admits.
+- **Ruled (root, 2026-09-26):** a data def such as `(def m {:a 1})` is a program row at the REPL exactly as in
+  files; clj-kondo is the single authority. `missing-contract` exempts arglist-less defs; `function-definition?`
+  (fn.clj:259) stays as is.
 - **Regressions:** `entry_gate_test`, `program_change_test`, `restoration_test`, `eval_test`, plus one new
   class regression: the same `def`/`defmulti` text gives the same program-row answer through a file and through
   the REPL.
@@ -216,6 +215,10 @@ before anyone plans lines. It is not slow (0.5 ms mean).
 
 ## 3. Ordered loadable slices (slow first)
 
+Ruled order (root, 2026-09-26): slice 1, then slice 4, then slice 2 after Astra's review
+(docs/research/agent-platform/review-eval-shrink-plan-2026-09-26.md), then slice 3. eval.clj edits wait until root
+releases it from one-commit-a-opus.
+
 Each slice is one commit, `git commit --only`, HEAD loads, `clj-kondo --lint src script test --cache false` 0
 errors, and `seon.contracts-compile-test/check` 0 findings over changed files. Root runs the named tests.
 
@@ -227,7 +230,7 @@ errors, and `seon.contracts-compile-test/check` 0 findings over changed files. R
 | 4 | **D0** mechanical deletions (2a) | eval.clj, reader.cljc, admit.clj | ≈ −20 | none (hygiene) | none; can go first if root prefers a warm-up |
 | 5 | **D1** caches into `seon.cache` with dials (2b) | eval.clj, cache config | ≈ −15 | law conformance | after slice 2 (it deletes one cache) |
 | 6 | **D14** one evaluation constructor | eval.clj | ≈ −50 | none | none |
-| 7 | **S1** one definition authority (2c) | eval.clj, reader.cljc (+ turn.clj patch) | ≈ −220 | removes the class behind today's four breakages; admission O(declared rows) | **owner `def` ruling**; shrink-turn for turn.clj:2051 |
+| 7 | **S1** one definition authority (2c) | eval.clj, reader.cljc (+ turn.clj patch) | ≈ −220 | removes the class behind today's four breakages; admission O(declared rows) | `def` ruled (row); shrink-turn for turn.clj:2051 |
 | 8 | **F5 / audit S5** gate through `seon.test/run` | eval.clj (+ turn.clj) | ≈ −224 (+turn −35) | 130-200 ms per gated defn; one test path | turn.clj holder; auto-check re-proved on the test path |
 | 9 | audit S2/S3/S6 (arm once, pre-eval gate, no re-reads) | eval.clj, turn.clj | ≈ −400 | per-form | the audit's option B ruling |
 | 10 | reader.cljc → reader.clj (2e); doc/dir move (D15) | reader, eval.clj, new doc owner | ≈ −10; −303 moved | none | owner for the doc/dir home |
