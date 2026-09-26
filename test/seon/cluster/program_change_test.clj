@@ -7,6 +7,7 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [my.program]
+            [seon.fn]
             [seon.cluster :as cluster]
             [seon.db :as db]
             [seon.schema :as schema]
@@ -192,3 +193,15 @@
      (is (identical? connection (db/call-with-custody {:seon.db/connection connection} (fn [] db/*conn*))))
      (is (nil? (db/call-with-custody {} (fn [] db/*conn*))))
      (is (nil? (db/call-without-custody (fn [] db/*conn*)))))))
+
+(deftest a-call-matching-a-declared-arity-is-never-prefixed
+  ;; `seon.fn/gate-sets` declares a request-map arity and a positional
+  ;; [database symbols] arity. A one-argument call is the map arity in full:
+  ;; supplying the positional arity's leading database in front of the map
+  ;; (the dispatch meant for two shapes that share their first slot) sent
+  ;; the call two arguments and refused it. Tests run as their member, so the
+  ;; call is prepared exactly as an agent's (patch call-preparation-declared-arity).
+  (support/with-database
+   (fn [connection]
+     (let [result (seon.fn/gate-sets {:seon.db/db (db/db connection) :seon.fn/seeds ['seon.id/valid?]})]
+       (is (vector? result) (pr-str result))))))
