@@ -410,14 +410,12 @@
                 (dissoc request :seon.config/manifest :seon.config/environment :seon.boot/prepl-server))
         name (:seon.boot/cluster-name config)
         paths (cluster/cluster-paths (:seon.boot/root config) name)
-        latest (atom nil)
-        failed (fn [cause]
+        failed (fn [cause instance]
                  (ex-info (ex-message cause)
-                          (assoc (diagnostic (ex-message cause) (or (ex-data cause) {}) :boot-failed cause)
-                                 :seon.boot/instance @latest)
+                          (cond-> (diagnostic (ex-message cause) (or (ex-data cause) {}) :boot-failed cause)
+                            instance (assoc :seon.boot/instance instance))
                           cause))
         publish! (fn [value]
-                   (reset! latest value)
                    (swap! running-instances assoc name value)
                    value)
         ;; The first value in the table is already an instance: acquiring the
@@ -432,7 +430,7 @@
                                              :address (:seon.boot/prepl-host config)
                                              :port (:seon.boot/prepl-port config)
                                              :args [:cluster-name name]}))
-                                       (catch Throwable cause (throw (failed cause))))]
+                                       (catch Throwable cause (throw (failed cause nil))))]
                      (publish! (listening-instance config listener))))]
     (try
       (let [;; The cluster the launcher opened this JVM for (it supplies the
@@ -451,11 +449,16 @@
           (publish! (assoc stood :seon.boot/ready-ms
                            (quot (- (System/nanoTime) began) 1000000)))))
       (catch Throwable cause
-        (when (#{:seon.cluster.store/held-elsewhere :seon.cluster.store/held-by-this-process}
-               (:seon.cluster.store/rule (ex-data cause)))
-          (server/stop-server (server-name name))
-          (swap! running-instances dissoc name))
-        (throw (failed cause))))))
+        ;; The table's entry is this start's latest stage only while it holds
+        ;; this start's listener; a competing start's entry is never consumed.
+        (let [own (let [entry (get @running-instances name)]
+                    (when (identical? (:seon.boot/prepl-server entry) (:seon.boot/prepl-server instance))
+                      entry))]
+          (when (and own (#{:seon.cluster.store/held-elsewhere :seon.cluster.store/held-by-this-process}
+                          (:seon.cluster.store/rule (ex-data cause))))
+            (server/stop-server (server-name name))
+            (swap! running-instances #(cond-> % (identical? own (get % name)) (dissoc name))))
+          (throw (failed cause own)))))))
 
 (defn readiness
   "Read each acquired layer; missing values are explicit, including partial boot."
