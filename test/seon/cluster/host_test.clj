@@ -244,6 +244,10 @@
           (is (= 'my.agents.switch-fresh (namespace-of 'my.agents.switch-fresh/fresh-probe)))
           (is (nil? (:seon.ns/source (db/pull (database) [:seon.ns/source] [:seon.ns/name 'my.agents.switch-fresh])))
               "the switch's text is not the namespace's source"))
+        (testing "a definition after a nested switch names a namespace no form declared"
+          (is (= "#'my.agents.switch-nested/nested-probe"
+                 (last (hosted-run! hosted "(do (in-ns 'my.agents.switch-nested) nil)\n(defn nested-probe \"Add three.\" {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 3))"))))
+          (is (= 'my.agents.switch-nested (namespace-of 'my.agents.switch-nested/nested-probe))))
         (testing "an ns form declares its namespace with its requires and aliases"
           (hosted-run! hosted "(ns my.agents.switch-declared (:require [clojure.string :as str]))")
           (is (= [#:seon.ns.alias{:local 'str :target-ns 'clojure.string}]

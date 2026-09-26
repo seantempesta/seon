@@ -1256,8 +1256,15 @@
           namespace-ref (or (:seon.fn/ns row)
                             (:seon.test/ns row))
           existing (when identity (db/pull db '[*] [identity identity-value]))
-]
-      (when (and namespace-ref
+          ;; A namespace the declaration names exists whether or not a form
+          ;; declared it: an absent one is asserted by identity alone.
+          [namespace-name] (when (and (vector? namespace-ref)
+                                      (not (:db/id (db/pull db [:db/id] namespace-ref))))
+                             [(second namespace-ref)])
+          row (cond-> row
+                namespace-name (assoc (if (:seon.fn/ns row) :seon.fn/ns :seon.test/ns)
+                                      (str "namespace:" namespace-name)))]
+      (when (and namespace-ref (not (vector? namespace-ref))
                  (not (:db/id (db/pull db [:db/id] namespace-ref))))
         (refuse! `receipt-settle-call ::program-namespace-missing request))
       (let [current-projection
@@ -1322,7 +1329,8 @@
                   (schema.datahike/malli->datahike-schema-in
                    candidate-projection required)))
               [])]
-        (into schema-declarations
+        (into (cond-> schema-declarations
+                namespace-name (conj {:db/id (str "namespace:" namespace-name) :seon.ns/name namespace-name}))
               (concat
                (cond
                  (nil? existing)
