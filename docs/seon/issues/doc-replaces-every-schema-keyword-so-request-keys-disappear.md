@@ -65,3 +65,11 @@ beside it, as `dir`'s `:schemas` map already does.
 
 For a `my.*` function with a supplied connection and a required identity key, `doc`'s `:in` names
 every non-supplied key and no supplied one.
+
+## Re-verified open 2026-09-26 (dogfood-repl-opus-2, cycle 10, archive 6ccf12a5a)
+
+`(doc my.issue/add!)` still prints every `:in` entry as `[<schema form> <schema form>]`, `:example ""`, and still lists the
+supplied `:seon.db/connection` and `:seon.agent/id` inside `:in` beside a new `:supplied [:seon.agent/id :seon.db/connection]`.
+`(dir my.program)` shows the same doubled entries in `propose-merge!`'s `:in`. Building `my.issue/add!`'s request took
+three attempts: `:seon.issue/functions #{'sym}` refused with sixteen alternative lines (int, string, tuple, map per member);
+lookup refs `[:seon.fn/sym 'sym]` were needed, which nothing printed.

@@ -102,3 +102,11 @@ Default pid 55348 (archive 04f3a159b). Branch agent, one test, JVM probes agains
 
 Landing, cuts and remaining options:
 `docs/research/agent-platform/landing/fix-test-request-cost-2026-09-26.md`.
+
+## Evidence 2026-09-26 (dogfood-repl-opus-2, cycle 10): still 2–3.6 s per changed check on 6ccf12a5a and 5bed888d0
+
+From a branch agent, `(my.test/check {:seon.test/changed [...]})` with one or two reaching tests:
+3,249 ms (member acquire 63 + resolve 2 + run 21 + release 8 ms; `seon.db/with-declarations` ×3,706 = 2,939 ms),
+2,952, 3,056, 3,640 (`clean-request-handle` 2,834 ms), 1,986, 2,258 and 2,400 ms. The identical re-check reuses green in
+146 ms (6bb96a6a9 verified). One check whose request selected no test still took 2,165 ms, 2,146 ms of it in
+`seon.cluster.registry/branch-commit-id` ×89 inside `seon.test/select`.

@@ -81,3 +81,11 @@ own replay, which is never stored.
 **(b) Settle on recording failure (turn.clj, the dogfood-API lane).** A refused receipt or evidence write must
 close the run with that refusal as its error, through the ordinary settlement, so the next run is admitted.
 It must never leave the turn open. See the hunk handed to root.
+
+## Evidence 2026-09-26 (dogfood-repl-opus-2, cycle 10): the regex query is fixed; the unsettled run is not
+
+A second trigger leaves a run open with no recorded error at all (archives 6ccf12a5a and 5bed888d0): a run that creates
+a namespace with a `:require` alias and defines a function using it. Details and minimal form on
+[an-alias-required-by-an-earlier-form-of-a-batch…](an-alias-required-by-an-earlier-form-of-a-batch-refuses-later-forms-as-unanalyzed.md).
+Part (b) of the design (settle on any failure after the run opened) is still the missing owner: a run that dies after
+recording its sources must close with the cause, whatever the cause.

@@ -80,3 +80,15 @@ no contract admits the function. **Which model is wrong (second part):** the rea
 internal value instead of the agent's clause as it was written (store the authored form, never a host
 object). No declared alternative can then accept the refusal. I did not run the Malli validation myself: `malli.core`
 is not resolvable from agent SCI code (`Unable to resolve symbol: malli.core/validate`).
+
+## Evidence 2026-09-26 (dogfood-repl-opus-2, cycle 10)
+
+- Archive 5bed888d0: `(defn dsum "Sum a pair." {:malli/schema [:=> [:cat [:vector :int]] :int]} [v] (let [[a b] v] (+ a b)))`
+  is refused correctly (the contract admits `[]`, where `(+ nil nil)` throws), but the report says
+  `arguments: [[]] expected: :int actual: dogfood.probe/dsum why: ["should be an integer"]`. The thrown
+  `NullPointerException` never appears; the agent reads "returned its own symbol".
+- Archive 6ccf12a5a: the same `defn` plus two others in one run took **119.6 s** (turn `d006e5a62088`), and the next
+  run of three `deftest`s 156.6 s; neither refusal reached the agent and `dsum` was simply absent afterwards.
+- **Fixed (#13 of the dogfood report):** on 5bed888d0 a function that reads its own data installs:
+  `(defn e-issue-count "…" {:malli/schema [:=> [:cat] :int]} [] (or (seon.db/q '[:find (count ?i) . :where [?i :seon.issue/id]]) 0))`
+  then `(e-issue-count)` answers `445`.

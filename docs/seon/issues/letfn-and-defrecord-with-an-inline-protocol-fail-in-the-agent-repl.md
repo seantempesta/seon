@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: fixed (5bed888d0, verified live 2026-09-26 by dogfood-repl-opus-2)
 severity: high
 created: 2026-09-26
 tags: [issue, sci, repl, dogfood]
@@ -48,3 +48,11 @@ as tagged maps.
 
 Parity rows for `letfn`, `defrecord` with an inline protocol, and record printing, run through the agent
 entrance.
+
+## Verified fixed 2026-09-26 (dogfood-repl-opus-2, cycle 10, archive 5bed888d0)
+
+Through MCP SCI on branch `dogfood-repl-opus-2-c10b`: `(letfn [(f [] :ok)] (f))` answers `:ok`;
+`(defprotocol P (p [x]))`, `(defrecord R [a] P (p [_] a))`, `(p (->R 1))` answer `P`, `user.R`, `1`; `(->R 1)` prints
+`#user.R{:a 1}`. Still open elsewhere: `(Math/abs -3)` answers "Unable to resolve symbol: Math/abs" (clojure.main: `3`),
+tracked on [agent-repl-error-output-diverges…](agent-repl-error-output-diverges-from-clojure-main-for-every-ordinary-mistake.md).
+On 6ccf12a5a (before 5bed888d0) both still failed exactly as above.

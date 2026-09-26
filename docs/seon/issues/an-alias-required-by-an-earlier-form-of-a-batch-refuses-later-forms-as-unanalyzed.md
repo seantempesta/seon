@@ -68,3 +68,27 @@ namespace and alias effects of earlier forms are invisible. `clojure.main/repl` 
 one form at a time, and the next read sees the previous form's effects. Analysis must be a per-form stage of
 the same loop, after the previous form's evaluation, not a batch pre-pass. The "fill the cache" remedy is
 wrong for this case too, as the missing-namespace issue says.
+
+## Evidence 2026-09-26 (dogfood-repl-opus-2, cycle 10): the same batch now hangs the agent with nothing recorded
+
+On archives 6ccf12a5a and 5bed888d0 the require-then-use batch no longer refuses; it **never settles**. Minimal form,
+on a fresh branch (`dogfood-repl-opus-2-c4c`), three times on three branches:
+
+```clojure
+(ns dogfood.min3 (:require [clojure.string :as str]))
+(defn a1 "A." {:malli/schema [:=> [:cat :string] :string]} [x] (str/upper-case x))
+(defn b1 "B." {:malli/schema [:=> [:cat :string] :string]} [x] (a1 x))
+(b1 "q")
+```
+
+- MCP answers `timeout` at 40, 45 and 120 s. The turn stays open (no `:seon.turn/closed-tx`); its four evaluation rows
+  have a source and no receipt or error; no JVM thread is running SCI, Malli or `seon.test` code. Only the MCP prepl
+  thread waits in `seon.await/await-port-operations` under `:seon.config.agent/turn-completion-backstop-ms` 600000.
+- **No error row is recorded** for the run on 5bed888d0 (the branch's error occurrences are unchanged), and
+  `runtime_status` shows `unanswered 0`. Every later run answers `agent-already-running`; only retire recovers.
+- Controls: the same forms without the alias (`(ns dogfood.min2)`, `(defn a1 … (inc x))`, `(defn b1 … (a1 x))`)
+  answer `2` in one run; `(ns dogfood.words (:require [clojure.string :as str]))` alone in one run and the `defn`s using
+  `str/` in the next run also work. `(ns dogfood.c4a (:require [clojure.string :as str]))` followed by
+  `(str/upper-case "abc")` (no `defn`) answers `"ABC"`, so the cycle-2 refusal (#11) is fixed; the hang needs a `defn`
+  whose body uses the new alias.
+- Settlement side of the same class: [a-query-with-a-regex-literal-cannot-record-its-read-and-leaves-the-run-open-forever](a-query-with-a-regex-literal-cannot-record-its-read-and-leaves-the-run-open-forever.md), part (b).

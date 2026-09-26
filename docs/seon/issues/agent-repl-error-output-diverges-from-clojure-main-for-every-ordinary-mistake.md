@@ -72,3 +72,20 @@ One parity row per line of the table, run through the agent entrance.
 - Before the entity schema was registered, `(dir user)` listed `:dogfood.book/id` and `:dogfood.book/title`, but
   `transact!` refused `:dogfood.book/title` as "an undeclared attribute … Use a declared attribute from the entity's
   schema". Registered-but-not-installed is not distinguished from undeclared.
+
+## Re-verified 2026-09-26 (dogfood-repl-opus-2, cycle 10, archive 5bed888d0): mostly fixed
+
+| Form | Now | Verdict |
+|---|---|---|
+| `(/ 1 0)` | `Execution error (ArithmeticException) at (REPL:1:1).` `Divide by zero` | fixed (6ccf12a5a still showed `REPL:1818`, an SCI-internal line; d9566ad05 fixed the location) |
+| `(inc "a")` | `Execution error (ClassCastException) … class java.lang.String cannot be cast …` | fixed |
+| `(throw (ex-info "boom" {:a 1}))` | `Execution error (ExceptionInfo) at (REPL:1:1).` `boom` | fixed (same as clojure.main, which also omits the data) |
+| `(try (inc "a") (catch ClassCastException e :c))` | `:c` | fixed (e33f095df) |
+| `(try (throw (IllegalStateException. "x")) (catch IllegalStateException e (ex-message e)))` | `"x"` | fixed |
+| `*ns*` | `#namespace[user]` | fixed (named) |
+| `(require '[clojure.set :as set])` | `nil` | fixed (d9566ad05) |
+| `(keys {:a 1 :b 2})`, `(map inc [1 2])`, `(sort …)`, `(seq "ab")`, `(rseq [1 2 3])`, `(subvec [1 2 3] 1)` | `(:a :b)`, `(2 3)`, `(1 2 3)`, `(\a \b)`, `(3 2 1)`, `[2 3]` | fixed (floor issue #7 of the dogfood report) |
+| `(sq 1 2)`, contracted one-arity `sq` | `… expected the declared arglists (nil), got an argument count of 2 … Called from sci.lang.Var (lang.cljc:265).` | **open**: arglists still `(nil)`, frame still `sci.lang.Var` |
+| `(Math/abs -3)` | `Unable to resolve symbol: Math/abs` | **open**: clojure.main answers `3` |
+| every exception | ends in `Contract finding: seon.sci.kernel/failure-value returned this error, and none of its declared error alternatives matches it.` | **open** (D12): the agent's own exception is reported as a contract finding of a platform function |
+| ten forms in one run | every error says `(REPL:1:1)` | minor: clojure.main counts lines across the input, so the tenth form says `REPL:10` |

@@ -38,3 +38,8 @@ function, or a test body.
 ## Regression
 
 A `register!` nested in `let` and in a helper function each installs its attribute.
+
+## Re-verified open 2026-09-26 (dogfood-repl-opus-2, cycle 10, archive 6ccf12a5a)
+
+`(let [n :dogfood.c4/thing] (seon.schema/register! n [:string {:min 1}]))` → "Execution error (ExceptionInfo) …
+Schema declarations require an isolated registration delta."

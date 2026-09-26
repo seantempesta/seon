@@ -60,3 +60,9 @@ ran: an eval, a macro expansion, … Define it with its own defn, or remove it f
 With `issue/status` (the alias `my.issue` has) instead of the qualified name, it answered `Cannot classify
 host binding: clj-kondo holds no analysis of issue`. Analysis attributed the whole `do` to `user`. Top-level
 `(in-ns 'my.issue)` followed by the `defn` in the same multi-form run works. Plain SCI accepts both shapes.
+
+## Re-verified open 2026-09-26 (dogfood-repl-opus-2, cycle 10, archive 6ccf12a5a)
+
+`(do (in-ns 'dogfood.c4b) (clojure.core/defn f1 [] 1))` → "This form changed dogfood.c4b/f1, which its analysis declares
+no definition for at the place it ran: an eval, a macro expansion, … Define it with its own defn, or remove it first with a
+top-level ns-unmap." The new message lists causes, none of which is the actual one (`in-ns` inside `do`).

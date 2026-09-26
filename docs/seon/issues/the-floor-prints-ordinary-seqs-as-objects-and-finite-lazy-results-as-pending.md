@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: fixed (verified live 2026-09-26 by dogfood-repl-opus-2 on 6ccf12a5a)
 severity: high
 created: 2026-09-26
 tags: [issue, print, floor, repl, dogfood]
@@ -74,3 +74,9 @@ prints a bounded prefix.
 `(subvec result/e49e526b52349 32)`, a slice of a vector result reached through its handle, printed
 `#object[clojure.lang.APersistentVector/SubVector]` (branch `dogfood-repl-opus-7`, archive 10d6fdff5). The
 allowlist misses vector implementations too, not only seqs.
+
+## Verified fixed 2026-09-26 (dogfood-repl-opus-2, cycle 10, archive 6ccf12a5a, again on 5bed888d0)
+
+`(keys {:a 1 :b 2})` → `(:a :b)`; `(map inc [1 2])` → `(2 3)`; `(sort [3 1 2])` → `(1 2 3)`; `(seq "ab")` → `(\a \b)`;
+`(rseq [1 2 3])` → `(3 2 1)`; `(subvec [1 2 3] 1)` → `[2 3]`. `(into-array [1 2])` prints `#object[[Ljava.lang.Long;]`,
+which matches clojure.main's `#object[...]` shape.
