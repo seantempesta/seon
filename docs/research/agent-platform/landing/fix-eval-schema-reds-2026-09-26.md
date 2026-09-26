@@ -58,6 +58,59 @@ definition, so after an incremental install they still call the JVM definition, 
 override. `database-provenance-…` now asserts the subset relation and compares roots outside the
 affected closure.
 
+## Round 6: storage collection (C14) and the durability issues (aaa9f9629); cluster-handle config (4d163db4b)
+
+- **Diagnosis.** The store grew because collection never ran. Its one runtime caller is the
+  weekly `root/maintenance/compact`, which refused: `:seon.config.maintenance/collect?` was
+  absent, and default had no collection receipts. Unlinked test branches are unreachable. On a
+  scratch store, 10 retired members × 20 commits went from 8 to 218 files, and the plain
+  (epoch-cutoff) collection swept 210 back to 8. A dry run on default found 971 of 2,363 keys
+  reclaimable, with an 850 ms mark.
+- **Durability issues: fixed at their owners and closed with reproductions at HEAD**
+  (`tmp/fix-durability/probe.clj`):
+  - superv.async fork `501b4294`: an `AssertionError` in a konserve write fails the commit.
+    The connection stays at `6ab73614-6ed9…`, the disk head is unchanged, and a fresh read is
+    whole.
+  - Datahike fork `fa0cc1a7`: the six fused roots are held strongly and are readable after
+    Reference clearing with a cold node cache.
+  - The collection claim the dial waited on holds for the plain collection: a held value, a
+    non-head adopted commit and 60 concurrent commits stay readable while a retired branch is
+    swept (31).
+- **Changes.**
+  - `registry/plain-cutoff` (the epoch).
+  - The scheduled and dry-run collections use it instead of a now cutoff, which pruned ancestry
+    and swept adopted source commits.
+  - `maintenance/collect-released!`, gated by the dial.
+  - The dial's schema now declares `:seon.config/default true`; the derived default is true.
+  - Regression `the-plain-collection-keeps-held-values-adopted-commits-and-concurrent-writes`:
+    5/0 in 3.2 s in a scratch run.
+  - `schedule-test`'s disabled-outcome member sets the dial false explicitly.
+- **Hunk for the fix-dogfood-api lane (`src/seon/test.clj`, `run`'s request `finally`,
+  ~:2428).** Require `[seon.maintenance :as maintenance]`. After the request handle is
+  released, run the plain collection gated by the dial. A collection failure is a core fault,
+  never a masked throw:
+
+```clojure
+(finally
+  (when request-handle
+    (@release-context! request-handle)
+    (try (maintenance/collect-released! (:seon.store/store request-handle) effective)
+         (catch Throwable failure (core-fault! `maintenance/collect-released! failure)))))
+```
+
+  Verify that `request-handle` carries `:seon.store/store` (`clean-request-handle` reads it
+  from the execution). Otherwise pass the execution's store. Measure the per-request cost
+  (the mark was 850 ms on default at 2,363 keys).
+- **cluster-handle**: the fix-dogfood-api patch is applied. The handle reads
+  `(config/effective (db/db connection) cluster-name)`, keeps the shipped decisions without a
+  cluster world, and refuses on a read error. Regression
+  `a-cluster-handle-takes-its-dials-from-its-worlds-effective-config`: 5/0 in a scratch run.
+  `host_test`'s time-limit hunk is now redundant.
+- **Static checks:** contracts-compile over `registry.clj` and `maintenance.clj` 0 findings;
+  the resource reads as EDN.
+- **Root runs:** `bin/test-check default --ns seon.cluster.registry-test`, `--ns seon.schedule-test`,
+  `--ns seon.maintenance-test`, `--ns seon.test-support-test`.
+
 ## Round 5: call-preparation snapshot staleness, D7 / C10 (a44538acc)
 
 - Reproduced on isolated branches of default. With `current-snapshot` on one call-state,
