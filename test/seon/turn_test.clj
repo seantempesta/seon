@@ -598,7 +598,9 @@
                         :seon.agent/id id}))
          (reset! transactions [])
          (submit "a")
-         (is (= [16 6 2] (mapv :seon.test/datoms @transactions))
+         ;; `(+ 1 1)` reads nothing, so its evaluation carries no read
+         ;; evidence datom (ca17618c0: a form's sink covers only its own reads).
+         (is (= [16 5 2] (mapv :seon.test/datoms @transactions))
              "the cold turn is open, evaluations, close, with no empty schedule recovery")
          (println {:seon.test/virtual-turn-transactions (count @transactions)
                    :seon.test/virtual-turn-datoms @transactions})
@@ -649,9 +651,9 @@
                      :seon.test/transactions measured
                      :seon.test/transaction-count (count measured)
                      :seon.test/datom-count (reduce + (map :seon.test/datoms measured))})
-           (is (= [30 16 2] (mapv :seon.test/datoms measured)))
+           (is (= [30 13 2] (mapv :seon.test/datoms measured)))
            (is (= 3 (count measured)))
-           (is (= 48 (reduce + (map :seon.test/datoms measured))))
+           (is (= 45 (reduce + (map :seon.test/datoms measured))))
            (is (= 1 (count (turn/receipt-settle-batch-tx
                             (mapv (fn [ordinal]
                                     {::turn/id turn-id
@@ -874,13 +876,12 @@
             test-symbol 'fixture.pending/target-test
             function-symbol 'fixture.pending/target
             now (java.util.Date. 1785000000000)
+            ;; The canonical producer analyzes and digests the row the
+            ;; writer reproduces (`support/program-row`).
             settle-row!
-            (fn [run-id agent-id row]
-              (let [source (or (:seon.fn/source row) (:seon.test/source row))
-                    namespace-ref (or (:seon.fn/ns row) (:seon.test/ns row))
-                    row (second
-                         (seon.fn/analyze-form
-                          @connection source namespace-ref row))]
+            (fn [run-id agent-id declaration source]
+              (let [row (support/program-row @connection declaration source
+                                             {:seon.schema.admission/source :agent})]
                 (support/transacted!
                         connection
                         (into (support/agent-tx @connection agent-id)
@@ -901,13 +902,9 @@
         (support/transacted! connection [(support/namespace-row @connection namespace-name)])
         (settle-row!
          "pending-test-run" "pending-test-agent"
-         {:seon.test/sym test-symbol
-          :seon.test/ns [:seon.ns/name namespace-name]
-          :seon.test/source
-          (str "(clojure.test/deftest ^{:seon.test/subject " function-symbol
-               "} target-test (clojure.test/is true))")
-          :seon.schema.admission/source :agent
-          :seon.test/subject function-symbol})
+         [:seon.test/sym test-symbol]
+         (str "(clojure.test/deftest ^{:seon.test/subject " function-symbol
+              "} target-test (clojure.test/is true))"))
         (let [pending (db/pull @connection '[*]
                                [:seon.test/sym test-symbol])]
           (is (= function-symbol (:seon.test/subject pending))
@@ -919,14 +916,8 @@
                     (seon.fn/gate-set @connection function-symbol))))
         (settle-row!
          "pending-function-run" "pending-function-agent"
-         {:seon.fn/sym function-symbol
-          :seon.fn/ns [:seon.ns/name namespace-name]
-          :seon.fn/source
-          "(defn ^{:malli/schema [:=> [:cat] :int]} target [] 1)"
-          :seon.fn/arglists "([])"
-          :seon.fn/private? false
-          :seon.fn/spec "[:=> [:cat] :int]"
-          :seon.schema.admission/source :agent})
+         [:seon.fn/sym function-symbol]
+         "(defn ^{:malli/schema [:=> [:cat] :int]} target [] 1)")
         (let [resolved (db/pull @connection '[:seon.test/subject]
                                 [:seon.test/sym test-symbol])]
           (is (= function-symbol (:seon.test/subject resolved))
@@ -948,29 +939,16 @@
                               (turn/receipt-start-tx
                                {::turn/id "batch" :seon.cluster.eval/ordinal ordinal
                                 :seon.cluster.eval/at now})))
-       (let [sources [(str "(clojure.test/deftest "
-                           "^{:seon.test/subject fixture.batch/target} "
-                           "target-test (clojure.test/is true))")
-                      "(defn ^{:malli/schema [:=> [:cat] :int]} target [] 1)"]
-             preliminary-rows
-             [{:seon.test/sym 'fixture.batch/target-test
-               :seon.test/ns [:seon.ns/name 'fixture.batch]
-               :seon.test/source (first sources)
-               :seon.test/subject 'fixture.batch/target
-               :seon.schema.admission/source :agent}
-              {:seon.fn/sym 'fixture.batch/target
-               :seon.fn/ns [:seon.ns/name 'fixture.batch]
-               :seon.fn/source (second sources)
-               :seon.fn/arglists "([])"
-               :seon.fn/private? false
-               :seon.fn/spec "[:=> [:cat] :int]"
-               :seon.schema.admission/source :agent}]
-             rows (mapv (fn [source row]
-                          (second
-                           (seon.fn/analyze-form
-                            @connection source
-                            (or (:seon.test/ns row) (:seon.fn/ns row)) row)))
-                        sources preliminary-rows)
+       (let [rows [(support/program-row
+                    @connection '[:seon.test/sym fixture.batch/target-test]
+                    (str "(clojure.test/deftest "
+                         "^{:seon.test/subject fixture.batch/target} "
+                         "target-test (clojure.test/is true))")
+                    {:seon.schema.admission/source :agent})
+                   (support/program-row
+                    @connection '[:seon.fn/sym fixture.batch/target]
+                    "(defn ^{:malli/schema [:=> [:cat] :int]} target [] 1)"
+                    {:seon.schema.admission/source :agent})]
              result (db/transact!
                      connection
                      (turn/receipt-settle-batch-tx
@@ -1527,21 +1505,11 @@
             function-row
             (memoize
              (fn [result]
-               (let [source
-                     (str "(defn ^{:malli/schema [:=> [:cat] :int]} "
-                          "scratch [] " result ")")
-                     preliminary-row
-                     {:seon.fn/sym qualified-id
-                      :seon.fn/ns [:seon.ns/name namespace-name]
-                      :seon.fn/source source
-                      :seon.fn/arglists "([])"
-                      :seon.fn/private? false
-                      :seon.fn/spec "[:=> [:cat] :int]"
-                      :seon.schema.admission/source :agent}]
-                 (second
-                  (seon.fn/analyze-form
-                   @connection source (:seon.fn/ns preliminary-row)
-                   preliminary-row)))))
+               (support/program-row
+                @connection [:seon.fn/sym qualified-id]
+                (str "(defn ^{:malli/schema [:=> [:cat] :int]} "
+                     "scratch [] " result ")")
+                {:seon.schema.admission/source :agent})))
             start!
             (fn [run-id ordinal]
               (db/transact!
@@ -1752,8 +1720,12 @@
     :plan (let [[run-id digest] args]
             (transact-or-refusal
              connection
+             ;; A stored namespace: the plan declares an absent one only
+             ;; from its evaluation's row or the source that moved into it,
+             ;; else the writer refuses the bare identity by name.
              (turn/plan-tx
-              {::turn/id run-id ::turn/starting-ns [:seon.ns/name 'user] ::turn/sources [{:seon.cluster.eval/source "(+ 1 1)"}]})))
+              {::turn/id run-id ::turn/starting-ns [:seon.ns/name 'my.agents.a1]
+               ::turn/sources [{:seon.cluster.eval/source "(+ 1 1)"}]})))
     :receipt-start (let [[run-id ordinal] args]
                      (transact-or-refusal
                       connection
@@ -2013,7 +1985,10 @@
          connection
          (error/commit-tx
           (db/db connection)
-          (cond-> {:seon.error/source {:seon.error/message message}
+          ;; The message never enters an error's signature (`seon.error/signature`):
+          ;; two faults are two sites, so each names its own operation.
+          (cond-> {:seon.error/source {:seon.error/message message
+                                       :seon.error/operation (symbol "fixture.faults" (name kind))}
                    :seon.error/declared-schema :seon.error/normalization-error
                    :seon.error/id message :seon.error/at (java.util.Date. millis)
                    :seon.error/process cluster/boot-process-identity

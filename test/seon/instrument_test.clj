@@ -1441,11 +1441,13 @@
   (test-support/with-database
    (fn [connection]
      (arm-prefix-contract!)
+     ;; The stored declaration is replaced exactly: an upsert would keep the
+     ;; owned attributes the new definition drops.
      (test-support/transacted!
       connection
-      [(test-support/program-fn-row
-        (db/db connection) 'seon.instrument-test/prefix-contract
-        "(defn prefix-contract [stale-name] stale-name)")])
+      (test-support/replacement-tx
+       (db/db connection) '[:seon.fn/sym seon.instrument-test/prefix-contract]
+       "(defn prefix-contract [stale-name] stale-name)" {}))
      (let [environment (env/environment
                         {:seon.boot/cluster-name "instrument-test"
                          :seon.db/connection connection})

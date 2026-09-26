@@ -258,8 +258,12 @@
   (when connection
     (let [environment (env/of {env/state-carrier
                                (:seon.sci.eval/projection-state (meta connection))})]
-      (some (fn [[_ handle]]
-              (when (identical? connection (:seon.db/connection handle)) handle))
+      ;; Only the handle acquired for no agent: an agent armed on the fixture's
+      ;; live branch borrows the same connection under `[branch agent-id]`, and
+      ;; its context is that agent's private universe.
+      (some (fn [[[_ agent-id] handle]]
+              (when (and (nil? agent-id) (identical? connection (:seon.db/connection handle)))
+                handle))
             (some-> (:seon.agent/context-state environment) deref)))))
 
 (defn execution-handle
@@ -785,7 +789,10 @@
 
 (defn program-row
   "Analyze an explicit synthetic declaration through the production source path,
-   then `revised-row` with `overrides`."
+   then `revised-row` with `overrides`. The row is the desired declaration, not
+   a write: an upsert onto a stored identity keeps the owned attributes it drops
+   and the writer refuses its digest, so write a stored identity through
+   `replacement-tx`."
   ([database identity source] (program-row database identity source {}))
   ([database identity source overrides]
    (let [projection (db/carried-projection database)
