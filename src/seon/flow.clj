@@ -1027,20 +1027,6 @@
       nil))
   nil)
 
-(defn- join-fault-committer-errors!
-  "Drain the committer graph's own error channel on that graph's executor, so
-  the graph's join also joins this reader: it ends when `flow/stop` closes
-  the channel."
-  [^Executor executor error-channel report-loss]
-  (.execute
-   executor
-   ^Runnable
-   (fn []
-     (loop []
-       (when-some [escaped (async/<!! error-channel)]
-         (report-loss escaped)
-         (recur))))))
-
 (defn- fault-graph-definition
   [request]
   {:procs
@@ -1061,7 +1047,7 @@
    [:=> [:catn [::request ::error-fanout-request]] ::error-fanout]}
   [{::keys [graph started fault-buffer-capacity monitor-buffer-capacity
             read-core-error-mode commit-fault! commit-drop! panic! projection
-            committer-step report-loss]
+            committer-step]
     :as request}]
   (let [environment (env/refuse-absent-environment!
                      request ::start-error-fanout!)
@@ -1097,12 +1083,7 @@
                      ::commit-drop! commit-drop!
                      ::panic! panic!}
               committer-step (assoc ::committer-step committer-step))
-            environment))
-          ::joins
-          {::fault-committer-error-join
-           (fn [{::keys [started executor]}]
-             (join-fault-committer-errors! executor (:error-chan started)
-                                           (or report-loss #'report-committer-loss!)))}})
+            environment))})
         monitor-view
         (monitor-graph
          graph monitor-report-channel monitor-error-channel)]

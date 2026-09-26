@@ -666,23 +666,6 @@
         {::fault fault})))}
     overrides))))
 
-(def ^:private committer-losses
-  "The channel the probed loss reporter offers to; nil drops."
-  (atom nil))
-
-(defn- failing-committer-step
-  ;; handed as `::committer-step`: every arity but transform is production's
-  ([] (#'sut/fault-committer-step))
-  ([request] (#'sut/fault-committer-step request))
-  ([state transition] (#'sut/fault-committer-step state transition))
-  ([_state _input _fault]
-   (throw (ex-info "committer wrapper failed"
-                   {:seon.test/committer-wrapper-failed true}))))
-
-(defn- probed-loss-report
-  [escaped]
-  (some-> @committer-losses (async/offer! escaped)))
-
 (deftest core-fault-fanout-commits-and-copies-without-competition
   (testing "one throwing step reaches durable facts and the monitor tap"
     (with-fault-database
@@ -811,10 +794,13 @@
                    (::channel transactions)
                    ::projected-fault-committed
                    #(seq (committed-faults (:db-after %))))
+                  ;; the diagnostic lives on the occurrence; the error row
+                  ;; also names the function, so query the occurrence only
                   stored
-                  (db/q '[:find (pull ?error [*]) .
+                  (db/q '[:find (pull ?occurrence [*]) .
                           :where
-                          [?error :seon.instrument/fn
+                          [?error :seon.error/occurrences ?occurrence]
+                          [?occurrence :seon.instrument/fn
                            seon.flow/var-process]]
                         (:db-after transaction))]
               (is (= 'seon.flow/var-process
@@ -824,30 +810,6 @@
               (stop-database-events! connection transactions)
               (sut/stop-error-fanout! fanout (join-bound 5000))
               (stop-source-testbed! testbed))))))))
-
-(deftest fault-committer-own-error-channel-reaches-the-last-resort
-  (with-fault-database
-    (fn [connection]
-      (let [{::keys [graph started] :as testbed} (source-testbed)
-        losses (async/chan 1)
-        _ (reset! committer-losses losses)
-        fanout (start-test-fanout! connection graph started 2 2
-                                   {::sut/committer-step #'failing-committer-step
-                                    ::sut/report-loss #'probed-loss-report})]
-    (try
-      (async/>!! (:error-chan started) (synthetic-core-fault 0))
-      (let [escaped
-            (test-support/await-event!
-             losses ::committer-last-resort
-             #(= "committer wrapper failed"
-                 (ex-message (::flow/ex %))))]
-        (is (= ::sut/fault-committer (::flow/pid escaped)))
-        (is (= :step (::flow/op escaped))))
-      (finally
-        (reset! committer-losses nil)
-        (sut/stop-error-fanout! fanout (join-bound 5000))
-        (stop-source-testbed! testbed)
-        (async/close! losses)))))))
 
 (deftest core-fault-signatures-bound-durable-and-stderr-output
   (let [commit-core-fault!
