@@ -181,8 +181,12 @@
                        (test-support/refusal-data
                         #(runner/commit-results! connection (completion first-run))))]
          (is (true? (:seon.db/invalid-read read-refusal)))
-         (is (= read-refusal refused)
+         ;; The writer returns the read's refusal with its own attempt context
+         ;; (request id, basis, transaction) added beside it.
+         (is (= (dissoc read-refusal :seon.error/data)
+                (select-keys refused (keys (dissoc read-refusal :seon.error/data))))
              "a refused read is never evidence of an existing run or an identity collision")
+         (is (true? (:seon.db/transaction-refused refused)) (pr-str refused))
          (is (= basis (db/basis-t (db/db connection)))))
        (let [basis (db/basis-t (db/db connection))
              changed (assoc first-run :seon.test.run/basis-t (inc (:seon.test.run/basis-t first-run)))
@@ -263,7 +267,9 @@
          :seon.source/test-input-digest (id/digest 64 [:admission :inputs])}])
      (let [stale (runner/provenance (db/db connection))
            _ (test-support/transacted!
-              connection [[:db/add [:seon.fn/sym 'seon.id/id] :seon.fn/doc "Written after the tested basis."]])
+              ;; A digested attribute changes through the row its writer digests.
+              connection [(test-support/revision (db/db connection) [:seon.fn/sym 'seon.id/id]
+                                                 {:seon.fn/doc "Written after the tested basis."})])
            database (db/db connection)
            request {::ignored :not-a-database-attribute
                     :seon.test.run/provenance (runner/provenance database)
