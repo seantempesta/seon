@@ -2,7 +2,7 @@
 type: landing
 lane: one-commit-a-opus
 date: 2026-09-26
-status: option 2 committed (55b5b580f): a form's first durable write opens its run; the speculative open deleted; RESET NEEDED, then measure
+status: option 2 (55b5b580f), program-change from report (ab87961d5) and the shared node cache pin (fc0ff40b9) committed; HEAD does not boot for a foreign task file (below); unmeasured
 ---
 
 # Landing: one durable commit per form (A), then reply-when-applied (B) (2026-09-26)
@@ -23,6 +23,32 @@ refusals, e.g. `agent-already-running`, answer the caller), evaluates on that va
 commits open + evaluations + close as ONE transaction (`with-submission` prepends the open; the
 run-dependent writer calls after it see the run mid-transaction, `datahike/db/transaction.cljc:1171`).
 The pass answers the reply port with its report; a pass that ends without settling closes the port.
+
+## HEAD does not boot (21:10Z), cause outside this lane
+
+- Restart onto 111abe670 failed: "Source changed during analysis; clj-kondo cache entries changed again".
+  This lane ran `clj-kondo --lint` on its files in the checkout at about that time. That writes the
+  shared `.clj-kondo/.cache` the booting analyzer reads, so a concurrent lint is the likely cause (not
+  proven). Lanes should not lint during a restart.
+- Restart onto ab87961d5 failed: "Task indexing was refused. seon.program is refused: handle-mismatch"
+  (`seon.issue/file-declarations`, issue.clj:597). Commit 2d047c99c (contract-cost landing) added
+  `resources/seon/tasks/seon.program.edn` entry `:seon.task/id "0d8be4a76ab3"` for
+  `a-defn-scans-every-projection-form-per-call`; its id is not the handle `task-handle` derives from
+  (ns, name, kind). Fix: omit the `:id` (the reader assigns the handle) or write the derived one.
+
+## Also landed, unmeasured
+
+- **ab87961d5, task 361088de3d56:** the program-change check reads the settlement's own report
+  (`install-evaluated-rows!` takes `:seon.db/transaction-report`; seven test callers pass theirs).
+  Before, on 8e4ac24c9 with a fresh branch, contracted defns through `evaluate-source!` took
+  **6,900 / 2,419 / 2,351 / 1,957 ms**; with-declarations ran 968 calls at 7.6 ms each on that branch
+  (probe `one-commit-defn-probe-2026-09-26.clj`).
+- **fc0ff40b9 (fork 67b00071), task 4bb788513862:** cause is that each Datahike connection built its own node
+  cache (`persistent_set.cljc` `create-storage`), and a branch is its own connection, so every branch
+  started cold. Ported upstream d2b9e525: one cache per physical store and threshold, reserved in the
+  connection registry beside the shared write hooks and handed to storage under
+  `datahike.index.interface/node-cache-key`. The fork's `connector_release_test` asserts two branch
+  reservations share one cache.
 
 ## Option 2 landed (55b5b580f) — unmeasured until the restart
 
