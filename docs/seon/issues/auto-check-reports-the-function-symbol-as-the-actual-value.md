@@ -37,3 +37,15 @@ cause"). It never reports the callee symbol as a value.
 
 Contract `[:=> [:cat :int] :int]` with body `(* x x x)`: the refusal names `ArithmeticException`
 and the generated argument.
+
+## Evidence 2026-09-26 (dogfood-repl-opus): the generated world has no schema, and "actual" is the lookup ref
+
+Default archive a1b01c92a, branch `dogfood-repl-opus-3`: a docstring-only redefinition of `my.issue/status`
+reported `Auto-check … arguments: [{:seon.db/db #datahike/DB {… :max-tx 536870912 :max-eid 0}, :seon.issue/id "0"}]
+expected: :map actual: [:seon.issue/id "0"] why: ["invalid type"]`. On a real database, `seon.issue/status`
+answers the declared not-found refusal for a missing id (verified on the next branch). So the generator built
+an **empty database without the issue schema**, the pull threw on the unknown lookup attribute, and the report
+shows the thrown `ex-data` entity id as the "actual" return value. **Which model is wrong:** a
+`:seon.db/database-value` argument is generated as an arbitrary empty Datahike value, not a database of the
+function's declared world. Supplied inputs (the database, the agent) are defaults supplied by declared schema
+name at the REPL, so the auto-check should supply the same defaults and not generate them.

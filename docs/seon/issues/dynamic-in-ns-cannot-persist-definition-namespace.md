@@ -45,3 +45,18 @@ one parsed namespace mechanism, not a special `in-ns` compatibility path.
 - The next definition settles normally and is attributable to the run.
 - A regression covers namespace movement hidden inside `do` without regex or
   source-text classification.
+
+## Evidence 2026-09-26 (dogfood-repl-opus): `(do (in-ns 'x) (defn …))` is refused by the definition authority
+
+Default archive 33ea69298, MCP SCI branch `dogfood-repl-opus-2`, one form, since the MCP tool description said
+a branch run takes exactly one form (it takes several, see the dogfood report):
+
+```clojure
+(do (in-ns 'my.issue) (defn status "…" {:malli/schema …} [request] (seon.issue/status request)))
+```
+
+answered: `This form changed my.issue/status, which its analysis declares no definition for at the place it
+ran: an eval, a macro expansion, … Define it with its own defn, or remove it first with a top-level ns-unmap.`
+With `issue/status` (the alias `my.issue` has) instead of the qualified name, it answered `Cannot classify
+host binding: clj-kondo holds no analysis of issue`. Analysis attributed the whole `do` to `user`. Top-level
+`(in-ns 'my.issue)` followed by the `defn` in the same multi-form run works. Plain SCI accepts both shapes.

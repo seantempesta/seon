@@ -276,3 +276,12 @@ indexed-read assertions. Four real-analyzer fixtures also now carry the
 canonical projection into reconciliation; that repair is tracked in
 `program-graph-tests-do-not-carry-their-current-contract-projection.md`.
 These fixture changes have not yet been run by the owner.
+
+## Evidence 2026-09-26 (dogfood-repl-opus): the saturation now blocks every first-party edit
+
+Default archive a1b01c92a, and again on 10d6fdff5: `(my.program/tests-reaching {:seon.program/subject 'my.issue/status})`
+and `… 'my.note/notes` each answered about 1,495 to 1,497 `:seon.program/gating` tests, while
+`my.program/callers` for `my.issue/status` answered **no callers**. `my.plan/current`, `my.agent/identity`,
+`my.turn/wait` and `my.fs/stat` answered 0. Because the install gate runs this whole selection, a
+docstring-only redefinition of `my.issue/status` was refused
+([issue](a-first-party-redefinition-gates-on-saturated-reach-interpreted-in-sci-and-is-refused.md)).

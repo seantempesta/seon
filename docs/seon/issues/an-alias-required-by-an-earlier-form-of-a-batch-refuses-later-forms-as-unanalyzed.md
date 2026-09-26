@@ -45,3 +45,26 @@ running until its request bound (lane fix-turn-hang-opus, default pid 23282, com
   bound is reached silently: `opening-deferred?` (src/seon/turn.clj:2715) derives no work.
   A core refusal should be stored and delivered as a fault, and reaching the bound should be
   loud.
+
+## Evidence 2026-09-26 (dogfood-repl-opus): the `ns` form, and every later form is shown as `null`
+
+Default archive 10d6fdff5, MCP SCI on branch `dogfood-repl-opus-5`, one run of seven forms:
+
+```clojure
+(ns dogfood.ns-form (:require [clojure.string :as str] [my.program :as program]))
+(str *ns*)
+(defn shout "…" {:malli/schema [:=> [:cat :string] :string]} [s] (str (str/upper-case s) "!"))
+(shout "hi") …
+```
+
+Form 0 answered `Cannot classify host binding: clj-kondo holds no analysis of str. Fill the checkout's cache …`
+as an exception, and forms 1 through 6 each answered `"val": null`, a value rather than "not evaluated". The
+branch-error window recorded it as a **core fault** (`seon.turn/phase`, signature `08d14419…`), even though
+the code is ordinary REPL Clojure. The same `ns` form alone in one run, then `(in-ns 'dogfood.ns-form)` with
+the `defn` in the next run, worked (`"HI!"`). So the alias is known once a previous run has evaluated it.
+
+**Which model is wrong:** the run analyzes every form before evaluating any, in the starting namespace, so
+namespace and alias effects of earlier forms are invisible. `clojure.main/repl` reads, evaluates and prints
+one form at a time, and the next read sees the previous form's effects. Analysis must be a per-form stage of
+the same loop, after the previous form's evaluation, not a batch pre-pass. The "fill the cache" remedy is
+wrong for this case too, as the missing-namespace issue says.
