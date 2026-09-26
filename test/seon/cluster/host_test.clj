@@ -15,7 +15,8 @@
             [seon.flow :as flow]
             [seon.id :as id]
             [seon.test-support :as support]
-            [seon.turn :as turn]))
+            [seon.turn :as turn]
+            [my.program]))
 
 (def ^:private cluster-name "host")
 
@@ -408,3 +409,38 @@
         (is (= [(pr-str issue-id)]
                (hosted-run! hosted (str "(:seon.issue/id (my.issue/status {:seon.issue/id " (pr-str issue-id) "}))")))
             "and the agent reads it back")))))
+
+(deftest root-reads-a-branch-agents-proposal-and-only-roots-custody-accepts
+  ;; Before, root had no REPL entrance to read a proposal or merge it. A branch
+  ;; agent's custody neither accepts a merge nor writes files: it refuses by name.
+  (with-host-world {}
+    (fn [{:keys [handle connection branch!]}]
+      (support/transacted! connection (support/agent-tx @connection "root"))
+      (let [branch (branch!)
+            hosted (host-on! handle branch "mcp/proposer")]
+        (hosted-run! hosted "(my.message/send {:my.message/to \"root\" :my.message/about \"a-fix\" :my.message/content \"Please merge.\"})")
+        (is (= [{:seon.issue/id "a-fix" :seon.store/branch branch :seon.agent/id "mcp/proposer"}]
+               (mapv #(dissoc % :seon.message/id)
+                     (my.program/proposals {:seon.db/db (db/db connection) :seon.agent/id "root"
+                                            :my.program/context {:seon.db/connection connection
+                                                                 :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
+                                                                 :my.program/base-ctx (:seon.sci.eval/ctx handle)
+                                                                 :seon.store/store (:seon.store/store handle)}}))))
+        (is (= [(str [:my.program/context branch])]
+               (hosted-run! hosted (str "((juxt :seon.error/member :my.program/held-branch) (my.program/accept-merge! "
+                                        "{:seon.source/candidate :tested :seon.test.run/id \"run\" "
+                                        ":datahike/expected-basis-t 1 :parents #{}}))"))))))))
+
+(deftest a-refused-install-is-its-receipts-error
+  ;; Before, a gate-refused install settled its refusal as shown text only, with
+  ;; no :seon.cluster.eval/error, so every reader (the MCP reply's exception flag)
+  ;; read a refusal as success.
+  (with-host-world {}
+    (fn [{:keys [handle branch!]}]
+      (let [hosted (host-on! handle (branch!) "mcp/installer")
+            connection (get-in hosted [:seon.turn.loop/cluster :seon.db/connection])]
+        (hosted-run! hosted "(defn gated-sq \"Square.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* x x))")
+        (hosted-run! hosted "(clojure.test/deftest gated-sq-test (clojure.test/is (= 16 (gated-sq 4))))")
+        (let [[shown] (hosted-run! hosted "(defn gated-sq \"Cube.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* x x x))")
+              errors (set (db/q '[:find [?error ...] :where [_ :seon.cluster.eval/error ?error]] (db/db connection)))]
+          (is (contains? errors shown) (pr-str [shown errors])))))))

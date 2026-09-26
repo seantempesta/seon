@@ -12,7 +12,10 @@
             [seon.error :as error]
             [seon.fn :as function]
             [seon.issue :as issue]
+            [seon.cluster.branch :as cluster.branch]
             [seon.cluster.message :as message]
+            [seon.cluster.registry :as registry]
+            [seon.cluster.source :as source]
             [seon.test]))
 
 (defn- read-result
@@ -453,9 +456,100 @@
     (if (:seon.error/at changed)
       changed
       (message/send! {:my.message/to "root" :my.message/about issue
-                      :my.message/content (pr-str {:seon.agent/branch (get-in (db/db connection) [:config :branch])
-                                                   :seon.issue/id issue :seon.test/changed changed})}
+                      :my.message/content (str "Please merge branch " (get-in (db/db connection) [:config :branch])
+                                                " for issue " issue "; it changes " (pr-str changed) ".")}
                      connection agent-id))))
+
+(defn proposals
+  "Read the merge proposals sent to me that are still pending: each message
+  about an issue from an agent whose row names another branch than mine, while
+  that branch is still linked in my store, for `prepare-merge!`.
+
+  Example:
+  (my.program/proposals)"
+  {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.db/database-value] [:seon.agent/id :seon.agent/id]
+                             [:my.program/context :my.program/context]]]
+                  [:or [:vector :my.program/proposal] :seon.db/error-result]]}
+  [{database :seon.db/db agent-id :seon.agent/id context :my.program/context}]
+  (let [found (db/q '[:find ?id ?issue ?branch ?sender :in $ ?me ?mine
+                      :where [?to :seon.agent/id ?me] [?m :seon.message/to ?to] [?m :seon.message/about ?issue]
+                      [?m :seon.message/id ?id] [?m :seon.message/from ?from] [?from :seon.agent/id ?sender]
+                      [?from :seon.agent/branch ?branch] [(not= ?branch ?mine)]]
+                    database agent-id (get-in database [:config :branch]))
+        linked (some-> (:seon.store/store context) registry/roster)]
+    (if (db/read-refusal? found)
+      found
+      (into [] (keep (fn [[id issue branch sender]]
+                       (when (contains? linked branch)
+                         {:seon.message/id id :seon.issue/id issue :seon.store/branch branch :seon.agent/id sender})))
+            (sort found)))))
+
+(defn- cluster-custody
+  "Nil when `context` holds its cluster's own branch, the custody that merges
+  into the cluster and writes its files; otherwise the refusal naming both."
+  {:malli/schema [:=> [:cat :qualified-symbol :my.program/context] [:maybe :my.program/custody-refused-error]]}
+  [operation {connection :seon.db/connection cluster :seon.cluster/name}]
+  (let [held (get-in (db/db connection) [:config :branch])
+        home (some-> cluster cluster.branch/cluster-branch)]
+    (when-not (and home (= held home))
+      (seon.error.refusal/diagnostic (java.util.Date.) :seon.program/write operation
+       {:seon.error/message (str operation " needs the cluster's own custody, branch " home
+                                 "; this context holds branch " held ".")
+        :seon.error/member :my.program/context
+        :my.program/held-branch held}))))
+
+(defn prepare-merge!
+  "Test a proposed branch's change through the merge gate on a fresh branch of
+  the head I hold and answer the verdict `accept-merge!` takes
+  (`seon.cluster.source/prepare-merge!`): `:seon.test/passed?`, the tally and
+  the run. Name `:seon.program/identities` to merge only those declarations;
+  one reaching an unselected change refuses by name. The merge is prepared
+  onto the head of the branch my context holds; only root's accepts it.
+
+  Example:
+  (my.program/prepare-merge! {:seon.store/branch :my-branch :seon.issue/id \"my-fix\"})"
+  {:malli/schema [:=> [:cat [:map [:my.program/context :my.program/context] [:seon.store/branch :seon.store/branch]
+                             [:seon.issue/id :seon.issue/id]
+                             [:seon.program/identities {:optional true} :seon.program/identity-set]]]
+                  [:or :my.program/merge-proposal :seon.program/three-way :seon.error/value]]}
+  [{context :my.program/context branch :seon.store/branch issue :seon.issue/id selection :seon.program/identities}]
+  (source/prepare-merge! context (:seon.store/store context) branch issue selection))
+
+(defn accept-merge!
+  "Merge exactly the program `prepare-merge!` tested into my cluster
+  (`seon.cluster.source/accept-merge!`), then unlink the tested branch. Answers
+  the transaction report `write-back!` takes. Only the cluster's own custody
+  (root) accepts.
+
+  Example:
+  (def accepted (my.program/accept-merge! proposal))"
+  {:malli/schema [:=> [:cat :my.program/accept-request]
+                  [:or :seon.db/transaction-report :seon.source/test-evidence-error :seon.error/value
+                   :my.program/custody-refused-error]]}
+  [{context :my.program/context tested :seon.source/candidate :as proposal}]
+  (or (cluster-custody 'my.program/accept-merge! context)
+      (let [store (:seon.store/store context)
+            report (source/accept-merge! context store (dissoc proposal :my.program/context))]
+        (when (:db-after report)
+          (registry/retire-branch! {:seon.store/store store :seon.store/branch tested}))
+        report)))
+
+(defn write-back!
+  "Write an accepted merge's declarations into their source file under `root`
+  (`seon.cluster.source/write-back!`): proven equivalent before an atomic
+  install. Answers the written path and digests. Only the cluster's own
+  custody (root) writes files.
+
+  Example:
+  (my.program/write-back! {:seon.source/accepted accepted :seon.fn/root \"/path/to/checkout\"})"
+  {:malli/schema [:=> [:cat [:map [:my.program/context :my.program/context]
+                             [:seon.source/accepted :seon.source/accepted] [:seon.fn/root :seon.fn/root]]]
+                  [:or :seon.source/written :seon.source/write-back-error :seon.error/value
+                   :my.program/custody-refused-error]]}
+  [{context :my.program/context accepted :seon.source/accepted root :seon.fn/root}]
+  (or (cluster-custody 'my.program/write-back! context)
+      (source/write-back! {:seon.db/connection (:seon.db/connection context)
+                           :seon.source/accepted accepted :seon.fn/root root})))
 
 (defn overrides
   "Read current agent-admitted identities under an indexed src root.

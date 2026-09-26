@@ -778,6 +778,23 @@
   (let [rows (fn/published-index-rows from (vec delta))]
     (if (vector? rows) (fn/reconcile-tx onto rows (vec delta)) rows)))
 
+(defn- unselected-reach
+  "The selected declarations that reach a change of `delta` outside `selection`
+  on `branch`, through the reverse closure test selection walks
+  (`seon.fn/reverse-closure`) seeded with those unselected changes."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set :seon.program/identity-set]
+                  [:or :seon.program/identity-set :seon.db/invalid-read-error]]}
+  [branch delta selection]
+  (let [seeds (into #{} (keep (fn [[attribute value :as identity]]
+                                (when (and (#{:seon.fn/sym :seon.test/sym} attribute) (not (selection identity)))
+                                  value)))
+                    delta)
+        closure (if (seq seeds) (fn/reverse-closure {:seon.db/db branch :seon.fn/seeds seeds}) {})]
+    (if (:seon.db/invalid-read closure)
+      closure
+      (let [reached (into (set (:seon.fn/affected closure)) (:seon.fn/tests closure))]
+        (into #{} (filter (fn [[_ value]] (reached value))) selection)))))
+
 (defn prepare-merge!
   "Test `candidate`'s function and test changes since its merge base with
   `source`'s head H on a fresh branch S of H through the save gate, with the
@@ -785,13 +802,26 @@
   replacement, an addition (absent at the base) or a retraction (absent on the
   candidate), as `seon.program/three-way` classifies it; one reconcile
   transaction applies all three. A conflict answers the three-way value; an
-  empty delta refuses."
-  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.store/store :seon.store/branch :seon.issue/id]
-                  [:or [:map [:seon.source/candidate :seon.store/branch] [:seon.test.run/id :seon.test.run/id]
-                        [:seon.test/passed? :boolean] [:seon.source/tally :string]
-                        [:datahike/expected-basis-t :int] [:parents [:set :seon.source/commit-id]]]
-                   :seon.program/three-way :seon.error/value]]}
-  [source held-store candidate issue]
+  empty delta refuses.
+
+  A `selection` of declaration identities merges only those changes: a
+  selected identity the candidate did not change, or a selected declaration
+  reaching an unselected change (a new helper it calls), refuses by name.
+  Without one the whole delta merges."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.agent/context-source :seon.store/store :seon.store/branch :seon.issue/id]
+                   [:or [:map [:seon.source/candidate :seon.store/branch] [:seon.test.run/id :seon.test.run/id]
+                          [:seon.test/passed? :boolean] [:seon.source/tally :string]
+                          [:datahike/expected-basis-t :int] [:parents [:set :seon.source/commit-id]]]
+                    :seon.program/three-way :seon.error/value]]
+                  [:=> [:cat :seon.agent/context-source :seon.store/store :seon.store/branch :seon.issue/id
+                        [:maybe :seon.program/identity-set]]
+                   [:or [:map [:seon.source/candidate :seon.store/branch] [:seon.test.run/id :seon.test.run/id]
+                          [:seon.test/passed? :boolean] [:seon.source/tally :string]
+                          [:datahike/expected-basis-t :int] [:parents [:set :seon.source/commit-id]]]
+                    :seon.program/three-way :seon.error/value]]]}
+  ([source held-store candidate issue] (prepare-merge! source held-store candidate issue nil))
+  ([source held-store candidate issue selection]
   (let [bound {:seon.program/max-datoms 10000}
         head (db/db (:seon.db/connection source))
         c-id (registry/branch-commit-id {:seon.store/store held-store :seon.store/branch candidate})
@@ -803,9 +833,13 @@
         maps (when (set? changed)
                (mapv #(program/digest-map % (assoc bound :seon.program/identities changed)) [base branch head]))
         three (when (and maps (not-any? :seon.error/at maps)) (apply program/three-way maps))
-        delta (when three (into (:seon.program/changed-on-branch three)
+        whole (when three (into (:seon.program/changed-on-branch three)
                                 (concat (:seon.program/added three) (:seon.program/retracted three))))
-        tx (when (seq delta) (replacement branch head delta))
+        unchanged (when (and whole selection) (vec (remove whole selection)))
+        reach (when (and whole selection (empty? unchanged)) (unselected-reach branch whole selection))
+        delta (if (and whole selection) (into #{} (filter whole) selection) whole)
+        tx (when (and (seq delta) (empty? unchanged) (empty? reach))
+             (replacement branch head delta))
         subject (db/pull branch [:db/id {:seon.issue/tests [:seon.test/sym]}] [:seon.issue/id issue])
         refuse #(refused :seon.program/scope %1 {:seon.error/offending %2})]
     (try
@@ -813,6 +847,10 @@
         (not (set? changed)) changed
         (not three) (some #(when (:seon.error/at %) %) maps)
         (seq (:seon.program/conflict three)) three
+        (seq unchanged) (refuse "A selected declaration is not a change on the candidate." unchanged)
+        (:seon.db/invalid-read reach) reach
+        (seq reach) (refuse "A selected declaration reaches an unselected change; select that change too."
+                            {:seon.program/identities reach :seon.program/unselected (set (remove selection whole))})
         (empty? delta) (refuse "The candidate changes nothing the head lacks." three)
         (:seon.error/at tx) tx
         (not (:db/id subject)) (refuse "The issue is absent on the candidate." issue)
@@ -833,7 +871,7 @@
             :else (assoc (select-keys gate [:seon.test/passed? :seon.source/tally])
                          :seon.source/candidate s :seon.test.run/id (:seon.test.run/id run)
                          :datahike/expected-basis-t (db/basis-t head) :parents #{c-id}))))
-      (finally (run! #(when-not (:seon.error/at %) (d/release-materialized-db %)) [base branch])))))
+      (finally (run! #(when-not (:seon.error/at %) (d/release-materialized-db %)) [base branch]))))))
 
 (defn accept-merge!
   "Merge exactly the program tested by `prepare-merge!`'s proposal into

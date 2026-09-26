@@ -19,4 +19,20 @@
  :my.program/history-request
  [:map [:seon.db/db :seon.db/database-value]
   [:seon.program/subject :seon.program/subject]
-  [:seon.db/tx {:optional true} :seon.db/tx]]}
+  [:seon.db/tx {:optional true} :seon.db/tx]]
+ :my.program/proposal
+ [:map [:seon.message/id :seon.message/id] [:seon.issue/id :seon.issue/id]
+  [:seon.store/branch :seon.store/branch] [:seon.agent/id :seon.agent/id]]
+ :my.program/merge-proposal
+ [:map [:seon.source/candidate :seon.store/branch] [:seon.test.run/id :seon.test.run/id]
+  [:seon.test/passed? {:optional true} :boolean] [:seon.source/tally {:optional true} :string]
+  [:datahike/expected-basis-t :int] [:parents [:set :seon.source/commit-id]]]
+ :my.program/accept-request
+ [:map [:my.program/context :my.program/context]
+  [:seon.source/candidate :seon.store/branch] [:seon.test.run/id :seon.test.run/id]
+  [:seon.test/passed? {:optional true} :boolean] [:seon.source/tally {:optional true} :string]
+  [:datahike/expected-basis-t :int] [:parents [:set :seon.source/commit-id]]]
+ :my.program/held-branch
+ [:keyword {:description "The branch a context refused the cluster's own custody holds."}]
+ :my.program/custody-refused-error
+ [:and :seon.error/base [:map [:my.program/held-branch :my.program/held-branch]]]}

@@ -194,7 +194,12 @@
                                         :seon.issue/tests #{added-test}}])
           (testing "the head lacks both additions before the merge"
             (is (every? #(nil? (:db/id (db/pull (db/db h-conn) [:db/id] %))) [added-fn added-test])))
-          (let [proposal (source/prepare-merge! target store c issue)
+          (testing "a selection merges only named changes; a selected test reaching an unselected addition refuses by name"
+            (is (= #{added-test} (get-in (source/prepare-merge! target store c issue #{added-test})
+                                         [:seon.error/offending :seon.program/identities])))
+            (is (= [[:seon.fn/sym 'absent/declaration]]
+                   (:seon.error/offending (source/prepare-merge! target store c issue #{[:seon.fn/sym 'absent/declaration]})))))
+          (let [proposal (source/prepare-merge! target store c issue #{added-fn added-test})
                 _ (some->> (:seon.source/candidate proposal) (vswap! made conj))
                 _ (is (true? (:seon.test/passed? proposal)) (pr-str proposal))
                 report (when (:seon.test/passed? proposal) (source/accept-merge! target store proposal))
