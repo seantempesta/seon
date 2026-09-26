@@ -131,7 +131,12 @@ EXISTING store (prove adoption on a branch of the live store, never only on a fr
   the branch head points at the already-durable commit record (one barrier for the ordered pair), durability unchanged.
 - **Boot's `loaded-builder` Object fault** on every start (`boot/stop!` marks running-instances with a bare Object; issue
   filed): boot.clj after the seams lane releases it.
-- **Atom audit cuts** (atom-audit-2026-09-26.md when it lands): file-disjoint DELETE/MOVE/COLOCATE slices.
+- **State architecture (owner 2026-09-26, AGENTS.md):** one roster per scope for live objects; admission/retirement as
+  writer-checked facts; derived values memoized; folds for accumulation. Authorities: atom-audit-2026-09-26.md (Astra, 13
+  ranked file-disjoint bundles R1–R13, ~450–950 lines) and system-state-opinion-2026-09-26.md (Opus, hierarchy C). Order:
+  (1) merge the context-state atom into the routing roster (~+10/−35); (2) P3b option (b) on it; (3) bundles R2/R4/R9 first
+  (smallest, free), then R10, R6, R8, R11, R12, R7, R3 with the render path, R1 SCI context, R5 lifecycle; R13 at the writer.
+  Open disagreement: web tab registrations into the render proc's state (root rules when R3 starts).
 - Render-dispatch reds in web-debug-test (`repl/render-ai` returns the raw evaluation map), fault card nil kicker/message,
   fixture writes refused (`unowned-entity`, "only the creator may remove tests"), `turn-details` 34 s.
 - seon.test-test: two stale fixtures (bare doc upsert; `with-redefs` on `db/pull`) and the runner/db question: should

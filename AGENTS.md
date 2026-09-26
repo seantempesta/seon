@@ -28,6 +28,10 @@ running system: a specification or source citation is not evidence of installati
 - **Prefer values to places.** Derive from held immutable values; arguments/channels remove hidden order.
   Atoms are a smell (owner 2026-09-26): state lives in its owner's value (database facts, the Flow proc's state, the SCI
   context, the dependency's cache), colocated, never scattered atoms; an atom needs a stated reason no owner holds it.
+  Live host objects with no data form (Flow graphs, channels, executors, SCI contexts, listeners) live in exactly one
+  roster per scope whose membership changes at run time (process, then cluster execution), keyed by stable ids, passed
+  explicitly and observable in status; admission and retirement are writer-checked facts; derived values are memoized on
+  immutable values; per-call accumulation is a fold (owner 2026-09-26).
 - **Grow by accretion.** Require no more, promise no less: open maps, validated declared members,
   optional additions and new names for changed semantics.
 - **Make failure local and loud.** Each part must fail without corrupting its neighbours
