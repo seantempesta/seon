@@ -68,3 +68,9 @@ with its cause.
 
 One member over the vector above: every element prints as its readable data, and `(range)`
 prints a bounded prefix.
+
+## Evidence 2026-09-26: `subvec` too
+
+`(subvec result/e49e526b52349 32)`, a slice of a vector result reached through its handle, printed
+`#object[clojure.lang.APersistentVector/SubVector]` (branch `dogfood-repl-opus-7`, archive 10d6fdff5). The
+allowlist misses vector implementations too, not only seqs.

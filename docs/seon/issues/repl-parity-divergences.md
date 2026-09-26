@@ -114,3 +114,17 @@ The repaired four-namespace gate passed 103 tests / 248 assertions with zero
 failures/errors at 20:10:49Z on September 15. The observation-fixture defect
 is resolved; this broader issue remains open for the remaining named
 `:known-divergence` rows.
+
+## Evidence 2026-09-26 (dogfood-repl-opus): a thrown exception loses its class and `ex-data`
+
+MCP SCI on branch `dogfood-repl-opus-7`, archive 10d6fdff5:
+
+- `(/ 1 0)` → `seon.sci.kernel/failure-value refused  at []: expected the declared requirement
+  (:successful-evaluation), got nil nil. Fix: Divide by zero Inspect the named requirement before retrying. …
+  Contract finding: seon.sci.kernel/failure-value returned this error, …`. There is no `ArithmeticException`.
+- `(throw (ex-info "boom" {:a 1}))` → the same frame with `Fix: boom`. The `{:a 1}` appears nowhere, and
+  `*e` is nil (retired; the shown text names no result handle for the exception either), so the agent
+  cannot read its own `ex-data`.
+
+`clojure.main` would print `ArithmeticException Divide by zero` and `ExceptionInfo boom {:a 1}`. The
+agent's own throw is presented as a platform function's refusal, with "got nil nil".

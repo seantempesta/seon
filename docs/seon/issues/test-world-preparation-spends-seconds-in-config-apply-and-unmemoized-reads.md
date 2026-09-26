@@ -60,3 +60,25 @@ Profile lines from the preparation probe: `seon.config/apply-compiled!`
 778 ms x1, `seon.reconcile/plan` 622 ms x2, `seon.db/transact!` 1,166 ms x4.
 Overlay probe: `seon.program/program-attributes` 50.9 ms, `seon.db/datoms`
 30.5 ms, `seon.fn/published-index-rows` 52.8 ms for two identities.
+
+## Evidence 2026-09-26 (dogfood-repl-opus): a one-test `my.test/check` from a branch agent spends 1.6 s outside its member
+
+Default archive 10d6fdff5 (pid 39759), hosted agent on branch `dogfood-repl-opus-7`, one REPL test
+(`user/word-count-ignores-surrounding-and-repeated-whitespace`, 3 assertions), measured with the agent's
+own `(seon.profile/begin)` / `(seon.profile/explain m 14)`:
+
+```
+1736 ms elapsed.
+1736 ms in my.test/check x1 · 1719 ms in seon.test/run x1
+1119 ms in seon.db/with-declarations x13680
+ 981 ms in seon.test/clean-request-handle x1
+ 865 ms in seon.db/q x84 · 772 ms in seon.db/transact! x3
+ 492 ms in seon.schema/call-with-projection x7 · 427 ms in seon.sci.eval/acquire! x2
+ 345 ms in seon.test/changed-definition-symbols x2 · 284 ms in seon.test/select x1
+```
+
+The member itself was acquire 35 ms + resolve 3 ms + run 24 ms + release 10 ms. Three consecutive identical
+requests on an unchanged program took 1,555, 1,730 and 1,720 ms, each with `:seon.test/reused-count 0`: green
+evidence for an unchanged program and test was never reused, and `clean-request-handle` paid its ~1 s each
+time. `seon.db/with-declarations` ran 13,680 times for one member. Its cost is proportional to something
+other than the change (the program? the selection?), which the explanation cannot say.

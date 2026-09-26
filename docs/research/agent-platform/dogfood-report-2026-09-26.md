@@ -63,6 +63,33 @@ snapshot.
   query itself wedged the agent (#4). Branches 1, 2 and 4–6 are retired. Branch 3 was deleted by
   root's store rebuild. **The change was not merged**; its source is in the report, for root.
 
+- **Cycle 2** (03:10–03:15Z, branch `dogfood-repl-opus-7`, archive 10d6fdff5, no restart). The loop
+  worked end to end *inside the branch*. I defined `user/word-count`, wrote a REPL `deftest` (it reached
+  on the next run), and `(my.test/run)` passed 3/3. I then redefined `word-count` with a bug; the gate
+  refused it (1 test, 2 failures, 25/25 auto-check) and kept the old definition. Merge and write-back
+  still have no agent entrance. The branch is retired.
+
+  **Where the seconds go** (turn open→close from the branch's own turn rows; `my.test` figures from its
+  result; profile from the agent's own `seon.profile/begin`/`explain`). MCP wall time is not visible to
+  the agent.
+
+  | Step | Time | Notes |
+  |---|---|---|
+  | orient: `(doc my.note/add!)` + two `add!` + `notes` | 645 ms | one `add!` is 45 ms (a single `transact!`) |
+  | orient: `(dir seon.db)` | 196 ms | 34,850 characters |
+  | change: `defn` + three calls | 252 ms | |
+  | test: `deftest` | 138 ms | reaches on the next run (D4) |
+  | test: first `(my.test/run)` | **3,909 ms** | a later identical run took 253 ms, 247 of them in `seon.db/q` ×20 inside `seon.test/select` |
+  | test: `(my.test/check {})`, one test | **1,555 / 1,730 / 1,720 ms** | member 71 ms; `with-declarations` ×13,680 = 1,119 ms, `clean-request-handle` 981 ms, `reused-count 0` every time ([evidence](../../seon/issues/test-world-preparation-spends-seconds-in-config-apply-and-unmemoized-reads.md)) |
+  | change: gated redefinition (refused) | 240 ms | 1 test and 25 auto-checks: fast |
+  | merge attempt | — | no entrance (known) |
+  | retire | not measurable from the agent | succeeded |
+
+  Also seen: an install refusal is not flagged `exception` in the MCP reply, so tooling reads it as success.
+  Its failure locations read `fail AFn.java:154`, not the test's line. `(my.note/notes)` shows
+  `:my.note/agent 34185`, a raw entity id. `(throw (ex-info "boom" {:a 1}))` loses its class and `ex-data`
+  ([evidence](../../seon/issues/repl-parity-divergences.md)). `subvec` prints `#object` (evidence on #9).
+
 ### Cycle 1 change (unmerged): coverage for `my.plan/current`
 
 ```clojure
