@@ -14,6 +14,10 @@ running system: a specification or source citation is not evidence of installati
 
 ## Think like a principal Clojure developer
 
+- **Find the best algorithm, then the simplest implementation.** The algorithmic choice has the biggest gains:
+  first ask what the work is proportional to and pick the approach with the best complexity. Then implement it
+  in the simplest form you can think of; add complexity only for a measured, large performance win. Optimize for
+  the common path, not the rare failure that recovery already handles.
 - **Take things apart.** Give each part one role and reason to change; separate braided concerns.
 - **Be patient at the REPL.** State the problem, knowns and unknowns; inspect real
   values and call the owner until you can predict the result. Refuting a cause is progress.
@@ -165,20 +169,14 @@ Private experiments remain possible; local green never implies shared acceptance
 
 ## Laws for data and contracts
 
-- **Custody is the default world, not a security boundary** (owner 2026-09-26, revised same day). Every agent is
-  cooperative and trying to improve the system; there is no isolation for security anywhere. An evaluation's custody
-  (its branch connection) is the world its calls default to, so an agent's writes land on its own branch unless it
-  deliberately reaches elsewhere — and deliberately opening another branch, calling any program function or grabbing
-  the context it needs is allowed. Root tasks and branch-then-merge exist for separation of concerns, not protection.
-  Isolation is the DEFAULT so merging is intentional: every agent gets a scratch space (its own branch and SCI fork) where
-  it may write 50 functions freely, and only what root deliberately merges reaches the cluster. An agent's context
-  executes in the same context the agent runs in: root's in its cluster, every other agent's on its own branch by
-  default. The values each entrant receives (database value, connection, branch, SCI fork, agent id, task, capabilities)
-  and where its writes land are declared once per entrant kind in the owning spec, never implied.
-  Agents CAN make serious changes, first-party code included (owner 2026-09-26): the immutable database is the safety
-  net — a crashed cluster is rolled back to an earlier commit, not prevented. Hostile-agent protections never shape a
-  design; a restriction must name the correctness failure it prevents or be deleted. Do not build refusals, markers or denylists to stop
-  an agent from reaching another context.
+- **Custody is the default world, not a wall.** Agents are cooperative; nothing is isolated for security.
+  An evaluation's custody (its branch connection) is where its calls read and write by default, so every agent
+  works in its own scratch space (its branch and SCI fork) and only what root deliberately merges reaches the
+  cluster. Reaching another branch, any program function or any context on purpose is allowed; root's own
+  context is its cluster. Agents may make serious changes, first-party code included: the immutable database
+  and rollback are the safety net. A restriction must name the correctness failure it prevents or be deleted.
+  What each kind of entrant receives (database value, connection, branch, SCI fork, agent id, task,
+  capabilities) and where its writes land is declared once in the owning spec, never implied.
 - **Pass the world explicitly.** Carry database/connection, projection, environment,
   render profile, proc and settlement inputs, including profiling/test ownership.
   Custody elides agent db/conn only; it does not authorize more ambient services.
@@ -218,36 +216,24 @@ Private experiments remain possible; local green never implies shared acceptance
 
 ## Laws for failure, execution and presentation
 
-- **One error shape, the only way** (owner 2026-09-26; audit error-delivery-audit-2026-09-26.md): an error is one flat map
-  under one named extension of `:seon.error/base` — producer fields, message, source location, and the whole cause chain
-  (class, message, `ex-data`, Seon frames per link); refusals add operation/member, expected, offending value and fix. It
-  holds REFERENCES, never copies: a database is its commit id/basis-t, a transaction its tx id, a context its agent and
-  branch, a large value one blob digest — never the database, a context, a projection or a request inlined. A failure after
-  evaluation is attached beside the unchanged result on the evaluation record. The same saved observation is what MCP replies
-  and Seon context show, printed by the one floor. Every other error path, wrapper, stringifier, cursor or copy is deleted.
-- **Declare errors as flat data.** Each error has one named schema over `:seon.error/base`;
-  arities enumerate exact error alternatives. No general error predicate, copied union,
-  registry-wide union or discriminator stamp. Deduplicate distinguishing content through
-  the identity owner; occurrences are components, not undeclared map copies. Contracts
-  alone do not prove body-derived error unions; that needs its producer, checker and regression.
-- **Keep the whole cause.** Catch only declared cases or resurface class, message, `ex-data`,
-  cause chain and Seon frames. Refusals name operation/member, expected shape and offending
-  value; missing evidence is typed unknown, never nil/default/message-only success.
-  An error is an ordinary value and follows the one REPL path like all data: no special
-  summarizing, stringifying or clipping where it is raised, caught or passed along.
-- **Return agent mistakes; store and deliver core faults.** Return declared `:seon.error`
-  mistakes to their agent. Commit every other failure with `:seon.error/chain` at its owning
-  boundary, then wake the responsible namespace agent or root through the ordinary route;
-  no overload channel may drop it. Recording without delivery is a defect.
-- **The REPL path is total; faults are loud beside the result** (owner 2026-09-26). read → evaluate → record → print
-  always returns the evaluated value. A later stage's failure (gate, renderer, recording, classification) is attached to
-  the result as a diagnostic and recorded as a core fault (status, page, delivery to root) — it never replaces, blocks or
-  wedges the value. The floor printer is total: any value prints (plain Clojure printing is the fallback); a smart renderer
-  that fails shows the value plus one diagnostic. A graph stops only when its own execution cannot continue; if storage
-  fails, stop. No stage guesses what a value is — the producer declares. Diagnose at the REPL; no fallback store or retry loop.
-  "Loud in dev" means reliably DELIVERED (owner 2026-09-26): every error reaches the agent that caused or can act on it as
-  data in its own tool results — Claude/Codex agents through the MCP replies, Seon agents through their context — never
-  only a log line, a panic or a silent record.
+- **Errors are ordinary values of one shape.** An error is one flat map under one named extension of
+  `:seon.error/base`: the producer's fields, message, source location and the whole cause chain (class,
+  message, `ex-data` per link); a refusal adds operation/member, expected, offending value and fix. Arities
+  enumerate their exact error alternatives; no general error predicate, copied union or discriminator stamp.
+  The producer declares identity; nothing downstream guesses it. Errors hold references, never copies: a
+  database is its commit id or basis, a transaction its id, a context its agent and branch, a large value one
+  blob digest. Catch only declared cases or resurface the whole cause; missing evidence is a typed unknown,
+  never nil, a default or message-only success. There is one way to build, store and show an error; delete
+  every other wrapper, stringifier, cursor or copy.
+- **Deliver every error to whoever can act on it.** Agent mistakes return to their agent. Core faults are
+  recorded at their owning boundary and delivered as data in the tool results of the agent that caused them or
+  can act on them — the MCP reply for outside agents, the next context for Seon agents, both reading the same
+  saved observation. Recording without delivery, a log line or a panic alone is a defect.
+- **The REPL path is total.** read → evaluate → record → print always returns the evaluated value. A later
+  stage's failure (gate, renderer, recording, classification) is attached beside the value as a diagnostic and
+  recorded as a fault; it never replaces, blocks or wedges the value. The floor printer can print any value
+  (plain Clojure printing is its fallback). A graph stops only when its own execution cannot continue or
+  storage fails. Diagnose at the REPL; no fallback store or retry loop.
 - **Let Flow own execution.** Give each agent a graph; procs declare `:io` or `:compute`,
   transforms reference Vars, topology changes rebuild graphs. Add no central scheduler
   or dispatcher. Listen before deriving work; channels carry only rederivable or replaceable
@@ -256,30 +242,25 @@ Private experiments remain possible; local green never implies shared acceptance
   name the missing terminal event when it fires. Timeout/cancellation is not termination:
   retain ownership/resources and prevent overlap until exit. SCI interrupts interpreted
   code, not arbitrary host calls; retain isolation where termination cannot be guaranteed.
-- **Recover facts, not execution.** Close interrupted turns and mark unfinished evaluations;
-  never resume interrupted execution or serialize private objects/live results. Persist
-  exact shown text; settle its durability contract before deleting other durable evidence.
-  Optimize for the 99%, not the crash (owner 2026-09-26): a form's result is returned as soon as its settlement is
-  applied in order; durability follows asynchronously (one commit per form). A crash may lose the newest not-yet-durable
-  forms — acceptable, because recovery closes what was lost and the agent redoes it; never slow every form to guard it.
-  Scope: only an agent form's own evaluation settlement is async; merges, write-back, tasks, config, schema adoption,
-  boot/publication records, fault recording, branch lifecycle and deliveries to root stay durable before their caller is answered.
-  The async path is ONE general fire-and-forget write in the database owner (ordered, no confirmation, durable
-  eventually), kept only if measured faster; callers opt in at their call site.
+- **Recover facts, not execution.** Close interrupted runs and mark unfinished evaluations; never resume
+  interrupted execution or serialize private objects or live results. An agent form's own evaluation settlement
+  returns once it is applied in order; its durability follows through the database owner's one fire-and-forget
+  write, kept only while it is measurably faster. A crash may lose the newest such forms; recovery closes them
+  and the agent redoes the work — do not represent the in-between state. Everything with consequences beyond
+  the form (merges, write-back, tasks, config, schema adoption, boot and publication records, faults, branch
+  lifecycle, deliveries) is durable before its caller is answered.
 - **Derive wakes and completion.** Use listened datoms and a qualifying ordinary reply's
   basis; openings/system-only turns answer nothing. Handling is separate, message subject
   is literal, `:seon.message/from` marks inside wakes. Refresh each distinct changed read
   from latest evidence before a turn; append changed reads, never replay writes/effects or
   rewrite history. Compaction clears evaluations and regenerates the opening. Archive
   agents; preserve task/agent identity on loud, resumable budget exhaustion.
-- **Three points, and cost decides** (owner 2026-09-26). (1) The ORIGINAL value may hold everything many functions use; keep
-  it whole (by reference) — never trim it for presentation. (2) A RENDER FUNCTION is schema-specific by definition: it knows it
-  turns one schema into AI forms, so all specific selection lives there ("for this schema, show these fields"). (3) Evaluating a
-  render's forms renders nested values by their own render function, else by the default VALUE RENDERER (the floor), which gets
-  only GENERAL improvements (budget, shape, laziness, cycles, references) — never a schema-specific branch. Cost order: pulling
-  unused data is waste; showing an agent irrelevant data costs more (every turn); re-touching cached data costs more than
-  leaving it — so invest in a good render function instead.
-- **Render ordinary values totally.** Per face, the first match wins: the value's own
+- **Render ordinary values totally.** There are three points and cost decides between them. The original value
+  stays whole (many functions use it; never trim it for presentation). A render function is schema-specific by
+  definition, so all specific selection lives there. The floor renders every value without one and takes only
+  general improvements (budget, shape, laziness, cycles, references), never a schema-specific branch. Pulling
+  unused data is waste, showing an agent irrelevant data costs more on every turn, and re-touching cached data
+  costs more than leaving it — invest in the render function. Per face, the first match wins: the value's own
   `:seon.render/ai` or `:seon.render/html` key (the master override: a renderer symbol, an inline
   function, or rendered data); a render function whose contract fits the value, defined in the
   viewing agent's namespace (that agent's own defaults); the schema's declared pair (the shipped
