@@ -69,3 +69,14 @@ repeated `"should be a string"` lines. On the agent's real database the query an
 the call fail. Every data-reading function must therefore declare a read refusal it can never meet in its own world, just to
 pass the check. That is a contract written for the generator, not for the program. This raises the class from friction:
 it blocks ordinary agent work on data.
+
+Follow-up on branch `dogfood-repl-opus-10` (archive 04f3a159b): with the honest contract
+`[:or [:vector :dogfood.book/title] :seon.db/error-result]`, returning `seon.db/q`'s refusal unchanged, the
+install was **still** refused. The report said `actual: [{:seon.sci.admit/type "datalog.parser.type.Placeholder"} :dogfood.book/title ?t]`.
+At the REPL, `seon.db/q`'s uninstalled-attribute refusal carries `:seon.error/offending [#object[datalog.parser.type.Placeholder]
+:dogfood.book/nope ?t]`, which is the *parsed* clause holding a datalog-parser host object, not the authored
+`[_ :dogfood.book/nope ?t]`. This is consistent with that host object failing `:seon.db/error-result` validation, so
+no contract admits the function. **Which model is wrong (second part):** the read refusal stores the parser's
+internal value instead of the agent's clause as it was written (store the authored form, never a host
+object). No declared alternative can then accept the refusal. I did not run the Malli validation myself: `malli.core`
+is not resolvable from agent SCI code (`Unable to resolve symbol: malli.core/validate`).
