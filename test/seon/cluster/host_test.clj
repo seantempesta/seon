@@ -391,3 +391,20 @@
         (is (= ["{:seon.program/callers #{my.agents.host-probe/breaks-caller}}"]
                (hosted-run! hosted "(:seon.error/offending (my.program/ns-unmap! 'my.agents.host-probe/breaks-helper))"))
             "the refusal names the surviving caller")))))
+
+(deftest a-hosted-agents-issue-is-a-cluster-task
+  ;; Before, my.issue/add! from a branch agent wrote the issue on the branch
+  ;; only, so a merge proposal named a task the cluster did not have.
+  (with-host-world {}
+    (fn [{:keys [handle connection branch!]}]
+      (support/transacted! connection (support/agent-tx @connection "root"))
+      (let [hosted (host-on! handle (branch!) "mcp/author")
+            shown (first (hosted-run! hosted (str "(:seon.issue/id (my.issue/add! {:seon.issue/title \"Cluster task\" "
+                                                  ":seon.issue/problem \"Filed from a branch.\" :seon.issue/severity :friction}))")))
+            issue-id (read-string shown)]
+        (is (string? issue-id) shown)
+        (is (= "Cluster task" (:seon.issue/title (db/pull (db/db connection) [:seon.issue/title] [:seon.issue/id issue-id])))
+            "the task is on the cluster")
+        (is (= [(pr-str issue-id)]
+               (hosted-run! hosted (str "(:seon.issue/id (my.issue/status {:seon.issue/id " (pr-str issue-id) "}))")))
+            "and the agent reads it back")))))
