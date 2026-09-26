@@ -33,6 +33,10 @@
         (is (.waitFor child 15 java.util.concurrent.TimeUnit/SECONDS))
         (is (zero? (.exitValue child)) (slurp (.getInputStream child))))
       (is (.isFile (io/file classes (str relative "__init.class"))))
+      ;; A promoted directory's classes carry a far-future time, so a later
+      ;; archive's source (extracted after the compile) still loses to them.
+      (doseq [file (file-seq classes)] (.setLastModified ^java.io.File file 4102444800000))
+      (.setLastModified source (+ (System/currentTimeMillis) 60000))
       ;; The next launch: the classes precede the source and are newer, so they load.
       (let [loader (clojure.lang.DynamicClassLoader.
                     (java.net.URLClassLoader.

@@ -542,3 +542,31 @@ against the previous unchanged restart (21e3a7068):
 2. `start --head` again with nothing changed, **in a quiet window**. Send phases, capture-ms, the layers and
    `program-classes?`.
 3. Re-run `seon.cluster.program-classes-test` after another test has run.
+
+## Resume 12 — class cache keyed by its inputs (b77a3fa63); RESET NEEDED ×2 with a docs-only commit between
+
+- **Why it missed.** Keyed by commit, the cache missed across the docs-only landing between 8303cd5a3 and
+  fa4e4bccf: `program-classes? false`, capture 5.3 s.
+- **New key.** `sha-256` of `git rev-parse <sha>:src <sha>:deps.edn <sha>:reference-code` plus the dependency
+  cache's status and digest. The directory is `target/dev-program-classes/<key>`, shared by every archive
+  (`target` is linked).
+  - fa4e4bccf and 8303cd5a3 give the same key, `9238cb3b…`; a non-commit source gives nil (no cache).
+  - Resources, tasks, tests and docs are out of the key: no macro reads a resource at expansion, and a namespace's
+    top-level reads run at load time.
+  - No test namespace is compiled during boot: I checked the 8303 fill for test/ sources and found none.
+- **Clojure's timestamp rule.** Clojure loads a class only when it is newer than its source, and every later
+  archive is extracted after the compile. So promotion sets every class file's time to 2100-01-01: the key already
+  proves the classes match this source. The regression now covers it, with the source touched newer and the class
+  still loading: 8/8 on default, 434 ms.
+- **Cleanup.** The directory's own mtime is its last use. A launch keeps the three most recently used plus its own,
+  and deletes staging directories older than a day. A concurrent promotion of the same key deletes the loser's
+  staging. `dev_cache` `reap` is not reused: it only knows manifest-bearing dependency directories and their
+  per-process reference records, and extending it would add more lines than this count-based prune.
+- **Size.** operator.clj +74/−23 in this commit. Cumulative over the cache work (52f35ed2b, 8cdac7294, b77a3fa63)
+  it is about +110/−30, over the 80-line target. The additions are the key, the prune and promotion safety.
+
+**Root runs:**
+1. `start --head` to fill.
+2. Commit something docs-only.
+3. `start --head` again: expect `program-classes? true` and a lower capture-ms.
+4. `bin/test-check default --test seon.cluster.program-classes-test/a-namespace-loaded-from-its-classes-keeps-protocol-and-record-identity-across-reload`
