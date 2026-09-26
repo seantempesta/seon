@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: open (the snapshot staleness is fixed; the hook's database source is still open)
 severity: high
 created: 2026-09-26
 tags: [call-preparation, correctness]
@@ -31,6 +31,31 @@ own rows but joins it to the newer snapshot's supplied defaults.
 Expected: a supplied-default answer is a function of the database value it was asked about.
 "A newer basis is not a valid answer for an older captured database"
 (`docs/research/agent-platform/atom-audit-2026-09-26.md`, A009).
+
+## Reproduced and fixed (2026-09-26, lane fix-eval-schema-reds-opus)
+
+Reproduced on isolated branches of default (pid 25654) with `probe.cp/f`
+`[:=> [:cat :seon.db/database-value :int] :int]`, added between `db0` and `db1`.
+With `current-snapshot` on one call-state, `db1` and then `db0`: `db0` was answered
+with `f` prepared and checked-through 536874744, above its own basis 536874742.
+A sibling branch without `f`, read through a call-state that had already answered
+`db1`, also had `f` prepared. `snapshot` answered both correctly.
+
+Fix: the latest-snapshot atom (`adopt`, `current-snapshot` and the state's
+`:snapshot` member) is deleted. `snapshot` holds the completed snapshot in the
+projection's memo under `[::snapshot commit-id]` (a commit fixes its basis), looks
+it up first, and runs its callees unarmed on the hook's path. The hook calls
+`snapshot`, and the call-state atom holds plans only. Per-call hook cost on
+default (pid 33919, scratch copy against the installed hook, 20,000 calls each):
+2.35-2.50 us against 2.75-4.59 us for a callee outside `prepared-symbols`.
+Regression: `seon.call-preparation-test/an-older-value-and-a-sibling-branch-read-their-own-snapshot`.
+The callers in `sci/eval.clj` and `sci/kernel.clj` need no change: `install` and
+`hook`'s signature are unchanged.
+
+Still open, the second evidence section below: the hook supplies against the
+connection's head, not the evaluation's `:seon.db/db`. Changing it decides
+read-your-writes inside one evaluation, which belongs to the repl-entry-renders
+design (§2.3).
 
 ## Reproduction plan (needs SCI; default was degraded when this was filed)
 

@@ -382,13 +382,13 @@
      (fn [connection]
        (let [call-state (cp/state)
              cold @connection
-             before (cp/current-snapshot call-state cold (projection))
+             before (cp/snapshot cold (projection))
              warm (cp/plan call-state cold before 'sample/target)]
          (is (nil? warm) "sample/target is not in the program graph yet")
          (test-support/transacted! connection (synthetic-population (db/db connection) :sample/marker))
          ;; No sleep and no listener: read the connection, compare the basis.
          (let [after-database @connection
-               after (cp/current-snapshot call-state after-database
+               after (cp/snapshot after-database
                                           (projection))]
            (is (> (long (:seon.call-preparation/checked-through-t after))
                   (long (:seon.call-preparation/checked-through-t before)))
@@ -407,13 +407,13 @@
      (test-support/transacted! connection (synthetic-population (db/db connection) :sample/marker))
      (let [call-state (cp/state)
            first-database @connection
-           first-snapshot (cp/current-snapshot call-state first-database
+           first-snapshot (cp/snapshot first-database
                                                (projection))
            first-plan (cp/plan call-state first-database first-snapshot
                                'sample/target)]
        (test-support/transacted! connection [(test-support/namespace-row @connection 'unrelated)])
        (let [next-database @connection
-             next-snapshot (cp/current-snapshot call-state next-database
+             next-snapshot (cp/snapshot next-database
                                                 (projection))]
          (is (> (long (:seon.call-preparation/checked-through-t next-snapshot))
                 (long (:seon.call-preparation/checked-through-t
@@ -439,7 +439,7 @@
            inserted (fn [plan] (mapv :seon.fn.argument/index
                                      (get-in plan [:seon.call-preparation/by-supplied-count 1
                                                    :seon.call-preparation/inserts])))
-           first-snapshot (cp/current-snapshot call-state @connection fixed-projection)
+           first-snapshot (cp/snapshot @connection fixed-projection)
            first-plan (cp/plan call-state @connection first-snapshot 'sample/target)]
        (is (= [1] (inserted first-plan)))
        (test-support/transacted!
@@ -447,7 +447,7 @@
         (filterv #(= 'sample/target (:seon.fn/sym %))
                  (synthetic-population (db/db connection) :sample/marker
                                        [:=> [:cat :sample/marker :string] :string])))
-       (let [next-snapshot (cp/current-snapshot call-state @connection fixed-projection)]
+       (let [next-snapshot (cp/snapshot @connection fixed-projection)]
          (is (= (:seon.call-preparation/basis-t first-snapshot)
                 (:seon.call-preparation/basis-t next-snapshot))
              "the row basis did not move")
@@ -528,6 +528,38 @@
              "both fixture branches start at the executing handle's commit")
          (is (held? earlier (cp/snapshot @connection fixed-projection))))))))
 
+(deftest an-older-value-and-a-sibling-branch-read-their-own-snapshot
+  ;; CLASS (issue call-preparation-snapshot-answers-an-older-database-with-a-newer-program):
+  ;; one call-state atom held the LATEST snapshot and answered every value at
+  ;; or below its basis with it, so an older value, or a branch sharing the
+  ;; cluster context, read a newer program's prepared symbols. REPL at
+  ;; 052552039: both read the newer snapshot. A snapshot is a function of the
+  ;; value it answers.
+  (test-support/with-database
+   (fn [connection]
+     (let [database-0 @connection
+           _ (test-support/transacted!
+              connection [(test-support/namespace-row @connection 'probe.cp)])
+           _ (test-support/transacted!
+              connection
+              [(test-support/program-fn-row
+                @connection 'probe.cp/f
+                "(defn f {:malli/schema [:=> [:cat :seon.db/database-value :int] :int]} [db x] x)")])
+           database-1 @connection
+           prepared? #(contains? (:seon.call-preparation/prepared-symbols %) 'probe.cp/f)
+           newer (cp/snapshot database-1 (db/carried-projection database-1))
+           older (cp/snapshot database-0 (db/carried-projection database-0))]
+       (is (prepared? newer) "the newer program prepares the added function")
+       (is (not (prepared? older)) "the older value is answered by its own program")
+       (is (= (db/basis-t database-0) (:seon.call-preparation/checked-through-t older)))
+       (is (identical? newer (cp/snapshot database-1 (db/carried-projection database-1)))
+           "a committed value's second read is the held snapshot")
+       (test-support/with-database
+        (fn [sibling]
+          (let [sibling-snapshot (cp/snapshot @sibling (db/carried-projection @sibling))]
+            (is (not (prepared? sibling-snapshot))
+                "a sibling branch at the earlier commit reads its own program"))))))))
+
 (deftest a-report-changing-no-read-attribute-reads-its-committed-parent
   (testing "the writer's speculative value derives nothing when the report's
             datoms name no attribute the snapshot reads"
@@ -563,7 +595,7 @@
        (test-support/transacted! connection-a (synthetic-population (db/db connection-a) :sample/marker))
        (let [state-a (cp/state)
              database-a @connection-a
-             snapshot-a (cp/current-snapshot state-a database-a (projection))
+             snapshot-a (cp/snapshot database-a (projection))
              plan-a (cp/plan state-a database-a snapshot-a 'sample/target)]
          (is (= [:sample/marker] (slot-keys plan-a 1)))
          (test-support/with-database
@@ -576,7 +608,7 @@
                                                (synthetic-population (db/db connection-b) :sample/marker)))
             (let [state-b (cp/state)
                   database-b @connection-b
-                  snapshot-b (cp/current-snapshot state-b database-b
+                  snapshot-b (cp/snapshot database-b
                                                   (projection))
                   plan-b (cp/plan state-b database-b snapshot-b
                                   'sample/target)]
@@ -992,7 +1024,7 @@
            sym 'seon.call-preparation-test/probe-current-database
            invocation-plan
            (binding [db/*read-evidence-sink* captured]
-             (let [current (cp/current-snapshot call-state @connection
+             (let [current (cp/snapshot @connection
                                                 (projection))]
                (cp/plan call-state @connection current sym)))
            evidence (db/read-evidence
@@ -1026,7 +1058,7 @@
        (let [warm-captured (atom [])
              warm-plan
              (binding [db/*read-evidence-sink* warm-captured]
-               (let [current (cp/current-snapshot call-state @connection
+               (let [current (cp/snapshot @connection
                                                   (projection))]
                  (cp/plan call-state @connection current sym)))
              warm-evidence (db/read-evidence @warm-captured)]

@@ -65,28 +65,17 @@
 
 (schema.edn/load! {})
 
-(def ^:private empty-snapshot
-  {:seon.call-preparation/supplied-defaults {}
-   :seon.call-preparation/prepared-symbols #{}
-   :seon.call-preparation/validators {}
-   :seon.call-preparation/refusals []
-   :seon.call-preparation/basis-t 0
-   ;; -1, not 0: a fresh store's first database value already has a basis, and
-   ;; an unchecked state must never compare equal to it.
-   :seon.call-preparation/checked-through-t -1})
-
 (defn state
-  "Create the call-preparation state owned by ONE acquired cluster context.
+  "Create the plan cache owned by ONE acquired cluster context.
 
-  Never process-global across sovereign branches: cluster B compiles the
-  same function identity from its own facts rather than reusing A's plan.
   `sci/fork` copies only `:env`, so every fork of a cluster's ctx shares
-  this atom by identity — which is correct, because a plan is a property
-  of the cluster's program graph, not of a turn."
+  this atom by identity. It holds plans only, each against the snapshot
+  derivation it was compiled from; the snapshot itself is a function of the
+  database value a call runs against (`snapshot`), never a latest one held
+  here, so a fork on another branch or an older value reads its own."
   {:malli/schema [:=> [:cat] :seon.call-preparation/state]}
   []
-  (atom {:seon.call-preparation/snapshot empty-snapshot
-         :seon.call-preparation/plans {}}))
+  (atom {:seon.call-preparation/plans {}}))
 
 (def carrier
   "The ONE key call-preparation state reads under on a sci ctx."
@@ -448,9 +437,9 @@
 
 (def snapshot-cache-policy
   "Bound the snapshots one projection retains independently of the number of commits."
-  {::snapshot-cache-size 16
+  {::snapshot-cache-size 24
    ::snapshot-cache-reason
-   "Retain eight recent program populations under each of their two keys (a committed value's read-attribute revisions and its commit) for the branches and test forks sharing one projection; an older population derives again."})
+   "Retain eight recent program populations under each of their three keys (a committed value's completed snapshot by commit, its read-attribute revisions and its commit) for the branches and test forks sharing one projection; an older population derives again."})
 
 (defn- snapshot-memo
   "The snapshot memo held by `projection` itself, or nil without a holder.
@@ -462,10 +451,12 @@
   so no second key for the projection is needed and none outlives it."
   {:malli/schema [:=> [:cat :seon.schema/projection] [:or :nil [:fn seon.call-preparation/state?]]]}
   [projection]
-  (let [memo (schema/projection-cache-value
+  ;; On the hook's path (below `snapshot`), so its callees run unarmed for
+  ;; cost; their contracts hold at every other caller.
+  (let [memo ((mi/-f->original schema/projection-cache-value)
               projection ::snapshot-memo
               #(cache/lru-cache-factory {} :threshold (::snapshot-cache-size snapshot-cache-policy)))]
-    (when (state? memo) memo)))
+    (when ((mi/-f->original state?) memo) memo)))
 
 (defn- snapshot-revision-key
   "The part of Datahike's cache-context the derivation depends on.
@@ -522,21 +513,31 @@
   branch at an already-derived commit, reads the held members. A
   speculative, as-of or history value has no committed identity and
   derives (`report-snapshot` answers the writer's report value).
-  `checked-through-t` is the basis of `database` itself."
+  `checked-through-t` is the basis of `database` itself.
+
+  The completed snapshot is held first by the value's commit, which fixes
+  its basis: the hook's per-call answer is one identity read and one
+  lookup (`[::snapshot commit]`), run unarmed below `hook`. Every value is
+  answered by its own snapshot, so an older value or another branch sharing
+  one cluster context never reads a newer program's members."
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.schema/projection]
     [:or :seon.call-preparation/snapshot :seon.db/error-result]]}
   [database projection]
   (let [committed (datahike.db/committed-value-identity database)
-        memo (when committed (snapshot-memo projection))
-        derived (if memo
-                  (memoized-snapshot database projection memo committed)
-                  (derive-snapshot database projection))]
-    (if (db/read-refusal? derived)
-      derived
-      (assoc derived
-             :seon.schema/projection projection
-             :seon.call-preparation/checked-through-t (db/basis-t database)))))
+        memo (when committed ((mi/-f->original snapshot-memo) projection))
+        held-key (when memo [::snapshot (:datahike.value/commit-id committed)])]
+    (or (when held-key (cache/lookup memo held-key))
+        (let [derived (if memo
+                        (memoized-snapshot database projection memo committed)
+                        (derive-snapshot database projection))]
+          (if (db/read-refusal? derived)
+            derived
+            (let [completed (assoc derived
+                                   :seon.schema/projection projection
+                                   :seon.call-preparation/checked-through-t (db/basis-t database))]
+              (when held-key (cache/miss memo held-key completed))
+              completed))))))
 
 (defn report-snapshot
   "The snapshot at a transaction report's `:db-after`.
@@ -560,53 +561,6 @@
         (if (db/read-refusal? held)
           held
           (assoc held :seon.call-preparation/checked-through-t (db/basis-t after)))))))
-
-;;; ---------------------------------------------------------------------------
-;;; Basis comparison — the correctness boundary; the listener is the optimizer
-;;; ---------------------------------------------------------------------------
-
-(defn- adopt
-  [current derived]
-  (let [existing (:seon.call-preparation/snapshot current)]
-    (if (>= (long (:seon.call-preparation/checked-through-t existing))
-            (long (:seon.call-preparation/checked-through-t derived)))
-      current
-      (cond-> (assoc current :seon.call-preparation/snapshot derived)
-        ;; A new derivation (changed rows or contracts; the memo hands an
-        ;; unchanged program its held members) invalidates every compiled
-        ;; plan; dropping them keeps the cache from holding two generations.
-        (not (identical? (:seon.call-preparation/prepared-symbols existing)
-                         (:seon.call-preparation/prepared-symbols derived)))
-        (assoc :seon.call-preparation/plans {})))))
-
-(defn current-snapshot
-  "The snapshot valid at `database`, refreshing synchronously if behind.
-
-  Datahike exposes a committed database on its connection BEFORE it
-  delivers listener callbacks, so the listener can never be the
-  correctness boundary. Every invocation dereferences the connection once
-  and linearizes at that database value's basis: checked through it, the
-  held snapshot is used as is; behind it, the complete snapshot is derived
-  from that immutable value and swapped in. Concurrent refreshes keep the
-  newest checked-through basis. An unrelated transaction therefore costs
-  at most one conservative re-derivation — and no plan recompilation,
-  because the row basis is unchanged."
-  {:malli/schema
-   [:=> [:cat :seon.call-preparation/state :seon.db/database-value
-         :seon.schema/projection]
-    [:or :seon.call-preparation/snapshot :seon.db/error-result]]}
-  [call-state database projection]
-  (let [basis (db/basis-t database)
-        held (:seon.call-preparation/snapshot @call-state)]
-        (if (>= (long (:seon.call-preparation/checked-through-t held))
-                (long basis))
-          held
-          (let [derived (snapshot database projection)]
-            (if (db/read-refusal? derived)
-
-              derived
-              (:seon.call-preparation/snapshot
-               (swap! call-state adopt derived)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Plan derivation — the contract's arities joined to the supplied defaults
@@ -856,9 +810,8 @@
   "The cached invocation plan for one function identity in this cluster.
 
   Held one entry per identity against the snapshot derivation it read (its
-  `prepared-symbols` object, replaced by any row, contract or schema change),
-  and only when compiled at the snapshot's own basis. A read error is
-  returned and never cached, so the next call reads again."
+  `prepared-symbols` object, replaced by any row, contract or schema change).
+  A read error is returned and never cached, so the next call reads again."
   {:malli/schema
    [:=> [:cat :seon.call-preparation/state :seon.db/database-value
          :seon.call-preparation/snapshot :seon.fn/sym]
@@ -869,8 +822,7 @@
     (if (identical? derivation (::derivation held))
       (:seon.call-preparation/plan held)
       (let [compiled (plan-for database current sym)]
-        (when (and compiled (not (db/read-refusal? compiled))
-                   (= (db/basis-t database) (:seon.call-preparation/checked-through-t current)))
+        (when (and compiled (not (db/read-refusal? compiled)))
           (swap! call-state assoc-in [:seon.call-preparation/plans sym]
                  {::derivation derivation :seon.call-preparation/plan compiled}))
         compiled))))
@@ -1176,16 +1128,17 @@
   THE HOOK IS ARMED ON EVERY CALL IN THE CLUSTER, so the path for a
   callee that declares nothing suppliable is the one that matters. It
   ends at the snapshot's `prepared-symbols` set: one connection deref,
-  one basis comparison, one string, one set lookup — no plan lookup, no
-  Datalog, no supplier, no argument copy."
+  one commit-keyed snapshot lookup, one string, one set lookup — no plan
+  lookup, no Datalog, no supplier, no argument copy."
   {:malli/schema
    [:=> [:cat :map :seon.schema/value :seon.schema/arguments] :seon.schema/value]}
   [ctx callee arguments]
   ;; The per-call pass-through reads a map member, derefs the connection and
-  ;; compares one basis. It calls those three definitions unarmed for cost,
-  ;; not recursion (no armed wrapper re-enters SCI): armed, env/of, db/db and
-  ;; current-snapshot add 2.9 + 2.2 + 10.4 us to a ~8.5 us hook that runs on
-  ;; every SCI Var call (default, 2026-09-24). Their other callers stay armed.
+  ;; reads the value's snapshot by its commit. It calls those three
+  ;; definitions unarmed for cost, not recursion (no armed wrapper re-enters
+  ;; SCI): armed, env/of, db/db and the snapshot read add microseconds each to
+  ;; a ~8.5 us hook that runs on every SCI Var call (default, 2026-09-24).
+  ;; Their other callers stay armed.
   (let [call-state (get ctx carrier)
         environment ((mi/-f->original env/of) ctx)
         projection (:seon.schema/projection ctx)
@@ -1196,7 +1149,7 @@
       arguments
       (let [current (if (db/read-refusal? database)
                       database
-                      ((mi/-f->original current-snapshot) call-state database projection))
+                      ((mi/-f->original snapshot) database projection))
             sym (callee-identity callee)]
         (cond
           ;; A callee with no program identity is never prepared.
