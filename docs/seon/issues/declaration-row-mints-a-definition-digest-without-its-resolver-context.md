@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: fixed-unverified
 severity: defect
 created: 2026-09-26
 tags: [issue, program, definition-digest, writer]
@@ -30,7 +30,7 @@ Mint only for namespace and schema rows, the families whose digest takes no reso
 or test row without a digest then refuses at the writer by the missing key. Every production function/test
 path digests through `definition-digest-of` before this stage (`seon.sci.eval/definition-row`,
 `seon.fn` source rows at `src/seon/fn.clj:1552`), and `:seon.program/declaration-row` does not require the
-digest on those families, so the output contract holds. The patch is `tmp/fix-turn-test-reds-program-mint.patch`.
+digest on those families, so the output contract holds. Landed in eb848eacd with the program_test update.
 
 It must land in the same slice as `program_test`'s `reader-events-have-one-canonical-declaration-row`
 (`test/seon/program_test.clj:833`, asserting a 64-character digest on every case). That assertion should

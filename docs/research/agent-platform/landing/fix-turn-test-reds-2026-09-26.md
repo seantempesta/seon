@@ -1,6 +1,6 @@
 ---
 type: landing
-status: landed (0d3b96015, 2c9d6aa3b accepted; round 2 6380f2d0c); tests owed to root; producer fixes in held files wait on their owners
+status: landed (rounds 1-2 accepted; round 3 eb848eacd, 08b57bfcd, 515b7e296, 42685bc27); tests owed to root
 lane: fix-turn-test-reds-opus
 created: 2026-09-26
 ---
@@ -194,6 +194,10 @@ refusal one step. Options, simplest first:
 ### Round-2 root runs
 
 ```sh
+bin/test-check default --ns seon.program-test
+bin/test-check default --test seon.db-test/a-store-without-program-schema-admits-its-writes
+bin/test-check default --test seon.render.web-debug-test/reverse-blocks-do-not-depend-on-the-graph-page
+bin/test-check default --test seon.cluster.mcp-test/artifact-lifecycle-preserves-identity-paging-and-retraction
 bin/test-check default --test seon.db-test/arity-components-and-callers-are-checked-in-the-final-state
 bin/test-check default --test seon.test-runner-test/a-metadata-only-change-changes-the-reach-digest
 bin/test-check default --test seon.publication-validation-test/documentation-writes-do-not-check-unrelated-arities-or-renderers
@@ -204,6 +208,27 @@ Verification limit: round 1's load-string syntax copies read the running archive
 directory is `data/source/<commit>`), not the working tree. Round 1's syntax proof is therefore clj-kondo
 only; round 2's copies were loaded by absolute path.
 
+## Round 3 (root rulings: every file granted)
+
+| Slice | Commit | What | Proof |
+|---|---|---|---|
+| declaration-row mint | eb848eacd | `program/declaration-row` mints a digest only for namespace and schema rows. A function or test digest comes from `seon.db/definition-digest-of`, and an undigested row refuses at the writer by the missing key. `program_test:833` expects a digest on the schema case only; the function and test cases carry none. | Production callers checked: `sci.eval/definition-row` and `seon.fn` source rows digest first; SCI's reader stage calls it only for namespace rows (`sci/eval.clj:386`); `:seon.program/declaration-row` does not require the digest for those families. |
+| class B | 08b57bfcd | db-test's schemaless dial under `:sample.schemaless/id`; web-debug relationship entities carry `::id` | the round-2 REPL probes above |
+| class C | 515b7e296 | Option 1 as ruled, with one correction: the blob scenarios need config too (`config/effective-in` refuses a cluster without its row), so all five scenarios run on the member's branched world. The fresh-store counter (`with-redefs-fn` over `support/with-fresh-database`) and the `:seon.test/fixture-observation` reason go. `executed` derives from the scenario list (it expected `:retraction` for `:blob-only`). | Diagnostic run of the edited deftest in a scratch copy, on an isolated branch: all five scenarios executed, 37 pass, 2 red in 3.4 s (below) |
+| publication-validation | 42685bc27 | `with-redefs-fn` becomes the armed wrappers' profile call counters (`seon.profile/cells`), with a positive control: the refused call-arity write increments `report-arity-comparison`. The old test counted `arity-mismatches-with`, whose wrapper no write reaches (0 even on the arity refusal), so it was vacuous. | Diagnostic run: 5 pass, 0 fail |
+
+Two reds remain inside the artifact scenarios. Neither is the fresh-store class; both are for the floor lane,
+which converts mcp_test next:
+- `jvm-exceptions-keep-the-whole-cause`: "the reply keeps every cause link: :seon.probe/member". The shown text
+  prints the data as `#:seon.probe{:member 1}`, so the literal `:seon.probe/member` is absent. This is printer
+  grammar (namespaced-map syntax) against a substring assertion.
+- `retrievable-artifacts-commit-no-transaction`: the advertised requery evaluates through
+  `seon.cluster.boot/selected-instance`, whose output contract refuses the test's hand-built `running-instance`
+  map (it has no `:seon.boot/config`).
+
+The profile counters are JVM-wide, so a concurrent writer can make the doc-write delta nonzero and cause a
+false failure, but it cannot hide a call. `with-redefs-fn` was equally global.
+
 ## Deleted / net lines
 
 | Commit | Files | + | − |
@@ -211,8 +236,12 @@ only; round 2's copies were loaded by absolute path.
 | 0d3b96015 | turn_test, test_support, instrument_test | 54 | 70 |
 | 2c9d6aa3b | write_back_test | 10 | 5 |
 | 6380f2d0c | test_support, test_runner_test, publication_validation_test | 25 | 22 |
+| eb848eacd | program.cljc, program_test | 11 | 4 |
+| 08b57bfcd | db_test, web_debug_test | 17 | 6 |
+| 515b7e296 | mcp_test | 14 | 22 |
+| 42685bc27 | publication_validation_test | 34 | 16 |
 
-Test net **−8** across both rounds, src 0. Deleted: three hand-built `analyze-form` row paths in turn_test (≈45 lines). Added: the
+Net across seven code commits: src +5/−3 (program.cljc), tests +160/−142. The additions are mostly comments stating the owning rule at each fixture. Deleted: three hand-built `analyze-form` row paths in turn_test (≈45 lines). Added: the
 `held-handle` agent-id guard, the docstring note and the custody wrapper.
 
 ## Root runs
