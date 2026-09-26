@@ -133,9 +133,9 @@
       (assoc :seon.eval/shown
              (:seon.eval/shown settlement-evaluation))
       error (assoc :seon.cluster.eval/error error)
-      (:seon.cluster.eval/triage-edn evaluation)
-      (assoc :seon.cluster.eval/triage-edn
-             (:seon.cluster.eval/triage-edn evaluation))
+      (:seon.cluster.eval/diagnostics settlement-evaluation)
+      (assoc :seon.cluster.eval/diagnostics
+             (:seon.cluster.eval/diagnostics settlement-evaluation))
       (:seon.cluster.eval/interrupted-at evaluation)
       (assoc :seon.cluster.eval/interrupted-at
              (:seon.cluster.eval/interrupted-at evaluation))
@@ -1387,7 +1387,7 @@
 
 
    :seon.cluster.eval/error
-   :seon.cluster.eval/triage-edn
+   :seon.cluster.eval/diagnostics
    :seon.cluster.eval/interrupted-at
    :seon.cluster.eval/output
    :seon.cluster.eval/read-basis-transaction
@@ -1406,11 +1406,13 @@
    :seon.test.accretion/report-blob
    :seon.test.accretion/report-size])
 
-(defn- receipt-gate-test-assertions
+(defn- receipt-reference-assertions
+  "One assertion per reference of `request`'s cardinality-many reference
+  attributes (gate tests, the settlement window's faults), targeting `receipt`."
   [receipt request]
-  (mapv (fn [test-ref]
-          [:db/add (:db/id receipt) :seon.test.accretion/gate-tests test-ref])
-        (:seon.test.accretion/gate-tests request)))
+  (vec (for [attribute [:seon.test.accretion/gate-tests :seon.cluster.eval/faults]
+             reference (get request attribute)]
+         [:db/add (:db/id receipt) attribute reference])))
 
 (defn- receipt-terminal-assertions
   "Terminal assertions present in `request`, targeting `receipt`."
@@ -1702,7 +1704,7 @@
       (into [] cat
             [(if program-row (row-tx db request program-row) [])
              (receipt-read-evidence-tx receipt request)
-             (receipt-gate-test-assertions receipt request)
+             (receipt-reference-assertions receipt request)
              (receipt-terminal-assertions receipt request)]))))
 
 (defn recover-tx
@@ -3518,20 +3520,29 @@
 (defn- final-shown
   "The one print owner's rendering of `value`, a value that replaced a printed
   result at settlement, in `cluster`'s world for `agent-id`."
-  {:malli/schema [:=> [:cat :seon.turn.loop/cluster :seon.db/database-value :seon.agent/id
-                       [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
-                              :seon.schema.admission/reason "Settlement prints any replacing value: a completed disposition or a refusal."
-                              :gen/elements [nil false 0 "" :k [] {}]}]]
-                  :seon.sci.eval/shown]}
-  [cluster database agent-id value]
+  {:malli/schema [:function
+                  [:=> [:cat :seon.turn.loop/cluster :seon.db/database-value :seon.agent/id
+                        [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                               :seon.schema.admission/reason "Settlement prints any replacing value: a completed disposition or a refusal."
+                               :gen/elements [nil false 0 "" :k [] {}]}]]
+                   :seon.sci.eval/shown]
+                  [:=> [:cat :seon.turn.loop/cluster :seon.db/database-value :seon.agent/id
+                        [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                               :seon.schema.admission/reason "Settlement prints any replacing value: a completed disposition or a refusal."
+                               :gen/elements [nil false 0 "" :k [] {}]}]
+                        [:map [:seon.render.value/options {:optional true} :map]]]
+                   :seon.sci.eval/shown]]}
+  ([cluster database agent-id value]
+   (final-shown cluster database agent-id value {}))
+  ([cluster database agent-id value options]
   ;; The ctx, time limit and error dial are the evaluation path's render world:
   ;; without the ctx the value renderer selects no declared pair.
-  (sci.eval/shown-result value {:seon.db/db database :seon.db/connection (:seon.db/connection cluster)
+  (sci.eval/shown-result value (merge options {:seon.db/db database :seon.db/connection (:seon.db/connection cluster)
                                 :seon.agent/id agent-id :seon.boot/cluster-name (:seon.cluster/name cluster)
                                 :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
                                 :seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
-                                :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms cluster)}
-                         nil))
+                                :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms cluster)})
+                         nil)))
 
 (defn- evaluation-terminal-data
   [{cluster :seon.turn.loop/cluster
@@ -3686,6 +3697,40 @@
                  receipt))))
           receipts)))
 
+(defn- fault-window
+  "The references of the errors written on `agent-id`'s branch in this
+  settlement's window, (the agent's previous settlement, `database`], read
+  once at the writer's basis (`seon.error/occurred-since`) and saved on the
+  batch's last evaluation. The window opens at run `run-id`'s own opening
+  when the agent has settled nothing before."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.turn/id]
+                  [:vector [:tuple [:= :seon.error/signature] :seon.error/signature]]]}
+  [database agent-id run-id]
+  (let [since (or (db/q '[:find (max ?tx) . :in $ ?agent-id ?run-id
+                          :where [?agent :seon.agent/id ?agent-id] [?run :seon.turn/agent ?agent]
+                          [?run :seon.turn/closed-tx ?tx] (not [?run :seon.turn/id ?run-id])]
+                        database agent-id run-id)
+                  (db/q '[:find ?tx . :in $ ?run-id :where [?run :seon.turn/id ?run-id] [?run :seon.turn/opened-tx ?tx]]
+                        database run-id))
+        found (when (int? since) (error/occurred-since database since))]
+    (when (map? found)
+      (throw (ex-info (str (:seon.error/message found "The settlement's fault window read refused.")) found)))
+    (mapv #(vector :seon.error/signature (:seon.error/signature %)) found)))
+
+(defn- with-fault-windows
+  "`receipts` with each run's settlement window saved on its last receipt."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.turn.loop/settle-evaluation-request]
+                       [:vector :seon.cluster.eval/settle-request]]
+                  [:vector :seon.cluster.eval/settle-request]]}
+  [database requests receipts]
+  (let [last-index (into {} (map-indexed (fn [index request] [(:seon.turn/id request) index])) requests)]
+    (vec (map-indexed
+          (fn [index [request receipt]]
+            (let [faults (when (= index (last-index (:seon.turn/id request)))
+                           (fault-window database (:seon.agent/id request) (:seon.turn/id request)))]
+              (cond-> receipt (seq faults) (assoc :seon.cluster.eval/faults faults))))
+          (map vector requests receipts)))))
+
 (defn- settle-batch!
   "Settle every evaluated form and all turn side effects in one transaction."
   {:malli/schema
@@ -3714,13 +3759,19 @@
                                           (:seon.agent/id request)))
                                       requests prepared))]
             (plan/run-issue-tests! cluster agent-id))
+        ;; Built inside the committed phase: a refused read of the fault
+        ;; window is a refused settlement the arm below closes, never an escape.
         transaction
-        {:seon.blob/staged-writes
+        #(hash-map
+          :seon.blob/staged-writes
          (into [] (mapcat :seon.blob/staged-writes) prepared)
          :seon.db/tx-data
          (-> (into (receipt-settle-batch-tx
-                    (final-namespace-digests (db/carried-projection (db/db connection))
-                                             (mapv :seon.turn.loop/receipt prepared)))
+                    (let [database (db/db connection)]
+                      (with-fault-windows
+                       database requests
+                       (final-namespace-digests (db/carried-projection database)
+                                                (mapv :seon.turn.loop/receipt prepared)))))
                    (mapcat :seon.db/tx-data)
                    prepared)
              ;; The close precedes plan/settle-call, as in close-turn; a
@@ -3730,7 +3781,7 @@
                             [:db.fn/call #'close-folded-call {::id run-id :seon.agent/id agent-id}]))
                      (distinct (map (juxt :seon.agent/id :seon.turn/id) requests))))
              (into (map (fn [agent-id] [:db.fn/call #'plan/settle-call agent-id]))
-                   (distinct (map :seon.agent/id requests))))}
+                   (distinct (map :seon.agent/id requests)))))
         ;; `with-publication!` IS TOTAL OVER AN EMPTY VECTOR — it calls the
         ;; commit directly — so the caller has no branch to get wrong. The
         ;; branch this replaced handed `(seq …)`, a `ChunkedSeq`, where the
@@ -3745,10 +3796,11 @@
         ;; fault may never leave a run open.
         outcome
         (phase
-         #(blob/with-publication!
-           connection (:seon.blob/staged-writes transaction)
-           (fn [] (db/transact!
-                   connection {:tx-data (:seon.db/tx-data transaction)}))))]
+         #(let [transaction (transaction)]
+            (blob/with-publication!
+             connection (:seon.blob/staged-writes transaction)
+             (fn [] (db/transact!
+                     connection {:tx-data (:seon.db/tx-data transaction)})))))]
     ;; SUCCESS IS THE WRITER'S TRANSACTION REPORT (`db/transact!` answers
     ;; `:seon.db/transaction-result` or its refused error); any other value,
     ;; a refused phase included, is the refusal the arm below settles.
@@ -3785,7 +3837,7 @@
          [:or :nil :seon.turn.loop/terminal-request] :seon.error/source]
     [:map [:seon.error/value :seon.error/value]
      [:seon.db/tx-data :seon.store/transaction-data]]]}
-  [cluster database now agent-id run-id process ordinal _receipt source]
+  [cluster database now agent-id run-id process ordinal receipt source]
   (let [recording
         (error/recording cluster database
                   (or (:seon.error/declared-schema source)
@@ -3794,14 +3846,24 @@
                   (cond-> {:seon.agent/id agent-id}
                     run-id (assoc :seon.turn/id run-id)))
         value (:seon.error/value recording)
+        structural {:seon.render.value/options {:seon.render.value/structural? true}}
+        ;; A form that returned a value keeps it: the refusal of its
+        ;; settlement is a diagnostic beside it, never its replacement.
+        evaluated? (and (:seon.eval/shown receipt) (not (:seon.cluster.eval/error receipt)))
         receipt-tx
         (when ordinal
           (receipt-settle-tx
            database
-            {:seon.turn/id run-id
-                     :seon.cluster.eval/ordinal ordinal
-                     :seon.eval/shown (:seon.eval/shown (final-shown cluster database agent-id value))
-                     :seon.cluster.eval/error (:seon.error/message value)}))]
+           (cond-> {:seon.turn/id run-id
+                    :seon.cluster.eval/ordinal ordinal
+                    :seon.cluster.eval/error (:seon.error/message value)}
+             evaluated?
+             (assoc :seon.eval/shown (:seon.eval/shown receipt)
+                    :seon.cluster.eval/diagnostics
+                    (:seon.eval/shown (final-shown cluster database agent-id [value] structural)))
+             (not evaluated?)
+             (assoc :seon.eval/shown
+                    (:seon.eval/shown (final-shown cluster database agent-id value structural))))))]
     {:seon.error/value value
      :seon.blob/staged-writes (:seon.blob/staged-writes recording)
      :seon.db/tx-data
@@ -3854,14 +3916,21 @@
         ;; refused for any other value its receipts carried (dogfood #4).
         unpublished (str "Not settled: this run's settlement was refused: "
                          (:seon.error/message value))
+        ;; The refusal as data, printed once by the floor, beside every value
+        ;; the batch evaluated (a form that failed keeps its own error).
+        diagnostics (:seon.eval/shown
+                     (final-shown cluster (db/db connection) agent-id [value]
+                                  {:seon.render.value/options {:seon.render.value/structural? true}}))
         receipts
         (mapv
          (fn [{receipt :seon.turn.loop/receipt}]
            (let [settled (select-keys receipt [:seon.turn/id :seon.db.process/id :seon.cluster.eval/ordinal
                                                :seon.cluster.eval/ns :seon.sci.eval/ending-ns
                                                :seon.eval/shown :seon.cluster.eval/error])]
-             (assoc settled :seon.cluster.eval/error
-                    (or (:seon.cluster.eval/error settled) unpublished))))
+             (if (:seon.cluster.eval/error settled)
+               settled
+               (assoc settled :seon.cluster.eval/error unpublished
+                      :seon.cluster.eval/diagnostics diagnostics))))
          prepared)
         transaction
         ;; Same writer decision as `refusal-terminal-data`: the batch's
@@ -4864,7 +4933,9 @@
                   ;; The refusal replaces a printed result: the one print
                   ;; owner renders it, and its render reads stay the form's.
                   (merge unrun (binding [db/*read-evidence-sink* captured]
-                                 (sci.eval/shown-result (:seon.sci.admit/value unrun) request
+                                 (sci.eval/shown-result (:seon.sci.admit/value unrun)
+                                                        (assoc request :seon.render.value/options
+                                                               {:seon.render.value/structural? true})
                                                         (:seon.sci.admit/record unrun)))))
                 evaluation)
               evaluation

@@ -1,7 +1,6 @@
 (ns seon.repl-test
   "The REPL response grammar: what an agent reads back for one form."
-  (:require [clojure.main :as main]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as check]
             [clojure.test.check.generators :as gen]
@@ -203,27 +202,39 @@
                       {:seon.print/options {:seon.print/length 0}}]]
       (is (= response (repl/response (merge emission settings)))))))
 
-(deftest an-error-names-its-throwable-and-never-invents-a-location
-  ;; A REFUSAL NAMES WHAT IT KNOWS AND NOTHING MORE (law 2.4, audit F2).
-  ;; The recorded triage is the authority; without it the fallback used to
-  ;; print `Execution error () at (REPL:1).` — an empty class and a source
-  ;; location the evaluation never had.
-  (let [throwable (try (/ 1 0) (catch Throwable failure failure))
-        triage (pr-str (main/ex-triage (Throwable->map throwable)))]
-    (testing "recorded triage names the throwable's own class"
-      (let [text (repl/error-text {:seon.cluster.eval/error "Divide by zero"
-                                   :seon.cluster.eval/triage-edn triage})]
-        (is (str/includes? text "ArithmeticException"))
-        (is (str/includes? text "Divide by zero"))))
-    (testing "without triage the class parens and the location are absent"
-      (let [text (repl/error-text {:seon.cluster.eval/error "Divide by zero"})]
-        (is (= "Execution error.\nDivide by zero" text))
-        (is (not (str/includes? text "()")))
-        (is (not (str/includes? text "REPL:1")))))
-    (testing "unreadable triage degrades to the same honest fallback"
-      (is (= "Execution error.\nDivide by zero"
-             (repl/error-text {:seon.cluster.eval/error "Divide by zero"
-                               :seon.cluster.eval/triage-edn "#unreadable("}))))))
+(deftest ^{:seon/tasks #{"0ae6b217abdd" "b331d31540bb"}} a-response-carries-errors-as-data-and-late-diagnostics-beside-the-value
+  ;; ONE SAVED OBSERVATION (AGENTS.md, one error shape): a failed
+  ;; evaluation's shown text is its whole flat error, and the response embeds
+  ;; it as data; a later stage's failure is its own entry beside the value.
+  (let [error {:seon.error/message "Divide by zero"
+               :seon.error/chain [{:seon.error/throwable-class "java.lang.ArithmeticException"
+                                   :seon.error/message "Divide by zero"}]
+               :seon.sci.eval/stacktrace [['user 1 1]]}
+        read-response (fn [emission] (binding [*read-eval* false] (read-string (repl/response emission))))]
+    (testing "an evaluation's own failure answers :error with its data"
+      (let [response (read-response {:seon.cluster.eval/error "Divide by zero"
+                                     :seon.eval/shown (pr-str error)})]
+        (is (= error (:seon.repl/error response)))
+        (is (not (contains? response :seon.repl/value)))))
+    (testing "a refused settlement keeps the value and names its refusal"
+      (let [refusal [{:seon.error/message "The stored definition digest is not the one its definition produces."}]
+            response (read-response {:seon.cluster.eval/error "Not settled: this run's settlement was refused."
+                                     :seon.eval/shown "#'user/f"
+                                     :seon.cluster.eval/diagnostics (pr-str refusal)})]
+        (is (= '(var user/f) (:seon.repl/value response)))
+        (is (= refusal (:seon.repl/diagnostics response)))
+        (is (not (contains? response :seon.repl/error)))))
+    (testing "a renderer failure is a diagnostic beside the value, the reply still readable"
+      (let [response (read-response {:seon.eval/shown "{:audit/value 42}"
+                                     :seon.cluster.eval/diagnostics "[{:seon.error/message \"renderer refused\"}]"})]
+        (is (= {:audit/value 42} (:seon.repl/value response)))
+        (is (= "renderer refused" (get-in response [:seon.repl/diagnostics 0 :seon.error/message])))))
+    (testing "text that is not data is one readable string, never an invented location"
+      (is (= "No such namespace: missing.function"
+             (:seon.repl/error (read-response {:seon.cluster.eval/error "No such namespace: missing.function"}))))
+      (is (= "Execution error (ArithmeticException) at (REPL:1:1).\nDivide by zero"
+             (:seon.repl/error (read-response {:seon.cluster.eval/error "Divide by zero"
+                                               :seon.eval/shown "Execution error (ArithmeticException) at (REPL:1:1).\nDivide by zero"})))))))
 
 (deftest a-unit-that-is-not-an-evaluation-refuses-instead-of-throwing
   ;; RENDERS NEVER THROW (law 2.4, audit F5). `entity-emission`'s declared

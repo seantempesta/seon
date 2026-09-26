@@ -20,7 +20,6 @@
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as support]
             [seon.turn :as turn]
-            [clojure.main :as main]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
@@ -851,19 +850,15 @@
     (is (str/includes? interrupted ":interrupted #inst") interrupted)
     (is (not (str/includes? interrupted ":value"))
         "an interrupted evaluation answers no value"))
-  (let [triage-edn
-        (try
-          (/ 1 0)
-          (catch Throwable throwable
-            (pr-str (main/ex-triage (Throwable->map throwable)))))
-        rendered
+  (let [rendered
         (repl/render-ai
          {:seon.cluster.eval/source "(/ 1 0)"
           :seon.cluster.eval/ordinal 0
           :seon.cluster.eval/error "Divide by zero"
-          :seon.cluster.eval/triage-edn triage-edn})]
-    (is (str/includes? rendered ":error \"Execution error (ArithmeticException) at"))
-    (is (str/includes? rendered "Divide by zero"))
+          :seon.eval/shown (pr-str {:seon.error/message "Divide by zero"
+                                    :seon.error/exception-class 'java.lang.ArithmeticException})})]
+    (is (str/includes? rendered ":error {:seon.error/message \"Divide by zero\""))
+    (is (str/includes? rendered "java.lang.ArithmeticException"))
     (is (not (str/includes? rendered "Form ")))
     (is (not (str/includes? rendered "failed:")))))
 
@@ -1386,8 +1381,8 @@
                 settle {::turn/id "receipts"
                         :seon.cluster.eval/ordinal 0
                         :seon.eval/shown "42"
-                        :seon.cluster.eval/triage-edn
-                        "{:clojure.error/cause \"triage evidence\"}"}]
+                        :seon.cluster.eval/diagnostics
+                        "[{:seon.error/message \"renderer evidence\"}]"}]
             (is (= ::committed
                    (transact-or-refusal connection (start-tx start))))
             (is (not= ::committed
@@ -1423,8 +1418,8 @@
                   "the first terminal outcome is preserved")
               (is (string? (:seon.eval/shown receipt))
                   "the stored observation is shown text")
-              (is (= "{:clojure.error/cause \"triage evidence\"}"
-                     (:seon.cluster.eval/triage-edn receipt)))
+              (is (= "[{:seon.error/message \"renderer evidence\"}]"
+                     (:seon.cluster.eval/diagnostics receipt)))
               (is (nil? (:seon.cluster.eval/error receipt))
                   "and the refused re-settle changed nothing")))
           ;; the takeover interleaving, re-expressed from the epoch era:

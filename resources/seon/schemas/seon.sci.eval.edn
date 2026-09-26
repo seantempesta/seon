@@ -44,9 +44,9 @@
                  [:seon.cluster.eval/error
                   {:optional true}
                   :seon.cluster.eval/error]
-                 [:seon.cluster.eval/triage-edn
+                 [:seon.cluster.eval/diagnostics
                   {:optional true}
-                  :seon.cluster.eval/triage-edn]
+                  :seon.cluster.eval/diagnostics]
                  [:seon.cluster.eval/interrupted-at
                   {:optional true}
                   :seon.cluster.eval/interrupted-at]
@@ -121,6 +121,7 @@
                          :gen/elements [nil false 0 "" :k [] {}]}]]
                  [:seon.eval/shown :seon.eval/shown]
                  [:seon.eval/renderer {:optional true} :seon.eval/renderer]
+                 [:seon.cluster.eval/diagnostics {:optional true} :seon.cluster.eval/diagnostics]
                  [:seon.sci.admit/record {:optional true} :seon.sci.admit/record]],
                 :unrun-request
                 [:map
@@ -410,6 +411,7 @@
  [:seon.sci.eval/restore :seon.sci.eval/restore]
  [:seon.sci.eval/namespace-unmap? :boolean]
  [:seon.sci.eval/form-start :seon.sci.eval/position]]
+:stacktrace [:vector {:min 1 :description "An interpreted failure's source location: the author's SCI frames, innermost first, as [function-or-namespace line column] (sci.core/stacktrace). SCI's live callstack is read once and never stored."} [:tuple :symbol :int :int]]
 :position [:tuple {:description "The line and column (1-based) where a form or a declaration inside it starts."} [:int {:min 1}] [:int {:min 1}]]
 :program-change
 [:map {:description "One form's definitions classified by provenance: rows matched to the Var that ran them, unindexed changes, and every declaration made, repeats kept."}

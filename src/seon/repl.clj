@@ -9,7 +9,6 @@
       (+ 1 1)
       #:seon.repl{:value 2, :result result/e41, :ms 3}"
   (:require [clojure.edn :as edn]
-            [clojure.main :as main]
             [clojure.pprint :as pprint]
             [clojure.string :as str]
             [seon.ai :as ai]
@@ -108,6 +107,7 @@
 (def ^:private response-order
   [:seon.repl/value
    :seon.repl/error
+   :seon.repl/diagnostics
    :seon.repl/interrupted
    :seon.repl/result
    :seon.repl/out
@@ -146,25 +146,13 @@
   [emission]
   (or (:seon.eval/shown emission) (:seon.repl/value emission)))
 
-(defn error-text
-  "Clojure's own concise REPL error for one failed evaluation.
-
-  The recorded `ex-triage` data is the authority — it names the throwable's
-  class and, when the evaluation had one, its source location. The stored
-  message is the fallback when triage is absent or unreadable, and it says
-  only what it knows: NO invented `(REPL:1)` location and no empty class
-  parens, because a diagnostic that fabricates where a failure happened is
-  worse than one that omits it (law 2.4)."
-  {:malli/schema [:=> [:cat :seon.repl/emission] [:maybe :string]]}
-  [{error :seon.cluster.eval/error triage :seon.cluster.eval/triage-edn}]
-  (when (string? error)
-    (or (when (string? triage)
-          (try
-            (let [triaged (edn/read-string triage)]
-              (when (map? triaged)
-                (-> triaged main/ex-str str/trim-newline)))
-            (catch Throwable _ nil)))
-        (str "Execution error.\n" (str/trim-newline error)))))
+(defn- data-text
+  "Saved text as it enters the reply map: floor-printed data verbatim, any
+  other text (an unrun evaluation's message, a receipt saved before its error
+  was data) as one readable string."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [text]
+  (if (string? (shown-value text)) (pr-str text) text))
 
 (defn- response-entries
   "The response's present keys, in declared order, each already text."
@@ -177,12 +165,14 @@
     interrupted-at :seon.cluster.eval/interrupted-at
     :as emission}]
   (let [value (value-text emission)
-        error (error-text emission)
-        shown-error (when (and error value
-                               (not (:seon.cluster.eval/triage-edn emission)))
-                      value)
-        by-key {:seon.repl/value (when (and (nil? error) (some? value)) value)
-                :seon.repl/error (some-> (or shown-error error) pr-str)
+        ;; The evaluation's own failure: its shown text IS its flat error.
+        ;; Diagnostics are a later stage's, beside a value that stands.
+        diagnostics (:seon.cluster.eval/diagnostics emission)
+        failed? (and (:seon.cluster.eval/error emission) (not diagnostics))
+        by-key {:seon.repl/value (when (and (not failed?) (some? value)) value)
+                :seon.repl/error (when failed?
+                                   (data-text (or value (:seon.cluster.eval/error emission))))
+                :seon.repl/diagnostics (some-> diagnostics data-text)
                 ;; AN EVALUATION BOOT CUT SAYS SO. Without this the response
                 ;; for an interrupted evaluation carried `:ms` alone and read
                 ;; exactly like one still running — absence of signal read as
@@ -229,10 +219,13 @@
                                           entries))
                            "}")))]
     (if (:seon.eval/renderer emission)
-      ;; The declared renderer's output is the value; the branch's new errors
-      ;; still follow it, in the same reply map.
-      (let [errors (reply-map (some->> (:seon.repl/errors emission)
-                                       (vector :seon.repl/errors) vector))]
+      ;; The declared renderer's output is the value; its diagnostics and the
+      ;; branch's new errors still follow it, in the same reply map.
+      (let [errors (reply-map (into [] (keep (fn [[response-key text]]
+                                                (when text [response-key text])))
+                                    [[:seon.repl/diagnostics
+                                      (some-> (:seon.cluster.eval/diagnostics emission) data-text)]
+                                     [:seon.repl/errors (:seon.repl/errors emission)]]))]
         (cond-> (value-text emission) errors (str "\n" errors)))
       (reply-map (response-entries emission)))))
 
@@ -417,7 +410,7 @@
                              :seon.eval/renderer
                              :seon.cluster.eval/error
                              :seon.cluster.eval/interrupted-at
-                             :seon.cluster.eval/triage-edn
+                             :seon.cluster.eval/diagnostics
                              :seon.cluster.eval/output
                              :seon.sci.eval/ending-ns
                              :seon.eval/duration-ms

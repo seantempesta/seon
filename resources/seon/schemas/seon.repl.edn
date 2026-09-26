@@ -25,6 +25,11 @@
              {:min 1,
               :description
               "The value renderer's text for the new open errors recorded on the evaluation's branch between the previous evaluation's settlement and this one's, one entry per signature with its count. Present only when there are any."}]
+            :diagnostics
+            [:string
+             {:min 1,
+              :description
+              "The flat errors a later stage (printing, a renderer, settlement) attached beside the evaluation's unchanged value, as the floor printed them (:seon.cluster.eval/diagnostics). Present only beside :seon.repl/value."}]
             :shown-value :seon.schema/value
             :comment [:string {:min 1}],
             :subject :seon.render.walk/lookup,
@@ -48,7 +53,7 @@
             :error
             [:string
              {:description
-              "Saved shown text for a returned flat error, or Clojure's concise throwable text from recorded ex-triage data. Exactly one of :seon.repl/value and :seon.repl/error is present."}],
+              "The failed evaluation's saved shown text: its whole flat error as the floor printed it, readable as data. Exactly one of :seon.repl/value and :seon.repl/error is present."}],
             :settled
             [:map
              [:seon.repl/key :seon.repl/key]
@@ -119,9 +124,9 @@
              [:seon.cluster.eval/interrupted-at
               {:optional true}
               :seon.cluster.eval/interrupted-at]
-             [:seon.cluster.eval/triage-edn
+             [:seon.cluster.eval/diagnostics
               {:optional true}
-              :seon.cluster.eval/triage-edn]
+              :seon.cluster.eval/diagnostics]
              [:seon.cluster.eval/output
               {:optional true}
               :seon.cluster.eval/output]

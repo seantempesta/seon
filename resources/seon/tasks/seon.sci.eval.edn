@@ -119,4 +119,11 @@
              :kind :function
              :intent "Analysis runs per batch and acquisition installs by name order, not evaluation order: alias hang, (do (in-ns) (defn)), register! only at top level, name-order install (Astra M1)."
              :must-read #{seon.sci.eval/acquire!}
-             :evidence #{"docs/research/agent-platform/landing/agent-path-2-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/agent-path-2-2026-09-26.md"}}
+ #:seon.task{:id "0ae6b217abdd"
+             :name "deliver-evaluation-errors-as-values"
+             :kind :function
+             :intent "An evaluation's failure is saved as its whole flat error data (class, message, ex-data per link, the author's SCI source location, refusal fields), printed by the floor, and that saved text is what MCP replies and the next context show; no triage prose, wrapper frame or SCI callstack object. Audit P1/P2/P3."
+             :must-read #{seon.sci.eval/shown-result seon.sci.kernel/failure-value seon.repl/response}
+             :evidence #{"docs/research/agent-platform/error-delivery-audit-2026-09-26.md"
+                         "docs/research/agent-platform/landing/err-s12-record-data-opus-2026-09-26.md"}}]

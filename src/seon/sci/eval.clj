@@ -3873,13 +3873,47 @@
       ;; printing `nil` as though it were the failure.
       :else "The evaluation failed and named no failure.")))
 
+(defn- floor-text
+  "`value` printed by the floor as the data it is: no declared renderer is
+  selected (`:seon.render.value/structural?`), so an error value prints its
+  whole flat shape, and the saved text reads back as that data."
+  {:malli/schema [:=> [:cat :map [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                                        :seon.schema.admission/reason "Any error or diagnostic value is printed here."
+                                        :gen/elements [nil 0 "" :k [] {}]}]]
+                  :string]}
+  [request value]
+  (render.value/render-ai-data
+   (render.value/prepare
+    (assoc (dissoc request :seon.render.call/function)
+           :seon.render/value value
+           :seon.render.value/options {:seon.render.value/structural? true}
+           :seon.render.call/id [:seon.cluster.eval/source (:seon.cluster.eval/source request)]))))
+
+(defn- flat-diagnostic
+  "One presentation failure as a flat error: a Throwable normalized once by
+  `seon.error.refusal/diagnostic` (class, message, ex-data per link); a
+  declared failure value as it is."
+  {:malli/schema [:=> [:cat [:or :seon.error/throwable :map]] :map]}
+  [failure]
+  (if (instance? Throwable failure)
+    (seon.error.refusal/diagnostic (java.util.Date.) :seon.render/invocation 'seon.sci.eval/shown-result
+                                   {:seon.error/throwable failure})
+    failure))
+
 (defn shown-result
   "The one print of a final value: its admitted value and exact shown text.
 
   Every evaluation's shown text comes from here, and so does the text of a
   value that replaces a result after it was printed (a disposition refusal, a
   completed disposition's delivery, a settlement refusal): the earlier bytes
-  are discarded, never stored, and the final value is rendered by this owner."
+  are discarded, never stored, and the final value is rendered by this owner.
+
+  TOTAL: printing never replaces or fails the value. A failure preparing the
+  print (profile, contract explanation, documentation read) or a renderer
+  failure the floor survived is a flat diagnostic beside the value,
+  `:seon.cluster.eval/diagnostics`, printed by the floor. A caller printing
+  an error it produced passes `:seon.render.value/options` structural, so
+  the error's whole data is its shown text."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
                                   :seon.schema.admission/reason "Any evaluated or replacing value is printed here."
                                   :gen/elements [nil false 0 "" :k [] {}]}]
@@ -3890,52 +3924,60 @@
         connection (or (:seon.db/connection request)
                        (get-in ctx [::custody :seon.db/connection]))
         profile (render/request-profile request)
-        ;; A refused profile is passed on, never rendered with as a profile.
-        _ (when (:seon.render/refused-member profile)
-            (throw (ex-info (:seon.error/message profile) profile)))
-        ;; Read only through the floor's classification (one-render-path
-        ;; §3g): an exact small persistent map, keys compared by identity.
-        ;; `get` on an arbitrary result can run a tree map's comparator or a
-        ;; host Map's `.get` before anything is printed.
-        checked? (some? (render.value/keyword-entry value :seon.instrument/check))
-        value (if (and connection
-                       checked?
-                       ((schema/projection-validator (render/request-projection request)
-                                                     :seon.instrument/contract-error) value)
-                       (not (:seon.error/result-id value)))
-                (merge value
-                       (error/prepare-result
-                        (cond-> {:seon.error/source value
-                                 :seon.schema/projection (render/request-projection request)
-                                 :seon.db/connection connection
-                                 :seon.render/profile profile}
-                          ctx (assoc :seon.sci.eval/ctx ctx)
-                          (:seon.sci.admit/caps request)
-                          (assoc :seon.sci.admit/caps (:seon.sci.admit/caps request)))))
-                value)
-        function-name (when (some? (render.value/keyword-entry value :seon.instrument/check))
-                        (:seon.instrument/fn value))
-        database (when function-name
-                   (or (:seon.db/db request)
-                       (some-> (get-in request [:seon.sci.eval/ctx ::custody :seon.db/connection]) db/db)))
-        function-row (when (and function-name database)
-                       (db/pull database program-documentation-selector
-                                [:seon.fn/sym function-name]))
-        value (if (:seon.fn/sym function-row)
-                (assoc value :seon.error/doc (function-doc-map database function-row)) value)
+        ;; A refused profile is a diagnostic; the value prints under the
+        ;; floor's defaults, never under the refusal read as a profile.
+        failures (cond-> [] (:seon.render/refused-member profile) (conj profile))
+        request (if (:seon.render/refused-member profile)
+                  (dissoc request :seon.render/profile)
+                  (assoc request :seon.render/profile profile))
+        enrich
+        (fn [value]
+          ;; Read only through the floor's classification (one-render-path
+          ;; §3g): an exact small persistent map, keys compared by identity.
+          (let [checked? (some? (render.value/keyword-entry value :seon.instrument/check))
+                value (if (and connection
+                               checked?
+                               ((schema/projection-validator (render/request-projection request)
+                                                             :seon.instrument/contract-error) value)
+                               (not (:seon.error/result-id value)))
+                        (merge value
+                               (error/prepare-result
+                                (cond-> {:seon.error/source value
+                                         :seon.schema/projection (render/request-projection request)
+                                         :seon.db/connection connection}
+                                  (not (:seon.render/refused-member profile)) (assoc :seon.render/profile profile)
+                                  ctx (assoc :seon.sci.eval/ctx ctx)
+                                  (:seon.sci.admit/caps request)
+                                  (assoc :seon.sci.admit/caps (:seon.sci.admit/caps request)))))
+                        value)
+                function-name (when checked? (:seon.instrument/fn value))
+                database (when function-name
+                           (or (:seon.db/db request)
+                               (some-> (get-in request [:seon.sci.eval/ctx ::custody :seon.db/connection]) db/db)))
+                function-row (when (and function-name database)
+                               (db/pull database program-documentation-selector
+                                        [:seon.fn/sym function-name]))]
+            (if (:seon.fn/sym function-row)
+              (assoc value :seon.error/doc (function-doc-map database function-row))
+              value)))
+        [value failures] (try [(enrich value) failures]
+                              (catch Throwable failure [value (conj failures failure)]))
         projection (render.value/prepare
-               (assoc request
-                      :seon.render/value value
-                      :seon.render/profile profile
-                      :seon.render.call/id
-                      [:seon.cluster.eval/source
-                       (:seon.cluster.eval/source request)]))
+                    (assoc request
+                           :seon.render/value value
+                           :seon.render.call/id
+                           [:seon.cluster.eval/source
+                            (:seon.cluster.eval/source request)]))
         shown (if (contains? projection :seon.render.value/root-description) projection
-                  (render.value/render-ai-data projection))]
+                  (or (:seon.render.value/value-text projection)
+                      (render.value/render-ai-data projection)))
+        failures (into failures (:seon.render.value/diagnostics projection))]
     (cond-> {:seon.sci.admit/value value
              :seon.eval/shown (if (string? shown) shown (pr-str shown))}
       (:seon.render.call/selected-producer projection)
       (assoc :seon.eval/renderer (:seon.render.call/selected-producer projection))
+      (seq failures)
+      (assoc :seon.cluster.eval/diagnostics (floor-text request (mapv flat-diagnostic failures)))
       record (assoc :seon.sci.admit/record record))))
 
 (defn- explained-evaluation
@@ -3980,9 +4022,8 @@
             (:seon.eval/shown admitted)
             (assoc :seon.eval/shown
                    (:seon.eval/shown admitted))
-            (:seon.cluster.eval/error admitted)
-            (assoc :seon.cluster.eval/error (:seon.cluster.eval/error admitted))
-)
+            (:seon.cluster.eval/diagnostics admitted)
+            (assoc :seon.cluster.eval/diagnostics (:seon.cluster.eval/diagnostics admitted)))
     ;; HOW LONG THE FORM TOOK IS A KEY OF THE EVALUATION, not something two
     ;; readers dig out of the diagnostic record by different routes. The
     ;; storage projection and the page's in-memory render both read this one
@@ -4008,7 +4049,6 @@
     definitions :seon.sci.eval/bindings
     record :seon.sci.admit/record
     value :seon.sci.admit/value
-    triage-edn :seon.cluster.eval/triage-edn
     interrupted-at :seon.cluster.eval/interrupted-at
     :as request}]
   (cond-> (cond-> {:seon.print/options print-options
@@ -4021,12 +4061,11 @@
             (:seon.eval/shown admitted)
             (assoc :seon.eval/shown
                    (:seon.eval/shown admitted))
-)
+            (:seon.cluster.eval/diagnostics admitted)
+            (assoc :seon.cluster.eval/diagnostics (:seon.cluster.eval/diagnostics admitted)))
     ;; The same one spelling on the failing path.
     (int? (:seon.eval/duration-ms record))
     (assoc :seon.eval/duration-ms (:seon.eval/duration-ms record))
-    (string? triage-edn)
-    (assoc :seon.cluster.eval/triage-edn triage-edn)
     (seq definitions) (assoc :seon.sci.eval/bindings definitions)
     (contains? request :seon.cluster.eval/interrupted-at)
     (assoc :seon.cluster.eval/interrupted-at interrupted-at)
@@ -4375,7 +4414,12 @@
                            throwable record)
                         arity-message
                         (assoc :seon.error/message arity-message))
-                admitted (shown-result value request record)]
+                ;; The agent's failure is its whole flat error, printed as
+                ;; the data it is: the saved observation MCP and the next
+                ;; context both read (AGENTS.md, one error shape).
+                admitted (shown-result value (assoc request :seon.render.value/options
+                                                    {:seon.render.value/structural? true})
+                                       record)]
           (failed-evaluation
            (cond-> {:seon.sci.eval/admitted admitted
                     :seon.sci.admit/caps caps
@@ -4384,10 +4428,7 @@
                     :seon.print/options @print-options
                     :seon.sci.eval/bindings definitions
                     :seon.sci.admit/record record
-                    :seon.sci.admit/value value
-                    :seon.cluster.eval/triage-edn
-                    (pr-str
-                     (main/ex-triage (Throwable->map throwable)))}
+                    :seon.sci.admit/value value}
              ;; the instant the interrupt was OBSERVED — the one
              ;; genuinely new fact a cut evaluation leaves. Its
              ;; presence IS the interrupted state; there is no label.
@@ -4692,7 +4733,8 @@
   (when-let [unavailable ((:seon.sci.eval/restore evaluation) nil (ex-info (:seon.error/message refusal) refusal))]
     (throw (ex-info (:seon.error/message unavailable) unavailable)))
   (merge (dissoc evaluation :seon.program/row :seon.sci.eval/bindings :seon.eval/renderer)
-         (shown-result refusal request
+         (shown-result refusal (assoc request :seon.render.value/options
+                                      {:seon.render.value/structural? true})
                        (assoc (:seon.sci.admit/record evaluation)
                               :seon.eval/outcome :error))))
 

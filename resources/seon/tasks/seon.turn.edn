@@ -42,4 +42,11 @@
              :kind :function
              :intent "A run failing after it records its sources was never closed with its cause (sorted-map wedge, sticky unavailable). rc-m4 f83931226 closes escaping runs; proven by root after restart."
              :must-read #{seon.turn/turn}
-             :evidence #{"docs/research/agent-platform/landing/agent-path-2-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/agent-path-2-2026-09-26.md"}}
+ #:seon.task{:id "b331d31540bb"
+             :name "late-faults-accompany-evaluated-values"
+             :kind :function
+             :intent "A settlement refusal, a renderer failure or a printing failure never replaces a completed evaluation's value: it is saved beside it as :seon.cluster.eval/diagnostics and shown as its own response entry; each settlement saves its fault window as references."
+             :must-read #{seon.turn/refusal-terminal-data seon.turn/settle-batch-refusal! seon.turn/fault-window}
+             :evidence #{"docs/research/agent-platform/error-delivery-audit-2026-09-26.md"
+                         "docs/research/agent-platform/landing/err-s12-record-data-opus-2026-09-26.md"}}]

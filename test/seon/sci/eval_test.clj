@@ -1312,15 +1312,29 @@
     (is (nil? (:seon.cluster.eval/error bare))
         "sci produced a value; E2-PRIME, not the evaluator, classifies it red")))
 
-(deftest a-failed-evaluation-records-reconstructable-throwable-data
-  (let [evaluation (run "(/ 1 0)")
-        triage-data
-        (edn/read-string (:seon.cluster.eval/triage-edn evaluation))]
-    (is (= "Divide by zero" (:clojure.error/cause triage-data)))
-    (is (= :execution (:clojure.error/phase triage-data)))
-    (is (= 'java.lang.ArithmeticException
-           (:clojure.error/class triage-data)))
-    (is (= "Divide by zero" (:seon.cluster.eval/error evaluation)))))
+(deftest ^{:seon/tasks #{"0ae6b217abdd"}} a-failed-evaluation-shows-its-whole-error-as-data
+  ;; Audit P1: the saved shown text IS the flat error, printed by the floor:
+  ;; it reads back as data with every link's class, message and ex-data, and
+  ;; the author's SCI location; no triage copy, no SCI wrapper link, and no
+  ;; live callstack object anywhere in the value or the text.
+  (let [evaluation (run (str "(let [thrower (fn [x]\n"
+                             "  (throw (ex-info \"outer\" {:audit/offending x}"
+                             " (ex-info \"inner\" {:audit/detail :sentinel}))))]"
+                             " (thrower 7))"))
+        value (:seon.sci.admit/value evaluation)
+        shown (edn/read-string (:seon.eval/shown evaluation))]
+    (is (not (contains? evaluation :seon.cluster.eval/triage-edn)))
+    (is (= [["clojure.lang.ExceptionInfo" "outer" {:audit/offending 7}]
+            ["clojure.lang.ExceptionInfo" "inner" {:audit/detail :sentinel}]]
+           (mapv (juxt :seon.error/throwable-class :seon.error/message :seon.error/data)
+                 (:seon.error/chain shown)))
+        (:seon.eval/shown evaluation))
+    (is (= [2 3] (rest (first (:seon.sci.eval/stacktrace shown))))
+        "the innermost author frame is the throw's own line and column")
+    (is (nil? (:seon.error/frame shown)) "an interpreter frame is not the author's location")
+    (is (not-any? #(and (map? %) (contains? % :sci.impl/callstack)) (tree-seq coll? seq value)))
+    (is (not (str/includes? (:seon.eval/shown evaluation) "Volatile")))
+    (is (= (:seon.error/message value) (:seon.cluster.eval/error evaluation)))))
 
 (deftest an-instrumented-multi-arity-miss-reads-like-clojure
   (test-support/with-database

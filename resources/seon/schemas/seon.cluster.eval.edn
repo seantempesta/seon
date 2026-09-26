@@ -1,4 +1,11 @@
-#:seon.cluster.eval{:triage-edn [:string {:min 1 :seon.wake/context-inert true}],
+#:seon.cluster.eval{:triage-edn [:string {:min 1 :seon.wake/context-inert true :description "Retiring: no longer produced; an evaluation's failure is its shown flat error data (seon.sci.eval/shown-result). Deleted in the next adoption."}],
+                    :faults
+                    [:vector {:seon.wake/context-inert true
+                              :description "References to the errors written on the agent's branch in this evaluation's settlement window, (the agent's previous settlement, this settlement], saved once by the settlement writer on the batch's last evaluation: the window never changes after, and no reader reconstructs it from occurrence counters."}
+                     :seon.db/ref],
+                    :diagnostics
+                    [:string {:min 1, :seon.db/no-history? true :seon.wake/context-inert true
+                              :description "The flat errors a later stage (printing, a renderer, settlement) attached beside this evaluation's unchanged value, as the floor printed them: a vector of :seon.error/base values that reads back as data. Present only when the evaluation itself returned a value."}],
                     :read-basis-transaction [:and {:seon.wake/context-inert true} :seon.db/basis-t],
                     :error [:and {:seon.wake/context-inert true} :string],
                     :read-evidence
@@ -66,9 +73,12 @@
                      [:seon.cluster.eval/error
                       {:optional true}
                       :seon.cluster.eval/error]
-                     [:seon.cluster.eval/triage-edn
+                     [:seon.cluster.eval/diagnostics
                       {:optional true}
-                      :seon.cluster.eval/triage-edn]
+                      :seon.cluster.eval/diagnostics]
+                     [:seon.cluster.eval/faults
+                      {:optional true}
+                      :seon.cluster.eval/faults]
                      [:seon.cluster.eval/interrupted-at
                       {:optional true}
                       :seon.cluster.eval/interrupted-at]
@@ -128,9 +138,12 @@
                      [:seon.cluster.eval/error
                       {:optional true}
                       :seon.cluster.eval/error]
-                     [:seon.cluster.eval/triage-edn
+                     [:seon.cluster.eval/diagnostics
                       {:optional true}
-                      :seon.cluster.eval/triage-edn]
+                      :seon.cluster.eval/diagnostics]
+                     [:seon.cluster.eval/faults
+                      {:optional true}
+                      :seon.cluster.eval/faults]
                      [:seon.cluster.eval/interrupted-at
                       {:optional true}
                       :seon.cluster.eval/interrupted-at]
