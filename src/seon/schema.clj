@@ -351,7 +351,7 @@
           (some-> (mr/schema (:seon.schema.projection/registry projection)
                              :seon.config.db/validation-node-limit)
                   m/properties))
-         :seon.schema.projection/compiled (atom {})))
+         :seon.schema.projection/compiled (cache/basic-cache-factory {})))
 
 (defn- projection-cache
   "The holder [[with-compiled-cache]] installed, or nil.
@@ -364,24 +364,19 @@
   (:seon.schema.projection/compiled projection))
 
 (defn projection-cache-value
-  "Return one value derived from `projection`, computing it at most once.
+  "Return one value derived from `projection`, retaining one answer per key.
 
    The answer is retained by the projection's own runtime holder. A projection
    assembled without that holder remains correct and simply derives afresh."
   {:malli/schema
    [:=> [:catn [:seon.schema/projection :map] [:seon.schema/cache-key [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A projection cache key is ordinary heterogeneous data chosen by its caller; cached values are the supplied thunk's arbitrary result.", :gen/elements [nil false 0 "" :k [] {}]}]] [:seon.schema/derive-fn [:fn clojure.core/ifn?]]] [:or :seon.schema/value :seon.schema/validation-refusal]]}
   [projection cache-key derive-fn]
-  (if-let [cache (projection-cache projection)]
-    (let [candidate (delay (derive-fn))
-          selected
-          (get
-           (swap! cache
-                  (fn [entries]
-                    (if (contains? entries cache-key)
-                      entries
-                      (assoc entries cache-key candidate))))
-           cache-key)]
-      @selected)
+  (if-let [compiled (projection-cache projection)]
+    ;; A hit is a read; only a miss swaps (lookup-or-miss swaps every call).
+    (let [held (cache/lookup compiled cache-key ::miss)]
+      (if (identical? ::miss held)
+        (cache/lookup-or-miss compiled cache-key (fn [_] (derive-fn)))
+        held))
     (derive-fn)))
 
 (defn predicate-functions-in
@@ -3797,13 +3792,8 @@
    answered with this one's descriptors. Value admission asks this per node,
    which is why it must be cheap and why it must be right."
   [projection]
-  (if-let [cache (projection-cache projection)]
-    (or (:seon.schema.identity-only/descriptors @cache)
-        (let [descriptors (identity-only-descriptors-in projection)]
-          (swap! cache assoc
-                 :seon.schema.identity-only/descriptors descriptors)
-          descriptors))
-    (identity-only-descriptors-in projection)))
+  (projection-cache-value projection :seon.schema.identity-only/descriptors
+                          #(identity-only-descriptors-in projection)))
 
 (defn identity-only-projector
   "One function of a value to its registered identity data, or nil.
