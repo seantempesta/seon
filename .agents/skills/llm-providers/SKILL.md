@@ -20,7 +20,7 @@ program; read them with
 - Read `resolved-target` (`src/seon/ai.clj:384-419`), `retry-strategy` and
   `delays` (`:496-560`), `wire-settings` (`:599-633`), `request-body`
   (`:677`), `stream-fold` (`:841`), the capture handoff in `call-turn`
-  (`src/seon/turn.clj:4616-4647`), and `resources/seon/schemas/seon.ai.edn`
+  (`src/seon/turn.clj:4595-4626`), and `resources/seon/schemas/seon.ai.edn`
   plus `resources/seon/schemas/seon.config.ai.edn` before changing the provider
   seam.
 - Keep credentials outside the database. Descriptor rows name the environment
@@ -37,7 +37,7 @@ program; read them with
   equivalents, such as reported cost.
 - Capture and reuse the exact rendered prompt. The loop commits the capture
   before calling the provider and passes only that string as `:seon.ai/prompt`
-  (`src/seon/turn.clj:4616-4647`, prompt placed at `:4677`;
+  (`src/seon/turn.clj:4595-4626`, prompt placed at `:4656`;
   `resources/seon/schemas/seon.context.capture.edn:1-37`).
 - Historical evaluations render their saved shown text unchanged; system turns
   append changed reads and compaction regenerates the opening
