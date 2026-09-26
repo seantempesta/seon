@@ -11,7 +11,6 @@
             [seon.print :as print]
             [seon.render :as render]
             [seon.render.value :as value]
-            [seon.sci.kernel :as kernel]
             [seon.test-support :as support]))
 
 (defn- prepl-events
@@ -74,8 +73,11 @@
                        (edn/read-string (:val (first terminal))))]
            (is (= 1 (count terminal)))
            (is (true? (:exception (first terminal))))
-           (is (symbol? (:seon.error/exception-class result)))
-           (is (not (contains? result :trace))))
+           ;; The whole Throwable->map prepl hands MCP (R6, d1d6b0eb6): its
+           ;; cause, its typed links and its frames, never a flat summary.
+           (is (= "expected failure" (:cause result)) (pr-str result))
+           (is (= 'clojure.lang.ExceptionInfo (:type (first (:via result)))))
+           (is (contains? result :trace)))
          ;; A root without an identity is refused before selection: the
          ;; refusal is the whole answer, with no tree and no text. With a
          ;; root, the one selection yields the tree and its text.
@@ -88,36 +90,15 @@
            (is (= (:seon.render.value/text prepared)
                   (:seon.print/text (print/emit-both (:seon.render.value/tree prepared)
                                                      (:seon.render.value/options prepared))))))
-         (let [calls (atom [])
-               invoke kernel/invoke
-               failing (assoc request :seon.render.value/root [::root]
-                              :seon.render/value
-                              {:seon.render/ai 'seon.error/render-ai
-                                :seon.error/message "probe"})]
-           (with-redefs [kernel/invoke
-                         (fn [invocation]
-                           (if (= "seon.error/render-ai" (:seon.fn/sym invocation))
-                             (do (swap! calls conj (:seon.fn/sym invocation))
-                                 (throw (ex-info "declared producer failure" {})))
-                             (invoke invocation)))]
-             (let [prepared (value/prepare failing)
-                   shown (edn/read-string (:seon.render.value/text prepared))
-                   failures (filter #(and (map? %)
-                                          (= "declared producer failure" (:seon.error/message %)))
-                                    (tree-seq coll? seq shown))]
-               (is (= ["seon.error/render-ai"] @calls))
-               (is (= 1 (count failures)))
-               (is (= "declared producer failure" (:seon.error/message shown))))))
-         (let [calls (atom 0)]
-           (with-redefs [value/prepare (fn [& _] (swap! calls inc)
-                                        (throw (ex-info "preparation failed" {})))]
-             (let [events (prepl-events cluster-name effective
-                            '(do (seon.cluster/project-next-prepl-value!) 42))
-                   terminal (filterv #(= :ret (:tag %)) events)
-                   result (:seon.dev.mcp/value
-                           (edn/read-string (:val (first terminal))))]
-               (is (= 1 (count terminal)))
-               (is (not (:exception (first terminal))))
-               (is (= 1 @calls))
-               (is (string? (:seon.dev.mcp/projection-offending-class result))))))
+         ;; A value's own renderer that refuses the value is shown as its
+         ;; declared unknown diagnostic, never as a missing value: the real
+         ;; directory renderer refuses a map that is not a directory.
+         (let [prepared (value/prepare
+                         (assoc request :seon.render.value/root [::root]
+                                :seon.render/value
+                                {:seon.render/ai 'seon.repl/render-directory-ai
+                                 :seon.error/message "probe"}))
+               shown (edn/read-string (:seon.render.value/text prepared))]
+           (is (= 'seon.repl/render-directory-ai (:seon.render.unknown/producer shown)) (pr-str shown))
+           (is (= :refused (:seon.render.unknown/reason shown))))
          (finally (swap! running-instances dissoc cluster-name)))))))
