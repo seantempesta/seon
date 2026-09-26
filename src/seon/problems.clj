@@ -580,7 +580,7 @@
 
 (defn block
   "Derive the problems block from its supplied database value."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
+  {:malli/schema [:=> [:cat :seon.render/db-unit] :seon.render/hiccup]}
   [unit]
   (let [found (problems (:seon.db/db unit) {})]
     (if (empty? found)

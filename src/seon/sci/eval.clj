@@ -3982,7 +3982,7 @@
   `{:seon.render/source text}`, or `{:seon.error/value refusal}` naming the
   first form that could not be read or evaluated, so the floor prints the
   value beside that one diagnostic: a form is never shown without its result."
-  {:malli/schema [:=> [:cat :seon.sci.eval/shown-request :seon.render/unit :string]
+  {:malli/schema [:=> [:cat :seon.sci.eval/shown-request :seon.render/db-unit :string]
                   [:or [:map [:seon.render/source :seon.render/source]]
                    [:map [:seon.error/value :seon.error/base]]]]}
   [request _unit source]

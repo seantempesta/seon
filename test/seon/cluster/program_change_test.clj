@@ -186,8 +186,8 @@
   ;; declared value is supplied from the member's world. A custody the caller
   ;; states is not a default: `(call-with-custody {} f)` means no custody, and
   ;; `seon.cluster.host/start!` relies on it to write another branch
-  ;; deliberately. Its entry has its own schema name so preparation never
-  ;; fills it (`:seon.db/custody-connection`).
+  ;; deliberately. Its connection entry is optional, and call preparation
+  ;; supplies only required inputs.
   (support/with-database
    (fn [connection]
      (is (identical? connection (db/call-with-custody {:seon.db/connection connection} (fn [] db/*conn*))))

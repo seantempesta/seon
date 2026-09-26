@@ -1426,7 +1426,7 @@
 
 (defn render-item-html
   "Show a step's state, completion time, and expected outcome."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
+  {:malli/schema [:=> [:cat :seon.render/db-unit] :seon.render/hiccup]}
   [step]
   (item-html step
              (when-let [database (:seon.db/db step)]
@@ -1518,7 +1518,7 @@
 
 (defn render-plan-ai
   "Read my plan and teach the completing call for its selected step."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
+  {:malli/schema [:=> [:cat :seon.render/db-unit] :seon.render/source]}
   [unit]
   (let [database (:seon.db/db unit)
         component (or (:seon.render/value unit) unit)
@@ -1551,7 +1551,7 @@
 
 (defn render-plan-html
   "Show the objective, current focus, progress, and every step with its state."
-  {:malli/schema [:=> [:cat :seon.render/unit]
+  {:malli/schema [:=> [:cat :seon.render/db-unit]
                   :seon.render/hiccup]}
   [unit]
   (let [database (:seon.db/db unit)

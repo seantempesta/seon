@@ -79,8 +79,6 @@
 
  ;; --- the derived invocation plan ------------------------------------------
  :entry-key :qualified-keyword,
- ;; An optional map entry: an unavailable supplier leaves it absent, never refuses.
- :optional? [:= true],
 
  :slot
  [:map
@@ -90,8 +88,7 @@
    :seon.call-preparation/supplier-symbol]
   [:seon.call-preparation/entry-key
    {:optional true}
-   :seon.call-preparation/entry-key]
-  [:seon.call-preparation/optional? {:optional true} :seon.call-preparation/optional?]],
+   :seon.call-preparation/entry-key]],
 
  :slots [:vector :seon.call-preparation/slot],
 

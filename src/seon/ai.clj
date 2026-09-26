@@ -112,7 +112,7 @@
 (defn attempt-ai
   "Render an attempt without its prompt-bearing body or provider reasoning.
   A unit naming no root identity answers the floor's declared refusal."
-  {:malli/schema [:=> [:cat :seon.render/unit]
+  {:malli/schema [:=> [:cat :seon.render/db-unit]
                   [:or :string :seon.render.value/missing-root-identity-error]]}
   [unit]
   (render.value/render-ai (attempt-without-private-provider-data unit)))
@@ -120,7 +120,7 @@
 (defn attempt-html
   "Render ordinary attempt facts; body and reasoning stay queryable only.
   A unit naming no root identity answers the floor's declared refusal."
-  {:malli/schema [:=> [:cat :seon.render/unit]
+  {:malli/schema [:=> [:cat :seon.render/db-unit]
                   [:or :seon.render/hiccup :seon.render.value/missing-root-identity-error]]}
   [unit]
   (render.value/render-html (attempt-without-private-provider-data unit)))
@@ -199,7 +199,7 @@
 
 (defn model-ai
   "Render one model's capabilities, economics, and latest observation."
-  {:malli/schema [:=> [:cat :seon.render/unit] :string]}
+  {:malli/schema [:=> [:cat :seon.render/db-unit] :string]}
   [unit]
   (let [model (rendered-model unit)
         provider (:seon.ai.model/provider model)
@@ -234,7 +234,7 @@
 
 (defn model-html
   "Render one model as a readable registry card."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
+  {:malli/schema [:=> [:cat :seon.render/db-unit] :seon.render/hiccup]}
   [unit]
   (let [model (rendered-model unit)
         provider (:seon.ai.model/provider model)

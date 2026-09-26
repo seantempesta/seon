@@ -289,7 +289,7 @@
 
 (defn render-identity-ai
   "Read identity, namespace, and stewardship as data in one block."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.render/source :seon.render/source-blocks]]}
+  {:malli/schema [:=> [:cat :seon.render/db-unit] [:or :seon.render/source :seon.render/source-blocks]]}
   [unit]
   (let [form (identity-form unit)
         identity-source
@@ -324,7 +324,7 @@
 (defn render-identity-html
   "Render an agent node: id, namespace, steward, the tasks naming its namespace
   as subject, and its status. The fleet belongs to the fleet page."
-  {:malli/schema [:=> [:cat :seon.render/unit]
+  {:malli/schema [:=> [:cat :seon.render/db-unit]
                   [:or [:maybe :seon.render/hiccup] :seon.error/value]]}
   [unit]
   (let [agent-data (if-let [database (:seon.db/db unit)]
@@ -390,7 +390,7 @@
   that `(help)` returns. When selected for that returned value, render it
   directly. Both paths therefore have one orientation value and no stored
   presentation duplicate."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  {:malli/schema [:=> [:cat :seon.render/db-unit] [:maybe :string]]}
   [unit]
   (let [doc-line (fn [documented-var]
                    (first (str/split-lines (:doc (meta documented-var)))))

@@ -166,7 +166,7 @@
 
 (defn render-settings-html
   "Show every declared agent dial, its effective value, and where it comes from."
-  {:malli/schema [:=> [:cat :seon.render/unit]
+  {:malli/schema [:=> [:cat :seon.render/db-unit]
                   [:or :seon.render/hiccup :seon.db/error-result
                        :seon.schema/unknown-shape-error
                        :seon.schema/validation-refusal

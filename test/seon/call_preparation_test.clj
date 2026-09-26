@@ -42,6 +42,13 @@
   (swap! entered inc)
   (db/database-value? database))
 
+(defn probe-optional-connection?
+  "True when this call's request map carried a connection; absence is meaningful."
+  {:malli/schema
+   [:=> [:cat [:map [:seon.db/connection {:optional true} :seon.db/connection]]] :boolean]}
+  [request]
+  (contains? request :seon.db/connection))
+
 (defn probe-received-connection?
   "True when this call's request map carried the cluster's connection."
   {:malli/schema
@@ -894,34 +901,40 @@
              (is (= :seon.db/db (:seon.call-preparation/unavailable-key result)))
              (is (zero? @entered) "the target body was never entered"))))))))
 
-(deftest an-unavailable-optional-entry-stays-absent-and-a-required-one-refuses
-  ;; Optional is a declared absence: the call runs without the key. A required
-  ;; entry still refuses by name before the body (owner ruling 2026-09-25).
+(deftest an-optional-entry-is-never-supplied-and-a-required-one-refuses
+  ;; Only REQUIRED inputs are supplied by declared schema name (ruling
+  ;; 2026-09-27): an optional entry's absence is the caller's meaning, so it
+  ;; is not in the plan at all. A required entry whose supplier cannot answer
+  ;; refuses by name before the body.
   (test-support/with-database
    (fn [connection]
      (test-support/transacted! connection database-rows)
      (let [current (cp/snapshot @connection (projection))
            environment (environment-for connection)
+           optional-plan (cp/plan-for @connection current
+                                      'seon.call-preparation-test/probe-optional-connection?)
            compiled (cp/plan-for @connection current
                                  'seon.call-preparation-test/probe-received-connection?)
            entry {:seon.fn.argument/index 0
                   :seon.call-preparation/key :seon.agent/id
                   :seon.call-preparation/entry-key :seon.agent/id
-                  :seon.call-preparation/supplier-symbol 'sample/nowhere-at-all}
-           prepared (fn [entry]
-                      (cp/prepare current environment
-                                  (assoc compiled
-                                         :seon.call-preparation/empty? false
-                                         :seon.call-preparation/by-supplied-count
-                                         {1 {:seon.call-preparation/ambiguous? false
-                                             :seon.call-preparation/inserts []
-                                             :seon.call-preparation/entries [entry]}})
-                                  [{:sample/label "caller"}]))]
-       (is (some? compiled))
+                  :seon.call-preparation/supplier-symbol 'sample/nowhere-at-all}]
+       (is (every? (comp empty? :seon.call-preparation/entries) (:seon.call-preparation/arities optional-plan))
+           "the optional connection is not an entry the plan fills")
        (is (= [{:sample/label "caller"}]
-              (prepared (assoc entry :seon.call-preparation/optional? true)))
-           "the optional entry is left absent and the caller's map is unchanged")
-       (is (= :seon.agent/id (:seon.call-preparation/unavailable-key (prepared entry)))
+              (cp/prepare current environment optional-plan [{:sample/label "caller"}]))
+           "the caller's map reaches the body unchanged")
+       (is (some? compiled))
+       (is (= :seon.agent/id
+              (:seon.call-preparation/unavailable-key
+               (cp/prepare current environment
+                           (assoc compiled
+                                  :seon.call-preparation/empty? false
+                                  :seon.call-preparation/by-supplied-count
+                                  {1 {:seon.call-preparation/ambiguous? false
+                                      :seon.call-preparation/inserts []
+                                      :seon.call-preparation/entries [entry]}})
+                           [{:sample/label "caller"}])))
            "the required entry refuses by name")))))
 
 (deftest two-clusters-supply-their-own-custody

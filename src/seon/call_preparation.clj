@@ -590,9 +590,11 @@
   (let [entries (vec (for [{position :seon.fn.argument/index map-entries ::map-entries} arguments
                            [entry-key optional? value] map-entries
                            :let [candidate (get index value)]
-                           :when (= entry-key (:seon.call-preparation/key candidate))]
-                       (cond-> (assoc (slot-of candidate position) :seon.call-preparation/entry-key entry-key)
-                         optional? (assoc :seon.call-preparation/optional? true))))
+                           ;; Only a REQUIRED entry is supplied: an optional one's
+                           ;; absence is the caller's meaning, never a gap to fill.
+                           :when (and (not optional?)
+                                      (= entry-key (:seon.call-preparation/key candidate)))]
+                       (assoc (slot-of candidate position) :seon.call-preparation/entry-key entry-key)))
         slots (vec (for [{position :seon.fn.argument/index rest? :seon.fn.argument/rest?
                           schema-key :seon.call-preparation/schema-key map-entries ::map-entries} arguments
                          :let [candidate (get index schema-key)
@@ -1016,16 +1018,13 @@
         ;; Each reduction stops at the first refusal (`reduced`), so no later
         ;; supplier runs; a stopped reduction returns the refusal map, never
         ;; the argument vector.
-        (let [absent (Object.)
-              value-for (fn [slot]
-                          (let [produced (supply current environment slot sym)
-                                unavailable? (and (map? produced) (:seon.call-preparation/unavailable-key produced))]
-                            (cond
-                              ;; Optional is a declared absence: the call runs without the key.
-                              (and unavailable? (:seon.call-preparation/optional? slot)) absent
-                              (or unavailable? (and (map? produced) (:seon.call-preparation/invalid-key produced)))
+        (let [value-for (fn [slot]
+                          (let [produced (supply current environment slot sym)]
+                            (if (and (map? produced)
+                                     (or (:seon.call-preparation/unavailable-key produced)
+                                         (:seon.call-preparation/invalid-key produced)))
                               (reduced produced)
-                              :else produced)))
+                              produced)))
               with-inserts
               (reduce (fn [args slot]
                         (let [position (:seon.fn.argument/index slot)
@@ -1044,10 +1043,9 @@
                         (if (or (not (map? target)) (contains? target entry-key))
                           args
                           (let [produced (value-for entry)]
-                            (cond
-                              (reduced? produced) produced
-                              (identical? absent produced) args
-                              :else (assoc args position (assoc target entry-key produced)))))))
+                            (if (reduced? produced)
+                              produced
+                              (assoc args position (assoc target entry-key produced)))))))
                     with-inserts
                     (:seon.call-preparation/entries answer))))))))
 

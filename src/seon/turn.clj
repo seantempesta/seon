@@ -1854,7 +1854,7 @@
   shapes say MAY, because rows 6 and 7 of the crash walk are
   indistinguishable from the facts and a confident claim would be a lie
   the agent then reasons from."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  {:malli/schema [:=> [:cat :seon.render/db-unit] [:maybe :string]]}
   [unit]
   (let [db (get unit :seon.db/db)
         id (get unit ::id)]
@@ -1929,7 +1929,7 @@
 
 (defn render-html
   "`:seon.render/html` — one run, with the same facts as its AI twin."
-  {:malli/schema [:=> [:cat :seon.render/unit]
+  {:malli/schema [:=> [:cat :seon.render/db-unit]
                   [:maybe :seon.render/hiccup]]}
   [unit]
   (when-let [text (render-ai unit)]

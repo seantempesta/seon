@@ -1426,7 +1426,7 @@
 
 (defn render-form
   "Spell the structural read that reproduces one reached database value."
-  {:malli/schema [:=> [:cat :seon.render/unit]
+  {:malli/schema [:=> [:cat :seon.render/db-unit]
                   [:or :seon.render/form :seon.render/request-error :seon.db/error-result]]}
   [unit]
   (let [value (:seon.render/value unit)
@@ -1443,7 +1443,7 @@
 
 (defn render-default-ai-source
   "Return authored source that reproduces a value for terminal rendering."
-  {:malli/schema [:=> [:cat :seon.render/unit]
+  {:malli/schema [:=> [:cat :seon.render/db-unit]
                   [:or :seon.render/source :seon.render/request-error :seon.db/error-result]]}
   [unit]
   (let [form (render-form unit)]

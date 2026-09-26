@@ -74,7 +74,7 @@
 
 (defn render-ai
   "`:seon.render/ai` — one effect receipt, derived from terminal attributes."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  {:malli/schema [:=> [:cat :seon.render/db-unit] [:maybe :string]]}
   [unit]
   (when-let [id (:seon.effect/id unit)]
     (let [{:keys [owner run]} (receipt-identities unit)
@@ -104,7 +104,7 @@
 
 (defn render-html
   "`:seon.render/html` — one readable effect-receipt card."
-  {:malli/schema [:=> [:cat :seon.render/unit]
+  {:malli/schema [:=> [:cat :seon.render/db-unit]
                   [:maybe :seon.render/hiccup]]}
   [unit]
   (when-let [id (:seon.effect/id unit)]

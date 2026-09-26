@@ -258,8 +258,9 @@
 
 (deftest a-declared-database-input-is-supplied-and-a-callers-is-kept
   ;; Inputs are the contract's (owner, 2026-09-25): a render function taking
-  ;; :seon.render/unit declares :seon.db/db; omitted, call preparation supplies
-  ;; the request's own database; a value that carries one keeps it.
+  ;; :seon.render/db-unit requires :seon.db/db; omitted, call preparation
+  ;; supplies the request's own database; a value that carries one keeps it.
+  ;; An optional input is never supplied (ruling 2026-09-27).
   (support/with-database
    (fn [connection]
      (support/transacted! connection (support/agent-tx @connection "db-viewer" 'my.agents.db-viewer))
@@ -268,7 +269,7 @@
         connection
         [(support/program-fn-row
           (db/db connection) 'my.agents.db-viewer/probe-view
-          "(defn probe-view {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/ai]} [unit] (str \"db:\" (some-> (:seon.db/db unit) :max-tx)))")])
+          "(defn probe-view {:malli/schema [:=> [:cat :seon.render/db-unit] :seon.render/ai]} [unit] (str \"db:\" (some-> (:seon.db/db unit) :max-tx)))")])
        (let [database (db/db connection)
              ctx (support/fork-cluster-ctx connection)
              rendered (fn [value]

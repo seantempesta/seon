@@ -205,8 +205,12 @@
               :surface-id [:string {:min 9}],
               :unit
               [:map
-               {:description "The open render unit: the value under :seon.render/value with the render inputs its function declares. The database is a declared input: omitted, call preparation supplies it (the invocation's scoped database)."}
+               {:description "The open render unit: the value under :seon.render/value with the render inputs its function declares. An optional database is never supplied: a renderer that reads it declares :seon.render/db-unit."}
                [:seon.db/db {:optional true} :seon.db/database-value]],
+              :db-unit
+              [:map
+               {:description "The open render unit of a renderer that reads the database: a required input, supplied when omitted (the invocation's scoped database)."}
+               [:seon.db/db :seon.db/database-value]],
               :value
               [:any
                {:seon.schema.admission/exemption

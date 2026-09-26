@@ -200,7 +200,7 @@
 
 (defn render-ai
   "`:seon.render/ai` — source reading one exact cluster before formatting it."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.render/source]]}
+  {:malli/schema [:=> [:cat :seon.render/db-unit] [:maybe :seon.render/source]]}
   [unit]
   (when-let [name (:seon.cluster/name unit)]
     (pr-str
@@ -215,7 +215,7 @@
 
 (defn render-html
   "`:seon.render/html` — one readable cluster card."
-  {:malli/schema [:=> [:cat :seon.render/unit]
+  {:malli/schema [:=> [:cat :seon.render/db-unit]
                   [:maybe :seon.render/hiccup]]}
   [unit]
   (when-let [name (:seon.cluster/name unit)]
