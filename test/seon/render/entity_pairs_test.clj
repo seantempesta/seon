@@ -177,9 +177,11 @@
         "an uncontracted operation names no alternatives")
     (let [declared #(#'render/declared-producers projection {} % :seon.render/ai)]
       (is (= ['seon.error/render-ai] (declared ambiguous)) "the satisfied alternative's pair")
-      (is (= ['seon.error/render-undeclared-ai]
+      (is (= ['seon.error/render-ai]
              (declared (dissoc ambiguous :seon.render/candidates :seon.error/data)))
-          "a contracted operation's unmatched error is a loud contract finding")
+          (str "an error its operation's declared returns do not describe composes the base pair: "
+               "the operation names where it was raised, and the producer's armed output "
+               "contract, not rendering, decides a return's declaration"))
       (is (= ['seon.error/render-ai]
              (declared (assoc ambiguous :seon.error/operation 'entity-pairs.fixture/none)))
           "an uncontracted operation composes the base pair"))))

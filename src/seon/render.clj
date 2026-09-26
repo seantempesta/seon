@@ -513,15 +513,12 @@
       (attribute-scoped? request) (into [] (keep identity) [(attribute-producer projection request output)])
       (not (map? value)) []
       (and (:seon.error/at value) (qualified-symbol? (:seon.error/operation value)))
-      ;; The satisfied alternative's pair; a contracted operation none of whose
-      ;; alternatives the error satisfies is a contract finding shown with the
-      ;; base renderer; an uncontracted operation composes the base pair.
-      (let [alternatives (error-alternatives projection value)
-            found (pairs alternatives)]
-        (cond (seq found) found
-              (and alternatives (empty? alternatives) (#{:seon.render/ai :seon.render/html} output))
-              [(if (= :seon.render/ai output) 'seon.error/render-undeclared-ai 'seon.error/render-undeclared-html)]
-              :else (pairs [:seon.error/base])))
+      ;; The satisfied alternative's pair, else the error base pair. The
+      ;; operation names the boundary that raised or recorded the error, not a
+      ;; function that returned it; whether a return is declared is decided at
+      ;; the producer by its armed output contract, never again here.
+      (let [found (pairs (error-alternatives projection value))]
+        (if (seq found) found (pairs [:seon.error/base])))
       (and function (identical? value (render-value request)))
       (pairs (satisfied-alternatives projection function value))
       ;; An attribute request stays an attribute request (AGENTS.md): an
