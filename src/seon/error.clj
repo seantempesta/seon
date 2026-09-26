@@ -546,7 +546,9 @@
     projection :seon.schema/projection
     :seon.sci.admit/keys [caps]
     run-id :seon.turn/id
-    agent-id :seon.agent/id :as request}]
+    agent-id :seon.agent/id
+    boundary-layer :seon.error/layer
+    boundary-operation :seon.error/operation :as request}]
   (let [failure (throwable source)
         class-name (when failure (.getName (class failure)))
         source (meaningful-source source)
@@ -566,12 +568,16 @@
         flow? (map? source)
         error-value (if failure (refusal failure) source)
         operation (:seon.error/operation error-value)
+        ;; A failure's own declared operation wins; else the observing
+        ;; boundary's, which is stable where a thrower's class name is not.
         function (or (when (qualified-symbol? operation) operation)
                      (:seon.instrument/fn instrument-data)
+                     boundary-operation
                      (stack-failing-function failure))
         frame (error.refusal/root-frame failure)
         chain (when failure (error.refusal/chain failure))
-        observation (merge (cond-> (seon.error.refusal/diagnostic at :seon.error/normalization (or function 'seon.error/normalize)
+        observation (merge (cond-> (seon.error.refusal/diagnostic at (or boundary-layer :seon.error/normalization)
+                                                                  (or function 'seon.error/normalize)
                                     {})
                              class-name (assoc :seon.error/exception-class (symbol class-name))
                              frame (assoc :seon.error/frame frame)

@@ -85,6 +85,28 @@
          (is (= #{"root"} (:seon.fault/delivered-to receipt))))
        (is (< elapsed-ms 1000.0) (str "one synchronous fault write took " elapsed-ms " ms"))))))
 
+(deftest the-boundary-names-the-site-of-a-failure-that-declares-none
+  ;; Two boundaries catching the same undeclared class from one thrower are
+  ;; two observed sites: the stored fact and its signature carry each
+  ;; boundary's declared layer and operation. A failure that
+  ;; declares its own operation keeps it.
+  (test-support/with-database
+   (fn [connection]
+     (let [environment (world connection "fault-boundary" {:seon.config/on-core-error :record})
+           thrown (fn [] (IllegalStateException. "one thrower"))
+           at (fn [operation failure]
+                (fault/fault! environment failure (assoc context :seon.error/operation operation)))
+           first-site (at `first-boundary (thrown))
+           second-site (at `second-boundary (thrown))
+           declared (at `first-boundary (ex-info "declared" {:seon.error/layer ::own
+                                                             :seon.error/operation `own-operation}))
+           fact (fn [receipt] (db/pull (db/db connection) [:seon.error/layer :seon.error/operation]
+                                       [:seon.error/signature (:seon.error/signature receipt)]))]
+       (is (not= (:seon.error/signature first-site) (:seon.error/signature second-site)))
+       (is (= {:seon.error/layer ::boundary :seon.error/operation `first-boundary} (fact first-site)))
+       (is (= {:seon.error/layer ::boundary :seon.error/operation `second-boundary} (fact second-site)))
+       (is (= {:seon.error/layer ::own :seon.error/operation `own-operation} (fact declared)))))))
+
 (deftest a-stored-occurrence-carries-its-own-declared-schemas-attributes
   ;; The writer derives which diagnostics an occurrence stores from the fault's
   ;; declared schema and the base alone, never from every declared error

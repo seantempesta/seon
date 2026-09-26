@@ -93,7 +93,9 @@
              [:map
               [:seon.error/source :seon.error/source]
               [:seon.error/declared-schema :seon.error/declared-schema]
-              [:seon.error/references {:optional true} :seon.error/references]],
+              [:seon.error/references {:optional true} :seon.error/references]
+              [:seon.error/layer {:optional true} :seon.error/layer]
+              [:seon.error/operation {:optional true} :seon.error/operation]],
              :normalize-request
              [:map
               [:seon.schema/projection :seon.schema/projection]
@@ -109,7 +111,9 @@
               [:seon.turn/id {:optional true} :seon.turn/id]
               [:seon.agent/id {:optional true} :seon.agent/id]
               [:seon.config.error/max-evidence-bytes
-               :seon.config.error/max-evidence-bytes]],
+               :seon.config.error/max-evidence-bytes]
+              [:seon.error/layer {:optional true} :seon.error/layer]
+              [:seon.error/operation {:optional true} :seon.error/operation]],
              :id [:string {:min 1, :seon.db/identity true :seon.program/row-schema :seon.error/error}],
              :message [:string {:min 1}],
              :refusal-shape :qualified-keyword,

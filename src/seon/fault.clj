@@ -119,7 +119,11 @@
           ;; durable fact keeps; a capped fact's whole evidence is staged by
           ;; `error/evidence-stage` and published below with its commit.
           {prepared-fact :seon.error/fact staged :seon.blob/staged-writes}
-          (error/evidence-stage connection (error/prepare request))
+          ;; The boundary's declared layer and operation name the observed
+          ;; site of a failure that declares none of its own.
+          (error/evidence-stage connection
+                                (error/prepare (merge request (select-keys observation [:seon.error/layer
+                                                                                        :seon.error/operation]))))
           recording (error/recording db (assoc request :seon.error/fact prepared-fact))
           fact (:seon.error/fact recording)]
       (try
@@ -239,6 +243,8 @@
                   (cond-> (if throwable? {::flow.core/ex failure} failure)
                     agent-id (assoc :seon.agent/id agent-id))
                   :seon.error/references (select-keys context reference-members)
+                  :seon.error/layer (:seon.error/layer context)
+                  :seon.error/operation (:seon.error/operation context)
                   :seon.error/declared-schema
                   (or (:seon.error/declared-schema context)
                       (when throwable? (:seon.error/declared-schema (meta (ex-data failure))))
