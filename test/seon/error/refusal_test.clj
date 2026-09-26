@@ -207,7 +207,9 @@
 
 (defn- printed-bytes
   "Printed size of `value`, or nil past `bound`: a copied world prints
-  megabytes (a projection past 2 GB), so printing stops at the bound."
+  megabytes (a projection past 2 GB), so printing stops at the bound.
+  `pr` prints every argument to `*out*`, so the writer is bound there;
+  `(pr value writer)` printed the world into the harness's captured output."
   [value bound]
   (let [n (volatile! 0)
         over (ex-info "over the bound" {::over true})
@@ -216,7 +218,7 @@
                  (write ([x] (count! (if (string? x) (count x) 1)))
                         ([_ _ length] (count! length)))
                  (flush []) (close []))]
-    (try (binding [*print-length* nil *print-level* nil] (pr value writer)) @n
+    (try (binding [*out* writer *print-length* nil *print-level* nil] (pr value)) @n
          (catch clojure.lang.ExceptionInfo e (when-not (identical? e over) (throw e))))))
 
 (deftest ^{:seon/tasks #{"480378b94c9b"}} every-producer-references-the-worlds-it-was-handed
