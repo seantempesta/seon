@@ -929,19 +929,28 @@
   ;; One-render-path §3g: a cut's coordinates are the walk node, the path and
   ;; the absolute offset; the same selection answers from there, and a node
   ;; that is no longer retained answers :gone rather than an empty value.
-  (let [ctx {:seon.sci.eval/result-objects (atom {"0123456789ab" {:rows (vec (range 100))}})}
-        request (fn [node path offset]
-                  {:seon.render.walk/continuation-node node :seon.sci.eval/ctx ctx :seon.sci.admit/caps caps
-                   :seon.render/profile (render/agent-render-profile (support/effective-config))
-                   :seon.render.data/cursor {:seon.render.data/path path :seon.render.data/offset offset}})
-        first-page (value/prepare (assoc (unit {:rows (vec (range 100))}) :seon.repl/handle 'result/e0123456789ab))
-        cut (first (tree-cuts first-page))
-        next-page ((requiring-resolve 'seon.render.walk/continue)
-                   (request 'result/e0123456789ab (:seon.render.data/path cut) (:seon.render.data/next-offset cut)))
-        next-cut (first (tree-cuts next-page))
-        gone ((requiring-resolve 'seon.render.walk/continue) (request 'result/eabsent [] 0))]
-    (is (= [[:rows] 32 100] ((juxt :seon.render.data/path :seon.render.data/next-offset :seon.render.data/total) cut)))
-    (is (str/starts-with? (value/render-ai-data next-page) "[32 33 34"))
-    (is (= [[:rows] 64 36] ((juxt :seon.render.data/path :seon.render.data/next-offset :seon.print/omitted) next-cut))
-        "every expansion shows new members and keeps absolute coordinates")
-    (is (= :gone (:seon.render.walk/continuation-reason gone)))))
+  (support/with-database
+   (fn [connection]
+     ;; The agent's own turn fork retains result objects; bind-result! is
+     ;; the evaluation's writer of that binding.
+     (let [value {:rows (vec (range 100))}
+           ctx (:seon.sci.eval/ctx
+                (evaluation/fork-for-turn {:seon.sci.eval/ctx (support/fork-cluster-ctx connection)
+                                           :seon.db/db (db/db connection)
+                                           :seon.agent/id "root"}))
+           _ (evaluation/bind-result! ctx 'result/e0123456789ab value)
+           request (fn [node path offset]
+                     {:seon.render.walk/continuation-node node :seon.sci.eval/ctx ctx :seon.sci.admit/caps caps
+                      :seon.render/profile (render/agent-render-profile (support/effective-config))
+                      :seon.render.data/cursor {:seon.render.data/path path :seon.render.data/offset offset}})
+           first-page (value/prepare (assoc (unit value) :seon.repl/handle 'result/e0123456789ab))
+           cut (first (tree-cuts first-page))
+           next-page ((requiring-resolve 'seon.render.walk/continue)
+                      (request 'result/e0123456789ab (:seon.render.data/path cut) (:seon.render.data/next-offset cut)))
+           next-cut (first (tree-cuts next-page))
+           gone ((requiring-resolve 'seon.render.walk/continue) (request 'result/eabsent [] 0))]
+       (is (= [[:rows] 32 100] ((juxt :seon.render.data/path :seon.render.data/next-offset :seon.render.data/total) cut)))
+       (is (str/starts-with? (value/render-ai-data next-page) "[32 33 34"))
+       (is (= [[:rows] 64 36] ((juxt :seon.render.data/path :seon.render.data/next-offset :seon.print/omitted) next-cut))
+           "every expansion shows new members and keeps absolute coordinates")
+       (is (= :gone (:seon.render.walk/continuation-reason gone)))))))
