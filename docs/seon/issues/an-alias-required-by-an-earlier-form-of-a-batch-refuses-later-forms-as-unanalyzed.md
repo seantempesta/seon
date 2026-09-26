@@ -92,3 +92,18 @@ on a fresh branch (`dogfood-repl-opus-2-c4c`), three times on three branches:
   `(str/upper-case "abc")` (no `defn`) answers `"ABC"`, so the cycle-2 refusal (#11) is fixed; the hang needs a `defn`
   whose body uses the new alias.
 - Settlement side of the same class: [a-query-with-a-regex-literal-cannot-record-its-read-and-leaves-the-run-open-forever](a-query-with-a-regex-literal-cannot-record-its-read-and-leaves-the-run-open-forever.md), part (b).
+
+## Evidence 2026-09-26 (fix-root-graph-panic-opus): the panic is gone; a `do`-wrapped `ns` still refuses
+
+Default archive 6a8e46ec6 (includes 71d3d74c5), MCP SCI on branch `fix-root-graph-panic` (one form per call):
+
+- `(do (ns scratch.fix-root-graph (:require [seon.effect :as effect])) (defn requester "…" {:malli/schema [:=> [:cat :map] :map]} [request] (effect/request! request)))`
+  answered, as a returned evaluation error (no graph panic, no fault):
+  `Cannot classify host binding: clj-kondo holds no analysis of effect. …` followed by
+  `Contract finding: seon.sci.kernel/failure-value returned this error, and none of its declared error alternatives matches it.`
+  Clojure evaluates a top-level `do`'s forms in order, so the `defn` sees the alias; ours analyzes the whole form first.
+- The same two forms as two calls (`ns`, then the `defn` in `scratch.fix-root-graph2`) passed analysis and reached
+  `seon.test.accretion/auto-check`, which refused its own output (`:seon.test.accretion/explanation` nil, not a string).
+- The log's 16:02-16:07Z "no analysis of effect" panics (default log ~107425-107470, during `seon.effect-test`) trace to
+  `seon.turn/analyze-submitted (turn.clj:3483)` calling `fault!`, which is the code before 71d3d74c5, so that archive
+  predated the fix. The fix stops the panic. It does not stop this refusal.
