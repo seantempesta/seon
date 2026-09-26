@@ -214,9 +214,21 @@
   [source]
   (when-let [routing (:seon.agent/routing source)]
     (assoc source
-           :seon.render/value (fleet-value (:seon.db/db source)
-                                           (context-cluster-name (:seon.sci.eval/ctx source))
-                                           routing)
+           ;; A VIEW NEVER SHOWS THE PROC RENDERING IT. The page is rendered
+           ;; by the render proc, whose pass count moves because it rendered
+           ;; and whose ping answers only when it is not mid-pass, so showing
+           ;; it made every pass a new package (every tab join repainted).
+           ;; `flow-status` keeps it: the operator's status is not rendered
+           ;; by that proc.
+           :seon.render/value
+           (let [fleet (fleet-value (:seon.db/db source)
+                                    (context-cluster-name (:seon.sci.eval/ctx source))
+                                    routing)]
+             (cond-> fleet
+               (:seon.oversight/plumbing fleet)
+               (update :seon.oversight/plumbing
+                       (partial filterv #(not= :seon.render.web/render
+                                               (:seon.oversight/proc %))))))
            ;; The producer's declared return names the pair (:seon.oversight/fleet).
            :seon.render.call/function `fleet-value)))
 
