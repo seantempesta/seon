@@ -133,7 +133,7 @@
          (is (:db-after written) (pr-str written))
          (when (:db-after written)
            (evaluation/install-evaluated-rows!
-            {:seon.sci.eval/ctx ctx :seon.db/db (:db-after written)
+            {:seon.sci.eval/ctx ctx :seon.db/db (:db-after written) :seon.db/transaction-report written
              :seon.sci.eval/installations
              [{:seon.program/row row :seon.sci.eval/evaluation defined}]})))
        (is (false? (db/read-evidence-current? (db/db connection) evidence)))

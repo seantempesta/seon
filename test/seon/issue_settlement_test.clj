@@ -41,7 +41,7 @@
     (let [report (db/transact! connection [(dissoc row :seon.sci.eval/evaluated?)])]
       (when-not (:db-after report) (throw (ex-info "Issue test admission transaction failed." report)))
       (evaluation/install-evaluated-rows!
-       {:seon.sci.eval/ctx ctx :seon.db/db (:db-after report)
+       {:seon.sci.eval/ctx ctx :seon.db/db (:db-after report) :seon.db/transaction-report report
         :seon.sci.eval/installations [{:seon.program/row row :seon.sci.eval/evaluation evaluated}]}))))
 
 (deftest issue-settlement-runs-tests-and-derives-completion

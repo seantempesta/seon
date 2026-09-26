@@ -5214,13 +5214,14 @@
                                  {:seon.program/row row
                                   :seon.sci.eval/evaluation evaluation}))))
                           gated)]
-                ;; A batch that defined nothing installs nothing: the program
-                ;; check below it walks the store, so only a defining batch pays it.
+                ;; A batch that defined nothing installs nothing; a defining
+                ;; batch's program check reads this settlement's own datoms.
                 (when (seq installations)
                   (sci.eval/install-evaluated-rows!
                    {:seon.sci.eval/ctx base-ctx
                     :seon.sci.eval/agent-ctx ctx
                     :seon.db/db (:db-after outcome)
+                    :seon.db/transaction-report outcome
                     :seon.sci.eval/installations installations}))
                 (if (or (:seon.turn.loop/settled last-prepared)
                         (:seon.turn.loop/undisposed? last-prepared)

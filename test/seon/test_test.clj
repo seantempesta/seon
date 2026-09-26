@@ -54,8 +54,8 @@
            declaration (program/declaration-row (seon.schema/handed-projection) (:seon.program/row evaluation) :all :agent)]
        (is (nil? (:seon.cluster.eval/error evaluation)) (pr-str evaluation))
        (is (string? (:seon.program/analyzed-source-digest declaration)))
-       (test-support/transacted! connection [declaration])
-       (let [database (db/db connection)
+       (let [written (test-support/transacted! connection [declaration])
+             database (db/db connection)
              request {:seon.db/db database :seon.db/connection connection
                       :seon.test/identity 'seon.test-test/admitted-fileless-test
                       :seon.sci.eval/ctx stale
@@ -66,7 +66,7 @@
                 (:seon.test/resolution-refusal (sut/resolve-test request)))
              "resolution never mutates the stale context into acquiring")
          (sci.eval/install-evaluated-rows!
-          {:seon.sci.eval/ctx ctx :seon.db/db database
+          {:seon.sci.eval/ctx ctx :seon.db/db database :seon.db/transaction-report written
            :seon.sci.eval/installations
            [{:seon.program/row declaration :seon.sci.eval/evaluation evaluation}]})
          (let [resolved (sut/resolve-test (assoc request :seon.sci.eval/ctx ctx))]
@@ -85,11 +85,11 @@
                                       [:seon.test/sym core-symbol])
                               [:seon.fn/file :db/id])
                  override (assoc declaration :seon.fn/file file)]
-             (test-support/transacted! connection [override])
-             (sci.eval/install-evaluated-rows!
-              {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
-               :seon.sci.eval/installations
-               [{:seon.program/row override :seon.sci.eval/evaluation evaluation}]})
+             (let [overridden (test-support/transacted! connection [override])]
+               (sci.eval/install-evaluated-rows!
+                {:seon.sci.eval/ctx ctx :seon.db/db (:db-after overridden) :seon.db/transaction-report overridden
+                 :seon.sci.eval/installations
+                [{:seon.program/row override :seon.sci.eval/evaluation evaluation}]}))
              (let [resolved (sut/resolve-test
                              (assoc request :seon.sci.eval/ctx ctx
                                             :seon.db/db (db/db connection)))]

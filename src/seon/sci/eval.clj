@@ -1947,53 +1947,57 @@
            (vec (get-in snapshot [::acquisition ::acquisition-refusals])))))
 
 (defn- installation-covers-program-change?
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value [:sequential [:map [:seon.program/row :seon.program/row]]] :seon.schema/projection] [:or :nil :boolean]]}
-  [before after installations projection]
-  (let [identities (set (map (comp program/row-identity :seon.program/row)
-                             installations))
-        shapes (program/shapes-in projection)
-        history (db/history after)
-        changed-database (db/since history (db/basis-t before))
-        components (into []
-                         (keep (fn [[attribute properties]]
-                                 (when (:db/isComponent properties) attribute)))
-                         (:schema (db/schema-database after)))
-        touched (db/q '[:find [?entity ...] :where [?entity]] changed-database)
-        parents (when-not (or (:seon.db/invalid-read touched) (:seon.schema/expected-value touched))
-                  (loop [frontier touched seen #{}]
-                    (if (empty? frontier)
+  "True when everything the settlement `report` changed since the context's
+  acquired value `before` is one of `installations` or leaves its program row
+  canonically equal.
+
+  The report's own datoms name what it wrote (a settlement is one
+  transaction), and each changed component's owning parents are joined through
+  the history index from those few children. A value acquired before some other
+  commit (another writer, or the form's own durable writes) is not covered: the
+  next acquisition derives from the head, as for any unknown change. Cost:
+  proportional to the settlement's datoms, never to the store's history (task
+  361088de3d56: the since-history scan took 2,025 ms to find 10 entities)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/transaction-report
+                       [:sequential [:map [:seon.program/row :seon.program/row]]] :seon.schema/projection]
+                  [:or :nil :boolean]]}
+  [before report installations projection]
+  (when (= (db/basis-t before) (db/basis-t (:db-before report)))
+    (let [after (:db-after report)
+          identities (set (map (comp program/row-identity :seon.program/row)
+                               installations))
+          shapes (program/shapes-in projection)
+          history (db/history after)
+          components (into []
+                           (keep (fn [[attribute properties]]
+                                   (when (:db/isComponent properties) attribute)))
+                           (:schema (db/schema-database after)))
+          touched (into #{} (map :e) (:tx-data report))
+          parents (loop [frontier (vec touched) seen #{}]
+                    (if (or (empty? frontier) (empty? components))
                       seen
                       (let [incoming (db/q '[:find [?parent ...]
                                              :in $ [?child ...] [?attribute ...]
                                              :where [?parent ?attribute ?child]]
                                            history frontier components)]
                         (when-not (or (:seon.db/invalid-read incoming) (:seon.schema/expected-value incoming))
-                          (recur (vec (remove seen incoming)) (into seen incoming)))))))
-        entities (db/q '[:find [?entity ...]
-                         :in $ [?attribute ...]
-                         :where [?entity ?attribute]]
-                       (db/since (db/history after) (db/basis-t before))
-                       program/identity-attributes)
-        changed (db/q '[:find [?entity ...]
-                        :in $ $changed [?attribute ...]
-                        :where [$changed ?entity] [?entity ?attribute]]
-                      after (db/since (db/history after) (db/basis-t before))
-                      program/identity-attributes)]
-    (when (and parents (not (or (:seon.db/invalid-read entities) (:seon.schema/expected-value entities))) (not (or (:seon.db/invalid-read changed) (:seon.schema/expected-value changed))))
-      (let [eids (vec (set (concat entities changed parents)))
-            old (db/pull-many before '[*] eids)
-            current (db/pull-many after '[*] eids)]
-        (and (not (or (:seon.db/invalid-read old) (:seon.schema/expected-value old))) (not (or (:seon.db/invalid-read current) (:seon.schema/expected-value current)))
-             (every?
-              (fn [[eid old-row current-row]]
-                (let [identity (or (program/row-identity current-row)
-                                   (program/row-identity old-row))]
-                  (or (nil? identity)
-                      (contains? identities identity)
-                      (and (not (contains? parents eid))
-                           (= (program/canonical-row shapes old-row)
-                              (program/canonical-row shapes current-row))))))
-              (map vector eids old current)))))))
+                          (recur (vec (remove seen incoming)) (into seen incoming))))))]
+      (when parents
+        (let [eids (vec (into touched parents))
+              old (db/pull-many before '[*] eids)
+              current (db/pull-many after '[*] eids)]
+          (and (not (or (:seon.db/invalid-read old) (:seon.schema/expected-value old)))
+               (not (or (:seon.db/invalid-read current) (:seon.schema/expected-value current)))
+               (every?
+                (fn [[eid old-row current-row]]
+                  (let [identity (or (program/row-identity current-row)
+                                     (program/row-identity old-row))]
+                    (or (nil? identity)
+                        (contains? identities identity)
+                        (and (not (contains? parents eid))
+                             (= (program/canonical-row shapes old-row)
+                                (program/canonical-row shapes current-row))))))
+                (map vector eids old current))))))))
 
 (defn install-evaluated-rows!
   "Install committed rows from the evaluations that produced them.
@@ -2009,6 +2013,7 @@
      [:map
       [:seon.sci.eval/ctx :seon.sci.eval/ctx]
       [:seon.db/db :seon.db/database-value]
+      [:seon.db/transaction-report {:optional true} :seon.db/transaction-report]
       [:seon.sci.eval/agent-ctx {:optional true} :seon.sci.eval/ctx]
       [:seon.sci.eval/installations
        [:vector
@@ -2019,6 +2024,7 @@
   [{ctx :seon.sci.eval/ctx
     db :seon.db/db
     installations :seon.sci.eval/installations
+    report :seon.db/transaction-report
     agent-ctx :seon.sci.eval/agent-ctx}]
   (transfer-evaluated-roots! ctx installations)
     (let [installed (:installed
@@ -2061,9 +2067,10 @@
       (when-let [snapshot (::base-bindings agent-ctx)]
         (reset! snapshot (base-bindings ctx)))
       (when-let [before (:seon.db/db (acquired-program ctx))]
-        (when (and (every? :seon.sci.eval/installed installed)
+        (when (and report
+                   (every? :seon.sci.eval/installed installed)
                    (installation-covers-program-change?
-                    before db installations (context-projection ctx)))
+                    before report installations (context-projection ctx)))
           (doseq [target (cond-> [ctx] agent-ctx (conj agent-ctx))]
             (swap! (::kernel/program-snapshot target) assoc :seon.db/db db))))
       installed))
