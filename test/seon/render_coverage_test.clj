@@ -228,7 +228,7 @@
           [:seon.render/ai :seon.render/html])))
   (is (= {:seon.render/ai `repl/render-ai
           :seon.render/html `repl/render-html}
-         (select-keys (family-properties :seon.eval/entity)
+         (select-keys (family-properties :seon.cluster.eval/receipt)
                       [:seon.render/ai :seon.render/html])))
   (is (= {:seon.render/ai `cluster/render-ai
           :seon.render/html `cluster/render-html}
