@@ -77,15 +77,21 @@
           (:seon.db/invalid-read effective)
           (:seon.schema/expected-value effective))
     effective
-    {:seon.render.profile/id :seon.render.profile/agent
-     :seon.render.profile/token-budget
-     (:seon.config.render.agent/token-budget effective)
-     :seon.render.profile/max-depth
-     (:seon.config.render.agent/max-depth effective)
-     :seon.render.profile/max-children
-     (:seon.config.render.agent/max-children effective)
-     :seon.render.profile/composition
-     (:seon.config.render.agent/composition effective)}))
+    (cond->
+     {:seon.render.profile/id :seon.render.profile/agent
+      :seon.render.profile/token-budget
+      (:seon.config.render.agent/token-budget effective)
+      :seon.render.profile/max-depth
+      (:seon.config.render.agent/max-depth effective)
+      :seon.render.profile/max-children
+      (:seon.config.render.agent/max-children effective)
+      :seon.render.profile/composition
+      (:seon.config.render.agent/composition effective)}
+      ;; The provenance ceiling (seon.print/fit); absent before a store
+      ;; adopts the dial, and then fit uses its declared default.
+      (:seon.print/rendered-token-ceiling effective)
+      (assoc :seon.print/rendered-token-ceiling
+             (:seon.print/rendered-token-ceiling effective)))))
 
 (def ^:private default-agent-profile
   (delay (agent-render-profile config/defaults)))
@@ -516,7 +522,12 @@
               :else (pairs [:seon.error/base])))
       (and function (identical? value (render-value request)))
       (pairs (satisfied-alternatives projection function value))
-      :else (pairs (or (some-> (entity-owner projection value) vector)
+      ;; An attribute request stays an attribute request (AGENTS.md): an
+      ;; entity nested in a value keeps its pulled shape, so its identity
+      ;; owner's pair claims only a root value. A nested value takes only the
+      ;; pair its reaching attribute declares (a component's schema).
+      :else (pairs (or (when (empty? (:seon.render.data/path request))
+                         (some-> (entity-owner projection value) vector))
                        (some->> (attribute-identity projection (:seon.render.data/path request))
                                 (named-alternatives projection)
                                 (filterv #((schema/projection-validator projection %) value))))))))

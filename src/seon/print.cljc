@@ -1020,7 +1020,8 @@
         ;; Chosen at entry by provenance: renderer text is bounded only by
         ;; the ceiling and is not charged to the raw value's budget.
         profile (assoc profile ::rendered-chars
-                       (tokens/estimate-chars (::rendered-token-ceiling options)))
+                       (tokens/estimate-chars (or (::rendered-token-ceiling profile)
+                                                  (::rendered-token-ceiling options))))
         raw-tokens (fn [candidate]
                      (tokens/estimate-of-characters
                       (max 0 (- (count (emit-text candidate options))

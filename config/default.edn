@@ -122,6 +122,13 @@
  ; readable while leaving normal result shapes intact.
  :seon.print/level 8
 
+ ; Unit: estimated tokens (`seon.ai.tokens/estimate`). The budget is chosen
+ ; by provenance (owner 2026-09-26): text a declared AI render function
+ ; produced is its own first bound and is cut only beyond this ceiling; raw
+ ; values keep :seon.config.render.agent/token-budget. Provenance: about 3.3
+ ; times the raw budget, so a curated render is never the thing cut first.
+ :seon.print/rendered-token-ceiling 50000
+
  ; Unit: milliseconds of wall clock per agent evaluation.
  ; Provenance: the ONLY limit sci has — it counts no steps, so this is
  ; the whole bound on an interpreted form (reference-code/sci/doc/
