@@ -250,8 +250,9 @@ root.
   any function, its omitted declared inputs are supplied by schema name.
 - **An AI render returns REPL entries** (`;;` comments and forms); the one REPL path evaluates each form read-only
   in the viewing agent's SCI world and prints form and result as the transcript the agent reads, so every line is
-  runnable. An agent never sees a render form without its result: if a form cannot be evaluated, the floor prints
-  the value with one diagnostic instead. Curated namespaces render as `(require '[ns :as alias])` then their `dir`/`doc` with contracts. An HTML
+  runnable. Rendering finishes with the turn: every render a turn's results need is evaluated and recorded before
+  the turn completes, so the next turn's context is fully present. An agent never sees a render form without its
+  result; only a render that genuinely fails falls back to the floor's value with one diagnostic. Curated namespaces render as `(require '[ns :as alias])` then their `dir`/`doc` with contracts. An HTML
   render returns hiccup. Components and declared queries render in their own blocks; failed rendering gives a
   diagnostic; error base and satisfied schema renderers compose. An attribute request stays an attribute request.
 - **Apply presentation limits once.** The floor printer holds the one budget and spreads it across the value's
