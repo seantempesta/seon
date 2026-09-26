@@ -848,3 +848,11 @@
     (is (not (:seon.error/message effective)) (pr-str (select-keys effective [:seon.config/error-key :seon.config/rule])))
     (is (true? (:seon.config.maintenance/collect? effective))
         "whole-store collection ships on")))
+
+(deftest a-projection-answers-its-dial-membership-once
+  ;; Every config read on a fresh database value asked the whole registry
+  ;; again (perf-eval-overhead 2026-09-26); the projection's holder answers.
+  (let [projection (schema/handed-projection)
+        dials (config/dial-attributes projection)]
+    (is (contains? dials :seon.config.agent/turn-completion-backstop-ms))
+    (is (identical? dials (config/dial-attributes projection)))))
