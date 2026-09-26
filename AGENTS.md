@@ -35,10 +35,10 @@ root.
 
 ## How to think
 
-- **Find the best algorithm, then the simplest implementation.** The algorithmic choice has the biggest gains: ask
-  what the work is proportional to and pick the approach with the best complexity. Implement it in the simplest form
-  you can think of; add complexity only for a measured, large performance win. Optimize for the common path, not the
-  rare failure that recovery already handles.
+- **Simple and correct first, then optimize.** The algorithmic choice has the biggest gains: ask what the work is
+  proportional to and prefer the approach that does only the work actually needed (lazy over eager, what is shown
+  over what might be). Implement it in the simplest correct form you can think of; add complexity only for a
+  measured, large performance win. Optimize for the common path, not the rare failure recovery already handles.
 - **Take things apart.** Give each part one role and one reason to change; separate braided concerns.
 - **Be patient at the REPL.** State the problem, knowns and unknowns; inspect real values and call the owner until
   you can predict the result. Refuting a cause is progress.
