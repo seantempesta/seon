@@ -129,3 +129,29 @@ or the function and re-evaluate the defn." That was expected: the redefinition m
 it, fail. It was not a writer refusal. `data/clusters/default/logs/seon.log` has no "validation rejected" line after
 18:40:17Z, which was the original dial failure under pid 15369. Nothing was logged since this JVM booted at 18:56Z.
 Needed from root: `:smoke-5`'s exact forms and its turn id, or the MCP reply. I did not fix anything blind.
+
+### Reproduced with root's forms: the cause is the settlement's digest, not the validator
+
+The rejection arrives as an `out` event in the MCP reply, not in seon.log. Bisection runs, each on a fresh branch, all
+retired afterwards:
+- Root's 8 forms in one run: rejected (reproduced).
+- `(/ 1 0)`, the `let`-nested defn and `my.plan/current`, each alone: settle.
+- Two defns in one run: settle.
+- **`(defn smoke-inc …)` then `(require '[malli.core :as m])` in one run: rejected.**
+- `require` then `defn` in one run: settles.
+
+The recorded refusal on the branch reads: "The stored definition digest of [:seon.fn/sym user/smoke-inc] is not the
+one its definition produces." That is `seon.db/write-digest-error`, which is unchanged by e6b559711.
+
+Producer: `seon.sci.eval/definition-row` (sci/eval.clj:916-956, d62d32bf7) digests each written row against the
+namespace row as it stands at that form: the database holds the run's earlier forms. A later `require` in the same
+run changes the stored namespace row, so the resolver context changes. `namespace-digests-tx` re-derives only rows
+the transaction does not write. The writer then checks the written row against the final namespace row and refuses.
+
+The projection enters `definition-digest-of` only through `program-shapes-in`. The entity schemas behind it are not
+changed by a settlement, so the pre-write and post-write validators compute the same digest. I infer from this that
+the rejection does not depend on e6b559711; I did not run the old validator against this settlement. The fix belongs
+at the producer (sci/eval.clj, not mine): digest the settlement's written rows against the namespace row the
+settlement stores, meaning after the run's last form. Alternatively, `namespace-digests-tx` could re-derive written
+rows whose namespace row the same transaction changes. That hides producer digest errors in exactly that case, so I
+did not make it.
