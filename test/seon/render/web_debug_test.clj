@@ -681,16 +681,20 @@
 (deftest block-reference-headers-link-identities-and-omit-unidentified-entities
   (support/with-database
    (fn [connection]
-     (support/transacted! connection (support/schema-rows @connection [[::identity-alias :seon.agent/id]]))
+     (support/transacted! connection (support/schema-rows @connection
+                                                          ;; Identity is the declaring attribute's own
+                                                          ;; property: an alias of :seon.agent/id is
+                                                          ;; not an upsert key (26f1f40d6).
+                                                          [[::probe-identity [:string {:min 1 :seon.db/identity true}]]]))
      (let [installed (db/transact!
                       connection
                       [(schema.datahike/malli->datahike-attr-in
                         (schema/projection-from-database @connection)
-                        ::identity-alias)])
+                        ::probe-identity)])
            _ (is (:db-after installed) (pr-str installed))
            written (db/transact! connection
                                  (into (support/agent-tx @connection "reference-agent")
-                                   [{::identity-alias "aliased-reference"}
+                                   [{::probe-identity "aliased-reference"}
                                     ;; An identity-less entity exists only as a
                                     ;; component of its one owner (the writer
                                     ;; refuses an unowned one).
@@ -704,7 +708,7 @@
            database @connection
            projection (schema/projection-from-database database)
            agent-ref (db/pull database '[:db/id] [:seon.agent/id "reference-agent"])
-           alias-ref (db/pull database '[:db/id] [::identity-alias "aliased-reference"])
+           probe-ref (db/pull database '[:db/id] [::probe-identity "aliased-reference"])
            unidentified {:db/id (get-in written [:tempids "unidentified"])}
            plan-ref {:db/id (get-in written [:tempids "plan"])}
            effective config/defaults
@@ -721,8 +725,8 @@
                           :seon.render.debug/viewer-namespace 'my.agents.reference-agent}]
        (is (integer? (:db/id agent-ref)))
        (is (integer? (:db/id unidentified)))
-       (is (= [[[::identity-alias "aliased-reference"] "aliased-reference"]]
-              (#'web/referenced-identities database [alias-ref])))
+       (is (= [[[::probe-identity "aliased-reference"] "aliased-reference"]]
+              (#'web/referenced-identities database [probe-ref])))
        (is (= [[[:my.plan/agent (:db/id agent-ref)] "reference-agent"]]
               (#'web/referenced-identities database plan-ref)))
        (is (= plan-ref
