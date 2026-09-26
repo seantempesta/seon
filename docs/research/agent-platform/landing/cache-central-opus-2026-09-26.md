@@ -11,6 +11,34 @@ design: docs/research/agent-platform/cache-central-design-2026-09-26.md (option 
 
 ## Broken or unproven first
 
+- **Calibrated in `e1e1d499b`: the byte budget undercounted real retention.**
+  - **Measured offline** with `bench/seon/measure_cache_kinds.clj`: one kind per fresh JVM, on a git archive of
+    `27eab14c6`, JDK 26.0.1. A kind's figure is the used heap after GC while holding the value, less the heap
+    before. Results are in `bench/seon/cache_kind_measurement.edn`.
+
+    | kind | measured | factor now | factor before |
+    |---|---|---|---|
+    | packaged population | 1.34 MB / 3,545 forms | 376 B/form | 375 |
+    | declaration projection | 8.9–9.1 MB / 3,549 | 2,550 B/form | 1,300 (2× under) |
+    | projection (marginal over the declaration projection) | 10.1 MB / 3,549; 19.5–19.9 MB with 2,371 contracts | 2,850 B/form + 4,050 B/contract | 2,230 per declaration (1.5× under) |
+    | authored shapes (with their projection built) | 244 KB / 6 families | 40,600 B/family | 4,096 (10× under) |
+
+  - **Why the defn-scan figure is higher.** Its 42.4 MB was a jamm deep walk of one population root. A deep walk
+    counts structure that other entries share. On JDK 26 jamm also refuses the hidden-class lambdas inside compiled
+    regex schemas. The heap delta counts what holding the entry keeps alive. The declaration projection plus the
+    contracted projection come to about 28.7 MB of that retention.
+  - **Regression:** `seon.cache-calibration-test/every-kind-is-charged-what-it-was-measured-to-retain` holds every
+    kind's charge within 1.25× of its measurement. Current ratios are 0.998–1.015. Two runs of the same kind differed
+    by 2.3%.
+  - **Still uncalibrated:**
+    - `config/declared-projection` holds the same object as the declaration-projection entry, so it is charged
+      twice, about 9 MB over.
+    - The base context in `sci/eval` (the patch) still uses MAT's 6.9 MB per context.
+    - The Datahike caches are outside `seon.cache`.
+- **Seen in passing: after `2f2b51861` (required-only supply), every JVM-mode MCP reply carries a diagnostic.**
+  `seon.render.value/prepare refused unit at [:seon.db/db]` (`:seon.render/db-unit`) comes from
+  `seon.cluster/mcp-project` (`cluster.clj:433`). The value is still returned, and the diagnostic sits beside it.
+
 - **The seeded-cluster turn-test reds are not caused by config. They are call-time defaults filling an optional map
   entry. Root's ruling is needed; no code was changed.**
   - **Affected tests** (`seon.turn-test`):
