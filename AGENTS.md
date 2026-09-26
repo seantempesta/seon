@@ -230,10 +230,12 @@ Private experiments remain possible; local green never implies shared acceptance
   mistakes to their agent. Commit every other failure with `:seon.error/chain` at its owning
   boundary, then wake the responsible namespace agent or root through the ordinary route;
   no overload channel may drop it. Recording without delivery is a defect.
-- **Panic visibly.** `:seon.config/on-core-error :panic` is the development/default policy:
-  throw to the caller, stop the failing graph and show failure in status, page and REPL;
-  keep the JVM/REPL available. `:record` keeps the rest running after storage and delivery.
-  If storage fails, panic in both modes. Diagnose at the REPL; no fallback store or retry loop.
+- **The REPL path is total; faults are loud beside the result** (owner 2026-09-26). read → evaluate → record → print
+  always returns the evaluated value. A later stage's failure (gate, renderer, recording, classification) is attached to
+  the result as a diagnostic and recorded as a core fault (status, page, delivery to root) — it never replaces, blocks or
+  wedges the value. The floor printer is total: any value prints (plain Clojure printing is the fallback); a smart renderer
+  that fails shows the value plus one diagnostic. A graph stops only when its own execution cannot continue; if storage
+  fails, stop. No stage guesses what a value is — the producer declares. Diagnose at the REPL; no fallback store or retry loop.
 - **Let Flow own execution.** Give each agent a graph; procs declare `:io` or `:compute`,
   transforms reference Vars, topology changes rebuild graphs. Add no central scheduler
   or dispatcher. Listen before deriving work; channels carry only rederivable or replaceable
