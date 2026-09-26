@@ -57,13 +57,8 @@ The pass answers the reply port with its report; a pass that ends without settli
    - The pass no longer re-derives `more-agent-work?` after its turn: it rewakes once and the next
      pass's single derivation finds the rest or reports idle, after the caller was answered
      (task 62c45543598c).
-4. **B's blob permit gap: fixed in fcee85161.** `seon.blob/with-publication!` holds its reachability
-   permit until an applied write's pending commit (`:seon.db/durable` on the applied report) resolves;
-   regression `a-blob-permit-is-held-until-an-applied-write-commits` (a sweep is not admitted while the
-   commit is pending, and is once it resolves).
-5. **B's size.** fcee85161 is +174/−49 across db.clj (mostly the `transact-through` extraction, a move),
-   blob.clj, turn.clj and two schema files: over the ~100-line presumption. It stays only if measured
-   clearly faster than A; otherwise the next slice deletes it whole (fork seam included).
+4. **After the restart onto de67fdd1a:** A's own answer time is unmeasured on its own build; the durable
+   column above (133.9 / 145.5 ms p50/p95) is where A answers on the same code. The probe re-runs it.
 
 ## B: reply once the settlement is applied — measured, then deleted (de67fdd1a)
 
