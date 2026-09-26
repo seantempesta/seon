@@ -572,6 +572,7 @@
                (or (ex-message throwable) "The operation was refused.")))
       (assoc
        (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.kernel/evaluation 'seon.sci.kernel/failure-value
+       (merge
        {:seon.sci.kernel/guard-observation {:seon.error.evidence/attribute :seon.eval/duration-ms
          :seon.error.evidence/value (:seon.eval/duration-ms diagnostic-record)}
         :seon.error/message (or (:seon.error/message existing)
@@ -588,8 +589,11 @@
         (:sci.impl/symbol throwable-data)
         (assoc :seon.sci.eval/symbol (:sci.impl/symbol throwable-data))) {:seon.sci.admit/record diagnostic-record})
         :seon.error/throwable throwable
-        :seon.error/expected :successful-evaluation
-        :seon.error/offending (or (:sci.impl/symbol throwable-data) subject)})
+        :seon.error/expected :successful-evaluation}
+        ;; Absent, never stored nil: a failure without a failing symbol or
+        ;; subject (a reader error) names no offending value.
+        (when-let [offending (or (:sci.impl/symbol throwable-data) subject)]
+          {:seon.error/offending offending})))
        :seon.error/chain links))))
 
 (defn unarmed-record
