@@ -1492,9 +1492,13 @@
 
 (defn- emission-label [projection saved]
   (let [attributes (distinct
+                     ;; the attributes Datahike reports the read depended on
                      (for [evidence (:seon.cluster.eval/read-evidence saved)
-                           entry (first (get-in evidence [:seon.db/read-request :seon.db/pull-arguments]))
-                           attribute (if (map? entry) (keys entry) [entry])
+                           source (get-in evidence [:datahike.read/dependency-plan
+                                                    :datahike.query.dependency/sources])
+                           :let [depended (:datahike.query.source/attributes source)]
+                           :when (set? depended)
+                           attribute (sort depended)
                            :when (keyword? attribute)] attribute))
         matches (when-let [renderer (or (some-> (get-in saved [:seon.eval/renderer-fn :seon.fn/sym]) symbol)
                                         (:seon.eval/renderer saved))]
