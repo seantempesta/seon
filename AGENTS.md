@@ -264,6 +264,8 @@ Private experiments remain possible; local green never implies shared acceptance
   forms — acceptable, because recovery closes what was lost and the agent redoes it; never slow every form to guard it.
   Scope: only an agent form's own evaluation settlement is async; merges, write-back, tasks, config, schema adoption,
   boot/publication records, fault recording, branch lifecycle and deliveries to root stay durable before their caller is answered.
+  The async path is ONE general fire-and-forget write in the database owner (ordered, no confirmation, durable
+  eventually), kept only if measured faster; callers opt in at their call site.
 - **Derive wakes and completion.** Use listened datoms and a qualifying ordinary reply's
   basis; openings/system-only turns answer nothing. Handling is separate, message subject
   is literal, `:seon.message/from` marks inside wakes. Refresh each distinct changed read
