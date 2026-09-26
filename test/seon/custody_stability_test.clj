@@ -257,8 +257,7 @@
             forbidden
             ['seon.cluster/running-instances
              'seon.cluster/root-store-holder
-             'seon.cluster.store/held-flocks
-             'seon.sci.eval/generator-ctx]
+             'seon.cluster.store/held-flocks]
             installed (sci/namespace-interns ctx)]
         (doseq [qualified forbidden
                 :let [namespace-name (symbol (namespace qualified))
@@ -271,8 +270,7 @@
                     "(resolve 'seon.operator.runtime/running-instances)"))))
         (doseq [source ["@@#'seon.cluster/running-instances"
                         "@@#'seon.cluster/root-store-holder"
-                        "@@#'seon.cluster.store/held-flocks"
-                        "@@#'seon.sci.eval/generator-ctx"]]
+                        "@@#'seon.cluster.store/held-flocks"]]
           (is (some? (:seon.cluster.eval/error (evaluate-in ctx source)))
               source))))))
 

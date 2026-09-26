@@ -180,12 +180,10 @@
 
 (def projection-state-generator env/environment-state-generator)
 
-(defonce ^:private generator-ctx
-  (delay (sci/init {})))
-
 (def ctx-generator
-  "A real ctx — honest by constructing an instance."
-  (gen/fmap (fn [_] @generator-ctx) (gen/return nil)))
+  "A real ctx, honest by constructing a fresh one per sample (0.04 ms): no
+  Var holds a live context, and no sample's mutation reaches the next."
+  (gen/fmap (fn [_] (sci/init {})) (gen/return nil)))
 
 (schema.edn/load! {})
 
