@@ -202,7 +202,8 @@ root.
 - **Errors are ordinary values of one shape.** An error is one flat map under one named extension of
   `:seon.error/base`: the producer's fields, message, source location and the whole cause chain (class, message,
   `ex-data` per link); a refusal adds operation/member, expected shape, offending value and fix. Arities enumerate
-  their exact error alternatives; no general error predicate, copied union or discriminator stamp. The producer
+  their exact error alternatives; no general error predicate, copied union or discriminator stamp (a contract alone
+  does not prove a body's error union — that needs its producer, checker and regression). The producer
   declares identity; nothing downstream guesses it. Errors hold references, never copies: a database is its commit
   id or basis, a transaction its id, a context its agent and branch, a large value one blob digest. Catch only
   declared cases or resurface the whole cause; missing evidence is a typed unknown, never nil, a default or
