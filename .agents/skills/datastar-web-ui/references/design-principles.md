@@ -28,7 +28,7 @@ exists under `src/`); do not infer a current pod or canvas API from those
 comments (`resources/public/css/input.css:1-52`).
 
 Build Tailwind through the maintained package scripts
-(`package.json:10-12`):
+(`package.json:10-13`):
 
 ```bash
 npm run css:build
@@ -73,7 +73,7 @@ The maintained font and dense-size tokens are the monospace stack and
 `text-2xs` definitions at `resources/public/css/input.css:58-64`; the fixed
 message bar demonstrates the compact border, spacing, and type rhythm
 (`.seon-bar`, `resources/public/css/input.css:991-1029`, rendered by
-`message-bar-html`, `src/seon/render/web.clj:268`).
+`message-bar-html`, `src/seon/render/web.clj:271`).
 
 - Use the maintained monospace stack.
 - Use `text-xs` for dense body text and `text-2xs` for metadata.
@@ -90,26 +90,26 @@ message bar demonstrates the compact border, spacing, and type rhythm
 ## Current rendering boundary
 
 Current UI hiccup is JVM Clojure serialized through `seon.render.hiccup/->string`
-(`src/seon/render/hiccup.clj:494`); HTML walk units receive stable wrappers in
-`surface-html` (`src/seon/render/web.clj:377-399`). `seon.render.block/surface-id`
+(`src/seon/render/hiccup.clj:486`); HTML walk units receive stable wrappers in
+`surface-html` (`src/seon/render/web.clj:380-402`). `seon.render.block/surface-id`
 is the one stable DOM-ID derivation (`src/seon/render/block.clj:61-96`), and
 delivery is owned by the render proc and feed (`render-step`,
-`src/seon/render/web.clj:2618`; `feed`, `:2857`).
+`src/seon/render/web.clj:2566`; `feed`, `:2805`).
 
 Build semantic hiccup with stable element IDs. Let the existing walk and block
 owners produce source, transcript, problem, and data presentation; the shared
-walk membership/order seam is `seon.render.walk/neighborhood` and
-`ordered-episode` (`src/seon/render/walk.clj:751`, `:897`). Do not
+walk membership/order seam is `seon.render.walk/neighborhood`
+(`src/seon/render/walk.clj:697`). Do not
 restore old `seon.ui.*` CLJS namespaces or quarry-era block call signatures.
 
 Design within the live web UI shapes:
 
 - namespace pages place walk units in one ranked layout
-  (`page-response`, `src/seon/render/web.clj:3205-3230`;
+  (`page-response`, `src/seon/render/web.clj:3167-3192`;
   `.seon-rank-layout`, `resources/public/css/input.css:1301`);
 - debug pages carry a local `showEverything` signal and a grid of panes
-  (`debug-response`, `src/seon/render/web.clj:3276`, signals at `:3288`,
-  `:3366`; `.seon-debug`, `resources/public/css/input.css:1349`); and
+  (`debug-response`, `src/seon/render/web.clj:3410`, signals at `:3422`,
+  `:3509`; `.seon-debug`, `resources/public/css/input.css:1466`); and
 - the exact live URLs come from the one route table
   (`src/seon/render/route.clj:5-31`).
 
@@ -136,15 +136,15 @@ The following remain **[TARGET]**:
 - generalized `my.canvas` controls and `/call`: neither appears in the exact
   live route table (`src/seon/render/route.clj:5-31`), while current input is
   the fixed message bar and context-action POSTs (`message-bar-html`,
-  `src/seon/render/web.clj:268`; `context-response`, `:3489`) plus
+  `src/seon/render/web.clj:271`; `context-response`, `:3630`) plus
   browser-local Datastar signals;
 - agent-owned `::renders`: the live blueprint contains only mailbox, turn and
-  schedule (`graph-definition`, `src/seon/cluster/agent.clj:535-581`).
+  schedule (`graph-definition`, `src/seon/cluster/agent.clj:560-607`).
 
 Revisioned packages and reconnect keyframes are current. The render proc builds
 each package with a delta and complete keyframe, while each tab sends the delta
 for a contiguous revision and the keyframe after a gap (`next-package`,
-`src/seon/render/web.clj:1885-1911`; `package-patches`, `:1913-1923`).
+`src/seon/render/web.clj:1828-1854`; `package-patches`, `:1856-1866`).
 
 Canonical namespace pages, root/agent aliases, and both debug variants are
 current routes (`src/seon/render/route.clj:5-16`). Keep visual work inside those

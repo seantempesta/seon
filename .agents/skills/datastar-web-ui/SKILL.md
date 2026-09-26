@@ -17,7 +17,7 @@ not layout or adoption.
 
 The canonical route data and compiled Reitit router live in
 `src/seon/render/route.clj:5` and `:32`; handler binding lives in
-`bind-handlers` and `handler` (`src/seon/render/web.clj:3630`, `:3652`).
+`bind-handlers` and `handler` (`src/seon/render/web.clj:3743`, `:3765`).
 Read that table instead of carrying another route list. A route name
 or retained manual context handler does not authorize preserving an
 obsolete behavior from before §14.
@@ -40,9 +40,9 @@ There is no separate teaching-prose mechanism.
 
 The evaluation schema declares `seon.repl/render-ai` and
 `seon.repl/render-html`; the walk renders evaluations in order
-through that pair (`resources/seon/schemas/seon.eval.edn:7-8`). The current
-entry points are `render-ai` and `render-html` (`src/seon/repl.clj:447`,
-`:480`); `text` at `:256` owns the REPL grammar. Do not mistake these existing entry points
+through that pair (`resources/seon/schemas/seon.cluster.eval.edn:30`). The current
+entry points are `render-ai` and `render-html` (`src/seon/repl.clj:449`,
+`:474`); `text` at `:264` owns the REPL grammar. Do not mistake these existing entry points
 for proof that §15 storage has landed.
 
 History is chronological, oldest first, with all turns shown by
@@ -65,8 +65,8 @@ append evaluations.
 
 The debug page uses the turn ledger and the acquired session component;
 entity inspection shares that session component (`debug-response`,
-`src/seon/render/web.clj:3276`). Debug text wraps in CSS; AI bytes do not
-acquire display-width breaks (`prepare`, `src/seon/render/value.clj:486`).
+`src/seon/render/web.clj:3410`). Debug text wraps in CSS; AI bytes do not
+acquire display-width breaks (`prepare`, `src/seon/render/value.clj:986`).
 Compaction wipes evaluations and regenerates
 the opening. Do not preserve manual Add/remove/curation controls
 as a second context mechanism.
@@ -75,14 +75,14 @@ as a second context mechanism.
 
 The render proc owns serialized revisioned packages.
 `join-package` returns retained bytes without deriving or serializing
-again (`src/seon/render/web.clj:1857`).
+again (`src/seon/render/web.clj:1800`).
 The feed writer's `write-package!` waits for drain or close while
 the sliding-one tap retains the newest complete package
-(`src/seon/render/web.clj:2777`).
+(`src/seon/render/web.clj:2725`).
 
 The dependency's `write-state` returns pending bytes and a
 drain-or-close completion
-(`reference-code/http-kit/src/org/httpkit/server.clj:321`).
+(`reference-code/http-kit/src/org/httpkit/server.clj:345`).
 A successful send alone is not a drain event. Revision gaps use
 the complete keyframe; never put delta-only values in a lossy buffer.
 
