@@ -1342,12 +1342,16 @@
                   [:= :unavailable]]}
   [ctx function-symbol refusal]
   (let [namespace-name (symbol (namespace function-symbol))
-        var-name (symbol (name function-symbol))]
-    (sci/add-namespace! ctx namespace-name
-                        {var-name (sci/new-var var-name
-                                               (fn refused [& _]
-                                                 (throw (ex-info (:seon.error/message refusal) refusal)))
-                                               {:ns (sci/create-ns namespace-name)})})
+        var-name (symbol (name function-symbol))
+        refused (fn refused [& _]
+                  (throw (ex-info (:seon.error/message refusal) refusal)))]
+    ;; A Var acquisition declared (or copied into this generation) keeps its
+    ;; identity, so callers analyzed against it reach the refusal by name.
+    (if-let [declared (get-in @(:env ctx) [:namespaces namespace-name var-name])]
+      (sci/bind-root! ctx declared refused)
+      (sci/add-namespace! ctx namespace-name
+                          {var-name (sci/new-var var-name refused
+                                                 {:ns (sci/create-ns namespace-name)})}))
     (kernel/mark-installed! ctx function-symbol)
     :unavailable))
 
@@ -1615,6 +1619,7 @@
                                   (not (overridden-row? (::loaded-database snapshot) committed)))
                               (and unloaded?
                                    (not (overridden-row? (::loaded-database snapshot) committed)))))
+              evaluated-row? (boolean (or evaluated? (::evaluated? row)))
               refusal (when (or host-row unbound?)
                         (interpretation-error function-symbol
                           (str (cond (nil? host-row) "Declaration "
@@ -1624,10 +1629,14 @@
                                (cond unloaded? " is in a namespace this JVM has not loaded; load its source files to call it."
                                      unbound? " is unchanged but calls a definition this branch changes; it runs only from the loaded source files."
                                      :else " must change through the loaded source files."))))
+              ;; A row acquired from the database refuses by name only when
+              ;; called: the rest of the program and every later form keep
+              ;; working. An agent's evaluation keeps the returned refusal.
               result
-              (if unbound?
-                (install-refusing-root! ctx function-symbol refusal)
-              (or refusal
+              (cond
+                (and refusal (not evaluated-row?)) (install-refusing-root! ctx function-symbol refusal)
+                refusal refusal
+                :else
                   (if-not interpreted?
                     (if (install-jvm-root! ctx function-symbol) :jvm :unavailable)
                     (try
@@ -1646,7 +1655,7 @@
                                 (or (:seon.instrument/registration-observation refusal)
                                     (:seon.config/error-key refusal)))
                           (throw failure))
-                        (interpretation-failure function-symbol failure))))))]
+                        (interpretation-failure function-symbol failure)))))]
           (if (map? result)
             (do (sci/eval-form ctx (list 'ns-unmap (list 'quote namespace-name)
                                        (list 'quote (symbol (name function-symbol)))))
@@ -1656,7 +1665,7 @@
              :seon.sci.eval/load-state result
              :seon.sci.eval/load-result
              (cond-> {:seon.sci.eval/load-state result :seon.fn/sym function-symbol}
-               unbound? (assoc :seon.error/message (:seon.error/message refusal)))})))
+               refusal (assoc :seon.error/message (:seon.error/message refusal)))})))
 
       :seon.schema/key
       {:seon.schema/projection

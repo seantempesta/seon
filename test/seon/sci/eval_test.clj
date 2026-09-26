@@ -2638,3 +2638,32 @@
          (is (not (contains? @(:env agent-ctx) :seon.sci.eval/unavailable-execution)))
          (is (nil? (sci/resolve agent-ctx 'user/kept)))
          (is (= 2 (sci/eval-string* agent-ctx "(+ 1 1)"))))))))
+
+(deftest a-stale-host-bound-row-refuses-by-name-only-when-called
+  ;; Restriction audit #1: a host-bound row acquired from the database
+  ;; installs a root that refuses by name, instead of refusing the
+  ;; acquisition (every later form) or leaving no Var.
+  (test-support/with-database
+   (fn [connection]
+     (test-support/transacted!
+      connection
+      (test-support/replacement-tx
+       (db/db connection) '[:seon.fn/sym seon.id/valid?]
+       "(defn valid? [length id] (and (java.util.Date.) (string? id)))"
+       {:seon.schema.admission/source :agent}))
+     (is (true? (:seon.fn/host-bound?
+                 (db/pull (db/db connection) [:seon.fn/host-bound?] [:seon.fn/sym 'seon.id/valid?])))
+         "the subject: a changed host-bound row")
+     (let [ctx (eval/base-ctx (db/db connection))
+           acquisition (:seon.sci.eval/acquisition ctx)
+           call (try (sci/eval-string* ctx "(seon.id/valid? 1 \"a\")")
+                     (catch clojure.lang.ExceptionInfo refusal (ex-message refusal)))]
+       (is (not-any? #(= 'seon.id/valid? (or (:seon.sci.eval/refused-function %)
+                                            (:seon.sci.eval/row-symbol %)))
+                     (concat (:seon.sci.eval/agent-mistakes acquisition)
+                             (:seon.sci.eval/acquisition-refusals acquisition))))
+       (is (some #(and (= 'seon.id/valid? (:seon.fn/sym %))
+                       (= :unavailable (:seon.sci.eval/load-state %)))
+                 (:seon.sci.eval/load-results acquisition)))
+       (is (and (string? call) (str/includes? call "seon.id/valid?")) (pr-str call))
+       (is (= 2 (sci/eval-string* ctx "(+ 1 1)")))))))
