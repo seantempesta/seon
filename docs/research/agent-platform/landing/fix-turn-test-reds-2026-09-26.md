@@ -1,6 +1,6 @@
 ---
 type: landing
-status: landed (rounds 1-3 accepted; round 4 374e918b7, 29abfed1a, 4e703c93a; round 5 d421b6e1a; round 6 48a345bc1); tests owed to root
+status: landed (rounds 1-3 accepted; round 4 374e918b7, 29abfed1a, 4e703c93a; round 5 d421b6e1a; round 6 48a345bc1; round 7 f81a22cd8); tests owed to root
 lane: fix-turn-test-reds-opus
 created: 2026-09-26
 ---
@@ -335,6 +335,53 @@ for the fixture root between the two JVMs.
 | turn-test | :1550 waits for the Datahike fix; :782 the refreshed-reads set gains `seon.error/for-agent`; durations are the harness class; :2292 is the print-owner terminal half | Datahike lane, turn/rereads owner, harness, pipeline |
 | test-runner-test, test.runner-test | `seon.render.value/admit-chunk` returns nil where its contract promises a map (value.clj:787) | floor printer lane |
 
+## Round 7: the arity gate misses a severed call (root: high priority; the test is right)
+
+**Why `db/arity-mismatches` reported nothing.** The answer is the pre-edit contract, not the arity rows and not
+a stale projection. Candidates come from the stored arity rows (`declared-arity-bounds`, db.clj). The verdict
+then kept only candidates that the callee's prepared arities also refuse, and those come from
+`call-preparation/plan-for` → `planned-arities` → `contract-arities (db/carried-projection database)`
+(call_preparation.clj:719-724, :745). That is the compiled `:seon.fn/spec`, which a write changing only the
+arity rows leaves as it was. REPL forms and values, on an isolated branch of default (052552039) with the
+db-test world, after the arity edit applied with `d/db-with`:
+- `(identical? (db/carried-projection before) (db/carried-projection edited))` → true: the projection is the same.
+- `:seon.fn/spec` → `"[:=> [:cat :int] :int]"`; `contract-arities` → one arity with `:min 1 :argument-count 1`.
+- `(cp/prepared-arities plan)` → `[{:min 1 :max 1}]`; stored rows → `#{{:min 2 :max 2}}`.
+- `arity-comparison` → candidate `[sample.arity/caller [sample.arity/target 1]]`; `db/arity-mismatches` → `[]`.
+
+**Fix (`f81a22cd8`, db.clj, granted after fd8f97877/45e541592):** a new `prepared-arity-bounds` returns the
+STORED arity rows, each minimum widened by the suppliable slot count of the plan arity with the same
+`:seon.fn.arity/order`. The graph's own rows are compared as written; the contract contributes only which
+slots a call may omit. `arity-verdict` and `arity-mismatches-with` had one 35-line copy of the report between
+them; both now call `arity-mismatch-report`. The now-unused `call-preparation-arities` resolver is deleted.
+`cp/prepared-arities` is now used only by call-preparation-test.
+
+REPL, the edited functions in a scratch namespace:
+
+| Case | Result |
+|---|---|
+| db-test world after the edit | `[{:caller sample.arity/caller :callee sample.arity/target :call-arity 1 :declared-arities [{2 2}] :prepared-arities [{2 2}]}]`, exactly the :1986 expectation |
+| edit plus the caller fixed to 2 | `[]` |
+| base (before the edit) | `[]` |
+| `my.message/inbox` (supplied slot) | `[{0 1}]`, the same as the contract's, so fn-test `prepared-source-counts…` keeps its value |
+| default's whole program | 0 candidates; old and new reports equal |
+
+Cost: the comparison (`report-arity-comparison`) is unchanged. The verdict adds one query per candidate callee
+(1.0 ms measured), and only when a candidate exists. Whole program with 0 candidates: 36.9 ms new against
+33.2 ms old, the same code path (noise). The writer-side 38 ms per report is not re-measured here: default
+runs the committed archive, so root's run measures it.
+
+Static checks: contracts-compile over db.clj finds 0 problems. Real outputs validate against
+`:seon.fn/declared-arities` and `:seon.fn/arity-mismatch-report`.
+
+Root runs:
+```sh
+bin/test-check default --test seon.db-test/arity-components-and-callers-are-checked-in-the-final-state
+bin/test-check default --test seon.fn-test/prepared-source-counts-are-admitted-and-real-mismatches-refuse
+bin/test-check default --test seon.fn-test/arity-mismatch-refuses-the-final-write
+bin/test-check default --test seon.publication-validation-test/changed-call-facts-still-refuse-an-invalid-arity
+```
+
 ## Deleted / net lines
 
 | Commit | Files | + | − |
@@ -351,6 +398,7 @@ for the fixture root between the two JVMs.
 | 4e703c93a | fn_test | 2 | 3 |
 | d421b6e1a | db.clj, db_test, web_debug_test | 47 | 11 |
 | 48a345bc1 | web_debug_test | 1 | 0 |
+| f81a22cd8 | db.clj (arity gate) | 73 | 63 |
 
 Net across seven code commits: src +5/−3 (program.cljc), tests +160/−142. The additions are mostly comments stating the owning rule at each fixture. Deleted: three hand-built `analyze-form` row paths in turn_test (≈45 lines). Added: the
 `held-handle` agent-id guard, the docstring note and the custody wrapper.
