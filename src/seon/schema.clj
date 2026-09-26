@@ -4080,7 +4080,7 @@
                   " has no active callable.")
              {:seon.error/at (java.util.Date.)
               :seon.error/layer :seon.instrument/registration
-              :seon.error/operation 'seon.instrument/bind-contract-predicates
+              :seon.error/operation 'seon.schema/bind-contract-predicates
               :seon.schema/unresolved-predicate predicate
               :seon.error/message "The schema predicate is unresolved."
               :seon.schema/predicate predicate}))))
