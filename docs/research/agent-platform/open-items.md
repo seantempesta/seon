@@ -117,28 +117,24 @@ EXISTING store (prove adoption on a branch of the live store, never only on a fr
 | Turns | local-provider turn 5/0 in bound; batched turn 3 fails (deletion lane); episode-limit loud fault green |
 | Concurrency | long suites not yet run; concurrency-test "Agent creation refused" unassigned |
 
-### Running lanes and the ranked plan (rewritten in place 2026-09-26 ~21:45Z; live: c029d48cb, pid 86089)
-Fix first — correctness of the agent's REPL path, then its cost, then boot:
-1. **Agent path correct** (one-commit-a-opus): `(do (defn …) (call …))` faults inside Seon (program-value? got no Var); prove a writing form
-   works under option 2; merge-cut1's three host-test regressions pass. Nothing else outranks this.
-2. **Today's landings green** (root): focused regressions for option 2, program-change, node cache, P1, cache S1, do/defn, merge cut 1;
-   each red goes to its owner lane, never triaged in bulk.
-3. **Per-form cost** — `(inc 1)` 144 ms p50 of which the settlement commit is 118 ms; first call of a new contracted fn 448 ms; config
-   read 1.3 ms (cache-central removing the file-stat stamp). Research lane on the commit floor (below).
-4. **defn cost** — 182k armed calls per defn, `seon.program/source-family?` ×38k (task 400bcf52dd53): whole-program scan per call.
-5. **Boot** — ready 89 s at c029d48cb (28 s at 8e4ac24c9) → perf-boot-opus.
-Research (answers, not code): why one Datahike commit costs ~118 ms (flushes/fsyncs/konserve writes per tx; the 55 writer-side queries);
-the three cache rulings (projection digest for projection-cache-value; the test runner's reach-index atom; render cache vs read evidence).
-Then: cache slice 2 (db.clj caches), apply the 44 subject-mark patches when files free, verify and close ~30 fixed tasks, the dogfood
-merge loop end to end (branch → defn → task → proof → propose → root merge).
+### The order (rewritten in place 2026-09-26 ~23:00Z; live: bb07fdf08, pid 89341)
+**Working rule from tonight:** a fix proves itself BEFORE landing — its focused tests pass on default (one bin/test-check at a time),
+Astra reviews the diff, then root batches ONE restart. No restart to find out whether something works. At most three editing lanes.
 
-| Lane | Doing |
-|---|---|
-| one-commit-a-opus | #1, then first-call 448 ms, then probes |
-| cache-central-opus | config read stamp → loaded program identity; then slice 2 when db.clj frees |
-| perf-boot-opus | boot ready 89 s |
-| commit-floor-research-opus | #3 research: the 118 ms commit |
-| defn-scan-opus | #4 source-family? ×38k |
+0. **Agent path correct (gates everything).** A hosted branch run moved the PARENT head (host_test:115) and a later form misses an
+   earlier declaration (:300-303); merge-cut1 in-form writes red. one-commit-a-opus diagnoses; astra-audit-today reads today's diffs
+   independently. Then host / evaluate-source / config / program / program-change / entry-gate / render-source green on default.
+1. **Slow first, clear causes (editing):** defn-scan-opus (source-family? ×38k; digest over used aliases only), perf-boot-opus
+   (re-analysis writes only changed rows; ready 89 s → target ≤10 s). commit-floor-research-opus: why one commit is ~118 ms.
+2. **The one eval path (after 0 and the Astra review of the audit):** eval-path-audit-2026-09-26.md option B — clj-kondo before
+   evaluation is the single authority (root ruled: a data def is a program row at the REPL exactly as in files), gate before running,
+   one wrap/projection/handle, reply from the settlement report; slices S1–S7 one at a time, each Astra-reviewed. ~−1,080 net lines.
+3. **Shrink the large files (PLAN ONLY until reviewed):** six shrink-plan docs (turn, sci/eval, db, schema+error, render, test/issue/plan),
+   slow paths first; Astra audits each plan; execute slow-first slices ≤3 lanes at a time. Target: 92.8k → 10k lines.
+4. **Then:** dogfood merge loop end to end (branch → defn → task → proof → propose → root merge); cache slice 2 (db.clj caches);
+   apply the 44 subject-mark patches; verify and close ~30 fixed tasks; stale-kondo-dependency task 547fc42c47a5.
+**Research running:** web-research-opus (Datahike/konserve commit latency, clojure-lsp/kondo incremental analysis, Clerk/Clay/nREPL
+eval pipelines, Malli instrumentation cost, Caffeine weighers); astra-review-eval-audit; astra-audit-today.
 
 ### Designs (authorities; each revised in place)
 | Design | Verdict |
