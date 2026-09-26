@@ -21,8 +21,7 @@ Part 2 (rollback entrance) was dropped by root on the owner's instruction ("roll
 - The default JVM was replaced during this audit. Its advertisement disappeared at about 16:02Z, and pid 19859 was
   booting from `start --head`. That was root's restart, not this lane's. The probe of private-var access, `eval`,
   `with-redefs` and `all-ns` did not run, so those rows below are marked **unverified live**.
-- Branches `audit-agent-restrictions` and `audit-agent-restrictions-2` could not be retired because the JVM was down.
-  **Root: retire both** (`branch` tool, action retire).
+- Branches `audit-agent-restrictions` and `audit-agent-restrictions-2` were retired after the JVM came back.
 - Found in passing (not restrictions, but they make work harder):
   - Contract finding on `seon.sci.kernel/failure-value`: an ordinary "Unable to resolve symbol" error matches none of
     its declared alternatives.
