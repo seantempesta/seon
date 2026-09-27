@@ -3098,7 +3098,11 @@
               :seon.schema/pure-predicate-symbols pure-predicate-symbols
               :seon.schema/predicate-functions
               (deleted-predicate-functions forms function-contracts)
-              :seon.schema/validate-render-contracts? true}))
+              ;; Reading committed rows re-admits nothing: renderer coherence
+              ;; was judged when the rows were written (`projection-with-schema`,
+              ;; publication's build). A historical commit opens under the
+              ;; rules that admitted it, not today's.
+              :seon.schema/validate-render-contracts? false}))
           ;; The row text each form was read from, so the next derivation
           ;; from this projection reads only rows whose text differs. A
           ;; runtime member: every other constructor drops it, so it never

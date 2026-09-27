@@ -1916,3 +1916,24 @@
         loader (#'schema/projection-admissions database)]
     (is (= (into {} (filter (fn [[[attribute _] _]] (= :seon.schema/key attribute))) loader)
            (#'schema/schema-scoped-admissions database)))))
+
+(deftest committed-rows-open-without-re-admitting-their-renderers
+  ;; A published commit whose renderer relation today's rules no longer accept
+  ;; (the 6ab855c9 build's :seon.render/db-unit inputs after db-unit's deletion)
+  ;; still opens: reading history derives its projection; renderer coherence
+  ;; belongs to the writes that admitted it.
+  (let [database (seon.db/db (:seon.db/connection (test-support/execution-handle nil)))
+        rows {:seon.schema/database-value database
+              :seon.schema/schema-rows [[:review/incoherent-input ":int" 1]
+                                        [:review/shape "[:map {:seon.render/ai review.render/render} [:review/x :int]]" 1]
+                                        [:review/x ":int" 1]]
+              :seon.schema/function-contract-rows
+              [['review.render/render "[:=> [:cat :review/incoherent-input] :string]" 1]]}
+        projection (schema/projection-from-rows rows)]
+    (is (contains? (:seon.schema.projection/forms projection) :review/shape))
+    (testing "admission still refuses the same relation at a write"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"does not accept the declaring shape"
+                            (schema/projection-with-schema
+                             projection :review/shape
+                             [:map {:seon.render/ai 'review.render/render} [:review/x :int] [:review/y {:optional true} :int]]
+                             {:seon.schema.admission/source :agent}))))))
