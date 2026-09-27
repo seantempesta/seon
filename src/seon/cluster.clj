@@ -1279,17 +1279,45 @@
   attribute is dropped by design; `dropped-summary` counts it and names the
   source files that re-derive the program rows among it. A converged reopen
   compares each installed attribute map with its memoized declaration; the
-  work of a change is proportional to the changed attributes' datoms."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection]
-                  :seon.store/transaction-data]}
-  [database projection]
-  (let [declarations (declared-attributes projection)]
-    (attribute-change-tx
-     database
-     (into (mapv :db/ident declarations) (retired-attributes database projection))
-     (schema/projection-cache-value
-      projection [::declarations-by-attribute]
-      #(into {} (map (juxt :db/ident identity)) declarations)))))
+  work of a change is proportional to the changed attributes' datoms.
+
+  `retire?` false leaves the retired attributes installed: a population that
+  also publishes program rows retires them after those rows
+  (`retire-attributes!`), so the writer judges the retirement against the
+  final program (`seon.db/removed-definition-error`)."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.db/database-value :seon.schema/projection]
+                   :seon.store/transaction-data]
+                  [:=> [:cat :seon.db/database-value :seon.schema/projection :boolean]
+                   :seon.store/transaction-data]]}
+  ([database projection]
+   (declaration-changes database projection true))
+  ([database projection retire?]
+   (let [declarations (declared-attributes projection)]
+     (attribute-change-tx
+      database
+      (cond-> (mapv :db/ident declarations)
+        retire? (into (retired-attributes database projection)))
+      (schema/projection-cache-value
+       projection [::declarations-by-attribute]
+       #(into {} (map (juxt :db/ident identity)) declarations))))))
+
+(defn- retire-attributes!
+  "Retract every attribute `projection` retired, with its current data, in one transaction.
+
+  Run after the population's program rows commit: a surviving writer
+  (`:seon.fn/writes`) of a retired attribute then refuses by name, and a
+  writer the same publication converted no longer does. Work is one AEVT
+  range read per retired attribute."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.schema/projection]
+                  [:or :nil :seon.db/transaction-report]]}
+  [connection projection]
+  (let [database (db/db connection)
+        tx-data (attribute-change-tx database (retired-attributes database projection) {})]
+    (when (seq tx-data)
+      (require-committed!
+       (db/transact! connection {:tx-data tx-data})
+       {:seon.boot/population :seon.schema/declarations}))))
 
 (defn- dropped-summary
   "The current datoms a declaration change drops, and the files that re-derive them.
@@ -1555,7 +1583,8 @@
   adopts in place (`declaration-changes`): missing and accretive declarations
   are transacted, a non-accretive change replaces the attribute and a retired
   attribute is retracted, each with its current data. A converged reopen
-  issues no transaction.
+  issues no transaction. `retire?` false leaves retirement to a caller that
+  publishes program rows first (`populate-source!`).
 
   The population HANDS its transactions the projection its declarations come
   from — the same projection write admission validates against — so a caller
@@ -1569,10 +1598,14 @@
     [:=> [:cat :seon.db/connection [:or :nil :seon.boot/cluster-name]]
      [:or :nil :seon.db/transaction-report]]
     [:=> [:cat :seon.db/connection [:or :nil :seon.boot/cluster-name] :boolean]
+     [:or :nil :seon.db/transaction-report]]
+    [:=> [:cat :seon.db/connection [:or :nil :seon.boot/cluster-name] :boolean :boolean]
      [:or :nil :seon.db/transaction-report]]]}
   ([connection cluster-name]
    (accrete-schema-population! connection cluster-name true))
   ([connection cluster-name publish-schema-rows?]
+   (accrete-schema-population! connection cluster-name publish-schema-rows? true))
+  ([connection cluster-name publish-schema-rows? retire?]
   (let [forms (schema.edn/packaged-forms)
         projection (or (schema/handed-projection) (schema/declaration-projection forms))]
     (schema/call-with-forms
@@ -1582,7 +1615,7 @@
         projection
         (fn []
           (let [declarations
-                (declaration-changes (db/db connection) projection)]
+                (declaration-changes (db/db connection) projection retire?)]
             (when (seq declarations)
               (require-committed!
                (db/transact! connection {:tx-data declarations})
@@ -1658,6 +1691,7 @@
           ;; schema resource never re-indexes the program and a config
           ;; document never re-accretes the schema.
           (let [schema? (or (nil? classes) (classes :schema-resource))
+                program? (or (nil? classes) (classes :program))
                 ;; Read BEFORE the population transacts: the datoms a replaced
                 ;; or retired attribute drops, and the files whose program
                 ;; rows carried them (owner 2026-09-23: drop the data, update
@@ -1674,8 +1708,10 @@
           ;; final transaction whenever program rows publish too (always, for
           ;; a complete or an incremental publication); publishing them first
           ;; refused a schema naming a renderer its own publication defines.
+          ;; Retired attributes likewise wait for the program rows: a writer
+          ;; this publication converts must not refuse their retirement.
           (let [report (accrete-schema-population!
-                        connection nil (and (some? classes) (not (classes :program))))]
+                        connection nil (and (some? classes) (not program?)) (not program?))]
             (report-source-progress!
              (str "schema population complete; dropped "
                   (:seon.db/datom-count dropped 0) " datoms"))
@@ -1694,7 +1730,7 @@
                                [:seon.db.process/id boot-process-identity]}})
                {:seon.boot/population :seon.cluster.instruction/rows}))))
           (let [result
-                (when (or (nil? classes) (classes :program))
+                (when program?
                   (report-source-progress! "program rows started")
                   (let [result (seon.fn/index!
              (cond-> {:seon.db/connection connection
@@ -1714,6 +1750,10 @@
              report-source-progress!)]
                     (report-source-progress! "program rows complete")
                     result))
+                ;; The writer judges the retirement against the final program
+                ;; rows, then the files behind its dropped datoms re-derive.
+                _ (when (and schema? program? (not (:seon.error/at result)))
+                    (retire-attributes! connection (schema/handed-projection)))
                 reapply (:seon.fn/changed-paths dropped)
                 ;; Re-derive only the files whose program rows lost datoms,
                 ;; compared against the database AFTER the drop so every row

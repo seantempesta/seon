@@ -4,7 +4,8 @@
   makes it unknown (`:program-unknown`, never green or red). A failed adoption
   leaves the program unknown until one records. Every test injects its own
   identity atom; the JVM's `seon.sci.eval/loaded-identity` is never touched."
-  (:require [clojure.string :as str]
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [my.program]
             [seon.fn]
@@ -13,6 +14,7 @@
             [seon.instrument :as instrument]
             [seon.repl :as repl]
             [seon.schema :as schema]
+            [seon.schema.edn :as schema.edn]
             [seon.sci.eval :as sci.eval]
             [seon.test]
             [seon.test-support :as support]))
@@ -244,3 +246,74 @@
         "a changed reached definition names another analyzer")
     (is (not= head (selected database #{"src/seon/fn.clj"} []))
         "a deleted analyzer file names another analyzer")))
+
+(defn- retire-projection
+  "The packaged population plus one fixture row, whose dial `dial?` declares."
+  [dial?]
+  (schema/declaration-projection
+   (schema.edn/derive-config-forms
+    (merge (schema.edn/packaged-forms)
+           {:retire.probe/id [:string {:seon.db/identity true}]
+            :retire.probe/row
+            (cond-> [:map {:seon.db/attributes true :seon.program/partition :seon.data}
+                     [:retire.probe/id :retire.probe/id]]
+              dial? (conj [:retire.probe/dial {:optional true} :retire.probe/dial]))}
+           (when dial? {:retire.probe/dial :int})))))
+
+(defn- writer-source
+  "One namespace whose function writes `entity`."
+  [entity]
+  (str "(ns retire.probe (:require [seon.db]))\n"
+       "(defn write! {:malli/schema [:=> [:cat :seon.db/connection] :any]} [connection]\n"
+       "  (seon.db/transact! connection [" entity "]))\n"))
+
+(deftest a-retirement-lands-after-the-program-rows-that-convert-its-writers
+  ;; Class regression (fix-retire-ordering 2026-09-27): 13387dc38 retired a
+  ;; dial and converted the one test writing it in the same commit, and boot's
+  ;; publication refused because `populate-source!` retracted the attribute
+  ;; before `index!` wrote the converted test row. WANTED: a publication that
+  ;; retires an attribute and converts its writer is admitted; one that retires
+  ;; it while a writer survives is refused naming that writer, retiring nothing.
+  (let [root (io/file "tmp" "program-change-retire" (str (random-uuid)))
+        source (io/file root "src/retire/probe.clj")
+        with-dial (retire-projection true)
+        without-dial (retire-projection false)
+        publish! (fn [connection projection]
+                   (schema/call-with-projection
+                    projection
+                    #(cluster/populate-source!
+                      {:seon.db/connection connection
+                       :seon.fn/root (.getCanonicalPath root)
+                       :seon.fn/roots ["src"]
+                       :seon.fn/changed-paths #{"src/retire/probe.clj"}
+                       :seon.source/change-classes #{:schema-resource :program}
+                       :seon.source/previous-database (db/db connection)})))
+        writes (fn [connection]
+                 (set (db/q '[:find [?attribute ...] :in $ ?writer
+                              :where [?e :seon.fn/sym ?writer] [?e :seon.fn/writes ?attribute]]
+                            (db/db connection) 'retire.probe/write!)))
+        installed? (fn [connection] (contains? (:schema (db/db connection)) :retire.probe/dial))]
+    (io/make-parents source)
+    (try
+      (support/with-database
+       (fn [connection]
+         (spit source (writer-source "{:retire.probe/dial 1}"))
+         (publish! connection with-dial)
+         (schema/call-with-projection
+          with-dial #(support/transacted! connection [{:retire.probe/id "a" :retire.probe/dial 3}]))
+         (is (contains? (writes connection) :retire.probe/dial) "the fixture writer is indexed")
+         (testing "retired while its writer survives: refused by name, nothing retired"
+           (let [refusal (pr-str (support/refusal-data #(publish! connection without-dial)))]
+             (is (str/includes? refusal "retire.probe/write!") refusal)
+             (is (str/includes? refusal ":seon.fn/writes"))
+             (is (installed? connection) "the attribute stays installed")))
+         (testing "retired in the publication that converts its writer: admitted"
+           (spit source (writer-source "{:retire.probe/id \"b\"}"))
+           (publish! connection without-dial)
+           (is (not (installed? connection)) "the attribute is retired with its data")
+           (is (empty? (writes connection)) "the converted writer names it no longer")
+           (is (= {:retire.probe/id "a"}
+                  (dissoc (db/pull (db/db connection) '[*] [:retire.probe/id "a"]) :db/id))
+               "its entity keeps every other attribute"))))
+      (finally
+        (doseq [file (reverse (file-seq root))] (io/delete-file file true))))))
