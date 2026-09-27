@@ -327,33 +327,56 @@
               ":result"))
         "a preview with no evaluation identity has no handle")))
 
-(deftest ^{:seon/tasks #{"18c37812b5bc"}} the-reply-map-reads-back-as-data-whatever-the-value-text-ends-in
-  (let [read-response (fn [text] (binding [*read-eval* false] (read-string text)))
-        handle (admit/result-handle "e7b3")]
-    (testing "an elided value's legend comment does not swallow the keys after it"
-      (let [response (repl/response
-                      {:seon.cluster.eval/source "(vec (range 3000))"
-                       :seon.repl/handle handle
-                       :seon.eval/duration-ms 711
-                       :seon.eval/shown (str "[0 1 2 …2997]\n"
-                                             ";; …N = N more. Read any part with (seon.print/value-at "
-                                             handle " [...]).")})
-            reply (read-response response)]
-        (is (= [0 1 2 (symbol "…2997")] (:seon.repl/value reply)))
-        (is (= handle (:seon.repl/result reply)))
-        (is (= 711 (:seon.repl/ms reply)))
-        (is (str/includes? response ";; …N = N more") "the legend is still shown")))
-    (testing "a declared renderer's output keeps the handle and the time in the reply map after it"
-      (let [response (repl/response {:seon.cluster.eval/source "(my.plan/current)"
-                                     :seon.eval/renderer 'my.plan/render-ai
-                                     :seon.repl/handle handle
-                                     :seon.eval/duration-ms 12
-                                     :seon.eval/shown ";; The plan has two steps.\n(my.plan/step 1)"})
-            [shown tail] (str/split response #"\n(?=#:seon\.repl\{)")]
-        (is (= ";; The plan has two steps.\n(my.plan/step 1)" shown))
-        (is (= {:seon.repl/result handle :seon.repl/ms 12} (read-response tail)))))))
+(defn- one-map
+  "The reply read back: exactly one EDN map, nothing before or after it."
+  [text]
+  (with-open [reader (java.io.PushbackReader. (java.io.StringReader. text))]
+    (let [end (Object.)
+          reply (binding [*read-eval* false *default-data-reader-fn* tagged-literal] (read {:eof end} reader))]
+      (is (map? reply) text)
+      (is (identical? end (binding [*read-eval* false *default-data-reader-fn* tagged-literal] (read {:eof end} reader)))
+          (str "nothing follows the reply map: " text))
+      (is (not (str/starts-with? (str/triml text) ";")) (str "nothing precedes the reply map: " text))
+      reply)))
 
-(deftest a-reply-within-every-declared-bound-adds-nothing-and-an-exceeded-bound-is-one-line-above-it
+(deftest ^{:seon/tasks #{"18c37812b5bc"}} the-reply-is-one-edn-map-whatever-the-value
+  ;; Owner 2026-09-27: "The repl should be returning the timing and the result
+  ;; so it's already a map" — "return data whenever possible so it's
+  ;; unambiguous." Value, error, findings, handle and time are keys of the one
+  ;; map; nothing is printed above or around it.
+  (let [handle (admit/result-handle "e7b3")]
+    (testing "an elided value keeps its cut and continuation as data"
+      (let [reply (one-map (repl/response
+                            {:seon.cluster.eval/source "(vec (range 3000))"
+                             :seon.repl/handle handle
+                             :seon.eval/duration-ms 711
+                             :seon.eval/shown "[0 1 2 …2997 (drop 3 result/ee7b3)]"}))]
+        (is (= [0 1 2 (symbol "…2997") '(drop 3 result/ee7b3)] (:seon.repl/value reply)))
+        (is (= handle (:seon.repl/result reply)))
+        (is (= 711 (:seon.repl/ms reply)))))
+    (testing "a comment-ended text still leaves the map readable"
+      (let [reply (one-map (repl/response {:seon.cluster.eval/source "x" :seon.repl/handle handle
+                                           :seon.eval/shown "[1 2]\n;; a trailing diagnostic line"
+                                           :seon.eval/duration-ms 1}))]
+        (is (= [1 2] (:seon.repl/value reply)))
+        (is (= 1 (:seon.repl/ms reply)))))
+    (testing "a declared renderer's text is the :value, not text before the map"
+      (let [reply (one-map (repl/response {:seon.cluster.eval/source "(my.plan/current)"
+                                           :seon.eval/renderer 'my.plan/render-ai
+                                           :seon.repl/handle handle
+                                           :seon.eval/duration-ms 12
+                                           :seon.eval/shown ";; The plan has two steps.\n(my.plan/step 1)"}))]
+        (is (= ";; The plan has two steps.\n(my.plan/step 1)" (:seon.repl/value reply)) "prose renders are one string")
+        (is (= handle (:seon.repl/result reply)))
+        (is (= 12 (:seon.repl/ms reply))))
+      (let [reply (one-map (repl/response {:seon.cluster.eval/source "(dir x)"
+                                           :seon.eval/renderer 'seon.repl/render-directory-ai
+                                           :seon.eval/shown "#:seon.repl{:columns [:sym], :rows [[x/f]]}"
+                                           :seon.eval/duration-ms 3}))]
+        (is (= {:seon.repl/columns [:sym] :seon.repl/rows [['x/f]]} (:seon.repl/value reply))
+            "a render that is EDN is data")))))
+
+(deftest a-reply-within-every-declared-bound-adds-nothing-and-an-exceeded-bound-is-a-findings-entry
   (let [emission {:seon.cluster.eval/source "(inc 1)"
                   :seon.repl/handle (admit/result-handle "e5885")
                   :seon.eval/shown "2"
@@ -361,17 +384,19 @@
     (testing "the normal reply is the answer, the handle and the time"
       (is (= "#:seon.repl{:value 2, :result result/ee5885, :ms 4}" (repl/response emission)))
       (is (= [] (repl/findings emission))))
-    (testing "each exceeded bound is one ;; line above the map naming measure, observation, bound and fix"
+    (testing "each exceeded bound is one data map under :findings in the one reply map"
       (let [slow (assoc emission :seon.eval/duration-ms 1450
                         :seon.cluster.eval/output (apply str (repeat 400 "noisy line\n")))
-            lines (str/split-lines (repl/response slow))]
-        (is (= 3 (count lines)))
-        (is (str/starts-with? (first lines) ";; SLOW: 1450 ms, over one second"))
-        (is (str/starts-with? (second lines) ";; LARGE OUTPUT: ~"))
-        (is (str/starts-with? (peek lines) "#:seon.repl{:value 2"))))
-    (testing "a value over the whole-value bound names its handle, its whole and shown size"
-      (is (= [";; LARGE VALUE: result/ee5885 is ~4650 tokens whole (shown 30). A value this big usually means a query or function returns more than it should."]
-             (repl/findings (assoc emission :seon.eval/value-tokens 4650 :seon.eval/shown-tokens 30))))
+            reply (one-map (repl/response slow))
+            found (:seon.repl/findings reply)]
+        (is (= [:slow :large-output] (mapv :seon.repl/finding found)))
+        (is (= 1450 (:seon.eval/duration-ms (first found))))
+        (is (every? :seon.repl/fix found) "every finding carries its declared fix")
+        (is (= 2 (:seon.repl/value reply)))))
+    (testing "a value over the whole-value bound reports its whole and shown size"
+      (is (= [{:seon.repl/finding :large-value :seon.eval/value-tokens 4650 :seon.eval/shown-tokens 30}]
+             (mapv #(dissoc % :seon.repl/fix)
+                   (repl/findings (assoc emission :seon.eval/value-tokens 4650 :seon.eval/shown-tokens 30)))))
       (is (= [] (repl/findings (assoc emission :seon.eval/value-tokens 900 :seon.eval/shown-tokens 900)))
           "within the bound the value is simply shown"))))
 
@@ -385,22 +410,18 @@
                :seon.eval/allocated-bytes]))
   (is (not-any? #(= "seon.repl" (namespace %)) (repl/cost-attributes))
       "a measure the reply derives itself is not pulled")
-  (is (str/includes?
-       (repl/render-ai {:db/id 7 :seon.cluster.eval/id "eb53" :seon.cluster.eval/source "(vec (range 3000))"
-                        :seon.eval/shown "[0 1 2 …2997 (drop 3 result/eeb53)]"
-                        :seon.eval/value-tokens 1604 :seon.eval/shown-tokens 39 :seon.eval/duration-ms 5})
-       ";; LARGE VALUE: result/eeb53 is ~1604 tokens whole (shown 39).")))
+  (let [text (repl/render-ai {:db/id 7 :seon.cluster.eval/id "eb53" :seon.cluster.eval/source "(vec (range 3000))"
+                              :seon.eval/shown "[0 1 2 …2997 (drop 3 result/eeb53)]"
+                              :seon.eval/value-tokens 1604 :seon.eval/shown-tokens 39 :seon.eval/duration-ms 5})
+        reply (one-map (subs text (str/index-of text "#:seon.repl{")))]
+    (is (= :large-value (get-in reply [:seon.repl/findings 0 :seon.repl/finding])) text)))
 
-(deftest a-failed-evaluation-with-a-rendered-face-still-says-error
-  ;; tests-0627i: a failure shown through its declared face lost its :error key,
-  ;; so it read like a value. The face prints; the map still says it failed.
-  (let [response (repl/response {:seon.cluster.eval/source "(/ 1 0)"
-                                 :seon.eval/renderer 'seon.sci.kernel/render-ai
-                                 :seon.eval/shown ";; Execution error (ArithmeticException) at (REPL:1:1).\n;; Divide by zero"
-                                 :seon.cluster.eval/error "Divide by zero"
-                                 :seon.repl/handle (admit/result-handle "e64f")
-                                 :seon.eval/duration-ms 0})
-        tail (read-string (subs response (str/index-of response "#:seon.repl{")))]
-    (is (= "Divide by zero" (:seon.repl/error tail)) response)
-    (is (not (contains? tail :seon.repl/value)) response)
-    (is (= 0 (:seon.repl/ms tail)))))
+(deftest a-failed-evaluation-says-error-in-the-one-map
+  (let [reply (one-map (repl/response {:seon.cluster.eval/source "(/ 1 0)"
+                                       :seon.eval/shown "{:seon.error/message \"Divide by zero\", :seon.error/exception-class java.lang.ArithmeticException}"
+                                       :seon.cluster.eval/error "Divide by zero"
+                                       :seon.repl/handle (admit/result-handle "e64f")
+                                       :seon.eval/duration-ms 0}))]
+    (is (= "Divide by zero" (get-in reply [:seon.repl/error :seon.error/message])) (pr-str reply))
+    (is (not (contains? reply :seon.repl/value)))
+    (is (= 0 (:seon.repl/ms reply)))))

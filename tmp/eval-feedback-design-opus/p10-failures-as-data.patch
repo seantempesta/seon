@@ -1,0 +1,75 @@
+diff --git a/src/seon/sci/eval.clj b/src/seon/sci/eval.clj
+index 332b0e8be..8f9afa547 100644
+--- a/src/seon/sci/eval.clj
++++ b/src/seon/sci/eval.clj
+@@ -4550,11 +4550,14 @@
+                            throwable record)
+                         arity-message
+                         (assoc :seon.error/message arity-message))
+-                ;; The agent's failure is its whole flat error; its declared
+-                ;; pair selects what shows, like any value's: a refusal's own
+-                ;; declaration, else its producer's return.
++                ;; The agent's failure is its whole flat error, shown AS DATA
++                ;; (owner 2026-09-27: "return data, not comments"): the floor
++                ;; prints the error map structurally, message, class, location
++                ;; and cause chain, bounded like any value, never a prose face.
+                 admitted (shown-result value (assoc request :seon.render.call/function
+-                                                    'seon.sci.kernel/failure-value)
++                                                    'seon.sci.kernel/failure-value
++                                                    :seon.render.value/options
++                                                    {:seon.render.value/structural? true})
+                                        record)]
+           (failed-evaluation
+            (cond-> {:seon.sci.eval/output-prefix (unadmitted-notice definitions)
+@@ -4900,7 +4903,9 @@
+   (when-let [unavailable ((:seon.sci.eval/restore evaluation) nil (ex-info (:seon.error/message refusal) refusal))]
+     (throw (ex-info (:seon.error/message unavailable) unavailable)))
+   (merge (dissoc evaluation :seon.program/row :seon.sci.eval/bindings :seon.eval/renderer)
+-         (shown-result refusal request
++         ;; A refusal is shown as data, like the agent's own failure.
++         (shown-result refusal (assoc request :seon.render.value/options
++                                      {:seon.render.value/structural? true})
+                        (assoc (:seon.sci.admit/record evaluation)
+                               :seon.eval/outcome :error))))
+ 
+diff --git a/src/seon/turn.clj b/src/seon/turn.clj
+index f263a6ce2..0544a2643 100644
+--- a/src/seon/turn.clj
++++ b/src/seon/turn.clj
+@@ -3926,7 +3926,7 @@
+                     (:seon.eval/shown (final-shown cluster database agent-id [value] structural)))
+              (not evaluated?)
+              (assoc :seon.eval/shown
+-                    (:seon.eval/shown (final-shown cluster database agent-id value))))))]
++                    (:seon.eval/shown (final-shown cluster database agent-id value structural))))))]
+     {:seon.error/value value
+      :seon.blob/staged-writes (:seon.blob/staged-writes recording)
+      :seon.db/tx-data
+@@ -5077,7 +5077,8 @@
+                   ;; owner renders it, and its render reads stay the form's.
+                   (merge unrun (binding [db/*read-evidence-sink* captured]
+                                  (sci.eval/shown-result (:seon.sci.admit/value unrun)
+-                                                        request
++                                                        (assoc request :seon.render.value/options
++                                                               {:seon.render.value/structural? true})
+                                                         (:seon.sci.admit/record unrun)))))
+                 evaluation)
+               evaluation
+diff --git a/test/seon/test/accretion_test.clj b/test/seon/test/accretion_test.clj
+index 5cd549017..c15896fed 100644
+--- a/test/seon/test/accretion_test.clj
++++ b/test/seon/test/accretion_test.clj
+@@ -212,9 +212,10 @@
+                                                   (accretion/gate-report
+                                                    {:seon.fn/sym 'fixture.candidate/target
+                                                     :seon.test.accretion/results results})))]
+-            ;; Shown through its declared teaching face, orientation first,
+-            ;; never the raw map a value budget may cut before it.
+-            (is (= 'seon.test.accretion/render-ai (:seon.eval/renderer refused)) (pr-str refused))
++            ;; Shown as data (owner 2026-09-27): the refusal map itself,
++            ;; orientation included, never a prose face.
++            (is (nil? (:seon.eval/renderer refused)) (pr-str refused))
++            (is (map? (read-string (:seon.eval/shown refused))) (:seon.eval/shown refused))
+             (is (re-find #"install refused" (:seon.eval/shown refused)) (:seon.eval/shown refused)))
+           (is (identical? held (sci/resolve parent 'fixture.candidate/target)))
+           (is (= 1 (sci/eval-string* parent "(fixture.candidate/target 1)"))))))))

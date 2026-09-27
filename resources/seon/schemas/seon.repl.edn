@@ -1,6 +1,14 @@
 #:seon.repl{:cost
             [:map-of {:description "One evaluation's measures as seon.repl/findings judges them against :seon.config.eval/bounds: each recorded measure the evaluation carries, plus :seon.repl/out-tokens. Absent means not measured."}
              :qualified-keyword :int]
+            :finding [:keyword {:description "What one exceeded declared bound (:seon.config.eval/bounds) names, e.g. :large-value."}]
+            :fix [:string {:min 1 :description "The declared fix for one finding."}]
+            :with [:vector {:description "The other recorded measures a bound's finding reports beside its own."} :qualified-keyword]
+            :finding-value
+            [:map {:description "One finding in the reply map's :seon.repl/findings: its kind, the measure it exceeded with the observed value, the other measures it reports, and its fix."}
+             [:seon.repl/finding :seon.repl/finding]
+             [:seon.repl/fix {:optional true} :seon.repl/fix]]
+            :findings [:vector :seon.repl/finding-value]
             :out-tokens
             [:int {:min 0 :description "Estimated tokens (seon.ai.tokens/estimate) of an evaluation's printed output, derived from the saved output when its reply is rendered."}]
             :directory

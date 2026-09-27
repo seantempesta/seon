@@ -109,6 +109,7 @@
 (def ^:private response-order
   [:seon.repl/value
    :seon.repl/error
+   :seon.repl/findings
    :seon.repl/diagnostics
    :seon.repl/interrupted
    :seon.repl/result
@@ -148,16 +149,29 @@
   [emission]
   (or (:seon.eval/shown emission) (:seon.repl/value emission)))
 
+(declare syntax-tokens)
+
 (defn- data-text
   "Saved text as it enters the reply map: floor-printed data verbatim, any
   other text (an unrun evaluation's message, a receipt saved before its error
-  was data) as one readable string."
+  was data, a render's REPL entries with their `;;` prose) as one readable
+  string, so no comment ever lands inside the reply map."
   {:malli/schema [:=> [:cat :string] :string]}
   [text]
-  (if (string? (shown-value text)) (pr-str text) text))
+  (if (or (string? (shown-value text))
+          (some #(= "comment" (first %)) (syntax-tokens text)))
+    (pr-str text)
+    text))
+
+(declare findings)
 
 (defn- response-entries
-  "The response's present keys, in declared order, each already text."
+  "The response's present keys, in declared order, each already text.
+
+  ONE MAP, DATA ONLY (owner 2026-09-27: \"return data, not comments\"). A
+  declared renderer's text is the `:value` (read back as data when it is EDN,
+  else one string), a failure is `:error`, and the declared bounds' findings
+  are `:findings`; nothing is printed above or around the map."
   [{output :seon.cluster.eval/output
     source :seon.cluster.eval/source
     handle :seon.repl/handle
@@ -171,9 +185,14 @@
         ;; Diagnostics are a later stage's, beside a value that stands.
         diagnostics (:seon.cluster.eval/diagnostics emission)
         failed? (and (:seon.cluster.eval/error emission) (not diagnostics))
-        by-key {:seon.repl/value (when (and (not failed?) (some? value)) value)
+        rendered? (some? (:seon.eval/renderer emission))
+        found (findings emission)
+        by-key {:seon.repl/value (when (and (not failed?) (some? value))
+                                   (if rendered? (data-text value) value))
                 :seon.repl/error (when failed?
                                    (data-text (or value (:seon.cluster.eval/error emission))))
+                :seon.repl/findings (when (seq found)
+                                      (binding [*print-namespace-maps* true] (pr-str found)))
                 :seon.repl/diagnostics (some-> diagnostics data-text)
                 ;; AN EVALUATION BOOT CUT SAYS SO. Without this the response
                 ;; for an interrupted evaluation carried `:ms` alone and read
@@ -204,8 +223,6 @@
                   (when-some [text (get by-key response-key)]
                     [response-key text])))
           response-order)))
-
-(declare syntax-tokens)
 
 (defn- ends-in-comment?
   "True when `text`'s last token is a line comment (the floor's elision legend,
@@ -245,18 +262,20 @@
 (def ^:private bounds
   "The declared bounds, compiled at the first response after this namespace
   loads (one read of the packaged forms): a bound edited in the schema
-  resource is adopted at the next reload of `seon.repl`. Each entry's
-  `:seon.repl/finding` is its line: strings verbatim, and each qualified
-  keyword the evaluation's value for it (a measure, `:seon.repl/result`)."
+  resource is adopted at the next reload of `seon.repl`. Each entry declares
+  its finding as data: `:seon.repl/finding` (what it is), `:seon.repl/with`
+  (the other recorded measures it reports) and `:seon.repl/fix`."
   (delay
    (let [form (get (schema.edn/packaged-forms) :seon.config.eval/bounds)
          schema (m/schema form)
-         lines (into {} (map (fn [[measure properties]] [measure (:seon.repl/finding properties)]))
-                     (m/children schema))]
+         declared (into {} (map (fn [[measure properties]]
+                                  [measure (select-keys properties [:seon.repl/finding :seon.repl/with
+                                                                    :seon.repl/fix])]))
+                        (m/children schema))]
      {::explainer (m/explainer schema)
       ::measures (m/explicit-keys schema)
-      ::lines lines
-      ::named (into #{} (comp (mapcat val) (filter qualified-keyword?)) lines)})))
+      ::declared declared
+      ::named (into #{} (mapcat (comp :seon.repl/with val)) declared)})))
 
 (defn cost-attributes
   "The stored evaluation attributes the declared bounds and their lines read
@@ -279,48 +298,31 @@
       (seq output) (assoc :seon.repl/out-tokens (tokens/estimate output)))))
 
 (defn findings
-  "One `;;` line per declared bound the evaluation's cost exceeds, as the
-  entry's `:seon.repl/finding` declares it. Empty within every bound, which
-  is the normal reply: nothing is added to it."
-  {:malli/schema [:=> [:cat :seon.repl/emission] [:vector :string]]}
+  "One map per declared bound the evaluation's cost exceeds: what it is
+  (`:seon.repl/finding`), the measure and what was observed, the other
+  measures the bound reports, and its fix. Empty within every bound, which is
+  the normal reply: nothing is added to it."
+  {:malli/schema [:=> [:cat :seon.repl/emission] [:vector :seon.repl/finding-value]]}
   [emission]
-  (let [{explainer ::explainer lines ::lines named ::named} @bounds
+  (let [{explainer ::explainer declared ::declared} @bounds
         measured (cost emission)
-        values (cond-> (merge (select-keys emission named) measured)
-                 (:seon.repl/handle emission) (assoc :seon.repl/result (:seon.repl/handle emission)))]
+        values (merge (select-keys emission (::named @bounds)) measured)]
     (into []
-          (map (fn [{[measure] :in}]
-                 (apply str ";; " (map #(if (qualified-keyword? %) (get values % "?") %)
-                                       (get lines measure)))))
+          (map (fn [{[measure] :in observed :value}]
+                 (let [{kind :seon.repl/finding with :seon.repl/with fix :seon.repl/fix} (get declared measure)]
+                   (cond-> (merge {:seon.repl/finding kind measure observed}
+                                  (select-keys values with))
+                     fix (assoc :seon.repl/fix fix)))))
           (:errors (explainer measured)))))
 
 (defn response
-  "The reply map, after the declared renderer's output when there is one,
-  and after one `;;` line per exceeded bound.
-
-  The reply map always reads back as data. A declared renderer's output is
-  the value itself, so its reply map carries every other key (`:result`,
-  `:ms`, `:out`, diagnostics) but not `:value`/`:error`.
+  "The reply: exactly one `#:seon.repl{…}` map that reads back as data.
 
   Returns nil when the evaluation has settled nothing — a running form has
   not printed a result, and inventing an empty map would say it had."
   {:malli/schema [:=> [:cat :seon.repl/emission] [:maybe :string]]}
   [emission]
-  (let [entries (response-entries emission)
-        failure (when (and (:seon.cluster.eval/error emission)
-                           (not (:seon.cluster.eval/diagnostics emission)))
-                  (:seon.cluster.eval/error emission))
-        answer (if (:seon.eval/renderer emission)
-                 ;; The rendered text is the value's (or the error's) face; the
-                 ;; map after it still says the evaluation FAILED, as `:error`
-                 ;; with its message, so a failure never reads like a value.
-                 (let [tail (reply-map (into (if failure [[:seon.repl/error (pr-str failure)]] [])
-                                             (remove (comp #{:seon.repl/value :seon.repl/error} first))
-                                             entries))]
-                   (cond-> (value-text emission) tail (str "\n" tail)))
-                 (reply-map entries))]
-    (when answer
-      (str/join "\n" (conj (findings emission) answer)))))
+  (reply-map (response-entries emission)))
 
 (defn- thinking-text
   "The agent's own `;;` prose for this evaluation, or nil.

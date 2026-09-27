@@ -300,3 +300,37 @@ Live check first, branch `efd-16` on pid 52335: the renderer-throws value
      (max-children 3, 2,048 tokens), so neither the budget default nor the ceiling reaches it. Both faces are one
      selection by design (`prepare`: "ONE SELECTION FOR BOTH FACES"). Whether the HTML face should keep the whole
      value is the three-points law against that design, a question for the render owner.
+
+## Round 5: one map, data only (owner 2026-09-27: "return data, not comments"; "the repl should be returning the timing and the result so it's already a map")
+
+Every reply is now exactly one `#:seon.repl{…}` map. Nothing is printed above or around it.
+- **Findings are data under `:seon.repl/findings`.** Each finding is
+  `{:seon.repl/finding :large-value, :seon.eval/value-tokens 1604, :seon.eval/shown-tokens 39, :seon.repl/fix "…"}`.
+  - A bound entry declares `:seon.repl/finding` (its kind), `:seon.repl/with` (the other measures to report) and
+    `:seon.repl/fix`; the text templates are gone.
+  - A scratch sample reply with one finding is 94 tokens.
+- **A declared renderer's text is the `:value`.** EDN renders (e.g. `dir`) become data. A prose render, or REPL entries
+  with `;;`, become one string, so no comment ever sits inside the map.
+- **A failure is `:error` with the error map printed as data.** This needs **P10**,
+  `tmp/eval-feedback-design-opus/p10-failures-as-data.patch` (sci/eval.clj, turn.clj, accretion_test). It changes the
+  four failure print sites so the floor prints the error structurally (message, class, location, cause chain), with
+  no `seon.error/render-ai` or `seon.sci.kernel/render-ai` prose face:
+  - the agent's own failure;
+  - `refuse-install`;
+  - the unrun refusal;
+  - the settlement refusal shown in place of a value.
+
+  The same `:seon.render.value/structural?` option already served settlement diagnostics.
+- The error AI pairs stay declared on about 280 error schemas, for the HTML face and for errors nested inside
+  successful values. Replies at the root no longer use them. Deleting them is a separate sweep for the owner.
+
+Tests whose expectations change once P10 lands (render lane / owners):
+- `seon.sci.render-source-test`: `an-agent-s-own-exception` expects `;=> [[clojure.core// …` REPL entries, and a
+  refusal's pair output.
+- `seon.render.transcript-test/one-reply-reads-identically…`: the failure is now `:error {…}` data. Ruling 45 is
+  satisfied.
+- `seon.cluster.host-test/a-run-reads-its-earlier-declarations`: the install refusal is now the data map. "install
+  refused" sits in `:seon.test.accretion/orientation` and may be cut at the 1,000 budget when a large auto-check
+  error precedes it in print order.
+- `seon.turn-test`: any assertion on failure prose.
+- `seon.test.accretion-test`: updated in P10.

@@ -5,20 +5,25 @@
                      :seon.config/dial true}],
                    :bounds
                    [:map
-                    {:description "The declared misuse bounds over one evaluation's measures (seon.repl/cost). seon.repl/findings prints one ;; line above the reply map for each m/explain error against this schema, as the entry's :seon.repl/finding declares it (strings verbatim; a qualified keyword is the evaluation's value for it: a measure, :seon.repl/result for its handle); within every bound the reply carries nothing extra. A new rule is a new entry; each measure is recorded by its producer."}
+                    {:description "The declared misuse bounds over one evaluation's measures (seon.repl/cost). Each m/explain error against this schema is one finding under :seon.repl/findings in the reply map: its :seon.repl/finding kind, the measure and the observed value, the other recorded measures named by :seon.repl/with, and :seon.repl/fix. Within every bound the reply carries no :findings key. A new rule is a new entry; each measure is recorded by its producer."}
                     [:seon.eval/duration-ms
                      {:optional true
-                      :seon.repl/finding ["SLOW: " :seon.eval/duration-ms " ms, over one second in the evaluation you asked for. Find what the work is proportional to (the store? the program? the call count?) and remove it; (seon.profile/summary (seon.profile/cells) 5) ranks the armed functions by time."]}
+                      :seon.repl/finding :slow
+                      :seon.repl/fix "Over one second in the evaluation you asked for: find what the work is proportional to (the store? the program? the call count?) and remove it; (seon.profile/summary (seon.profile/cells) 5) ranks the armed functions by time."}
                      [:<= 1000]]
                     [:seon.eval/value-tokens
                      {:optional true
-                      :seon.repl/finding ["LARGE VALUE: " :seon.repl/result " is ~" :seon.eval/value-tokens " tokens whole (shown " :seon.eval/shown-tokens "). A value this big usually means a query or function returns more than it should."]}
+                      :seon.repl/finding :large-value
+                      :seon.repl/with [:seon.eval/shown-tokens]
+                      :seon.repl/fix "A value this big usually means a query or function returns more than it should: select what you need."}
                      [:<= 1000]]
                     [:seon.eval/allocated-bytes
                      {:optional true
-                      :seon.repl/finding ["LARGE ALLOCATION: " :seon.eval/allocated-bytes " bytes, over 512 MiB: something realized far more than it returned (an unbounded lazy sequence, a whole-store read, a copied collection). Realize only what you need."]}
+                      :seon.repl/finding :large-allocation
+                      :seon.repl/fix "Something realized far more than it returned (an unbounded lazy sequence, a whole-store read, a copied collection): realize only what you need."}
                      [:<= 536870912]]
                     [:seon.repl/out-tokens
                      {:optional true
-                      :seon.repl/finding ["LARGE OUTPUT: ~" :seon.repl/out-tokens " tokens printed; printed output is saved and re-read in every later context. Return the value instead of printing it."]}
+                      :seon.repl/finding :large-output
+                      :seon.repl/fix "Printed output is saved and re-read in every later context: return the value instead of printing it."}
                      [:<= 500]]]}

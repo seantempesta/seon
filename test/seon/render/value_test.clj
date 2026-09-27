@@ -1186,7 +1186,8 @@
   ;; Owner 2026-09-27: a failed render falls back to the floor, still bounded
   ;; at the value budget, and keeps the floor's whole-size estimate, so the
   ;; reply shows the bounded print, one renderer-failed diagnostic and the
-  ;; LARGE VALUE line, and the evaluation records whole and shown tokens.
+  ;; :large-value finding in the one reply map, and the evaluation records whole
+  ;; and shown tokens.
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "large-render" {})
@@ -1214,4 +1215,7 @@
        (is (= 1 (count (re-seq #":seon.error/layer :seon.render/invocation"
                                (str (:seon.cluster.eval/diagnostics evaluation)))))
            "one renderer-failed diagnostic, beside the value")
-       (is (str/starts-with? reply ";; LARGE VALUE: result/elargerender1 is ~") reply)))))
+       (is (str/starts-with? reply "#:seon.repl{") "the reply is one map, nothing above it")
+       (is (= :large-value
+              (get-in (binding [*read-eval* false *default-data-reader-fn* tagged-literal] (read-string reply)) [:seon.repl/findings 0 :seon.repl/finding]))
+           reply)))))
