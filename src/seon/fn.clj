@@ -955,7 +955,12 @@
                 :where [?n :seon.ns/name ?name]
                        [?f :seon.fn/ns ?n] [?f :seon.fn/sym _]]
               database namespace-names)
-        prelude (analyzer/program-prelude available-functions)
+        ;; A `declare` makes no row; the caller names those Vars.
+        prelude (analyzer/program-prelude
+                 (into available-functions
+                       (comp (mapcat :seon.fn/declared)
+                             (map (fn [function-symbol] {:seon.fn/sym function-symbol})))
+                       requests))
         interpreter-refers
         (interpreter-refer-rows
          (or (db/carried-projection database)
@@ -1529,16 +1534,25 @@
   "Construct source declarations through the indexer's analysis and row owners.
 
   The supplied namespace is the caller's current resolver context, including
-  uncommitted aliases. Prelude declarations resolve calls but never become
-  submitted rows. A submitted form has no file; each row's
+  uncommitted aliases. `declared` names that context's Vars declared without
+  a program row (a `declare`); they join the prelude, so a call to one is an
+  edge as it is in the file. Prelude declarations resolve calls but never
+  become submitted rows. A submitted form has no file; each row's
   `:seon.fn/form-span` is the analyzer's exact byte span within `source`,
   transient provenance a caller drops before storing the row."
   {:malli/schema
-   [:=> [:cat :seon.db/database-value :seon.program/shapes
-         :seon.ns/ns
-         :string [:set :keyword]]
-     :seon.program/rows]}
-  [database row-shapes namespace-row source _declared-attributes]
+   [:function
+    [:=> [:cat :seon.db/database-value :seon.program/shapes
+          :seon.ns/ns
+          :string [:set :keyword]]
+     :seon.program/rows]
+    [:=> [:cat :seon.db/database-value :seon.program/shapes
+          :seon.ns/ns
+          :string [:set :keyword] [:vector :qualified-symbol]]
+     :seon.program/rows]]}
+  ([database row-shapes resolver-namespace source declared-attributes]
+   (source-rows database row-shapes resolver-namespace source declared-attributes []))
+  ([database row-shapes namespace-row source _declared-attributes declared]
   (let [namespace-name (:seon.ns/name namespace-row)
         {analysis :seon.fn/analysis
          text :seon.fn/source
@@ -1547,7 +1561,8 @@
         (runtime-analysis-batch
          database [{:namespace-name namespace-name
                     :form-source source
-                    :seon.fn/namespace-row namespace-row}])
+                    :seon.fn/namespace-row namespace-row
+                    :seon.fn/declared declared}])
         [first-row last-row] (first spans)
         context (text-context text)
         ;; The submitted form starts its own line after the prelude.
@@ -1583,7 +1598,7 @@
                     (:seon.fn/form-span row)
                     (assoc :seon.fn/form-span
                            (mapv #(- % base) (:seon.fn/form-span row)))))))
-          (get rows "<stdin>"))))
+          (get rows "<stdin>")))))
 
 (defn- lint-rows
   {:malli/schema [:=> [:cat :string [:fn seon.fn/source-file?] :map [:sequential :map] [:sequential :map]] [:vector :map]]}

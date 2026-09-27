@@ -903,17 +903,25 @@
       (some-> row :seon.program/delete-identities first second)))
 
 (defn- analyzed-rows
-  "Analyze the accepted form source once, answering its declaration rows."
+  "Analyze the accepted form source once, answering its declaration rows.
+  The namespace's rootless Vars in `namespaces` (a `declare`, which makes no
+  row) are named to the analyzer, so a call to one is an edge."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection :string
-                       :seon.sci.eval/namespace-row]
+                       :seon.sci.eval/namespace-row :seon.sci.eval/namespaces]
                   [:vector :map]]}
-  [database projection source namespace-row]
-  (vec (seon.fn/source-rows
-        database
-        (program/shapes-in projection)
-        (assoc namespace-row :seon.program/definition-digest
-               (program/definition-digest namespace-row)) source
-        (set (keys (:seon.schema.projection/forms projection))))))
+  [database projection source namespace-row namespaces]
+  (let [namespace-name (:seon.ns/name namespace-row)]
+    (vec (seon.fn/source-rows
+          database
+          (program/shapes-in projection)
+          (assoc namespace-row :seon.program/definition-digest
+                 (program/definition-digest namespace-row)) source
+          (set (keys (:seon.schema.projection/forms projection)))
+          (into []
+                (keep (fn [[intern-name sci-var]]
+                        (when (and (sci.utils/var? sci-var) (not (sci.vars/hasRoot sci-var)))
+                          (symbol (str namespace-name) (str intern-name)))))
+                (get namespaces namespace-name))))))
 
 (defn- definition-row
   "One matched analyzed row made FINAL: runtime contract, workload and test
@@ -983,7 +991,8 @@
           {matched ::matched unindexed ::unmatched declared ::declared}
           (if (seq definitions)
             (program-change definitions
-                            (analyzed-rows database projection source namespace-row)
+                            (analyzed-rows database projection source namespace-row
+                                           before-namespaces)
                             source start)
             {})
           declared (cond-> (into (vec earlier) declared)
