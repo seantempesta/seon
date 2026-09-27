@@ -1475,6 +1475,22 @@
   @(cache/lookup-or-miss value-projection-cache [builder value-key]
                          (fn [_] (delay (content-projection builder database)))))
 
+(defn- speculative-projection
+  "The projection of a speculative value (a `with` result, a report's
+  `:db-after`, a `:db.fn/call` argument) that wrote a declaration attribute:
+  derived from its basis (`nearest-base`, the committed entry sharing its
+  untouched revisions) and retained only in the bounded value tier, keyed by
+  its revision key. It is never inserted into the committed projection cache,
+  so a batch of speculative values cannot evict committed entries (one-path
+  spec 12, ruling B: a write after a 22-registration batch derived 30 ms before
+  the batch and 642 ms after it, from a full rebuild)."
+  {:malli/schema [:=> [:cat :seon.source/digest [:map-of :qualified-keyword :seon.schema/value]
+                       :seon.db/database-value]
+                  :seon.schema/projection]}
+  [builder value-key database]
+  @(cache/lookup-or-miss value-projection-cache [builder value-key]
+                         (fn [_] (delay (schema/load-projection database (nearest-base builder database))))))
+
 (defn- as-of-key
   "An as-of view's exact identity: its committed origin's commit and its time
   point, which fix every datom it holds. Absent for an uncommitted origin."
@@ -1697,7 +1713,7 @@
         (if (cache/has? projection-cache revision-key)
           @(cache/lookup-or-miss projection-cache revision-key
                                  (fn [_] (delay (content-projection @builder source))))
-          (value-projection @builder revision-key source)))
+          (speculative-projection @builder revision-key source)))
 
       ;; A detached value (Datahike gives it no context: an `empty-db` or
       ;; `load-entities` basis) keys by its declaration content alone.

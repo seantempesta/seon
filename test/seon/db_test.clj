@@ -702,6 +702,34 @@
   (let [[_ inputs] (:malli/schema (meta #'db/read-evidence-current?))]
     (is (= :seon.db/database-value (second inputs)))))
 
+;; CLASS: speculative values evicting committed projections. A batch of `with`
+;; values that each wrote a declaration inserted its content projection into the
+;; committed cache (24 entries): the next committed write's derivation found no
+;; near base and rebuilt (1,757 ms against 266 ms before the batch, measured on
+;; a disposable root; one-path spec 12, ruling B).
+(deftest speculative-declarations-never-enter-the-committed-projection-cache
+  (test-support/with-database
+   (fn [connection]
+     (let [row (fn [database k] (program/declaration-row (db/carried-projection database)
+                                                         {:seon.schema/key k :seon.schema/form "[:string]"}
+                                                         :all :agent))
+           database (db/db connection)
+           _ (db/carried-projection database)
+           last-value (reduce (fn [value i]
+                                (let [written (db/with value [(row value (keyword "probe.speculative" (str "k" i)))])]
+                                  (is (not (:seon.error/at written)) (pr-str written))
+                                  (db/carried-projection written)
+                                  written))
+                              database (range 6))]
+       (is (contains? (:seon.schema.projection/forms (db/carried-projection last-value)) :probe.speculative/k5)
+           "each speculative value reads its own declarations")
+       ;; Other members share the cache, so the check names this test's own
+       ;; declarations: no committed entry derived them.
+       (is (not-any? (fn [cell] (and (realized? cell)
+                                     (contains? (:seon.schema.projection/forms @cell) :probe.speculative/k0)))
+                     (vals @@#'db/projection-cache))
+           "no speculative projection entered the committed cache")))))
+
 (deftest query-and-pull-append-evidence-only-when-captured
   (test-support/with-database
    (fn [connection]
