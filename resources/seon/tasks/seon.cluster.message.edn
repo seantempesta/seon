@@ -1,4 +1,9 @@
 [#:seon.task{:name "unresolved-sender-logs-unbounded"
              :kind :function
              :intent "Rendering a message whose sender lookup ref does not resolve ([:seon.agent/id \"nobody\"]) makes Datahike log an unbounded :error line on every render. AGENTS: a log line printing a value outside the floor is a defect. Resolve the sender as data (a typed unknown) without the logging lookup, or bound the line (fix-html-views 52fb24e1c)."
-             :evidence #{"docs/research/agent-platform/red-triage-3-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/red-triage-3-2026-09-27.md"}}
+ #:seon.task{:name "the-agent-opening-no-longer-reads-its-inbox"
+             :kind :function
+             :intent "Since 89629b13c render-inbox-ai answers a recipient reference with (pr-str reference) and declares a :string return, so the agent's :seon.message/_to concern renders its own lookup and the system-turn opening holds no inbox read: a changed message is never a changed read (db-test system-turn-renders-a-changed-read-with-value-diff, reproduced at e999fdd1b, E1). Return the reverse-ref inbox read (seon.render.transcript/inbox-form) for a reference, declared as :seon.render/source so source-producer? reads it as REPL entries, and keep the data face for an inbox unit."
+             :must-read #{seon.cluster.message/render-inbox-ai seon.render.transcript/inbox-form}
+             :evidence #{"docs/research/agent-platform/red-triage-r6-2026-09-27.md"}}]

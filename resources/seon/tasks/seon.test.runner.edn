@@ -29,4 +29,9 @@
              :kind :namespace
              :intent "With two test requests running at once in one JVM, ambient-drift blames one request's member for the other's instrumentation changes: refusal-test/every-producer-references-the-worlds-it-was-handed went red with 486 foreign wrappers while instrument-test ran; refusal-test/armed-refusal-returns-every-declared-family-without-refusing red with :snapshot-planned drift-removed while a second refusal-test request ran. restore-live-cluster-schema! also advances every live cluster's projection after every member. The before/after snapshot assumes nothing else runs; test agents (option B) route JVM-global tests to the isolated host and delete this family (f985bfc97116). Done when concurrent requests of non-host-global tests produce no drift reds."
              :must-read #{seon.test.runner/ambient-snapshot seon.test.runner/ambient-drift seon.test.runner/restore-live-cluster-schema!}
-             :evidence #{"docs/research/agent-platform/test-agents-concurrency-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/test-agents-concurrency-2026-09-27.md"}}
+ #:seon.task{:name "a-green-re-record-sweeps-the-failure-cell"
+             :kind :function
+             :intent "Recording a green result after a red one refuses vector-element-swept on :seon.test/failures: the runner retracts the old failure entity while the vector cell naming it stays (reproduced at e999fdd1b, E4; test-failure-facts-test recorded-reach-belongs-to-the-tested-value-and-is-replaced, what-made-it-red-names-changed-functions). Replace the failures vector through its owner in the same transaction instead of retracting its elements."
+             :must-read #{seon.test.runner/commit-results!}
+             :evidence #{"docs/research/agent-platform/red-triage-r6-2026-09-27.md"}}]

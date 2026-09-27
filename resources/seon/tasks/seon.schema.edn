@@ -59,4 +59,9 @@
              :kind :function
              :intent "Every agent defn: seon.sci.eval/definition-row calls schema/projection-with-function-contract only to validate the contract, then discards the projection; it costs ~5.1 ms of definition-row's ~5.7 ms (measured at default 2026-09-27, fix-source-row-contract). Validate the contract against the evaluation projection directly (Malli m/schema with its registry), or reuse the projection it builds; cost must follow what the defn changed."
              :must-read #{seon.schema/projection-with-function-contract seon.sci.eval/definition-row}
-             :evidence #{"docs/research/agent-platform/landing/boot-ready-regression-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/boot-ready-regression-2026-09-27.md"}}
+ #:seon.task{:name "pull-selector-predicate-compiles-per-check"
+             :kind :function
+             :intent "seon.schema/pull-selector? compiles its whole argument (Datahike compile-pull-plan) on every armed :seon.schema/pull-selector check: 0.69 ms for the 15,060-node root selector, ten checks per walk since 18ce1b1a4 armed vector-pull and physical-selector (sci.eval-test public-walk counted 10 compiles for one plan, E6). projection-with-pulled-form-in's hit costs 2.9-3.1 ms digesting its key. Parse once per selector value (a content-keyed cache kind) or check structure only."
+             :must-read #{seon.schema/pull-selector? seon.schema/projection-with-pulled-form-in}
+             :evidence #{"docs/research/agent-platform/red-triage-r6-2026-09-27.md"}}]
