@@ -320,12 +320,17 @@
            ;; arm names the agent and its derivation observation. A bare
            ;; diagnostic is not a prompt return, so the turn must not see one.
            message "The generated opening could not be derived."
-           refusal {:seon.error/at (java.util.Date.) :seon.error/layer :seon.cluster.prompt/invocation :seon.error/operation 'seon.cluster.prompt/prompt
-                    :seon.error/message message
-                    :seon.cluster.prompt/error-agent-id agent-id
-                    :seon.cluster.prompt/derivation-observation
-                    {:seon.error.evidence/attribute :seon.error/message
-                     :seon.error.evidence/value message}}
+           ;; The producer declares its error's schema on the value's
+           ;; metadata, as `seon.cluster.prompt/prompt` does; the recorder
+           ;; requires it.
+           refusal (with-meta
+                     {:seon.error/at (java.util.Date.) :seon.error/layer :seon.cluster.prompt/invocation :seon.error/operation 'seon.cluster.prompt/prompt
+                      :seon.error/message message
+                      :seon.cluster.prompt/error-agent-id agent-id
+                      :seon.cluster.prompt/derivation-observation
+                      {:seon.error.evidence/attribute :seon.error/message
+                       :seon.error.evidence/value message}}
+                     {:seon.error/declared-schema :seon.cluster.prompt/error})
            ;; The cluster's world exists before its handle reads its config.
            _ (test-support/seed-cluster! connection cluster-name)
            cluster (test-support/cluster-handle
@@ -448,13 +453,16 @@
                     (config/result-caps (test-support/effective-config))
                     :seon.config.error/recurrence-limit 3
                     :seon.config.message/max-chain 8})
-           unpaid {:seon.ai/transport-failure "http://127.0.0.1:1/v1" :seon.error/at (java.util.Date.) :seon.error/layer :seon.ai/invocation :seon.error/operation 'seon.ai/complete
-                   :seon.error/message "connection refused"
-                   :seon.error/data
-                   {:seon.ai/error-class :transport-before-send
-                    :seon.ai/request-transmitted? false
-                    :seon.ai/response-started? false
-                    :seon.ai/output-observed? false}}
+           ;; Declared as `seon.ai/send-request` declares its transport failure.
+           unpaid (with-meta
+                    {:seon.ai/transport-failure "http://127.0.0.1:1/v1" :seon.error/at (java.util.Date.) :seon.error/layer :seon.ai/invocation :seon.error/operation 'seon.ai/complete
+                     :seon.error/message "connection refused"
+                     :seon.error/data
+                     {:seon.ai/error-class :transport-before-send
+                      :seon.ai/request-transmitted? false
+                      :seon.ai/response-started? false
+                      :seon.ai/output-observed? false}}
+                    {:seon.error/declared-schema :seon.ai/transport-failure-error})
            completions (atom [unpaid
                               {:seon.ai/text "(identity 1)"
                                :seon.ai/usage

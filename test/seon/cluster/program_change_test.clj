@@ -203,5 +203,5 @@
   ;; call is prepared exactly as an agent's (patch call-preparation-declared-arity).
   (support/with-database
    (fn [connection]
-     (let [result (seon.fn/gate-sets {:seon.db/db (db/db connection) :seon.fn/seeds ['seon.id/valid?]})]
+     (let [result (seon.fn/gate-sets {:seon.db/db (db/db connection) :seon.fn/seeds #{'seon.id/valid?}})]
        (is (vector? result) (pr-str result))))))

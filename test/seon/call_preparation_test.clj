@@ -121,6 +121,22 @@
   ([database _first _second]
    (if (db/database-value? database) :supplied-database :wrong-value)))
 
+(defn probe-leading-database
+  "Ruling #41's shortcut: a declared arity whose own first input is the
+  supplied database slot, colliding with the longer arity's derived shape.
+
+  Two supplied arguments are either `[database label]` — explicit — or
+  `[label label]` with the three-arity's leading database elided; the first
+  argument's value decides."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.db/database-value :string] :keyword]
+    [:=> [:cat :seon.db/database-value :string :string] :keyword]]}
+  ([database _label]
+   (if (db/database-value? database) :explicit-database :wrong-value))
+  ([database _first _second]
+   (if (db/database-value? database) :supplied-database :wrong-value)))
+
 (defn probe-connection-name
   "The identity of the connection this call was supplied.
 
@@ -652,6 +668,7 @@
    'probe-untouched #'probe-untouched
    'probe-current-database #'probe-current-database
    'probe-shortcut #'probe-shortcut
+   'probe-leading-database #'probe-leading-database
    'probe-connection-name #'probe-connection-name})
 
 (defn- arm-probes!
@@ -707,13 +724,13 @@
                    (:seon.call-preparation/target-symbol refused))
                 "naming the call it refused")
             (is (zero? @entered) "the body never ran without its database"))
-          (testing "a call no evaluation makes is not prepared: the callee's
-                    own contract answers for the arguments it was given"
+          (testing "a JVM test body runs as its member (`kernel/*host-world*`):
+                    its own call is prepared from the member's live world,
+                    not the probe ctx's released one"
             (reset! entered 0)
-            (is (= 1 (:seon.instrument/declared-arity-count
-                      (test-support/refusal-data #((var probe-received-database?) "a"))))
-                "its contract refuses the arity it was called with")
-            (is (zero? @entered)))))))))
+            (is (some? (kernel/world-ctx)))
+            (is (true? ((var probe-received-database?) "a")))
+            (is (= 1 @entered)))))))))
 
 (deftest ^{:seon/tasks #{"0261d4d9bbe6"}}
   host-work-outside-an-evaluation-keeps-its-declared-arity
@@ -723,17 +740,19 @@
   ;; database elided, and `request` is not a database, so preparation chose
   ;; the elided shape, had no world to supply from, and returned its
   ;; unavailable refusal as the call's value; `mapcat` spliced that map's
-  ;; entries into tx-data. A call no evaluation makes is never prepared.
+  ;; entries into tx-data. A call matching a declared arity whose first input
+  ;; is not the supplied slot is never prefixed (0b134d2f2), with or without
+  ;; a world.
   (test-support/with-database
    (fn [connection]
      (test-support/transacted! connection database-rows)
      (arm-probes! @connection)
-     (is (nil? (kernel/world-ctx)) "this test body serves no evaluation")
+     (is (some? (kernel/world-ctx)) "a test body runs as its member")
      (is (= :two-labels ((var probe-shortcut) "a" "b"))
          "the declared arity runs with the arguments given")
      (let [ctx (probe-ctx connection connection)]
-       (is (= :supplied-database (probe ctx "probe-shortcut \"a\" \"b\""))
-           "the same call inside an evaluation still gets its elided database")))))
+       (is (= :two-labels (probe ctx "probe-shortcut \"a\" \"b\""))
+           "inside an evaluation too: the declared arity is never prefixed")))))
 
 (deftest a-compiled-first-party-call-is-prepared
   (testing "positional, map-key, caller-wins, supplied-nil, undeclared and
@@ -831,19 +850,20 @@
            (is (zero? @entered) "an ambiguous call never enters the body")))))))
 
 (deftest the-leave-off-the-database-shortcut-survives-the-general-planner
-  (testing "ruling #41's positional shortcut, decided by the leading slot's
-            own declared value schema rather than by arity order"
+  (testing "ruling #41's positional shortcut: decided by the first argument's
+            value only when the colliding declared arity's own first input is
+            the supplied slot"
     (test-support/with-database
      (fn [connection]
        (test-support/transacted! connection database-rows)
        (let [ctx (probe-ctx connection connection)]
-         (is (= :supplied-database (probe ctx "probe-shortcut \"a\" \"b\""))
+         (is (= :supplied-database (probe ctx "probe-leading-database \"a\" \"b\""))
              "two non-database arguments mean the three-arity with its
               leading database elided")
          (is (= :explicit-database
                 (armed-eval
                  ctx
-                 (str "(seon.call-preparation-test/probe-shortcut "
+                 (str "(seon.call-preparation-test/probe-leading-database "
                       "(seon.call-preparation-test/probe-current-database)"
                       " \"b\")")))
              "an explicit database value at the same count keeps the DECLARED
@@ -851,10 +871,13 @@
          (is (= :supplied-database
                 (armed-eval
                  ctx
-                 (str "(seon.call-preparation-test/probe-shortcut "
+                 (str "(seon.call-preparation-test/probe-leading-database "
                       "(seon.call-preparation-test/probe-current-database)"
                       " \"a\" \"b\")")))
-             "and the exact declared three-arity is untouched"))))))
+             "and the exact declared three-arity is untouched")
+         (is (= :two-labels (probe ctx "probe-shortcut \"a\" \"b\""))
+             "a declared arity whose first input is another schema is matched
+              in full, never prefixed"))))))
 
 (deftest an-unavailable-supplier-refuses-before-the-body
   (testing "the unavailable face: a flat value naming the target, the key and

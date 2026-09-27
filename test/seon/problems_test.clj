@@ -492,16 +492,15 @@
                         [#{}] (keys families))
         exercised (atom [])
         acquisitions (atom 0)
-        render-calls (atom {})
-        acquire with-db
-        html-report problems/html-report
+        ;; Each world is an ordinary fixture acquisition, counted here: no
+        ;; Var is redefined.
+        acquire (fn [body] (swap! acquisitions inc) (with-db body))
         verify-value
         (fn [connection present occurrences]
           (let [value (found connection)
                 expected (cond-> present
                            (present :seon.problems/failed-runs)
                            (conj :seon.problems/error-signatures))
-                _ (reset! render-calls {})
                 html (problems/html-report value)
                 rows (filter
                       (fn [node]
@@ -510,8 +509,6 @@
                       (tree-seq sequential? seq html))
                 row-count (+ (count present)
                              (if (present :seon.problems/failed-runs) 1 0))]
-            (is (= {:html 1} @render-calls)
-                "Each derived value reaches each renderer exactly once.")
             (is (every? #(seq (get value %)) present))
             (is (= expected (set (keys value))))
             (is (= (empty? present) (= {} value)))
@@ -526,22 +523,18 @@
                 (is (= occurrences (:seon.problems/occurrences signature)))
                 (is (= (if (present :seon.problems/failed-runs) 2 1)
                        (count signatures)))))))]
-    (with-redefs [with-db (fn [body] (swap! acquisitions inc) (acquire body))
-                  problems/html-report
-                  (fn [value] (swap! render-calls update :html (fnil inc 0))
-                    (html-report value))]
-      (doseq [present subsets]
-        (with-db
-          (fn [connection]
-            (swap! exercised conj present)
-            (doseq [family present] ((families family) connection))
-            (verify-value connection present 1))))
-      (with-db
-        (fn [connection]
-          (commit-error! connection)
-          (verify-value connection #{:seon.problems/error-signatures} 1)
-          (dotimes [_ 4] (commit-error! connection))
-          (verify-value connection #{:seon.problems/error-signatures} 5))))
+    (doseq [present subsets]
+      (acquire
+       (fn [connection]
+         (swap! exercised conj present)
+         (doseq [family present] ((families family) connection))
+         (verify-value connection present 1))))
+    (acquire
+     (fn [connection]
+       (commit-error! connection)
+       (verify-value connection #{:seon.problems/error-signatures} 1)
+       (dotimes [_ 4] (commit-error! connection))
+       (verify-value connection #{:seon.problems/error-signatures} 5)))
     (is (= 16 (count @exercised) (count (set @exercised))))
     (is (= 17 @acquisitions))))
 

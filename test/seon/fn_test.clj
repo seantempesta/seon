@@ -180,7 +180,7 @@
         (is (contains? (called-symbols shadow-row) (quote clojure.core/identity)))
         (is (not (contains? (called-symbols shadow-row) (quote clojure.core/map)))
             "a let-bound map is a local, never a clojure.core/map call")
-        (is (= #{(quote seon.fn/tests-reaching)}
+        (is (= #{(quote seon.fn/tests-reaching) (quote clojure.core/defn)}
                (called-symbols qualified-row))
             "a qualified namespace absent from the stored ns row is synthesized")
         (is (not (contains? (called-symbols shadow-row)
@@ -265,9 +265,11 @@
       (is (string? (:seon.fn/spec leaf)))
       (is (= :io (:seon.fn/workload leaf))))
     (testing "call edges alone reveal the capability owner"
-      (is (= #{(quote sample.capability/leaf)}
+      ;; A macro use is a call (20a87b1d1): the defining `defn` is an edge.
+      (is (= #{(quote sample.capability/leaf) (quote clojure.core/defn)}
              (:seon.fn/calls (get by-symbol (quote sample.capability/pure-caller)))))
-      (is (= #{(quote sample.capability/compute-leaf) (quote sample.capability/leaf)}
+      (is (= #{(quote sample.capability/compute-leaf) (quote sample.capability/leaf)
+               (quote clojure.core/defn)}
              (:seon.fn/calls (get by-symbol (quote sample.capability/mixed-caller))))))
     (testing "a pure blocking helper remains capability-free"
       (is (= :io
@@ -423,10 +425,13 @@
         (is (= :none
                (:seon.fn/projection-boundary
                 (get by-id [:seon.fn/sym (quote sample.core/contracted)]))))
-        (is (= #{(quote sample.core/helper)}
+        ;; A macro use and a value handed on are calls (20a87b1d1): the
+        ;; defining macro and the contract's predicate values are edges.
+        (is (= '#{sample.core/helper clojure.core/defn clojure.core/string?
+                  clojure.core/fn?}
                (:seon.fn/calls
                 (get by-id [:seon.fn/sym (quote sample.core/contracted)]))))
-        (is (= #{(quote sample.core/contracted)}
+        (is (= '#{sample.core/contracted clojure.test/deftest clojure.core/identity}
                (:seon.fn/calls
                 (get by-id [:seon.test/sym (quote sample.core/example-test)]))))
         (is (= "Macro doc."
@@ -449,20 +454,20 @@
         (is (nil? (:seon.fn/spec
                    (get by-id [:seon.fn/sym (quote sample.core/sample-macro)])))
             "macro rows do not claim runtime function contracts")
-        (is (= #{(quote clojure.string/trim)}
+        (is (= '#{clojure.string/trim clojure.core/defn sample.core/sample-macro}
                (:seon.fn/calls
                 (get by-id [:seon.fn/sym (quote sample.core/helper)])))
-            "macro expansion is not a runtime call")
-        (is (contains? (set (:seon.fn/references
-                             (get by-id [:seon.fn/sym (quote sample.core/helper)])))
-                       (quote sample.core/sample-macro))
-            "macro expansion retains a dependency without a runtime arity")
+            "a macro use is a call: its expansion runs in the caller")
+        (is (not (contains? (set (:seon.fn/references
+                                  (get by-id [:seon.fn/sym (quote sample.core/helper)])))
+                            (quote sample.core/sample-macro)))
+            "only a quoted symbol is a reference")
         (let [usages (::analyzer/var-usages
                       (analyzer/analyze {::analyzer/paths [(.getCanonicalPath (io/file root "sample/core.clj"))]}))
               macros (filter ::analyzer/macro usages)]
           (is (seq macros))
           (doseq [usage macros]
-            (is (nil? (#'seon.fn/call-target usage))
+            (is (some? (#'seon.fn/call-target usage))
                 (pr-str (select-keys usage [::analyzer/to ::analyzer/name])))))
         (is (= "(defrecord Pair [left right])"
                (:seon.fn/source
@@ -979,7 +984,8 @@
       (is (re-matches #"[0-9a-f]{64}"
                       (:seon.fn.manifest/digest manifest))))
     (testing "one-file analysis records every call target (ruling 42b)"
-      (is (= #{(quote clojure.core/str) (quote artifact.alpha/target) (quote clojure.string/trim)}
+      (is (= #{(quote clojure.core/str) (quote artifact.alpha/target) (quote clojure.string/trim)
+               (quote clojure.core/defn)}
              (:seon.fn/calls beta-caller)))
       (is (= (.getPath root) (file-root beta-artifact)))
       (is (= (file-root beta-artifact) (file-root incremental))
@@ -1306,9 +1312,10 @@
                 (quote sample.reach/indirect)
                 (quote sample.reach/property)]
                (seon.fn/tests-reaching @connection (quote sample.reach/target))))
-        (is (nil? (:seon.fn/calls
-                   (db/pull @connection [:seon.fn/calls]
-                            [:seon.test/sym (quote sample.reach/property)])))
+        (is (not-any? #(= "sample.reach" (namespace %))
+                      (:seon.fn/calls
+                       (db/pull @connection [:seon.fn/calls]
+                                [:seon.test/sym (quote sample.reach/property)])))
             "the schema-property test reaches its subject without a call edge")
         (is (= [(quote sample.reach/target)]
                (filterv #(= "sample.reach" (namespace %))
@@ -1344,8 +1351,12 @@
       (let [database (db/db connection)]
         (transact-fixture!
          connection
-         [(test-support/namespace-row @connection 'sample.authored-findings)
-          ;; Core admission: an agent contract may not name clojure.core/ifn?
+         [(program/declaration-row
+           (db/carried-projection database)
+           {:seon.ns/name 'sample.authored-findings
+            :seon.ns/source "(ns sample.authored-findings)"}
+           :all :core)
+          ;; Core admission, namespace and function alike: an agent contract may not name clojure.core/ifn?
           ;; until program-graph edges prove it pure; the finding, not the
           ;; purity rule, is under test here.
           (test-support/program-fn-row
@@ -2274,17 +2285,21 @@
   (let [rows (attribute-rows)
         writer (get rows (quote sample.attributes/record-agent!))
         reader (get rows (quote sample.attributes/reads-only))]
-    (is (= #{[(quote seon.db/transact!) 2] [(quote sample.attributes/helper) 1]}
+    ;; A macro use is a call (20a87b1d1): the defining `defn` form is one.
+    (is (= #{[(quote seon.db/transact!) 2] [(quote sample.attributes/helper) 1]
+             [(quote clojure.core/defn) 3]}
            (:seon.fn/call-arities writer)))
-    (is (= #{[(quote seon.db/q) 2]} (:seon.fn/call-arities reader)))
+    (is (= #{[(quote seon.db/q) 2] [(quote clojure.core/defn) 3]}
+           (:seon.fn/call-arities reader)))
     (testing "every refined callee is a target the reach index already carries"
       (doseq [row (vals rows)]
         (is (= (into #{} (map first) (:seon.fn/call-arities row))
                (set (:seon.fn/calls row)))
             (str (:seon.fn/sym row)
                  " refines exactly its :seon.fn/calls targets"))))
-    (is (nil? (:seon.fn/call-arities (get rows (quote sample.attributes/helper))))
-        "a declaration with no call edge carries no tuple")))
+    (is (= #{[(quote clojure.core/defn) 3]}
+           (:seon.fn/call-arities (get rows (quote sample.attributes/helper))))
+        "a declaration calling nothing else carries only its defining form's tuple")))
 
 (deftest static-index-and-runtime-admission-agree-on-analysis-attributes
   (test-support/with-database
@@ -2334,7 +2349,7 @@
                        :seon.cluster.eval/ns [:seon.ns/name 'sample.prepared]
                        :seon.program/row row}])
            admitted (second (first analyzed))]
-       (is (= #{['my.message/inbox 0]} (:seon.fn/call-arities admitted)))
+       (is (= #{['my.message/inbox 0] ['clojure.core/defn 3]} (:seon.fn/call-arities admitted)))
        (test-support/transacted! connection [admitted])
        (is (empty? (:seon.fn/arity-mismatches (seon.fn/arity-mismatches (db/db connection)))))
        (let [basis (:max-tx @connection)
@@ -3256,13 +3271,15 @@
                (set (keys found)))
             "every def is a row; `declare` interns no body")
         (is (true? (:seon.fn/constant? (get (by-sym literal) 'sample.value-def/handle))))
-        (is (= {:seon.fn/arglists "()" :seon.fn/calls #{'clojure.core/assoc}
+        (is (= {:seon.fn/arglists "()" :seon.fn/calls #{'clojure.core/assoc 'clojure.core/def}
                 :seon.fn/defined-by 'clojure.core/def :seon.fn/private? true}
                (select-keys (get found 'sample.value-def/handle)
                             [:seon.fn/arglists :seon.fn/calls :seon.fn/constant?
                              :seon.fn/defined-by :seon.fn/private? :seon.fn/spec]))
             "a computed def has no arities or contract; its initializer's calls are its edges")
-        (is (= #{'clojure.core/comp} (:seon.fn/calls (get found 'sample.value-def/point-free))))
+        (is (= '#{clojure.core/comp clojure.core/inc clojure.core/def}
+               (:seon.fn/calls (get found 'sample.value-def/point-free)))
+            "a value handed on is a call")
         (is (= 'clojure.core/defonce (:seon.fn/defined-by (get found 'sample.value-def/registry))))
         (test-support/with-database
           (fn [connection]
@@ -3275,10 +3292,11 @@
                      (db/pull database [:seon.fn/source :seon.fn/constant?]
                               [:seon.fn/sym 'sample.value-def/handle]))
                   "the literal-to-computed change adopts in place")
-              (is (contains? (set (:seon.fn/references
-                                   (db/pull database [:seon.fn/references]
+              (is (contains? (set (:seon.fn/calls
+                                   (db/pull database [:seon.fn/calls]
                                             [:seon.fn/sym 'sample.value-def/user-of])))
-                             'sample.value-def/handle))))))
+                             'sample.value-def/handle)
+                  "a def's value used in a body is a call edge (20a87b1d1)")))))
       (finally (test-support/delete-recursively! root)))))
 
 (deftest a-caller-files-findings-name-its-value-defs-rows
