@@ -886,7 +886,9 @@
                        (let [outcome
                              (try
                                (let [handler-value
-                                    (dispatch
+                                    ;; The request context may hand its own
+                                    ;; dispatcher; a caller never redefines one.
+                                    ((or (:seon.effect/dispatch *request-context*) dispatch)
                                       handler
                                       owner-sym
                                       effect-id

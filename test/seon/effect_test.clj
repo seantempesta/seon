@@ -781,22 +781,23 @@
                                  :seon.turn/agent [:seon.agent/id "effect-agent"]
                                  :seon.turn/opened-tx "datomic.tx"}])
       (install-capability! connection)
-      (with-redefs-fn
-        {(ns-resolve 'seon.effect 'dispatch)
-         (fn [_handler _owner-sym _effect-id _request _effective]
-           (throw (InterruptedException. "test interruption")))}
-        (fn []
-          (let [result
-                (binding [effect/*request-context* (request-context connection)]
-                  (effect/request! #'capability-owner
-                                   {:seon.effect-test/value 7}))
-                receipt
-                (db/pull (db/db connection) '[*]
-                         [:seon.effect/id
-                          (id/digest 12 [:seon.effect/id "effect-run" 3 0])])]
-            (is (= (:seon.effect/id receipt) (:seon.effect/interrupted-effect-id result)))
-            (is (inst? (:seon.effect/interrupted-at receipt)))
-            (is (nil? (:seon.effect/result-edn receipt)))))))))
+      ;; The request context hands a dispatcher that is interrupted; no Var
+      ;; is redefined.
+      (let [result
+            (binding [effect/*request-context*
+                      (assoc (request-context connection)
+                             :seon.effect/dispatch
+                             (fn [_handler _owner-sym _effect-id _request _effective]
+                               (throw (InterruptedException. "test interruption"))))]
+              (effect/request! #'capability-owner
+                               {:seon.effect-test/value 7}))
+            receipt
+            (db/pull (db/db connection) '[*]
+                     [:seon.effect/id
+                      (id/digest 12 [:seon.effect/id "effect-run" 3 0])])]
+        (is (= (:seon.effect/id receipt) (:seon.effect/interrupted-effect-id result)))
+        (is (inst? (:seon.effect/interrupted-at receipt)))
+        (is (nil? (:seon.effect/result-edn receipt)))))))
 
 (deftest guarded-sci-evaluation-supplies-the-effect-identity-context
   (test-support/with-database
