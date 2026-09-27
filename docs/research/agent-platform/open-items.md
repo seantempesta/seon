@@ -112,7 +112,7 @@ duplicates deleted. Unverified commits are debt. Two lessons from 2026-09-25: a 
 real values against the declared contract before committing); a new attribute must install before its first write on an
 EXISTING store (prove adoption on a branch of the live store, never only on a fresh one).
 
-### Platform state (rewritten in place 2026-09-27 ~17:30Z)
+### Platform state (rewritten in place 2026-09-27 ~17:30Z; update 23:00Z: default OOM ~17:29Z from the corpus (range) probe — fixed by the safety slice; restarted, now at f73937596-era HEAD, healthy)
 - Default: pid 53231 at f4af60b0f (HEAD ahead only by docs/tasks), ready 14.2 s; health **faulted** — 10 open faults (newest
   `settle-batch-refusal!` = root's P0.1 probe; 5× `test.runner/record-tx`; `flow/stop-work-launcher!`), 77 failed + 64 unknown
   tests (mostly suites first run centrally today). Central cache 116 MB / 512 MB. Arming intact (0 planless wrappers).
@@ -137,29 +137,43 @@ EXISTING store (prove adoption on a branch of the live store, never only on a fr
 | Operator | hermetic program classpath from pins (93b342cc0); fallback proven by the next move |
 | Datahike fork | fe1d4e26: values of different classes order by class name (in-place retype); pushed; gitlink 916394523 |
 
-### The order (rewritten in place 2026-09-27 ~17:30Z)
-**0. THE ONE TRUE REPL PATH FIRST (owner 2026-09-27: "before we can finish the data model changes we need to fix the one
-true path so this shit is solid").** Every valid-Clojure failure seen works at top level and breaks nested ((do (defn …)) unadmitted,
-nested in-ns loses the run a318b2d38, register! in do refused, a refused multi-form settlement returns nothing). Evidence:
-valid-clojure-corpus-probe-2026-09-27.md (corpus through the real path vs plain SCI and clj-kondo); audit:
-eval-path-audit-2-2026-09-27.md (Astra: every fact decided by form position, every form-shape special case, every lost reply,
-target pipeline read once → SCI evaluates → facts from observed effects + kondo analysis of the whole source → one settlement
-upserting every namespace → total reply; deletion-first slices). No per-case patches until then (register! fix held to diagnosis).
-**1. THE AGENT DATA MODEL (owner) — design continues; implementation after 0.** No source edits on the run/eval/session/settings model
-until the owner reviews the plan. Authority: `repl-session-entity-design-2026-09-27.md` (being revised under the rulings in
-"Standing rulings → agent data model"), with `repl-session-prior-art-2026-09-27.md` and `agent-session-vocabulary-2026-09-27.md`.
-Next: design lane finishes the revision (five modeling choices per relationship, statement vs token, component-validation
-cost measured) → Astra review → owner questions → phased slices. Confirmed live defect it fixes first: a nested `in-ns` loses
-the whole run (task a318b2d38). Config-scope design (`config-read-scope-design-2026-09-27.md`, 10192e1ee, Astra REVISE
-f4af60b0f) is FOLDED into it: the agent's settings link to its cluster config replaces `:seon.agent/cluster`.
-1. **Reds after the model settles:** turn-test / agent-test residue (many touch the session model — hold); reconcile 2;
-   background-blob 2; incremental-publication (needs a `refresh-source!` seam, task e4f90fb37e0c); the roster-released fix for
-   agent_test :1166 is parked in tmp/t4-c-starting-ns-opus/superseded-starting-ns-and-roster-released.patch.
-2. **Slow:** history acquisition 1.5–1.8 s (decoding 17.6 M chars of stored read-dependency plans; plan slice P1);
-   `definition-row` builds a projection only to validate (task f6f7a43f0, ~5 ms of 5.7 ms per defn); violation construction is
-   quadratic in explain errors (47c70a502); maintenance collect/branch waits (534966f34876).
-3. **Earlier queue (still valid, after 0–2):** derive-once + contracts-out joint order; eval-path audit order; shrink plans;
-   dogfood merge loop; docs parser slice; render-specificity slices; face-vocabulary sweep.
+### The order (rewritten in place 2026-09-27 ~23:00Z)
+**0. THE ONE SIMPLE PATH — today's major work (owner: "How hard is it to parse and eval and save the results? It's data
+being generated and then passed … one transaction to write it all correctly"; "Everything should be using this one simple
+system").** Pipeline (AGENTS "There is one REPL path"): text → read ONCE (forms with exact spans) → SCI evaluates each form
+(no evaluator of ours) → observations (Vars interned/unmapped AT definition, ending namespace, schema registrations via an
+always-open delta) → clj-kondo analysis of the same text joined by EXACT (ns, name, span) — total by construction, no
+exception lists; runtime-only definitions recorded as data → gates → ONE transaction (upserting every namespace it names) →
+TOTAL reply. Every entrant uses it: agent turns, MCP jvm/sci, the test harness, render forms in context assembly and the
+debug page (a view of that assembly), register!, the install gate, merge/write-back — none keeps its own reader, evaluator,
+printer or recording.
+Evidence: `valid-clojure-corpus-probe-2026-09-27.md` (plain SCI runs every case but definterface; ALL failures are Seon
+layers F1–F12); `eval-path-audit-2-2026-09-27.md` (verdict NO: 52 shape branches, 21 syntax-decided facts, 17 lossy
+boundaries, our own do-evaluator; ~16k lines around the path); `landing/register-anywhere-diagnosis-2026-09-27.md`;
+`landing/oom-63809-2026-09-27.md` (default OOM = corpus `(range)` realized by unbound-value?'s post-eval walk).
+Sequence (owner-approved "safety now, then one core rewrite"):
+  a. **Safety slice (running: safety-slice-opus)** — OOM walk d1efccd3ab7e (bounded by admission), namespace upsert
+     a318b2d38, total reply (evaluate-source! keeps refusals; post-eval failures never replace the value).
+  b. **Astra redesign (running: astra-audit-eval-path, resumed)** of §5 to the owner's invariant: one read; SCI observes
+     definitions AT definition (fork seam); exact-span kondo join; total. Then root resumes it with the full entrant list
+     and the parallel-path inventory (`repl-session-entity-design-2026-09-27.md` §5d) so the plan converts every entrant.
+  c. **ONE core rewrite** (Opus implements in the existing owners, deleting in the same cut: reader prediction, our do
+     evaluator, declared-row, shape branches, singular-row plumbing, the parallel render/preview evaluators), Astra
+     diff-review, proven by the corpus going green + focused suites; then the entity-vocabulary renames inside those files.
+  Open corpus classes the rewrite must close: F1 copied JVM import hides SCI's (defrecord/deftype/import), F3 defmacro in
+  let loses location (SCI fork), F4 two defns per form, F5 nested register!, F8 generated-input gate refuses valid code,
+  F10 ns-unmap! within a run, F11 non-defn definitions store no entity, F12 cost (0.7–1.1 s per contracted defn).
+**1. Supporting cuts (design done / running):** entity vocabulary sweep (running: entity-vocabulary-opus; excludes the 9
+eval-path files) + the intentional Malli→Datahike mapping section in the data-modeling guide; first-class vectors
+(`vector-storage-design-2026-09-27.md`, 67b982219: cell entities with position, element keeps its declared kind — Astra
+review after the eval redesign); adoption member validation LANDED (bd3d35b19).
+**2. THE AGENT DATA MODEL — after 0.** Authority `repl-session-entity-design-2026-09-27.md` (4400c9c47 → e9877da0f/a2fd4676c
+§5d one context assembly), review `repl-session-entity-review-2026-09-27.md` (REVISE, 12 findings folded). Demo on branch
+design-1: http://127.0.0.1:7994/agent/root/debug?n=3&branch=design-1&root=[:seon.agent/id%20"demo"] (loaded via the
+agent path; settings base made optional on the branch because root's overlay lacks one — the live change must backfill).
+Next there: render content design (tight data; identity render still asks for :seon.agent/namespace).
+**3. Earlier queue (after 0–2):** derive-once + contracts-out; shrink plans; dogfood merge loop; docs parser; render
+specificity; face vocabulary; history acquisition 1.5–1.8 s (P1 read plans); definition-row projection discard.
 
 ### Designs (authorities; each revised in place)
 | Design | Verdict |
@@ -167,6 +181,9 @@ f4af60b0f) is FOLDED into it: the agent's settings link to its cluster config re
 | `repl-session-entity-design-2026-09-27.md` (agent data model: audit, renames, phased plan) | in revision under owner graph rulings; Astra review next |
 | `repl-session-prior-art-2026-09-27.md`, `agent-session-vocabulary-2026-09-27.md` | research inputs (vocabulary: session, turn, run = derived budget of turns, evaluation, compaction, message, task) |
 | `config-read-scope-design-2026-09-27.md` + review | REVISE, folded into the data-model plan |
+| `eval-path-audit-2-2026-09-27.md` (Astra) | verdict NO; §5 being redesigned to the owner's one-read / observe-at-definition / exact-span invariant |
+| `valid-clojure-corpus-probe-2026-09-27.md` | evidence: SCI fine, Seon layers F1–F12 |
+| `vector-storage-design-2026-09-27.md` | cell encoding recommended; Astra review pending |
 | `red-triage-3/4-2026-09-27.md` | today's red classification (slices landed; residue above) |
 | earlier (task-context-install, references-as-refs, one-repl-language, lost-error-seams, contracts-out, derive-once) | unchanged; re-read before starting |
 
