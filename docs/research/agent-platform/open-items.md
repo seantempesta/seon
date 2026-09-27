@@ -163,6 +163,21 @@ Sequence (owner-approved "safety now, then one core rewrite"):
   Open corpus classes the rewrite must close: F1 copied JVM import hides SCI's (defrecord/deftype/import), F3 defmacro in
   let loses location (SCI fork), F4 two defns per form, F5 nested register!, F8 generated-input gate refuses valid code,
   F10 ns-unmap! within a run, F11 non-defn definitions store no entity, F12 cost (0.7–1.1 s per contracted defn).
+**Stability and speed (owner, standing: "nothing should panic"; "nothing in the system should be slow"):**
+- Evidence: `stability-sweep-2026-09-27.md` (d8b796bc4) and `perf-audit-2026-09-27.md` (dbd4a9f98).
+- Running: stability-fix-opus (turn.clj and cluster/agent.clj). A fault goes on the reply that caused it; a parked
+  proc answers and clears; an interrupt is recognised through `ex-info`.
+- Running: fault-resolution-design-opus. A fault resolves by the operation that failed, under a declared scope; health
+  shows its task link.
+- Queued behind the vocabulary sweep's uncommitted edits:
+  - delete the per-test-request storage collection (`test.clj:2512-2528`, about −31 lines; it holds the GC permit that
+    blocks `branch!` and blob publication for up to 82 s);
+  - narrow the fork's `gc-storage!` permit to the delete step (design and review first);
+  - the health read: 580–675 ms (`deferred-agents` loops over all 121 agents);
+  - add the about 11 proposed task entries from both docs.
+- Folded into the core rewrite: settlement computed twice (the gate's `with-settled` and the writer's
+  `receipt-settle-call`, about 560 ms per defn); a slow reply names its responsible functions.
+
 **1. Supporting cuts (design done / running):** entity vocabulary sweep (running: entity-vocabulary-opus; excludes the 9
 eval-path files) + the intentional Malli→Datahike mapping section in the data-modeling guide; first-class vectors
 (`vector-storage-design-2026-09-27.md`, 67b982219: cell entities with position, element keeps its declared kind — Astra
