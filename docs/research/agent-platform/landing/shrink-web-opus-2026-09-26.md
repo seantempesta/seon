@@ -225,3 +225,29 @@ diff); its change is a patch.
     18.7 KB of `datahike.db.DB` internals (measured).
   - The runner renders expected and actual with a full budget each (about 48 k characters each).
   - Both fixes belong to runner/runner-test (shrink-test).
+
+## Two more routed reds (perf-boot round)
+
+- **entity-pairs `a-declared-database-input-is-supplied…`: the cause is the forked context's program, not selection.**
+  - Probed on the disposable branch `shrink-web-probe2` (now retired).
+  - An agent `defn` of a unit-taking renderer in its namespace is selected by `render/selection`: namespace stage
+    `:selected`, `:compatible`. `render-ai` answers `"db:<max-tx>"`.
+  - A row written with `support/program-fn-row` (as the test does), followed by `support/fork-cluster-ctx`, is
+    **absent** from the fork's `:seon.sci.kernel/program-snapshot`. So `viewer` lists only the earlier function, and
+    the floor renders.
+  - `(seon.sci.eval/acquire! {…})` on that ctx brings the row in. The fork's snapshot at that moment carried
+    `:seon.sci.eval/loaded-basis` revisions for `:seon.source/commit-id` only.
+  - **Owner: sci/eval.clj (shrink-eval) and test_support's `fork-cluster-ctx`.** A fork taken after a program-row
+    commit must see that row, or the fixture must acquire. I did not mask it in the test.
+- **web-test `a-reconnect-refuses…` (with-redefs of `render.walk/neighborhood`).** Not rewritten. The pass must be
+  held mid-derivation at an earlier basis while a newer fact commits.
+  - An injected renderer (a program row in `my.agents.root`, selected by the namespace stage) can block, but its
+    latch must reach the render proc's thread without JVM-global test state or a Var redefinition.
+  - The request carries only declared members: ctx, profile, caps. No declared input exists today to hand a test's
+    promise to a renderer.
+  - Options for root:
+    1. A test-namespace function the renderer calls, holding a per-test latch keyed by the test's branch. This is
+       test-namespace state.
+    2. A declared `:seon.render.web/hold` seam in the render proc: production code for a test.
+    3. Delete the test and keep the reconnect wire tests as the class regression.
+  - I recommend 3 unless the class has no other regression. `reconnect-is-repaint-wire-test` covers reconnect paint.
