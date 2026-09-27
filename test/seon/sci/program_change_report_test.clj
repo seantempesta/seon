@@ -21,7 +21,6 @@
                           :my.note/content "x"})
            ctx (support/fork-cluster-ctx connection)
            acquired (db/db connection)
-           _ (sci.eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db acquired})
            _ (support/transacted! connection (note "between"))
            written-on (db/db connection)
            own (support/transacted! connection (note "own"))

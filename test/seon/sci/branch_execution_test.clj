@@ -70,7 +70,6 @@
        (let [_ (support/seed-cluster! connection "realities-proof")
            captured (db/db connection)
            live (support/fork-cluster-ctx connection)
-           _ (eval/acquire! {:seon.sci.eval/ctx live :seon.db/db captured})
            leaf 'seon.sci.eval-test/cut?
            caller 'seon.sci.eval-test/ok?
            leaf-row (db/pull captured '[*] [:seon.fn/sym leaf])
@@ -215,7 +214,6 @@
      (db/call-with-custody {:seon.db/connection connection}
       (fn []
        (let [live (support/fork-cluster-ctx connection)
-             _ (eval/acquire! {:seon.sci.eval/ctx live :seon.db/db (db/db connection)})
              subject 'seon.render.value/bounded-text
              indexed (db/pull (db/db connection) '[*] [:seon.fn/sym subject])]
          (is (true? (:seon.fn/host-bound? indexed))
@@ -323,21 +321,21 @@
            (is (= #{} (:refused adopted)) "the adopted row is compiled, so nothing refuses")
            (on-branch connection adopted-db :m9-adoption-isolated
             (fn [child]
-              (let [fork (eval/fork-cluster-ctx
-                          ctx (db/db child) child
-                          (eval/projection-state (db/db child) (db/carried-projection (db/db child))))]
-                (println "M9-ADOPTION-ISOLATED-MS"
-                         (:ms (measured #(eval/acquire! {:seon.sci.eval/ctx fork :seon.db/db (db/db child)}))))
+              (let [{fork :value ms :ms}
+                    (measured #(eval/fork-cluster-ctx
+                                ctx (db/db child) child
+                                (eval/projection-state (db/db child) (db/carried-projection (db/db child)))))]
+                (println "M9-ADOPTION-ISOLATED-MS" ms)
                 (is (= (select-keys adopted [:loaded :interpreted :interpreted-count :refused])
                        (acquisition-view fork))
                     "an isolated branch at the head compares against the cluster's record"))))
            (on-branch connection before :m9-adoption-stable
             (fn [child]
-              (let [fork (eval/fork-cluster-ctx
-                          ctx (db/db child) child
-                          (eval/projection-state (db/db child) (db/carried-projection (db/db child))))]
-                (println "M9-ADOPTION-STABLE-MS"
-                         (:ms (measured #(eval/acquire! {:seon.sci.eval/ctx fork :seon.db/db (db/db child)}))))
+              (let [{fork :value ms :ms}
+                    (measured #(eval/fork-cluster-ctx
+                                ctx (db/db child) child
+                                (eval/projection-state (db/db child) (db/carried-projection (db/db child)))))]
+                (println "M9-ADOPTION-STABLE-MS" ms)
                 (let [stable (acquisition-view fork)]
                   (is (= edited-commit (:loaded stable)))
                   (is (contains? (:refused stable) subject)

@@ -3808,8 +3808,13 @@
      ;; forked onto: rows committed after the base was acquired are acquired
      ;; here (`acquire!` answers at once when the program is equal). An
      ;; unacquired base stays lazy.
+     ;; Only a database that cannot store the acquisition's refusal records
+     ;; refuses the fork; the refusals themselves are recorded values.
      (when (::acquisition @(::kernel/program-snapshot ctx))
-       (acquire! {:seon.sci.eval/ctx ctx :seon.db/db db}))
+       (when-let [failure (::acquisition-recording-error
+                           (acquire! {:seon.sci.eval/ctx ctx :seon.db/db db}))]
+         (throw (ex-info "Program acquisition could not record its refusals."
+                         {::acquisition-recording-error failure}))))
      ctx)))
 
 (defn- declared-row

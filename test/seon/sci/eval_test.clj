@@ -1420,8 +1420,6 @@
                            connection
                            (test-support/agent-tx (db/db connection) agent-id namespace-name))
             base (test-support/fork-cluster-ctx connection)
-            _ (eval/acquire! {:seon.sci.eval/ctx base
-                              :seon.db/db (db/db connection)})
             fork-result
             (eval/fork-for-turn
              {:seon.sci.eval/ctx base
