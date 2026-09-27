@@ -1,0 +1,86 @@
+diff --git a/src/seon/test/accretion.clj b/src/seon/test/accretion.clj
+index 22c22c2ef..8c1b28ce7 100644
+--- a/src/seon/test/accretion.clj
++++ b/src/seon/test/accretion.clj
+@@ -390,12 +390,18 @@
+       check (assoc :seon.test.accretion/auto-check check))))
+ 
+ (defn install-refusal
+-  "The attribute-shaped error value for one refused function install."
++  "The attribute-shaped error value for one refused function install.
++
++  The producer declares the value's identity (`:seon.error/declared-schema`
++  metadata), so the renderer chain selects its declared pair, the teaching
++  face that leads with the orientation line, instead of the floor printing
++  the raw map (which a 1,000-token budget cuts before \"install refused\")."
+   {:malli/schema
+    [:=> [:cat :seon.test.accretion/gate-report]
+     :seon.test.accretion/install-refused-error]}
+   [report]
+   (let [message "Fix the contract or the function and re-evaluate the defn."]
++    (vary-meta
+     (merge (seon.error.refusal/diagnostic (java.util.Date.) :seon.test.accretion/install `install-refusal
+             {:seon.error/message message
+              :seon.error/member :seon.test.accretion/install?
+@@ -409,7 +415,8 @@
+                         [:seon.test.accretion/arguments
+                          :seon.test.accretion/expected
+                          :seon.test.accretion/actual])
+-           {})))
++           {})
++    assoc :seon.error/declared-schema :seon.test.accretion/install-refused-error)))
+ 
+ (defn- render-failure
+   [failure]
+diff --git a/test/seon/instrument_test.clj b/test/seon/instrument_test.clj
+index 14c9e60bf..515ce7654 100644
+--- a/test/seon/instrument_test.clj
++++ b/test/seon/instrument_test.clj
+@@ -701,7 +701,11 @@
+         "the AI projection stops at the profile's child bound")
+     ;; One cut face (one-render-path §3e): the shown members, then `…N`
+     ;; counting what was omitted of the 40 that were there.
+-    (is (str/includes? ai "[100 101 102 …37 (drop 3 (get-in result/eaudit [:seon.error/problems 0 :seon.error/offending]))]") ai)
++    ;; The layout may break the line before the cut; the cut and its
++    ;; continuation are the same tokens either way.
++    (is (str/includes? (str/replace ai #"\s+" " ")
++                       "[100 101 102 …37 (drop 3 (get-in result/eaudit [:seon.error/problems 0 :seon.error/offending]))]")
++        ai)
+     (is (str/includes? ai "(get-in result/eaudit [:seon.error/problems 0 :seon.error/offending])")
+         "and it hands back the form that requeries the leaf it elided")
+     (is (= [] (remove #(str/includes? html (str %)) member))
+diff --git a/test/seon/test/accretion_test.clj b/test/seon/test/accretion_test.clj
+index aadad4cc8..5cd549017 100644
+--- a/test/seon/test/accretion_test.clj
++++ b/test/seon/test/accretion_test.clj
+@@ -54,6 +54,9 @@
+         rendered (accretion/render-ai refusal)]
+     (is (= "Gate: 5 tests · 0 passed · 5 failed · auto-check 7/25 · install refused"
+            (:seon.test.accretion/orientation report)))
++    (is (= :seon.test.accretion/install-refused-error
++           (:seon.error/declared-schema (meta refusal)))
++        "the producer declares the identity its renderer pair is declared on")
+     (is (= 6
+            (reduce + (map (comp count :seon.test.accretion/failures)
+                           (:seon.test.accretion/failure-groups report))))
+@@ -204,11 +207,15 @@
+                                      "(fixture.candidate/target 1)")))
+           (is (= 2 (sci/eval-string* parent "(fixture.candidate/target 1)"))))
+         (testing "a refused install restores the evaluating context"
+-          (sci.eval/refuse-install wrapped evaluation
+-                                   (accretion/install-refusal
+-                                    (accretion/gate-report
+-                                     {:seon.fn/sym 'fixture.candidate/target
+-                                      :seon.test.accretion/results results})))
++          (let [refused (sci.eval/refuse-install wrapped evaluation
++                                                 (accretion/install-refusal
++                                                  (accretion/gate-report
++                                                   {:seon.fn/sym 'fixture.candidate/target
++                                                    :seon.test.accretion/results results})))]
++            ;; Shown through its declared teaching face, orientation first,
++            ;; never the raw map a value budget may cut before it.
++            (is (= 'seon.test.accretion/render-ai (:seon.eval/renderer refused)) (pr-str refused))
++            (is (re-find #"install refused" (:seon.eval/shown refused)) (:seon.eval/shown refused)))
+           (is (identical? held (sci/resolve parent 'fixture.candidate/target)))
+           (is (= 1 (sci/eval-string* parent "(fixture.candidate/target 1)"))))))))
+ 

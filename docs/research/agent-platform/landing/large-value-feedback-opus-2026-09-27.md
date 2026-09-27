@@ -276,3 +276,27 @@ Live check first, branch `efd-16` on pid 52335: the renderer-throws value
      returns instead, so the floor prints the raw map.
    - That selection belongs to the eval/error owner. It is not fixed here; the options are that fix, or a test that
      reads the orientation from the error value.
+5. **Update to item 4 (host-test a-run-reads, plus one-commit's analysis): cause found at the producer.**
+   `seon.render/declared-producers` finds a value's pair through one of:
+   - its producer's `:seon.error/declared-schema` metadata;
+   - the root call's contracted return alternatives;
+   - its reaching attribute;
+   - its entity owner.
+
+   `seon.test.accretion/install-refusal` declared none of these. `refuse-install` prints it with no call function, and
+   the refusal is not an entity, so the chain fell to the floor. The floor printed the raw map (374 tokens here; more
+   with an auto-check error), which the 1,000 budget cuts before the orientation line.
+   - **P9**, `tmp/eval-feedback-design-opus/p9-install-refusal-declares-identity.patch`: `install-refusal` puts
+     `:seon.error/declared-schema :seon.test.accretion/install-refused-error` on its value, as `config/result-caps`
+     does. Its pair `seon.test.accretion/render-ai` then renders 71 tokens, leading with "… · install refused" (live
+     probe, pid 59300).
+   - Regressions in `accretion_test`:
+     - the refusal carries its declared schema;
+     - `refuse-install`'s evaluation is shown by `seon.test.accretion/render-ai` and contains "install refused".
+6. **`instrument-test/refusal-value-projection-…`.**
+   - **Line 713 is mine.** The cut's continuation lengthened the line and the layout broke before `…37`. P9 compares
+     with whitespace normalized.
+   - **Line 716 (HTML lacks members 103 onward) is not from my changes.** The test fixes its own profile
+     (max-children 3, 2,048 tokens), so neither the budget default nor the ceiling reaches it. Both faces are one
+     selection by design (`prepare`: "ONE SELECTION FOR BOTH FACES"). Whether the HTML face should keep the whole
+     value is the three-points law against that design, a question for the render owner.
