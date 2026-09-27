@@ -1925,7 +1925,7 @@
              :seon.source/digest digest :seon.source/built? false}))
         (finally (when database (d/release-materialized-db database)))))))
 
-(declare published-analyzer-digest)
+(declare published-analyzer-digest selected-analyzer-digest)
 
 (defn- full-source-refresh!
   "Capture, compare, classify and analyze selected rows on the current lineage."
@@ -1934,7 +1934,8 @@
          [:map [:seon.fn/root :string] [:seon.source/roots :seon.source/roots]
           [:seon.source/changed-paths [:vector :string]]
           [:seon.source/analyzer-digest {:optional true} :seon.source/analyzer-digest]
-          [::launched-analyzer {:optional true} :seon.source/relative-file-digests]]]
+          [::launched-analyzer {:optional true} :seon.source/relative-file-digests]
+          [::reanalyze? {:optional true} :boolean]]]
     :seon.source/publish-result]}
   [root store roots]
   (let [published (current-publication store nil)
@@ -1966,13 +1967,16 @@
             analyzer (:seon.source/analyzer-digest roots)
             ;; Rows derive from the analyzer as well as the bytes: rows another
             ;; analyzer produced are all stale, whatever file changed.
-            analyzer-changed? (and committed analyzer
-                                   (not= analyzer
-                                         (when (contains? (:schema committed) :seon.source/analyzer-digest)
-                                           (db/q '[:find ?digest . :where [_ :seon.source/analyzer-digest ?digest]]
-                                                 committed))))
+            stored-analyzer (when (and committed (contains? (:schema committed) :seon.source/analyzer-digest))
+                              (db/q '[:find ?digest . :where [_ :seon.source/analyzer-digest ?digest]] committed))
+            analyzer-changed? (and committed analyzer (not= analyzer stored-analyzer))
+            launched (::launched-analyzer roots)
+            ;; Launch loaded analyzer files as bytes the head did not publish:
+            ;; those files are changed inputs, so the selected rows decide below
+            ;; whether any reached definition changed.
+            settle? (and analyzer-changed? launched (not (::reanalyze? roots)))
             classification (cond
-                             (or (nil? committed) analyzer-changed?) :all
+                             (or (nil? committed) (and analyzer-changed? (not settle?))) :all
                              (empty? changed) :selected
                              ;; A changed directory input is a gitlink: capture digests
                              ;; directories only through their recorded pins.
@@ -2021,47 +2025,50 @@
                                    :seon.fn.analyzer/sources captured
                                    :seon.source/relative-file-digests inputs}
                             database (assoc :seon.source/previous-database database)))
-                previous-findings (when database
-                                    (seon.fn/file-rows database (vec paths) :seon.lint/file))
-                _ (when (:seon.error/at previous-findings)
-                    (refused! "Published findings could not be read." previous-findings))
-                _ (report-analysis-warnings! previous-findings (filterv :seon.lint/id analyzed))
-                classes (when paths
-                          (cond-> #{:program}
-                            (some #(str/starts-with? % "resources/seon/schemas/") changed) (conj :schema-resource)
-                            (contains? changed config/default-manifest-path) (conj :config)))
-                _ (report-source-progress! (str "branch publication started: "
-                                                (if paths (count paths) (count (filter :seon.fn.file/relative-path analyzed)))
-                                                " inputs"))
-                result (source/publish!
-                        (cond->
-                        {:seon.store/store store :seon.fn/root (:seon.fn/root roots)
-                         :seon.source/digest digest :seon.source/populate `populate-source!
-                         :seon.source/test-input-digest (:seon.source/test-input-digest snapshot)
-                         :seon.source/changed-paths (vec (into changed requested-paths))
-                         :seon.source/relative-file-digests inputs
-                         :seon.source/progress! report-source-progress!
-                         :seon.source/populate-request
-                         (cond-> {:seon.program/rows analyzed :seon.fn/root directory
-                                  :seon.fn/roots (:seon.fn/roots roots)
-                                  :seon.source/relative-file-digests inputs}
-                           database (assoc :seon.source/previous-database database)
-                           paths (assoc :seon.fn/changed-paths paths
-                                        :seon.source/change-classes classes))}
-                          ;; The analysis above derives from this head; the
-                          ;; publisher refuses if another publication moved it.
-                          published (assoc :seon.source/expected-commit-id
-                                           (:seon.source/commit-id published))
-                          ;; A JVM launched on analyzer files the head did not
-                          ;; publish reanalyzed everything with them; when these
-                          ;; inputs are those bytes, the analyzed rows name it.
-                          analyzer (assoc :seon.source/analyzer-digest
-                                          (let [launched (::launched-analyzer roots)]
-                                            (if (and launched (= launched (select-keys inputs (keys launched))))
-                                              (published-analyzer-digest analyzed)
-                                              analyzer)))))]
-            (report-source-progress! "branch publication complete")
-            result)
+                sealed? (and launched (= launched (select-keys inputs (keys launched))))
+                settled (when (and settle? sealed?) (selected-analyzer-digest database selected analyzed))]
+          (if (and settle? (not= settled stored-analyzer))
+            (full-source-refresh! root store (assoc roots ::reanalyze? true))
+            (let [previous-findings (when database
+                                      (seon.fn/file-rows database (vec paths) :seon.lint/file))
+                  _ (when (:seon.error/at previous-findings)
+                      (refused! "Published findings could not be read." previous-findings))
+                  _ (report-analysis-warnings! previous-findings (filterv :seon.lint/id analyzed))
+                  classes (when paths
+                            (cond-> #{:program}
+                              (some #(str/starts-with? % "resources/seon/schemas/") changed) (conj :schema-resource)
+                              (contains? changed config/default-manifest-path) (conj :config)))
+                  _ (report-source-progress! (str "branch publication started: "
+                                                  (if paths (count paths) (count (filter :seon.fn.file/relative-path analyzed)))
+                                                  " inputs"))
+                  result (source/publish!
+                          (cond->
+                          {:seon.store/store store :seon.fn/root (:seon.fn/root roots)
+                           :seon.source/digest digest :seon.source/populate `populate-source!
+                           :seon.source/test-input-digest (:seon.source/test-input-digest snapshot)
+                           :seon.source/changed-paths (vec (into changed requested-paths))
+                           :seon.source/relative-file-digests inputs
+                           :seon.source/progress! report-source-progress!
+                           :seon.source/populate-request
+                           (cond-> {:seon.program/rows analyzed :seon.fn/root directory
+                                    :seon.fn/roots (:seon.fn/roots roots)
+                                    :seon.source/relative-file-digests inputs}
+                             database (assoc :seon.source/previous-database database)
+                             paths (assoc :seon.fn/changed-paths paths
+                                          :seon.source/change-classes classes))}
+                            ;; The analysis above derives from this head; the
+                            ;; publisher refuses if another publication moved it.
+                            published (assoc :seon.source/expected-commit-id
+                                             (:seon.source/commit-id published))
+                            ;; A JVM launched on analyzer files the head did not
+                            ;; publish names the analyzer of those bytes: the
+                            ;; head's with the selected rows, else every row.
+                            analyzer (assoc :seon.source/analyzer-digest
+                                            (cond settled settled
+                                                  sealed? (published-analyzer-digest analyzed)
+                                                  :else analyzer))))]
+              (report-source-progress! "branch publication complete")
+              result)))
           (finally (when database (d/release-materialized-db database))))))))
       (finally (when committed (d/release-materialized-db committed))))))
 
@@ -2462,14 +2469,42 @@
   [database]
   (id/digest 64 [(into (sorted-map) (map (juxt first second)) (analyzer-declarations database))]))
 
+(defn- reached-digest
+  "The digest of the definition digests reached from `seon.fn/analyze-rows`
+  through `functions`, each symbol's row."
+  {:malli/schema [:=> [:cat [:map-of :qualified-symbol
+                             [:map [:seon.program/definition-digest {:optional true} :seon.program/definition-digest]
+                              [:seon.fn/calls {:optional true} :seon.fn/calls]]]]
+                  :seon.source/analyzer-digest]}
+  [functions]
+  (id/digest 64 [(into (sorted-map)
+                       (keep #(some->> (get-in functions [% :seon.program/definition-digest]) (vector %)))
+                       (analyzer-reach (update-vals functions (comp vec :seon.fn/calls))))]))
+
 (defn- published-analyzer-digest
   "`analyzer-digest` of the rows a publication analyzed, before they are stored."
   {:malli/schema [:=> [:cat :seon.program/rows] :seon.source/analyzer-digest]}
   [rows]
-  (let [functions (into {} (keep #(when (and (:seon.fn/sym %) (:seon.fn/file %)) [(:seon.fn/sym %) %])) rows)]
-    (id/digest 64 [(into (sorted-map)
-                         (keep #(some->> (get-in functions [% :seon.program/definition-digest]) (vector %)))
-                         (analyzer-reach (update-vals functions (comp vec :seon.fn/calls))))])))
+  (reached-digest (into {} (keep #(when (and (:seon.fn/sym %) (:seon.fn/file %)) [(:seon.fn/sym %) %])) rows)))
+
+(defn- selected-analyzer-digest
+  "`analyzer-digest` of `database` with the files at `paths`, and every file
+  `rows` analyzed, replaced by `rows`: a selected publication's analyzer."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:set :string] :seon.program/rows]
+                  :seon.source/analyzer-digest]}
+  [database paths rows]
+  (let [analyzed (filterv :seon.fn/sym rows)
+        replaced (into paths (keep #(some-> % :seon.fn/file second)) analyzed)
+        stored (db/q '[:find [(pull ?function [:seon.fn/sym :seon.program/definition-digest :seon.fn/calls
+                                               {:seon.fn/file [:seon.fn.file/relative-path]}]) ...]
+                       :where [?function :seon.fn/sym]] database)]
+    (when (map? stored) (refused! "Published function rows could not be read." stored))
+    (reached-digest
+     (into {} (map (juxt :seon.fn/sym identity))
+           (concat (sequence (comp (remove #(contains? replaced (get-in % [:seon.fn/file :seon.fn.file/relative-path])))
+                                   (map #(update % :seon.fn/calls set)))
+                             stored)
+                   analyzed)))))
 
 (defn- launched-analyzer
   "The analyzer identity `database` names when this JVM loaded its files as

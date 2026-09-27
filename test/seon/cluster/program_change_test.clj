@@ -222,3 +222,25 @@
    (fn [connection]
      (let [result (seon.fn/gate-sets {:seon.db/db (db/db connection) :seon.fn/seeds #{'seon.id/valid?}})]
        (is (vector? result) (pr-str result))))))
+
+(deftest a-launch-on-analyzer-bytes-with-unchanged-definitions-publishes-selected
+  ;; WANTED: a JVM launched on analyzer files whose reached definitions are
+  ;; unchanged (a comment, an unreached defn) names the head's analyzer from the
+  ;; selected rows, so boot publishes only the changed files; a changed or
+  ;; deleted reached definition names another analyzer, so every file
+  ;; reanalyzes (seon.cluster/selected-analyzer-digest; 2b6625eff61e).
+  (let [database (db/db (:seon.db/connection (support/execution-handle nil)))
+        selected #'cluster/selected-analyzer-digest
+        head (#'cluster/analyzer-digest database)
+        rows (seon.fn/file-rows database ["src/seon/fn.clj"] :seon.fn/file)
+        zero (apply str (repeat 64 "0"))]
+    (is (seq rows) "the indexer's own file is published")
+    (is (= head (selected database #{"src/seon/fn.clj"} rows))
+        "the same definitions from other bytes name the head's analyzer")
+    (is (not= head (selected database #{"src/seon/fn.clj"}
+                             (mapv #(cond-> % (= `seon.fn/analyze-rows (:seon.fn/sym %))
+                                      (assoc :seon.program/definition-digest zero))
+                                   rows)))
+        "a changed reached definition names another analyzer")
+    (is (not= head (selected database #{"src/seon/fn.clj"} []))
+        "a deleted analyzer file names another analyzer")))
