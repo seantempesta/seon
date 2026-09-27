@@ -146,3 +146,39 @@ before editing. Slice 3 follows it.
   - deleting the machinery (≈ −150) therefore trades lines for per-form latency. That is root's call.
 - **Leftover.** The probe left `:seon.sci.eval/loaded-population` and `::loaded-base` entries in pid 85741's
   process cache. They are released on restart.
+
+### Slice 2a decision rule: keep or revert, decided mechanically
+
+**Baseline.** These three runs are on archive 46c670bb6 (pid 85741). They ran while root's tests were running,
+so the numbers are noisy.
+
+| run | first contracted defn | 2nd | 4th | whole derivations keyed to the probe branch |
+|---|---:|---:|---:|---:|
+| oc-before | 1,075 ms | 595 | 516 | not counted |
+| oc-before-2 | 1,489 ms | 630 | 513 | JVM-wide profile delta (5 derivations, 585 ms), not attributable to the probe |
+| oc-before-3 | 1,548 ms | 590 | 490 | **2** (base-context-cache keys carrying the probe branch's connection id) |
+
+**What slice 2a can change.**
+
+- The hosted agent's first acquisition adds only its agent namespace, so it is additive and 2a serves it from the
+  shared base (a delta read of 33-62 ms plus a 4 ms receive).
+- After the first defn settles, the branch holds an agent function row. It is no longer additive and derives
+  whole, exactly as before.
+- So 2a can remove at most **one** of the two whole derivations per probe, the one before the first defn. Later
+  defns are unchanged.
+
+**Expected after the restart onto e522324c2.**
+
+- The first defn's time falls by that derivation's cost minus ~40 ms, which is **≈ 60-240 ms** (warm derive 102 ms;
+  under load 100-280 ms).
+- The 2nd and 4th defns are unchanged within noise.
+- Derivations keyed to the probe branch fall from 2 to 1.
+
+**Rule.**
+
+- **Keep 2a** only if, over three quiet runs, the median first-defn time drops by ≥ 150 ms against three quiet
+  baseline runs **and** branch-keyed derivations fall from 2 to 1.
+- Otherwise **revert e522324c2 whole in one commit**. The extracted helpers `install-acquired-row` and
+  `acquired-namespace-row` go with it, back to closures, so the revert is `git revert e522324c2` with no manual
+  edits.
+- The baseline must be re-run quietly, because the numbers above were taken under test load.
