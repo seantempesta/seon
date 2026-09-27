@@ -27,6 +27,16 @@
                       :seon.repl/finding :not-admitted
                       :seon.repl/fix "This form failed, so these definitions stayed private to your context with no program row (no tests, no merge): evaluate each again once its form succeeds."}
                      [:set {:max 0} :qualified-symbol]]
+                    [:seon.eval/replaced
+                     {:optional true
+                      :seon.repl/finding :replaced-definition
+                      :seon.repl/fix "The program advanced over these definitions of yours: their changed program rows replaced them in your context. Evaluate yours again to redefine them."}
+                     [:set {:max 0} :qualified-symbol]]
+                    [:seon.eval/ungeneratable
+                     {:optional true
+                      :seon.repl/finding :no-generator
+                      :seon.repl/fix "These schemas have no Malli generator, so functions using them skip auto-check: add a generator or a generatable form."}
+                     [:set {:max 0} :qualified-keyword]]
                     [:seon.repl/out-tokens
                      {:optional true
                       :seon.repl/finding :large-output

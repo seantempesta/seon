@@ -340,9 +340,9 @@ Tests whose expectations change once P10 lands (render lane / owners):
 Regression from P10: printing the raw error map structurally showed 22 of Seon's own frames and the layer/operation
 internals, about 840 shown tokens, and a :large-value finding fired on the error.
 
-**P11**, `tmp/eval-feedback-design-opus/p11-small-error-face-and-unadmitted-data.patch` (error.clj, sci/eval.clj,
+**P11**, `tmp/eval-feedback-design-opus/p11-small-error-map-and-notices-as-data.patch` (error.clj, sci/eval.clj,
 turn.clj, seon.eval.edn, the receipt schema):
-- `seon.error/reply-face` selects what an agent acts on as data:
+- `seon.error/reply-value` selects what an agent acts on as data:
   - the first cause's message;
   - `:seon.error/exception-class`;
   - the agent's own frames (`:seon.sci.eval/stacktrace`);
@@ -370,3 +370,18 @@ sources with 0 findings.
 
 Still in `:out` as prose, and not converted: the success-path `;; PROGRAM CHANGE replaced your definition …` notice,
 and the non-generatable schema advisory. Both are candidates for the same treatment.
+
+### Round 6b (owner: "no more faces, just render functions and data")
+
+- **P11 regenerated from HEAD 7b4461190:** `tmp/eval-feedback-design-opus/p11-small-error-map-and-notices-as-data.patch`.
+  - The error selection is `seon.error/reply-value`, and no new name or doc says "face".
+  - The two remaining `:out` notices are now recorded data (`:seon.eval/replaced`, `:seon.eval/ungeneratable`, sets on
+    the evaluation and receipt). The bounds in `:seon.config.eval/bounds` make them the `:replaced-definition` and
+    `:no-generator` findings; the bounds are committed.
+  - `accretion/non-generatable-advisory` is deleted, since only its own test called it. The test now asserts the
+    fact.
+- **Checks:**
+  - P11 passes `git apply --check` on the working tree, including another lane's uncommitted turn.clj hunk.
+  - Contracts compile over P11's five sources with 0 findings.
+  - The patched schema projection builds (3,570 forms), and a receipt with the three sets validates.
+  - The bounds explainer answers `[[:seon.eval/replaced] [:seon.eval/ungeneratable]]` for non-empty sets.

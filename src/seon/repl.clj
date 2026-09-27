@@ -516,7 +516,7 @@
                              :seon.print/length
                              :seon.print/level
                              :seon.print/options])
-    ;; The recorded measures the declared bounds read, so this face's
+    ;; The recorded measures the declared bounds read, so this render's
     ;; findings match the MCP reply's and the next context's.
     :always (merge (select-keys unit (cost-attributes)))
     renderer-symbol

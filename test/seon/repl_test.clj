@@ -404,7 +404,7 @@
   ;; Live 2026-09-27: the receipt recorded :seon.eval/value-tokens 1604 but the
   ;; MCP reply showed no LARGE VALUE, because the transcript's pull selector
   ;; named its attributes by hand. The attributes the findings read are one
-  ;; derived list, and the entity face carries them too.
+  ;; derived list, and the entity render carries them too.
   (is (every? (set (repl/cost-attributes))
               [:seon.eval/duration-ms :seon.eval/value-tokens :seon.eval/shown-tokens
                :seon.eval/allocated-bytes]))

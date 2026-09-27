@@ -335,7 +335,7 @@
         :else (literal form)))
 
 (defn elided-text
-  "The one text face of a cut: `…N` after shown members, `\"prefix\"…+N`
+  "The one text of a cut: `…N` after shown members, `\"prefix\"…+N`
   after a string's shown characters, `…?` for a pending tail, each followed by
   its continuation form when the cut has a source. The floor's allocator
   measures cuts with this same function."
