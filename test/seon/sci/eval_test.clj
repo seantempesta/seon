@@ -165,7 +165,7 @@
            private-result (run-in b "(def s3-private (atom 7))" 2000)
            private-var (sci/resolve b 'user/s3-private)
            private-object @private-var
-           private-reader (run-in b "(do (def s3-private-value 1) (def s3-private-reader (fn [] s3-private-value)))" 2000)
+           private-reader (run-in b "(do (def s3-private-value 1) (defn s3-private-reader {:malli/schema [:=> [:cat] :int]} [] s3-private-value))" 2000)
            result-handle (seon.id/symbol-in "result" \e
                                            (seon.id/evaluation "s3-fixture" 0))
            _ (eval/bind-result! b result-handle private-object)
@@ -330,10 +330,11 @@
   (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.sci.eval/request) {:seon.cluster.eval/source "(+ 1 1)"
         :seon.sci.admit/caps caps
         :seon.sci.eval/time-limit-ms 1000}))
+  ;; The core-error dial is deleted (7c40396b3); the time limit is the
+  ;; required bound a caller cannot forget.
   (is (not ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.sci.eval/request) {:seon.cluster.eval/source "(+ 1 1)"
-             :seon.sci.admit/caps caps
-             :seon.sci.eval/time-limit-ms 1000}))
-      "no dial, no evaluation"))
+             :seon.sci.admit/caps caps}))
+      "no time limit, no evaluation"))
 
 (deftest
   instrumented-generated-form-does-not-advise-an-absent-program-row
@@ -1080,8 +1081,13 @@
           :seon.sci.eval/ending-namespace 'next
           :seon.print/options {:seon.print/length 4}
           :seon.sci.eval/bindings defs
-          :seon.program/row row})]
+          :seon.program/row row
+          ;; the evaluation's own clock, supplied by `evaluate` (65d0ca8e0);
+          ;; a zero acquisition stays absent
+          :seon.eval/duration-ms 5
+          :seon.eval/acquisition-ms 0})]
     (is (= {:seon.sci.admit/value 7
+            :seon.eval/duration-ms 5
             :seon.eval/shown "7"
             :seon.print/options {:seon.print/length 4}
             :seon.cluster.eval/ns [:seon.ns/name 'user]
@@ -1291,11 +1297,14 @@
         value (:seon.sci.admit/value evaluation)
         shown (edn/read-string (:seon.eval/shown evaluation))]
     (is (not (contains? evaluation :seon.cluster.eval/triage-edn)))
+    ;; The shown text is the small error map (`seon.error/reply-value`,
+    ;; 737fe0a5d); the whole chain stays on the value its handle retrieves.
     (is (= [["clojure.lang.ExceptionInfo" "outer" {:audit/offending 7}]
             ["clojure.lang.ExceptionInfo" "inner" {:audit/detail :sentinel}]]
            (mapv (juxt :seon.error/throwable-class :seon.error/message :seon.error/data)
-                 (:seon.error/chain shown)))
-        (:seon.eval/shown evaluation))
+                 (:seon.error/chain value)))
+        (pr-str value))
+    (is (= "outer" (:seon.error/message shown)) (:seon.eval/shown evaluation))
     (is (= [2 3] (rest (first (:seon.sci.eval/stacktrace shown))))
         "the innermost author frame is the throw's own line and column")
     (is (nil? (:seon.error/frame shown)) "an interpreter frame is not the author's location")
@@ -2045,8 +2054,9 @@
     "#{"
     "(let [x])"
     "#foo/bar [1]"
-    "#=(System/exit 1)"
-    "(java.io.File. \"/etc/passwd\")"]))
+    "#=(System/exit 1)"]))
+;; `(java.io.File. ...)` left this list: the agent interpreter resolves any
+;; classpath class (2cae09887), so constructing one is an ordinary value.
 
 (deftest generated-sources-compose-fork-guard-and-admission
   (let [time-limit-ms (:seon.config.eval/time-limit-ms config/defaults)

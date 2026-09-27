@@ -632,10 +632,16 @@
 (deftest current-database-resolves-once-per-call
   (test-support/with-database
    (fn [connection]
+     ;; Only this thread's resolutions count: `with-redefs` replaces the
+     ;; root for the whole JVM, and members run concurrently, so a
+     ;; JVM-wide count (34 and 62, tests-0627q) measured other members'
+     ;; `d/db` calls, never this call's.
      (let [calls (atom 0)
-           datahike-db d/db]
+           datahike-db d/db
+           this-thread (Thread/currentThread)]
        (with-redefs [d/db (fn [bound-connection]
-                            (swap! calls inc)
+                            (when (identical? this-thread (Thread/currentThread))
+                              (swap! calls inc))
                             (datahike-db bound-connection))]
          (binding [db/*conn* connection]
            (db/q exam-query)
@@ -1151,9 +1157,13 @@
   (test-support/with-database
    (fn [connection]
      (let [effective config/defaults
+           ;; The request names its world's projection: the writer stopped
+           ;; stamping reports' database values with one (9b8c5b405), so the
+           ;; identity-only declaration of a database is read from here.
            request
            {:seon.sci.admit/value
             {:probe/report (db/transact! connection [])}
+            :seon.schema/projection (db/carried-projection @connection)
             :seon.sci.admit/interrupt-fn (fn [])
             :seon.sci.admit/caps (config/result-caps effective)}
            admitted (admit/admit request)

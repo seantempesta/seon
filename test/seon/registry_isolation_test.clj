@@ -37,17 +37,24 @@
   (support/seed-cluster! connection cluster-name)
   (config/apply! {:seon.db/connection connection
                   :seon.boot/cluster-name cluster-name})
-  (let [contract [:=> [:cat [:map [:seon.schema/projection :map]
-                                 [::value schema-key]]] schema-key]
-        result (db/transact!
-                connection
-                [{:seon.schema/key schema-key
-                  :seon.schema/form (pr-str definition)
-                  :seon.schema.admission/source :core}
-                 {:seon.fn/sym "seon.registry-isolation-test/value"
-                  :seon.fn/spec (pr-str contract)}])]
-    (is (some? (:db-after result)) (pr-str (:seon.error/message result)))
-    (schema/projection-from-database @connection)))
+  ;; Fixture writes go through `transacted!` (custody of the connection it
+  ;; names; a nested `with-database` otherwise wrote into the other world's
+  ;; branch, f46f9d461) and the program row through the production analyzer
+  ;; (`replacement-tx`): `:seon.fn/sym` is a symbol since 0e8f7d323, and a
+  ;; hand-written spec on a stored row fails the writer's digest check.
+  (support/transacted! connection [{:seon.schema/key schema-key
+                                    :seon.schema/form (pr-str definition)
+                                    :seon.schema.admission/source :core}])
+  (support/transacted!
+   connection
+   (support/replacement-tx
+    @connection [:seon.fn/sym 'seon.registry-isolation-test/value]
+    (str "(defn value \"Return the supplied value; the cluster's program declares its shape.\"\n"
+         " {:malli/schema [:=> [:cat [:map [:seon.schema/projection :map] [:seon.registry-isolation-test/value "
+         schema-key "]]] " schema-key "]}\n"
+         " [request] (:seon.registry-isolation-test/value request))")
+    {}))
+  (schema/projection-from-database @connection))
 
 (deftest two-clusters-own-their-contracts-and-share-stable-host-wrappers
   (support/with-database
