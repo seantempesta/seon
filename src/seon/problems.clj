@@ -64,6 +64,7 @@
   committed; the next caller re-derives it from the same facts."
   (:require [seon.db :as db]
             [seon.turn :as turn]
+            [seon.cluster.wake :as wake]
             [seon.error :as error]
             [seon.config :as config]
             [seon.render :as render]
@@ -71,7 +72,6 @@
             [seon.render.test :as test-render]
             [seon.test :as test]
             [seon.test.runner :as test.runner]
-            [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
@@ -135,14 +135,16 @@
        vec))
 
 (defn open-faults
-  "Keep the signatures of `entries` that `seon.error/resolution` leaves open at `database`.
+  "Keep the signatures of `entries` that `seon.error/resolution` left open.
+  `entries` are `problems`'s error signatures of `database`, each already
+  carrying its resolution when one resolves it, so none is derived again.
   A fault resolves when its function's definition digest changed after its
   latest occurrence, or by `resolve!`; a later occurrence re-opens it, and an
   unreadable resolution keeps it open."
   {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.problems/error-signature]]
                   [:vector :seon.problems/error-signature]]}
-  [database entries]
-  (filterv #(not (:seon.error/resolved-by (error/resolution database (:seon.error/signature %)))) entries))
+  [_database entries]
+  (filterv #(not (:seon.error/resolved-by (:seon.error/resolution %))) entries))
 
 (defn resolve!
   "Record that the fault `signature` names is fixed away from its failing function.
@@ -261,15 +263,24 @@
 
 (defn- deferred-agents
   "Agents whose pending triggers the episode cap is deferring (F1 §7).
-  A derivation over derivations — `work/episode-runs` and
-  `work/deferred-triggers` — so the state vanishes the moment the next
+  A derivation over derivations — `turn/episode-runs` and
+  `turn/deferred-triggers` — so the state vanishes the moment the next
   outside trigger's run resets the count. Nothing here reads a counter
-  or a flag, because none exists."
+  or a flag, because none exists.
+
+  # Costs
+
+  Unarmed, default 2026-09-27: 2 ms, against 114 ms when every agent ever
+  created (123) was asked. A deferred trigger is a message wake, so only
+  agents a message addresses through a turn-opening wake attribute are asked."
   {:seon/tasks #{"41a8e43ce5a4"}}
   [db]
   (->> (db/q '[:find [?agent-id ...]
-              :where [_ :seon.agent/id ?agent-id]]
-            db)
+              :in $ [?attribute ...]
+              :where [?message :seon.message/id _]
+                     [?message ?attribute ?agent]
+                     [?agent :seon.agent/id ?agent-id]]
+            db (vec (wake/turn-opening-attributes db)))
        sort
        (keep (fn [agent-id]
                (let [deferred (turn/deferred-triggers db agent-id)]
@@ -372,8 +383,7 @@
   symbols that are test rows at `database` count: a deleted test's member
   evidence is history, not a current failure."
   {:malli/schema [:=> [:cat :seon.db/database-value]
-                  [:or :seon.test/latest-results :seon.test/execution-error :seon.db/invalid-read-error
-                   :seon.schema/missing-projection-error]]}
+                  [:or :seon.test/latest-results :seon.test/execution-error :seon.db/invalid-read-error]]}
   [database]
   (let [symbols (db/q '[:find [?symbol ...]
                         :where [_ :seon.test/sym ?symbol]
@@ -411,12 +421,9 @@
                         [:map [:seon.problems/failed-tests-unknown {:optional true}
                                [:vector :seon.test/execution-error]]]]
                    :seon.test/execution-error
-                   :seon.db/invalid-read-error
-                   :seon.schema/missing-projection-error]]}
+                   :seon.db/invalid-read-error]]}
   [db _request]
-  (if-not (or (db/carried-projection db) (schema/handed-projection))
-    (db/projection-fallback 'seon.problems/problems)
-    (let [signatures (error-signatures db)
+  (let [signatures (error-signatures db)
         tests (failed-tests db)
         failed (failed-runs db)
         errored (errored-receipts db)
@@ -439,7 +446,7 @@
                 (seq stale) (assoc :seon.problems/stale-vars stale)
                 (seq missing-model-rows)
                 (assoc :seon.problems/missing-models missing-model-rows))]
-    found)))
+    found))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The html projection — the problems PAGE

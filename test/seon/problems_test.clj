@@ -60,8 +60,8 @@
   (S2c), so those rows are the world's findings, never a fixture's."
   {:malli/schema [:=> [:cat] [:set [:map [:seon.ns/name :seon.ns/name]]]]}
   []
-  (set (:seon.problems/unowned-namespaces
-        (problems/problems (db/db (:seon.db/connection seon.test/*member*)) {}))))
+  ;; Only this family is read: the whole derivation per `found` doubled the cost.
+  (set (#'problems/unstewarded-namespaces (db/db (:seon.db/connection seon.test/*member*)))))
 
 (defn- found
   "The problems the fixture's own facts derive: the world's findings removed."
@@ -553,21 +553,6 @@
             "the fixture's healthy value renders exactly its world's surface")
         (is (not (str/includes? (render-at healthy) "the model did not answer")))
         (is (str/includes? (render-at broken) "the model did not answer"))))))
-
-(deftest missing-projection-is-a-refusal-not-query-entities
-  (test-support/with-database
-   (fn [connection]
-     (let [raw @connection
-           warnings (java.io.StringWriter.)
-           result (binding [*err* warnings]
-                    (seon.schema/call-with-projection-state
-                     (atom {}) #(problems/problems raw {})))]
-       ;; `seon.db/projection-fallback` owns the flat refusal and names the caller.
-       (is (= 'seon.db/projection-fallback (:seon.error/operation result)))
-       (is (= :seon.schema/projection (:seon.error/layer result)))
-       (is (= 'seon.problems/problems (:seon.db/refused-read-operation result)))
-       (is (= {:seon.db/operation 'seon.problems/problems} (:seon.schema/refused-value result)))
-       (is (= 1 (count (str/split-lines (str warnings)))))))))
 
 (deftest six-hundred-failed-tests-render-within-the-profile-bound
   ;; 649 live failed tests were 313,589 characters of prose with no bound.

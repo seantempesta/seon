@@ -954,21 +954,6 @@
               (dry-run-store! root held)
               (collect-store! root held))))))))
 
-(defn collect-released!
-  "The plain collection a test request runs after it unlinks its branches.
-
-  Only objects no roster branch reaches are swept — the unlinked branches'
-  commits and nodes — with every live branch's ancestry kept
-  (`registry/plain-cutoff`), under Datahike's safe point against in-flight
-  writers. Runs only when `effective` carries
-  `:seon.config.maintenance/collect? true`; answers nil when collection is off."
-  {:seon/tasks #{"534966f34876"}
-   :malli/schema [:=> [:cat :seon.store/store :seon.config/effective]
-                  [:or :nil :seon.cluster.registry/inventory]]}
-  [store effective]
-  (when (true? (:seon.config.maintenance/collect? effective))
-    (registry/collect! store registry/plain-cutoff {})))
-
 (defn observe-footprint!
   "Measure only this managed data directory; the schedule records the result."
   {:malli/schema [:=> [:cat :seon.operator/footprint-request]

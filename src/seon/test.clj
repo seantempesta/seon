@@ -15,11 +15,9 @@
             [seon.env :as env]
             [seon.error.refusal]
             [seon.fault :as fault]
-            [seon.flow :as work]
             [seon.fn :as functions]
             [seon.id :as id]
             [seon.instrument :as instrument]
-            [seon.maintenance :as maintenance]
             [seon.program :as program]
             [seon.profile :as profile]
             [seon.schema :as schema]
@@ -2506,26 +2504,9 @@
                       outcome))
                   (finally
                     (when-let [request-handle @held-handle]
-                      (@release-context! request-handle)
-                      ;; Sweeping the unlinked member branches is the maintenance
-                      ;; owner's io work, off the request's path (its mark is ~850
-                      ;; ms and grows with the store); a failure is a core fault.
-                      (let [environment (env/of execution)
-                            launcher (:seon.flow/work-launcher environment)
-                            store (:seon.store/store request-handle)]
-                        (when (and launcher store (true? (:seon.config.maintenance/collect? effective)))
-                          (work/submit!
-                           launcher
-                           {:seon.env/environment environment
-                            :seon.flow/submission-id (str "collect-released-" (id/id))
-                            :seon.flow/workload :io
-                            :seon.flow/work-fn (fn [_] (maintenance/collect-released! store effective))
-                            :seon.flow/complete!
-                            (fn [{value :seon.flow/value failure :seon.flow/throwable}]
-                              (when-let [cause (or failure (when (:seon.error/at value)
-                                                             (ex-info (str (:seon.error/message value)) value)))]
-                                (core-fault! `maintenance/collect-released! cause))
-                              nil)}))))))
+                      ;; Unlink only: the weekly `seon.maintenance/collect!`
+                      ;; reclaims what no roster branch reaches.
+                      (@release-context! request-handle))))
                 held-elsewhere (::held outcome)
                 reused (vec (:seon.test.selection/unchanged selection))
                 results (into (vec (:seon.test/results outcome)) reused)
