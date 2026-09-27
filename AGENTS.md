@@ -212,6 +212,7 @@ root.
   named predicates, never anonymous contract functions or incomplete forms. Justify polymorphic boundaries. Every
   bug fix adds or tightens the contract at the producer of the bad value, so that class of bug is refused at its
   source from then on. Existing uncontracted code is not back-filled wholesale: much of it is headed for deletion.
+  The gate refuses a new or changed function without a complete contract.
 - **Keep entry policy separate from merge.** Schema/test/test-first entry defaults to `:gate`, refusing before
   evaluation; explicit `:warn` admits experiments with declared diagnostics. Preserve malformed authored contracts
   as data; never arm them or substitute stale wrappers. Arm every valid contract: invalid inputs prevent entry,
