@@ -135,9 +135,31 @@
 
 (declare declared-schema-keys stored-observation observation-selector latest-fact)
 
+(defn- frame-site
+  "The compile-stable part of a stack frame: its named function's class, method
+  and file. The compiler numbers every anonymous class (`$fn__6604`) and every
+  local fn (`own_write_BANG___16186`, `eval987622`) per compile, and a line moves
+  with any edit above it, so neither may enter a fault's identity: on default
+  one runner fault became four signatures and one turn backstop fault five
+  (2026-09-26), each re-opened by a restart."
+  {:malli/schema [:=> [:cat :seon.error/frame] [:tuple :string :string [:or :nil :string]]]}
+  [[class-name method file]]
+  (let [digits? (fn [text] (and (seq text) (every? #(Character/isDigit ^char %) text)))
+        segment (fn [text]
+                  (let [cut (str/last-index-of text "__")]
+                    (cond (and cut (digits? (subs text (+ cut 2)))) (subs text 0 cut)
+                          (and (str/starts-with? text "eval") (digits? (subs text 4))) "eval"
+                          :else text)))
+        segments (loop [text (str class-name) found []]
+                   (if-let [cut (str/index-of text "$")]
+                     (recur (subs text (inc cut)) (conj found (subs text 0 cut)))
+                     (conj found text)))]
+    [(str/join "$" (remove #{"fn"} (map segment segments))) (str method) (some-> file str)]))
+
 (defn- signature
   "D13: identity of the observed site, producer-declared schema, violated schema and path.
-  Incidental time, process, message and offending bytes never enter this tuple."
+  Incidental time, process, message, offending bytes and the compiler's class
+  numbering and line numbers ([[frame-site]]) never enter this tuple."
   {:malli/schema [:=> [:cat :seon.schema/projection :map :seon.error/declared-schema
                        [:or :nil :symbol] [:or :nil :seon.error/frame]]
                   :seon.error/signature]}
@@ -157,7 +179,7 @@
     (id/id [(:seon.error/layer observation)
             (:seon.error/operation observation)
             declared-schema
-            throwable-class frame
+            throwable-class (some-> frame frame-site)
             (into (sorted-map)
                   (select-keys observation [:seon.error/expected-key :seon.error/expected-shape]))
             path]

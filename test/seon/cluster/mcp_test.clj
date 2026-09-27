@@ -448,11 +448,13 @@
             "a windowed result stores its blob and commits no transaction")
         (is (true? (:seon.dev.mcp/retrievable? stored))
             "the stored blob is retrievable by its digest")
-        (let [requery (some :seon.print/requery-form
-                            (tree-seq coll? seq (:seon.dev.mcp/value stored)))]
-          (is (seq requery) "a clipped value supplies an executable requery")
-          (is (= value (eval requery))
-              "the advertised requery reads the complete stored value"))
+        (let [cut (some #(when (and (string? %) (str/starts-with? % "…")) %)
+                        (tree-seq coll? seq (:seon.dev.mcp/value stored)))
+              shown (count (remove string? (:seon.dev.mcp/value stored)))
+              continuation (read-string (subs cut (inc (str/index-of cut " "))))]
+          (is (string? cut) "a clipped value's cut is its one text, as the agent reply prints it")
+          (is (= (drop shown value) (eval continuation))
+              "the cut's continuation form reads the stored remainder"))
         (let [absent (apply str (repeat 64 "0"))]
           (is (= [:gone [:seon.blob/digest absent]]
                  ((juxt :seon.render.walk/continuation-reason :seon.render.walk/continuation-node)

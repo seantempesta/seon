@@ -551,6 +551,7 @@
         (mcp-error (failure request :branch throwable))))))
 
 (defn- execute-clj-eval
+  {:seon/tasks #{"f64757aef0e6"}}
   [{:keys [code root cluster mode session_id timeout_ms] :as request}]
   (let [root (canonical-root root)
         cluster (or cluster own-cluster)
@@ -642,19 +643,21 @@
                      :seon.dev.mcp/form code}
                     :transport throwable))))))))
 
-(defn- session-rows
-  [root cluster]
-  (into
-   []
-   (comp
-    (filter (fn [[session-root session-cluster _]]
-              (and (= root session-root)
-                   (= cluster session-cluster))))
-    (map (fn [[session-root cluster session-id]]
-           {:seon.dev.mcp/root session-root
-            :seon.dev.mcp/cluster cluster
-            :seon.dev.mcp/session-id session-id})))
-   (sort (keys @clj-sessions))))
+(defn- session-ids
+  "The ids of `root`'s `cluster` sessions open to `endpoint`, the JVM its
+  advertisement names now (nil when none is advertised). A session open to
+  any other endpoint talks to a JVM that is gone: it is released here, since
+  a caller's going away is invisible to this shared bridge and its peer's
+  going away is not. Lanes named ~35 such sessions after restarts
+  (2026-09-27), each listed as active."
+  [root cluster endpoint]
+  (let [owned (filterv (fn [[session-root session-cluster _]]
+                        (and (= root session-root) (= cluster session-cluster)))
+                      (keys @clj-sessions))
+        [live gone] ((juxt filter remove)
+                     #(and endpoint (= endpoint (:endpoint (get @clj-sessions %)))) owned)]
+    (run! close-clj-session! gone)
+    (vec (sort (map #(nth % 2) live)))))
 
 (defn- runtime-observation
   [root cluster]
@@ -709,7 +712,10 @@
                    :seon.dev.mcp/flow :unknown}))]
         [])
       :seon.dev.mcp/selected-cluster selected
-      :seon.dev.mcp/sessions (session-rows root selected)})))
+      :seon.dev.mcp/sessions
+      (session-ids root selected
+                   ;; no advertisement: no live JVM for any session to reach
+                   (try (read-clj-endpoint root selected) (catch clojure.lang.ExceptionInfo _ nil)))})))
 
 (defn- hex-digit?
   [character]

@@ -61,6 +61,8 @@
             [seon.schedule :as schedule]
             [seon.sci.admit :as admit]
             [seon.render.walk :as render.walk]
+            [seon.print :as print]
+            [clojure.walk :as walk]
             [seon.render.web :as web]
             [seon.sci.eval :as sci.eval]
             [taoensso.timbre :as log]
@@ -450,7 +452,17 @@
                stored-digest (when (and artifact-backed? connection)
                                (blob/put! connection content))]
            (cond-> {:seon.dev.mcp/value
-                    (if (:seon.error/at projection) projection (admit/semantic-value projected-node))
+                    (if (:seon.error/at projection)
+                      projection
+                      ;; A cut is data an agent reads: its one text and
+                      ;; continuation form, as the agent's own reply prints it
+                      ;; (`print/elided-text`), never the node's bookkeeping
+                      ;; (face, bound, profile and the same requery form three
+                      ;; times: ~1,100 characters a cut on runtime_status).
+                      (walk/postwalk #(if (and (map? %) (= :seon.print/elided (:seon.print/face %)))
+                                        (print/elided-text %)
+                                        %)
+                                     (admit/semantic-value projected-node)))
                     :seon.dev.mcp/windowed? artifact-backed?}
              artifact-backed?
              (assoc :seon.blob/digest content-digest
@@ -521,6 +533,8 @@
         (let [projection (render.walk/continue
                           {:seon.render.walk/continuation-node [:seon.blob/digest content-digest]
                            :seon.db/connection connection
+                           ;; a render unit carries the database it renders against
+                           :seon.db/db (db/db connection)
                            :seon.render.data/cursor {:seon.render.data/path path :seon.render.data/offset offset}
                            :seon.render/profile (assoc (render/agent-render-profile effective)
                                                        :seon.render.profile/id :seon.render.profile/mcp
@@ -675,9 +689,10 @@
         procs (when (map? flow)
                 (for [row (:seon.oversight/agents flow) proc (:seon.oversight/procs row)] proc))
         roots (:seon.dev.mcp/replaced-roots observation)]
-    (cond-> (select-keys observation [:seon.dev.mcp/cluster :seon.dev.mcp/health
-                                      :seon.dev.mcp/problem-counts :seon.dev.mcp/resolved-fault-count
-                                      :seon.cache/status])
+    (cond-> (merge (select-keys observation [:seon.dev.mcp/cluster :seon.dev.mcp/health
+                                             :seon.dev.mcp/problem-counts :seon.dev.mcp/resolved-fault-count])
+                   ;; the cache's budget and weight; its per-kind counters are the whole value's
+                   (select-keys (:seon.cache/status observation) [:seon.cache/max-bytes :seon.cache/weighted-bytes]))
       (:seon.dev.mcp/readiness observation)
       (assoc :seon.dev.mcp/readiness (select-keys (:seon.dev.mcp/readiness observation)
                                                   [:seon.boot/missing-layers :seon.boot/ready-ms

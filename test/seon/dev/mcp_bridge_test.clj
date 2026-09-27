@@ -255,9 +255,12 @@
            (fn [_ cluster]
              (swap! observations conj cluster)
              {:seon.dev.mcp/health :observed})
+           (bridge-var 'read-clj-endpoint)
+           (fn [_ _] {:port 1})
            (bridge-var 'clj-sessions)
-           (atom {[root selected "selected-session"] {}
-                  [root "unrelated" "unrelated-session"] {}})}
+           (atom {[root selected "selected-session"] {:endpoint {:port 1}}
+                  [root selected "gone-session"] {:endpoint {:port 0}}
+                  [root "unrelated" "unrelated-session"] {:endpoint {:port 1}}})}
           #((bridge-var 'execute-runtime-status)
             {:root root :cluster selected}))
         data (result-data result)
@@ -267,10 +270,8 @@
     (is (= 1 (count rows)))
     (is (= selected (:seon.dev.mcp/cluster (first rows))))
     (is (= 2 (:seon.dev.mcp/observation-count (first rows))))
-    (is (= [{:seon.dev.mcp/root root
-             :seon.dev.mcp/cluster selected
-             :seon.dev.mcp/session-id "selected-session"}]
-           (:seon.dev.mcp/sessions data)))
+    (is (= ["selected-session"] (:seon.dev.mcp/sessions data))
+        "a session to a JVM its cluster no longer advertises is released, not listed")
     (is (not (str/includes? (get-in result [:content 0 :text])
                             "unrelated")))))
 

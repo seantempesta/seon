@@ -1664,7 +1664,7 @@
   Admitted runs complete members without recreating program rows. Legacy
   unadmitted runs retain the existing latest-result replacement until their
   callers migrate to pre-execution admission."
-  {:seon/tasks #{"32db32ffe15c"}
+  {:seon/tasks #{"32db32ffe15c" "80aa14c43291"}
    :malli/schema [:=> [:cat :seon.db/database-value :seon.test.run/completion]
                   :seon.test.runner/record-tx]}
   [database completion]

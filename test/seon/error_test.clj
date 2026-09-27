@@ -1572,3 +1572,21 @@
               (count (:seon.error/offending
                       (#'admit/semantic-value (edn/read-string (blob/get connection digest))))))
            "the digest retrieves the whole value")))))
+
+(deftest a-fault-site-survives-recompilation-and-moved-lines
+  ;; One runner fault became four signatures and one turn backstop fault five
+  ;; on default (2026-09-26): the compiler's class numbering and the line
+  ;; entered the identity, so each restart or edit above re-opened the fault.
+  (let [site #'seon.error/frame-site]
+    (is (= (site '[seon.test$run$own_write_BANG___16186 invoke "test.clj" 2353])
+           (site '[seon.test$run$own_write_BANG___16130 invoke "test.clj" 2342])
+           ["seon.test$run$own_write_BANG_" "invoke" "test.clj"]))
+    (is (= (site '[seon.turn$turn_completion_backstop_failure invokeStatic "turn.clj" 5561])
+           (site '[seon.turn$turn_completion_backstop_failure invokeStatic "turn.clj" 5612])))
+    (is (= ["seon.call_preparation$preparing" "doInvoke" "call_preparation.clj"]
+           (site '[seon.call_preparation$preparing$fn__6604 doInvoke "call_preparation.clj" 40])))
+    (is (= ["user$eval" "invokeStatic" "NO_SOURCE_FILE"]
+           (site '[user$eval987622 invokeStatic "NO_SOURCE_FILE" 3])))
+    (testing "distinct named functions stay distinct"
+      (is (not= (site '[seon.test$run invoke "test.clj" 1])
+                (site '[seon.test$run_BANG_ invoke "test.clj" 1]))))))
