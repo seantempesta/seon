@@ -1917,23 +1917,31 @@
     (is (= (into {} (filter (fn [[[attribute _] _]] (= :seon.schema/key attribute))) loader)
            (#'schema/schema-scoped-admissions database)))))
 
-(deftest committed-rows-open-without-re-admitting-their-renderers
-  ;; A published commit whose renderer relation today's rules no longer accept
-  ;; (the 6ab855c9 build's :seon.render/db-unit inputs after db-unit's deletion)
-  ;; still opens: reading history derives its projection; renderer coherence
-  ;; belongs to the writes that admitted it.
+(deftest committed-rows-open-without-re-admission-and-writes-are-admitted
+  ;; A published commit whose rows today's rules would refuse still opens:
+  ;; reading history derives its projection from its own rows; completeness
+  ;; and renderer coherence judge writes. Classes: the 6ab855c9 build's
+  ;; :seon.render/db-unit renderer inputs after db-unit's deletion, and a
+  ;; contract a newer completeness rule refuses (an agent's bare nilable return).
   (let [database (seon.db/db (:seon.db/connection (test-support/execution-handle nil)))
         rows {:seon.schema/database-value database
               :seon.schema/schema-rows [[:review/incoherent-input ":int" 1]
                                         [:review/shape "[:map {:seon.render/ai review.render/render} [:review/x :int]]" 1]
                                         [:review/x ":int" 1]]
               :seon.schema/function-contract-rows
-              [['review.render/render "[:=> [:cat :review/incoherent-input] :string]" 1]]}
+              [['review.render/render "[:=> [:cat :review/incoherent-input] :string]" 1]
+               ['review.nil/f "[:=> [:cat :review/x] [:maybe :string]]" 1]]}
         projection (schema/projection-from-rows rows)]
-    (is (contains? (:seon.schema.projection/forms projection) :review/shape))
-    (testing "admission still refuses the same relation at a write"
+    (is (contains? (:seon.schema.projection/forms projection) :review/shape) "renderer relation opens")
+    (is (contains? (:seon.schema.projection/function-contracts projection) 'review.nil/f)
+        "a contract today's completeness rules refuse opens")
+    (testing "the same declarations written now are refused"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"does not accept the declaring shape"
                             (schema/projection-with-schema
                              projection :review/shape
                              [:map {:seon.render/ai 'review.render/render} [:review/x :int] [:review/y {:optional true} :int]]
+                             {:seon.schema.admission/source :agent})))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"bare nilable return"
+                            (schema/projection-with-function-contract
+                             projection 'review.nil/g [:=> [:cat :review/x] [:maybe :string]]
                              {:seon.schema.admission/source :agent}))))))

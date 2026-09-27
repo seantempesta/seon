@@ -2199,8 +2199,9 @@
     {:seon.schema/keys [schema-admissions function-admissions
                         artifact-exports
                         pure-predicate-symbols predicate-functions
-                        validate-render-contracts?]
-     :or {schema-admissions {}
+                        validate-render-contracts? admission?]
+     :or {admission? true
+          schema-admissions {}
           function-admissions {}
           artifact-exports #{}
           pure-predicate-symbols #{}
@@ -2252,7 +2253,8 @@
                (map (fn [[sym _contract]]
                       [sym (mr/schema registry sym)]))
                function-contracts)
-         _ (validate-declarations!
+         _ (when admission?
+            (validate-declarations!
             {:seon.schema/forms forms
              :seon.schema/function-contracts function-contracts
              :seon.schema/compiled-schemas compiled-schemas
@@ -2264,7 +2266,7 @@
              :seon.schema/pure-predicate-symbols pure-predicate-symbols
              :seon.schema/predicate-functions predicate-functions
              :seon.schema/schema-keys (vec (keys forms))
-             :seon.schema/function-symbols (vec (keys function-contracts))})
+             :seon.schema/function-symbols (vec (keys function-contracts))}))
          reverse-schema-dependencies
          (reduce-kv
           (fn [reverse-edges dependent dependencies]
@@ -2638,8 +2640,9 @@
    {:seon.schema/keys [schema-admissions function-admissions
                        artifact-exports
                        pure-predicate-symbols predicate-functions
-                       validate-render-contracts?]
-    :or {schema-admissions {}
+                       validate-render-contracts? admission?]
+    :or {admission? true
+         schema-admissions {}
          function-admissions {}
          artifact-exports #{}
          pure-predicate-symbols #{}
@@ -2703,7 +2706,8 @@
                          :seon.schema/artifact-exports artifact-exports
                          :seon.schema/pure-predicate-symbols pure-predicate-symbols
                          :seon.schema/predicate-functions predicate-functions
-                         :seon.schema/validate-render-contracts? validate-render-contracts?})
+                         :seon.schema/validate-render-contracts? validate-render-contracts?
+                         :seon.schema/admission? admission?})
 
       :else
       (let [canonical-keys
@@ -2818,7 +2822,8 @@
                      :seon.schema.projection/fingerprint fingerprint}
                     shape-data)
              predicate-functions)
-            _ (validate-declarations!
+            _ (when admission?
+               (validate-declarations!
                {:seon.schema/forms forms
                 :seon.schema/function-contracts function-contracts
                 :seon.schema/compiled-schemas (mr/schemas registry)
@@ -2830,7 +2835,7 @@
                 :seon.schema/pure-predicate-symbols pure-predicate-symbols
                 :seon.schema/predicate-functions predicate-functions
                 :seon.schema/schema-keys (vec affected-keys)
-                :seon.schema/function-symbols (vec affected-fns)})]
+                :seon.schema/function-symbols (vec affected-fns)}))]
         (when validate-render-contracts?
           ;; A renderer whose contract recompiled is checked against every
           ;; schema naming it, as a build checks every declaration.
@@ -3098,11 +3103,13 @@
               :seon.schema/pure-predicate-symbols pure-predicate-symbols
               :seon.schema/predicate-functions
               (deleted-predicate-functions forms function-contracts)
-              ;; Reading committed rows re-admits nothing: renderer coherence
-              ;; was judged when the rows were written (`projection-with-schema`,
-              ;; publication's build). A historical commit opens under the
-              ;; rules that admitted it, not today's.
-              :seon.schema/validate-render-contracts? false}))
+              ;; Reading committed rows re-admits nothing: completeness and
+              ;; renderer coherence were judged when the rows were written
+              ;; (`projection-with-schema` and the other replacements,
+              ;; publication's build). A historical commit opens as its own
+              ;; rows, under the rules that admitted it, not today's.
+              :seon.schema/validate-render-contracts? false
+              :seon.schema/admission? false}))
           ;; The row text each form was read from, so the next derivation
           ;; from this projection reads only rows whose text differs. A
           ;; runtime member: every other constructor drops it, so it never
