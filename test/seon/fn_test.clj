@@ -1608,60 +1608,45 @@
            "One complete canonical program population into a fresh memory store verifies exclusive component ownership."
            :seon.test/long-ms 180000}
   fresh-population-flattens-with-its-supplied-declarations
-  (let [configuration {:store {:backend :memory :id (random-uuid)}
-                       :commit-graph? false
-                       :keep-history? true
-                       :schema-flexibility :write}
-        projection (schema/declaration-projection (schema.edn/packaged-forms))
-        manifest @test-support/source-manifest
-        caller (Thread/currentThread)
-        compiled (atom nil)
-        compile-population @#'seon.fn/compile-index-transaction]
-    (d/create-database configuration)
-    (try
-      (with-open [held (test-support/closeable (d/connect configuration) d/release)]
-        (let [connection @held]
-          (schema/call-with-projection
-           projection
-           (fn []
-             ;; This is the complete-publication seam: physical attributes and
-             ;; process facts exist, while canonical schema rows arrive with
-             ;; the program transaction they describe.
-             (#'cluster/accrete-schema-population! connection nil false)
-             (is (empty? (db/q '[:find ?key :where [_ :seon.schema/key ?key]]
-                                  (db/db connection))))
-             (is (= :db.type/ref
-                    (get-in @connection [:schema :seon.fn/arities :db/valueType])))
-             (with-redefs-fn
-               {#'seon.fn/compile-index-transaction
-                (fn [supplied rows identities]
-                  (let [result (compile-population supplied rows identities)]
-                    (when (identical? caller (Thread/currentThread))
-                      (reset! compiled result))
-                    result))}
-               #(let [result (seon.fn/index!
-                              {:seon.db/connection connection
-                               :seon.db/process boot-process
-                               :seon.fn/manifest manifest})]
-                  (is (pos? (:seon.reconcile/operations result)) (pr-str result))))
-             (let [database (db/db connection)
-                   component-attributes
-                   (into []
-                         (keep (fn [[attribute declaration]]
-                                 (when (:db/isComponent declaration) attribute)))
-                         (:schema database))]
-               (is (seq (:seon.fn/index-entities @compiled)) "the population compiled")
-               (is (seq component-attributes)
-                   "the installed schema declares the component relationships checked")
-               (is (empty?
-                    (db/q '[:find ?child ?first ?second
-                            :in $ [?name ...]
-                            :where [?first ?name ?child]
-                                   [?second ?name ?child]
-                                   [(not= ?first ?second)]] database component-attributes))
-                   "flattening preserves exclusive ownership of component children"))))))
-      (finally
-        (d/delete-database configuration)))))
+  ;; WANTED: the fresh store is the fixture's custody (`with-database`
+  ;; `:fresh-store?`), so the population writes its own world; a store made
+  ;; beside the member's branch was refused as a foreign branch.
+  (test-support/with-database
+   {:seon.test-support/fresh-store? true}
+   (fn [connection]
+     (schema/call-with-projection
+      (schema/declaration-projection (schema.edn/packaged-forms))
+      (fn []
+        ;; This is the complete-publication seam: physical attributes and
+        ;; process facts exist, while canonical schema rows arrive with
+        ;; the program transaction they describe.
+        (#'cluster/accrete-schema-population! connection nil false)
+        (is (empty? (db/q '[:find ?key :where [_ :seon.schema/key ?key]]
+                          (db/db connection))))
+        (is (= :db.type/ref
+               (get-in @connection [:schema :seon.fn/arities :db/valueType])))
+        (let [result (seon.fn/index!
+                      {:seon.db/connection connection
+                       :seon.db/process boot-process
+                       :seon.fn/manifest @test-support/source-manifest})]
+          (is (pos? (:seon.reconcile/operations result)) (pr-str result)))
+        (let [database (db/db connection)
+              component-attributes
+              (into []
+                    (keep (fn [[attribute declaration]]
+                            (when (:db/isComponent declaration) attribute)))
+                    (:schema database))]
+          (is (some? (db/q '[:find ?key . :where [_ :seon.schema/key ?key]] database))
+              "the population wrote its schema rows with the program transaction")
+          (is (seq component-attributes)
+              "the installed schema declares the component relationships checked")
+          (is (empty?
+               (db/q '[:find ?child ?first ?second
+                       :in $ [?name ...]
+                       :where [?first ?name ?child]
+                              [?second ?name ?child]
+                              [(not= ?first ?second)]] database component-attributes))
+              "flattening preserves exclusive ownership of component children")))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; ONE EVALUATION POINT — the census's own regression (ruling 71)
