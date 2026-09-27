@@ -1,0 +1,132 @@
+{:passed 13,
+ :of 13,
+ :running-after 0,
+ :waiting-after 0,
+ :proofs
+ {:b2-world-carried
+  {:pass? true,
+   :plain
+   {:connection? false,
+    :member? false,
+    :host-world? false,
+    :projection? false},
+   :virtual
+   {:connection? true,
+    :member? true,
+    :host-world? true,
+    :projection? true},
+   :compute
+   {:connection? true,
+    :member? true,
+    :host-world? true,
+    :projection? true},
+   :ms 148.08,
+   :valid? true},
+  :owner-world-own-branch
+  {:write-on-own? true,
+   :errors nil,
+   :sci-reads-own? true,
+   :on-cluster? false,
+   :valid? true,
+   :read-branch :agent-d9357462d72b,
+   :requester :agent-8438096da20a,
+   :on-requester? false,
+   :pass? true,
+   :member-branch :agent-d9357462d72b,
+   :ms 221.92},
+  :b4-fixture-classification
+  {:direct 277,
+   :valid? true,
+   :classify-ms 120.71,
+   :tests 2378,
+   :runnable-concurrently 1973,
+   :subject-reaches [clojure.core/alter-var-root],
+   :direct-subject? false,
+   :analysis-ms 2504.96,
+   :host-global 405,
+   :pass? true,
+   :ms 2647.67},
+  :b3-counterexample
+  {:pass? true,
+   :outcomes
+   ["java.util.concurrent.TimeoutException"
+    "java.util.concurrent.TimeoutException"],
+   :ms 505.51,
+   :valid? true},
+  :b5-member-allocation
+  {:pass? true,
+   :samples
+   [{:alloc-mb 28.24, :ms 33.72}
+    {:alloc-mb 28.24, :ms 30.88}
+    {:alloc-mb 28.24, :ms 31.61}
+    {:alloc-mb 28.24, :ms 38.59}
+    {:alloc-mb 28.24, :ms 30.83}],
+   :ms 421.8,
+   :valid? true},
+  :b5-pressure-resume
+  {:pass? true,
+   :with-notice
+   {:refused-while-held? true,
+    :running-while-held 0,
+    :collections 1,
+    :values [:ran],
+    :pending [],
+    :cleared? true,
+    :ms 285.56},
+   :without-notice
+   {:refused-while-held? true,
+    :running-while-held 0,
+    :collections 1,
+    :values [],
+    :pending [:m],
+    :cleared? false,
+    :ms 2702.75},
+   :ms 3821.57,
+   :valid? true},
+  :b4-first-load-ready
+  {:pass? true, :loads 1, :distinct-values 1, :ms 52.27, :valid? true},
+  :b3-nested-progress
+  {:pass? true,
+   :parents [[[:child :child [] []]] [[:child :child [] []]]],
+   :ms 300.76,
+   :valid? true},
+  :b1-exit-owned
+  {:valid? true,
+   :run-finished-at-answer? false,
+   :branch-released-after-exit? true,
+   :unfinished [:held],
+   :stop-events 1,
+   :branch-held-at-answer? true,
+   :release->join-ms 0.233292,
+   :exit->release-ms 10.021416,
+   :pass? true,
+   :ms 667.44},
+  :owner-two-clusters-never-cross
+  {:pass? true,
+   :requesters [:agent-11654a9ed6cb :agent-7425f1b0d304],
+   :members [:agent-db67aad6d655 :agent-57e362f60a31],
+   :crossed-datoms [false false],
+   :crossed-sci [false false],
+   :recorded {:r1 [true false], :r2 [false true]},
+   :ms 252.24,
+   :valid? true},
+  :b1-counterexample
+  {:pass? true,
+   :graph-exited? true,
+   :body-exited? false,
+   :ms 0.38,
+   :valid? true},
+  :b6-record-stage
+  {:pass? true,
+   :record-calls 3,
+   :requester-transactions 2,
+   :z-value [:boom],
+   :z-diagnostics ["settle: recording refused"],
+   :ms 236.99,
+   :valid? true},
+  :armed-refuses
+  {:pass? true,
+   :member-world :malli.core/invalid-input,
+   :run-request :malli.core/invalid-input,
+   :ms 0.37,
+   :valid? true}}}
