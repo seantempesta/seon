@@ -1,0 +1,7 @@
+#:seon.config.bootstrap{:beyond-closure-token-budget
+                        [:int
+                         {:min 1,
+                          :seon.config/dial true,
+                          :seon.config/optional true,
+                          :description
+                          "Maximum whole-entry content admitted beyond the generated opening's explained closure. Unit: estimated tokens from seon.ai.tokens/estimate."}]}

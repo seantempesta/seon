@@ -112,6 +112,7 @@
              ::seon.flow/configuration
              (assoc (select-keys (test-support/effective-config)
                                  seon.flow/flow-workload-attributes)
+                    :seon.config.flow.compute/queue-depth 10
                     :seon.config.flow.compute/concurrency 2
                     :seon.config.flow.io/queue-depth 2
                     :seon.config.flow.io/concurrency 2)})]
