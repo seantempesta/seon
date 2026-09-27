@@ -60,4 +60,9 @@
              :kind :function
              :intent "After the plan reads a reply, its source is read again by evaluable-source?, read-source, source-events (source-key and read-only-evaluation?, which also re-derives declarations with program/declaration-row), seon.sci.eval/one-event and install-row!'s test and deletion replays, besides the clj-kondo parse. A form is parsed once: carry the plan's events and the analyzed rows on the evaluation."
              :must-read #{seon.turn/source-events seon.turn/read-only-evaluation? seon.turn/evaluable-source? seon.sci.eval/one-event}
-             :evidence #{"docs/research/agent-platform/eval-path-audit-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/eval-path-audit-2026-09-26.md"}}
+ #:seon.task{:name "receipt-attributes-are-a-hand-list"
+             :kind :function
+             :intent "seon.turn/receipt-terminal-attributes is a hand-written list of the receipt attributes the writer stores; it duplicates the receipt schema, so every new receipt key is silently dropped until someone edits the list (the LARGE VALUE cost keys of 2026-09-27 never landed because of it). Derive the stored attributes from the receipt's declared schema (CLAUDE.md: declare the partition on entity schemas, not in a hand list) and delete the list."
+             :must-read #{seon.turn/receipt-terminal-attributes}
+             :evidence #{"docs/research/agent-platform/landing/large-value-feedback-opus-2026-09-27.md"}}]
