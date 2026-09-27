@@ -155,6 +155,13 @@ root.
 
 ## Data and contracts
 
+- **Model from the agent outward.** The agent's record is its one-hop attachments (session, plan, settings, messages,
+  tasks), each with a declared render; context is rendering what is attached, detail one requery away. Tell a story, not
+  a star: agent → session (current namespace, ordered turns) → evaluations; namespace information lives on the namespace,
+  agent information on the agent. Every stored fact names its consumer or is deleted; hiding it behind a filter or a
+  missing render is not a fix. Choose each relationship deliberately: component, optional or required peer ref, identity
+  value, or a settlement-moved edge; a statement about a living entity is a ref, an observed name is a value; a component
+  is validated as its whole owning value on each write, so size trees by what each write owns.
 - **Custody is the default world, not a wall.** Agents are cooperative; nothing is isolated for security. An
   evaluation's custody (its branch connection) is where its calls read and write by default, so each agent works in
   its own scratch space (branch and SCI fork) and only what root deliberately merges reaches the cluster. Root's own
@@ -294,7 +301,8 @@ root.
   context, unlink. Call the agent's owners, never a test-side copy. Ordinary work uses the main JVM; only
   platform/bootstrap, declared destructive and host-bound work gets isolated JVMs. If an edit cannot reach the main
   JVM, report the precise gap. No JVM-global test state (loaded program identity included) or restoring reloaded
-  roots; preserve instrumentation; never `alter-var-root`, `with-redefs`, `load-file` or `intern` over any Var. Stop
+  roots; preserve instrumentation (a test arms only its own Vars, never the whole JVM); never `alter-var-root`,
+  `with-redefs`, `load-file` or `intern` over any Var. A test driver waits for what production waits for. Stop
   graphs before retracting their facts; release resources even if setup or cleanup fails.
 - **Require current positive proof.** Select tests by current dependencies and each member's actual tested program
   and input evidence; past observed reach is diagnostic. Unknown or red cannot reuse green. Record completion even
@@ -335,7 +343,7 @@ root.
 ## Operating and collaborating
 
 - **Operate through `bin/seon`.** Use its installed help for start/status/open/init/config apply/stop/down/reset/
-  nuke, never deleted internals. Every JVM runs a committed archive, never the working tree: `start` launches HEAD;
+  nuke, never deleted internals. Every JVM runs a committed archive, submodules at their pinned revisions, never the working tree: `start` launches HEAD;
   `start --head` replaces a live root with HEAD, retaining store and caches; a dependency-class miss is filled before
   the old JVM stops, and our own classes are cached as boot loads them, so a miss never lengthens downtime. Reset
   unlinks and forks from program rows, retaining caches. Nuke replaces one JVM, holds the sibling store lock through
