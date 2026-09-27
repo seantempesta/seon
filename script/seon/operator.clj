@@ -12,12 +12,28 @@
            [java.util.concurrent CompletableFuture TimeUnit]
            [java.util.function Supplier Function]))
 
-(defn repository-root []
+(defn program-root
+  "The directory this operator's code loaded from: a committed program
+  (`bin/_operator-program`, a `data/source/<sha>` archive) or, run by hand, the
+  checkout. Its committed `config/` is this program's shipped configuration."
+  {:malli/schema [:=> [:cat] :string]}
+  []
   (-> (io/resource "seon/operator.clj") io/file .getCanonicalFile
       .getParentFile .getParentFile .getParentFile .getPath))
 
+(defn repository-root
+  "The Git checkout this operator builds committed archives from and whose
+  `target` holds the shared class caches: `SEON_CHECKOUT` as `bin/seon` names
+  it (the operator runs a committed program, not the checkout) and a JVM it
+  launched inherits, else `program-root` (the operator run from the checkout
+  itself). An archive program without it has no checkout, and
+  `committed-repository` refuses it."
+  {:malli/schema [:=> [:cat] :string]}
+  []
+  (or (System/getenv "SEON_CHECKOUT") (program-root)))
+
 (def shipped-default-decisions
-  (delay (edn/read-string (slurp (io/file (repository-root) "config/default.edn")))))
+  (delay (edn/read-string (slurp (io/file (program-root) "config/default.edn")))))
 
 (defn operator-silence-backstop-ms
   {:malli/schema [:=> [:cat [:maybe :seon.config/manifest]] [:int {:min 1}]]}
@@ -790,8 +806,12 @@
       (finally (.delete tar)))))
 
 (defn- committed-repository
-  "The operator's own checkout (derived from this script's location, never the
-  cwd), required to be a Git top level: a nuke builds from committed inputs."
+  "The operator's Git checkout (`repository-root`: `SEON_CHECKOUT`, else this
+  script's location, never the cwd), required to be a Git top level: a nuke
+  builds from committed inputs. A JVM running a `data/source/<sha>` archive
+  (whose tests start operators) reaches its checkout through the inherited
+  `SEON_CHECKOUT`."
+  {:malli/schema [:=> [:cat] :string]}
   []
   (let [repository (repository-root)
         top (try (str/trim (command! ["git" "rev-parse" "--show-toplevel"] repository 30000))
@@ -801,7 +821,7 @@
                                                {:seon.operator/repository repository} :refused cause)
                                    cause))))]
     (when-not (= (.getCanonicalPath (io/file top)) (.getCanonicalPath (io/file repository)))
-      (fail! "The operator's checkout is not a Git top level (a frozen archive inside another repository?); a nuke builds from committed inputs and this checkout has none."
+      (fail! "The operator's checkout is not a Git top level (an archive program run without SEON_CHECKOUT naming its checkout?); a nuke builds from committed inputs and this checkout has none."
              {:seon.operator/repository repository :seon.operator/enclosing-repository top}))
     repository))
 

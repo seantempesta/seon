@@ -3,4 +3,7 @@ set -euo pipefail
 
 SEON_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export SEON_PROJECT_ROOT="$SEON_ROOT"
-exec bb --classpath "$SEON_ROOT/script:$SEON_ROOT/src:$SEON_ROOT/resources" -m seon.dev.mcp "$@"
+# The bridge runs the commit of the live default JVM it talks to, never the
+# working tree (bin/_operator-program); a reconnect follows a moved JVM.
+program="$("$SEON_ROOT/bin/_operator-program" "$SEON_ROOT" running)"
+exec bb --config /dev/null --classpath "$program/script:$program/src:$program/resources" -m seon.dev.mcp "$@"

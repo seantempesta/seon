@@ -13,14 +13,26 @@ if [[ "${1:-}" == "--root" ]]; then
   shift 2
 fi
 
+# The operator runs committed bytes, never the working tree (bin/_operator-program):
+# `start --head` moves the root to HEAD, so it runs HEAD's operator; every
+# other command runs the commit of the root's live JVM (HEAD when none runs).
+which=running
+if [[ "${1:-}" == start && " $* " == *" --head "* ]]; then
+  which=head
+fi
+program="$("$SEON_SOURCE_ROOT/bin/_operator-program" "$SEON_OPERATOR_ROOT" "$which")"
+# The Git checkout the operator builds committed archives from
+# (seon.operator/repository-root); a JVM it launches inherits it.
+if [[ -e "$SEON_SOURCE_ROOT/.git" ]]; then
+  export SEON_CHECKOUT="$SEON_SOURCE_ROOT"
+fi
+
 if [[ "${1:-}" == "issues-index" ]]; then
   shift
-  exec bb --config "$SEON_SOURCE_ROOT/bb.edn" --deps-root "$SEON_SOURCE_ROOT" \
-    --classpath "$SEON_SOURCE_ROOT/script:$SEON_SOURCE_ROOT/src:$SEON_SOURCE_ROOT/resources" \
+  exec bb --config /dev/null --classpath "$program/script:$program/src:$program/resources" \
     -e '(require (quote seon.dev.issues)) (System/exit (seon.dev.issues/run! (first *command-line-args*) (rest *command-line-args*)))' \
     "$SEON_OPERATOR_ROOT" "$@"
 fi
 
-exec bb --config "$SEON_SOURCE_ROOT/bb.edn" --deps-root "$SEON_SOURCE_ROOT" \
-  --classpath "$SEON_SOURCE_ROOT/script:$SEON_SOURCE_ROOT/src:$SEON_SOURCE_ROOT/resources" \
+exec bb --config /dev/null --classpath "$program/script:$program/src:$program/resources" \
   -m seon.operator --seon-root "$SEON_OPERATOR_ROOT" "$@"

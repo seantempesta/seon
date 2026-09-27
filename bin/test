@@ -16,7 +16,13 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 if [ "${1-}" != --platform ]; then
-  exec bin/test-check "$@"
+  # The request client runs the commit of the live JVM it asks, never the
+  # working tree (bin/_operator-program).
+  root=.
+  if [ "${1-}" = --root ]; then root=${2-.}; fi
+  program=$(bin/_operator-program "$(cd "$root" && pwd -P)" running)
+  exec bb --config /dev/null --classpath "$program/script:$program/src:$program/resources" \
+    "$program/bin/test-check" "$@"
 fi
 shift
 if [ "$#" -ne 0 ]; then
@@ -50,7 +56,9 @@ booted=$(date +%s)
 echo "bin/test --platform: host ready in $((booted - started)) s" >&2
 
 status=0
-bin/test-check --root "$root" default --isolated --include-long || status=$?
+program=$(bin/_operator-program "$root" running)
+bb --config /dev/null --classpath "$program/script:$program/src:$program/resources" \
+  "$program/bin/test-check" --root "$root" default --isolated --include-long || status=$?
 finished=$(date +%s)
 echo "bin/test --platform: request $((finished - booted)) s; total $((finished - started)) s" >&2
 

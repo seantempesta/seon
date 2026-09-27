@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# bin/_operator-program ROOT head|running
+#
+# Prints the committed program directory the babashka operator loads from
+# (bin/seon, bin/test, bin/mcp-server), so no uncommitted working-tree edit
+# reaches it: `git archive` of the operator's paths at one commit, extracted
+# once per commit under the checkout's target/operator-programs/<sha>.
+#   head     committed HEAD: the commands that launch a JVM (start, nuke),
+#            whose program is HEAD's archive too.
+#   running  the commit ROOT's live default JVM runs (the archive named by its
+#            -Dseon.repository.root, whose directory is that commit), so the
+#            operator speaks the protocol of the JVM it talks to; HEAD when no
+#            JVM runs.
+# Run from an archive (no .git beside bin/), the archive itself is committed
+# bytes and is the program.
+set -euo pipefail
+checkout="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+root="$1"
+if [[ ! -e "$checkout/.git" ]]; then
+  echo "$checkout"
+  exit 0
+fi
+
+revision=HEAD
+advertisement="$root/data/clusters/default/prepl.edn"
+if [[ "$2" == running && -f "$advertisement" ]]; then
+  pid=$(sed -n 's/.*:seon\.boot\/pid \([0-9][0-9]*\).*/\1/p' "$advertisement")
+  source=$( (ps -o args= -p "${pid:-0}" 2>/dev/null || true) | tr ' ' '\n' \
+            | sed -n 's/^-Dseon\.repository\.root=//p' | head -n 1)
+  [[ -n "$source" ]] && revision="$(basename "$source")"
+fi
+sha=$(git -C "$checkout" rev-parse --verify --quiet "$revision^{commit}" \
+      || git -C "$checkout" rev-parse --verify HEAD^{commit})
+
+programs="$checkout/target/operator-programs"
+program="$programs/$sha"
+if [[ ! -d "$program" ]]; then
+  staging="$program.staging-$$"
+  mkdir -p "$staging"
+  git -C "$checkout" archive --format=tar "$sha" bin script src resources config | tar -x -C "$staging"
+  # rename(2) refuses a non-empty target: a racing builder that won keeps its copy.
+  perl -e 'rename($ARGV[0], $ARGV[1]) or exit 1' "$staging" "$program" || rm -rf -- "$staging"
+  # Prune programs older than ten minutes that no live process names.
+  live=$(ps -axo args=)
+  for old in $(find "$programs" -mindepth 1 -maxdepth 1 -type d -mmin +10); do
+    case "$live" in *"$old/"*) ;; *) rm -rf -- "$old" ;; esac
+  done
+fi
+echo "$program"
