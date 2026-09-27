@@ -267,7 +267,10 @@
        "(defn write! {:malli/schema [:=> [:cat :seon.db/connection] :any]} [connection]\n"
        "  (seon.db/transact! connection [" entity "]))\n"))
 
-(deftest a-retirement-lands-after-the-program-rows-that-convert-its-writers
+(deftest ^{:seon.test/long
+           "Three real incremental publications of one fixture file (analysis, index!, retirement): 0.18-0.41 s each warm, 1.42 s for the first in a JVM, plus two fixture projections (~0.3 s each cold); measured at the REPL 2026-09-27. The harness run measured 5.49 s including member acquisition."
+           :seon.test/long-ms 8000}
+  a-retirement-lands-after-the-program-rows-that-convert-its-writers
   ;; Class regression (fix-retire-ordering 2026-09-27): 13387dc38 retired a
   ;; dial and converted the one test writing it in the same commit, and boot's
   ;; publication refused because `populate-source!` retracted the attribute
@@ -311,7 +314,8 @@
            (spit source (writer-source "{:retire.probe/id \"b\"}"))
            (publish! connection without-dial)
            (is (not (installed? connection)) "the attribute is retired with its data")
-           (is (empty? (writes connection)) "the converted writer names it no longer")
+           ;; The converted writer writes only the fixture's identity.
+           (is (= #{:retire.probe/id} (writes connection)) "the converted writer names it no longer")
            (is (= {:retire.probe/id "a"}
                   (dissoc (db/pull (db/db connection) '[*] [:retire.probe/id "a"]) :db/id))
                "its entity keeps every other attribute"))))
