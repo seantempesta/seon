@@ -212,3 +212,27 @@ Patches:
 
 Both pass `git apply --check`. Contracts compile over all patched sources with 0 findings. Scratch value_test: 99 pass;
 2 fail, the same pre-existing failures as before; the errors are fixtures that need `seon.test/run`.
+
+## Round 3 (pid 51535, bb9773a8d): the receipt records the cost, but MCP showed no LARGE VALUE
+
+Cause: `seon.render.transcript/receipt-selector` pulls a hand-listed set of receipt attributes, and it has none of the
+cost measures.
+- The history entry's `::value-tokens`/`::shown-tokens` (P2) were therefore always nil.
+- `seon.cluster.agent/run-observation` → `history-entries` → `seon.repl/response` is the one reply path for both MCP
+  and the next context, so both saw no LARGE VALUE.
+
+Proof on branch `efd-13`, run `965b42559c21`, `(vec (range 3000))`: the receipt holds
+`{:value-tokens 1604 :shown-tokens 39 :elisions 1 :duration-ms 5}`. The live `seon.repl/findings` over those recorded
+keys answers:
+`;; LARGE VALUE: result/eb53baf43a2c6 is ~1604 tokens whole (shown 39). A value this big usually means a query or function returns more than it should.`
+
+Fix:
+- `seon.repl/cost-attributes` derives the stored attributes the bounds and their lines read from the bounds schema
+  (committed).
+- `seon.repl/entity-emission` carries them (committed).
+- **P7**, `tmp/eval-feedback-design-opus/p7-transcript-pulls-cost.patch` (transcript.clj, held; +7 / −8): the
+  selector adds `(repl/cost-attributes)`, and the history entry and emission carry `::cost` as one map, replacing the
+  per-key copies.
+
+Regression: `seon.repl-test/every-reply-path-reads-the-recorded-cost-its-findings-need`. Scratch repl_test: 19 tests,
+96 assertions, 0 failures. Contracts compile over repl.clj, repl_test and P7's transcript with 0 findings.

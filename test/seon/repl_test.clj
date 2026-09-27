@@ -374,3 +374,19 @@
              (repl/findings (assoc emission :seon.eval/value-tokens 4650 :seon.eval/shown-tokens 30))))
       (is (= [] (repl/findings (assoc emission :seon.eval/value-tokens 900 :seon.eval/shown-tokens 900)))
           "within the bound the value is simply shown"))))
+
+(deftest every-reply-path-reads-the-recorded-cost-its-findings-need
+  ;; Live 2026-09-27: the receipt recorded :seon.eval/value-tokens 1604 but the
+  ;; MCP reply showed no LARGE VALUE, because the transcript's pull selector
+  ;; named its attributes by hand. The attributes the findings read are one
+  ;; derived list, and the entity face carries them too.
+  (is (every? (set (repl/cost-attributes))
+              [:seon.eval/duration-ms :seon.eval/value-tokens :seon.eval/shown-tokens
+               :seon.eval/allocated-bytes]))
+  (is (not-any? #(= "seon.repl" (namespace %)) (repl/cost-attributes))
+      "a measure the reply derives itself is not pulled")
+  (is (str/includes?
+       (repl/render-ai {:db/id 7 :seon.cluster.eval/id "eb53" :seon.cluster.eval/source "(vec (range 3000))"
+                        :seon.eval/shown "[0 1 2 …2997 (drop 3 result/eeb53)]"
+                        :seon.eval/value-tokens 1604 :seon.eval/shown-tokens 39 :seon.eval/duration-ms 5})
+       ";; LARGE VALUE: result/eeb53 is ~1604 tokens whole (shown 39).")))

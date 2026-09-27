@@ -1,0 +1,47 @@
+diff --git a/src/seon/render/transcript.clj b/src/seon/render/transcript.clj
+index f81add270..aefc48d76 100644
+--- a/src/seon/render/transcript.clj
++++ b/src/seon/render/transcript.clj
+@@ -38,6 +38,9 @@
+    :seon.message/about])
+ 
+ (def ^:private receipt-selector
++  ;; Plus every stored measure the declared bounds read (seon.repl/cost-attributes),
++  ;; so the reply's findings see what the receipt recorded.
++  (into
+   [:db/id
+    :seon.cluster.eval/id
+    :seon.cluster.eval/ordinal
+@@ -68,7 +71,8 @@
+      {:seon.turn/agent
+       [:db/id
+        :seon.agent/id
+-       {:seon.agent/namespace [:db/id :seon.ns/name]}]}]}])
++       {:seon.agent/namespace [:db/id :seon.ns/name]}]}]}]
++  (repl/cost-attributes)))
+ 
+ 
+ 
+@@ -288,9 +292,7 @@
+      ::interrupted-at (:seon.cluster.eval/interrupted-at receipt)
+      ::comment (:seon.cluster.eval/comment receipt)
+      ::duration-ms (:seon.eval/duration-ms receipt)
+-     ::allocated-bytes (:seon.eval/allocated-bytes receipt)
+-     ::value-tokens (:seon.eval/value-tokens receipt)
+-     ::shown-tokens (:seon.eval/shown-tokens receipt)
++     ::cost (select-keys receipt (repl/cost-attributes))
+      ::print-length (:seon.print/length receipt)
+      ::print-level (:seon.print/level receipt)
+      ::ending-ns (:seon.sci.eval/ending-ns receipt)
+@@ -492,10 +494,7 @@
+       (::ending-ns entry) (assoc :seon.sci.eval/ending-ns (::ending-ns entry))
+       (::duration-ms entry) (assoc :seon.eval/duration-ms
+                                    (::duration-ms entry))
+-      (::allocated-bytes entry) (assoc :seon.eval/allocated-bytes
+-                                       (::allocated-bytes entry))
+-      (::value-tokens entry) (assoc :seon.eval/value-tokens (::value-tokens entry))
+-      (::shown-tokens entry) (assoc :seon.eval/shown-tokens (::shown-tokens entry))
++      (seq (::cost entry)) (merge (::cost entry))
+       (::branch-errors-text entry) (assoc :seon.repl/errors
+                                           (::branch-errors-text entry)))))
+ 

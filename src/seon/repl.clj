@@ -258,6 +258,16 @@
       ::lines lines
       ::named (into #{} (comp (mapcat val) (filter qualified-keyword?)) lines)})))
 
+(defn cost-attributes
+  "The stored evaluation attributes the declared bounds and their lines read
+  (every measure and named value outside `seon.repl`'s own derived ones). A
+  reader that pulls an evaluation for its reply pulls these, so the findings
+  see what the receipt recorded; nothing names them by hand."
+  {:malli/schema [:=> [:cat] [:vector :qualified-keyword]]}
+  []
+  (let [{measures ::measures named ::named} @bounds]
+    (into [] (comp (remove #(= "seon.repl" (namespace %))) (distinct)) (concat measures named))))
+
 (defn cost
   "The measures the declared bounds judge for one evaluation: each one its
   emission carries as recorded, and the estimated tokens of its printed
@@ -497,6 +507,9 @@
                              :seon.print/length
                              :seon.print/level
                              :seon.print/options])
+    ;; The recorded measures the declared bounds read, so this face's
+    ;; findings match the MCP reply's and the next context's.
+    :always (merge (select-keys unit (cost-attributes)))
     renderer-symbol
     (assoc :seon.eval/renderer (symbol renderer-symbol))
     changed? (assoc :seon.repl/changed-since? true)
