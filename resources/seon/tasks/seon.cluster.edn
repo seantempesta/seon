@@ -57,4 +57,9 @@
              :kind :function
              :intent "mcp-instance reads seon.operator.runtime/running-instances directly with no way to pass an instance, so mcp-test fixtures swap! the JVM-wide roster 16 times (JVM-global test state) and one test builds its context with env/carry-state {} and with-redefs over config/effective. Pass the instance through the mcp-* functions (mcp-valf, mcp-get-value, mcp-effective, runtime observation) and convert the fixtures to injected instances."
              :must-read #{seon.cluster/mcp-get-value}
+             :evidence #{"docs/research/agent-platform/red-triage-3-2026-09-27.md"}}
+ #:seon.task{:name "mcp-reply-without-a-database-prints-unbounded"
+             :kind :function
+             :intent "In JVM mode for a cluster with no connection (before the store layer is up, or a cluster name this JVM does not host), mcp-project has no database for render.value/prepare, whose unit requires :seon.db/db; the refusal is attached and the value falls back to plain printing with the MCP profile's budget unapplied. AGENTS: nothing prints unbounded. The fallback prints through the floor's bounded path (bounded-text), never plain Clojure printing of the whole value (fix-c, 4c2ac5774)."
+             :must-read #{seon.cluster/mcp-project seon.render.value/prepare}
              :evidence #{"docs/research/agent-platform/red-triage-3-2026-09-27.md"}}]
