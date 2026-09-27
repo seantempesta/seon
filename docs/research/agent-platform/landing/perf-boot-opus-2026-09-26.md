@@ -767,3 +767,39 @@ Whoever used `/tmp/x` should check.
 **Checks:** clj-kondo 0 errors on an archive of HEAD plus the diff; contracts compile check `[]`.
 
 **Files:** `resources/seon/schemas/seon.render.edn`; `src/seon/{agent,ai,cluster,effect,error,plan,problems,render,repl,turn}.clj`; `src/seon/cluster/{agent,boot,message,status}.clj`; `src/seon/render/{ns,test,transcript,value}.clj`; `src/seon/sci/eval.clj`; `src/seon/test/runner.clj`; `test/seon/render/entity_pairs_test.clj`.
+
+## Resume 18 — render entry points without a database (a6ec14a8c); RESET NEEDED
+
+**Refusals on pid 45188** (tests-0627f), counted by the function refused:
+
+| function | count | cause |
+|---|---|---|
+| `render.web/message-bar-html` | 54 | shell and session controls built `{:seon.agent/id id}` |
+| `render.value/node-id` | 18 | `render.web/unit-id` on walked units that carried no database |
+| `seon.error/render-html` | 4 | debug previews rendering a refusal map |
+
+**Fixed at the producers:**
+- `render/render-argument`, where every render unit is built: a request with no `:seon.db/db` renders against its
+  `:seon.db/connection`'s current value, else its SCI context's custody connection's.
+- `render.web`:
+  - `with-database` hands the page's database to the message bar in `shell` and in session controls;
+  - to every walked unit in `page-result`, before `unit-id` and `surface-html`;
+  - to the debug previews, through a new `database` parameter.
+  - The two `shell` callers with a database pass it.
+
+**entity-pairs test:**
+- The "argument count 2" error is not a prefixed call. `render/entity-owner` has been
+  `[projection value database]` since 958bf0ed6, and the test called it with 2 arguments; it now passes `nil`.
+- The probe render request now names `:seon.render.value/root`, which node-id requires.
+
+**Not diagnosed.** The other value-test and transcript-test reds are not db refusals by message. Two examples:
+`block-pairs-remain-explicit` rendered the floor (`#object[TxReport]`), and `a-failing-renderer-never-replaces-the-value`
+changed its text. Some may be requests built without a database, where the render contract fit check now rejects
+producers whose unit lacks one; `render-argument` above covers those that carry a connection or ctx. Others may come
+from other lanes' render changes. Re-run them first.
+
+**Checks:** clj-kondo 0 errors on an archive of HEAD plus the diff; contracts compile check `[]`.
+
+**Root runs:** `seon.render.web-test`, `seon.render.web-context-test`, `seon.render.entity-pairs-test`,
+`seon.render.transcript-test`, `seon.render.value-test`, `seon.render-test`, `seon.problems-test`,
+`seon.cluster.mcp-test`.
