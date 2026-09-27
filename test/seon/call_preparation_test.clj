@@ -706,6 +706,11 @@
 
 (deftest unavailable-custody-refuses-the-call-instead-of-running-it-unprepared
   ;; The world's connection is released: its supplier cannot read a database.
+  ;; WANTED since 68c721fbb: a prepared call is supplied the database of the
+  ;; custody in force (`seon.instrument/calling-environment`), so the
+  ;; evaluation runs under the released connection's custody. Without it, a
+  ;; test member's custody (bound by the runner) supplied its live database and
+  ;; the body ran.
   (test-support/with-database
    (fn [connection]
      (test-support/transacted! connection database-rows)
@@ -714,7 +719,9 @@
         (let [ctx (probe-ctx connection released)]
           (d/release released)
           (reset! entered 0)
-          (let [refused (probe ctx "probe-received-database? \"a\"")]
+          (let [refused (db/call-with-custody
+                         {:seon.db/connection released}
+                         #(probe ctx "probe-received-database? \"a\""))]
             (is (= :seon.db/db (:seon.call-preparation/unavailable-key refused))
                 "the call's result names the default its world could not supply")
             (is (= (symbol #'probe-received-database?)
