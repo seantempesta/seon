@@ -2227,7 +2227,8 @@
                    (let [result (agent/evaluate-source! (assoc request :seon.agent/segmenter 'seon.cluster.reply/code-sources
                                                                :seon.cluster.reply/text text))
                          run-id (:seon.turn/id result)
-                         database (db/db connection)
+                         ;; the run on the reply's own value (answered when applied)
+                         database (or (:seon.db/db result) (db/db connection))
                          receipts (when run-id
                                     (sort-by :seon.cluster.eval/ordinal
                                              (db/q '[:find [(pull ?e [:seon.cluster.eval/ordinal :seon.eval/shown

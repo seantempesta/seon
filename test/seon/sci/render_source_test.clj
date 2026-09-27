@@ -120,10 +120,11 @@
         (agent/arm! agent-request)
         (let [result (agent/evaluate-source! (assoc agent-request :seon.agent/segmenter 'seon.cluster.reply/code-sources
                                                     :seon.cluster.reply/text "(/ 1 0)"))
-              saved (:seon.eval/shown (first (drive/run-receipts (db/db connection) [(:seon.turn/id result)])))
+              ;; the run on the reply's own value (answered when applied)
+              saved (:seon.eval/shown (first (drive/run-receipts (:seon.db/db result) [(:seon.turn/id result)])))
               context #(:seon.render.history/printed-value
                         (first (transcript/history-entries
-                                {:seon.db/db (db/db connection) :seon.agent/id agent-id
+                                {:seon.db/db (:seon.db/db result) :seon.agent/id agent-id
                                  :seon.render.transcript/selected-run-id (:seon.turn/id result)
                                  :seon.sci.admit/caps (config/result-caps config/defaults)})))]
           (is (str/includes? saved ";=> ") saved)

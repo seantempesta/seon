@@ -442,7 +442,7 @@
               ;; context reads, read on the database value the run's settlement
               ;; left (`seon.cluster.agent/run-observation`), never on a later
               ;; connection value.
-              (assoc (dissoc result# :seon.db/db) :seon.dev.mcp/evaluations
+              (assoc (dissoc result# :seon.db/db :seon.db/durable) :seon.dev.mcp/evaluations
                      ((requiring-resolve 'seon.cluster.agent/run-observation)
                       result# (:seon.agent/id custody#) ~cluster)))))))))
 

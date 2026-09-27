@@ -15,6 +15,7 @@
             [seon.cluster.message :as message]
             [seon.cluster.reply :as reply]
             [seon.cluster.wake :as wake]
+            [seon.await :as await]
             [seon.config :as config]
             [seon.db :as db]
             [seon.effect :as effect]
@@ -2423,17 +2424,43 @@
   [{connection :seon.db/connection agent-id :seon.agent/id}]
   (db/transact! connection [[:db.fn/call #'compact-call agent-id]]))
 
+(defn- await-durable!
+  "Wait for `pending`, the commit of a settlement the writer answered when
+  applied (`seon.db/transact-applied!`), under the cluster's turn-completion
+  bound. A failed commit was already faulted by `settlement-lost!`; a timeout
+  or failure escapes whole to the caller's fault route."
+  {:malli/schema [:=> [:cat :seon.turn.loop/cluster :seon.await/blocking-deref] :nil]}
+  [cluster pending]
+  (let [attribute :seon.config.agent/turn-completion-backstop-ms
+        outcome (await/await!
+                 {:seon.await/bound {:seon.await/config-attribute attribute
+                                     :seon.await/config-value
+                                     (get (config/effective (db/db (:seon.db/connection cluster))
+                                                            (:seon.cluster/name cluster))
+                                          attribute)}
+                  :seon.await/diagnostic {:seon.error/layer :seon.turn/settlement
+                                          :seon.error/operation `await-durable!}
+                  :seon.await/blocking-deref pending})]
+    (when (or (:seon.await/config-attribute outcome) (instance? Throwable outcome))
+      (throw (if (instance? Throwable outcome)
+               outcome
+               (ex-info (:seon.error/message outcome) outcome))))
+    nil))
+
 (defn virtual-turn!
   "Run a fixture reply as one ordinary run of the agent proc, without a
   provider (`seon.cluster.agent/evaluate-source!`). Returns its turn identity
-  once the run has settled, or the pass's refusal (a run already open)."
+  once the run has settled and committed, so a fixture reads it on the
+  connection, or the pass's refusal (a run already open)."
   {:malli/schema [:=> [:cat :seon.turn/virtual-request]
                   [:or :seon.agent/source-submission-result
                    :seon.agent/source-submission-refused-error
                    :seon.await/timeout-error :seon.await/closed-error]]}
   [request]
-  (@cluster-agent-evaluate-source!
-   (update request :seon.cluster.reply/text #(or % ""))))
+  (let [result (@cluster-agent-evaluate-source!
+                (update request :seon.cluster.reply/text #(or % "")))]
+    (some->> (:seon.db/durable result) (await-durable! (:seon.turn.loop/cluster request)))
+    result))
 
 
 
@@ -3799,6 +3826,29 @@
            :seon.blob/staged-writes (into (vec (:seon.blob/staged-writes submission))
                                           (:seon.blob/staged-writes transaction))))))
 
+(defn- settlement-lost!
+  "The durable commit of an applied settlement failed: the writer is stopped
+  (Datahike's terminal commit failure), so the fault names the runs whose
+  shown results were lost and goes to `seon.fault/fault!`, which cannot store
+  it and so runs this agent's stop and throws."
+  {:malli/schema [:=> [:cat :seon.turn.loop/cluster [:vector :seon.turn.loop/settle-evaluation-request]
+                       :seon.error/throwable]
+                  :nil]}
+  [cluster requests failure]
+  (let [runs (into [] (comp (map :seon.turn/id) (distinct)) requests)
+        agent-id (:seon.agent/id (first requests))]
+    (fault/fault! (env/of cluster)
+                  (ex-info (str "The durable commit of applied settlement(s) for run(s) " (pr-str runs)
+                                " failed; their shown results are lost and the writer has stopped.")
+                           {:seon.turn/id (first runs) :seon.agent/id agent-id} failure)
+                  (cond-> {:seon.error/layer :seon.turn/settlement
+                           :seon.error/operation `settle-batch!
+                           :seon.db.process/id (:seon.db.process/id cluster)
+                           :seon.agent/id agent-id}
+                    (:seon.fault/stop-request! cluster)
+                    (assoc :seon.fault/stop-request! (:seon.fault/stop-request! cluster))))
+    nil))
+
 (defn- settle-batch!
   "Settle every evaluated form and all turn side effects in one transaction."
   {:malli/schema
@@ -3867,8 +3917,15 @@
          #(let [transaction (with-submission cluster (transaction))]
             (blob/with-publication!
              connection (:seon.blob/staged-writes transaction)
-             (fn [] (db/transact!
-                     connection {:tx-data (:seon.db/tx-data transaction)})))))]
+             ;; THE AGENT'S FORM IS ANSWERED ONCE ITS SETTLEMENT IS APPLIED;
+             ;; durability follows (AGENTS "Recover facts, not execution").
+             ;; Every reader of the run uses the answer's own value
+             ;; (`:seon.turn.loop/basis`), never a later connection read. A
+             ;; failed commit stops the writer; `settlement-lost!` names the
+             ;; runs it lost and stops this agent loudly.
+             (fn [] (db/transact-applied!
+                     connection {:tx-data (:seon.db/tx-data transaction)}
+                     (partial settlement-lost! cluster requests))))))]
     ;; SUCCESS IS THE WRITER'S TRANSACTION REPORT (`db/transact!` answers
     ;; `:seon.db/transaction-result` or its refused error); any other value,
     ;; a refused phase included, is the refusal the arm below settles.
@@ -5188,6 +5245,16 @@
     (get-in settlement [:seon.turn.loop/outcome :db-after])
     (assoc :seon.turn.loop/basis (get-in settlement [:seon.turn.loop/outcome :db-after]))))
 
+(defn- applied
+  "`report` carrying the value its settlement left and, for a settlement the
+  writer answered when applied (`seon.db/transact-applied!`), its pending
+  commit: the pass holds it so its next pass starts after it lands."
+  {:malli/schema [:=> [:cat :seon.turn.loop/turn-report :seon.db/transaction-report]
+                  :seon.turn.loop/turn-report]}
+  [report outcome]
+  (cond-> (assoc report :seon.turn.loop/basis (:db-after outcome))
+    (:seon.db/durable outcome) (assoc :seon.db/durable (:seon.db/durable outcome))))
+
 (defn- resume-turn
   "Evaluate an intent-frozen turn in memory, then settle the whole batch once."
   {:malli/schema
@@ -5344,8 +5411,8 @@
                         (:seon.turn.loop/undisposed? last-prepared)
                         ;; a folded close (close-folded-call) closed it in the settlement
                         (::closed-tx (db/pull (:db-after outcome) [::closed-tx] [::id run-id])))
-                  (assoc (report :closed (count gated)) :seon.turn.loop/basis (:db-after outcome))
-                  (assoc (report :released (count gated)) :seon.turn.loop/basis (:db-after outcome)))))))))))
+                  (applied (report :closed (count gated)) outcome)
+                  (applied (report :released (count gated)) outcome))))))))))
 (defn- close-turn
   {:malli/schema [:=> [:cat [:map
                             [:seon.turn.loop/cluster :seon.turn.loop/cluster]
@@ -5904,6 +5971,17 @@
                (async/close! failure-channel)))))))
     backstop))
 
+(defn- await-settled!
+  "The agent's previous settlement was answered when applied: when the
+  connection has not caught up with it, the next pass waits for its commit
+  (`await-durable!`), so every read of the pass sees it."
+  {:malli/schema [:=> [:cat :seon.turn.loop/cluster :map] :nil]}
+  [cluster {pending :seon.db/durable settled :seon.turn.loop/basis}]
+  (when (and pending settled
+             (> (db/basis-t settled) (db/basis-t (db/db (:seon.db/connection cluster)))))
+    (await-durable! cluster pending))
+  nil)
+
 (defn step
   "The turn transform, in Flow's four arities: ONE episode pass.
   Settle this agent's orphan (the wedge fence, per-agent), pin one
@@ -5969,6 +6047,11 @@
                       now (Date.)
                       request {:seon.agent/id agent-id
                                :seon.db.process/id process}
+                      ;; THE PREVIOUS SETTLEMENT WAS ANSWERED WHEN APPLIED; this
+                      ;; pass starts on its committed value, so every read below
+                      ;; (derivation, fork, forms, gate) sees it. Waiting happens
+                      ;; only when the next pass follows within the commit.
+                      _ (await-settled! cluster state)
                       database (db/db connection)
                       ;; A SUBMISSION IS ITS OWN WORK. The writer's own decision
                       ;; (`system-run-plan`) on this one value refuses a busy or
@@ -6026,7 +6109,8 @@
                                    :seon.turn.work/next next}
                                   now)
                           _ (when reply (async/offer! reply report))
-                          report (dissoc report :seon.turn.loop/basis)
+                          pending-commit (select-keys report [:seon.turn.loop/basis :seon.db/durable])
+                          report (dissoc report :seon.turn.loop/basis :seon.db/durable)
                           _ (when-let [opened (:seon.turn/id report)]
                               (reset! (:seon.agent/run-id turn-bound) opened))
                           refusal (:seon.turn.loop/refusal report)
@@ -6075,7 +6159,11 @@
                       ;; exactly that ordinary case.
                       [(let [run-id (:seon.turn/id report)]
                          (cond-> (dissoc state :seon.turn/id
-                                         :seon.turn.loop/write-refusals)
+                                         :seon.turn.loop/write-refusals
+                                         :seon.turn.loop/basis :seon.db/durable)
+                           ;; an applied settlement's pending commit, awaited
+                           ;; by the next pass if it starts before it lands
+                           (:seon.db/durable pending-commit) (merge pending-commit)
                            run-id (assoc :seon.turn/id run-id)
                            (pos? refusals)
                            (assoc :seon.turn.loop/write-refusals refusals)

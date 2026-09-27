@@ -19,8 +19,9 @@
   [connection result]
   (is (:seon.turn/id result) (pr-str result))
   (when (:seon.turn/id result)
+    ;; the run is read on the reply's own value, answered when applied
     (mapv #(or (:seon.eval/shown %) (:seon.cluster.eval/error %))
-          (drive/run-receipts (db/db connection) [(:seon.turn/id result)]))))
+          (drive/run-receipts (or (:seon.db/db result) (db/db connection)) [(:seon.turn/id result)]))))
 
 (defn- receipt-id-of
   "The evaluation id of a one-form run's only form."
@@ -75,7 +76,7 @@
                   defn-source "(defn run-inc \"Adds one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))"
                   settled (fn [sources]
                             (let [result (code sources)
-                                  receipts (drive/run-receipts (db/db connection) [(:seon.turn/id result)])]
+                                  receipts (drive/run-receipts (:seon.db/db result) [(:seon.turn/id result)])]
                               (is (not-any? :seon.cluster.eval/error receipts) (pr-str receipts))
                               (shown connection result)))]
               (is (= [(str "#'" namespace-name "/run-inc") "nil"]
@@ -127,24 +128,25 @@
                                              {:tx-data [{:my.note/id note-id
                                                          :my.note/agent [:seon.agent/id agent-id]
                                                          :my.note/content "written by a form"}]})))
-                  receipts (drive/run-receipts (db/db connection) [(:seon.turn/id result)])]
+                  receipts (drive/run-receipts (:seon.db/db result) [(:seon.turn/id result)])]
               (is (not-any? :seon.cluster.eval/error receipts) (pr-str receipts))
               (is (= (receipt-id-of result)
                      (db/q '[:find ?receipt-id . :in $ ?note-id
                              :where [?note :my.note/id ?note-id] [?note :my.note/content _ ?tx]
                              [?tx :seon.db/receipt ?receipt] [?receipt :seon.cluster.eval/id ?receipt-id]]
-                           (db/db connection) note-id))
+                           (:seon.db/db result) note-id))
                   "the write's transaction names the form's evaluation")))
           (testing "a fault recorded during a form names its run without refusing: the value is answered"
             ;; A renderer that throws is a later stage's failure: recorded as a
             ;; fault attributed to the run, beside the value, never a panic.
             (let [result (code "{:seon.render/ai (fn [_] (throw (ex-info \"render probe\" {}))) :probe 1}")]
               (is (:seon.turn/id result) (pr-str result))
-              (is (= 1 (count (drive/run-receipts (db/db connection) [(:seon.turn/id result)]))))))
+              (is (= 1 (count (drive/run-receipts (:seon.db/db result) [(:seon.turn/id result)]))))))
           (testing "the run is written in the one transaction that settles it; submission commits nothing"
             (let [before (db/db connection)
                   result (code "(+ 1 2)")
-                  after (db/db connection)
+                  ;; the reply's own value: the settlement applied, one past the basis before
+                  after (:seon.db/db result)
                   txs (db/q '[:find ?opened ?shown ?closed :in $ ?id
                               :where [?run :seon.turn/id ?id ?opened] [?e :seon.cluster.eval/run ?run]
                               [?e :seon.eval/shown _ ?shown] [?run :seon.turn/closed-tx ?closed]]

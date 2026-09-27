@@ -147,7 +147,9 @@
                       [:seon.turn/id :seon.turn/id]
                       [:seon.agent/reply {:optional true} :seon.agent/reply]
                       ;; the value the run's settlement left (evaluate-source!)
-                      [:seon.db/db {:optional true} :seon.db/database-value]],
+                      [:seon.db/db {:optional true} :seon.db/database-value]
+                      ;; its pending commit when the writer answered it applied
+                      [:seon.db/durable {:optional true} :seon.db/durable]],
                      ;; A source submission as the value its agent's turn proc
                      ;; receives on its bounded request port: the run request
                      ;; (`seon.turn/system-run-call`'s input), its staged reply,

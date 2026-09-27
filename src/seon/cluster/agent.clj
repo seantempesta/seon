@@ -805,7 +805,10 @@
 
               (:seon.turn.loop/outcome answer)
               (cond-> {:seon.turn/id run-id}
-                (:seon.turn.loop/basis answer) (assoc :seon.db/db (:seon.turn.loop/basis answer)))
+                (:seon.turn.loop/basis answer) (assoc :seon.db/db (:seon.turn.loop/basis answer))
+                ;; answered when applied: durability follows; a caller that
+                ;; needs the committed connection derefs it (`virtual-turn!`)
+                (:seon.db/durable answer) (assoc :seon.db/durable (:seon.db/durable answer)))
               ;; At the bound the run may still settle: the timeout carries its id.
               ;; A closed reply (retirement stopped the graph first) settled nothing.
               (:seon.await/elapsed-ms answer) (assoc answer :seon.turn/id run-id)

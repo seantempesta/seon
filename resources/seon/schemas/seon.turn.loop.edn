@@ -222,7 +222,10 @@
                   [:seon.turn.loop/refusal {:optional true}
                    :seon.turn.loop/refusal]
                   [:seon.turn.loop/basis {:optional true}
-                   :seon.turn.loop/basis]],
+                   :seon.turn.loop/basis]
+                  ;; the pending commit of a settlement the writer answered
+                  ;; applied (seon.db/transact-applied!); the pass holds it
+                  [:seon.db/durable {:optional true} :seon.db/durable]],
                  ; The database value a run's terminal settlement left: its
                  ; callers read the run's evaluations there, not on a later value.
                  :basis :seon.db/database-value,
