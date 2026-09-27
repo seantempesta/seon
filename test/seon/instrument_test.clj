@@ -660,7 +660,7 @@
       (finally
         (instrument/remove!)))))
 
-(deftest refusal-value-projection-obeys-the-profile-and-html-keeps-the-whole-value
+(deftest refusal-value-projection-obeys-the-profile-in-both-faces-and-the-whole-value-stays-retrievable
   ;; THE OFFENDING VALUE IS THE FAILING LEAF, not the container it sat in
   ;; (error-entities PRD 2026-09-17, "Offending value": the fault retains the
   ;; independently bounded projection of its own LEAF; AGENTS.md 2.4, a
@@ -669,9 +669,11 @@
   ;; collection violation now reports. The whole checked value is not lost:
   ;; it stays beside the leaf as the diagnostic's own offending value.
   ;;
-  ;; The leaf is therefore what both faces are measured on: the AI projection
-  ;; bounds it under the profile and says what it omitted and how to requery
-  ;; it, and the HTML face keeps every member of it.
+  ;; The leaf is therefore what both faces are measured on. AI agents and the
+  ;; browser share one selection, node tree and cut retrieval; only the final
+  ;; face differs (CLAUDE.md, Presentation; root ruling 2026-09-27). The
+  ;; original value stays whole and retrievable from its reference; neither
+  ;; face prints it whole unless asked.
   (let [member (vec (range 100 140))
         raw (concat (range 8) [member])
         wrapped (instrument/wrap-interpreted
@@ -708,8 +710,17 @@
         ai)
     (is (str/includes? ai "(get-in result/eaudit [:seon.error/problems 0 :seon.error/offending])")
         "and it hands back the form that requeries the leaf it elided")
-    (is (= [] (remove #(str/includes? html (str %)) member))
-        "the HTML face keeps every member of the whole offending value")))
+    (testing "the HTML face is the same selection with the same cut"
+      (is (every? #(str/includes? html (str %)) [100 101 102]) html)
+      (is (not (str/includes? html "139")) "HTML stops at the same child bound")
+      (is (str/includes? html "seon-print-elision") "the cut is marked in HTML")
+      (is (str/includes? html "…37 (drop 3 (get-in result/eaudit [:seon.error/problems 0 :seon.error/offending]))")
+          "and carries the same continuation that retrieves the rest"))
+    (testing "the whole value stays retrievable from the stored reference"
+      (is (= member (print/value-at refusal [:seon.error/problems 0 :seon.error/offending])))
+      (is (= (drop 3 member)
+             (drop 3 (get-in refusal [:seon.error/problems 0 :seon.error/offending])))
+          "the continuation form, evaluated over the held value, is exactly the omitted rest"))))
 
 (deftest registry-sized-contract-evidence-retains-the-offending-object
   (let [caps (config/result-caps (test-support/effective-config))
