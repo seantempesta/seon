@@ -48,9 +48,4 @@
              :kind :function
              :intent "The auto-check and gate bodies write into the agent's live branch; functions keep their creation context's connection, so forking alone cannot move their calls (Astra M2; owner decision on gate world pending)."
              :must-read #{seon.test/run}
-             :evidence #{"docs/research/agent-platform/landing/agent-path-2-2026-09-26.md"}}
- #:seon.task{:name "a-collection-stopped-with-its-jvm-is-recorded-as-a-fault"
-             :kind :function
-             :intent "seon.test/run submits collect-released! to the work launcher after it unlinks its branches; when the JVM stops first, the launcher answers :seon.flow/launcher-stopped and the completion callback records it as a core fault (two signatures on default, 2026-09-27 00:19Z and 01:42Z, both at a restart). A collection cut short by the stop of its process is redone by the next one: the stop is not a fault of the request, and the default reads :faulted until someone resolves it by hand."
-             :must-read #{seon.test/run seon.flow/stop-work-launcher!}
-             :evidence #{"docs/research/agent-platform/landing/stability-opus-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/agent-path-2-2026-09-26.md"}}]
