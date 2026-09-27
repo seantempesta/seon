@@ -1,9 +1,9 @@
 ---
 type: research
-status: audit, measurements and priced design; no production source changed
+status: audit, measurements and priced design, revised after review 57814415b (REVISE, six blockers accepted); prototype proven 13/13; no production source changed
 created: 2026-09-27
 lane: test-agents-audit-opus
-head: 79c10321d (file:line citations); default JVM pid 53665 loaded 441988b49
+head: 79c10321d (audit citations), 5205cd9b2 (spec rev 3); audit on default pid 53665, revision proofs on pid 84717
 scope: how Seon admits or serializes concurrent test work, measured in one JVM, and test agents on Flow through the one REPL path
 ---
 # Test agents: concurrent tests in one JVM
@@ -16,10 +16,12 @@ gets its own branch through `seon.cluster.agent/acquire-context!` and its own vi
 **Data flow.** Request → selection (Datalog over test entities and their recorded evidence) → admission (`admit-run`
 as `:db.fn/call` in the recording writer) → per-member acquire, body, record, release → tally.
 
-**The Clojure approach proposed here.** A test request becomes an ordinary agent, and each member becomes a one-body
-agent with its own Flow graph. The body is one entry through the one REPL path, and its evidence settles as facts on
-the run entity. Members of every request run at once. Two JVM-wide bounds, each declared once, limit them: the
-process root's existing `:compute` executor for CPU, and the kernel's existing tenured-heap admission for memory.
+**The Clojure approach proposed here.** A test request becomes a run agent, and each member becomes a one-body agent
+with its own Flow graph. The body is one entry through the one REPL path. Its world is one value, entered on the
+body's own thread. Its evidence settles through the batch's supplied settle stage. Two JVM-wide bounds limit members:
+
+- a process roster of running bodies, sized once to the processors, whose nested requests take no slot;
+- the kernel's tenured-heap admission, whose resume notice wakes waiting runs.
 
 Lane `test-agents-audit-opus`, 2026-09-27. All measurements were taken on default (pid 53665, HEAD `441988b49`
 loaded) through MCP `eval_clj` in JVM mode, on disposable branches. The namespace `tmp.test-agents-audit` was removed
@@ -39,14 +41,16 @@ afterwards.
      - Tests redefine Vars JVM-wide at 303 call sites (404 bindings, 96 files; §8).
      - Tests re-arm instrumentation.
      - The runner restores every live cluster's schema after each member.
-- **Recommended: option B (§6).**
-  - A request is an agent and each member is a one-body agent on Flow.
-  - Body execution is bounded by the process root's `:compute` executor, sized once to the available processors and
-    unused today.
-  - Admission is bounded by the kernel's tenured-heap pressure.
-  - Tests that mutate JVM-global state are derived from their direct analysis and routed to the isolated host until
-    they are converted.
-  - Estimated change: about −750/+215 source lines.
+- **Recommended: option B (§6), revised after Astra's review.**
+  - A request is a run agent, and each member is a one-body agent on the one path.
+  - Each body runs on its own virtual thread, and its `finally` is the exit fact.
+  - The member's one world value is entered on that thread.
+  - A process roster admits at most the processor count of top-level bodies, and nested requests take no slot.
+  - Pending members wake on the kernel's resume notice.
+  - The recording is the batch's supplied settle stage.
+  - Tests that mutate JVM-global state (405 of 2,378, classified over fixtures and helpers) go to the isolated host.
+  - Prototype `tmp/test-agents/src/seon/test/agent.clj`; proofs `tmp/test-agents/proof.clj`: 13 of 13 pass (§5).
+  - Estimated change: ≈ −181 source lines now (+333 / −514), and ≈ −417 once S17 goes.
 
 ## 2. Audit: what admits or serializes concurrent work today
 
@@ -181,215 +185,301 @@ The design in §5 closes these gaps:
 - The shell client is the MCP client.
 - Delivery is the test agent's reply, projected once (one-path spec §4, "The MCP reply projection").
 
-## 5. Design: test agents
+## 5. Design: test agents (revised after review 57814415b)
+
+Astra's review (`docs/research/agent-platform/review-test-agents-2026-09-27.md`, commit `57814415b`) returned
+**REVISE** with six blockers, and root accepted all six. This section is the revision.
+
+The prototype is the code that lands: `tmp/test-agents/src/seon/test/agent.clj` (384 lines, 333 of them code), a new
+namespace, `seon.test.agent`. It runs over the one-path orchestrator, `seon.batch/evaluate-batch` from
+`tmp/one-path/src/seon/batch.clj`, spec rev 3.
+
+Every blocker's fix is proved at the REPL by `tmp/test-agents/proof.clj`. It extends Astra's counterexamples and
+returns one map of named proofs.
+
+- **Result:** 13 of 13 pass. The latest run was on default (pid 84717), with the raw map in
+  `tmp/test-agents/proof-results.edn`.
+- **Conditions:** each proof is timed and validated against its proof schema, on disposable branches.
+- **Arming:** entrances are called armed, with Malli `-instrument` against the installed carried projection's
+  registry. The `armed-refuses` proof shows invalid inputs refused.
 
 ### 5.1 Entities and facts, not rows
 
-A test run is the existing `:seon.test.run` entity (`resources/seon/schemas/seon.test.edn`, `:seon.test.run/id`
-`:343`), with `:seon.test.run/members` as components. Its **test agent** is an ordinary `:seon.agent` entity, and the
-run points to it:
+A test run is the existing `:seon.test.run` entity, with `:seon.test.run/members` as components.
 
-- `:seon.agent/id` `"test/<run-id>"`, minted by the run's owner.
-- `:seon.agent/branch`: the request world branch that `clean-request-handle` already creates.
-- The run entity takes one new optional ref, `:seon.test.run/agent`.
+- **Admission** is the reservation `admit-run` already writes.
+- **Pending members** are admitted-not-started member facts. The run proc's state is only a derivation of them.
+- **Completion** is a member's result facts, written by its settle stage (§5.6), plus its exit.
+- **The run's own stop event** (unfinished and pending at its deadline) is one separate transaction owned by the run.
 
-Each member is also an agent: `"test/<run-id>/<ordinal>"`, on the member branch that `member-result` already acquires.
-It carries one ref to its member entity. Admission and retirement use the existing writer-checked facts:
+Nothing else is kept. "Open members" and "done" are queries.
 
-- Admission is the reservation that `admit-run` writes today.
-- Retirement is `:seon.agent/admission-closed-tx`, the fact `seon.cluster.host/retire!` writes
-  (`src/seon/cluster/host.clj:155-180`).
-- Completion is the member's result facts (`commit-results!`, `runner.clj:1813`) plus its exit fact (`record-exit!`,
-  `:1867`).
+### 5.2 Blocker 1: exit is the body's own `finally`, and join follows it
 
-No row, list or counter is kept beside them. "Open members of a run" is a query:
+**Design.**
 
-- a member with an admission and no exit fact is open;
-- a request is done when it has no open members.
+- **Body thread.** `start-body!` runs the member's batch on its own virtual thread. That thread's `finally` sends the
+  exit fact, which carries the batch, to the member graph's `:exit` port. Nothing else counts as exit: a timed-out
+  wait, a cancelled Future and a joined graph are not exits.
+- **Member proc** (`member-step`, one `:io` proc). It never waits on the body. On the exit fact it releases the
+  member's branch (`release-context!`), then answers the run.
+- **Run agent** (`run-step`, one `:io` proc; ports `:wake`, `:done` and `:deadline`).
+  - At the deadline it records unfinished and pending once (`record-stop`) and answers the requester.
+  - It keeps ownership of every unfinished member.
+  - On each `:done` it stops and joins that member's graph (`seon.flow/join-graph!`), after the exit.
+  - A member can therefore never join its own executor.
 
-### 5.2 Execution: reuse the agent and Flow machinery
+**Proofs.**
 
-**Run agent.** It is created through the same host path as an MCP branch agent: `seon.cluster.host/host!`
-(`host.clj:124`) → `acquire-context!` (`agent.clj`) → `start!` (`host.clj:70`) → `flow/start-graph!`
-(`flow.clj:101`). Its graph derives work from listened facts:
+- **`b1-counterexample`** (Astra P10, reproduced): the graph's executor terminates while the compute body is still
+  alive: `{:graph-exited? true :body-exited? false}`.
+- **`b1-exit-owned`**, with a body held past a 300 ms deadline:
+  - the answer names `:unfinished [:held]`;
+  - at answer time the member branch is still in the store roster, and the run has not finished;
+  - the stop event was recorded exactly once;
+  - after the body returns, the order is exit → branch released (about 10 ms) → graph joined (about 0.2 ms), the join
+    answers nil, and the branch has left the roster.
 
-- A wake says only "look" (sliding buffer 1, as in `graph-definition`, `agent.clj:578`).
-- The turn pass reads admitted members that have no member agent yet, and hosts one per member up to admission.
+### 5.3 Blocker 2 and the owner's world: one world value, entered on the body's thread
 
-**Member agent.** It is one graph with one `:io` proc step. It acquires its branch as `member-result` does today and
-runs `apply-seeds!` (`test.clj:132`). Then it submits **one entry through the one REPL path**:
+**Design.**
 
-- `seon.sci.eval/evaluate-batch` with the §4 "Test body" stage values (§5.5).
-- The thunk (`runner/run-var!` or `sci.eval/run-test`) is submitted to the process root's **`:compute` executor**. The
-  proc parks on its future. Its virtual thread holds nothing.
+- **The world value.** `member-world` is the member's one world value: the spec's per-entrant world, a
+  `:seon.db/custody-request` extension. It holds:
+  - `:seon.cluster/name` and `:seon.agent/branch`;
+  - `:seon.db/connection`, `:seon.db/db` and `:seon.db/writer`;
+  - `:seon.sci.eval/ctx`, `:seon.schema/projection` and `:seon.test/member`.
+- **One world shape.** There is no second world shape. When the spec's world lands, `member-world` becomes its
+  constructor for a test entrant (§5.7).
+- **Entering it.** `enter` re-establishes the world on whatever thread runs the body:
+  - custody through `seon.db/call-with-custody`;
+  - the projection through `schema/call-with-projection`;
+  - `seon.test/*member*` and `kernel/*host-world*`.
+- **Where it runs.** `enter` is the batch's `:seon.batch/around` stage, so the one path, not the runner, enters the
+  world.
 
-**Settle.** The member agent settles its result (`commit-results!`) and its exit (`record-exit!`) on the recording
-connection, then retires: admission closed, `join-graph!` (`flow.clj:138`) awaits actual executor termination, and
-`release-context!` (`agent.clj:959`) unlinks the branch. The run agent wakes on the member's settled facts, not on a
-channel payload. When no members are open, it writes the run's completion and retires the same way.
+**Proofs.**
 
-**Bound.**
+- **`b2-world-carried`.**
+  - On a bare virtual thread, none of connection, member, host world or projection is present.
+  - Inside `enter`, all four are identical to the world value's, both on a virtual thread and on the process
+    `:compute` executor (Astra's P4 setting).
+- **`owner-world-own-branch`.** Inside a test agent's body:
+  - the elided `(db/db)` reads the member's own branch;
+  - an elided `db/transact!` writes there and is visible there;
+  - evaluation in the member's SCI context (`sci/eval-string*`) reads that same branch.
+  - The marker is absent from the requester branch and from the cluster.
+- **`owner-two-clusters-never-cross`.** Two requesters stand for two clusters' branches.
+  - Two test agents run at once, and each waits until both have written.
+  - Neither sees the other's datom, from the host or from SCI.
+  - Each recording lands only on its own requester (`{:r1 [true false] :r2 [false true]}`).
+  - Limit: one store holds both "clusters". A second cluster in the same JVM was not booted.
 
-- The per-body bound stays the SCI arm's `:seon.test/long-ms` or 5,000 ms interrupt.
-- The request bound is the run agent's deadline, from `:seon.test/check-time-limit-ms`.
-- A body alive past its bound keeps its member agent. The graph does not join, so the branch is held, and the member is
-  recorded unfinished. This is what `bounded-result`'s watcher does today, done by Flow's executor join instead of a
-  second thread mechanism.
+### 5.4 Blocker 3: waits stay on `:io`; the bound is a process roster; nested members take no slot
 
-### 5.3 How N clusters run at once, and what bounds them
+**Design.**
 
-- **N clusters** means N run agents, each on its own branch with its own writer (S5). Their members are independent
-  member agents. There is no request-level serialization: S1 disappears, because members of one request run as
-  concurrently as members of different requests.
-- **CPU bound.** The process root's `:compute` executor (`resources/seon/operator/runtime.clj:17-22`) is
-  `(flow/bounded-platform-executor (.availableProcessors …))`. It is declared once per process and shared by every
-  cluster in the JVM. At most `availableProcessors` bodies execute at once; the rest wait in the JDK executor's queue.
-  This gives the dead `:seon.config.flow.compute/concurrency` dial a consumer, or retires it (task
-  `seon.config.edn:9`).
-- **Heap bound.** `seon.sci.kernel/memory-pressure` (`kernel.clj:161`) already refuses new arms from 70% of tenured
-  occupancy and resumes below 55%. Member admission asks it before hosting a member agent. A refused member stays
-  admitted-not-started, and the run agent re-derives it on its next wake.
-- **No lane cap and no slot.** The bounds are the machine's cores and heap. Root no longer serializes namespaces; it
-  submits all 35 at once.
-- **Estimated effect, not measured.** At 18 cores with bodies CPU-bound, the r5 run (35 namespaces, ≈25 min serial)
-  becomes roughly the sum of body CPU time divided by 18, plus the fixed per-request cost (S2) paid once per request in
-  parallel. §3.2 measured 3.5× from request-level concurrency alone at 7 cores busy.
+- **No fixed pool for bodies.** The fixed `:compute` pool is not used for bodies, because a body can wait on a nested
+  request.
+- **Where bodies run.** Every body runs on its own virtual thread. The run and member procs are `:io` and only react
+  to messages.
+- **The CPU bound.** It is an admission count in the one process roster of running bodies (`body-roster`, keyed by
+  member).
+  - At most `limit` top-level bodies run at once. The prototype takes `limit` as a value; at landing it is the
+    process's available processors, the consumer that the dead `:seon.config.flow.compute/concurrency` dial and the
+    unused root `:compute` executor lacked (F8).
+  - A request made from inside a member body is nested (`seon.test/*member*` is bound) and takes no slot, because its
+    parent holds one while it waits.
+  - A body's exit frees its slot and wakes every waiting run (`release!` → `wake-all!`, sliding-one wake channels).
 
-### 5.4 What platform, destructive and host-bound tests still need
+**Proofs.**
 
-1. **Host-global members.**
-   - Definition: a test whose own analysis (its body and the `seon.test-support` helpers it calls directly, not its
-     transitive reach, §3.4) names `clojure.core/with-redefs`, `with-redefs-fn`, `alter-var-root`, `intern`,
-     `load-file`, `require` with `:reload`, `seon.instrument/apply!`/`restore!`,
-     `seon.test-support/preserving-instrumentation-state`/`preserving-schema-registry`, or a cluster boot.
-   - The classification is derived the same way `effect-reach` is derived (`test.clj:2406`). It is not a hand list.
-   - Such members join `isolated-members` and run on the isolated host (`bin/test --platform`) until they are
-     converted. The conversion is the law's own requirement.
-   - When the classification lands, `ambient-snapshot`/`ambient-drift`/`restore-live-cluster-schema!` (S17) have no
-     subject left in the development JVM and are deleted.
-2. **Platform, destructive and file-backed members** (`:seon.test/platform`, `:seon.fn/destroys` reach,
-   `:seon.test/fixture-observation`) are unchanged. They need an OS process, a flock or store deletion, so a separate
-   JVM stays the honest boundary. That JVM runs the same test agents inside it.
-3. **Adoption during a run.** Adoption is a JVM-global event (S12). It still makes every in-flight member unknown, and
-   that is correct detection. Root batches adoption between test rounds.
-4. **Wall-clock assertions.** A test with a wall-clock assertion (§3.3.2) states its bound under admission. With the
-   compute bound, a body no longer competes with more runnable bodies than there are cores.
+- **`b3-counterexample`:** a fixed pool of two whose two parents each wait on two queued children. Both parents time
+  out.
+- **`b3-nested-progress`:** with `limit` 2, two top-level bodies fill both slots. Each synchronously runs a nested
+  two-member request. All six bodies complete with nothing unfinished or pending, in about 300 ms.
 
-### 5.5 Interface points with the one-path spec
+### 5.5 Blocker 4: classify over the invocation graph; first loads get a positive ready value; keep S17
 
-`docs/research/agent-platform/one-repl-path-spec-2026-09-27.md` is rev 3 in another lane. It is not edited here.
+**Design.**
 
-1. **§2 `:seon.eval/request`.** A member agent supplies:
-   - `:seon.eval/read-next`: one synthetic entry;
-   - `:seon.eval/evaluate`: the thunk on the root `:compute` executor;
-   - `:seon.sci.eval/ctx`: the member's fork;
-   - `:seon.db/database-value`: the member branch head after seeds.
-2. **§4 entrant table, row "Test body"** (observe/derive/settle = no/no/no; "evidence is the runner's `record-tx`").
-   Test agents keep no/no for observe and derive.
-   - **Settle:** the member's settlement is its result and exit facts on the run entity.
-   - **Question for the spec owner:** is settle a boolean the entrant completes afterwards (no spec change: the member
-     step calls `commit-results!` after the batch), or should `:seon.eval/settle` accrete as a stage value beside
-     `:read-next` and `:evaluate`? The second keeps "an entrant is a choice of stage values" literal.
-3. **§7.3 S13** ("`bounded-result` :218 … the `:else` branch becomes the `:evaluate` thunk of a one-entry batch.
-   Bound, thread and release stay `bounded-result`'s").
-   - Test agents supersede the second sentence: bound, thread and release move to the member agent's graph, and
-     `bounded-result` is deleted.
-   - Order: S13 lands first as specified. The test-agent slice then replaces `bounded-result`'s `FutureTask` and
-     watcher (`test.clj:218-338`) with the member graph and `join-graph!`.
-4. **§4 "The MCP reply projection."**
-   - A test agent's reply is its run's batch entries, and it is projected once.
-   - MCP `test` is `run-form` evaluating `(my.test/…)`, which makes one delivery shape for both sides (§4 of this
-     note).
-   - `my.test/run` returns the whole run value; the results-only projection goes.
+- **`host-global`.** It classifies over clj-kondo analysis of the test roots. For each test it walks:
+  - its body;
+  - every local helper and fixture it reaches (test-root Vars only);
+  - every namespace-level usage (fixtures, load effects) of each namespace it reaches.
 
-### 5.6 Machinery reused, deleted and added
+  Production Vars are a boundary: they count only when they are themselves mutators. The mutators are `with-redefs`,
+  `with-redefs-fn`, `alter-var-root`, `intern`, `load-file`, `remove-ns`, `ns-unmap`, `instrument/apply!`,
+  `restore!`, `remove!`, `preserving-instrumentation-state`, `preserving-schema-registry`, and cluster boot and stop.
+- **`ready!`.** It makes first-load arming a positive ready value per key. The key is (loaded program identity,
+  namespaces), the value is `arm-first-loads!`, and it is taken once by any number of concurrent callers before any
+  body starts. This is the roster-delay pattern of `acquire-once!`.
+- **S17 stays for now.** The runner's drift snapshot and restore are deleted only after a concurrent round of the
+  runnable set shows zero drift reds.
+
+**Proofs.**
+
+- **`b4-fixture-classification`**, over the loaded archive's `test/`:
+  - `seon.profile-test/an-sci-installation-owns-its-own-cell` is host-global through its namespace's
+    `preserving-roots` fixture, which reaches `alter-var-root`. The direct-body classifier misses it.
+  - Every direct hit is also a graph hit.
+  - Counts: 2,378 tests, 405 host-global (direct: 277), **1,973 runnable concurrently**.
+  - Cost: the clj-kondo analysis took 2,505 ms, over one second. At landing, classify over the stored analysis facts
+    keyed by content in `seon.cache`, not a fresh lint. Classification itself took 121 ms.
+- **`b4-first-load-ready`:** eight concurrent callers ran the loader once and all held the same ready value.
+
+### 5.6 Blocker 5: pending members wait as facts; the kernel's resume notice wakes them; pressure is reactive
+
+**Design.**
+
+- **Admission under pressure.** `admit!` refuses while kernel pressure is held. A refused member stays
+  admitted-not-started. It is not materialized, so it has no branch, context or graph.
+- **The resume notice.** `resume-listener` is subscribed to every collector's completion notifications
+  (`watch-resume!`). After a collection, a held pressure that clears (`kernel/memory-pressure` over the kernel's own
+  state) wakes every waiting run. That includes a run with zero running members.
+- **No second monitor.** It reuses the kernel's pressure state and the JVM's own notifications, and nothing polls.
+- **Deadline.** The run's deadline answers pending members if the pressure never clears.
+- **Pressure is reactive.** It stops new admissions after a collection crosses 70%. It does not reserve memory.
+- **What bounds memory.** Live member worlds are at most `limit` top-level plus their nested members, and each is
+  materialized only at admission.
+
+**Proofs.**
+
+- **`b5-pressure-resume`.** A run's only member was refused under a held pressure, with nothing running.
+  - With the notice: one ordinary young collection, provoked by short-lived garbage and not a full GC, woke the run.
+    The member ran in 286 ms.
+  - Without the notice: the run reached its 3 s deadline with the member pending.
+- **`b5-member-allocation`.** Materializing one member world (branch, connection, SCI fork) allocates 28.24 MB and
+  takes about 31 ms. That is an allocation, not a retained size.
+  - Retained size under load is open: task `4e824da5bfb7` puts a branch's index-node cache near 350 MB when it fills.
+  - `limit` × that is the figure to measure before claiming any heap guarantee.
+
+### 5.7 Blocker 6: recording is the batch's supplied settle stage
+
+**Design.**
+
+- `member-request` is the one-path spec's test entrant (rev 3, `seon.turn.batch/test-request`, S12):
+  - one synthetic entry;
+  - the body as the `:seon.batch/evaluate` stage;
+  - the world entered by `:seon.batch/around`;
+  - the recording **supplied as `:seon.batch/settle`**.
+- `evaluate-batch` calls the settle stage exactly once. A settle failure is a diagnostic beside the kept value, which
+  is the spec's totality (V2-3).
+- The run's stop event is a separate owning event with its own transaction.
+
+**Proof.** In `b6-record-stage`, three members ran:
+
+- The recording was invoked 3 times.
+- The two good members each made one transaction on the requester (2 in total).
+- The third member's recording threw. Its body value `:boom` is kept, and the diagnostic `"settle: recording refused"`
+  is delivered in the answer.
+
+**Interface with the spec** (rev 3, `5205cd9b2`; not edited here):
+
+1. **§2 `:seon.batch/request`.** The test agent supplies:
+   - `:seon.batch/text` and a one-entry reader;
+   - `:seon.batch/evaluate`, the body;
+   - `:seon.batch/around`, entering the world value;
+   - `:seon.batch/settle`.
+2. **§6 "Test agents: the interface".**
+   - Its `:seon.batch/commit!` and `:seon.batch/head` are the requesting agent's branch writer and value. In world
+     terms, that is the requester world's `:seon.db/writer` and `:seon.db/db`.
+   - The member facts `:seon.test.member/*`, with reach digest and counts, are what that settle stage writes at
+     landing. The prototype's proofs supply simpler recordings.
+3. **The world value.** The spec's one world per entrant (cluster, branch, connection, db, `:seon.db/writer`, SCI
+   fork, agent and task, render profile, proc and settlement inputs, over `:seon.db/custody-request`) is the shape
+   `member-world` builds. The test agent adds only `:seon.test/member`.
+4. **S12** says "`bounded-result` :218 keeps bound and exit ownership". This revision supersedes that: exit and bound
+   move to the member agent (§5.2), and `bounded-result` is deleted.
+5. **Delivery parity.**
+   - Every entrance calls `seon.test.agent/run-request!`.
+   - `my.test` calls it from an agent's evaluation, and MCP SCI is the same agent evaluation (`run-form`).
+   - **Not proven here:** `my.test` does not call the prototype yet, so identical delivery through MCP and `my.test`
+     is by construction, not measured.
+
+### 5.8 What platform, destructive and host-bound tests still need
+
+- **Host-global tests:** 405 by the §5.5 classifier. They run on the isolated host until converted. The §8 seam census
+  names each conversion.
+- **Platform, destructive and file-backed members:** unchanged. They run in a separate JVM, which runs the same test
+  agents.
+- **Adoption during a run:** it makes in-flight members unknown, which is correct detection. Root batches adoptions
+  between rounds.
+- **Wall-clock assertions** (F6): measured under the admission bound.
+
+### 5.9 Reused, deleted, added (updated estimate)
 
 **Reused:**
 
-- `seon.cluster.host/host!`/`retire!`
-- `agent/acquire-context!`, `release-context!`, `acquire-once!`, `graph-definition`
-- `seon.flow/var-process`, `start-graph!`, `join-graph!`
-- the process-root executors
-- `kernel/memory-pressure`
-- `admit-run`, `commit-results!`, `record-exit!`
-- `clean-request-handle`, `apply-seeds!`, `arm-first-loads!`, selection
-- `evaluate-batch` (one-path)
+- `seon.batch/evaluate-batch` (one-path) and the spec's test entrant;
+- `agent/acquire-context!` and `release-context!`;
+- `seon.flow/var-process`, `start-graph!` and `join-graph!`;
+- `seon.await/await!`;
+- `db/call-with-custody` and `schema/call-with-projection`;
+- `kernel/memory-pressure`;
+- `admit-run` and selection.
 
-**Deleted (source):**
+**Added:** the prototype, 333 lines of code, which is the landing code.
 
-| What | Lines |
-|---|---|
-| `test.clj` `bounded-result` (`:218-338`) | 121 |
-| `member-result` (`:1968-2086`) | 119 |
-| The sequential batch loop and exit bookkeeping inside `run`: `run-batch`, the batch `loop`, `release-not-started!`, `held-handle` (`:2330-2480`) | ≈150 |
-| `attempt-request-context` (`:186-217`) plus effect-reach: a member agent has a real agent and turn | 32 + 12 |
-| `runner.clj` `ambient-snapshot` (65), `set-drift` (10), `drift-directions` (23), `ambient-drift` (12), `live-cluster-schema-states` (18), `restore-live-cluster-schema!` (87), `schema-restore-drift` (11), drift lines in `run-vars!` (≈10) | ≈236 |
-| `bin/test-check`'s own prepl request form and tally printing; it becomes the MCP `test` client | ≈80 of 134 |
-| **Total** | **≈750** |
-
-**Added (estimated):**
+**Deleted in the same slice:**
 
 | What | Lines |
 |---|---|
-| Test run/member agent blueprint and step | ≈100 |
-| Run-completion derivation from listened member facts | ≈40 |
-| Host-global classification from direct analysis | ≈30 |
-| MCP `test` tool as a `run-form` wrapper | ≈25 |
-| `seon.test.edn` for `:seon.test.run/agent` and the member ref | ≈20 |
-| **Total** | **≈215** |
+| `bounded-result` | 121 |
+| `member-result` | 119 |
+| The sequential batch loop in `run` | ≈150 |
+| `attempt-request-context` and effect reach (a member has a real agent) | 44 |
+| `bin/test-check`'s own request form | ≈80 |
+| **Total** | **≈514** |
 
-**Net ≈ −535 source lines.** These counts are measured line spans of the named functions; the additions are
-estimates.
+The runner-side recording callers go with spec S12, and are counted there.
 
-**Tests.** A regression per class:
+**Net for this slice: ≈ −181.** S17's 236 lines follow when zero drift reds are shown, for **≈ −417** in total.
 
-- two concurrent requests from two clusters, with no cross-attribution;
-- the compute bound holds (`availableProcessors`+1 bodies, one queued);
-- memory-pressure refusal leaves a member admitted-not-started;
-- a body past its bound keeps its member agent until exit.
-
-The 85 files using `with-redefs` are converted or classified host-global, file by file, by their owners.
+The first estimate (−535) assumed S17 went at once and a 215-line addition. The measured prototype is larger, because
+it owns exit, world entry, admission, wakes and classification.
 
 ## 6. Options (simplest viable first)
 
 **A. Concurrent requests, members still sequential.** Keep `seon.test/run`. Root submits one request per namespace at
-once. Classify host-global members from direct analysis into the isolated host. Delete S17.
+once. Route the 405 host-global tests (the invocation-graph classifier, §5.5) to the isolated host.
 
-- *Guarantee:* N clusters' non-platform tests run concurrently and correctly in one JVM; heap is bounded by the
-  kernel's existing admission.
-- *Cost:* ≈30 added, ≈236 deleted. Half a day.
-- *Sacrifice:* CPU is bounded only by the number of requests. Each request stays sequential and pays its 2.8 s fixed
-  cost. There are no test agents and no MCP parity, and `bounded-result` survives as a second thread mechanism beside
-  Flow. Measured throughput is 3.5× at N=6.
+- *Guarantee:* N clusters' 1,973 runnable tests run concurrently in one JVM without shared-state interference; heap
+  admission is the kernel's.
+- *Cost:* the classifier (about 40 lines of the prototype). Half a day.
+- *Sacrifice:*
+  - CPU is bounded only by the number of requests, and each request stays sequential and pays its fixed cost.
+  - `bounded-result` survives beside Flow.
+  - S17 stays.
+  - Measured throughput is 3.5× at N=6.
 
-**B. Test agents on Flow (recommended).** Option A's classification and deletion, plus §5.
+**B. Test agents on Flow (recommended).** §5, landed after spec S12, with A's classifier as its first slice.
 
-- *Guarantee:* every member of every request is a one-body agent on the one path with its own graph, bounded by cores
-  (the root `:compute` executor) and heap (kernel pressure), both declared once. The same request and delivery come
-  from a Seon agent, MCP and the shell. Exit is proved by the graph's executor join.
-- *Cost:* ≈−750/+215 source lines. Two slices after one-path S13:
-  1. classification and S17 deletion (option A);
-  2. run and member agents, MCP `test`, and deletion of `bounded-result`, `member-result` and the batch loop.
-
-  About two days, plus owner-side conversion of the `with-redefs` files.
-- *Sacrifice:* a member costs an agent graph (a few virtual threads) and a branch. Today's per-member acquire is
-  32 ms serial and 147 ms at N=6. Branch creation is serialized store-wide by Datahike's roster permit (S6). A body
-  that blocks on its writer holds a compute slot.
+- *Guarantee.* Each of the six review blockers is closed by a passing proof:
+  - exit is the body's `finally`, and join follows it;
+  - the one world value is entered on the body's thread;
+  - top-level bodies are bounded by a process roster sized once to the processors, and nested requests make progress;
+  - host-global tests are classified over fixtures and helpers;
+  - pending members wake on the kernel's resume notice;
+  - recording is the supplied settle stage, invoked once and total.
+- *Cost:* ≈ −181 source lines (+333 / −514); S17 (−236) later. About two days after S12, plus owner-side conversions.
+- *Sacrifice:*
+  - Each member costs a branch and two small graphs: 28 MB allocated and about 31 ms to materialize.
+  - Branch creation stays serialized store-wide by the roster permit (S6/F7).
+  - The heap bound is reactive, not a reservation.
+  - Delivery parity through `my.test` is by construction until `my.test` calls the entrance.
 
 **C. Option B plus shared per-request work.**
 
-- Key selection facts, the request world and `program-written-since?` by content digest in `seon.cache`, so N requests
-  over the same program pay S2 once.
-- Run members declared pure on one request branch with `seon.db/with` speculative values instead of one branch each.
-- Batch roster publication for member branches inside one `:roster` permit.
+- Adds:
+  - content-keyed selection, request world and `program-written-since?` in `seon.cache`;
+  - the stored-analysis classifier;
+  - batched roster publication for member branches.
 - *Guarantee:* B's guarantee, with near-zero fixed cost per request and no S6 contention.
-- *Cost:* B plus ≈150 lines and a `datahike.versioning` fork change for batched `branch!`. A purity declaration or
-  derivation would also be needed. About two more days.
-- *Sacrifice:* a speculative value isolates only what `with` sees, so a member that writes must still get a branch.
-  Purity is a new classification to keep honest, and it touches a maintained fork.
+- *Cost:* B plus ≈150 lines and a `datahike.versioning` fork change. About two more days.
+- *Sacrifice:* it touches a maintained fork, and caches must key by content alone.
 
-B is recommended. It is the owner's "test agents, the one path". Its first slice is exactly A, so A lands value
-immediately. C is deferred until measurements of B show S2 or S6 dominating.
+B is recommended, with A as its first slice. C waits until B's measured rounds show S2 or S6 dominating.
 
 ## 7. Findings, filed as tasks
 
@@ -424,8 +514,15 @@ bound of §5.3 must be judged with it.
 - Measurements come from one development JVM, which other lanes shared (load average 7), so timings carry that
   contention.
 - The runs were not isolated per request from other cluster activity.
-- §5's line counts for additions are estimates.
-- No design here was tried as code; option B's scaling estimate is not measured.
+- §5's addition count is the prototype's measured size; the deletion counts are line spans of the named functions.
+- **The prototype is proved by focused proofs, not yet by a real test request.**
+  - Its proofs use synthetic bodies and simpler recordings, not the `:seon.test.member/*` writer.
+  - No throughput of option B was measured.
+  - Default was restarted by root during the revision (pid 71396 → 84717). The proofs ran in the new JVM.
+- **What the proof run leaves loaded.** It loads two new namespaces into default, `seon.batch` (from the one-path
+  lane's file) and `seon.test.agent`, plus `tmp.test-agents.proof`. It leaves no branch: the store roster had no
+  `agent-*` branch afterwards, the body roster was 0 running / 0 waiting, and the compute executor was 0 active /
+  0 queued.
 
 ## 8. Seam census: what tests replace JVM-wide, and the seam that removes each
 
@@ -468,7 +565,7 @@ defaults to `seon.db/transact!`. The refusal test then passes a refusing writer 
 | S2 | `seon.cluster.prompt/prompt` (5 / 5 / 2) | the turn's opening/prompt step | The prompt builder is a stage value of the turn | turn: **one-path rewrite supplies the seam**. This is the ledger's "agent-test prompt redefs blocked on turn.clj seam" |
 | S3 | turn and evaluation internals (31 bindings): `seon.sci.eval/evaluate` 10, `seon.turn/next-agent-work` 5, `seon.sci.eval/install-row!` 3, `seon.turn/step` 2, `declared-sources` 2, and one each of `preview-sources`, `generate-turn`, `receipt-settle-tx`, `turn`, `evaluate-sources`, `more-agent-work?`, `opening-db`, `seon.cluster.reply/sources`, `seon.sci.eval/directory-value` | internal | The one-path request's stage values (`:seon.eval/read-next`, `:seon.eval/evaluate`, `:seon.eval/settle?`). A test that makes evaluation throw supplies a throwing `:seon.eval/evaluate` | `sci/eval.clj`, `turn.clj`, `cluster/reply.clj`: **one-path rewrite supplies the seam** |
 | S4 | the HTTP leaf and credential: `seon.ai/credential` 6, `seon.ai/send-request` 5, `seon.ai/agent-overlay` 2 | only `seon.ai/complete` | `complete`'s target map carries the leaf, `:seon.ai/send!` (defaulting to `send-request`), and the environment it resolves credential names from, `:seon.ai/environment` (defaulting to the process environment). Credentials stay environment-variable names | `src/seon/ai.clj` |
-| S5 | `seon.db/transact!` (14 / 13 / 9) | 73 callers | Each owner under test takes its writer as a value, as `publish!` does. **One declared writer key**, not one per owner: `:seon.source/transact!` and `:seon.test/recording-writer` already declare the same identity twice, so fold them into one before adding a third | per caller: `fn.clj` (3 tests; **held by vector-shrink-opus**), `render/web.clj` (2), `reconcile.clj` (1), `render.clj` preview (1), `cluster/source.clj` (2; verify whether `89add17ce` already covers them), `turn.clj` (5: **one-path rewrite supplies the seam**) |
+| S5 | `seon.db/transact!` (14 / 13 / 9) | 73 callers | Each owner under test takes its writer as a value, as `publish!` does. The one declared writer key `:seon.db/writer` exists since `6eadf4b62`, which replaced `:seon.source/transact!` and `:seon.test/recording-writer`; each further owner reads it too | per caller: `fn.clj` (3 tests; **held by vector-shrink-opus**), `render/web.clj` (2), `reconcile.clj` (1), `render.clj` preview (1), `cluster/source.clj` (2; verify whether `89add17ce` already covers them), `turn.clj` (5: **one-path rewrite supplies the seam**) |
 | S6 | refused or counted read: `seon.db/q` 10, `pull` 6, `datoms` 4, `pull-many` 2 | 333 / 191 / 15 callers | (a) **Counting** reads: the existing read-evidence sink `seon.db/*read-evidence-sink*` (`db.clj:169`) observes every read. This needs no production change. (b) **Injecting a refusal** into one query: no seam exists. The candidate is a database value whose read genuinely refuses (not verified). Otherwise the propagation is the declared error alternative of the caller's contract, proved by its producer's regression | `src/seon/db.clj` (**held by vector-shrink-opus**; class (a) needs no edit there) |
 | S7 | counted invocation or derivation: `seon.sci.kernel/invoke` 10, `seon.schema/projection-from-database` 6, `seon.schema/load-projection` 4, `seon.render/acquire-context!` 6 | render, schema | Observe with the existing per-Var call counters (`seon.profile/begin` + `explain`, `profile.clj:205,230`) or the cache's per-kind statistics (`seon.cache`, `cache.clj:50`). This needs no production change. A test that injects an `acquire-context!` failure needs a real failing world | tests only; `render.clj` for the failure case |
 | S8 | resource reader: `seon.schema.edn/read-schema-resource` 5, `clojure.java.io/resource` 5 | `seon.schema.edn/resource-population`; config's shipped document | `resource-population` takes the resource set as a value; config's default document is passed as a value | `src/seon/schema/edn.clj`, `src/seon/config.clj` |
@@ -498,7 +595,7 @@ some are helpers such as `with-cluster`, `exercise-selection!` and `with-default
 
 1. S6(a) and S7 need no production change, so those tests can convert now.
 2. S4, S8 and S10 are small owner slices, each named by its file.
-3. S5 needs the one writer key decided first.
+3. S5 is unblocked: the one writer key `:seon.db/writer` landed in `6eadf4b62`.
 4. S9 and S6(b) wait for vector-shrink-opus to release `fn.clj` and `db.clj`.
 5. S1–S3 come from the one-path rewrite: 92 bindings, including 45 of turn_test's 56 `seon.ai/complete` sites.
 6. Until then those tests are host-global under §5.4 and run on the isolated host, never concurrently in the
