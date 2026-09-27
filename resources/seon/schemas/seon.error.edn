@@ -229,7 +229,7 @@
               [:seon.error/value :seon.error/value]
               [:seon.db/tx-data :seon.store/transaction-data]],
              :prepare-request :seon.error/normalize-request,
-             :data :map,
+             :data [:and :map [:fn {:error/message "must print within the evidence bound, each larger value held by its name and size (seon.error.refusal/link)"} seon.error.refusal/within-evidence-bound?]],
              :prepared
              [:map
               [:seon.error/fact :seon.error/fact]

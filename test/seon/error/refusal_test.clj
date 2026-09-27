@@ -325,6 +325,35 @@
                 (map (:seon.error/offending error) [:seon.agent/routing :seon.probe/memo]))
         "each place is its #object name, as a string a reader reads back")))
 
+(deftest a-large-argument-is-held-by-name-in-the-chain-and-live-in-the-refusal
+  ;; value-hygiene 2026-09-27: an eval_clj call refused on argument 0 of
+  ;; `seon.schema/projection-with-declarations` stored a 2.8 MB blob: the
+  ;; refusal's offending arguments held argument 2, a projection's 3,576
+  ;; forms, and the error value's chain copied it. The live refusal keeps the
+  ;; caller's actual arguments; the chain, the error as data, holds each value
+  ;; past the evidence bound by its class, identity and size.
+  (let [projection (schema/handed-projection)
+        caps (config/result-caps (test-support/effective-config))
+        forms (:seon.schema.projection/forms projection)
+        contracted (instrument/wrap-interpreted
+                    'seon.probe/f "[:=> [:cat :qualified-symbol :map] :int]" projection caps (fn [_ _] 1))
+        failure (try (contracted 'unqualified forms) (catch clojure.lang.ExceptionInfo e e))
+        error (error.refusal/diagnostic (assoc base :seon.error/throwable failure))
+        link-data (get-in error [:seon.error/chain 0 :seon.error/data])
+        held (get-in link-data [:seon.error/offending 1])]
+    (is (< 1000 (count forms)) "the subject: a large argument")
+    (is (identical? forms (get-in (ex-data failure) [:seon.error/offending 1]))
+        "the live refusal keeps the actual argument")
+    (is (= 'unqualified (get-in link-data [:seon.error/offending 0])) "the refused argument stays")
+    (is (= (str "#object[" (.getName (class forms)) " 0x"
+                (Integer/toHexString (System/identityHashCode forms)) " {:count " (count forms) "}]")
+           held)
+        "the large one is its class, identity and size")
+    (is (printed-bytes error 16384) "the error prints in kilobytes")
+    (is (error.refusal/within-evidence-bound? link-data))
+    (is (not (error.refusal/within-evidence-bound? (ex-data failure)))
+        "the declared contract refuses the copy")))
+
 (deftest constructor-output-keeps-the-producing-contract
   (let [projection (-> (schema/handed-projection)
                           (schema/projection-with-schema :x/member :int
