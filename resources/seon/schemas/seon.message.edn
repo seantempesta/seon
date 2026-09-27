@@ -80,6 +80,7 @@
                  {:optional true}
                  :seon.message/about]
                 [:seon.message/assignment {:optional true} :seon.message/assignment]
+                [:seon.message/received-tx {:optional true} :seon.message/received-tx]
                 [:my.message/reason
                  {:optional true}
                  :my.message/reason]],
@@ -103,6 +104,11 @@
                 [:seon.message/caused-by
                  {:optional true}
                  :seon.db/ref]],
+               :received-tx
+               [:and
+                {:description
+                 "The recipient's acknowledgement: the transaction in which it wrote my.message/received!. Unread means addressed to the agent without this fact; the ref sweeps if that transaction is removed."}
+                :seon.db/ref],
                :caused-by
                [:and
                 {:description

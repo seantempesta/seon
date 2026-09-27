@@ -5,7 +5,4 @@
  :my.agent/identity [:map [:my.agent/id :my.agent/id]
                      [:my.agent/namespace {:optional true} :my.agent/namespace]
                      [:my.agent/steward {:optional true} :my.agent/steward]]
- :my.agent/settings :seon.config/agent-overlay
- :my.agent/settings-request
- [:map [:seon.db/connection :seon.db/connection]
-       [:seon.agent/id :seon.agent/id]]}
+ :my.agent/settings :seon.config/agent-overlay}

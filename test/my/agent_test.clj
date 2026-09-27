@@ -54,19 +54,25 @@
        (is (= first-id (component)))
        (is (= {} (agent/settings @connection "other-owner")))))))
 
-(defn- held-branch
-  "Evaluate (my.agent/branch) for `agent-id` in `handle`'s context; its value or refusal."
-  {:malli/schema [:=> [:cat :seon.agent/execution-handle :seon.agent/id] :any]}
-  [handle agent-id]
+(defn- agent-value
+  "Evaluate `source` as `agent-id` in `handle`'s context; its value or refusal."
+  {:malli/schema [:=> [:cat :seon.agent/execution-handle :seon.agent/id :string] :any]}
+  [handle agent-id source]
   (let [result (sci/evaluate
                 {:seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
                  :seon.db/db (db/db (:seon.db/connection handle))
                  :seon.agent/id agent-id
                  :seon.cluster.eval/ns [:seon.ns/name 'user]
-                 :seon.cluster.eval/source (pr-str (list 'my.agent/branch {:seon.agent/id agent-id}))
+                 :seon.cluster.eval/source source
                  :seon.sci.eval/time-limit-ms 5000
                  :seon.sci.admit/caps (config/result-caps config/defaults)})]
     (or (:seon.cluster.eval/error result) (:seon.sci.admit/value result))))
+
+(defn- held-branch
+  "Evaluate (my.agent/branch) for `agent-id` in `handle`'s context; its value or refusal."
+  {:malli/schema [:=> [:cat :seon.agent/execution-handle :seon.agent/id] :any]}
+  [handle agent-id]
+  (agent-value handle agent-id (pr-str (list 'my.agent/branch {:seon.agent/id agent-id}))))
 
 (deftest branch-mode-is-the-acquisition-decision-not-a-cluster-label
   ;; The member branch inherits default's cluster entities. Before the fix the mode
@@ -89,3 +95,26 @@
              (held-branch isolated "mode-isolated")))
       (is (not= parent-branch (:seon.agent/branch isolated)))
       (finally (cluster.agent/release-context! isolated)))))
+
+(deftest settings!-declares-the-dials-it-takes
+  ;; The operations query is an AVET seek on input refs: settings! is found on
+  ;; the settings component only because its contract names that schema.
+  (let [parent (support/execution-handle db/*conn*)
+        connection (:seon.db/connection parent)
+        _ (support/transacted! connection
+                               (cluster.agent/creation-tx
+                                {:seon.agent/id "dial-owner" :seon.ns/name 'my.agents.dial-owner
+                                 :seon.cluster/name "default"}))
+        handle (cluster.agent/acquire-context! parent "dial-owner" {:seon.agent/isolate? true})]
+    (try
+      (is (contains? (set (map symbol (db/q '[:find [?sym ...]
+                                              :where [?arity :seon.fn.arity/input-refs :seon.config/agent-overlay]
+                                                     [?function :seon.fn/arities ?arity]
+                                                     [?function :seon.fn/sym ?sym]]
+                                            @connection)))
+                     'my.agent/settings!))
+      (let [value (agent-value handle "dial-owner"
+                               "(my.agent/settings! {:seon.config.eval/time-limit-ms 1234})")]
+        (is (= 1234 (:seon.config.eval/time-limit-ms value)) (pr-str value))
+        (is (= value (agent/settings (db/db (:seon.db/connection handle)) "dial-owner"))))
+      (finally (cluster.agent/release-context! handle)))))

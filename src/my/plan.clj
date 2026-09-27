@@ -10,7 +10,8 @@
   (my.plan/add! {:my.plan.item/id \"verify-total\"
                  :my.plan.item/title \"Verify the total\"
                  :my.plan.item/done-when \"I have read the computed total.\"})"
-  (:require [seon.plan :as plan]))
+  (:require [seon.db :as db]
+            [seon.plan :as plan]))
 
 (defn plan
   "Read my objective, ordered steps, current item, and derived work sets.
@@ -99,6 +100,26 @@
   {:malli/schema [:=> [:cat :my.plan/request] [:or :my.plan/intent-subjects :seon.error/value]]}
   [request]
   (plan/ready-subjects (:seon.db/db request) (:seon.agent/id request)))
+
+(defn objective!
+  "Set my plan's objective and return my plan.
+
+  Replaces any earlier objective; steps and the current step are unchanged.
+  My plan is created when I have none. My connection and identity are supplied.
+
+  Example:
+  (my.plan/objective! \"Verify the monthly totals\")"
+  {:malli/schema [:=> [:cat :my.plan/objective :seon.db/connection :seon.agent/id]
+                  [:or :my.plan/component-view :seon.error/value]]}
+  [objective connection agent-id]
+  (let [result (db/transact! connection
+                             {:tx-data [{:db/id "plan" :my.plan/agent [:seon.agent/id agent-id]
+                                         :my.plan/objective objective}
+                                        [:db/add [:seon.agent/id agent-id] :seon.agent/plan "plan"]]
+                              :tx-meta {:seon.db/user [:seon.agent/id agent-id]}})]
+    (if (:db-after result)
+      (plan/plan {:seon.db/db (:db-after result) :seon.agent/id agent-id})
+      result)))
 
 (defn add!
   "Add a plan step and return the saved step with its derived state.

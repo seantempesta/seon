@@ -46,15 +46,17 @@
 (defn settings!
   "Change supplied setting overrides and return my resulting overrides.
 
-  Supply fully qualified :seon.config keys. Omitted keys retain their values.
-  Returns a map of :seon.config setting overrides for my agent.
+  Supply per-agent dials, the fully qualified :seon.config keys that
+  :seon.config/agent-overlay declares. Omitted keys retain their values.
+  Returns a map of :seon.config setting overrides for my agent. My connection
+  and identity are supplied.
 
   Example:
   (my.agent/settings! {:seon.config.eval/time-limit-ms 10000})"
-  {:malli/schema [:=> [:cat :my.agent/settings-request] [:or :seon.config/agent-overlay :seon.error/value]]}
-  [request]
-  (agent/settings! (dissoc request :seon.db/connection :seon.agent/id)
-                   (:seon.db/connection request) (:seon.agent/id request)))
+  {:malli/schema [:=> [:cat :seon.config/agent-overlay :seon.db/connection :seon.agent/id]
+                  [:or :seon.config/agent-overlay :seon.error/value]]}
+  [overrides connection agent-id]
+  (agent/settings! overrides connection agent-id))
 
 (defn branch
   "Read the branch my context holds and its live or isolated mode.

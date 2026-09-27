@@ -1,7 +1,8 @@
 (ns ^{:seon.ns/context-relevant? true} my.message
   "The inter-agent message protocol, with optional request-map calls; call preparation supplies my database and identity."
   (:refer-clojure :exclude [read send])
-  (:require [seon.cluster.message :as message]))
+  (:require [seon.cluster.message :as message]
+            [seon.db :as db]))
 
 (defn inbox
   "Read messages in my inbox, oldest first.
@@ -27,6 +28,34 @@
   {:malli/schema [:=> [:cat :my.message/read-request] [:or :seon.message/message :seon.error/value]]}
   [request]
   (message/read (:my.message/id request) (:seon.db/db request)))
+
+(defn received!
+  "Acknowledge a message addressed to me; it is then no longer unread.
+
+  Writes :seon.message/received-tx, a ref to this acknowledging transaction,
+  and returns the message with it. Unread means addressed to me without that
+  fact. Acknowledging an acknowledged message is inert. A missing identity
+  returns a flat :seon.error value. My connection and identity are supplied.
+
+  Example:
+  (my.message/received! \"example-message\")"
+  {:malli/schema [:=> [:cat :seon.message/id :seon.db/connection :seon.agent/id]
+                  [:or :seon.message/message :seon.error/value]]}
+  [message-id connection agent-id]
+  (let [acknowledged (fn [database]
+                       (let [message (message/read message-id database)]
+                         (if (:seon.message/id message)
+                           (merge message (db/pull database [:seon.message/received-tx]
+                                                   [:seon.message/id message-id]))
+                           message)))
+        before (acknowledged (db/db connection))]
+    (if (or (not (:seon.message/id before)) (:seon.message/received-tx before))
+      before
+      (let [result (db/transact! connection
+                                 {:tx-data [[:db/add [:seon.message/id message-id]
+                                             :seon.message/received-tx "datomic.tx"]]
+                                  :tx-meta {:seon.db/user [:seon.agent/id agent-id]}})]
+        (if (:db-after result) (acknowledged (:db-after result)) result)))))
 
 (defn send
   "Send a message now and return the written message with its identity.

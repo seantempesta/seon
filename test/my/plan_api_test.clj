@@ -93,3 +93,40 @@
         (doseq [step (:my.plan/steps view)]
           (is (= step (plan/item {:seon.db/db database
                                   :my.plan.item/id (:my.plan.item/id step)}))))))))
+
+(deftest objective!-sets-the-objective-and-keeps-the-steps
+  ;; The operations query finds objective! by the plan's own objective key.
+  (let [parent (support/execution-handle db/*conn*)
+        connection (:seon.db/connection parent)
+        _ (support/transacted! connection
+                               (agent/creation-tx {:seon.agent/id "objective-owner"
+                                                   :seon.ns/name 'my.agents.objective-owner
+                                                   :seon.cluster/name "default"}))
+        handle (agent/acquire-context! parent "objective-owner" {:seon.agent/isolate? true})
+        evaluate #(let [result (sci.eval/evaluate
+                                {:seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
+                                 :seon.db/db (db/db (:seon.db/connection handle))
+                                 :seon.agent/id "objective-owner"
+                                 :seon.cluster.eval/ns [:seon.ns/name 'user]
+                                 :seon.cluster.eval/source %
+                                 :seon.sci.eval/time-limit-ms 5000
+                                 :seon.sci.admit/caps (config/result-caps config/defaults)})]
+                    (or (:seon.cluster.eval/error result) (:seon.sci.admit/value result)))]
+    (try
+      (is (contains? (set (map symbol (db/q '[:find [?sym ...]
+                                              :where [?arity :seon.fn.arity/input-refs :my.plan/objective]
+                                                     [?function :seon.fn/arities ?arity]
+                                                     [?function :seon.fn/sym ?sym]]
+                                            @connection)))
+                     'my.plan/objective!))
+      (let [created (evaluate "(my.plan/objective! \"Verify the totals\")")]
+        (is (= "Verify the totals" (:my.plan/objective created)) (pr-str created))
+        (is (= [] (:my.plan/steps created))))
+      (evaluate "(my.plan/add! {:my.plan.item/id \"kept\" :my.plan.item/title \"Kept\"})")
+      (let [replaced (evaluate "(my.plan/objective! \"Verify the new totals\")")]
+        (is (= "Verify the new totals" (:my.plan/objective replaced)))
+        (is (= ["kept"] (mapv :my.plan.item/id (:my.plan/steps replaced)))))
+      (is (= 1 (count (db/q '[:find [?plan ...] :where [?plan :my.plan/agent ?agent]
+                                                      [?agent :seon.agent/id "objective-owner"]]
+                            (db/db (:seon.db/connection handle))))))
+      (finally (agent/release-context! handle)))))

@@ -9,11 +9,14 @@
   `:seon.error/value`, so the declared output schemas are ones the
   functions actually keep."
   (:require [clojure.test :refer [deftest is testing]]
+            [seon.cluster.agent :as cluster.agent]
             [seon.cluster.message :as message]
             [my.message]
+            [seon.config :as config]
             [seon.run :as run]
             [seon.db :as db]
             [seon.schema]
+            [seon.sci.eval :as sci]
             [seon.test-support :as support]))
 
 (defn- with-messages
@@ -215,9 +218,55 @@
     (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.error/value) value)
         "the error path keeps the output schema too")))
 
-(deftest the-surface-is-exactly-four-functions
-  ;; The established names remain; send and decline write immediately.
-  (is (= #{'decline 'inbox 'read 'send}
+(deftest received!-acknowledges-once-and-leaves-the-unread-set
+  ;; Unread = addressed to me without :seon.message/received-tx (design §9).
+  ;; The operations query finds received! by the message's own identity key.
+  (let [parent (support/execution-handle db/*conn*)
+        connection (:seon.db/connection parent)
+        _ (support/transacted! connection
+                               (cluster.agent/creation-tx
+                                {:seon.agent/id "ack-reader" :seon.ns/name 'my.agents.ack-reader
+                                 :seon.cluster/name "default"}))
+        _ (support/transacted! connection
+                               [{:seon.message/id "ack-1" :seon.message/to [:seon.agent/id "ack-reader"]
+                                 :seon.message/content "Acknowledge me."}])
+        handle (cluster.agent/acquire-context! parent "ack-reader" {:seon.agent/isolate? true})
+        evaluate #(let [result (sci/evaluate
+                                {:seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
+                                 :seon.db/db (db/db (:seon.db/connection handle))
+                                 :seon.agent/id "ack-reader"
+                                 :seon.cluster.eval/ns [:seon.ns/name 'user]
+                                 :seon.cluster.eval/source %
+                                 :seon.sci.eval/time-limit-ms 5000
+                                 :seon.sci.admit/caps (config/result-caps config/defaults)})]
+                    (or (:seon.cluster.eval/error result) (:seon.sci.admit/value result)))
+        unread #(set (db/q '[:find [?id ...]
+                             :where [?agent :seon.agent/id "ack-reader"]
+                                    [?message :seon.message/to ?agent]
+                                    [?message :seon.message/id ?id]
+                                    (not [?message :seon.message/received-tx _])]
+                           (db/db (:seon.db/connection handle))))]
+    (try
+      (is (contains? (set (map symbol (db/q '[:find [?sym ...]
+                                              :where [?arity :seon.fn.arity/input-refs :seon.message/id]
+                                                     [?function :seon.fn/arities ?arity]
+                                                     [?function :seon.fn/sym ?sym]]
+                                            @connection)))
+                     'my.message/received!))
+      (is (= #{"ack-1"} (unread)))
+      (let [acknowledged (evaluate "(my.message/received! \"ack-1\")")
+            tx (get-in acknowledged [:seon.message/received-tx :db/id])]
+        (is (int? tx) (pr-str acknowledged))
+        (is (= "ack-1" (:seon.message/id acknowledged)))
+        (is (= #{} (unread)))
+        (is (= acknowledged (evaluate "(my.message/received! \"ack-1\")"))
+            "acknowledging again is inert"))
+      (is (= "absent" (:my.message/not-found (evaluate "(my.message/received! \"absent\")"))))
+      (finally (cluster.agent/release-context! handle)))))
+
+(deftest the-surface-is-exactly-five-functions
+  ;; The established names remain; send, decline and received! write immediately.
+  (is (= #{'decline 'inbox 'read 'received! 'send}
          (set (keys (ns-publics 'my.message)))))
   (is (.contains ^String (:doc (meta (the-ns 'my.message)))
                  "inter-agent message protocol"))
