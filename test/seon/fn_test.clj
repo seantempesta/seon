@@ -1342,9 +1342,13 @@
         (transact-fixture!
          connection
          [(test-support/namespace-row @connection 'sample.authored-findings)
+          ;; Core admission: an agent contract may not name clojure.core/ifn?
+          ;; until program-graph edges prove it pure; the finding, not the
+          ;; purity rule, is under test here.
           (test-support/program-fn-row
            database 'sample.authored-findings/maybe-callable
-           "(defn maybe-callable {:malli/schema [:=> [:cat] [:maybe [:fn clojure.core/ifn?]]]} [] nil)")])
+           "(defn maybe-callable {:malli/schema [:=> [:cat] [:maybe [:fn clojure.core/ifn?]]]} [] nil)"
+           {:seon.schema.admission/source :core})])
         (let [findings (seon.fn/contract-findings (db/db connection))
               mine (filterv #(= 'sample.authored-findings/maybe-callable (:seon.fn/sym %)) findings)]
           (is (sequential? findings) "the report validates its own return value")
