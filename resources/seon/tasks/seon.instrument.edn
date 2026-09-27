@@ -37,4 +37,9 @@
              :kind :function
              :intent "seon.instrument/violation (instrument.clj ~305-316) scans described-unions with some and all errors again with remove for every explain error, so building one refusal is quadratic in the error count: an armed call of seon.cluster/published-analyzer-digest with 5,445 malformed entities pinned a core for over 10 minutes (fix-boot-full-pass probe, 2026-09-27). A large invalid argument must refuse in time proportional to its errors (index described unions once; bound the errors examined, as the floor bounds what prints)."
              :must-read #{seon.instrument/violation}
-             :evidence #{"docs/research/agent-platform/landing/boot-ready-regression-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/boot-ready-regression-2026-09-27.md"}}
+ #:seon.task{:name "a-map-for-a-sequential-crashes-the-refusal-builder"
+             :kind :function
+             :intent "An armed call whose [:sequential :map] argument receives a map throws ClassCastException (clojure.lang.Keyword cannot be cast to java.util.Map$Entry) inside the refusal builder, so the caller gets only 'X :malli.core/invalid-input: the refusal could not be built' (instrument.clj:789 fallback) with no path, expected or offending member. Repro at default 441988b49, JVM mode: (#'seon.render.transcript/ledger-effects (seon.db/db (seon.cluster.boot/connection \"default\")) \"root\" {:seon.error/message \"x\"}). Reached in r5 by web-debug-test (ledger-derives-shared-data-once, passive-ledger-never-reconstructs-directory) and turn-test virtual-turns..., where a refused read's error map arrived as the evaluations argument. Done when that call refuses with the member, path [2], expected [:sequential :map] and the map as offending, and a regression covers a map-for-sequential argument."
+             :must-read #{seon.instrument/compiled-wrapper}
+             :evidence #{"test/seon/render/web_debug_test.clj"}}]
