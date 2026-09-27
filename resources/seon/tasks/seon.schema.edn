@@ -54,4 +54,9 @@
              :intent "Function contract rows are a projection range (seon.schema/projection-ranges :function-contract-rows), so every contracted defn makes a new projection value: load-projection (36-50 ms, ~94 MB) and every projection-keyed derivation re-walks ~3,550 forms. Measured 2026-09-26 on pid 89341: (defn f [x] (inc x)) 134 ms, 157 MB, 26k armed calls; the same defn with {:malli/schema [:=> [:cat :int] :int]} 757 ms, 1.21 GB, 190k armed calls. Root ruling 2026-09-27: contracts leave the projection; design in docs/research/agent-platform/contracts-out-of-projection-design-2026-09-27.md."
              :must-read #{seon.schema/projection-ranges seon.schema/build-projection seon.db/carried-projection}
              :evidence #{"docs/research/agent-platform/landing/defn-scan-opus-2026-09-26.md"
-                         "docs/research/agent-platform/contracts-out-of-projection-design-2026-09-27.md"}}]
+                         "docs/research/agent-platform/contracts-out-of-projection-design-2026-09-27.md"}}
+ #:seon.task{:name "definition-row-builds-a-projection-to-discard"
+             :kind :function
+             :intent "Every agent defn: seon.sci.eval/definition-row calls schema/projection-with-function-contract only to validate the contract, then discards the projection; it costs ~5.1 ms of definition-row's ~5.7 ms (measured at default 2026-09-27, fix-source-row-contract). Validate the contract against the evaluation projection directly (Malli m/schema with its registry), or reuse the projection it builds; cost must follow what the defn changed."
+             :must-read #{seon.schema/projection-with-function-contract seon.sci.eval/definition-row}
+             :evidence #{"docs/research/agent-platform/landing/boot-ready-regression-2026-09-27.md"}}]
