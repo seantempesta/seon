@@ -622,17 +622,20 @@
   "Run `body` on an independent, empty in-memory store carrying the executing
   program's installed attribute schema. Blob keys, roster and GC are
   store-global, so a subject over them needs a store, not a branch; its
-  program facts are the test's own writes."
-  {:malli/schema [:=> [:cat [:or :nil :uuid :string] [:or :nil [:vector :map]] [:fn clojure.core/ifn?]]
+  program facts are the test's own writes. `keep-history?`, when a boolean,
+  replaces the source's history policy (a non-temporal store's subject)."
+  {:malli/schema [:=> [:cat [:or :nil :uuid :string] [:or :nil :boolean] [:or :nil [:vector :map]] [:fn clojure.core/ifn?]]
                   [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
                          :seon.schema.admission/reason "A fixture returns its body's arbitrary result unchanged."}]]}
-  [database-id extra-schema body]
+  [database-id keep-history? extra-schema body]
   (let [handle (execution-handle db/*conn*)
         source (db/db (:seon.db/connection handle))
         source-config (:config source)
         configuration (cond-> {:store {:backend :memory :id (or database-id (random-uuid))}
                                :schema-flexibility (:schema-flexibility source-config)
-                               :keep-history? (:keep-history? source-config)}
+                               :keep-history? (if (boolean? keep-history?)
+                                                keep-history?
+                                                (:keep-history? source-config))}
                         (contains? source-config :attribute-refs?)
                         (assoc :attribute-refs? (:attribute-refs? source-config)))
         attributes (into []
@@ -683,7 +686,8 @@
 
    `:seon.test-support/fresh-store?` (or `:seon.test-support/database-id`)
    supplies an independent empty in-memory store with the installed attribute
-   schema, for store-global subjects such as blob keys."
+   schema, for store-global subjects such as blob keys;
+   `:seon.test-support/keep-history?` sets that store's history policy."
   {:malli/schema [:function
                   [:=> [:cat [:fn clojure.core/ifn?]]
                    [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
@@ -692,9 +696,9 @@
                    [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
                          :seon.schema.admission/reason "A fixture returns its body's arbitrary result unchanged."}]]]}
   ([body] (with-database {} body))
-  ([{:seon.test-support/keys [database-id extra-schema fresh-store?]} body]
+  ([{:seon.test-support/keys [database-id extra-schema fresh-store? keep-history?]} body]
     (if (or database-id fresh-store?)
-      (with-fresh-database database-id extra-schema body)
+      (with-fresh-database database-id keep-history? extra-schema body)
       (with-branched-database extra-schema body))))
 
 
