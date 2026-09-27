@@ -7,13 +7,14 @@
   assert what each detector says about exactly those declarations. The
   canonical population carries its own real subjects; asserting on its totals
   would make these tests a census of the tree. Every seed goes through
-  `seon.db/transact!` and its report is checked: a fixture that ignores its
-  own transaction report reads a refusal as behaviour."
+  `seon.test-support/transacted!`, which stops setup on a refusal: a fixture
+  that ignores its own transaction report reads a refusal as behaviour."
   (:require [clojure.string]
             [clojure.test]
             [seon.db]
             [seon.fn]
             [seon.issue.detect]
+            [seon.program]
             [seon.test-support]))
 
 (def ^:private source-ns 'seon.detect-fixture)
@@ -29,53 +30,64 @@
 
 (def ^:private fixture-symbols #{complete-fn uncontracted-fn untested-fn helper-fn constant-var})
 
-(defn- digest
-  "A 64-character digest, the width `:seon.fn.file/digest` declares."
-  [character]
-  (apply str (repeat 64 character)))
+(def ^:private source-file "src/seon/detect_fixture.clj")
+(def ^:private helper-file "test/seon/detect_fixture_helpers.clj")
 
-(defn- function-entity [function-symbol namespace-name file extra]
-  (merge {:seon.fn/sym function-symbol
-          :seon.fn/ns [:seon.ns/name namespace-name]
-          :seon.fn/file [:seon.fn.file/relative-path file]
-          :seon.fn/private? false
-          :seon.fn/source (str "(defn " (name (symbol function-symbol)) " [x] x)")
-          :seon.fn/doc "Seeded by seon.issue.detect-test."
-          :seon.schema.admission/source :core}
-         extra))
+(def ^:private fixture-source
+  "The fixture namespace's declarations, analyzed as an author's file is: two
+  contracted functions, one without a contract, a literal constant (no body:
+  no standard names it) and a test reaching two of them."
+  (str "(defn complete \"Doc.\" {:malli/schema [:=> [:cat :int] :int]} [x] x)\n"
+       "(defn uncontracted \"Doc.\" [x] x)\n"
+       "(defn untested \"Doc.\" {:malli/schema [:=> [:cat :int] :int]} [x] x)\n"
+       "(def constant 7)\n"
+       "(clojure.test/deftest covers (clojure.test/is (= 1 (complete (uncontracted 1)))))"))
+
+(defn- declaration
+  "The canonical entity `source` declares for `declared`, analyzed through the
+  production source path and digested by the writer's digest owner."
+  [database declared source file]
+  (seon.test-support/program-entity
+   database declared source
+   (cond-> {:seon.schema.admission/source :core}
+     file (assoc :seon.fn/file [:seon.fn.file/relative-path file]))))
 
 (defn- seed!
-  "One namespace under `src` with three declarations telling the two standards
-  apart, plus one under `test` that only the unscoped run may name."
+  "One namespace under `src` with declarations telling the two standards apart
+  and the test reaching two of them, plus one under `test` that only the
+  unscoped run may name. Every entity comes from its writer: namespaces from
+  `seon.program/declaration-row`, declarations analyzed from source (the writer
+  refuses a hand-built declaration's digest, 79b6d9abd)."
   [connection]
-  (let [source-file "src/seon/detect_fixture.clj"
-        helper-file "test/seon/detect_fixture_helpers.clj"
-        report
-        (seon.db/transact!
-         connection
-         [{:seon.ns/name source-ns :seon.schema.admission/source :core}
-          {:seon.ns/name helper-ns :seon.schema.admission/source :core}
-          {:seon.fn.file/relative-path source-file
-           :seon.fn.file/digest (digest "a")
-           :seon.fn.file/relative-root "src"}
-          {:seon.fn.file/relative-path helper-file
-           :seon.fn.file/digest (digest "b")
-           :seon.fn.file/relative-root "test"}
-          (function-entity complete-fn source-ns source-file
-                        {:seon.fn/spec "[:=> [:cat :int] :int]"})
-          (function-entity uncontracted-fn source-ns source-file {})
-          (function-entity untested-fn source-ns source-file
-                        {:seon.fn/spec "[:=> [:cat :int] :int]"})
-          (function-entity helper-fn helper-ns helper-file {})
-          ;; A literal constant has no body: no standard names it.
-          (function-entity constant-var source-ns source-file
-                        {:seon.fn/constant? true :seon.fn/defined-by 'clojure.core/def
-                         :seon.fn/source "(def constant 7)"})
-          {:seon.test/sym (sym-in 'seon.detect-fixture-test "covers")
-           :seon.schema.admission/source :core
-           :seon.fn/calls #{complete-fn uncontracted-fn}}])]
-    (clojure.test/is (let [observed report] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str report))
-    report))
+  (let [projection (seon.db/carried-projection (seon.db/db connection))
+        namespace-entity #(seon.program/declaration-row projection {:seon.ns/name %1 :seon.ns/source %2} :all :agent)]
+    (seon.test-support/transacted!
+     connection
+     [(namespace-entity source-ns (pr-str (list 'ns source-ns '(:require [clojure.test]))))
+      (namespace-entity helper-ns (pr-str (list 'ns helper-ns)))
+      {:seon.fn.file/relative-path source-file
+       :seon.fn.file/digest (apply str (repeat 64 "a"))
+       :seon.fn.file/relative-root "src"}
+      {:seon.fn.file/relative-path helper-file
+       :seon.fn.file/digest (apply str (repeat 64 "b"))
+       :seon.fn.file/relative-root "test"}])
+    (let [database (seon.db/db connection)]
+      (seon.test-support/transacted!
+       connection
+       (conj (mapv #(declaration database [:seon.fn/sym %] fixture-source source-file)
+                   [complete-fn uncontracted-fn untested-fn constant-var])
+             (declaration database [:seon.test/sym (sym-in source-ns "covers")] fixture-source nil)
+             (declaration database [:seon.fn/sym helper-fn] "(defn helper \"Doc.\" [x] x)" helper-file))))))
+
+(defn- declare-more!
+  "Write the declarations `extra` source adds to the fixture file, analyzed
+  after the file's own forms so every form keeps its own span."
+  [connection symbols extra]
+  (let [database (seon.db/db connection)
+        source (str fixture-source "\n" extra)]
+    (seon.test-support/transacted!
+     connection
+     (mapv #(declaration database [:seon.fn/sym %] source source-file) symbols))))
 
 (defn- named
   "The fixture symbols one detector call names, as a set."
@@ -146,14 +158,9 @@
   (seon.test-support/with-database
     (fn [connection]
       (seed! connection)
-      (let [source-file "src/seon/detect_fixture.clj"
-            shared (sym-in source-ns "->Shared")
+      (let [shared (sym-in source-ns "->Shared")
             sibling (sym-in source-ns "map->Shared")
-            report (seon.db/transact!
-                    connection
-                    [(function-entity shared source-ns source-file {:seon.fn/form-span [10 20]})
-                     (function-entity sibling source-ns source-file {:seon.fn/form-span [10 20]})])
-            _ (clojure.test/is (let [observed report] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str report))
+            _ (declare-more! connection [shared sibling] "(defrecord Shared [a])")
             database (seon.db/db connection)
             contract (into #{} (map :seon.fn/sym)
                            (seon.issue.detect/public-without-contract
@@ -172,22 +179,12 @@
   (seon.test-support/with-database
     (fn [connection]
       (seed! connection)
-      (let [source-file "src/seon/detect_fixture.clj"
-            constructor (sym-in source-ns "->Bodiless")
+      (let [constructor (sym-in source-ns "->Bodiless")
             method (sym-in source-ns "bodiless-method")
             defined (sym-in source-ns "defined-by-defn")
-            report (seon.db/transact!
-                    connection
-                    [(function-entity constructor source-ns source-file
-                                   {:seon.fn/defined-by 'clojure.core/deftype
-                                    :seon.fn/form-span [30 40]})
-                     (function-entity method source-ns source-file
-                                   {:seon.fn/defined-by 'clojure.core/defprotocol
-                                    :seon.fn/form-span [50 60]})
-                     (function-entity defined source-ns source-file
-                                   {:seon.fn/defined-by 'clojure.core/defn
-                                    :seon.fn/form-span [70 80]})])
-            _ (clojure.test/is (let [observed report] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str report))
+            _ (declare-more! connection [constructor method defined]
+                             (str "(deftype Bodiless [a])\n(defprotocol Bodiless-protocol (bodiless-method [x]))\n"
+                                  "(defn defined-by-defn \"Doc.\" [x] x)"))
             database (seon.db/db connection)
             contract (into #{} (map :seon.fn/sym)
                            (seon.issue.detect/public-without-contract
@@ -199,4 +196,4 @@
         (clojure.test/is (contains? contract defined)
                          "a defn the author wrote is still a subject")
         (clojure.test/is (contains? contract uncontracted-fn)
-                         "and so is a declaration with no defined-by fact")))))
+                         "and so is the seeded uncontracted defn")))))
