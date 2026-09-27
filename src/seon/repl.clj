@@ -307,9 +307,16 @@
   {:malli/schema [:=> [:cat :seon.repl/emission] [:maybe :string]]}
   [emission]
   (let [entries (response-entries emission)
+        failure (when (and (:seon.cluster.eval/error emission)
+                           (not (:seon.cluster.eval/diagnostics emission)))
+                  (:seon.cluster.eval/error emission))
         answer (if (:seon.eval/renderer emission)
-                 (let [tail (reply-map (filterv (comp (complement #{:seon.repl/value :seon.repl/error}) first)
-                                                entries))]
+                 ;; The rendered text is the value's (or the error's) face; the
+                 ;; map after it still says the evaluation FAILED, as `:error`
+                 ;; with its message, so a failure never reads like a value.
+                 (let [tail (reply-map (into (if failure [[:seon.repl/error (pr-str failure)]] [])
+                                             (remove (comp #{:seon.repl/value :seon.repl/error} first))
+                                             entries))]
                    (cond-> (value-text emission) tail (str "\n" tail)))
                  (reply-map entries))]
     (when answer

@@ -390,3 +390,17 @@
                         :seon.eval/shown "[0 1 2 …2997 (drop 3 result/eeb53)]"
                         :seon.eval/value-tokens 1604 :seon.eval/shown-tokens 39 :seon.eval/duration-ms 5})
        ";; LARGE VALUE: result/eeb53 is ~1604 tokens whole (shown 39).")))
+
+(deftest a-failed-evaluation-with-a-rendered-face-still-says-error
+  ;; tests-0627i: a failure shown through its declared face lost its :error key,
+  ;; so it read like a value. The face prints; the map still says it failed.
+  (let [response (repl/response {:seon.cluster.eval/source "(/ 1 0)"
+                                 :seon.eval/renderer 'seon.sci.kernel/render-ai
+                                 :seon.eval/shown ";; Execution error (ArithmeticException) at (REPL:1:1).\n;; Divide by zero"
+                                 :seon.cluster.eval/error "Divide by zero"
+                                 :seon.repl/handle (admit/result-handle "e64f")
+                                 :seon.eval/duration-ms 0})
+        tail (read-string (subs response (str/index-of response "#:seon.repl{")))]
+    (is (= "Divide by zero" (:seon.repl/error tail)) response)
+    (is (not (contains? tail :seon.repl/value)) response)
+    (is (= 0 (:seon.repl/ms tail)))))
