@@ -66,3 +66,16 @@ The install gate refuses edits to `test-markers`, `may-read-vectors?` and
 `reads-cells?` even when the edit keeps behavior identical, because their
 reaching tests are red in the gate's evaluation (`with-vector-world` and
 `throwaway-test-var` are unresolved, and a fixture needs an execution handle).
+
+## Gate evidence for task d653ed4b633f (install-gate-interprets-file-tests-in-sci)
+
+On branch `boot-perf-edit` (e999fdd1b, 2026-09-27), the gate refused REPL installs whatever their behavior:
+- a behavior-identical redefinition of `seon.program/test-markers` (with its docstring trimmed): the
+  `seon.test-runner-test/a-huge-execution-failure-becomes-bounded-text` test failed with "Unable to
+  resolve symbol: throwaway-test-var", and the fixture tests failed with "The canonical fixture
+  needs an executing test handle".
+- `seon.db/may-read-vectors?`: the
+  `seon.schema.vector-storage-test/datalog-over-a-vector-attribute-means-membership` test failed
+  with "Unable to resolve symbol: with-vector-world".
+- `seon.schema.datahike/reads-cells?`: refused in the same way.
+- `seon.fn.analyzer/literal-value?` has no gating test and installed.

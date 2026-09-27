@@ -46,7 +46,8 @@
                          "docs/research/agent-platform/landing/fix-dogfood-api-2026-09-26.md"
                          "docs/research/agent-platform/landing/inv-heap-stuck-members-opus-2026-09-26.md"
                          "docs/seon/issues/a-first-party-redefinition-gates-on-saturated-reach-interpreted-in-sci-and-is-refused.md"
-                         "docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}
+                         "docs/research/agent-platform/repl-dogfood-2026-09-27.md"
+                         "tmp/boot-source-perf/evidence.md"}}
  #:seon.task{:id "fc812316b5da"
              :name "a-registration-lets-a-later-redefinition-skip-its-gate"
              :kind :function
