@@ -101,6 +101,7 @@
             [datahike.api :as d]
             [edamame.core :as edamame]
             [clojure.java.io :as io]
+            [clojure.set :as set]
             [clojure.string :as str]
             [clojure.walk :as walk]
             [clojure.test]
@@ -2727,6 +2728,46 @@
     ::agent-mistakes
     ::acquisition-refusals))
 
+(defn- acquired-namespace-row
+  "One namespace row as acquisition installs and caches it: its bindings'
+  components pulled whole, with its source and admission beside them."
+  {:malli/schema [:=> [:cat :seon.db/database-value :symbol [:maybe :string]
+                       [:maybe :keyword]] :map]}
+  [db namespace-name source admission]
+  (assoc (db/pull db '[* :seon.ns/requires {:seon.ns/aliases [*]} {:seon.ns/imports [*]}
+                       {:seon.ns/refers [*]}]
+                  [:seon.ns/name namespace-name])
+         ::namespace-source source
+         ::namespace-admission admission
+         ::agent-authored? (= :agent admission)))
+
+(defn- install-acquired-row
+  "Install one acquired declaration row into `ctx` and fold its outcome into
+  the acquisition `state`: an installed count and load result, or the row's
+  refusal under its member. A registration observation is rethrown whole."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :map :map] :map]}
+  [ctx db state row]
+  (try
+    (let [installed
+          (install-row!
+           {:seon.sci.eval/ctx (assoc ctx :seon.schema/projection (:seon.schema/projection state))
+            :seon.db/db db
+            ::prepared-projection (:seon.schema/projection state)
+            :seon.program/row row})]
+      (if (or (contains? installed :seon.instrument/check)
+              (:seon.sci.eval/refused-function installed))
+        (update state (refusal-member row) (fnil conj []) (acquisition-refusal row installed))
+        (cond-> (assoc state
+                       :seon.schema/projection (:seon.schema/projection installed)
+                       :seon.sci.eval/installed (+ (:seon.sci.eval/installed state)
+                                                   (:seon.sci.eval/installed installed)))
+          (:seon.sci.eval/load-result installed)
+          (update :seon.sci.eval/load-results (fnil conj []) (:seon.sci.eval/load-result installed)))))
+    (catch Throwable failure
+      (when (:seon.instrument/registration-observation (error/refusal failure))
+        (throw failure))
+      (update state (refusal-member row) (fnil conj []) (acquisition-refusal row failure)))))
+
 (defn- record-acquisition-refusals!
   "Record contained row refusals through the one durable error owner, once.
 
@@ -2886,18 +2927,7 @@
          (map (fn [namespace-name]
                 (let [[source admission]
                       (get namespace-source-by-name namespace-name)]
-                  (assoc
-                   (db/pull db
-                            '[* :seon.ns/requires
-                                {:seon.ns/aliases [*]}
-                                {:seon.ns/imports [*]}
-                                {:seon.ns/refers [*]}]
-                            [:seon.ns/name namespace-name])
-                   ::namespace-source source
-                   ::namespace-admission admission
-                   ::agent-authored?
-                   (boolean (and admission
-                                 (agent-authored? admission)))))))
+                  (acquired-namespace-row db namespace-name source admission))))
          all-namespace-names)
         all-namespace-row-by-name
         (into {} (map (juxt :seon.ns/name identity)) all-namespace-rows)
@@ -2992,35 +3022,7 @@
                                (apply disj required released)]))
                        (apply dissoc remaining ready))
                  (into ordered ready))))))
-        install-row
-        (fn [state row]
-          (try
-            (let [installed
-                  (install-row!
-                   {:seon.sci.eval/ctx
-                    (assoc ctx :seon.schema/projection
-                           (:seon.schema/projection state))
-                    :seon.db/db db
-                    ::prepared-projection (:seon.schema/projection state)
-                    :seon.program/row row})]
-              (if (or (contains? installed :seon.instrument/check)
-                      (:seon.sci.eval/refused-function installed))
-                (update state (refusal-member row) (fnil conj [])
-                        (acquisition-refusal row installed))
-                (cond-> (assoc state
-                       :seon.schema/projection
-                       (:seon.schema/projection installed)
-                       :seon.sci.eval/installed
-                       (+ (:seon.sci.eval/installed state)
-                          (:seon.sci.eval/installed installed)))
-                  (:seon.sci.eval/load-result installed)
-                  (update :seon.sci.eval/load-results (fnil conj [])
-                          (:seon.sci.eval/load-result installed)))))
-            (catch Throwable failure
-              (when (:seon.instrument/registration-observation (error/refusal failure))
-                (throw failure))
-              (update state (refusal-member row) (fnil conj [])
-                      (acquisition-refusal row failure)))))]
+        install-row (partial install-acquired-row ctx db)]
     ;; Imports are explicit namespace facts. Install their named classes before
     ;; the namespace bindings resolve them; SCI is containment, not a security
     ;; boundary, and the program graph—not a hand list—declares the set.
@@ -3455,6 +3457,141 @@
                       ::loaded-database (or (::loaded-database arm-request)
                                             (loaded-program database))))))
 
+(defn- derived-base-ctx
+  "The base context derived from `database` itself, memoized by its program
+  identity: the path of a branch that changes the loaded program's functions."
+  {:malli/schema [:=> [:cat :seon.db/database-value :map] :seon.sci.eval/ctx]}
+  [database arm-request]
+   (if-let [cache-key (base-ctx-key database arm-request)]
+     (let [cell (cache/lookup-or-miss
+                 base-context-cache cache-key
+                 (fn [_] (delay (derive-base-ctx database arm-request))))]
+       (copy-base-ctx
+        (try @cell
+             (catch Throwable failure
+               ;; A failed derivation is not a value of the key: drop the
+               ;; cell so the next call derives again, and surface the cause.
+               (cache/evict base-context-cache cache-key)
+               (throw failure)))
+        database arm-request))
+     (copy-base-ctx (derive-base-ctx database arm-request) database arm-request)))
+
+(defn- program-population
+  "The declaration tuples acquisition installs from, as sets: functions by
+  definition digest, admission and privacy; namespaces and tests by source and
+  admission; every namespace name. A function row without a stored definition
+  digest reads as \"\", which never compares equal to a program (see
+  `additive-delta`)."
+  {:malli/schema [:=> [:cat :seon.db/database-value] :map]}
+  [database]
+  (let [read (fn [query]
+               (let [rows (db/q query database)]
+                 (when (:seon.db/invalid-read rows)
+                   (throw (ex-info "The program population could not be read." rows)))
+                 (set rows)))]
+    {::functions (read '[:find ?sym ?digest ?admission ?private
+                         :where [?f :seon.fn/sym ?sym]
+                         [(get-else $ ?f :seon.program/definition-digest "") ?digest]
+                         [?f :seon.schema.admission/source ?admission]
+                         [(get-else $ ?f :seon.fn/private? false) ?private]])
+     ::namespaces (read '[:find ?name ?source ?admission
+                          :where [?n :seon.ns/name ?name] [?n :seon.ns/source ?source]
+                          [?n :seon.schema.admission/source ?admission]])
+     ::namespace-names (read '[:find [?name ...] :where [_ :seon.ns/name ?name]])
+     ::tests (read '[:find ?sym ?source ?admission ?namespace-name
+                     :where [?t :seon.test/sym ?sym] [?t :seon.test/source ?source]
+                     [?t :seon.schema.admission/source ?admission]
+                     [?t :seon.test/ns ?n] [?n :seon.ns/name ?namespace-name]])}))
+
+(defn- loaded-population
+  "`program-population` of a committed loaded program, once per store and commit."
+  {:malli/schema [:=> [:cat :seon.db/database-value] :map]}
+  [loaded]
+  (seon.cache/lookup ::loaded-population [(store-identity loaded) (db/commit-id loaded)]
+                     #(* 256 (+ (count (::functions %)) (count (::namespaces %)) (count (::tests %))))
+                     #(program-population loaded)))
+
+(def ^:private projection-inputs
+  "The members a projection is built from (`schema/build-projection`): equal
+  inputs build an equal projection."
+  [:seon.schema.projection/forms :seon.schema.projection/function-contracts
+   :seon.schema.projection/predicate-functions :seon.schema.projection/schema-admissions
+   :seon.schema.projection/function-admissions])
+
+(defn- additive-delta
+  "What `database` adds to the loaded program when that is all it changes, or nil.
+
+  The shared loaded base serves a branch whose functions equal the loaded
+  program's (every function tuple, with a stored digest), whose projection is
+  the loaded program's, and whose other rows only add agent-authored namespaces
+  and agent-authored tests. Any other difference (a changed, added or removed
+  function, a changed or removed namespace or test, a file-derived addition, a
+  schema change) answers nil: acquisition derives that branch whole."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value
+                       :seon.schema/projection]
+                  [:maybe :map]]}
+  [database loaded loaded-projection]
+  (let [branch (program-population database)
+        program (loaded-population loaded)
+        added (fn [k] (set/difference (k branch) (k program)))
+        agent-rows? (fn [rows] (every? #(= :agent (nth % 2)) rows))]
+    (when (and (= (::functions branch) (::functions program))
+               (not-any? #(= "" (second %)) (::functions branch))
+               (set/subset? (::namespaces program) (::namespaces branch))
+               (set/subset? (::namespace-names program) (::namespace-names branch))
+               (set/subset? (::tests program) (::tests branch))
+               (agent-rows? (added ::namespaces))
+               (agent-rows? (added ::tests))
+               (= (added ::namespace-names) (into #{} (map first) (added ::namespaces)))
+               (let [projection (schema/projection-from-database database)]
+                 (or (identical? projection loaded-projection)
+                     ;; Construction inputs, not the built registry object
+                     ;; `:compile-options` holds (one per build).
+                     (= (select-keys projection projection-inputs)
+                        (select-keys loaded-projection projection-inputs)))))
+      {::namespaces (added ::namespaces) ::tests (added ::tests)})))
+
+(defn- loaded-base
+  "The base context of the loaded program itself, shared by every branch that
+  only adds to it: a function of its store and commit, derived once and
+  retained in `seon.cache`. It carries no recorder and no branch value."
+  {:malli/schema [:=> [:cat :seon.db/database-value] :seon.sci.eval/ctx]}
+  [loaded]
+  (seon.cache/lookup ::loaded-base [(store-identity loaded) (db/commit-id loaded)]
+                     #(* 256 (count @(::kernel/installed-functions %)))
+                     #(derive-base-ctx loaded {::loaded-database loaded})))
+
+(defn- receive-additions
+  "A fork of the shared loaded base holding `database`'s program: the
+  additive delta's agent namespaces (classes, bindings, cached rows) and then
+  its agent tests installed on the fork, their refusals folded into the fork's
+  acquisition as a whole derivation folds them."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :map :map]
+                  :seon.sci.eval/ctx]}
+  [base database arm-request {namespaces ::namespaces tests ::tests}]
+  (let [ctx (copy-base-ctx base database arm-request)
+        rows (mapv (fn [[namespace-name source admission]]
+                     (acquired-namespace-row database namespace-name source admission))
+                   (sort-by (comp str first) namespaces))]
+    (install-declared-classes! ctx rows)
+    (doseq [row rows]
+      (sci/install-namespace-bindings! ctx (:seon.ns/name row) (row-bindings row)))
+    (swap! (::kernel/program-snapshot ctx) update :namespaces merge
+           (into {} (map (juxt :seon.ns/name identity)) rows))
+    (let [acquisition (reduce (partial install-acquired-row ctx database)
+                              (::acquisition ctx)
+                              (map (fn [[sym source admission namespace-name]]
+                                     {:seon.test/sym sym
+                                      :seon.schema.admission/source admission
+                                      :seon.test/source source
+                                      :seon.test/ns [:seon.ns/name namespace-name]})
+                                   (sort-by (comp str first) tests)))]
+      (swap! (::kernel/program-snapshot ctx) merge
+             {::acquisition acquisition
+              :seon.test/class-loader (clojure.lang.RT/baseLoader)}
+             (select-keys arm-request [:seon.flow/commit-fault!]))
+      (assoc ctx ::acquisition acquisition))))
+
 (defn base-ctx
   "Derive the program-only SCI context from one database value.
 
@@ -3471,19 +3608,15 @@
      :seon.sci.eval/ctx]]}
   ([database] (base-ctx database {}))
   ([database arm-request]
-   (if-let [cache-key (base-ctx-key database arm-request)]
-     (let [cell (cache/lookup-or-miss
-                 base-context-cache cache-key
-                 (fn [_] (delay (derive-base-ctx database arm-request))))]
-       (copy-base-ctx
-        (try @cell
-             (catch Throwable failure
-               ;; A failed derivation is not a value of the key: drop the
-               ;; cell so the next call derives again, and surface the cause.
-               (cache/evict base-context-cache cache-key)
-               (throw failure)))
-        database arm-request))
-     (copy-base-ctx (derive-base-ctx database arm-request) database arm-request))))
+   (let [loaded (or (::loaded-database arm-request) (loaded-program database))
+         shared (when (map? (db/committed-value-identity loaded))
+                  (loaded-base loaded))
+         delta (when shared
+                 (additive-delta database loaded (:seon.schema/projection shared)))]
+     (if delta
+       (receive-additions shared database arm-request delta)
+       (derived-base-ctx database arm-request)))))
+
 
 (defn- loaded-basis
   "The revision of the adoption record's attribute in the loaded source.
