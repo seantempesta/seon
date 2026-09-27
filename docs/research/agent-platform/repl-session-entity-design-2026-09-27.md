@@ -1,717 +1,929 @@
 ---
 type: research
-status: data-model plan, fourth revision (components all the way down; P0 incremental validation and P1 bounded read evidence as prerequisites) after owner rulings R1–R6 and the modeling review (2026-09-27); for Astra review, then the owner; no source changed
+status: data-model plan, fifth revision — addresses Astra review e80bf7c0d (REVISE, 12 findings) and owner rulings of 2026-09-27 (declared reverse attachments, acknowledgement, relevance tiers, no home namespace, session render, distributed rendering, every modeling kind in the sample); for re-review, then the owner; no source changed
 created: 2026-09-27
 branch: refactor/agent-platform
 source-pin: d7d185a7e (checkout); live default pid 22787, commit 6ab93d43, basis 536879662
 lane: design-repl-session-opus
-supersedes: ca19ad74b's shape; the `:seon.agent/cluster` proposal of config-read-scope-design-2026-09-27.md (10192e1ee)
-reads: agent-session-vocabulary-2026-09-27.md (b0c5d4a89), repl-session-prior-art-2026-09-27.md (08bd655aa)
+supersedes: earlier revisions of this file; the `:seon.agent/cluster` proposal of config-read-scope-design-2026-09-27.md (10192e1ee)
+reads: agent-session-vocabulary-2026-09-27.md (b0c5d4a89), repl-session-prior-art-2026-09-27.md (08bd655aa), repl-session-entity-review-2026-09-27.md (e80bf7c0d)
+sample: tmp/data-model-sample/sample.edn, tmp/data-model-sample/load.clj
 ---
 
-# The agent's record, told as a story: agent → session → turns → forms, and one hop to everything else
+# The agent's record, told as a story
 
-What exists: root's record on default is a flat star of about 124 edges, almost all of them reverse refs other
-entities point at it: 61 turns, 27 messages to it, 22 messages from it, 3 schedule tasks, 3 firings, 3 maintenance
-requests, 3 error occurrences, and back-refs from its own runtime, settings, plan and namespace. The turn system
-was built as a set of proofs of concept, not from the agent's side. Target: the agent owns a few forward
-attachments, each with a declared render. Its REPL session owns an ordered list of turns, and each turn owns its
-forms. Everything else the agent must see is one declared attachment away and appears as one node, never as
-one edge per item. Principal Clojure approach: model each relationship as exactly one of the guide's five choices
-(guide §3), write every change a turn makes in its one settlement transaction, and let context be the attachments'
-render functions.
+## Summary
 
-**Skills and guides read end to end for this revision:**
+What exists: root's record on default is a flat star of about 124 edges, almost all of them reverse refs that
+other entities point at it:
+
+- 61 turns
+- 27 messages to it and 22 messages from it
+- 3 schedule tasks and 3 firings
+- 3 maintenance requests
+- 3 error occurrences
+- back-references from its own runtime, settings, plan and namespace
+
+The turn system was built as a set of proofs of concept, not from the agent's side.
+
+The target has five parts:
+
+1. The agent owns a few forward attachments.
+2. Its session owns its ordered turns, and each turn owns its ordered evaluations. It is components all the way
+   down.
+3. Every other entity the agent needs points at the agent. The agent's schema **declares** which of those
+   reverse edges are its attachments, each with a render.
+4. One pull selector per entity kind is derived from the schema (forward refs plus declared attachments). It
+   drives the walk, the context and the debug graph.
+5. Context is the attachments' renders; detail is one requery away.
+
+The principal Clojure approach:
+
+- Each relationship is exactly one of the guide's five choices (guide §3).
+- A statement about a living entity is a ref; an observed name is a value.
+- Everything a turn changes is written in its one settlement transaction.
+- Two of our own defects are fixed first, so the model does not bend around them: the writer re-validating whole
+  owned trees, and forms storing unbounded read plans.
+
+Skills and guides read end to end:
+
 - `.agents/skills/data-oriented-clojure/SKILL.md`
 - `.agents/skills/data-modeling/SKILL.md`
 - `.agents/skills/datahike/SKILL.md`
 - `docs/seon/architecture/data-modeling-guide.md`
-- the two research notes above
+- the three research notes above
 
-§11 checks every modeling choice against them and lists the skill claims that are stale.
+§12 checks every modeling choice against them. §15 answers each review finding.
 
-## 0. What changed since ca19ad74b, and why
+## 0. Owner rulings this revision applies
 
-| Earlier decision | Now | Reason |
-|---|---|---|
-| `:seon.agent/runtime` → `:seon.agent/sci` holding only the current namespace | **`:seon.agent/session`**. It holds the current namespace and the forward, ordered list of its turns. | R1 puts the turns under the session. A SCI world holds no turns, so "sci" would no longer be true. The vocabulary survey (b0c5d4a89 §4.1) recommends `session`, which is nREPL's name for exactly this state. |
-| History by the reverse of `:seon.turn/agent`; delete `:seon.runtime/turns` | **Forward edge `:seon.agent.session/turns`** (ordered by `:seon.turn/ordinal`). `:seon.turn/agent` is deleted. | R1: attach forward from the parent, one direction. |
-| (second revision) Turns as forward peer refs, to avoid the validation cost | **Components all the way down: session ⊃ turns ⊃ forms**, which is the shape the story wants (R1). Two of our own defects become prerequisite slices so the model does not bend around them. | §3: the cost measured in the second revision comes from (1) the writer re-validating the whole owning value on any write, and (2) forms storing unbounded read plans. P0 (incremental owned-value validation) and P1 (bounded read evidence) fix those. Peer-ref turns remain only as the fallback if P0 cannot keep the guarantee (Q1). |
-| Each evaluation keeps a `:seon.cluster.eval/ns` **ref** | **`:seon.cluster.eval/namespace`, a symbol value** (new key) | Statement versus token (data-modeling skill lines 40-70). "This form ran in `x`" is an observation that must survive `x`'s deletion. The session's current namespace stays a ref. |
-| Inbox left implicit | Messages stay peer entities with `from`/`to`. The inbox is a **declared attachment**, rendered as one node. | R5 (§9) |
-| Compaction retracts evaluations | Compaction retracts chosen forms and appends a system turn with new forms, in one transaction. Attachments are untouched. `:seon.db/no-history?` is removed from write-once form text. | R3 (§8). Today four form-text attributes are declared no-history, so compaction erases their text permanently. |
-| No oversight fact | `:seon.agent/oversees`: peer refs from root to the agents it runs, rendered as a one-line summary per agent | R4 (§10) |
+| Ruling (2026-09-27) | Consequence here |
+|---|---|
+| The fact lives on the entity that states it (message → agent, fn → namespace). The reverse is a read path, never a stored copy. Each entity schema **declares** its reverse attachments, each with a render. One pull selector per entity kind is derived from the schema. Undeclared reverse refs stay queryable but never appear. Owned things are forward components. | §2, §5 |
+| Unread = to me without my acknowledgement. The agent writes one received fact on the message; there is no stored unread ref. | §5, §9 |
+| Relevance tiers are a render choice. The session's current namespace and task → namespace render `(dir ns)`. Task → function renders `(doc f)`. Resolving a symbol gives full source on demand. Render selection order is unchanged: inline override, then the viewing agent's namespace, then the schema pair, then the floor. | §5 |
+| The agent's current task is a peer ref, `:seon.agent/task`. | §2, §4 |
+| Definitions are namespace information; there is no "my functions". Authorship, if ever wanted, goes in transaction metadata. | §4 |
+| **There is no home namespace, only a current one.** `:seon.agent/namespace` is deleted. Creation sets `:seon.agent.session/ns`. A namespace agent is creation with a chosen namespace plus a task naming it. | §2, §3 (reader list), §8 |
+| The turns render is **one render pair on `:seon.agent/session`**: the transcript. | §5, §8 |
+| The settings and task parts are approved as planned. | §7 |
+| Names (settled in `docs/seon/architecture/vocabulary.md`, f49086d5c): session; turn (the `:seon.turn` entity); run = a derived budget of turns, never stored; compaction. | throughout |
 
-Kept from ca19ad74b:
-- the per-fact audit method, now with a consumer column
-- the settings link `:seon.config/base` and one `seon.ai/agent-settings` reader
-- the move-namespace request
-- the retirement of `:seon.turn/starting-ns` and the stored `:seon.sci.eval/ending-ns`
-- the read-evidence cost slice
+## 1. Root's graph before and after: the acceptance picture
 
-## 1. Root's graph, before and after (R6: the acceptance picture)
-
-### Before (default, measured §14)
+### Before (default, measured §18)
 
 ```
-                                    root
-  ┌──────────┬──────────┬───────────┬┴──────────┬───────────┬────────────┬───────────┐
-61 turns   27 msgs→   22 msgs←   3 sched.   3 firings  3 maint.req  3 error occ.  back-refs: runtime,
-(:seon.    (:seon.    (:seon.    tasks      (:fire/    (:request/   (:occurrence/ settings, plan,
-turn/agent) message/to) message/   (:task/    agent)     agent)       agent)        :seon.ns/steward
-                        from)      owner)
-all at level 1, unordered, ~124 edges; runtime → the same 61 turns again; evaluations reached only in reverse
+root ── 61 :seon.turn/agent · 27 :seon.message/to · 22 :seon.message/from · 3 :seon.schedule.task/owner
+        · 3 :seon.schedule.fire/agent · 3 :seon.maintenance.request/agent · 3 :seon.error.occurrence/agent
+        · back-refs :seon.runtime/agent, :seon.config/agent, :my.plan/agent · :seon.ns/steward
+        (all at level 1, unordered; runtime → the same 61 turns again; evaluations only in reverse)
 ```
 
-### After (the picture the debug page must show)
+### After
 
 ```
-root                                                   level 1: one node per attachment (9)
-├─ session ─── ns → my.agents.root                     component (one, ongoing)
-│    └─ turns 1 … 61   (ordered by :seon.turn/ordinal)  level 2: components, in order
-│         └─ forms 0 … n  (ordered by ordinal)          level 3: components of their turn
-├─ plan                                                component
-├─ settings ── base → config "default"                 component overlay + required ref
-├─ home namespace → my.agents.root  · stewards 1       ref · declared derived
-├─ inbox (0 unanswered)                                declared attachment over :seon.message/_to
-├─ faults (3)                                          declared attachment (occurrences + of-steward)
-├─ schedules (3)                                       declared attachment over :seon.schedule.task/_owner
-├─ tasks (0)                                           declared attachment over :seon.task/_agent
-└─ oversees → live agents (0 today; 112 retired)       peer refs, summary render
+root                                            level 1: forward attributes + declared attachments
+├─ session  ns → my.agents.root                 component: one, ongoing
+│    └─ turns 0 … 60   by :seon.turn/ordinal    level 2: components, in order (bounded window + count)
+│         └─ evaluations 0 … n  by ordinal       level 3: components of their turn
+├─ plan                                         component (present once it has a fact)
+├─ settings ─ base → config "default"           component overlay + required ref
+├─ task → (none on root)                        peer ref
+├─ oversees → 0 agents (112 closed & exited)    peer refs, one summary line each, not expanded
+├─ inbox        (unread 0 of 27)                declared attachment :seon.message/_to
+├─ notes        (0)                             declared attachment :my.note/_agent
+├─ issues       (0)                             declared attachment :seon.issue/_agent
+├─ assignments  (0)                             declared attachment :seon.task/_agent
+├─ schedules    (3)                             declared attachment :seon.schedule.task/_owner
+├─ faults       (3)                             declared derived :seon.error/of-steward + occurrences
+└─ listens      (0)                             component (wake subscriptions; plumbing, one line)
 ```
 
-A graph node at level 1 is either a forward attribute of the agent or a declared attachment. Every reverse
-collection is **one** node carrying a count, expanded on click, as the declared `:seon.render/units` list already
-names them (`resources/seon/schemas/seon.agent.edn:36-45`). Today `walk/graph` follows every ref "forward and
-reverse" (`src/seon/render/walk.clj:1033-1081`), which is what draws the star.
+Every node at level 1 comes from the schema: a forward attribute of the agent, or a declared attachment. A
+declared attachment is **one** node carrying its count; it is expanded on click. Undeclared reverse refs (for
+example `:seon.message/from`, `:seon.schedule.fire/agent`) are queryable but not drawn.
 
-## 2. The target shape (R1)
+## 2. Target schema
 
 ```clojure
-;; agent: its attachments (forward), each with a render pair on the attribute
-#:seon.agent{:session  [:and {:seon.db/component true :seon.db/component-schema :seon.agent.session/session} :seon.db/ref]
-             :plan     … ; unchanged component
-             :settings … ; unchanged component (gains :seon.config/base, §7)
-             :namespace … ; unchanged: home assignment
-             :oversees [:set {:description "Agents this agent runs and answers for."} :seon.db/ref]}   ; R4
+;; agent — forward attachments and declared reverse attachments (:seon.render/units stays the declaration)
+[:map {:seon.db/attributes true :seon.program/partition :seon.data
+       :seon.render/units [:seon.agent/session :seon.agent/plan :seon.agent/settings :seon.agent/task
+                           :seon.agent/oversees :seon.agent/listens
+                           :seon.message/_to :my.note/_agent :seon.issue/_agent :seon.task/_agent
+                           :seon.schedule.task/_owner :seon.error/of-steward]
+       :seon.render/ai … :seon.render/html …}
+ [:seon.agent/id …] [:seon.agent/branch …] [:seon.agent/archived-tx {:optional true} …]
+ [:seon.agent/admission-closed-tx {:optional true} …]
+ [:seon.agent/session :seon.agent/session]                  ; required: created with the agent
+ [:seon.agent/plan {:optional true} …]                      ; created with its first fact
+ [:seon.agent/settings :seon.agent/settings]                ; required: created with its base
+ [:seon.agent/task {:optional true} :seon.agent/task]       ; peer ref: the current task
+ [:seon.agent/oversees {:optional true} :seon.agent/oversees]
+ [:seon.agent/listens {:optional true} :seon.agent/listens]]
+;; deleted from the agent: :seon.agent/namespace, :seon.agent/runtime
 
-;; the session (identity-less component; its owner is the agent's forward edge)
-#:seon.agent.session{:ns    [:and {:description "The namespace the REPL is in: SCI's *ns* after the last settled form, or where a request moved it."} :seon.db/ref]
-                     :turns [:set {:seon.db/component true :seon.db/component-schema :seon.turn/turn
-                                   :description "The session's turns, in :seon.turn/ordinal order (components; Q1)."} :seon.db/ref]
-                     :session [:map {:seon.db/attributes true :seon.render/ai … :seon.render/html …}
-                               [:seon.agent.session/ns {:optional true} :seon.agent.session/ns]
+;; session (identity-less component; no back-ref)
+#:seon.agent.session{:ns    [:and {…} :seon.db/ref]                                   ; required
+                     :turns [:set {:seon.db/component true :seon.db/component-schema :seon.turn/turn} :seon.db/ref]
+                     :session [:map {:seon.db/attributes true :seon.program/partition :seon.data
+                                     :seon.render/ai seon.render.transcript/render-session-ai
+                                     :seon.render/html seon.render.transcript/render-session-html}
+                               [:seon.agent.session/ns :seon.agent.session/ns]
                                [:seon.agent.session/turns {:optional true} :seon.agent.session/turns]]}
 
-;; the turn (today's :seon.turn entity; the code's "run" wording becomes "turn")
-#:seon.turn{:ordinal [:int {:min 0 :description "Position in its session; stable across compaction."}]
-            :forms   [:set {:seon.db/component true :seon.db/component-schema :seon.cluster.eval/receipt} :seon.db/ref]}
-;; retired: :seon.turn/agent, :seon.turn/starting-ns, :seon.cluster.eval/run, :seon.cluster.eval/ns,
-;;          stored :seon.sci.eval/ending-ns, :seon.eval/renderer-fn, :seon.agent/runtime and :seon.runtime/*
+;; turn (today's :seon.turn entity)
+#:seon.turn{:ordinal     [:int {:min 0}]                                                  ; required, written by the open writer
+            :evaluations [:set {:seon.db/component true :seon.db/component-schema :seon.cluster.eval/receipt} :seon.db/ref]}
+;; NOT :seon.turn/forms: that key already names the in-memory [:vector :seon.turn/form] of a system result
+;; (seon.turn.edn:145, required at :55-58; produced turn.clj:2358-2362; consumed :2031, :2251, :5492).
 
-;; the form (today's evaluation entity; identity id/evaluation(turn, ordinal) unchanged)
-#:seon.cluster.eval{:namespace [:symbol {:seon.db/index true :description "The namespace this form ran in, as observed. A value: it outlives the namespace."}]}
+;; evaluation (identity id/evaluation(turn, ordinal) unchanged)
+#:seon.cluster.eval{:namespace [:symbol {:seon.db/index true}]}                            ; the observed namespace
+
+;; messages, tasks, settings
+#:seon.message{:received-tx [:and {…} :seon.db/ref]}           ; the recipient's acknowledgement (a tx ref)
+#:seon.task{:namespace [:and {…} :seon.db/ref] :function [:and {…} :seon.db/ref]}
+#:seon.config{:base [:and {…} :seon.db/ref]
+              :agent-settings [:map {…} [:seon.config/base :seon.config/base] <derived per-agent dial entries>]}
 ```
 
-The **run** is derived, not stored (vocabulary b0c5d4a89 §4.2). It is the turns spent against one budget since the
-anchor wake. Renames that follow: `:seon.config.run/max-episode-runs` → `:seon.config.run/max-turns`, and
-`episode-runs`/`episode-exhausted!` → `run-turns`/`run-exhausted!` (`src/seon/turn.clj:2855, 5571`).
+The retired set:
+- `:seon.agent/namespace`, `:seon.agent/runtime`
+- `:seon.runtime/agent`, `:seon.runtime/turns`, `:seon.runtime/trigger` (listens move to `:seon.agent/listens`)
+- `:seon.turn/agent`, `:seon.turn/starting-ns`
+- `:seon.cluster.eval/run`, `:seon.cluster.eval/ns`
+- the stored `:seon.sci.eval/ending-ns`
+- `:seon.eval/renderer-fn`, `:my.plan/agent`, `:seon.config/agent`, `:seon.maintenance.request/agent`
 
-## 3. Component validation cost (C), measured, and the options
+`:seon.eval/entity`'s required `:seon.cluster.eval/run` (`seon.eval.edn:10`) retires with them. The run is
+derived: `:seon.config.run/max-episode-runs` becomes `:seon.config.run/max-turns`, including
+`config/default.edn` and every manifest consumer. `episode-runs` becomes `run-turns` and `episode-exhausted!`
+becomes `run-exhausted!`.
 
-The writer validates the complete owning value of every entity a write touches. It walks owners before and after up
-to the roots, then expands each root's whole component tree (`write-owned-values-error`,
-`src/seon/db.clj:3540-3760`). It refuses past `:seon.config.db/validation-node-limit`, which is 250,000 on default.
-Measured with `seon.db/with`, read-only (§14 probe 12):
+## 3. Readers of `:seon.agent/namespace`, and what each becomes (no home)
 
-| Write | Owning value today | Validation + with |
+| Reader (file:line) | Today | Becomes |
 |---|---|---|
-| empty transaction | — | 0.8–1.0 ms |
-| message content | the message | 2.6–3.9 ms |
-| one field on a turn (`reply-size`) | root's tree: agent, plan, settings, runtime + 61 turns + attempts (369 maps) | 7.1–8.1 ms |
-| same, with 500 more empty turns | 561 turns | 43.6–50.3 ms |
-| same, with 2,000 more empty turns | 2,061 turns | 113.5–126.3 ms |
-| one field on the evaluation holding the 1.5 MB evidence plan | that evaluation + evidence | 137–193 ms |
-| every one of root's 117 evaluations touched once | all evaluation trees | 1,795–1,932 ms |
+| `turn.clj:704-714` `plan-call`, `:774-781` `system-run-plan` | fallback start | the session ns (required; no fallback) |
+| `turn.clj:2233`, `:5478`, `:5549` (system turn, appended generated forms) | home as current | the session ns |
+| `turn.clj:4745` `freeze!` segmentation, `:5334` resume | home | the session ns |
+| `turn.clj:2611` `form-owner` | assignment as ownership | `:seon.ns/steward` of the evaluation's namespace (P6) |
+| `sci/eval.clj:431-449` `agent-namespace`; `:3347`; `:4536-4541` | home; the evaluation-namespace default | deleted; callers read the session ns |
+| `render/walk.clj:603-612` `acquired-root-namespace-eid` | the namespace half | the session ns (via the derived selector) |
+| `render.clj:646-657` `viewing-namespace` | where the viewer's render functions live | the viewer's session ns (render selection step 2) |
+| `render.clj:1736-1746` `namespace-owner` | render-failure recipient | `:seon.ns/steward` (P6) |
+| `render.clj:1826-1838` `repl-state` | the prompt namespace | the session ns |
+| `agent.clj:18-33` `identity` (`:my.agent/namespace`, steward) | identity map | `:my.agent/namespace` from the session ns; steward is read from that namespace |
+| `bootstrap.clj:22-42` (help tools), `:112-148` (situation `:seon.agent/namespace-ref`) | home's requires; situation | the session ns; the situation's `namespace-ref` becomes the session ns |
+| `cluster/agent.clj:237` `creation-tx` | writes home | writes the session with its first ns |
+| `cluster/agent.clj:255`, `:283` (`whoami`), `:334-341` (render identity), `:406` (situation text) | home | the session ns |
+| `cluster/agent.clj:452-465` agents of a namespace (routing) | assignment | agents whose session is in the namespace, or its steward, by caller: named per caller in P6 |
+| `cluster/agent.clj:697-724` submit path | home | the session ns, or the request's `:seon.ns/name`, which moves the session (§8) |
+| `cluster.clj:3417-3428` creation result | home | the session ns |
+| `test.clj:1542` `owned-symbols` | "tests in my namespace" | the tests of the task's namespace (`:seon.agent/task` → `:seon.task/namespace`) |
+| `render/web.clj:1377-1414`, `:2824-2829`, `:3062-3069`, `:3631-3633` (debug viewer) | home | the session ns |
+| `render/transcript.clj:74`, `:278-283` (form fallback), `:838`, `:1258-1270` | home | the evaluation's own `namespace` symbol; the session ns |
+| `eval/drive.clj:22-28` | constructs a default | the creation request's first namespace |
+| `problems.clj:294` | docstring only | unchanged text correction |
 
-The rising rows are not a property of the model. They come from two defects of ours, and the model should not
-bend around them (root and owner, 2026-09-27).
+That is 25 test files naming `:seon.agent/namespace`. P2's rewrite manifest (§13) includes them.
 
-**Defect 1: the writer validates owned size, not the change.** Validation proceeds in three steps:
-1. Seeds are every entity in the report's attempted and effective datoms, plus the targets of component datoms
-   (`src/seon/db.clj:3663-3665`).
-2. `owning-ancestors` walks each seed up to its roots, before and after (`:3652-3662`).
-3. The reduce at `:3674-3722` expands **each root's entire component tree** and re-reads and re-validates every
-   row in it (`row` at `:3588-3597`, `write-entity-value` `:3479`).
+## 4. Relationships: five choices, statement or token, requiredness, deletion
 
-So a one-field turn write on root expands agent, plan, settings, runtime, 61 turns and their attempts: 369 maps,
-7.6 ms. That grows linearly (114 ms at 2,061 turns) and refuses at `:seon.config.db/validation-node-limit`
-(250,000). This violates AGENTS "Make cost follow changed inputs".
+Kinds follow `docs/seon/architecture/data-modeling-guide.md:89-95`; statement versus token follows data-modeling
+skill lines 40-70. Every "required" refuses an invalidating sweep only because the writer validates the surviving
+row (datahike skill lines 60-82). No ref enforces target existence by itself (guide §3, `db/utils.cljc:116-155`).
 
-The whole expansion buys nothing that the ref schema needs:
-- `:seon.db/ref` accepts an entity id as well as a nested map (`resources/seon/schemas/seon.db.edn:40`), so a
-  parent row validates with its children as ids.
-- Each child is validated separately against its relation's `:seon.db/component-schema` (the second `some` at
-  `:3754-3770`).
-- An unchanged sibling's validity cannot change unless its datoms or the projection change.
+| Relationship | Kind | Req. | Statement/token | Target deleted | Source deleted |
+|---|---|---|---|---|---|
+| agent → session | component | req. | statement | — | cascades session, turns, evaluations, evidence |
+| session → current ns | peer ref, moved by settlement | **req.** | statement | refuses unless the same transaction moves the session (`remove-ns!` repairs or refuses) | — |
+| session → turns | component, ordered by `:seon.turn/ordinal` | opt. | statement | — | cascades |
+| turn → evaluations | component, ordered by ordinal | opt. | statement | — | cascades |
+| evaluation → evidence; turn → attempts | component | opt. | statement | — | cascades |
+| evaluation → namespace | **identity value** (symbol) | — | **token** | unchanged | — |
+| evaluation → renderer | identity value (symbol) | opt. | token | unchanged | — |
+| agent → plan / settings | component | opt. / **req.** | statement | — | cascades |
+| settings → base config | peer ref | **req.** | statement | refuses | — |
+| agent → task | peer ref | opt. | statement (the current work) | sweeps | — |
+| task → namespace / function | peer ref | opt. | statement (what the task concerns) | sweeps; the task keeps its `:seon.task/ns` identity aspect (token) | — |
+| agent → oversees | peer ref set | opt. | statement (responsibility) | sweeps | — |
+| agent → listens | component set | opt. | statement | — | cascades |
+| message → to | peer ref, listened | **req.** (`seon.message.edn:20-30`) | statement | refuses | — |
+| message → from, caused-by | peer ref | opt. | statement | sweeps | — |
+| message → received-tx | tx ref (a transition by the recipient) | opt. | statement | — | — |
+| turn → trigger, handled | peer ref | opt. | statement (cause, claim) | sweeps | — |
+| namespace → steward | peer ref | opt. | statement (namespace information) | sweeps | — |
+| fn → namespace (`:seon.fn/ns`) | peer ref (program) | req. | statement | refuses (program rules) | — |
+| note → agent / about | peer ref | req. / opt. (`my.note.edn:15-17`) | statement | refuses / sweeps | — |
+| issue → agent; assignment → agent | peer ref | opt. | statement | sweeps | — |
+| schedule task → owner | peer ref, arming | **req.** | statement | refuses | — |
+| firing → agent | peer ref, listened | **req.** (`seon.schedule.fire.edn:19`) | statement: **the recipient of this firing**, an immutable routing observation recorded once by the firing writer (`schedule.clj:378-389`), not a mirror of the task's current owner | refuses | — |
+| capture → turn | peer ref | **req.** (`seon.context.capture.edn:9-10`) | statement | refuses | — |
+| cluster → config | peer ref | **req.** (`seon.cluster.edn:7`) | statement | refuses | — |
+| occurrence → agent or turn (one, §5) | peer ref | opt. | statement | sweeps | — |
+| evaluation → delivered faults | peer ref set | opt. | statement (what was shown) | sweeps | — |
 
-**Defect 2: forms store unbounded read plans.** A form's read evidence stores a `:datahike.read/dependency-plan`
-whose `:seon.db/read-index-patterns` list one pattern per matched entity (`db.clj:678`, `:760-853`). The generated
-read `(seon.error/for-agent …)` therefore stores 1.5 MB per evaluation (17.6 M characters over 451 plans on
-default). No render shows it, yet every validation and every history load decodes it: 137–193 ms for one form,
-1.8 s for 117, and 1.5–1.8 s to load root's history.
+Messages stay peers because of their **independent lifecycle**: they outlive both parties' turns and are
+addressed by either side. Having two parties alone would not forbid ownership by one of them (review finding 5).
+Definitions belong to their namespace (`:seon.fn/ns`); an agent reaches them only through a namespace it
+renders.
 
-With both fixed, the story's shape is affordable: **components all the way down**. P0 and P1 become prerequisites
-of the shape change P3 (§12).
+## 5. Context: the derived selector, the attachments and their renders
 
-### P0: incremental owned-value validation (prerequisite)
+### 5a. One derived pull selector per entity kind (review finding 6; owner ruling)
 
-**Where.** `write-owned-values-error`, `src/seon/db.clj:3540-3760`: replace the root expansion (`:3674-3722`) and
-keep owner discovery (`owners-of :3621-3651`, `owning-ancestors :3652-3662`).
+`seon.render.walk/entity-selector [projection kind]` is derived once per projection and cached by projection
+fingerprint:
 
-**The rule.** Let **C** be the entities this transaction changed:
-- the `:e` of every attempted or effective datom, including cascaded and swept retractions, which Datahike writes
-  into `:tx-data` (`db/transaction.cljc:814-820`);
-- the `:v` of every component datom added or retracted.
+- every forward attribute of the kind's entity schema;
+- every declared reverse attachment from its `:seon.render/units`;
+- a component nests its target kind's selector;
+- a peer ref selects only the target's identity attributes, so `oversees` stays shallow until requested (review
+  finding 6);
+- a many-valued attachment or component set is fetched ordered before any window is cut. Turns are ordered by
+  `:seon.turn/ordinal` and evaluations by `:seon.cluster.eval/ordinal`; the window is the last *n* in that order,
+  never target eid order (today's cut is by eid, `walk.clj:1029`, `:1064-1068`).
 
-Then:
-1. **Validate every changed row.** Each nonempty row in C is validated after the transaction against:
-   - its identity schemas, when it is a root (`write-entity-error :3502`);
-   - otherwise its owning relation's `:seon.db/component-schema`, where the owner is found after.
-   Children are validated as refs (ids), not expanded.
-2. **Owner invariants for the changed entities only**, both before and after, as the guide §4 requires:
-   - at most one owner after (`::multiple-component-owners`);
-   - no cycle along the owner chain from each changed entity (the chain walk already visits it; a revisit is
-     `::component-cycle`);
-   - a nonempty identity-less row in C with no owner after is `::unowned-entity`;
-   - a component edge in C pointing at an empty row is `::missing-component`;
-   - a changed child whose row became empty re-validates its before-owner's row, because the owner may require
-     it (the required-key refusal of guide §3 row 3).
-3. **The bound counts work done.** `charge!` charges the changed rows, their owner-chain hops and their direct
-   child edges, not whole trees. `::validation-node-limit` then bounds the transaction's size, not the owner's
-   history.
-4. **Unchanged.** The arity gate's changed-roots walk (`:3724-3752`) already walks ancestors, not trees. The
-   final-report hook and the attempted-datom rule (datahike skill lines 276-281) are unchanged.
+One value serves three consumers:
 
-**Proof obligations** (Astra reviews these before code):
-- **(a) A parent's validity is independent of its children's content.** Every component attribute's form is
-  `:seon.db/ref` or a collection of it, so no entity schema reads a child's attributes. Enforce this where the
-  projection is compiled (`schema.clj`, beside `assert-entity-partition! :1517`): a component attribute whose form
-  is anything else refuses. Only then is skipping unchanged children sound.
-- **(b) Every entity whose final value differs is in C.** That includes cascades (`retract-components`
-  `db/transaction.cljc:832-836`), incoming-ref sweeps (`:1003-1015`) and upsert merges. Datahike emits each as a
-  datom, so C is complete by construction; a regression per path proves it.
-- **(c) An unchanged row validated at its own write stays valid** while the projection is unchanged. A
-  transaction that changes the projection (schema adoption) validates every entity whose schema changed, as
-  adoption already does through `attribute-change-tx` (`schema-attribute-change-tx turn.clj:1097`, `seon.cluster/attribute-change-tx`).
-- **(d) Before and after owner discovery is kept** for unlinks and moves (guide §4: "A child-only edit or unlink
-  finds owners in both before and after databases").
+| Consumer | Today | Target |
+|---|---|---|
+| The walk / context acquisition | declared concerns + the home namespace (`walk.clj:97-125`, `:603-612`) | the derived selector; the namespace half from `:seon.agent.session/ns` |
+| The debug graph | every ref forward and reverse, integer eid nodes (`walk.clj:979-997`; `seon.render.walk.edn:151-169`); web assumes numeric ids (`web.clj:3267-3295`, `:3325-3339`) | the derived selector. An attachment node is `{:seon.render.walk/attachment attr :seon.render.walk/count n :seon.render.walk/members [...] :seon.render.walk/elision {...}}`, with no synthetic entity stored. The graph schema and web accept it |
+| The agent's opening render | declared units | the same selector's value, rendered per attachment |
 
-**Cost and target.** About +40/−60 lines in `db.clj`, plus the (a) assertion in `schema.clj` (~10 lines).
-Measured targets for R8:
-- a one-field turn write ≈ a one-entity write (the message row: 2.6–3.9 ms today), independent of history;
-- at 61 and 2,061 turns, within 20% of each other;
-- a whole turn settlement ≈ that turn's forms, not the session.
+Attachment behavior, stated once:
+
+| Case | What the attachment shows |
+|---|---|
+| empty | the attachment with count 0; its render may print its empty form (the plan's "no plan") |
+| a refused read | the refusal as the attachment's value (floor + diagnostic) |
+| a cut | an elision naming the bound, the count, the path and the requery form |
+| requery | a runnable form, for example `(seon.db/pull (seon.db/db) (seon.render.walk/entity-selector …) [:seon.agent/id "root"])`, or the attachment's own query |
+
+Inverse concerns needed for other roots are declared on their schemas, so no navigation is lost when undeclared
+reverse refs stop appearing:
+
+- a namespace declares `:seon.fn/_ns` (its definitions) and `:seon.test/_ns`;
+- an evaluation reaches its turn through the component reverse (single-valued, `pull_api.cljc:328-329`);
+- function callers remain the observed-symbol edges (`walk.clj` `interim-value-edges`).
+
+### 5b. Attachments, renders and tokens (estimated tokens, chars/4, on root unless marked)
+
+| Attachment | Render (AI) | Requery | Tokens |
+|---|---|---|---|
+| identity (scalars) | id, branch, current ns, namespaces it stewards | the agent pull | ~40 est. |
+| **session** | **the transcript** (§8): each turn by ordinal, each evaluation by ordinal, `ns=> source` then its saved `:seon.eval/shown` (or its error map) | a turn by ordinal; `as-of` before a compaction | root 34,593 stored today; 86% three repeated generated reads |
+| namespace half (session ns) | `(dir <ns>)` | `(doc sym)`; full source by resolving the symbol | 32 (`my.agents.root`) … 11,284 (`seon.turn`) raw |
+| task | `(dir <task ns>)` when it differs from the session ns; `(doc <task fn>)` | the task entity | ~100–2,000 |
+| plan | objective, current step, ready/blocked | `(seon.plan/plan {})` | ~130 |
+| settings | dials declared `:seon.config/shown` + the override set | `(seon.ai/agent-settings (seon.db/db) "root")`, 82 dials | ~90 / ~880 |
+| inbox | **unread**: `:seon.message/_to` without `:seon.message/received-tx`, oldest first | all messages to me; sent messages by `:seon.message/_from` | ~23 each (root: 27 messages, none acknowledged under the new fact) |
+| notes, issues, assignments, schedules | counts + newest items | each entity | small |
+| faults | unresolved occurrences routed to me or to namespaces I steward | `(seon.error/for-agent (seon.db/db) "root")` | ~325 per refresh today |
+| oversees | one line per agent: id, branch, admission state, exit state | that agent's render on its branch | ~30 each |
+| listens | the attribute list | the patterns | ~10 |
+
+Render selection order is unchanged, as ruled: the value's inline override, then a render function in the
+viewing agent's current namespace (`render.clj:646-657`, now the session ns), then the schema's declared pair,
+then the floor.
+
+**Per turn.** The opening after a compaction is the sum of the attachment renders plus the namespace half. Every
+later turn appends only what changed, under the existing refresh (turn PRD §14): an `in-ns` appends
+`(dir <new ns>)`, a new message re-renders the inbox, and a plan change re-renders the plan. The measured
+savings on root:
+- deleting the runtime-trigger read: −240 tokens per turn;
+- showing only unread messages instead of every message: −616 tokens per refresh.
+
+### 5c. Distributed rendering: a recursive render over the pulled tree (owner, 2026-09-27)
+
+The context is a recursive render over the tree the schema-derived selector pulls, seen from the viewing agent.
+There is no central context builder.
+
+1. **Pull the tree.** The derived selector (§5a) pulls the root entity with its forward refs and declared reverse
+   attachments. Components nest their own derived selectors, and peer refs stop at identity. The shape comes from
+   the schemas alone.
+2. **Render recursively.** Each node's render renders its own node and delegates its children to their renders:
+   - the agent's render hands the session to the session render, the task to the task render, and the inbox to
+     the inbox attachment render;
+   - a child render may in turn delegate.
+   - Depth and the floor's one token budget bound the recursion. The composer dedupes, back-points and orders.
+3. **Reach beyond the tree when useful.** A render may:
+   - return forms that reach past the pulled tree, such as `(dir seon.repl)` for task → namespace or
+     `(doc seon.repl/response)` for task → function. These evaluate through the one REPL path and render through
+     the named entity's own pair;
+   - **read the database.** The database is a declared input of every render, supplied by schema name, and a
+     render uses it when it needs more context.
+
+   The norm is to focus on the data the render was handed; nothing blocks the rest.
+4. **Perspective.** The viewing agent is a declared input of every render:
+   - A message renders to its recipient with the acknowledgement form `(my.message/received! "id")`, and to its
+     sender as delivered or received.
+   - Root's `oversees` renders one line per agent.
+5. **The composer** keeps the laws the 2026-09-25 design and AGENTS set:
+   - each entity once per context, with later mentions a data back-pointer
+     `#:seon.render{:see [:seon.ns/name seon.repl]}`, not a comment;
+   - definitions before uses;
+   - turns and evaluations in ordinal order;
+   - renders evaluated once and cached by the value's content digest (AGENTS "Return data, not comments";
+     `task-context-install-design-2026-09-25.md` §4.3-§4.5).
+
+   What changes from that design:
+   - Traversal is the one pull of the derived selector, not a level-by-level walk of every reverse ref to depth N
+     (its §2, §4.2).
+   - Relevance lives in the render functions: which namespace gets `dir`, which function gets `doc`.
+   - The recursion follows the pulled tree plus the forms renders return.
+6. **How context is realized.** Under additive context (turn PRD §14) the opening is a system turn whose forms
+   are the ones the agent's recursive render returned. The prompt is then the session render, the transcript, over
+   all turns. A compaction regenerates the opening from the agent's render; later changes arrive as appended
+   refresh forms.
+
+**Render location is the tuning lever.** It is the AGENTS selection order, used on purpose:
+
+| Where the render lives | Scope | Use it for |
+|---|---|---|
+| inline on the value (`:seon.render/ai`, `:seon.render/html`) | this one value | a one-off view a producer decides |
+| a function in the **viewing agent's current namespace** whose contract fits the value | every agent working in that namespace | a namespace's own view of a kind, e.g. `my.agents.reviewer/render-task-ai` showing full source, or `seon.repl`'s agents seeing function docs with examples |
+| the schema's declared pair | everyone: the **global default** | the ordinary view |
+| the floor | values with no render | general printing |
+
+Because the session's current namespace selects step 2, **an agent that `in-ns`es into a namespace also picks up
+that namespace's renders**. Tuning the view for a kind of work means adding a render function in its namespace,
+never editing a central builder.
+
+#### Renders for the sample
+
+Estimated tokens (chars/4); seon.repl measured on default.
+
+| Entity / kind | Render (where declared) | Returns | Tokens |
+|---|---|---|---|
+| agent `demo` | `:seon.agent/agent` pair (schema default) | `(my.agent/whoami)`, `(my.task/current)`, `(seon.plan/plan {})`, `(seon.agent/effective-settings)`, `(my.message/unread)`: one form per non-empty attachment | ~40 + parts |
+| task `demo0task001` | `:seon.task/task` pair (schema default) | its intent, then `(dir seon.repl)` and `(doc seon.repl/response)` | ~40 + parts |
+| namespace `seon.repl` | `:seon.ns/ns` pair (default, `seon.render.ns/render-ai`) | its `dir` value (30 functions): definitions through the declared `:seon.fn/_ns` attachment | ~2,726 |
+| function `seon.repl/response` | `:seon.fn` pair (default) | its `doc` value; full source by resolving the symbol on demand | ~65 |
+| inbox | the `:seon.message/_to` attachment pair on the agent schema (`seon.cluster.message/render-inbox-ai`) | the unread messages, each through the message pair with the recipient perspective | ~25 (1 unread) |
+| settings | `:seon.agent/settings` attribute pair (`seon.agent/render-settings-ai`) | the shown dials + override set | ~90 |
+| session transcript | `:seon.agent.session/session` pair (new, default) | turns by ordinal, evaluations by ordinal: `ns=> source` + saved shown text | ~150 for demo's 5 evaluations |
+| root oversight | `:seon.agent/oversees` attribute pair (new, default) | one summary map per overseen agent | ~30 per agent |
+
+Every row above is a **global default**: the schema's declared pair. Where a namespace override changes the view:
+
+| Override (hypothetical) | Who sees it |
+|---|---|
+| `demo.work/render-task-ai` returning each task function's full source instead of `(doc f)` | demo after its `in-ns 'demo.work` |
+| `seon.repl/render-fn-ai` showing a function's callers alongside its doc | any agent in `seon.repl` |
+| `my.agents.root/render-agent-ai` summarizing an overseen agent with its recent faults | root |
+
+An inline `:seon.render/ai` on one message (a producer's special notice) wins over all of them.
+
+- **demo's whole opening context:** about 40 + 40 + 2,726 + 65 + 25 + 90 ≈ 3,000 tokens, then the transcript.
+- **root's opening:** its identity, plan, settings, faults, schedules and one line per overseen agent.
+
+**What in today's code fights this** (file:line; the graph code is being changed by another lane, so these are at
+the checkout):
+- `render/walk.clj:97-106` `declared-concerns` and `:948` `::attachments` both read `:seon.render/units`, a second
+  and third reader of one declaration. The derived selector should be the only reader.
+- `render/web.clj:649` `declared-entity-units` and `:1634-1641` are the debug page's own unit reader and reverse
+  pulls, another path.
+- `render/walk.clj:913-921` `interim-value-edges` is a hand list of value edges, retiring as the refs lane converts
+  them.
+- `turn.clj:1979-2030` `declared-sources` → `walk/neighborhood` is the central opening builder.
+- `render/transcript.clj:112-184` `candidate-entity-ids`, with pin and limit rules, is a central history builder,
+  and `:258-301` `receipt-entry` hand-maps evaluation fields (audit F06).
+- `agent.clj:147-154` is the settings summary hand list.
+- **A ruling conflict.** The 2026-09-25 design planned to delete `:seon.render/units` "with no replacement key"
+  (its §6, owner O4). Today's ruling makes the entity schema **declare** its reverse attachments, which is exactly
+  what `:seon.render/units` holds. So the plan keeps `:seon.render/units` as that declaration and names it as its
+  meaning. Only the extra readers are deleted, not the key. Owner Q7 confirms.
+
+## 6. Validation cost: two defects made prerequisites (review finding 1)
+
+Measured with `seon.db/with`, read-only on default; Astra's review reproduced the same numbers. The validation
+limit is 250,000.
+
+| Write | Owning value today | ms |
+|---|---|---|
+| empty transaction | — | 0.8–1.0 |
+| message content | the message | 2.6–3.9 |
+| one turn field | root's tree: agent, plan, settings, runtime, 61 turns, attempts (369 maps) | 6.0–8.1 |
+| same, 2,061 turns | | 107–126 |
+| one field on the evaluation holding the 1.5 MB plan | that evaluation + evidence | 137–193 |
+| all 121 of root's evaluations touched once | all evaluation trees | 1,796–1,932 |
+| Astra counterfactual, turns as non-components: turn write at 61 / 2,061 turns | | 1.7–2.1 / 1.5–1.9 |
+| same counterfactual: session write (row holds all turn ids) | | 1.6–1.8 / 2.6–3.0 |
+
+The last two rows show what remains when descendants are not expanded. A session row still carries all its
+turn ids, and Malli's collection validator walks them (`reference-code/malli/src/malli/core.cljc:1532-1539`).
+So a session write is **O(the session's turn refs)** at id granularity. That is about 3 ms at 2,061 turns. It is
+not constant, and this plan no longer claims it is.
+
+**Defect 1, whole-tree re-validation.** `write-owned-values-error` (`src/seon/db.clj:3540-3770`) expands each
+root's whole component tree on any write (reduce at `:3674-3722`).
+
+**Defect 2, unbounded read plans.** Forms store read plans with one pattern per matched entity
+(`db.clj:678`, `:760-853`): up to 1.5 MB each, 17.6 M characters on default. No render shows them.
+
+### P0: incremental owned-value validation (prerequisite; its own design note and review)
+
+**Rule.** C is every entity the transaction changed: the `:e` of attempted and effective datoms, including
+cascades and sweeps, plus the `:v` of component datoms.
+
+1. Validate each nonempty row in C, after the transaction, against its identity schemas or its owning relation's
+   component schema. Children are ids, not expanded maps; `:seon.db/ref` admits an id (`seon.db.edn:40`).
+2. Check owner invariants for C only, before and after: at most one owner, no cycle along the owner chain, no
+   unowned identity-less row, no component edge to an empty row. A child whose row became empty re-validates its
+   before-owner's row.
+3. Charge `::validation-node-limit` for work done: C, owner-chain hops and direct child edges.
+
+**Location.**
+- `db.clj:3674-3722` replaces the tree expansion.
+- Owner discovery stays: `owners-of :3621-3651`, `owning-ancestors :3652-3662`.
+- The arity gate's changed-roots walk (`:3724-3752`) is unchanged.
+
+**Proof obligations.** Each gets a named regression.
+
+| # | Obligation | How it is shown |
+|---|---|---|
+| a | No entity schema reads a child's content. | Assert at projection compile, beside `assert-entity-partition!` (`schema.clj:1517`), that every component attribute's form is `:seon.db/ref` or a collection of it. Also show that no `:fn`, `:and` or custom validator in a parent reads children. |
+| b | C is complete. | Cascades (`db/transaction.cljc:832-836`), sweeps (`:1003-1015`) and upsert merges all emit datoms. One regression per path. |
+| c | Schema adoption re-validates every entity whose schema changed. | Through `attribute-change-tx` (`schema-attribute-change-tx turn.clj:1097`). |
+| d | Before and after owner discovery is kept for unlinks and moves. | Guide §4. |
+| e | Cross-field invariants are only row-local or owner-local. | Name any that are not; each is either re-validated when its inputs change or refused as a design error. |
+
+**Estimate.** Not proved: about +50/−60 lines plus the (a) assertion. It gets its own reviewed note before code
+(review finding 1).
+
+**Targets (R8), each measured at 61 and 2,061 turns:**
+
+| Write | Target |
+|---|---|
+| (i) turn append | O(the session's turn refs) ≈ 3 ms at 2,061 |
+| (ii) session namespace change | O(the session's turn refs) |
+| (iii) plan or settings edit | O(that component's row) ≈ a one-entity write |
+| (iv) one turn's settlement | O(that turn's actual admitted evaluations and their evidence) |
 
 ### P1: bounded read evidence (prerequisite)
 
-**Where.** `seon.db/read-evidence` (`db.clj:928`) and pattern capture (`:760-853`).
+- A stored plan keeps at most K entity patterns per source (`db.clj:760-853`). Past K it widens to
+  attribute-level patterns.
+- Widening is conservative: the currency check (`read-evidence-current?`) may report "changed" more often, never
+  less.
+- K is a declared dial.
+- History and refresh stop pulling plans they do not use (`eval.clj:18-20`, `turn.clj:2054-2056`).
+- Targets: `of-agent` on root from 1.55–1.82 s to the selector-only 0.41 ms order; one evaluation's validation
+  from 137 ms to about a one-entity write.
 
-**The rule.**
-- A stored plan keeps at most K entity-level patterns per source. Past K it widens them to attribute-level
-  patterns (drop `:seon.db/pattern-entity`).
-- Widening is conservative: the currency check (`read-evidence-current?`, `db.clj:~1100-1160`) then reports
-  "changed" more often, never less, so refresh may re-run a read but never misses a change.
-- K is a declared dial; the design review picks it.
-- History and refresh readers stop pulling plans they do not use (`eval.clj:18-20` default selector;
-  `latest-evaluations turn.clj:2054-2056`).
-
-**Targets:**
-- the largest stored plan is bounded (on root, from 1.5 MB to kilobytes);
-- `seon.eval/of-agent` on root drops from 1.55–1.82 s to the selector-only 0.41 ms order;
-- validating one form drops from 137 ms to about a message write.
-
-### Options, re-priced
+### Options (Q1)
 
 | Option | Guarantee | Cost | Sacrifice |
 |---|---|---|---|
-| **A (recommended). Components all the way down (agent ⊃ session ⊃ turns ⊃ forms), after P0 and P1** | pull and cascade tell the whole story; deleting an agent retracts its history (kept in history); validation follows the change | P0 ~+50/−60 lines in `db.clj`/`schema.clj` and its proof; P1 in `db.clj` | a correctness-critical writer change lands first. Pull expansion is whole-tree: any pull of an agent without a selector expands its history, so readers use selectors, and the pull work bound (`pull_api.cljc` `charge-work!`) reports an elision past it |
-| B (fallback). Session a component; session → turns forward peer refs; forms components of turns | bounded validation without P0 | ~+10 lines over A | no cascade from agent to turns; the story has one peer edge. Use only if P0's proof obligation (a) or (b) fails in review |
-| C. Turns point back to the session | bounded | ~0 | reverse edge; the star returns; contradicts R1 |
+| **A (recommended). Components all the way down (agent ⊃ session ⊃ turns ⊃ evaluations), after P0 and P1** | pull and cascade tell the story; each write is bounded by (i)–(iv) above | P0 (own review) + P1 | a correctness-critical writer change lands first. Any selector-less pull of an agent expands its history, so renders use the derived selector, and the pull work charge bounds a wildcard at the REPL |
+| B (fallback). Turns as forward peer refs from the session; evaluations components of turns | turn writes bounded without P0; session writes O(turn refs) as in A | ~+10 over A, plus a writer check for **single-session membership and unique ordinal**, because a peer ref no longer prevents one turn in two sessions (review finding 5) | no cascade from agent to turns; one peer edge in the story |
+| C. Components without P0 | — | — | every write re-validates the owner's whole history; rejected |
 
-Data-modeling skill line 179 (and data-oriented skill lines 66-70) say "History, unanswered wakes, and routed
-faults remain queries". Under R1 that is **stale for history**: history becomes a forward walk from the agent. It
-is **still right for unanswered wakes and routed faults**, which stay derived attachments (§9). The skill is
-updated in the implementing commit (§11).
+## 7. Settings: stored overlay versus sparse request (review finding 4)
 
-## 4. Relationships: the five choices and statement versus token (A, B)
+**Today:**
+- `config/default.edn`, a sparse overlay and the environment compile into one config row per cluster
+  (`config.clj:1-14, 543, 736`), applied at boot (`cluster/boot.clj:718, 762`; `cluster.clj:3362`).
+- `bin/seon config apply` changes a cluster on the fly (`config.clj:810-860`).
+- `seon.agent/settings!` changes one agent's per-agent dials, including model and provider. The next turn uses them.
 
-The guide's §3 table (`docs/seon/architecture/data-modeling-guide.md:89-95`) gives the five choices: component,
-optional peer ref, required peer ref, identity value, settlement moves an edge. Statement versus token follows
-data-modeling skill lines 40-70.
+**Target (approved):**
+- **Two schemas, derived once by `derive-config-forms` (`src/seon/schema/edn.clj:63-93`):**
+  - The sparse request `:seon.config/agent-overlay` keeps only optional dials, as today. `settings!` and its
+    transaction function keep accepting it (`agent.clj:87-113`).
+  - The stored entity `:seon.config/agent-settings` is the same dial entries plus a **required**
+    `:seon.config/base`. The settings component's `:seon.db/component-schema` points at it.
+  - `settings!` resolves the stored overlay through the agent, so a sparse request never needs the base.
+- **Creation writes the base** from the creation request's `:seon.cluster/name`. It is the overlay's first fact,
+  so no empty settings component exists.
+- **One reader.** `seon.ai/agent-settings [db agent-id]` reads the base's `:seon.config/cluster` and calls
+  `config/effective db cluster-name` unchanged (`config.clj:862-911`). That keeps required-dial defaults, the
+  typed missing-row error and false/zero precedence. The AI namespace does not copy `effective`'s semantics.
+- **The config design's classification is kept** (10192e1ee §1): A-sites through `agent-settings` or held
+  settings, B aggregates unchanged, C overlay steps inside the reader, D reference selection through the base ref.
+  Writer-side decisions stay in the writers.
+- **Render:** dials declared `:seon.config/shown` replace the hand list at `agent.clj:147-154`;
+  `:seon.config.agent/show-all-settings` is retired.
+- **Q3** (the config row's own name) stays later work. Removing the config identity would change `effective`'s
+  lookup, not merely erase a duplicate string.
 
-| Relationship | Kind | Statement or token | Delete target | Delete source | Why |
-|---|---|---|---|---|---|
-| agent → session | component | statement | — | cascades the session | the session is part of the agent's value (skill lines 97-99) |
-| session → current ns (`:seon.agent.session/ns`) | optional peer ref, **moved by settlement** | statement: the agent is in `x` | sweeps; the next turn starts at home | — | a living relation the next turn acts on; the settlement writes its successor each turn (guide §3 row 5) |
-| session → turns | component, cardinality-many, ordered by `:seon.turn/ordinal` | statement | — (retracting a turn removes it from the session) | cascades turns, their forms and evidence | the session's turns are part of its value (R1); ordinals carry order (skill lines 91-92; datahike skill lines 329-330). Needs P0 (§3) |
-| turn → forms | component | statement | — | cascades forms and their evidence | owned; compaction retracts forms |
-| form → evidence | component | statement | — | cascades | owned |
-| turn → attempts | component | statement | — | cascades | unchanged |
-| form → namespace (`:seon.cluster.eval/namespace`) | **identity value** (symbol) | **token**: "ran in `x`" | nothing changes | — | the history must still say where a form ran after `remove-ns!` (skill lines 56-61) |
-| form → renderer (`:seon.eval/renderer`) | identity value (symbol) | token | nothing | — | the same; `:seon.eval/renderer-fn` (the same fact as a ref) is deleted |
-| turn → trigger message | optional peer ref | statement (provenance of a living message) | sweeps | — | messages are retracted only deliberately; wake answering uses `:t`, not this ref |
-| turn → handled messages | optional peer ref set | statement (claim) | sweeps | — | `seon.turn.edn` `:handled` description |
-| message → to agent | **required** peer ref | statement; the listened wake edge | refuses deleting the recipient while the message survives | — | `seon.message.edn:20-30` |
-| message → from agent | optional peer ref | statement; the inside-wake marker | sweeps | — | `seon.message.edn` `:from` |
-| message → caused-by message | optional peer ref | statement | sweeps | — | chain limit (`cluster/message.clj:44`) |
-| agent → home namespace | optional peer ref | statement (assignment) | sweeps; the agent has no home | — | assignment is a living relation |
-| namespace → steward agent | optional peer ref | statement (namespace information: where its faults go) | sweeps | — | `steward-call`; same for every viewer |
-| agent → settings overlay | component | statement | — | cascades | owned |
-| overlay → base config (`:seon.config/base`) | **required** peer ref | statement | refuses retracting a config row agents use | — | an overlay without a base cannot compute settings |
-| cluster → config row | peer ref (unchanged) | statement | — | — | Q3 |
-| root → overseen agents | optional peer ref set | statement | sweeps | — | R4; retirement retracts the edge |
-| error occurrence → agent / turn | optional peer ref (one of them, §5) | statement | sweeps | — | guide §3: a fault keeps its observed *identity* values separately (signature, symbols) |
-| schedule task → owner | required peer ref (arming attribute) | statement | refuses | — | `seon.schedule.task.edn:2` |
-| firing → agent | optional peer ref, listened | statement; a denormalized routing edge | sweeps | — | kept for the stated reason: "so the wake router needs no query" (`seon.schedule.fire.edn`) |
-| capture → turn | optional peer ref | statement | sweeps | — | calibration record |
-| form → faults delivered | optional peer ref set | statement | sweeps | — | the observation of what the agent was shown |
+## 8. The session: lifecycle, namespace transitions, the transcript, compaction
 
-Refined guidance for namespaces:
-- The session's current namespace is a **ref**, written with an upsert of the namespace identity in the same
-  transaction. A lookup ref alone refuses for a namespace with no row: task a318b2d38, confirmed.
-- Every historical mention of a namespace, function or renderer is a **value**.
+### 8a. Empty-component lifecycle (review finding 3)
 
-With the evaluation's namespace a value, a nested `in-ns` no longer needs a namespace row for each form at all.
-Only the session's final namespace upserts one.
+| Component | Created | First fact | Losing its last fact |
+|---|---|---|---|
+| session | with the agent | `:seon.agent.session/ns` (the chosen first namespace; for a namespace agent, its task's namespace) | impossible while the ns is required: `remove-ns!` of the session's namespace must move the session in the same transaction or refuse |
+| settings | with the agent | `:seon.config/base` | impossible: base is required |
+| plan | **with its first real fact** (no empty plan at creation) | objective or a step | the writer that removes the last fact also retracts the component edge in the same transaction; the declared plan render prints "no plan" for an absent attachment |
+| listens | with the first listen | the pattern | the component set simply loses its member |
 
-## 5. Per-fact audit, with who uses each fact
+- No identity or existence stamp keeps an empty component alive.
+- **Adoption of existing empty plans:** retiring `:my.plan/agent` leaves 114 plan rows empty. The retirement
+  transaction (P2b) therefore also retracts every plan component whose only fact was the back-ref, and its edge.
+  This is part of the retirement's own `attribute-change-tx`, not a data migration.
 
-Legend:
-- **K** keep · **M** move or rename · **D** delete · **N** new.
-- "Consumer" names a concrete reader with file:line.
-- A fact with no consumer is proposed for deletion with the reason it exists. Hiding it with a filter is not a fix.
+### 8b. Namespace transitions (review finding 8)
 
-### Agent and attachments
+The in-memory `:seon.sci.eval/ending-ns` stays on the evaluation value until settlement. Only its stored copy is
+retired.
+
+| Event | Session ns after |
+|---|---|
+| settlement commits | the last settled evaluation's SCI `*ns*` (identity upsert + the required ref, one transaction) |
+| no evaluation ran (phase failure before evaluation) | unchanged |
+| a request carrying `:seon.ns/name` | written by the turn's open transaction; the turn starts there |
+| an explicit move followed by a refused settlement | the refusal settlement records the last evaluated form's ending ns if it commits; if no form evaluated, the moved ns stands |
+| a settlement transaction that aborts and whose refusal recording also fails | unchanged. The boundary is `settle-batch!` → `settle-batch-refusal!` (`turn.clj:3857`, `:4074-4152`) → `settlement-lost!` (`:3834`) |
+| `remove-ns!` of a namespace a session is in | the same transaction moves each such session to a namespace the caller names, or the write refuses naming the sessions |
+
+SCI binds `*ns*` per evaluation from this fact (`sci/eval.clj:4536-4541`, `:4755`), so an unrecorded move
+cannot leave the context "somewhere else". The next turn starts at the recorded session ns.
+
+**Identity-only namespace rows.** Settlement upserts `{:seon.ns/name x}` for the session ns. Such a row is
+admitted by `seon.ns/ns` (`seon.ns.edn:16-19`) and absent from `program/changed-identities` (`program.cljc:631-655`).
+That proves only that a scratch `in-ns` is not a merge delta; it is not universal program compatibility.
+`digest-map`'s identity path refuses an undigested identity (`program.cljc:563-608`; Astra probe). Its only
+production caller is scoped to changed identities (`cluster/source.clj:880`).
+
+Open program edge (probe P0.2, before P2b): a `defn` settled in an identity-only namespace, and `prepare-merge!`'s
+selection adding `[:seon.ns/name ns]` for selected functions (`cluster/source.clj` `delta`). The settlement must
+either declare the namespace through the program writer or refuse by name (`:seon.fn/namespace-unresolvable`).
+No definition digest is manufactured for an observed namespace.
+
+**Adoption (P2b).** Existing evaluations hold namespace refs and existing agents hold home refs. Converting them
+would be a data migration, which the owner's disposable-data rule replaces with a reset. So P2b's retirements
+land behind **RESET NEEDED**, batched with P3/P5/P6 (§13). The P2a slice fixes a318b2d38 now without any schema
+change.
+
+### 8c. The session render: the transcript, and what `:shown` is
+
+`render-session-ai` returns the transcript:
+- turns in `:seon.turn/ordinal` order;
+- within each turn, evaluations in ordinal order;
+- for each evaluation, the prompt `ns=>` (from its `namespace` symbol), its comment and source, then its saved
+  `:seon.eval/shown` text or, for a failure, its shown error map.
+
+Compaction changes which evaluations the session holds, and the same render produces the smaller transcript.
+`render-session-html` is the page's transcript. The turn keeps its own pair (renamed from `render-run-ai/html`)
+for a single turn's detail.
+
+**What `:shown` is.** `:seon.eval/shown` is the exact text the floor printer produced **once, at evaluation
+time**, under the render profile's budget (turn PRD §15: "the profile is applied once at evaluation time"):
+- It is stored because history must show what the agent saw; re-printing a changed object or profile could not
+  reproduce those bytes.
+- The live value exists only in the agent's SCI context, bound to its handle `result/eN`
+  (`sci.eval/bind-result!`, `turn.clj:5178`), and is lost at restart.
+
+Other stored copies of the result text, with dispositions:
+
+| Copy | Disposition |
+|---|---|
+| `:seon.context.capture/prompt` | holds the whole prompt, which contains the session's shown texts: a duplicate. Calibration needs `:seon.ai.tokens/characters` (stored beside it) and the contribution hashes, not the text. **D** proposed in P7, after its one consumer (`context/capture-ai`, the debug view) reads the transcript instead. Not written on default today (no provider) |
+| `:seon.cluster.eval/error` (failure text) beside the shown error map | the same failure in two forms. Its consumers use it as the positive terminal fact (`turn.clj` terminal checks, `problems` errored receipts). **P7:** keep one: a terminal marker without text, or the shown map as the only text |
+| `:seon.turn/reply` / `:reply-blob` | the provider's raw reply. The evaluations' sources and comments are segments of it: a duplicate unless it holds text no evaluation keeps (prose outside forms). **P7 investigates** with its consumers |
+
+### 8d. Compaction (R3; review finding 9)
+
+- **Entrance.** `seon.turn/compact!` (today `turn.clj:2393-2430`, which retracts every evaluation) becomes a
+  request `{:seon.agent/id a :seon.turn.compaction/retract #{evaluation-id …} :seon.turn.compaction/sources
+  [...]}`.
+- **Writer checks.** In the writer (`db.fn/call`): the agent has no open turn; every named evaluation belongs to
+  a closed turn of this agent's session.
+- **Replacement forms.** They are evaluated as an ordinary system turn, not a second evaluator. That turn's
+  single settlement transaction retracts the selected evaluations (cascading their evidence) and appends itself
+  at the next ordinal.
+- **What stays.** Turns stay, with their control and calibration facts. Attachments (plan, settings, messages,
+  task, session ns) are not touched.
+- **Cost.** It is measured as its own clock row: retract N evaluations + one settlement.
+- **Retention.** Remove `:seon.db/no-history?` from `:seon.cluster.eval/source`, `:comment`, `:output`,
+  `:diagnostics` (`seon.cluster.eval.edn:7, 14, 24, 32`) and `:seon.turn/reply` (`seon.turn.edn:135`).
+  - After that, a retracted attribute's old assertion and its retraction enter temporal EAVT/AEVT, and AVET where
+    indexed (`db/transaction.cljc:471-485`). That is several index entries per attribute, not "one datom per form".
+  - `:seon.eval/shown` already keeps history (`seon.eval.edn:47-50`); shipped keep-history is true
+    (`config/default.edn:4`).
+  - The flag change cannot restore text already missing from the head's temporal history.
+- **Test (R9):** `as-of` on the **post-compaction** database recovers each retracted evaluation's source and shown
+  text.
+
+## 9. Messages and acknowledgement (review finding 7; owner ruling)
+
+- A message is one entity: `to` (required, listened), `from`, `caused-by`, content. Sending is creating it.
+- **Received.** The recipient writes `:seon.message/received-tx`, a ref to its own transaction (`"datomic.tx"`),
+  through `my.message/received!`.
+- **Unread** = to me without that fact. It is derived by the inbox render, and no unread ref is stored.
+- **Answered.** Wake answering is a different predicate and stays where it is: the accepted-reply basis
+  (`latest-answering-turn-t`, `unanswered-wakes`, `turn.clj:3111-3147`).
+- **Handled** (`:seon.turn/handled`, written by `close-call` `turn.clj:480-501`, read by the inbox query
+  `cluster/message.clj:548-554`) loses its inbox consumer.
+  - Its remaining consumers are named in P7: the handled-message display and the close claim itself.
+  - If none needs it once the ack exists, it is deleted in P7 (owner Q6).
+- **Requery** reaches older incoming messages (`:seon.message/_to`) and **sent** messages (`:seon.message/_from`)
+  after compaction has removed the form that sent them.
+- **R7** covers: an accepted reply with no claim and no ack; a system turn; an acknowledged message leaving the
+  inbox.
+
+## 10. Root's oversight lifecycle (review finding 10)
+
+`:seon.agent/oversees` is responsibility, so it outlives admission closure. The edge is kept until the overseen
+agent's retirement has **exited**, not when admission closes.
+
+- **Writers.**
+  - A hosted agent: `host!` adds the edge on the cluster, the branch that holds root's record.
+  - Its retirement: `host/retire!` closes admission, joins its work (`cluster/host.clj:155-179`), and on a
+    successful join/release retracts the edge. A failed join keeps the edge.
+  - An issue worker: the issue writer (`issue.clj:1338`) adds the edge on the parent's branch.
+- **Summary line.** It reads only facts on root's branch: id, `:seon.agent/branch` (custody), admission state,
+  and whether the edge survives past closure (closure without exit = "closing").
+  - It never infers "idle" from the parent row. Open or idle lives on the agent's own branch and is one requery
+    away.
+- **R11** covers a failed retirement join: the agent stays in root's summary as closing.
+
+## 11. Per-fact audit (consumer column)
+
+K keep · M move · D delete · N new.
 
 | Fact | Verdict | Writer | Consumer |
 |---|---|---|---|
-| `:seon.agent/id` | K | `creation-tx` `cluster/agent.clj:233` | every lookup |
-| `:seon.agent/branch` | K | `branch-call` `cluster/agent.clj:205-215` | custody acquisition; a hosted agent's row on default names another branch |
-| `:seon.agent/archived-tx`, `admission-closed-tx` | K | `seon.agent/archive-call` `agent.clj:58`; host retirement | presentation filter; the turn writer's admission refusal (`turn.clj:refuse-closed-admission!`) |
-| `:seon.agent/namespace` | K | `creation-tx :234` | start fallback; identity render; issue routing. Stop using it as the current namespace (`turn.clj:2233, 4745, 5334, 5478, 5549`; `render/walk.clj:603-612`) or as ownership (`form-owner turn.clj:2599`; `render.clj:1736` → `:seon.ns/steward`) |
-| `:seon.agent/plan` | K | `creation-tx :235` | plan render |
-| `:my.plan/agent` | **D** | `creation-tx :235` | none but upsert: a back-ref (datahike skill lines 392-400). Writers address the plan through `:seon.agent/plan` |
-| `:seon.agent/settings` | K | `creation-tx :236`, `settings!` `agent.clj:106` | settings render; `agent-settings` |
-| `:seon.config/agent` | **D** | `creation-tx :236`, `agent.clj:101` | none but upsert: a back-ref |
-| `:seon.config/base` | **N** | `creation-tx` | `seon.ai/agent-settings` (§7) |
-| `:seon.agent/runtime` | **M** → `:seon.agent/session` | `creation-tx :237` | — |
-| `:seon.runtime/agent` | **D** | `creation-tx :237`; `turn.clj:466, 1622` | none but upsert: a back-ref |
-| `:seon.runtime/turns` | **M** → `:seon.agent.session/turns` (component, ordered) | `turn.clj:465-467, 1622-1623` | `eval.clj:49`, `cluster/status.clj:137-142`, `cluster/agent.clj:335-342`, `render/web.clj:3211`, `render/transcript.clj:1149, 2431`, `turn.clj:575, 2059` |
-| `:seon.runtime/trigger` | **D** | `open-call turn.clj:468` | only the runtime render (`transcript.clj:1040-1060`), which re-sends a copy of the newest turn's trigger (~240 tokens a turn) |
-| `:seon.runtime/listens` | **M** → `:seon.agent/listens` (component) | `issue.clj:1468` | wake routing `cluster/wake.clj:427-429`; issue budget `issue.clj:1456`. 0 datoms on default |
-| `:seon.agent.session/ns` | **N** | settlement; a move request's open (§8) | every turn start; the namespace half of context; the `ns=>` prompt |
-| `:seon.agent/oversees` | **N** | agent creation by an overseer (`cluster/host.clj:67`, `issue.clj:1338`, `cluster.clj:3383`); retirement retracts it | root's oversight render (§10) |
-| `:seon.agent/listens` | **N** (moved) | `issue.clj:1468` | wake routing |
+| `:seon.agent/id`, `branch`, `archived-tx`, `admission-closed-tx` | K | `cluster/agent.clj:205-241`; `agent.clj:58`; host retirement | lookups, custody, presentation, admission refusal |
+| `:seon.agent/namespace` | **D** | `creation-tx :237` | §3: every reader converts to the session ns, the task namespace or the steward |
+| `:seon.agent/session`, `:seon.agent.session/ns`, `/turns` | N / M (from runtime) | creation; settlement; the open of a moving request | every turn start; the transcript; the namespace half |
+| `:seon.agent/runtime`, `:seon.runtime/agent`, `/turns`, `/trigger` | **D** | `creation-tx :237`; `open-call turn.clj:465-468`; `:1622-1623` | replaced by the session; the trigger copy's only reader was the runtime render (~240 tokens a turn) |
+| `:seon.runtime/listens` | M → `:seon.agent/listens` | `issue.clj:1468` | `cluster/wake.clj:427-429`; `issue.clj:1456` |
+| `:seon.agent/plan` + `:my.plan/agent` | K / **D** | `creation-tx`; `my.plan` writers | plan render / back-ref only (§8a) |
+| `:seon.agent/settings` + `:seon.config/agent` | K / **D** | `creation-tx`; `agent.clj:101` | `agent-settings` / back-ref only |
+| `:seon.config/base` | N | `creation-tx` | `agent-settings` |
+| `:seon.agent/task`, `:seon.task/namespace`, `/function` | N | the assignment writer; task admission | task render (dir / doc) |
+| `:seon.agent/oversees` | N | §10 | oversight render |
+| `:seon.turn/id`, `ordinal`, opened/closed-tx | K / N / K | `open-call` | ordering, open-turn and wake answering |
+| `:seon.turn/agent`, `starting-ns` | **D** | `open-call :462-463` and others | 47 mentions / `fold-namespace`, `stored-record-content` |
+| `:seon.turn/trigger`, reply, reply-size, attempts, disposition, result | K | open, plan, settlement | cause; plan-frozen fence (`plan-call :724`); calibration; continuation |
+| `:seon.turn/handled` | K → Q6 | `close-call :480-501` | inbox (moves to the ack), close claim |
+| `:seon.turn.work/situation` | K, **named follow-up** | `open-call :462` | `plan-call :727` refusal, `latest-evaluations :2046`. The turn PRD §2 ruled it removed. A follow-up task for root to file: "derive `:call`/`:generate` from authorship and attempts; retire the stamp" |
+| `:seon.turn/evaluations` | N | plan freeze; settlement | the transcript, compaction |
+| `:seon.cluster.eval/run` | **D** | `receipt-row :954` | 72 source mentions; the component reverse replaces it |
+| `:seon.cluster.eval/ns` → `/namespace` | **D** / N | settlement | prompts, `form-owner`, `fn/analyze-form` (`settlement-form :1003`) |
+| stored `:seon.sci.eval/ending-ns` | **D** | `evaluation-facts :154-156` | the next prompt; the session |
+| `:seon.eval/renderer` / `renderer-fn` | K / **D** | `evaluation-facts :130-132` | label; readers already fall back to the symbol |
+| shown, diagnostics, output, cost measures, read-basis, faults | K | settlement | the transcript; bounds findings; refresh; error delivery |
+| `:seon.cluster.eval/error` | K → P7 (§8c) | settlement | terminal fact; problems |
+| read-evidence | K, bounded (P1) | settlement | refresh currency |
+| `:seon.message/received-tx` | N | `my.message/received!` | inbox unread |
+| error occurrence `agent` / `turn` | K, one per occurrence (P7) | `error.clj:1492-1493` | `problems.clj:120`, `error.clj:1769-1772`. `error.clj:2058-2072` queries the direct agent and gains turn → session → agent in P7 |
+| `:seon.maintenance.request/agent` | **D** | `schedule.clj:266` | none; the firing names its recipient |
+| `:seon.schedule.fire/agent` | K | `schedule.clj:389` | wake router; the firing's recipient, an immutable observation (§4) |
+| `:seon.context.capture/*` | K (prompt text → P7) | `context.clj:359` | calibration (`seon.ai.tokens/characters`); contributions read by `transcript.clj:701-703`, produced by `context.clj:340-355`, tested by `context_capture_test.clj:7` |
+| `seon.context/selection`, `append-tx`, `compact-tx` | **D** (functions only) | `context.clj:76-256` | none outside the file. The contribution schema and its `evaluations` member stay: captures produce and read them (review finding 9) |
 
-### Turn and forms
+## 12. Modeling choices against the skills; documentation corrections
 
-| Fact | Verdict | Writer | Consumer |
-|---|---|---|---|
-| `:seon.turn/id` | K | `open-call turn.clj:462` | identity; result handles via `id/evaluation`; error occurrences; captures |
-| `:seon.turn/ordinal` | **N** | `open-call` (count of the session's turns, inside the writer) | ordering in render, graph, history |
-| `:seon.turn/agent` | **D** | `open-call :462`, `record-evaluated-call :1583` | 47 source mentions; each becomes `[?a :seon.agent/session ?s] [?s :seon.agent.session/turns ?t]` |
-| `:seon.turn/starting-ns` | **D** | `turn.clj:463, 731-732, 787, 912, 1620`; callers `cluster/agent.clj:750`, `bootstrap.clj:316, 343`, `issue.clj:1407` | `fold-namespace :4533`, `stored-record-content :1546`; both replaced by the session |
-| `opened-tx`, `closed-tx` | K | `open-call`, `close-call :480-501` | open-turn derivation; wake answering by `:t` (`latest-answering-turn-t turn.clj:3111`) |
-| `:seon.turn/trigger` | K | `open-call`; `issue.clj:1408` | the prompt's cause (`turn.clj:4599-4611`); `transcript.clj:141-150` |
-| `:seon.turn/handled` | K | `close-call :491-501` | unanswered-message derivation (`turn.clj:497`, `cluster/message.clj:401, 553`) |
-| reply, reply-blob, reply-size | K | `plan-call :677-734` | transcript; `reply-size` is also the plan-frozen fence (`plan-call :724`) and the wake-answering basis (`close-call :494`) |
-| attempts, disposition, result | K | provider path; settlement | usage calibration; continuation (`next-agent-work`); the completed reply |
-| `:seon.turn.work/situation` | K (flagged) | `open-call :462` | `plan-call :727` refusal; `latest-evaluations :2046`. The turn PRD §2 lists this stamp as removed; issue candidate |
-| `:seon.turn/forms` | **N** (replaces `:seon.cluster.eval/run`) | the plan freeze (`source-rows :639-675`) and settlement | render, compaction |
-| `:seon.cluster.eval/run` | **D** | `receipt-row :954` | 72 mentions in 11 files; the reverse `:seon.turn/_forms` is single-valued for a component (`pull_api.cljc:328-329`) |
-| form id, ordinal, at, author, source, comment | K | `receipt-row` | the REPL grammar (`repl.clj`), transcript ordering, refresh authorship rules |
-| `:seon.cluster.eval/ns` (ref) | **D** → `:seon.cluster.eval/namespace` (symbol) | `source-rows :666-669` (plan-time guess, deleted) and `evaluation-facts :152` | the `ns=>` prompt (`repl.clj:466-472`, `transcript.clj:278`), `form-owner`, `fn/analyze-form` via `settlement-form :1003` |
-| stored `:seon.sci.eval/ending-ns` | **D** | `evaluation-facts :154-156` | `repl.clj:216` (`:seon.repl/ns`: the next prompt shows it), `fold-namespace` (replaced) |
-| `:seon.eval/renderer` | K | `evaluation-facts :130` | transcript renderer label |
-| `:seon.eval/renderer-fn` | **D** | `evaluation-facts :132` | the same fact as a ref; readers fall back to the symbol already (`transcript.clj:287, 1495, 1563`) |
-| shown, error, diagnostics, output | K | settlement | the §15 observation shown to the agent |
-| duration and cost measures | K | settlement | findings against the declared bounds (`repl/cost-attributes`) |
-| read-basis-transaction, read-evidence | K, bounded (P1) | `receipt-read-evidence-tx :1463` | refresh (`system-plan :2099`, `read-evidence-current?` `db.clj`) |
-| `:seon.cluster.eval/faults` | K | `with-fault-windows :3790` | transcript error delivery (`transcript.clj:351-388`) |
-| `:seon.cluster.eval/triage-edn` | D (already retiring) | none | none |
-
-### Everything else attached to the agent
-
-| Fact | Verdict | Writer | Consumer |
-|---|---|---|---|
-| message id, to, content, from, caused-by, about, assignment | K | `cluster/message.clj:231`, `error.clj:1397` | wake routing (`to`); inside-wake marker and assignment queries (`from`, `turn.clj:2662`); chain limit (`caused-by`) |
-| error occurrence `agent` and `turn` | K, **one per occurrence** | `error.clj:1492-1493` | `problems.clj:120`, `error.clj:1769-1772, 2066`. When the occurrence happens in a turn, the turn names the agent. Default: 11 agent-only, 0 with a turn |
-| `:seon.maintenance.request/agent` | **D** | `schedule.clj:266` | none. The request already names its firing, whose `:seon.schedule.fire/agent` names the agent |
-| `:seon.schedule.fire/agent` | K | `schedule.clj:389` | the wake router (listened; its description states the denormalization) |
-| `:seon.schedule.task/owner` | K | `schedule.clj:96, 726` | arming (`:seon.wake/arms`), `schedule.clj:182, 327` |
-| `:seon.task/agent`, `:seon.issue/agent`, created-by | K | task/issue writers | assignment routing; the tasks attachment |
-| `:seon.ns/name` rows | K | `namespace-rows turn.clj:619`, now called only for the session namespace | the session ref target; program rows by definition digest (`program.cljc:614-655`) |
-| `:seon.ns/steward` | K | `steward-call` | fault and complaint routing (`problems.clj` `unstewarded-namespaces`), the namespace render, the agent's "stewards" line |
-| `:seon.context.capture/*` | K | `context/capture-tx context.clj:359` | token calibration (`seon.ai.tokens/characters` join) |
-| `:seon.context.contribution/agent`, `/evaluations`; `seon.context/selection`, `append-tx`, `compact-tx` | **D** | `context.clj:76-256` | none outside `context.clj` (searched src, script, test) |
-
-### Awkward on click in root's current graph, and what each becomes
-
-| Clicked | What it is | Becomes |
+| Choice | Authority | Holds? |
 |---|---|---|
-| runtime → 61 turns, and the same 61 turns again at level 1 | one relation drawn twice | session → turns, ordered, level 2 |
-| runtime → trigger | a copy of the newest turn's trigger | gone; the turn shows its trigger |
-| runtime/settings/plan back-refs pointing at root | back-refs used only for upsert | gone |
-| 27 + 22 message edges | peer messages drawn one edge each | one inbox node (unanswered); the rest under the turns that were triggered by or handled them |
-| 3 maintenance requests | a copied agent ref nobody reads | gone |
-| 3 firings + 3 schedule tasks | a routing edge + owned schedules | one schedules node |
-| a turn's `starting-ns` | copy of its first form's namespace | gone |
-| an evaluation's `ns` + `ending-ns` + `renderer-fn` | one fact two ways ×3 | `namespace` symbol, `renderer` symbol |
-| `:seon.turn.work/situation` | a stored label ruled removed | flagged (issue) |
+| components owned forward; cascade; pull expansion | data-modeling skill lines 30, 97-99; datahike skill lines 380-391; guide §4 | yes, with P0 |
+| no back-ref identities; parent from the forward edge | datahike skill lines 383-384, 392-400; guide §4 | yes. Supersedes turn PRD §18c's back-ref prescription, which is updated under the owner's newer authority when the refs retire |
+| order by ordinal | data-modeling skill lines 91-92; datahike skill lines 329-330 | yes |
+| identity-less components validated by component schema | datahike skill lines 88-90; `schema.clj:1517-1537` | yes |
+| evaluation namespace and renderer as values | data-modeling skill lines 40-70 | yes |
+| session ns as a required ref moved by settlement, repaired or refused on retraction | guide §3 rows 3 and 5; §2 ("repair … in the same transaction or refuse") | yes |
+| declared reverse attachments, one derived selector | data-modeling skill lines 167-178; guide §7 ("derive the pulled shape from the entity schema and selector") | yes |
+| compacted history retained | datahike skill lines 106-121 | after the no-history change; old head history is not restored |
 
-## 6. The agent's attachments and their renders (R2)
+Corrections applied **in the slice that installs the behavior** (review finding 12), never before:
 
-Context = render(agent). Each attachment's declared render emits REPL entries (forms plus their results). The
-detail is one requery away as a runnable form. Token figures are estimates (chars/4) measured on root unless
-marked.
+- **Data-modeling skill line 179** (and data-oriented lines 66-70). "History, unanswered wakes, and routed faults
+  remain queries" becomes:
 
-| Attachment | Render shows | Requery for detail | Tokens |
-|---|---|---|---|
-| identity (scalars) | id, branch, home ns, current ns, namespaces it stewards | `(seon.db/pull … [:seon.agent/id "root"])` | ~40 (est.) |
-| session | the forms since the last compaction, each `ns=>` prompt from its form's `namespace` value | a turn's forms by ordinal; history `as-of` before a compaction | root 34,593 stored today; 86% three repeated generated reads (§14) |
-| plan | objective, current step, ready and blocked steps | `(seon.plan/plan {})` full tree | ~130 (root: 264 over 2 evaluations) |
-| settings | the dials declared `:seon.config/shown` + the set the agent overrides | `(seon.ai/agent-settings (seon.db/db) "root")`, 82 dials | ~90 shown; ~880 full |
-| inbox | unanswered messages only (to me, no handling claim) | the triggering or handling turn of any older message | ~23 each (root: 0 unanswered) |
-| faults | unresolved occurrences routed to me and to namespaces I steward | `(seon.error/for-agent (seon.db/db) "root")` | ~325 today per refresh |
-| schedules | next firing per task | the task's firings | small |
-| tasks | open assigned tasks | the task entity | 0 on root |
-| oversees (root) | one summary line per live agent | that agent's own render | ~30 per agent (est.); 0 live on default now |
-| namespace half (not an attachment) | `(dir <session ns>)` | `(doc sym)` | 32 (`my.agents.root`) to 11,284 (`seon.turn`) raw |
+  > The session owns membership of turns and evaluations (forward components). Traversal, ordering and temporal
+  > reconstruction remain derived reads. Unanswered wakes, unread messages and routed faults are derived and
+  > rendered as declared attachments.
 
-**Per turn.** The opening after a compaction is the sum of the attachment renders plus the namespace half: about
-40 + 130 + 90 + inbox + faults + dir. Every later turn appends only what changed, under the existing refresh (turn
-PRD §14): a changed plan re-renders the plan, a new message re-renders the inbox, an `in-ns` appends
-`(dir <new-ns>)`. Deleting the runtime-trigger read saves ~240 tokens a turn on root. Restricting the inbox to
-unanswered messages replaces root's ~616-token message read with 0 today.
+- **Stale file:line citations**, all confirmed by the review: `db.clj` `q` 2450, `pull` 2673, `transact!` 5094,
+  `call-with-custody` 390, `read-evidence` 928, `write-entity-error` 3502, `write-owned-values-error` 3540,
+  `removed-definition-error` 4152, `deletion-error` 4219; `turn.clj` `system-plan` 2099, `system-turn` 2222,
+  `latest-answering-turn-t` 3111; `instrument.clj` 767 and 796; `sci/eval.clj` 3246, 3320, 3514.
+- **Guide §7's "pull defaults to 1,000" is false.** `pull_api.cljc:16` sets the default to nil. The writer
+  docstring's "pull's 1,000 cap" is false for the same reason, and guide §4's source ranges are stale.
+- **"Namespace rows never merge"** narrows to §8b's wording.
 
-**The two halves (owner, 2026-09-27).**
-- The agent half is every attachment above. It follows the agent.
-- The namespace half is selected by `:seon.agent.session/ns` and is the same for every agent there.
-- `:seon.ns/steward` is namespace information: where the namespace's faults go. The agent sees it through its
-  stewards line.
-- Today the opening's namespace member is the home namespace (`render/walk.clj:603-612`); the target reads the
-  session's.
+## 13. Phased plan
 
-## 7. Settings (unchanged from ca19ad74b §6, restated briefly)
+Every slice is one loadable commit that converts its callers and tests. Root runs the named tests centrally.
 
-**How clusters get their config today:**
-- `config/default.edn` (653 lines, one decision per dial), a sparse overlay (`config/development.edn`) and the
-  environment compile into one config row per cluster (`config.clj:1-14, 543, 736`), applied at boot
-  (`cluster/boot.clj:718, 762`, `cluster.clj:3362`).
-- `bin/seon config apply [NAME] PATH` changes a cluster on the fly; its held overlay keeps earlier decisions
-  (`config.clj:810-860`).
-- `seon.agent/settings!` (`agent.clj:106-120`) overrides any of 34 per-agent dials for one agent, including
-  model and provider. The next turn's composition (`cluster/prompt.clj:48-72`) uses it.
-
-**Target:**
-- The overlay gains `:seon.config/base`, a required ref to its cluster's config row, written at creation.
-- One reader, `seon.ai/agent-settings [db agent-id]`, computes base effective merged with the overlay.
-- The 18 guessing sites of 10192e1ee §1 A become its consumers (agent-scoped A1, A4–A13), pass settings they
-  already hold (A2, A3, A14, A15), or name their cluster from the world they hold (A16–A18).
-- The render shows the dials declared `:seon.config/shown` (replacing the hand list `agent.clj:147-154`) with the
-  override set, and the full map is one requery away.
-- `:seon.config.agent/show-all-settings` is retired: it is presentation state, and the requery replaces it.
-
-## 8. The session: current namespace, moving it, compaction (R3)
-
-**Writes.**
-- The settlement of a turn, in its one transaction, upserts `{:db/id "namespace:x" :seon.ns/name 'x}` and asserts
-  `:seon.agent.session/ns` through a transaction function that reaches the session from the agent (no back-ref).
-- `x` is the in-memory `:seon.sci.eval/ending-ns` of the last settled form, SCI's `*ns*`
-  (`sci/eval.clj:4755`, threaded at `turn.clj:5184`).
-- Each form stores its own `:seon.cluster.eval/namespace` symbol, so no other namespace row is needed. That fixes
-  a318b2d38.
-- An unchanged namespace emits no datom.
-- A request carrying an optional `:seon.ns/name` asserts the same fact in the turn's open transaction (R3 of the
-  previous round: "just updating data we should already be reading"). Every turn start reads `(or session-ns home)`.
-- The refusal arm writes the session too, because SCI has already moved (Q4).
-
-**Compaction is one transaction:**
-1. Retract the chosen forms (`[:db/retractEntity form]`, which cascades their evidence).
-2. Keep every turn. Turns carry the wake-answering, claim and calibration facts other readers use (§5).
-3. Append one system turn at the next ordinal whose forms are the new context. That context is the re-rendered
-   attachments (the opening) and any authored instruction, for example what to do after compaction, as an
-   ordinary form with a comment and a result.
-
-Plan, settings, messages, faults, tasks and the session namespace are attachments, not forms, so compaction never
-touches them and the plan stays stable (R3).
-
-**Nothing is deleted (R3) needs a schema fix.** `:seon.cluster.eval/source`, `:comment`, `:output`,
-`:diagnostics` (`seon.cluster.eval.edn:7, 14, 24, 32`) and `:seon.turn/reply` (`seon.turn.edn:135`) declare
-`:seon.db/no-history? true`, so retracting a form erases its text from history
-(`db/transaction.cljc:441-485`; datahike skill lines 106-112).
-- These attributes are written once and never updated, so `noHistory` saves nothing until retraction. There it
-  destroys exactly what R3 says to keep.
-- Remove the flag from them. The retention cost is the retraction datom per compacted form.
-- History of this kind needs `:seon.config.db/keep-history? true`, the shipped default in `config/default.edn`.
-
-**Forms are easy to manipulate.** A form is addressed by `[:seon.cluster.eval/id (id/evaluation turn ordinal)]`,
-ordered by `:seon.cluster.eval/ordinal` within a turn and by `:seon.turn/ordinal` across turns. Compaction and
-any agent can therefore select forms by position, source, author or namespace with one query over the session's
-turns, and replace them in one transaction.
-
-## 9. Messages (R5)
-
-- A message stays one entity with `from` and `to`. Sending and receiving are the same single entity.
-- A message cannot be a component: it has two parties, and a component has one owner (skill lines 97-99;
-  datahike skill lines 388-390).
-- A forward `:seon.agent/inbox` edge on the recipient would store the `to` relation twice. `to` is also the
-  listened wake edge (`seon.message.edn:20-30`), so it is the one to keep.
-- The inbox therefore appears as a **declared attachment**: `:seon.message/_to` filtered to unanswered (no
-  handling claim), rendered once as one node with its count. That is how it avoids the flat star.
-- Answered messages are reached from the turns that were triggered by or handled them (`:seon.turn/trigger`,
-  `:seon.turn/handled`), which is where they belong in the story.
-- There is no outbox attachment. A sent message is visible in the sender's history as the form that sent it. The
-  `from` edge's consumers are the inside-wake marker and assignment queries.
-
-## 10. Root (R4)
-
-Root is an ordinary agent with one more attachment, `:seon.agent/oversees` (optional peer refs to the agents it
-runs).
-
-- **Writers:** the creation paths that make a hosted or worker agent add the edge. Retirement (admission closed)
-  retracts it, and history keeps it.
-- **Render:** one line per agent: id, current namespace, open or idle, turns in the current run against the
-  budget, unanswered count, last settled instant. About 30 tokens per agent. Each line's requery is that agent's
-  own render.
-- **Default today:** 112 hosted agents, all admission-closed. After the change, root's summary lists the live
-  ones only.
-
-## 11. Every modeling choice against the skills, and stale skill claims
-
-| Choice | Skill/guide line | Holds? |
-|---|---|---|
-| session, plan, settings, forms, evidence as components; cascade and pull expansion | data-modeling skill lines 30, 97-99; datahike skill lines 380-391; guide §4 (lines 122-143) | yes |
-| no back-ref identities on components; derive the parent from the forward edge | datahike skill lines 383-384 and 392-400; guide line 137 | yes. **Conflicts with turn PRD §18c** ("Components the agent writes to carry an identity derived from the owner … `:seon.runtime/agent`"). The plan follows the skill; writers use transaction functions |
-| turns as components of the session | data-modeling skill lines 97-99 ("Choose components when children belong to one parent's value"); guide §4 | yes: a turn belongs to one session. Other entities (occurrences, captures) reference it by ordinary ref, which the skill allows for identified owned rows. Affordable only with P0; the guide §4 guarantee is kept by P0's proof obligations |
-| order by ordinal on members | data-modeling skill lines 91-92; datahike skill lines 329-330; guide §6 (lines 176-177) | yes |
-| identity-less session component | datahike skill lines 88-90 (unowned identity-less rows refuse; owned ones validate by component schema); `schema.clj:1517-1537` requires a partition only for identity-bearing schemas | yes |
-| form namespace, renderer as values | data-modeling skill lines 40-70, 33 | yes; supersedes "lookup refs everywhere" |
-| session ns as optional ref moved by settlement | guide §3 rows 2 and 5 | yes |
-| required refs: message → to, overlay → base | datahike skill lines 60-82; guide §3 row 3 | yes |
-| identity-only namespace rows are program-partition rows that never merge | `seon.ns.edn:10-18`; `program.cljc:614-655` (merge by digest) | yes |
-| history of compacted forms | datahike skill lines 106-112; guide §2 (lines 49-61) | only after removing `no-history?` (§8) |
-| context as attachments' renders | data-modeling skill lines 167-178 ("record and render contract") | yes |
-| "history … remain queries" | data-modeling skill line 179; data-oriented skill lines 66-70 | **stale for history** under R1 (§3) |
-
-**Proposed in-place correction of data-modeling skill line 179** (for root to apply with the owner's ruling; the
-data-oriented skill's lines 66-70 take the same edit):
-
-> Unanswered wakes and routed faults remain queries, rendered as declared attachments of the agent. History is
-> not a query: it is the agent's session, attached forward (agent → session → ordered turns → forms), walked by
-> the render from the agent.
-
-**Name check.** `:seon.agent/session` (`:seon.agent.session/ns`, `:seon.agent.session/turns`) is adopted, not
-`:seon.agent/sci`:
-- It matches the settled vocabulary (f49086d5c) and the survey (b0c5d4a89 §4.1).
-- It keeps "SCI context" for the live, unstored object only.
-- No skill argues otherwise: the data-modeling skill asks for the dependency's or Clojure's term, and nREPL's
-  term for this state is session.
-
-"Run" for one turn is retired in the same slice: `seon.render.transcript/render-run-ai` and `render-run-html`
-(`seon.turn.edn:5-6`, `render/transcript.clj:782, 898`) become `render-turn-ai` and `render-turn-html`.
-
-**Stale skill and guide claims (a stale skill is a high-priority defect).** None are edited here; this lane owns
-only this document. Each is fixed in the slice that touches its subject, or by root.
-
-`.agents/skills/datahike/SKILL.md`:
-
-| Claim | Cites | Current source |
-|---|---|---|
-| `q` | `db.clj:2438` | `:2450` |
-| `pull` | `:2661` | `:2673` |
-| `transact!` | `:4928` | `:5094` |
-| `call-with-custody` | `:383` | `:390` |
-| `read-evidence` | `:920` | `:928` |
-| `write-entity-error` | `:3485` | `:3502` |
-| `write-owned-values-error` | `:3523` | `:3540` |
-| `system-turn` | `turn.clj:2157` | `:2222` |
-| `system-plan` | `:2034-2074` | `:2099` |
-| `latest-answering-turn-t` | `:3041-3066` | `:3111` |
-
-`.agents/skills/data-oriented-clojure/SKILL.md`:
-
-| Claim | Cites | Current source |
-|---|---|---|
-| `q` | `:2438` | `:2450` |
-| `pull` | `:2661` | `:2673` |
-| `transact!` | `:4912` | `:5094` |
-| `collect-contracts!` | `instrument.clj:770-780` | `:767` |
-| `apply!` | `:799` | `:796` |
-| `base-ctx` | `sci/eval.clj:3350` | `:3514` |
-| `fork-for-turn` | `:3156` | `:3320` |
-| `regenerate-agent-context!` | `:3082` | `:3246` |
-
-`.agents/skills/data-modeling/SKILL.md`:
-
-| Claim | Cites | Current source |
-|---|---|---|
-| `write-owned-values-error` | `db.clj:3523` | `:3540` |
-| `removed-definition-error` | `:4111` | `:4152` |
-| `deletion-error` | `:4171` | `:4219` |
-| `fork-for-turn` | `sci/eval.clj:3156` | `:3320` |
-| `regenerate-agent-context!` | `:3082-3154` | `:3246` |
-
-`docs/seon/architecture/data-modeling-guide.md`:
-- §7 says "Current Datahike pull defaults each many-valued attribute to 1,000". False: `+default-limit+` is nil
-  (`reference-code/datahike/src/datahike/pull_api.cljc:16`, used at `:315`, `:323`), as the datahike skill lines
-  182-191 already say.
-- Its §4 grounding `db.clj:3586-3609, 4050-4121` no longer matches (`:3540-3760`; final report
-  `write-report-error :4436`).
-- `write-owned-values-error`'s own docstring ("pull's 1,000 cap") repeats the stale default.
-
-## 12. Phased plan
-
-Each slice is one loadable commit. It converts every caller and test it touches, and it is run centrally by root
-with the named tests. Additions adopt as accretion. Retirements adopt in place (`f9fc0e0d0`, `da10c8912`) in the
-same commit as their writer conversions.
-
-| # | Slice | Owner files | Tests | Adoption / RESET |
+| # | Slice | Owner files | Tests | Adoption |
 |---|---|---|---|---|
-| **P0** | **Incremental owned-value validation (prerequisite, §3)**: validate changed rows and owner invariants only; the (a) component-form assertion | `src/seon/db.clj` (`write-owned-values-error :3540-3770`), `src/seon/schema.clj` (beside `:1517`) | `seon.db` write-admission and component tests (cascade, sweep, unlink, move, multiple owners, cycle, unowned row, missing child, adoption); R8 | none |
-| **P1** | **Bounded read evidence (prerequisite, §3)**: at most K entity patterns per source, widened past K; history and refresh selectors drop plans | `src/seon/db.clj` (`:760-853`, `read-evidence :928`), `src/seon/eval.clj`, `src/seon/turn.clj` | read-evidence currency and refresh tests; clock rows for `of-agent` (1.55–1.82 s today) and one-form validation (137 ms) | none; existing large plans stay until the P3 reset |
-| P2 | Session namespace and form namespace: `:seon.agent.session/ns` on today's runtime component; `:seon.cluster.eval/namespace` symbol; delete the plan-time ns guess, `starting-ns`, stored `ending-ns`, `previous-ending-namespace`, `fold-namespace`, the submit-path lookup; the move-namespace request key; system turns and segmentation start at the session; remove `no-history?` from form text | `seon.runtime.edn`, `seon.cluster.eval.edn`, `seon.turn.edn`, `seon.agent.edn`, `turn.clj`, `cluster/agent.clj`, `repl.clj`, `render/transcript.clj`, `bootstrap.clj`, `issue.clj`, `cluster.clj`, `fn.clj` (eval-ns readers `:1226-1308`); ~20 test files | R1–R4, R6 | accretion + retirement; no reset |
-| P3 | The shape (after P0 and P1): rename runtime → `:seon.agent/session`; `turns` as components with `:seon.turn/ordinal`; `:seon.turn/forms` component; delete `:seon.turn/agent`, `:seon.cluster.eval/run`, `:seon.runtime/trigger`, `/agent`; move listens; rename `render-run-ai/html` → `render-turn-ai/html`; scripted sweep of 47 + 72 source mentions and ~120 test files | `seon.runtime.edn` (retired), `seon.agent.edn`, `seon.turn.edn`, `seon.cluster.eval.edn`, `turn.clj`, `eval.clj`, `cluster/status.clj`, `cluster/agent.clj`, `cluster/wake.clj`, `cluster/message.clj`, `issue.clj`, `problems.clj`, `repl.clj`, `prompt.clj`, `fault.clj`, `oversight.clj`, `test.clj`, `render/web.clj`, `render/transcript.clj`, `context.clj`, tests | turn, transcript, status, wake, message, web debug; R8, R9 | **RESET NEEDED**: existing turns carry only the retired reverse edge. Data is disposable; no migration |
-| P4 | Graph and renders: `walk/graph` follows forward attributes and declared attachments only, each reverse collection one node; the namespace half reads the session; the attachment renders (§6); inbox restricted to unanswered | `render/walk.clj`, `render/transcript.clj`, `cluster/message.clj`, `cluster/agent.clj` (agent render), `seon.agent.edn` units | R5, R7; debug-page graph screenshot = §1 | none |
-| P5 | Settings link and render (§7) | `seon.config.edn`, `seon.config.*.edn`, `ai.clj`, `cluster/prompt.clj`, `agent.clj`, `cluster/agent.clj`, the A-list owner files | config, prompt, message, plan, issue, blob; R10 | **RESET NEEDED** (existing overlays lack `base`); batch with P3 |
-| P6 | Root oversight: `:seon.agent/oversees` and the summary render | `seon.agent.edn`, `cluster/host.clj`, `issue.clj`, `cluster.clj`, `cluster/agent.clj` | R11 | covered by the P3/P5 reset |
-| P7 | Remaining doubles: `:my.plan/agent`, `:seon.config/agent`, `:seon.eval/renderer-fn`, `:seon.maintenance.request/agent`, occurrence agent-or-turn, ownership via steward, run renames (`max-turns`, `run-turns`) | `my.plan.edn`, `seon.config.edn`, `seon.eval.edn`, `seon.maintenance.request.edn`, `schedule.clj`, `plan.clj`, `agent.clj`, `error.clj`, `render.clj`, `turn.clj`, `seon.config.run.edn` | plan, settings, error, routing, maintenance | retirements; no reset |
-| P8 | Dead context selection | `context.clj`, `seon.context.contribution.edn` | context | retirement |
+| P2a | **Fix a318b2d38 now.** Settlement upserts the namespace identity of every evaluated form's `ns` and of the final namespace (`namespace-rows`, `turn.clj:619`). No schema change | `turn.clj` | R2 | none |
+| P0 | Incremental owned-value validation (own note + review) | `db.clj :3540-3770`, `schema.clj :1517` | the owned-value members listed in the review; R8 (i)–(iv) | none |
+| P1 | Bounded read evidence | `db.clj :760-853, :928`, `eval.clj`, then `turn.clj :2054` after P2a releases it | read-evidence currency, refresh; clock rows | none |
+| P2b | Session ns and evaluation namespace symbol; creation writes the session; no home (§3); the move request; delete `starting-ns`, stored `ending-ns`, `previous-ending-namespace`, `fold-namespace`, the plan-time guess; remove no-history from form text; empty-plan retirement (§8a) | `seon.runtime.edn`→`seon.agent.session.edn` (**new resource owned here**, with the session render), `seon.agent.edn`, `seon.turn.edn`, `seon.cluster.eval.edn`, `seon.eval.edn`, `my.plan.edn`, `turn.clj`, `cluster/agent.clj`, `sci/eval.clj`, `repl.clj`, `render.clj`, `render/transcript.clj`, `render/walk.clj` (namespace half only), `render/web.clj`, `bootstrap.clj`, `agent.clj`, `issue.clj`, `cluster.clj`, `test.clj`, `eval/drive.clj`, `fn.clj :1226-1308` | R1–R6 | **RESET NEEDED** (batched) |
+| P3 | Shape: session ⊃ turns (`:seon.turn/ordinal`) ⊃ evaluations (`:seon.turn/evaluations`); delete `:seon.turn/agent`, `:seon.cluster.eval/run`, the runtime; listens move; `render-run` → `render-turn`; the membership rewrite | `seon.agent.edn`, `seon.turn.edn`, `seon.cluster.eval.edn`, `seon.eval.edn`, `turn.clj`, `eval.clj`, `cluster/status.clj`, `cluster/agent.clj`, `cluster/wake.clj`, `cluster/message.clj`, `issue.clj`, `problems.clj`, `repl.clj`, `cluster/prompt.clj`, `fault.clj`, `oversight.clj`, `test.clj`, `render/web.clj`, `render/transcript.clj`, `context.clj`, tests | turn, transcript, status, wake, message, web-debug; R8, R9 | **RESET NEEDED** (batched): existing turns have a forward runtime component edge but no ordinal, session or evaluation membership (review finding 11); converting them is a migration |
+| P4 | The derived selector and the shared graph contract (§5a): walk, context, debug graph, web and the graph schemas together; declared inverse attachments on namespace and other roots; the session render; the unread inbox; relevance-tier renders | `render/walk.clj`, `render/web.clj`, `seon.render.walk.edn`, `render/transcript.clj`, `render.clj`, `cluster/message.clj`, `cluster/agent.clj`, `seon.ns.edn`, `seon.message.edn`, `my.message` | R5, R7; the §1 graph as the page acceptance | none |
+| P5 | Settings (§7) | `seon.config.edn`, `schema/edn.clj :63-93`, `ai.clj`, `cluster/prompt.clj`, `agent.clj`, `cluster/agent.clj`, the A-list owner files | config (incl. `config_test :506-521`), prompt, message, plan, issue, blob; R10 | **RESET NEEDED** (batched): existing overlays lack a base |
+| P6 | Oversight (§10); ownership via steward | `seon.agent.edn`, `cluster/host.clj`, `issue.clj`, `cluster.clj`, `cluster/agent.clj`, `turn.clj :2599`, `render.clj :1736` | R11; problem routing | **RESET NEEDED** (batched): no oversees edges exist |
+| P7 | Remaining doubles: `renderer-fn`, maintenance agent, occurrence agent-or-turn (with `error.clj:2058-2072`), `handled` after Q6, capture prompt text, eval error text, reply text, run renames (with `config/default.edn` and every manifest consumer) | owners named in §11 | error, routing, maintenance, config, capture | retirements |
+| P8 | Dead selection functions only | `context.clj:76-256` | `context_capture_test` stays green | none |
 
 **Order.**
-1. P2 first: it fixes the confirmed data loss of a318b2d38 and needs neither prerequisite.
-2. P0 and P1 in parallel with P2's review: they own different code in `db.clj`, so they land serially in that file.
-   They are prerequisites of P3. P1's `turn.clj` selector change waits for P2 to release that file.
-3. P3 + P5 + P6 land together behind one RESET, batched by root, only after P0's R8 and P1's clock rows pass.
+1. P2a immediately.
+2. P0 and P1 while P2b and P3 are reviewed. P1's `turn.clj` edit waits for P2a.
+3. P2b, P3, P5 and P6 land in **one batched RESET**, only after R8 and P1's clock rows pass.
 4. P4 follows.
 5. P7 and P8 come last.
-6. If P0's review finds proof obligation (a) or (b) cannot hold, P3 lands option B instead (§3 table); nothing
-   else in the plan changes.
 
-**Sizes** (production, approximate):
+If P0's review fails, P3 lands option B and adds the membership and ordinal writer check.
+
+**The membership rewrite (review finding 11).** P3 and P2b ship a reproducible, syntax-aware rewrite script
+under `script/seon/dev/` using rewrite-clj (already a dependency, `deps.edn:107`), plus a manifest of
+old → new forms:
+
+- datalog clauses `[?t :seon.turn/agent ?a]` → `[?a :seon.agent/session ?s] [?s :seon.agent.session/turns ?t]`;
+- `[?e :seon.cluster.eval/run ?t]` → `[?t :seon.turn/evaluations ?e]`;
+- pull selectors and quoted keys;
+- schema resources and defaults.
+
+Coverage and verification:
+- It runs over `src`, `script`, `test` and `resources`.
+- Its verification pass reports every remaining mention, including auto-resolved `::agent` forms in
+  `seon.turn`.
+- The inventory is a lower bound: **82 distinct test files** (76 name `:seon.turn/agent`, 43 name
+  `:seon.cluster.eval/run`) plus 25 naming `:seon.agent/namespace`.
+- It is applied once in the implementation lane, then linted, loaded, and the semantic exceptions hand-fixed.
+
+**Sizes (production, approximate; P0 unproved):**
 
 | Slice | Lines |
 |---|---|
+| P2a | +10 |
 | P0 | +50/−60 |
-| P1 | +30/−10 (design review sets K) |
-| P2 | +50/−150 |
-| P3 | +60/−90 (mostly scripted query rewrites) |
-| P4 | +40/−40 |
-| P5 | +40/−60 |
-| P6 | +30/−0 |
-| P7 | +20/−80 |
-| P8 | −190 |
+| P1 | +30/−10 |
+| P2b | +60/−170 |
+| P3 | +60/−90 |
+| P4 | +80/−60 |
+| P5 | +50/−60 |
+| P6 | +40/−10 |
+| P7 | +20/−100 |
+| P8 | −180 |
 
-P3's test sweep is the largest cost: ~120 files naming `:seon.turn/agent` or `:seon.cluster.eval/run`. It is a
-scripted rewrite, then lint, load and hand-fix.
+P4 is the largest addition. It replaces the graph's reverse walk and the context's home selection with one derived
+selector; it must stay under ~100 added lines or return with the smaller alternative.
 
-**Risks.**
-- **P0 is the most correctness-critical change in the plan.** It narrows what the final writer re-checks. Its
-  proof obligations (§3) and one regression per refusal class (cascade, sweep, unlink, move, multiple owners,
-  cycle, unowned row, missing child, schema adoption) must pass before P3 relies on it.
-- **Pull expansion.** With turns as components, pulling an agent with a wildcard, or naming a component attribute
-  without a sub-selector, expands its whole history: `pull_api.cljc:346-351`, datahike skill lines 217-225. No
-  production reader pulls an agent with a wildcard today (searched src and script). The render and the graph name
-  sub-selectors. A wildcard pull by an agent at the REPL is bounded by the pull work charge
-  (`pull_api.cljc` `charge-work!`), and the floor reports the elision.
-- **Ordinal writes.** The ordinal is computed inside the open writer (a count of the session's turns); concurrent
-  opens are already serialized by the one-open-turn fence (`open-call :448-458`).
-- **Opening bytes** change once (turn PRD §16a).
+## 14. Class regressions
 
-## 13. Class regressions
+- **R1.** An `in-ns` at form 2 of 3: each evaluation records its own namespace; the session moves; the next
+  turn starts there.
+- **R2 (P2a).** A nested `(do (in-ns 'x))` then a form in the same turn: settlement commits.
+- **R3.** A scratch namespace is not in `changed-identities`, and `prepare-merge!`'s scoped digest reads never
+  include it. P0.2 decides the `defn` case.
+- **R4.** A request carrying `:seon.ns/name` moves the session before its turn; the move shows in the next turn.
+- **R5.** After `in-ns`, the next prompt appends `(dir x)`; earlier evaluations keep their own `ns=>` prompts; the
+  task's namespace and function render as `dir`/`doc`.
+- **R6.** `remove-ns!` of a session's namespace moves the session in the same transaction or refuses; compaction
+  keeps the session ns.
+- **R7.** The inbox shows unread (no ack) messages. An accepted reply with no claim, a system turn, and an
+  acknowledged message each behave as §9 says.
+- **R8 (P0).** Writes (i)–(iv) of §6 at 61 and 2,061 turns, within their targets. Each refusal class of guide §4
+  still refuses.
+- **R9.** Compaction retracts the selected evaluations and appends a system turn in one settlement.
+  Attachments are unchanged. `as-of` on the post-compaction database recovers the retracted source and shown text.
+- **R10.** `settings!` with a sparse request changes the next turn. `config/apply!` changes an agent without that
+  override. A missing base refuses with the named error.
+- **R11.** Oversight survives a failed retirement join as "closing" and disappears after exit.
+- **R12.** Empty plan: an agent is created without a plan; the first plan write creates it; removing its last
+  fact removes the attachment; the plan render prints its empty form.
+- **R13.** Forms-key collision: `:seon.turn/forms` (in-memory system result) and `:seon.turn/evaluations`
+  (stored) both validate in the same projection.
 
-- **R1 in-ns mid-turn.** A 3-form turn whose form 2 is a top-level `(in-ns 'probe.b)`: forms record their
-  `namespace` symbols; the session becomes `probe.b`; the next turn starts there.
-- **R2 nested in-ns (a318b2d38).** `(do (in-ns 'probe.c))` then `(+ 1 2)` in one turn: settlement commits; the
-  session refs an identity-only `probe.c` row.
-- **R3 scratch namespace.** After R2, `program/changed-identities` from the turn's base has no
-  `[:seon.ns/name probe.c]`.
-- **R4 move and continue.** A request with `:seon.ns/name` moves the session before its turn; a submission and the
-  following system turn start at the session.
-- **R5 two halves.** After `in-ns`, the next prompt appends `(dir probe.b)` and keeps the earlier forms with their
-  own prompts.
-- **R6 namespace deleted.** `remove-ns!` of the session namespace sweeps the ref; the next turn starts at home;
-  earlier forms still print `probe.b=>` (value, not ref).
-- **R7 no flat star.** The graph of an agent with 50 turns, 30 messages and 3 schedules has one level-1 node per
-  attachment, and the turns at level 2 are in ordinal order.
-- **R8 bounded validation (P0).** With turns as components, a one-field turn write costs about a one-entity write
-  (2.6–3.9 ms on today's default). Its time at 61 and 2,061 turns is within 20%. It still refuses each class the
-  guide §4 lists: multiple owners, cycle, unowned identity-less row, missing child, and an owner whose required
-  child was retracted.
-- **R9 compaction.** One transaction retracts chosen forms and appends a system turn; plan, settings, messages and
-  session namespace are unchanged; the retracted forms' source is readable `as-of` before it.
-- **R10 settings.** Switching the model with `settings!` changes the next request; `config/apply!` changes an
-  agent without that override; a missing base refuses by name.
-- **R11 root oversight.** Creating a hosted agent adds it to root's summary; retiring it removes it.
+## 15. Review findings (e80bf7c0d), answered
 
-## 14. Owner questions (few, priced)
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | B's session writes still grow; R8 overclaimed | Accepted. §6 prices a session write as O(turn refs), about 3 ms at 2,061 (review counterfactual). A turn write is bounded by its actual evaluations. R8 now covers four writes. P0 is a prerequisite with its own note, not a ~40-line estimate. A over B now rests on P0, not on B's bound. |
+| 2 | `:seon.turn/forms` already has a contract | Fixed: the stored relation is `:seon.turn/evaluations`; R13 |
+| 3 | Empty-component lifecycle | Fixed: §8a (session and settings are born with a required fact; plan with its first fact; adoption retracts the empty plans) |
+| 4 | Settings base vs sparse request | Fixed: §7 (two derived schemas, `effective` reused through the base, `schema/edn.clj` in P5) |
+| 5 | Required refs misclassified; notes, listens, tasks/issues | Fixed: §4 (firing, capture and cluster→config required; firing recipient as an immutable observation; notes, listens, issues and assignments separate); situation stamp gets a named follow-up (§11); B's membership check (§6) |
+| 6 | No shared graph contract | Fixed: §5a (one derived selector, attachment node shape, count/empty/refusal/cut/requery, ordering before windowing, shallow oversight, declared inverse concerns); P4 carries web and the graph schemas |
+| 7 | Unanswered vs handled | Replaced by the owner's acknowledgement ruling (§9); answering keeps its wake predicate; sent messages stay reachable |
+| 8 | Namespace adoption and refusal transitions | Fixed: §8b transition table, recovery boundary, narrowed program claim, P0.2 open edge; adoption is priced as a reset rather than claimed as accretion |
+| 9 | Compaction writer, retention accounting, contributions | Fixed: §8d (entrance, writer checks, one settlement, clock row, accurate retention, post-compaction `as-of`); P8 keeps the capture contributions and deletes only the dead functions |
+| 10 | Oversight across failed exit | Fixed: §10 |
+| 11 | Reset and sweep claims | Fixed: §13 (honest reset reasons, 82-file lower bound, rewrite script and manifest, P1 and P3 file dependency, config defaults in P7) |
+| 12 | Citations; semantic wording | Fixed: §12 (corrections applied in their installing slices; membership wording; no "history is not a query") |
 
-**Q1. Turns under the session.**
-- (a) *Recommended*: components all the way down (session ⊃ turns ⊃ forms), after prerequisites P0 (incremental
-  validation, ~+50/−60 lines in `db.clj` and `schema.clj`, with four proof obligations) and P1 (bounded read
-  evidence).
-  - Validation then follows the change: target ≈ 3 ms per turn write, independent of history.
-  - Pull and cascade tell the whole story.
-- (b) Fallback: turns as forward peer refs, forms components of the turn. ~+10 lines; bounded without P0; no
-  cascade from agent to turns. Taken only if P0's review fails.
-- (c) Components without P0: rejected. Every write re-validates the owner's whole history (7.6 ms for 61 empty
-  turns, 114 ms for 2,061, 1.8 s once 117 forms are owned), refusing at 250,000 nodes.
+## 16. Owner questions (few, priced)
 
-**Q2. Form namespace as a value.**
-- (a) *Recommended*: a `:seon.cluster.eval/namespace` symbol; history survives namespace deletion. This reverses
-  "each evaluation keeps its own ns ref".
-- (b) Keep the ref. When a namespace is deleted, its forms lose where they ran, and the transcript falls back to
-  guesses.
+**Q1. Turn ownership.**
+- (a) *Recommended*: components all the way down after P0 and P1.
+- (b) Fallback: turns as forward peer refs, with a membership and ordinal writer check.
+- §6 prices both.
 
-**Q3. The cluster's name, stored twice** (`:seon.cluster/name` and `:seon.config/cluster`).
-- (a) Keep. 0 lines.
-- (b) *Recommended later*: the config row is reached as `[:seon.cluster/name n]` → `:seon.cluster/config` and loses
-  its own name. ~30 lines in `config.clj`, with a no-reset adoption proof.
+**Q2. Evaluation namespace as a value.** The review accepts it. It reverses "each evaluation keeps its own ns
+ref". Confirm.
 
-**Q4. A refused settlement's namespace.**
-- (a) *Recommended*: write the session to where SCI ended. ~3 lines.
-- (b) Leave it. The next turn starts where the context no longer is.
+**Q3. The config row's own name.** Deferred, as the review agrees.
 
-**Q5. Schedules as a forward component.**
-- (a) *Recommended for now*: keep `:seon.schedule.task/owner` (it is the arming attribute) and show schedules as a
-  declared attachment. 0 lines.
-- (b) `:seon.agent/schedules` component. Wake arming moves to the forward edge; ~+30 lines in `schedule.clj` and
-  the armer.
+**Q4. A refusal that commits records where SCI ended.**
+- (a) *Recommended*: yes, and the session is unchanged when no form evaluated or the recording aborts.
+- (b) Never move on refusal.
 
-## 15. Evidence (read-only, JVM mode, default, 2026-09-27)
+**Q6. `:seon.turn/handled` once acknowledgement exists.**
+- (a) Delete it in P7 if no consumer beyond the inbox remains.
+- (b) Keep it as the turn's claim for a future "what did this turn handle" view.
 
-Earlier probes (counts, timings, token sizes, store roster, settings) are unchanged from ca19ad74b and
-summarized here with the new ones.
+**Q7. `:seon.render/units` as the declaration of an entity's reverse attachments.**
+- (a) *Recommended*: keep the key, now meaning exactly that. Delete its extra readers (§5c). 0 new keys.
+- (b) Rename it `:seon.render/attachments`: a clearer name, at the cost of a scripted rename across 3 schema
+  resources and its readers.
+- This reverses the 2026-09-25 design's deletion (its §6).
 
-1. Root's incoming refs: `:seon.turn/agent` 61, `:seon.message/to` 27, `:seon.message/from` 22,
+Q5 (schedules) is closed: they stay a declared attachment, as the review agrees.
+
+## 17. The sample for the design review
+
+`tmp/data-model-sample/sample.edn` holds three parts:
+- the new schema forms;
+- patches to existing packaged forms (added entries, made-optional members, added units, the settings component
+  schema), applied by `load.clj` so every other member is kept;
+- the demo record.
+
+The demo record contains:
+- agent `demo`, a namespace agent with no home: its session starts in its task's namespace `seon.repl`;
+- three turns, where turn 1 moves to `demo.work` by a top-level `in-ns`, and every evaluation carries its
+  namespace symbol;
+- a plan;
+- a settings overlay with base `[:seon.config/cluster "default"]`;
+- a task referring to `seon.repl` and `seon.repl/response`;
+- two messages from root, one acknowledged;
+- `root :seon.agent/oversees demo`.
+
+The demo agent's admission is closed, so no turn can run for it.
+
+**Every modeling kind, as the view shows it:**
+
+| Sample datum | Kind (guide §3) | Why the model needs it |
+|---|---|---|
+| demo ◆ session ◆ turns ◆ evaluations; demo ◆ plan; demo ◆ settings | component (cardinality-many for turns and evaluations) | owned history and owned concerns |
+| settings → `[:seon.config/cluster "default"]` | required peer ref | the overrides' base |
+| message → demo (`:seon.message/to`) | required peer ref, listened | the wake edge |
+| demo → task; task → `seon.repl`; task → `seon.repl/response` | optional peer ref | current work; what it concerns |
+| session → `demo.work` | settlement-moved edge, required | where the next turn starts |
+| `demo-msg-1` `:seon.message/received-tx` | transition fact (tx ref by the recipient) | unread is derived from its absence |
+| demo's inbox (`:seon.message/_to`) | declared reverse attachment | one node, unread 1 of 2 |
+| `seon.repl`'s definitions (`:seon.fn/_ns`, existing program rows) | declared reverse attachment | the namespace half |
+| root's sent messages (`:seon.message/from`) | undeclared reverse ref | queryable, not in root's story |
+| each evaluation's `:seon.cluster.eval/namespace`; `seon.repl/response`'s 3 `:seon.fn/calls` | identity value | observed names that outlive their targets |
+| root → demo (`:seon.agent/oversees`) | optional peer ref, cardinality-many | responsibility |
+
+`tmp/data-model-sample/load.clj` is a JVM form that reads the sample and this JVM's packaged forms and returns
+two SCI sources:
+- `:run-1` registers 22 schema forms in one top-level `do`.
+- `:run-2` transacts the record through `seon.db/transact!`, throws the writer's refusal whole, and pulls the
+  record back through its forward refs.
+
+Root submits each with MCP `eval_clj {mode "sci", branch <disposable>}`.
+
+The generator was checked read-only on default's JVM: it returned both sources, and both read back as EDN. It defines no Var and writes nothing. It has **not** been run on a branch.
+
+The sample keeps the branch's existing members that the design retires, for example `:seon.agent/namespace` in
+the units, made optional where needed. The branch's own machinery keeps working, and the demo record simply does
+not use them.
+
+## 18. Evidence (read-only, JVM mode, default, 2026-09-27)
+
+1. **Root's incoming refs:** `:seon.turn/agent` 61, `:seon.message/to` 27, `:seon.message/from` 22,
    `:seon.schedule.task/owner` 3, `:seon.schedule.fire/agent` 3, `:seon.maintenance.request/agent` 3,
    `:seon.error.occurrence/agent` 3, `:seon.runtime/agent` 1, `:seon.config/agent` 1, `:my.plan/agent` 1,
-   `:seon.ns/steward` 1. Root's outgoing: branch, id, namespace, plan, runtime, settings.
-2. Totals: agents 113; turns 59–61; evaluations 117; `:seon.runtime/listens` 0; `:my.plan/agent` 114;
-   `:seon.config/agent` 114; renderer 3 and renderer-fn 3; occurrences 11 agent-only, 0 with a turn.
-3. History cost: `seon.eval/of-agent` 1.55–1.82 s; `turn/latest-evaluations` 1.56–1.60 s. Raw pull of the same
-   data: 3 ms. Evidence plans: 17,572,807 characters over 451 values.
-4. Namespace reads: two-hop pull 30 µs; `previous-ending-namespace` 103–118 µs.
-5. Tokens: stored history 34,593; messages read 15,413 over 25 turns; errors read 8,455 over 26; runtime read
-   6,000 over 25; `dir` 32 to 11,284; settings summary 76; effective settings 879.
-6. Validation (`seon.db/with`, 3–4 samples each): see §3's table. The validation-node-limit is 250,000.
-   Synthetic turns were added only inside `with` values, never committed.
-7. Store roster: `:cluster-default` 1 cluster row, 113 agents; `:checkpoint-default-f311e0fc…` 1/0;
-   `:current-src` 0/0; `:db` neither. Root reports P0.3: every production value holds one cluster row.
-8. P0.1 is confirmed by root (task a318b2d38, `resources/seon/tasks/seon.turn.edn`).
+   `:seon.ns/steward` 1.
+2. **Totals:** 113 agents; 117–121 evaluations; `:seon.runtime/listens` 0; `:my.plan/agent` 114;
+   `:seon.config/agent` 114; `renderer` 3 and `renderer-fn` 3; occurrences 11 agent-only, 0 with a turn.
+3. **History cost:** `of-agent` 1.55–1.82 s; `latest-evaluations` 1.56–1.60 s; raw pull 3 ms; evidence plans
+   17,572,807 characters.
+4. **Validation:** see §6. The review's counterfactual is artifact
+   `473d73ba4d9384576e2848251e6cd2618568521a7c18ed72dfad3d821843b405`.
+5. **Tokens:**
+
+   | What | Estimated tokens |
+   |---|---|
+   | stored history | 34,593 |
+   | messages read | 15,413 over 25 turns |
+   | errors read | 8,455 over 26 |
+   | runtime read | 6,000 over 25 |
+   | `dir` | 32–11,284 |
+   | settings summary | 76 |
+   | effective settings | 879 |
+
+6. **`:seon.agent/namespace`:** 55 source mentions (§3) and 25 test files.
+7. **Store roster:** every production value holds one cluster row.
+8. **Sample check:** `(load-file "tmp/data-model-sample/load.clj")` in JVM mode returned `:run-1` (22 registrations)
+   and `:run-2`, both EDN-readable. `seon.repl/response` (eid 5837), `[:seon.ns/name seon.repl]` and
+   `[:seon.config/cluster "default"]` exist on default.
 
 Not measured:
-- a full prompt build through `seon.cluster.prompt/prompt`
+- a full prompt build
 - test-harness worlds
 - any test run
+- the sample on a branch
