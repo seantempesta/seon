@@ -265,9 +265,10 @@ root.
   carry the value, its handle, its timing, its errors and its findings; comment lines are confusing next to data and
   agents repeat them. **An AI render returns REPL entries** (forms; `;;` only for prose that has no data form); the
   one REPL path evaluates each form read-only in the viewing agent's SCI world and prints form and result as the
-  transcript the agent reads, so every line is runnable. Rendering is lazy: a render is evaluated (and recorded) when
-  a context that shows it is built, cached by the value's content digest, so only what is shown is rendered and
-  nothing twice; the context an agent receives is always fully evaluated. An agent never sees a render form without
+  transcript the agent reads, so every line is runnable. A render is evaluated once, when the reply that shows it is
+  built (every evaluation is shown once, so this is already on demand), cached in the central cache by the value's
+  content digest so nothing renders twice; the reply the agent saw is its stored history, and the context an agent
+  receives is always fully evaluated. An agent never sees a render form without
   its result; only a render that genuinely fails falls back to the floor's value with one diagnostic. Curated
   namespaces render as `(require '[ns :as alias])` then their `dir`/`doc` with contracts. An HTML render returns
   hiccup. Components and declared queries render in their own blocks; failed rendering gives a diagnostic; error base
@@ -349,7 +350,8 @@ root.
 - **One file, one owner.** A file has one owner at a time, no shared hunks. Root checks
   `tmp/orchestrator/file-ownership.md` before every launch or follow-up; a change to a held file goes to its owner
   as a patch or waits; agents request new ownership without editing the ledger. At each check-in root launches all ready
-  file-disjoint work or names its dependency or collision, with no artificial lane, JVM-slot or prober cap, and
+  file-disjoint work or names its dependency or collision, with no artificial JVM-slot or prober cap; editing lanes are limited to what root can prove
+  in one central test round, and
   addresses oversized functions and files with shrink assignments.
 - **Stay inside the assignment.** Work within its stop boundary; never resume, message or edit another agent's
   session or files. Do not nest delegation in bounded assignments, sandbox assigned work or overlap your own probe
