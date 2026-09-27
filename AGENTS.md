@@ -16,7 +16,7 @@ Seon agents too: they use the same branch, REPL entrance, checks and reviewed me
 root.
 
 - **Core is composable.** One shared database (stable values, one writer, cheap branches), one shared SCI runtime (a
-  base context each agent forks into its own world) and faces that are functions over data; each agent is its own
+  base context each agent forks into its own world) and render functions over data; each agent is its own
   concurrent Flow graph. Parts compose as functions and stage values, never as parallel systems. MCP, the test
   harness and the web are views that enter through the agent's path and render its values; they hold no second
   model, evaluator, printer or store.
@@ -245,10 +245,10 @@ root.
   (budget, shape, laziness, cycles, references), never a schema-specific branch, and plain Clojure printing is its
   fallback. Pulling unused data is waste, showing an agent irrelevant data costs more on every turn, and re-touching
   cached data costs more than leaving it: invest in the render function.
-- **Choose the renderer per face; the first match wins**: the value's own `:seon.render/ai` or `:seon.render/html`
+- **Choose the render function per consumer (AI or HTML); the first match wins**: the value's own `:seon.render/ai` or `:seon.render/html`
   key (the master override: a renderer symbol, an inline function or rendered data); a render function whose
-  contract fits the value, defined in the viewing agent's namespace; the schema's declared pair; the floor. A render
-  function's face is its attachment key where attached, else its declared output schema, never a separate fact; like
+  contract fits the value, defined in the viewing agent's namespace; the schema's declared pair; the floor. Whether a render
+  function serves AI or HTML is its attachment key where attached, else its declared output schema, never a separate fact; like
   any function, its omitted declared inputs are supplied by schema name.
 - **Return data, not comments.** What comes back to an agent is data whenever possible: a reply is one map whose
   keys carry the value, its handle, its timing, its errors and its findings; comment lines are confusing next to data
@@ -263,7 +263,7 @@ root.
   diagnostic; error base and satisfied schema renderers compose. An attribute request stays an attribute request.
 - **Apply presentation limits once.** The floor printer holds the one budget and spreads it across the value's
   shape; nothing else clips. Printing is rendering with two consumers on one pipeline: AI agents through MCP and
-  humans through the browser share the same selection, node tree and cut retrieval; only the final face differs.
+  humans through the browser share the same selection, node tree and cut retrieval; only the final output (text or hiccup) differs.
   Save exact shown text, select whole prompt units, never clip HTML or historical units again. Keep query-work
   bounds and deadlines separate; elisions name bound, count, path and requery, with floor hits counted. Derive
   missing profiles at entry or refuse explicitly. Build minimal infrastructure. Report ugly output, and state the size of anything an agent
