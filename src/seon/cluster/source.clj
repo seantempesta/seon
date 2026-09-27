@@ -586,7 +586,7 @@
     progress! :seon.source/progress!
     ;; The writer of publication's own scratch writes (schema and seal), an
     ;; explicit value so a caller supplies another without redefining a Var.
-    transact! :seon.source/transact!
+    transact! :seon.db/writer
     :or {progress! (constantly nil)
          transact! db/transact!}}]
   (let [published (current store)

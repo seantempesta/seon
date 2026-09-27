@@ -415,7 +415,7 @@
            _ (define-agent-test! handle "(clojure.test/deftest refused-recording (clojure.test/is true))")
            result (sut/run {:seon.test/execution (support/execution-handle connection)
                             :seon.test/recording-connection connection
-                            :seon.test/recording-writer writer
+                            :seon.db/writer writer
                             :seon.test/policy :named
                             :seon.test/identities #{'seon.test.one-request-test/refused-recording}})
            refusal @refused

@@ -315,6 +315,13 @@
             [:seon.db/transaction-refused :seon.db/transaction-refused]
             [:seon.db/owned-value-refusal {:optional true} :seon.db/owned-value-refusal]
             [:seon.db.write.attempt/request-id :seon.db.write.attempt/request-id]]]
+          ;; The one declared writer an owner takes as a value, so a caller
+          ;; supplies another (a refusing or counting writer) without
+          ;; redefining seon.db/transact!; absent, the owner writes through it.
+          :writer
+          [:=> {:description "A writer with seon.db/transact!'s connection arity: connection and transaction to the writer's report or refusal. Owners default it to seon.db/transact!."}
+           [:cat :seon.db/connection :seon.store/transaction]
+           [:or :seon.db/transaction-report :seon.db/transaction-refused-error]]
           :transaction-outcome-unknown [:= true]
           :transaction-outcome-unknown-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a database transaction whose outcome is unknown"} [:seon.db/transaction-outcome-unknown :seon.db/transaction-outcome-unknown] [:seon.error/message :seon.error/message]]
  :seon.db/refused-read-operation :qualified-symbol

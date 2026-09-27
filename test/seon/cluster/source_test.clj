@@ -147,7 +147,7 @@
                    database (sci.eval/projection-state database (:seon.schema/projection opened)))]
     (try
      (source/publish! (merge (select-keys populate-request [:seon.source/expected-commit-id
-                                                            :seon.source/transact!])
+                                                            :seon.db/writer])
                      {:seon.store/store opened
                      :seon.source/digest digest
                      :seon.source/populate populate
@@ -158,7 +158,7 @@
                      (merge {:seon.fn/manifest (:seon.fn/manifest opened)
                              :seon.source/previous-database previous
                              :seon.source/change-classes #{:program}}
-                            (dissoc populate-request :seon.source/transact!))
+                            (dissoc populate-request :seon.db/writer))
                      :seon.source/progress! @#'cluster/*source-progress!*}))
      (finally (d/release-materialized-db database))))))
 
@@ -226,7 +226,7 @@
                :seon.error/layer :seon.db/invocation :seon.error/operation 'seon.db/transact!
                :seon.error/message "injected refusal" :seon.error/offending transaction})
             result (refusal #(publish opened digest-a 'seon.cluster.source-test/populate!
-                                      {:seon.source/transact! refusing-writer}))]
+                                      {:seon.db/writer refusing-writer}))]
         (is (= :seon.cluster.source/source-seal-refused
                (:seon.cluster.source/rule result))
             (pr-str result))

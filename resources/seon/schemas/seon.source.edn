@@ -68,9 +68,6 @@
                 {:optional true}
                 :seon.fn.manifest/manifest]],
               :progress! [:=> [:cat :string] :nil],
-              :transact! [:=> {:description "The writer of publication's scratch schema and seal transactions; seon.db/transact! when absent."}
-                          [:cat :seon.db/connection :seon.store/transaction]
-                          [:or :seon.db/transaction-report :seon.db/transaction-refused-error]],
               :publish-request
               [:map
                [:seon.source/relative-file-digests {:optional true} :seon.source/relative-file-digests]
@@ -84,7 +81,7 @@
                [:seon.source/digest :seon.source/digest]
                [:seon.source/populate :seon.source/populate]
                [:seon.source/progress! {:optional true} :seon.source/progress!]
-               [:seon.source/transact! {:optional true} :seon.source/transact!]
+               [:seon.db/writer {:optional true :description "The writer of publication's scratch schema and seal transactions."} :seon.db/writer]
                [:seon.source/populate-request
                 {:optional true}
                 :seon.source/populate-request]],

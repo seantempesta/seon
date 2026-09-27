@@ -297,16 +297,12 @@
  :seon.test/recording-connection
  [:and {:description "The durable authority a request admits and records on. It holds the execution branch; it never grants a test body custody."}
   :seon.db/connection]
- :seon.test/recording-writer
- [:fn {:error/message "must be the recording writer: connection and transaction data to the writer's report or refusal, as seon.db/transact!"
-       :gen/schema [:=> [:cat :seon.db/connection :seon.db/tx-data] :map]}
-  clojure.core/ifn?]
  :seon.test/policy :seon.test.run/policy
  :seon.test/request
  [:map
   [:seon.test/execution :seon.test/execution]
   [:seon.test/recording-connection :seon.test/recording-connection]
-  [:seon.test/recording-writer {:optional true :description "Writes the run's admission and stop on the recording connection; defaults to seon.db/transact!."} :seon.test/recording-writer]
+  [:seon.db/writer {:optional true :description "Writes the run's admission and stop on the recording connection."} :seon.db/writer]
   [:seon.test/policy :seon.test/policy]
   [:seon.test/identities {:optional true} [:set :seon.test/sym]]
   [:seon.test/namespaces {:optional true} [:set :symbol]]

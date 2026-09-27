@@ -2211,7 +2211,7 @@
   changed reach and outstanding obligations from recorded evidence; `:platform`
   the declared rows; `:all` every eligible row). Selection and admission read
   and write the explicit `:seon.test/recording-connection`, which must hold the
-  execution branch; `:seon.test/recording-writer` (default `seon.db/transact!`)
+  execution branch; `:seon.db/writer` (default `seon.db/transact!`)
   writes admission and stop there. A member whose recorded green still holds is answered from
   the record with `:seon.test/unchanged` and no execution.
 
@@ -2241,7 +2241,7 @@
                    :seon.sci.kernel/memory-pressure-error]]}
   [{execution :seon.test/execution recording :seon.test/recording-connection
     policy :seon.test/policy identities :seon.test/identities
-    namespaces :seon.test/namespaces write! :seon.test/recording-writer
+    namespaces :seon.test/namespaces write! :seon.db/writer
     :or {write! db/transact!} :as request}]
   (let [started (System/nanoTime)
         elapsed #(/ (- (System/nanoTime) started) 1000000.0)
