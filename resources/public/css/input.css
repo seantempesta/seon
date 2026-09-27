@@ -1414,6 +1414,11 @@ details.tool-call-details[open] .tool-preview {
 .seon-graph-summary th { font-weight: 400; color: var(--color-text-400); }
 .seon-graph-summary td:is(:nth-child(3), :nth-child(4)) { text-align: right; font-variant-numeric: tabular-nums; }
 .seon-graph-skipped-row { color: var(--color-text-500); }
+/* The relationship legend beside the graph: one stroke and one line per kind. */
+.seon-graph-kinds { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 0.2rem 0.75rem; margin: 0.75rem 0; font-size: 0.8rem; color: var(--color-text-300); }
+.seon-graph-kinds > :is(dt, dd) { margin: 0; }
+.seon-graph-kinds > dt { display: flex; align-items: center; gap: 0.25rem; color: var(--color-inspection); }
+.seon-graph-chip { border: 1px solid var(--color-base-700); border-radius: 0.25rem; padding: 0 0.3rem; font-size: 0.75rem; }
 /* A node's attributes: kind and attribute stay whole; value and declared schema read left to right. */
 .seon-graph-attributes td:is(:nth-child(3), :nth-child(4)) { text-align: left; font-variant-numeric: normal; }
 .seon-graph-attributes td:is(:nth-child(1), :nth-child(2)) { white-space: nowrap; }
@@ -1422,10 +1427,10 @@ details.tool-call-details[open] .tool-preview {
   --seon-graph-level-0: var(--color-signal); --seon-graph-level-1: var(--color-info);
   --seon-graph-level-2: var(--color-eval); --seon-graph-level-3: var(--color-success);
 }
-.seon-graph-body { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 1rem; align-items: start; }
+.seon-graph-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; align-items: start; }
 .seon-graph-panel { position: sticky; top: 5.5rem; max-height: calc(100vh - 6rem); overflow-y: auto; min-width: 0; }
 .seon-graph-canvas-section { margin-top: 1.25rem; }
-.seon-graph-canvas-section .seon-debug-graph-canvas { height: 55vh; min-height: 22rem; }
+.seon-graph-canvas-section .seon-debug-graph-canvas { height: 65vh; min-height: 22rem; }
 .seon-graph-node { scroll-margin-top: 6rem; }
 .seon-graph-node:target { border-color: var(--color-inspection); }
 .seon-graph-why { margin: 0; padding: 0.3rem 0.75rem; color: var(--color-text-400); overflow-wrap: anywhere; border-bottom: 1px solid var(--color-base-800); }

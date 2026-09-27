@@ -3287,9 +3287,13 @@
 (defn- node-attributes-html
   "One node's attributes grouped value / ref / component, each with its
   declared schema form, then its owning schema's render pair."
-  {:malli/schema [:=> [:cat :seon.schema/projection :seon.render.walk/structure :seon.render.walk/node] :seon.render/hiccup]}
-  [projection structure {value :seon.render/value schema-key ::render.walk/node-schema}]
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.render.walk/structure :seon.db/database-value [:=> [:cat :string] :string] :seon.render.walk/node] :seon.render/hiccup]}
+  [projection structure database root-href {value :seon.render/value schema-key ::render.walk/node-schema}]
   (let [refs (set (::render.walk/ref-attributes structure))
+        ;; A symbol value is an observed name; it links when a symbol identity currently names an entity.
+        named (into [] (keep (fn [[a {t :db/valueType u :db/unique}]] (when (and u (= :db.type/symbol t)) a))) (:schema (db/schema-database database)))
+        link (fn [v] (when-let [a (and (symbol? v) (seq named) (db/q '[:find ?a . :in $ [?a ...] ?v :where [_ ?a ?v]] database named v))]
+                       [:a {:href (root-href (pr-str [a v]))} [:code (value/bounded-text v)]]))
         group #(cond ((::render.walk/component-owners structure) %) "component" (refs %) "ref" :else "value")
         shown #(if (refs %1) (value/bounded-text (if (map? %2) (:db/id %2) (mapv :db/id %2))) (value/bounded-text %2))
         properties (some->> schema-key (mr/schema (:seon.schema.projection/registry projection)) internal/entity-properties)]
@@ -3299,34 +3303,93 @@
      (into [:table {:class "seon-graph-summary"} [:tr [:th "kind"] [:th "attribute"] [:th "value"] [:th "declared schema"]]]
            (for [[kind entries] (sort-by key (group-by (comp group key) (dissoc value :db/id)))
                  [a v] (sort-by (comp str key) entries)]
-             [:tr [:td kind] [:td [:code (str a)]] [:td [:code (shown a v)]]
+             [:tr [:td kind] [:td [:code (str a)]] [:td (or (link v) [:code (shown a v)])]
               [:td [:code (value/bounded-text (projection-form projection a))]]]))]))
 
 (defn- context-graph-model
-  "The walk in `seon-graph.js`'s model shape: nodes carry their level and the
-  id of their block; each edge its relationship kind and attribute label."
-  {:malli/schema [:=> [:cat [:set :qualified-keyword] [:=> [:cat :seon.render.walk/edge] [:tuple :string :boolean]] :seon.render.walk/graph] :map]}
-  [identities kind {nodes ::render.walk/nodes edges ::render.walk/edges root ::render.walk/graph-root}]
-  {:elements {:nodes (mapv (fn [[id {schema ::render.walk/node-schema level ::render.walk/node-level :as node}]]
-                             {:data {:id (str "e" id) :level level :href (str "#node-" id)
-                                     :label (str/trim (str (if schema (subs (str schema) 1) "unowned") "\n" (graph-node-name identities node)))}})
-                           (sort-by key nodes))
-              :edges (into [] (comp (filter (fn [[e _ t]] (and (nodes e) (nodes t) (not= e t)))) (distinct)
-                                    (map (fn [[e a t :as edge]]
-                                           (let [[k many?] (kind edge)]
-                                             {:data {:id (str "e" e a "e" t) :source (str "e" e) :target (str "e" t) :kind k
-                                                     :label (str (name a) (when many? " *")) :attribute (str a " · " k (when many? " · many"))
-                                                     :reverse (str/starts-with? (name a) "_")}}))))
-                           edges)}
-   "seon.graph/selected" (str "e" root)
-   "seon.graph/snapshot" nil})
+  "The walk as `seon-graph.js`'s tree: each node labeled by its schema and
+  identity with its symbol and keyword values as chips; a card-one edge drawn
+  parent to child; each cardinality-many edge family (a component set or a
+  declared attachment) one counted group node whose members, in graph order,
+  show `window` from their offset, eight at a time, then a `… N more` node that
+  requeries the next eight. A node carries the groups on its path, so the page
+  shows it once every one is expanded."
+  {:malli/schema [:=> [:cat [:set :qualified-keyword] [:=> [:cat :seon.render.walk/edge] [:tuple :string :boolean]]
+                       [:=> [:cat :seon.render.walk/node] [:vector :string]] [:map-of [:tuple :int :qualified-keyword] :int]
+                       [:=> [:cat :int :qualified-keyword :int] :string] :seon.render.walk/graph] :map]}
+  [identities kind chips window more-href {nodes ::render.walk/nodes edges ::render.walk/edges root ::render.walk/graph-root order ::render.walk/graph-order}]
+  (let [position (zipmap order (range))
+        edges (into [] (comp (filter (fn [[e _ t]] (and (nodes e) (nodes t) (not= e t)))) (distinct)) edges)
+        kinds (into {} (map (juxt identity kind)) edges)
+        singles (group-by first (remove (comp second kinds) edges))
+        groups (group-by ffirst (group-by (juxt first second) (filter (comp second kinds) edges)))
+        gid (fn [e a] (str "g" e a))
+        inline (fn [e a members] (take 8 (drop (get window [e a] 0) (sort-by position (distinct (map peek members))))))
+        children (fn [x p] (concat (for [[_ _ t] (singles x)] [t p])
+                                   (for [[[e a] members] (groups x) m (inline e a members)] [m (conj p (gid e a))])))
+        paths (loop [paths {root []} frontier [root]]
+                (let [found (remove (comp paths first) (for [x frontier child (children x (paths x))] child))
+                      grown (reduce (fn [m [c p]] (cond-> m (not (m c)) (assoc c p))) paths found)]
+                  (if (= (count grown) (count paths)) paths (recur grown (distinct (map first found))))))
+        edge (fn [source target k a & [label]] {:data (cond-> {:id (str source ">" target " " a) :source source :target target :kind k :attribute (str a " · " k)}
+                                                         label (assoc :label label))})
+        into-parent? #(#{"attachment" "reverse"} %)]
+    {:elements
+     {:nodes (-> []
+                 (into (for [[id path] (sort-by (comp position key) paths) :let [{schema ::render.walk/node-schema level ::render.walk/node-level :as node} (nodes id)
+                                                   named (graph-node-name identities node)
+                                                   [_ identity-value] (some #(find (:seon.render/value node) %) (sort identities))]]
+                         {:data {:id (str "e" id) :level level :href (str "#node-" id) :groups (vec path)
+                                 :label (str/join "  ·  " (cons (str (if schema (name schema) "unowned") " " (if (and (some? identity-value) (not (map? identity-value))) (value/bounded-text identity-value 28) named)) (chips node)))
+                                 :full (str (some-> schema str (subs 1)) " " named " · e" id)}}))
+                 (into (for [[e families] groups :when (paths e) [[_ a] members] families
+                             :let [g (gid e a) total (count (distinct (map peek members))) offset (get window [e a] 0)]
+                             data (cond-> [{:id g :group true :expanded (contains? window [e a]) :groups (paths e) :href "#"
+                                            :level (inc (get-in nodes [e ::render.walk/node-level]))
+                                            :label (str (if (str/starts-with? (name a) "_") (str "← " (forward-attribute a)) a) " · " total)
+                                            :full (str (first (kinds (first members))) " · " total " members")}]
+                                    (> total (+ offset 8))
+                                    (conj {:id (str g "+") :more true :groups (conj (paths e) g) :href (more-href e a (+ offset 8))
+                                           :label (str "… " (- total offset 8) " more") :full "requery the next eight"}))]
+                         {:data data})))
+      :edges (-> []
+                 (into (for [[e a t :as walked] (mapcat val singles) :when (and (paths e) (paths t))]
+                         (edge (str "e" e) (str "e" t) (first (kinds walked)) a (str a))))
+                 (into (for [[e families] groups :when (paths e) [[_ a] members] families
+                             :let [g (gid e a) k (first (kinds (first members)))]
+                             created (cons (if (into-parent? k) (edge g (str "e" e) k a) (edge (str "e" e) g k a))
+                                           (concat (for [m (inline e a members) :when (paths m)]
+                                                     (if (into-parent? k) (edge (str "e" m) g k a) (edge g (str "e" m) k a)))
+                                                   (when (> (count (distinct (map peek members))) (+ (get window [e a] 0) 8))
+                                                     [(edge g (str g "+") k a)])))]
+                         created)))}
+     "seon.graph/selected" (str "e" root)
+     "seon.graph/snapshot" nil}))
+
+(defn- graph-legend-html
+  "One line per relationship kind of the data-modeling guide §3, each with the
+  stroke `seon-graph.js` draws for it."
+  {:malli/schema [:=> [:cat] :seon.render/hiccup]}
+  []
+  (let [line (fn [dash width & [faint]] [:svg {:width 44 :height 10 :aria-hidden "true"}
+                                         [:line {:x1 2 :y1 5 :x2 42 :y2 5 :stroke "currentColor" :stroke-width width
+                                                 :stroke-dasharray dash :opacity (if faint 0.4 1)}]])]
+    [:dl {:class "seon-graph-kinds"}
+     [:dt (line nil 3.5) "◆"] [:dd "component — owned: cascades with, is pulled and validated as part of its parent; ◆ at the parent"]
+     [:dt (line nil 1.5)] [:dd "required peer ref — the writer refuses a deletion that would break it"]
+     [:dt (line "1 3" 1.5)] [:dd "optional peer ref — swept silently when its target goes"]
+     [:dt (line "6 3" 1.5)] [:dd "declared attachment — a fact the other entity states (arrow into this one), read back through :seon.render/units"]
+     [:dt (line "6 3" 1.5 true)] [:dd "undeclared reverse ref — queryable, not the story: hidden forward, faint in every-ref mode"]
+     [:dt [:span {:class "seon-graph-chip"} "ns: x"]] [:dd "identity value — an observed name stored as a value (survives deletion): a chip on its node; a symbol naming an entity links from the node's attribute table"]
+     [:dt [:span {:class "seon-graph-chip"} "attr · N"]] [:dd "cardinality-many — one counted node, members in graph order, eight at a time; click to expand"]
+     [:dt "—"] [:dd "settlement-moved edge — no schema property declares it today, so it is not drawn distinctly"]]))
 
 (defn- graph-debug-href
-  "The graph page for `query` (string keys n, root, branch, mode) with `changes`; a nil change removes its key."
+  "The graph page for `query` (string keys n, root, branch, mode, more) with `changes`; a nil change removes its key."
   {:malli/schema [:=> [:cat :seon.agent/id [:map-of :string [:maybe :string]] [:map-of :string [:maybe :string]]] :string]}
   [agent-id query changes]
   (route/path ::route/agent-debug {:id agent-id}
-              (into {} (keep (fn [[k v]] (when v [(keyword k) v]))) (merge (select-keys query ["n" "root" "branch" "mode"]) changes))))
+              (into {} (keep (fn [[k v]] (when v [(keyword k) v]))) (merge (select-keys query ["n" "root" "branch" "mode" "more"]) changes))))
 
 (defn- graph-node-label
   "A node's summary line: graph position, owning schema, what names it, and a
@@ -3340,7 +3403,7 @@
      [:span {:class "seon-graph-identity"} (graph-node-name identities node)]
      [:span {:class "seon-graph-eid"} (str "e" id)]
      (when (and attribute (not (:db/id named)))
-       [:a {:class "seon-graph-reroot" :href (graph-debug-href agent-id query {"root" (pr-str [attribute named])})} "walk from here"])]))
+       [:a {:class "seon-graph-reroot" :href (graph-debug-href agent-id query {"root" (pr-str [attribute named]) "more" nil})} "walk from here"])]))
 
 (defn- sent-context-html
   "The agent's context exactly as its next turn sends it: `seon.cluster.prompt/prompt`'s
@@ -3418,6 +3481,14 @@
         identities (if database (set (db/identity-attributes database)) #{})
         paths (when nodes (inclusion-paths (::render.walk/graph-root graph) (::render.walk/edges graph)))
         node-text #(str "e" % " " (graph-node-name identities (nodes %)))
+        ;; `more=<eid> <attribute> <offset>`: the one group whose members start at offset.
+        window (let [[e a o] (some-> (get query "more") (str/split #" "))]
+                 (if (and (some-> e parse-long) (some-> o parse-long) (some-> a (str/starts-with? ":")))
+                   {[(parse-long e) (keyword (subs a 1))] (parse-long o)} {}))
+        chips (fn [{v :seon.render/value}]
+                (into [] (comp (remove (comp identities key)) (filter (comp #(or (symbol? %) (keyword? %)) val)) (take 2)
+                               (map (fn [[a x]] (str (name a) ": " (value/bounded-text x 28)))))
+                      (sort-by (comp str key) v)))
         toggle #(vector :button {:type "button" :class "seon-graph-toggle"
                                  (keyword "data-on:click") (str "document.querySelectorAll('.seon-graph-node').forEach(d => d.open = " %1 ")")} %2)]
     [:section {:class "seon-graph-page"}
@@ -3440,7 +3511,7 @@
               (reduce + (vals skipped)) " skipped · " (count cuts) (if (= 1 (count cuts)) " cut" " cuts")
               " · " (count (::render.walk/back-references graph)) " back-references")])
       [:p {:class "seon-graph-legend"}
-       "AI face: the text the model reads. HTML face: what a human explores. #k: graph order (definitions before uses, turns by time). Edges: thick = component, solid = required ref, dotted = optional ref, dashed = declared attachment (reverse), faint dashed = other reverse ref, * = cardinality-many."
+       "AI face: the text the model reads. HTML face: what a human explores. #k: graph order (definitions before uses, turns by time)."
        " " (toggle "true" "open all") " " (toggle "false" "close all")]]
      [:details {:class "seon-graph-sent" (keyword "data-on:toggle") (str "el.open && @get('" (route/path ::route/agent-debug {:id agent-id} {:sent "true"}) "')")}
       [:summary "The context as sent — the prompt this agent's next turn composes (seon.cluster.prompt/prompt); the walk below is not yet on that path"]
@@ -3453,8 +3524,10 @@
         [:div {:class "seon-graph-panel"}
          [:section {:class "seon-debug-graph seon-graph-canvas-section" :data-seon-graph ""}
           [:div {:class "seon-debug-graph-canvas" :data-graph-canvas "" :data-ignore-morph "" :role "img" :aria-label "The walked context graph"}]
-          [:script {:type "application/json" :data-graph-model ""} (hiccup/raw (json-script-text (context-graph-model identities #(edge-kind structure database nodes %) graph)))]
-          [:p {:class "seon-debug-graph-status" :data-graph-detail "" :aria-live "polite"} "Select a node to open its faces; an edge to read its attribute."]]
+          [:script {:type "application/json" :data-graph-model ""} (hiccup/raw (json-script-text (context-graph-model identities #(edge-kind structure database nodes %) chips window
+                                                                                                 #(graph-debug-href agent-id query {"more" (str %1 " " %2 " " %3)}) graph)))]
+          [:p {:class "seon-debug-graph-status" :data-graph-detail "" :aria-live "polite"} "Select a node to open its faces; a counted node to expand its members."]]
+         (graph-legend-html)
          [:table {:class "seon-graph-summary"}
           [:tr [:th "level"] [:th "owning schema"] [:th "nodes"] [:th "≈tokens"]]
           (for [[[level k] ids] (sort-by key (group-by (juxt level-of #(get-in nodes [% ::render.walk/node-schema])) order))]
@@ -3477,7 +3550,7 @@
                          [:div {:class "seon-graph-faces"}
                           [:div {:class "seon-graph-face seon-graph-ai"} [:h3 "AI face"] (if (string? ai) [:pre ai] ai)]
                           [:div {:class "seon-graph-face seon-graph-html"} [:h3 "HTML face"] (if (string? html) [:pre html] html)]]
-                         (node-attributes-html projection structure (nodes id))]))))])]))
+                         (node-attributes-html projection structure database #(graph-debug-href agent-id query {"root" % "more" nil}) (nodes id))]))))])]))
 
 (defn- debug-response
   [{connection :seon.store/connection-object

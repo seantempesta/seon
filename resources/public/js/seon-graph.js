@@ -26,6 +26,11 @@ const readModel = (script) => {
       label: requiredString(data?.label, 'node data.label'),
       href: requiredString(data?.href, 'node data.href'),
       ...(Number.isInteger(data?.level) ? { level: data.level } : {}),
+      // A walk tree node: its hover text, the groups on its path, and whether it is a group or a requery.
+      ...(typeof data?.full === 'string' ? { full: data.full } : {}),
+      ...(Array.isArray(data?.groups) ? { groups: data.groups } : {}),
+      ...(data?.group === true ? { group: true, expanded: data?.expanded === true } : {}),
+      ...(data?.more === true ? { more: true } : {}),
     },
   }))
   const edges = elements.edges.map(({ data } = {}) => ({
@@ -120,8 +125,22 @@ const graphStyle = (section) => {
   const levels = [0, 1, 2, 3].flatMap((level) => {
     const value = css.getPropertyValue(`--seon-graph-level-${level}`).trim()
     // A walk's rings are unlabelled; the selected node names itself.
-    return value ? [{ selector: `node[level = ${level}]`, style: { 'background-color': value, label: '' } }] : []
+    return value ? [{ selector: `node[level = ${level}]`, style: { 'background-color': value } }] : []
   })
+  // The walk tree reads left to right: each label beside its node, one hop per column.
+  const tree = [
+    { selector: 'node[display]', style: { label: 'data(display)', 'text-valign': 'center', 'text-halign': 'right', 'text-margin-x': 6, 'text-wrap': 'none', 'font-size': 12, width: 14, height: 14 } },
+    // An outline edge drops from its parent's dot and turns into the child's row, clear of every label.
+    { selector: 'edge[kind]', style: { 'curve-style': 'taxi', 'taxi-direction': 'vertical', 'taxi-turn': '100%', 'taxi-turn-min-distance': 4 } },
+    { selector: 'node[?group]', style: { shape: 'round-rectangle', width: 18, height: 12, 'font-weight': 'bold' } },
+    { selector: 'node[?more]', style: { shape: 'ellipse', width: 8, height: 8, 'font-style': 'italic' } },
+    { selector: '.seon-hidden', style: { display: 'none' } },
+    { selector: 'edge[kind = "component"]', style: { width: 3.5, 'source-arrow-shape': 'diamond', 'source-arrow-color': inspection } },
+    { selector: 'edge[kind = "optional"]', style: { 'line-style': 'dotted' } },
+    { selector: 'edge[kind = "attachment"]', style: { 'line-style': 'dashed' } },
+    { selector: 'edge[kind = "reverse"]', style: { 'line-style': 'dashed', opacity: 0.4 } },
+    { selector: 'edge[kind = "value"]', style: { 'line-style': 'dotted', opacity: 0.4 } },
+  ]
 
   return [
     {
@@ -157,12 +176,7 @@ const graphStyle = (section) => {
     },
     ...levels,
     { selector: 'edge[?reverse]', style: { 'line-style': 'dashed' } },
-    // A walk edge names its relationship kind (seon.render.web/edge-kind) and carries its attribute label.
-    { selector: 'edge[label]', style: { label: 'data(label)' } },
-    { selector: 'edge[kind = "component"]', style: { width: 3.5 } },
-    { selector: 'edge[kind = "optional"]', style: { 'line-style': 'dotted' } },
-    { selector: 'edge[kind = "reverse"]', style: { opacity: 0.45 } },
-    { selector: 'edge[kind = "value"]', style: { 'line-style': 'dotted', opacity: 0.45 } },
+    ...tree,
     {
       selector: ':selected',
       style: {
@@ -172,7 +186,7 @@ const graphStyle = (section) => {
         'target-arrow-color': text,
       },
     },
-    { selector: 'node[level]:selected', style: { label: 'data(label)', 'z-index': 10 } },
+    { selector: 'node[level]:selected', style: { 'z-index': 10 } },
     {
       selector: 'edge:selected',
       style: {
@@ -233,7 +247,10 @@ const reconcile = (cy, model, canvas, firstModel) => {
   })
 
   const walk = model.nodes.every(({ data }) => Number.isInteger(data.level))
-  if (firstModel && cy.elements().nonempty()) {
+  if (model.nodes.every(({ data }) => Array.isArray(data.groups))) {
+    if (firstModel) cy.nodes('[?expanded]').forEach((node) => node.data('open', true))
+    layoutTree(cy, model.selected)
+  } else if (firstModel && cy.elements().nonempty()) {
     cy.layout({
       name: 'concentric',
       fit: true,
@@ -248,6 +265,34 @@ const reconcile = (cy, model, canvas, firstModel) => {
   } else {
     cy.viewport({ pan, zoom })
   }
+}
+
+// A walk tree node shows once every group on its path is open. The shown part is an outline: one row per node in
+// depth-first order from the root (children in model order, which is graph order), one column per hop, so no two
+// labels share a row.
+const layoutTree = (cy, selected) => {
+  const open = new Set(cy.nodes('[?open]').map((node) => node.id()))
+  cy.batch(() => {
+    cy.nodes().forEach((node) => node.toggleClass('seon-hidden', !(node.data('groups') || []).every((g) => open.has(g))))
+  })
+  const shown = cy.nodes().not('.seon-hidden')
+  const rank = new Map(cy.nodes().map((node, index) => [node.id(), index]))
+  const position = new Map()
+  let row = 0
+  // A child's row reads `attribute  label`: the edge that reached it names the relationship, so no edge label is drawn.
+  const visit = (node, depth, via) => {
+    position.set(node.id(), { x: depth * 200, y: row++ * 30 })
+    node.data('display', via ? `${via}  ${node.data('label')}` : node.data('label'))
+    node.connectedEdges().map((edge) => [edge, edge.source().same(node) ? edge.target() : edge.source()])
+      .filter(([, next]) => !next.hasClass('seon-hidden') && !position.has(next.id()))
+      .sort(([, a], [, b]) => rank.get(a.id()) - rank.get(b.id()))
+      .forEach(([edge, next]) => { if (!position.has(next.id())) visit(next, depth + 1, edge.data('label')) })
+  }
+  visit(cy.getElementById(selected), 0)
+  shown.forEach((node) => { if (!position.has(node.id())) position.set(node.id(), { x: 0, y: row++ * 30 }) })
+  shown.layout({ name: 'preset', positions: (node) => position.get(node.id()), fit: false, animate: false }).run()
+  cy.fit(shown, 24)
+  if (cy.zoom() < 0.8) { cy.zoom(0.8); cy.pan({ x: 24, y: 24 }) }
 }
 
 const edgeDescription = (edge) => {
@@ -310,6 +355,12 @@ attribute({
       }
     }
     const onNodeTap = (event) => {
+      if (event.target.data('group')) {
+        event.target.data('open', !event.target.data('open'))
+        layoutTree(cy, readModel(script).selected)
+        show(event.target.data('full'))
+        return
+      }
       const href = event.target.data('href')
       const block = href.startsWith('#') && document.getElementById(href.slice(1))
       if (block) {
@@ -324,7 +375,7 @@ attribute({
 
     cy.on('tap', 'node', onNodeTap)
     cy.on('tap', 'edge', onEdgeTap)
-    const onNodeOver = (event) => show(event.target.data('label'))
+    const onNodeOver = (event) => show(event.target.data('full') || event.target.data('label'))
     cy.on('mouseover', 'node', onNodeOver)
     const observer = new MutationObserver(update)
     observer.observe(script, { childList: true, characterData: true, subtree: true })

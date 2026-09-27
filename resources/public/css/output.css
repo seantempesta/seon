@@ -3254,6 +3254,11 @@ details.tool-call-details[open] .tool-preview {
 .seon-graph-skipped-row {
   color: var(--color-text-500);
 }
+/* The relationship legend beside the graph: one stroke and one line per kind. */
+.seon-graph-kinds { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 0.2rem 0.75rem; margin: 0.75rem 0; font-size: 0.8rem; color: var(--color-text-300); }
+.seon-graph-kinds > :is(dt, dd) { margin: 0; }
+.seon-graph-kinds > dt { display: flex; align-items: center; gap: 0.25rem; color: var(--color-inspection); }
+.seon-graph-chip { border: 1px solid var(--color-base-700); border-radius: 0.25rem; padding: 0 0.3rem; font-size: 0.75rem; }
 .seon-graph-attributes td:is(:nth-child(3), :nth-child(4)) {
   text-align: left;
   font-variant-numeric: normal;
@@ -3269,7 +3274,7 @@ details.tool-call-details[open] .tool-preview {
 }
 .seon-graph-body {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 1rem;
   align-items: start;
 }
@@ -3284,7 +3289,7 @@ details.tool-call-details[open] .tool-preview {
   margin-top: 1.25rem;
 }
 .seon-graph-canvas-section .seon-debug-graph-canvas {
-  height: 55vh;
+  height: 65vh;
   min-height: 22rem;
 }
 .seon-graph-node {

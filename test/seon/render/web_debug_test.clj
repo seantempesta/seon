@@ -1109,8 +1109,10 @@
            (is (str/includes? (:body response) "seon-graph-page"))
            (is (not (str/includes? (:body response) "seon.render.unknown"))
                "every face renders: the agent's HTML face reads the connection the page carries")
-           (is (= (count order) (count (get-in (json/read-str (second (re-find #"data-graph-model=\"\"[^>]*>(.*?)</script>" (:body response)))) ["elements" "nodes"])))
-               "the graph view draws one node per walked node")
+           (let [drawn (into #{} (keep #(let [id (get-in % ["data" "id"])] (when (re-matches #"e\d+" id) (parse-long (subs id 1)))))
+                             (get-in (json/read-str (second (re-find #"data-graph-model=\"\"[^>]*>(.*?)</script>" (:body response)))) ["elements" "nodes"]))]
+             (is (and (contains? drawn (first order)) (every? (set order) drawn))
+                 "the graph view draws walked nodes only, the root always; a many relationship draws a counted node instead"))
            (is (= (count order) (count (classed page "seon-graph-why"))) "every node says which path included it")))
        (let [rooted (#'web/debug-response service 'my.agents.root "root" {:query-string "n=1&root=%5B%3Aseon.ns%2Fname%20my.agents.root%5D" :headers {}})
              malformed (#'web/debug-response service 'my.agents.root "root" {:query-string "n=1&root=nope" :headers {}})]
@@ -1126,7 +1128,7 @@
                kinds (fn [m] (set (map #(get-in % ["data" "kind"]) (get-in m ["elements" "edges"]))))
                forward (model "n=1")
                both (model "n=1&mode=both")]
-           (is (every? #(get-in % ["data" "label"]) (get-in forward ["elements" "edges"])) "every edge carries its attribute label")
+           (is (every? #(get-in % ["data" "attribute"]) (get-in forward ["elements" "edges"])) "every edge carries its attribute and kind")
            (is (not-any? #{"reverse" "value"} (kinds forward)) (pr-str (kinds forward)))
            (is (<= (count (get-in forward ["elements" "edges"])) (count (get-in both ["elements" "edges"]))))))
        (testing "node detail groups the node's attributes with their declared schemas"
@@ -1154,3 +1156,28 @@
             (is (str/includes? (page {"branch" branch}) "class=\"seon-graph-node\"") "the branch's agent is walked")
             (is (str/includes? (page {"branch" branch}) (str "branch " branch)) "the header names the branch read")
             (is (not (str/includes? (page {}) "class=\"seon-graph-node\"")) "the cluster's own value has no such agent"))))))))
+
+(deftest the-graph-groups-a-many-relationship-into-one-counted-node
+  ;; WANTED: a declared attachment with ten members is one node `← :seon.message/to · 10`; its first eight members
+  ;; hang under it and a `… 2 more` node requeries the next eight, which the `more` window then shows.
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "graph-group")
+     (support/transacted! connection (agent/creation-tx {:seon.agent/id "root" :seon.cluster/name "graph-group"
+                                                         :seon.ns/name 'my.agents.root}))
+     (doseq [i (range 10)]
+       (support/transacted! connection ((requiring-resolve 'seon.cluster.message/inbound-tx) @connection
+                                        {:seon.agent/id "root" :seon.message/inbound-content (str "m" i)
+                                         :seon.config.eval.result/max-string 1000})))
+     (let [service (#'web-test/service-request connection {})
+           model (fn [query] (let [m (json/read-str (second (re-find #"data-graph-model=\"\"[^>]*>(.*?)</script>"
+                                                                      (hiccup/->string (#'web/graph-debug-html service "root" query)))))]
+                               (mapv #(get % "data") (get-in m ["elements" "nodes"]))))
+           first-page (model {"n" "1"})
+           group (first (filter #(get % "group") first-page))
+           root-id (:db/id (db/pull @connection [:db/id] [:seon.agent/id "root"]))
+           members #(count (filter (fn [node] (= (get group "id") (peek (get node "groups")))) %))]
+       (is (= "← :seon.message/to · 10" (get group "label")) (pr-str first-page))
+       (is (= 9 (members first-page)) "eight members and the more node hang under the group")
+       (is (some #(= "… 2 more" (get % "label")) first-page))
+       (is (= 2 (members (model {"n" "1" "more" (str root-id " :seon.message/_to 8")}))) "the requeried window holds the last two")))))
