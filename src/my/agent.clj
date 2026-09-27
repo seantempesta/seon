@@ -2,7 +2,9 @@
   "Read and update my record through request maps."
   (:refer-clojure :exclude [identity])
   (:require [seon.agent :as agent]
+            [seon.cluster.registry :as registry]
             [seon.db :as db]
+            [seon.error.refusal :as refusal]
             [seon.run :as run]))
 
 (defn identity
@@ -80,3 +82,86 @@
       (throw (ex-info "No acquisition of this agent holds its connection's branch."
                       {:seon.agent/id agent-id :seon.agent/branch held})))
     {:seon.agent/branch held :seon.agent/mode mode}))
+
+;;; ---------------------------------------------------------------------------
+;;; Lane branches: the one entrance an agent and the MCP `branch` tool share
+;;; ---------------------------------------------------------------------------
+
+(defn- branch-refusal
+  "A declared refusal of one branch operation."
+  {:malli/schema [:=> [:cat :qualified-symbol :string :map] :seon.error/value]}
+  [operation message data]
+  (refusal/diagnostic (java.util.Date.) :my.agent/branch operation
+                      (merge {:seon.error/message message :seon.error/member :seon.store/branch} data)))
+
+(defn- own-branch
+  "The branch my context's connection holds."
+  {:malli/schema [:=> [:cat :my.program/context] :seon.store/branch]}
+  [{connection :seon.db/connection}]
+  (get-in @connection [:config :branch]))
+
+(defn branches
+  "Read my cluster's own branch and the store's branch roster.
+
+  My context is supplied.
+
+  Example:
+  (my.agent/branches)"
+  {:malli/schema [:=> [:cat :my.program/context] [:or :my.agent/branches :seon.error/value]]}
+  [{store :seon.store/store :as context}]
+  (if-not store
+    (branch-refusal `branches "My context holds no store to read the roster from." {})
+    {:my.agent/own-branch (own-branch context) :my.agent/roster (registry/roster store)}))
+
+(defn create-branch!
+  "Create a lane branch off my cluster head's current commit.
+
+  The branch inherits every fact up to that commit; my cluster's own branch
+  and an existing name refuse. Returns the branch, the commit it forks and
+  that commit's basis. My context is supplied.
+
+  Example:
+  (my.agent/create-branch! {:seon.store/branch :my-lane})"
+  {:malli/schema [:=> [:cat :my.agent/branch-request :my.program/context]
+                  [:or :my.agent/created-branch :seon.error/value]]}
+  [{lane :seon.store/branch} {store :seon.store/store connection :seon.db/connection :as context}]
+  (cond
+    (nil? store) (branch-refusal `create-branch! "My context holds no store to branch in." {})
+    (= lane (own-branch context))
+    (branch-refusal `create-branch! "The cluster's own branch is shared; name a lane branch." {:seon.store/branch lane})
+    :else
+    (let [source @connection
+          from (db/commit-id source)
+          result (registry/branch! {:seon.store/store store :seon.store/branch lane :seon.cluster.registry/from from})]
+      (if (:seon.cluster/created? result)
+        (assoc result :seon.cluster.registry/from from :seon.db/basis-t (db/basis-t source))
+        (branch-refusal `create-branch! "The branch already exists; retire it or name another." {:seon.store/branch lane})))))
+
+(defn retire-branch!
+  "Retire a lane branch: its hosted agent first (admission closed, its graphs
+  joined, its execution released), then any execution still held on it, then
+  its roster entry. A branch an agent still holds, and my cluster's own
+  branch, refuse. Its data goes when retention collects. My context is
+  supplied.
+
+  Example:
+  (my.agent/retire-branch! {:seon.store/branch :my-lane})"
+  {:malli/schema [:=> [:cat :my.agent/branch-request :my.program/context]
+                  [:or :my.agent/retired-branch :seon.error/value]]}
+  [{lane :seon.store/branch} {store :seon.store/store routing :seon.agent/routing :as context}]
+  (cond
+    (nil? store) (branch-refusal `retire-branch! "My context holds no store to retire from." {})
+    (= lane (own-branch context))
+    (branch-refusal `retire-branch! "The cluster's own branch is shared; name a lane branch." {:seon.store/branch lane})
+    :else
+    (let [child #(some-> routing deref (get-in [:seon.agent/children lane]) deref)
+          _ (some-> (:seon.cluster.host/host (child)) deref ((requiring-resolve 'seon.cluster.host/retire!)))
+          held (vec (:seon.agent/contexts (child)))
+          agents (vec (keep (comp :seon.agent/id second) held))]
+      (if (seq agents)
+        (branch-refusal `retire-branch! "Agents hold this branch; disarm them first."
+                        {:seon.store/branch lane :seon.agent/id agents})
+        (do (doseq [[_ execution] (sort-by (comp :seon.agent/owns-connection? second) held)]
+              ((requiring-resolve 'seon.cluster.agent/release-context!) execution))
+            (registry/retire-branch! {:seon.store/store store :seon.store/branch lane})
+            {:seon.store/branch lane :my.agent/retired? true})))))

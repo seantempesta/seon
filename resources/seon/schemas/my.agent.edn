@@ -5,4 +5,14 @@
  :my.agent/identity [:map [:my.agent/id :my.agent/id]
                      [:my.agent/namespace {:optional true} :my.agent/namespace]
                      [:my.agent/steward {:optional true} :my.agent/steward]]
- :my.agent/settings :seon.config/agent-overlay}
+ :my.agent/settings :seon.config/agent-overlay
+ :my.agent/branch-request [:map {:description "A lane branch named by its store branch keyword."} [:seon.store/branch :seon.store/branch]]
+ :my.agent/created-branch [:map {:description "A branch created off my cluster's head: the commit it forks and that commit's basis."}
+                           [:seon.store/branch :seon.store/branch] [:seon.cluster/created? :seon.cluster/created?]
+                           [:seon.cluster.registry/from :seon.cluster.registry/from] [:seon.db/basis-t :seon.db/basis-t]]
+ :my.agent/retired? :boolean
+ :my.agent/retired-branch [:map {:description "A lane branch removed from the store's roster; its data goes when retention collects."}
+                           [:seon.store/branch :seon.store/branch] [:my.agent/retired? :my.agent/retired?]]
+ :my.agent/own-branch [:and {:description "The branch my cluster's connection holds; shared, never a lane's."} :seon.store/branch]
+ :my.agent/branches [:map [:my.agent/own-branch :my.agent/own-branch] [:my.agent/roster :my.agent/roster]]
+ :my.agent/roster [:and {:description "Every branch in the store's roster."} :seon.cluster.registry/roster]}
