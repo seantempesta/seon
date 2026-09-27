@@ -4178,3 +4178,46 @@
       :seon.schema/pure-predicate-symbols (:seon.schema.projection/pure-predicate-symbols projection #{})
       :seon.schema/predicate-functions (predicate-functions-in projection)})
     product))
+
+(defn admit-declarations!
+  "Admit declarations a write changed, judged by the projection the write leaves.
+
+   The write-side half of reading without re-admission: [[projection-from-rows]]
+   derives a committed value's projection without its completeness and
+   renderer-coherence rules, so the writer (`seon.db/validate-write-report`)
+   applies them here to exactly what its report changed. `schema-keys` and
+   `function-symbols` are the changed identities present in `projection`; the
+   reverse schema closure and the contracts depending on it are judged too, as
+   a replacement judges them, and every schema naming a changed renderer is
+   rechecked. Throws the same refusals a replacement throws; nil when admitted."
+  {:malli/schema [:=> [:cat :seon.schema/projection [:set :keyword] [:set :qualified-symbol]] :nil]}
+  [projection schema-keys function-symbols]
+  (let [forms (:seon.schema.projection/forms projection)
+        contracts (get projection :seon.schema.projection/function-contracts {})
+        registry (:seon.schema.projection/registry projection)
+        schema-keys (into #{} (filter #(contains? forms %)) schema-keys)
+        affected-keys (dependent-schema-keys projection schema-keys)
+        affected-fns (into (into #{} (filter #(contains? contracts %)) function-symbols)
+                           (function-dependents-of projection affected-keys))]
+    (validate-declarations!
+     {:seon.schema/forms forms
+      :seon.schema/function-contracts contracts
+      :seon.schema/compiled-schemas (mr/schemas registry)
+      :seon.schema/schema-dependencies (:seon.schema.projection/schema-dependencies projection {})
+      :seon.schema/registry registry
+      :seon.schema/canonical-keys (or (:seon.schema.projection/canonical-keys projection) (set (keys forms)))
+      :seon.schema/schema-admissions (:seon.schema.projection/schema-admissions projection {})
+      :seon.schema/function-admissions (:seon.schema.projection/function-admissions projection {})
+      :seon.schema/pure-predicate-symbols (:seon.schema.projection/pure-predicate-symbols projection #{})
+      :seon.schema/predicate-functions (predicate-functions-in projection)
+      :seon.schema/schema-keys (vec affected-keys)
+      :seon.schema/function-symbols (vec affected-fns)})
+    (assert-render-contracts!
+     projection
+     (into affected-keys
+           (when (seq function-symbols)
+             (into #{}
+                   (comp (filter #(contains? function-symbols (:seon.render/function %)))
+                         (map :seon.schema/key))
+                   (render-declarations-in projection (keys forms))))))
+    nil))

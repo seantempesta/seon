@@ -1944,4 +1944,20 @@
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"bare nilable return"
                             (schema/projection-with-function-contract
                              projection 'review.nil/g [:=> [:cat :review/x] [:maybe :string]]
-                             {:seon.schema.admission/source :agent}))))))
+                             {:seon.schema.admission/source :agent}))))
+    (testing "and the database writer refuses such a write by the projection it leaves"
+      (test-support/with-database
+       (fn [connection]
+         (let [renderer 'sample.admission/ai
+               schema-key :seon.schema-test/admitted-render-target
+               definition [:map {:seon.render/ai renderer}]
+               built (schema/build-projection
+                      (assoc (:seon.schema.projection/forms (seon.db/carried-projection (seon.db/db connection)))
+                             schema-key definition))
+               row (first (schema/canonical-schema-rows built {schema-key definition}))
+               basis (:max-tx @connection)
+               refusal (seon.db/transact! connection [row])]
+           (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
+           (is (= renderer (get-in refusal [:seon.error/data :seon.render/function]))
+               "the renderer with no declared contract is named by the admission refusal")
+           (is (= basis (:max-tx @connection)) "nothing was written")))))))
