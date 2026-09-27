@@ -154,7 +154,7 @@
 (defn- stand-boot-layers!
   "Stand the ordered boot layers above the REPL.
 
-  Store → source commit → fork → connection → config are assoc'd
+  Store → published head → fork → connection → source commit → config are assoc'd
   as they stand, and the whole value is republished to the registry at every
   step. The instance a failure carries is exactly what stands: absence marks
   where boot stopped."
@@ -181,13 +181,16 @@
         ;; published program (files edited while the JVM was down), and nothing
         ;; when none differ; a first start publishes everything. A refused
         ;; publication refuses the boot: stale program entities never run silently.
-        _ (let [published (if (source/current store)
-                            (let [changed (changed-source-paths store)]
-                              (when (seq changed)
-                                (cluster/refresh-source! (:seon.boot/root config) changed)))
-                            (cluster/refresh-source! (:seon.boot/root config)))]
-            (when (:seon.error/at published)
-              (throw (ex-info (:seon.error/message published) published))))
+        ;; Its cost is proportional to the changed inputs, so it stands as its
+        ;; own layer: the published head boot proceeds from.
+        instance (let [published (if (source/current store)
+                                   (let [changed (changed-source-paths store)]
+                                     (when (seq changed)
+                                       (cluster/refresh-source! (:seon.boot/root config) changed)))
+                                   (cluster/refresh-source! (:seon.boot/root config)))]
+                   (when (:seon.error/at published)
+                     (throw (ex-info (:seon.error/message published) published)))
+                   (publish! (assoc instance :seon.source/current (source/current store))))
         ;; Before any branch is acquired: a dead process's branches are no
         ;; one's to release, and each would root its data forever.
         instance (publish! (assoc instance :seon.cluster.registry/retired
@@ -439,8 +442,8 @@
 
 (def boot-layers
   "The layers a ready instance holds, in the order boot acquires them."
-  [:seon.boot/prepl-server :seon.store/store :seon.source/commit-id
-   :seon.store/branch :seon.boot/cluster-connection :seon.boot/config-result
+  [:seon.boot/prepl-server :seon.store/store :seon.source/current
+   :seon.store/branch :seon.boot/cluster-connection :seon.source/commit-id :seon.boot/config-result
    :seon.sci.eval/ctx :seon.flow/work-launcher :seon.flow/graph
    :seon.render.web/served])
 
