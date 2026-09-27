@@ -1799,29 +1799,38 @@
   [read! database]
   (let [datoms (fn [& arguments] (read! (apply db/datoms database arguments)))
         installed (:schema (db/schema-database database))
-        function-symbol #(:v (first (datoms :eavt % :seon.fn/sym)))
-        function-named? #(seq (datoms :avet :seon.fn/sym %))
         ;; Datalog's `[(symbol? ?v)]` saw the stored value, so only a stored
         ;; symbol names a target, and an entity id names its function row: an
         ;; attribute storing neither (a string render form) declares no edge.
         naming? #(#{:db.type/symbol :db.type/ref :db.type/long} (get-in installed [% :db/valueType]))
-        target (fn [v] (if (int? v) (function-symbol v) (when (and (symbol? v) (function-named? v)) v)))
         referring (for [{declaration :e v :v} (datoms :aevt :seon.fn/reference-to)
                         :when (= :seon.fn/sym v)
                         {attribute :v} (datoms :eavt declaration :seon.schema/key)]
                     attribute)
+        invokers (into [] (filter (comp naming? :v)) (datoms :aevt :seon.fn/invokes))
+        ;; Each declaring attribute's datoms, read once.
+        held (into {} (map (fn [attribute] [attribute (datoms :aevt attribute)]))
+                   (distinct (concat [:seon.effect/capability] referring (map :v invokers))))
+        capabilities (held :seon.effect/capability)
+        referred (into [] (mapcat held) (distinct referring))
+        ;; Each entity and each named symbol is resolved once.
+        symbol-of (into {} (keep (fn [e] (when-let [s (:v (first (datoms :eavt e :seon.fn/sym)))] [e s])))
+                        (distinct (concat (map :e capabilities) (map :e referred)
+                                          (filter int? (map :v referred))
+                                          (filter int? (mapcat #(map :v %) (vals held))))))
+        named (into #{} (filter #(seq (datoms :avet :seon.fn/sym %)))
+                    (distinct (concat (map :v capabilities) (filter symbol? (mapcat #(map :v %) (vals held))))))
+        target (fn [v] (if (int? v) (symbol-of v) (when (named v) v)))
         edges (concat
-               (for [{caller :e named :v} (datoms :aevt :seon.effect/capability)
-                     :when (and (function-symbol caller) (function-named? named))]
-                 [caller named])
-               (for [attribute referring
-                     {caller :e v :v} (datoms :aevt attribute)
-                     :let [target-symbol (when (int? v) (function-symbol v))]
-                     :when (and target-symbol (function-symbol caller))]
+               (for [{caller :e v :v} capabilities
+                     :when (and (symbol-of caller) (named v))]
+                 [caller v])
+               (for [{caller :e v :v} referred
+                     :let [target-symbol (when (int? v) (symbol-of v))]
+                     :when (and target-symbol (symbol-of caller))]
                  [caller target-symbol])
-               (for [{caller :e attribute :v} (datoms :aevt :seon.fn/invokes)
-                     :when (naming? attribute)
-                     {v :v} (datoms :aevt attribute)
+               (for [{caller :e attribute :v} invokers
+                     {v :v} (held attribute)
                      :let [target-symbol (target v)]
                      :when target-symbol]
                  [caller target-symbol]))]

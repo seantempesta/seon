@@ -66,22 +66,31 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.test.run/admission]
                   :seon.store/transaction-data]}
   [database admission]
-  (let [complete-member #(assoc %
-                               :seon.test.member/completed-tx "datomic.tx"
-                               :seon.test.member/terminated-tx "datomic.tx"
-                               :seon.test.member/began? true :seon.test.member/ended? true
-                               :seon.test.member/pass-count 1 :seon.test.member/fail-count 0
-                               :seon.test.member/error-count 0)
-        owned (db/q '[:find [?member ...] :in $ ?run-id
+  (let [;; A completed member stores the reach digest it was tested at, as the
+        ;; runner's completion does: content-keyed reuse compares exactly it.
+        admitted (sut/admit-run database admission)
+        owned (db/q '[:find ?member ?symbol :in $ ?run-id
                       :where [?run :seon.test.run/id ?run-id]
-                             [?run :seon.test.run/members ?member]]
-                    database (get-in admission [:seon.test.run/provenance :seon.test.run/id]))]
+                             [?run :seon.test.run/members ?member]
+                             [?member :seon.test.member/symbol ?symbol]]
+                    database (get-in admission [:seon.test.run/provenance :seon.test.run/id]))
+        reach (runner/reach-digests database
+                                    (vec (distinct (concat (keep :seon.test.member/symbol (mapcat :seon.test.run/members admitted))
+                                                           (map second owned)))))
+        complete-member #(cond-> (assoc %
+                                        :seon.test.member/completed-tx "datomic.tx"
+                                        :seon.test.member/terminated-tx "datomic.tx"
+                                        :seon.test.member/began? true :seon.test.member/ended? true
+                                        :seon.test.member/pass-count 1 :seon.test.member/fail-count 0
+                                        :seon.test.member/error-count 0)
+                           (string? (get reach %2)) (assoc :seon.test.member/reach-digest (get reach %2)))]
     (into (mapv (fn [entity]
                   (cond-> entity
                     (:seon.test.run/members entity)
-                    (update :seon.test.run/members #(mapv complete-member %))))
-                (sut/admit-run database admission))
-          (map (fn [member] (complete-member {:db/id member})))
+                    (update :seon.test.run/members
+                            #(mapv (fn [member] (complete-member member (:seon.test.member/symbol member))) %))))
+                admitted)
+          (map (fn [[member test-symbol]] (complete-member {:db/id member} test-symbol)))
           owned)))
 
 (defn- complete-selection!

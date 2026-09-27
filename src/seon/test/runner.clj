@@ -1984,9 +1984,10 @@
 
   ## Costs
 
-  An index walk from each name (`:seon.test.member/symbol` AVET, then the
-  runs holding the member) and one query over those runs: proportional to
-  the requested tests' executions, never every member. Measured unarmed on
+  An index read from each name (`:seon.test.member/symbol` AVET), one query
+  for the runs holding those members and one over those runs: proportional
+  to the requested tests' executions, never every member, and a run more
+  adds no read. Measured unarmed on
   default 2026-09-27: the executions of 14 tests (148) in 3.9 ms where the
   unbound Datalog took 152 ms; 595 tests (377 results) in 60 ms where it took
   4.7 s."
@@ -1994,11 +1995,16 @@
                   [:or :seon.test/latest-results :seon.test/execution-error]]}
   [database test-symbols]
   (try
-    (let [datoms #(execution-read (apply db/datoms database %&))
-          runs (for [test-symbol (distinct test-symbols)
-                     {member :e} (datoms :avet :seon.test.member/symbol test-symbol)
-                     {run :e} (datoms :avet :seon.test.run/members member)]
-                 [test-symbol run])
+    (let [members (into {} (for [test-symbol (distinct test-symbols)
+                                 {member :e} (execution-read (db/datoms database :avet :seon.test.member/symbol test-symbol))]
+                             [member test-symbol]))
+          ;; One read for the runs holding every member, however many runs they span.
+          runs (when (seq members)
+                 (mapv (fn [[run member]] [(members member) run])
+                       (execution-read
+                        (db/q '[:find ?run ?member :in $ [?member ...]
+                                :where [?run :seon.test.run/members ?member]]
+                              database (vec (keys members))))))
           admitted (when (seq runs)
                      (into {} (map (fn [[run id selected]] [run [id selected]]))
                            (execution-read
