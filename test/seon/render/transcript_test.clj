@@ -1347,12 +1347,34 @@
                (is (re-find #"…\d+\]" clipped)
                    (str "the cut shows the one cut face: " clipped))))
 
-           (testing "ruling 45: nothing emitted is comment-shaped"
-             (doseq [line (str/split-lines (str/join "\n" stored-bytes))]
-               (when (str/starts-with? (str/trim line) ";")
-                 (is (str/includes? line "a definition worth keeping")
-                     (str "a comment-shaped line the agent did not write: "
-                          line))))))
+           (testing "ruling 45 (revised): only a renderer or the agent writes comment-shaped lines"
+             ;; An AI render returns REPL entries, `;;` comments included
+             ;; (CLAUDE.md Presentation), so a response a renderer produced
+             ;; (an error face, a declared renderer) may carry them. What
+             ;; stays forbidden is a comment-shaped line emitted outside a
+             ;; renderer: in the prompt and input the agent did not type, or
+             ;; in a plain value's response (transcript assembly, wrappers).
+             (doseq [{entry-bytes :seon.render.history/bytes
+                      response :seon.render.history/printed-value
+                      ordinal :seon.cluster.eval/ordinal} stored-entries
+                     :let [receipt (db/pull stored-db
+                                            [:seon.cluster.eval/error :seon.eval/renderer
+                                             {:seon.eval/renderer-fn [:seon.fn/sym]}]
+                                            [:seon.cluster.eval/id
+                                             (turn/receipt-identity "one-grammar-stored" ordinal)])
+                           rendered? (boolean (some receipt [:seon.cluster.eval/error :seon.eval/renderer
+                                                              :seon.eval/renderer-fn]))
+                           split (when response (str/last-index-of entry-bytes response))
+                           input (if split (subs entry-bytes 0 split) entry-bytes)
+                           answer (if split (subs entry-bytes split) "")]
+                     line (concat (map #(vector :input %) (str/split-lines input))
+                                  (map #(vector :response %) (str/split-lines answer)))
+                     :let [[region text] line]
+                     :when (str/starts-with? (str/trim text) ";")]
+               (is (or (and (= :input region) (str/includes? text "a definition worth keeping"))
+                       (and (= :response region) rendered?))
+                   (str "a comment-shaped line no renderer and no agent wrote (form "
+                        ordinal ", " (name region) "): " text)))))
          (finally (async/close! channel)))))))
 
 ;; The ledger's prefix check derived its profile from a request and carried a
