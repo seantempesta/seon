@@ -215,10 +215,11 @@ root.
   A new or changed function without a complete contract: the edit hook refuses it; the REPL admits it with a
   warning beside its value that grows as the agent's uncontracted definitions accumulate; merge acceptance refuses
   a proposal that carries one.
-- **Keep entry policy separate from merge.** Schema/test/test-first entry defaults to `:gate`, refusing before
-  evaluation; explicit `:warn` admits experiments with declared diagnostics. Preserve malformed authored contracts
-  as data; never arm them or substitute stale wrappers. Arm every valid contract: invalid inputs prevent entry,
-  invalid outputs refuse. Entry policy never relaxes merge acceptance.
+- **Keep entry policy separate from merge.** Schema and test entry default to `:gate`, refusing before evaluation;
+  explicit `:warn` admits experiments with declared diagnostics. A missing function contract is never refused at
+  the REPL: the value returns with the growing warning above. Preserve malformed authored contracts as data; never
+  arm them or substitute stale wrappers. Arm every valid contract: invalid inputs prevent entry, invalid outputs
+  refuse. Entry policy never relaxes merge acceptance.
 - **Documentation is data.** Docstrings are Markdown with a few fixed headings (Examples, Edge cases, Costs,
   Recommendations, Errors, Known issues); cross-cutting knowledge lives in Markdown pages. `[[sym]]` links resolve
   as data, and a subject's context shows every doc item linking it. Costs are prose stating armed or unarmed and
