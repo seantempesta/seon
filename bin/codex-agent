@@ -53,7 +53,7 @@ lanes_dir=$dir/lanes
 sessions_dir=$dir/sessions
 model=${LANE_MODEL:-gpt-6-astra}
 effort=${LANE_EFFORT:-low}
-lane_rule="Another lane's in-flight breakage is never a reason to stop: iterate with one seon.test/run request on your cluster branch: bin/test-check [--root ROOT] CLUSTER --ns <namespace> (or --test NS/TEST, --changed NS/SYM), or the same request from the MCP eval tool. Lanes never run bin/test gates; the orchestrator owns the cold gate and platform proof. When the shared tree cannot load, prove HEAD plus your diff from a git archive snapshot with the shared caches linked; never create a git worktree (owner 2026-09-23: 'no more git worktrees'). Name the foreign boundary in your landing note; never resume, message, or edit another lane's session or files."
+lane_rule="Another lane's in-flight breakage is never a reason to stop. Lanes start no test runs: root runs one central list of focused tests and returns each red to its owner; name the exact tests your change needs in your reply. Before committing, lint src script test with clj-kondo --cache false from a git archive of HEAD plus your diff (0 errors) and run the contracts compile check. Never create a git worktree (owner 2026-09-23: 'no more git worktrees'). Name the foreign boundary in your landing note; never resume, message, or edit another lane's session or files."
 
 usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 64; }
 
