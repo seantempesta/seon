@@ -26,4 +26,9 @@
              :kind :function
              :intent "The floor's tree gives collection nodes :seon.render.data/total always but string nodes only when cut, so a consumer cannot tell an uncut string page's end; mcp-get-value (999fb0450) now derives it from the page's shape. Give the uncut :string node its total at the producer, then delete that special case in seon.cluster/mcp-get-value."
              :must-read #{seon.render.value/tree seon.cluster/mcp-get-value}
-             :evidence #{"docs/research/agent-platform/red-triage-3-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/red-triage-3-2026-09-27.md"}}
+ #:seon.task{:name "a-count-prints-as-an-entity-reference"
+             :kind :function
+             :intent "Wrong value shown to agents: a JVM eval returning {:seon.turn/agent 61 ...} (query counts) printed each integer as [:db/ident :seon.source/digest] / [:db/ident :my.plan/current-step] — the floor treated small integers as entity ids and printed their referent's ident (observed via MCP eval_clj, 2026-09-27). A number is a number unless its schema says ref: reference printing applies only where the value's declared schema is :seon.db/ref (or a datom's ref attribute), never by guessing from the value."
+             :must-read #{seon.render.value/prepare}
+             :evidence #{"docs/research/agent-platform/repl-session-entity-design-2026-09-27.md"}}]
