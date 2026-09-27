@@ -476,7 +476,7 @@
   The reverse unit hands every message it acquired and renders them through
   [[inbox-html]]; a walk from one message hands that message's single
   recipient reference and renders it as the reference it is."
-  {:malli/schema [:=> [:cat :seon.render/unit :seon.db/database-value]
+  {:malli/schema [:=> [:cat [:or :seon.message/to :seon.message/inbox-unit] :seon.db/database-value]
                   :seon.render/hiccup]}
   [recipient-or-inbox database]
   ;; A LOOKUP REF IS ALSO SEQUENTIAL, so the collection branch is the one
