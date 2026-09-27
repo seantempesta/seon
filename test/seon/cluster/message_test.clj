@@ -24,6 +24,7 @@
             [seon.id :as id]
             [seon.turn :as turn]
             [seon.cluster.message :as message]
+            [seon.cluster.agent :as cluster.agent]
 
             [seon.cluster.wake :as wake]
             [seon.config :as config]
@@ -182,8 +183,11 @@
         (is (nil? (:seon.cluster.eval/error argless)))))))
 
 (deftest message-terminal-formatter-preserves-database-errors
-  (let [failure {
-                 :seon.error/message "message read failed"}]
+  ;; A read refusal handed in place of a unit passes through unchanged. The
+  ;; fixture is the database owner's own refusal (its :seon.error/kind
+  ;; stand-in was retired in bc8152438).
+  (let [failure (db/projection-fallback 'seon.cluster.message-test/read)]
+    (is (db/read-refusal? failure))
     (is (= failure (message/format-ai failure)))))
 
 (deftest inbox-unit-renders-both-projections-of-the-same-messages
@@ -484,9 +488,7 @@
   (let [population (subvec agent-ids 0 population-size)]
     (test-support/with-database
       (fn [connection]
-        (test-support/transacted! connection
-                                (mapv (fn [id] {:seon.agent/id id})
-                                      population))
+        (test-support/transacted! connection (test-support/agents-tx @connection population))
         (second
          (reduce
           (fn [[model valid?] [command-index command]]
@@ -587,7 +589,11 @@
       (test-support/transacted!
                    connection
                    (schema.datahike/malli->datahike-schema-in (seon.schema/handed-projection) (schema/canonical-database-attributes (seon.schema/handed-projection))))
-      (test-support/transacted! connection (test-support/agent-tx @connection "alice"))
+      ;; A raw history-off store has no fixture cluster, so the agent comes
+      ;; from the creation writer itself (branch from the store's own config).
+      (test-support/transacted! connection (cluster.agent/creation-tx
+                                            {:seon.agent/id "alice" :seon.ns/name 'my.agents.alice
+                                             :seon.cluster/name "fixture"}))
       (ask! connection "m-0" "alice" "hello")
       (let [report
             (db/transact!

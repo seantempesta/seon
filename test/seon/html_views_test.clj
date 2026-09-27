@@ -190,8 +190,9 @@
       (let [report (db/transact! connection [{:my.plan.item/id "first" :my.plan.item/title "Prepare"}])
             ;; The writer's own refusal: a step without its required title.
             refusal (db/transact! connection [{:my.plan.item/id "refused"}])
-            identity {:db-name :fixture :t 42 :datahike/commit-id #uuid "00000000-0000-0000-0000-000000000042"}
-            shown-report {:db-before identity :db-after identity :tx-data [] :tempids {} :tx-meta {}}]
+            ;; A real report whose only datom is its transaction's own: the
+            ;; declared report shape holds database values, never identity maps.
+            shown-report (db/transact! connection [])]
         (readable! (db/render-transaction-html report) ["Committed transaction" "Prepare" "Changes"])
         (readable! (db/render-rejection-html refusal)
                    ["seon.db/transact!" "Supply :my.plan.item/title with a string."])
