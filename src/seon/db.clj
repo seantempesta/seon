@@ -1231,14 +1231,14 @@
             (not-any? #(index-pattern-change changes %) checked))))))
 
 (defn read-evidence-current?
-  "True when `database` still satisfies every retained dependency revision."
-  {:malli/schema [:=> [:cat [:or :seon.db/database-value :seon.error/value]
-                       [:vector :seon.db/read-evidence]]
+  "True when `database` still satisfies every retained dependency revision.
+
+  The database is a declared :seon.db/database-value, so an agent's call that
+  omits it has it supplied by schema name, as `q` and `pull` do."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.db/read-evidence]]
                   [:or :boolean :seon.db/error-result]]}
   [database retained]
-  (if-not (db.utils/db? database)
-    database
-    (every?
+  (every?
      (fn [{source-position :seon.db/source-argument-position
            plan :datahike.read/dependency-plan
            revision :datahike.read/revision
@@ -1273,7 +1273,7 @@
                                   (:seon.db/read-result-digest evidence)]
                          (when-let [actual (read-result-digest stable)]
                            (= expected actual)))))))))))
-     retained)))
+     retained))
 
 ;;; THE declaration population for ONE read operation. Every decode walker
 ;;; below takes it as its first argument and never resolves it again: asking

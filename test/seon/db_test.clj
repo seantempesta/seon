@@ -669,7 +669,6 @@
         reads
         [[:connection-identity #(apply db/connection-identity [upstream])]
          [:database-value-identity #(db/database-value-identity upstream)]
-         [:read-evidence-current? #(db/read-evidence-current? upstream [])]
          [:db #(db/db upstream)]
          [:q-database-first #(db/q upstream exam-query)]
          [:q-source-argument #(db/q exam-query upstream)]
@@ -695,6 +694,13 @@
       (testing (clojure.core/name operation)
         (is (identical? upstream (read-call))
             "the exact upstream error value returns before dependency work")))))
+
+;; `read-evidence-current?` declares its database by schema name, so an
+;; agent call omitting it is supplied one (as `q`'s is); an upstream error in
+;; that slot is refused by its contract instead of passed through.
+(deftest read-evidence-currency-declares-its-database-by-schema-name
+  (let [[_ inputs] (:malli/schema (meta #'db/read-evidence-current?))]
+    (is (= :seon.db/database-value (second inputs)))))
 
 (deftest query-and-pull-append-evidence-only-when-captured
   (test-support/with-database
