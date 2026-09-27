@@ -53,6 +53,16 @@ with `(seon.error/resolution db sig)`. `seon.problems/problems` returns
 
 The split into many signatures per class is item 4 above.
 
+At 02:10Z I resolved the nine test-exhaust signatures with `seon.problems/resolve!` on
+default. Eight faults remain open: the six live ones above and two new ones that arrived during
+root's 02:08Z test round on the pre-fix JVM:
+
+- `721e82de`: `fired-bound` again, under a new signature, because of item 4. It stops once this
+  commit is live.
+- `67029fe7`: `superv.async/throw-if-exception-`, `java.lang.InterruptedException` at 02:08:11Z.
+  Not triaged. Datahike's async layer was interrupted while something was running; check it
+  against root's run log.
+
 ## 2. Stale io-prepl sessions
 
 The session roster is `seon.dev.mcp/clj-sessions`, an atom in the one bb bridge process that all
