@@ -10,6 +10,8 @@
             [seon.fn]
             [seon.cluster :as cluster]
             [seon.db :as db]
+            [seon.instrument :as instrument]
+            [seon.repl :as repl]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
             [seon.test]
@@ -180,6 +182,21 @@
      (let [result (my.program/breaks {:seon.program/subject 'seon.id/valid?})]
        (is (map? result))
        (is (not (:seon.error/at result)) (pr-str (select-keys result [:seon.error/message])))))))
+
+(deftest a-test-bodys-direct-render-call-gets-its-members-database
+  ;; A JVM test body's world is its member's context scoped to the member's
+  ;; database (`seon.test/member-world`), so a render function called
+  ;; directly, whose `:seon.render/unit` requires `:seon.db/db`, is supplied
+  ;; it as an agent's evaluation would be (tests-0627l: repl, value, error).
+  (let [connection (:seon.db/connection (support/execution-handle nil))
+        supplied (:seon.db/db (instrument/calling-environment))]
+    (is (db/database-value? supplied) "the body's world scopes a database")
+    (is (= (:max-tx (db/db connection)) (:max-tx supplied)) "the member's own")
+    (is (str/includes? (repl/render-ai {:seon.cluster.eval/source "(+ 1 1)"
+                                        :seon.cluster.eval/ns {:seon.ns/name 'my.agents.juniper}
+                                        :seon.eval/shown "2"})
+                       "my.agents.juniper=> (+ 1 1)")
+        "a direct render call omitting its database renders")))
 
 (deftest an-explicit-empty-custody-clears-the-callers-world
   ;; A JVM test body runs as its member (`kernel/*host-world*`), so an omitted
