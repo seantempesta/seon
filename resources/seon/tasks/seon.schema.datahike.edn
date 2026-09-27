@@ -4,4 +4,8 @@
              :intent "seon.db/pull-many on evaluation entities is 40x Datahike: 49 rows took 231 ms and 1,018 MB against d/pull-many 5.9 ms and 21 MB; the debug-page walk of 83 nodes spends 195 ms / 986 MB of its 215 ms in it. The EDN codec re-prints stored values to compare them (canonical-print-string 3.6 GB in one page recording, storage-compare, reader-round-trips?). Decode without printing."
              :must-read #{seon.db/pull-many seon.schema.datahike/canonical-print-string seon.schema.datahike/reader-round-trips? seon.schema.datahike/storage-compare}
              :evidence #{"docs/research/agent-platform/landing/debug-context-page-2026-09-26.md"
-                         "docs/research/agent-platform/perf-profile-2026-09-26.md"}}]
+                         "docs/research/agent-platform/perf-profile-2026-09-26.md"}}
+ #:seon.task{:name "parity-baseline-is-stale"
+             :kind :namespace
+             :intent "test/seon/schema/datahike_parity.edn (1.4 MB generated baseline for seon.schema.datahike-test/canonical-population-native-parity) still names retired config attributes (:seon.config.flow.compute/queue-depth, :seon.config.bootstrap/beyond-closure-token-budget, retired 13387dc38) and the launcher-configuration compute keys d2604ede9 removed. Regenerate it in a JVM with an explained baseline update, or derive the expectation from the packaged projection instead of a stored copy (a stored mirror silently drifts)."
+             :evidence #{"test/seon/schema/datahike_parity.edn"}}]
