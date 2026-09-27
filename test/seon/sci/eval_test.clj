@@ -146,13 +146,19 @@
                concurrency-capability-classes))))
 
 (defn- run-in
+  "One evaluation in `ctx`, against the database its world holds (custody,
+  or the value a `base-ctx` was derived from). Without a ctx the evaluator
+  builds a bare interpreter, so the executing member's database is supplied:
+  an agent's evaluation always has one, and its shown value renders a
+  `:seon.render/unit`, which requires it (93144cb71)."
   [ctx source time-limit-ms]
   (eval/evaluate
    (cond-> {:seon.schema/projection (schema/handed-projection)
             :seon.cluster.eval/source source
             :seon.sci.admit/caps caps
             :seon.sci.eval/time-limit-ms time-limit-ms}
-     ctx (assoc :seon.sci.eval/ctx ctx))))
+     ctx (assoc :seon.sci.eval/ctx ctx)
+     (nil? ctx) (assoc :seon.db/db (db/db (:seon.db/connection (test-support/execution-handle nil)))))))
 
 (deftest database-provenance-regenerates-the-base-and-reverts-for-retained-forks
   (test-support/with-database
@@ -2687,3 +2693,32 @@
                         (eval/fork-for-turn (assoc request :seon.sci.eval/agent-ctx entering)))]
          (is (some? (sci/resolve next-turn 'malli.core/validate)))
          (is (true? (:seon.sci.admit/value (run next-turn "(m/validate int? 1)")))))))))
+
+(deftest a-print-the-render-stage-refuses-returns-the-value-with-one-diagnostic
+  ;; A bare interpreter with no world and no database: the render unit cannot
+  ;; be built, so the print stage refuses. The path stays total.
+  (let [evaluation (eval/evaluate
+                    {:seon.sci.eval/ctx (eval/build-base-ctx (schema/handed-projection))
+                     :seon.schema/projection (schema/handed-projection)
+                     :seon.cluster.eval/source "(+ 1 2)"
+                     :seon.sci.admit/caps caps
+                     :seon.sci.eval/time-limit-ms 5000})]
+    (is (= 3 (:seon.sci.admit/value evaluation)) (pr-str evaluation))
+    (is (= "3" (:seon.eval/shown evaluation)))
+    (is (string? (:seon.cluster.eval/diagnostics evaluation))
+        "the refused print is one diagnostic beside the value")))
+
+(deftest a-context-derived-from-a-database-evaluates-against-it
+  ;; `base-ctx` holds the value it was derived from; a request naming no
+  ;; database prints against it instead of refusing (perf-boot 74a46362a).
+  (test-support/with-database
+   (fn [connection]
+     (let [evaluation (eval/evaluate
+                       {:seon.sci.eval/ctx (eval/base-ctx (db/db connection))
+                        :seon.cluster.eval/source "(/ 1 0)"
+                        :seon.sci.admit/caps caps
+                        :seon.sci.eval/time-limit-ms 5000})]
+       (is (:seon.cluster.eval/error evaluation) (pr-str evaluation))
+       (is (string? (:seon.eval/shown evaluation)))
+       (is (nil? (:seon.cluster.eval/diagnostics evaluation))
+           "the print had its database: no diagnostic")))))

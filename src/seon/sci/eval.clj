@@ -4084,18 +4084,26 @@
                   (assoc request :seon.render/profile profile))
         ;; The render's forms read the value by its handle.
         _ (when (and ctx handle) (bind-result! ctx handle value))
-        projection (render.value/prepare
-                    (cond-> (assoc request
-                                   :seon.render/value value
-                                   :seon.render.call/id
-                                   [:seon.cluster.eval/source
-                                    (:seon.cluster.eval/source request)])
-                      (and ctx (:seon.sci.eval/time-limit-ms request) (:seon.sci.admit/caps request)
-                           (not (::rendering? request)))
-                      (assoc :seon.sci.eval/evaluate-source (partial evaluated-source request))))
-        shown (if (contains? projection :seon.render.value/root-description) projection
-                  (or (:seon.render.value/value-text projection)
-                      (render.value/render-ai-data projection)))
+        ;; A preparation or print the render stage refuses (a unit it cannot
+        ;; build, a refusal its own contract rejects) is one diagnostic; the
+        ;; value then shows as bounded plain Clojure printing.
+        [projection shown]
+        (try
+          (let [projection (render.value/prepare
+                            (cond-> (assoc request
+                                           :seon.render/value value
+                                           :seon.render.call/id
+                                           [:seon.cluster.eval/source
+                                            (:seon.cluster.eval/source request)])
+                              (and ctx (:seon.sci.eval/time-limit-ms request) (:seon.sci.admit/caps request)
+                                   (not (::rendering? request)))
+                              (assoc :seon.sci.eval/evaluate-source (partial evaluated-source request))))]
+            [projection
+             (if (contains? projection :seon.render.value/root-description) projection
+                 (or (:seon.render.value/value-text projection)
+                     (render.value/render-ai-data projection)))])
+          (catch Throwable failure
+            [{:seon.render.value/diagnostics [failure]} (render.value/bounded-text value)]))
         failures (into failures (:seon.render.value/diagnostics projection))
         shown (if (string? shown) shown (pr-str shown))]
     ;; THE VALUE'S SIZE IS RECORDED BESIDE ITS SHOWN TEXT: the whole value's
@@ -4114,7 +4122,10 @@
       (:seon.render.call/selected-producer projection)
       (assoc :seon.eval/renderer (:seon.render.call/selected-producer projection))
       (seq failures)
-      (assoc :seon.cluster.eval/diagnostics (floor-text request (mapv flat-diagnostic failures)))
+      (assoc :seon.cluster.eval/diagnostics
+             (let [diagnostics (mapv flat-diagnostic failures)]
+               (try (floor-text request diagnostics)
+                    (catch Throwable _ (render.value/bounded-text diagnostics)))))
       record (assoc :seon.sci.admit/record record))))
 
 (def ^:private value-size-keys
@@ -4341,7 +4352,10 @@
                               (some-> (get-in base-evaluation-ctx
                                                [::custody :seon.db/connection])
                                       db/db)
-                              (get-in base-evaluation-ctx [::custody :seon.db/db]))]
+                              (get-in base-evaluation-ctx [::custody :seon.db/db])
+                              ;; A context derived from a database (`base-ctx`)
+                              ;; holds it as its acquired value.
+                              (some-> (::kernel/program-snapshot base-evaluation-ctx) deref :seon.db/db))]
           (if-let [projection (or (db/carried-projection database)
                                   (context-projection base-evaluation-ctx))]
             (assoc request :seon.db/db
