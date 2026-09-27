@@ -19,7 +19,6 @@
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
-            [datahike.api :as d]
             [seon.db :as db]
             [seon.id :as id]
             [seon.turn :as turn]
@@ -31,7 +30,6 @@
             [seon.render.route :as route]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.schema.datahike :as schema.datahike]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support])
   (:import [java.util Date]))
@@ -412,46 +410,54 @@
           ::refusals refusals}]))))
 
 (defn- actual-messages
+  "Every stored message as the model states it: one pull for the stored
+  facts, and the owners' own reads (`chain-depth`, `sender`) for the
+  derived ones under test."
   [db]
   (into {}
         (map
-         (fn [entity]
-           (let [id (:seon.message/id entity)
-                 parent
-                 (db/q '[:find ?parent-id .
-                        :in $ ?id
-                        :where
-                        [?message :seon.message/id ?id]
-                        [?message :seon.message/caused-by ?parent]
-                        [?parent :seon.message/id ?parent-id]]
-                      db id)]
-             [id
-              (cond-> {::id id
-                       ::to (db/q '[:find ?agent-id .
-                                   :in $ ?to
-                                   :where [?to :seon.agent/id
-                                           ?agent-id]]
-                                 db
-                                 (:db/id (:seon.message/to entity)))
-                       ::content (:seon.message/content entity)
-                       ::depth (message/chain-depth db id)}
-                (:seon.message/from entity)
-                (assoc ::from (message/sender db id))
-                parent (assoc ::parent parent))]))
-         (db/q '[:find [(pull ?message [*]) ...]
+         (fn [{id :seon.message/id :as entity}]
+           [id
+            (cond-> {::id id
+                     ::to (get-in entity [:seon.message/to :seon.agent/id])
+                     ::content (:seon.message/content entity)
+                     ::depth (message/chain-depth db id)}
+              (:seon.message/from entity)
+              (assoc ::from (message/sender db id))
+              (:seon.message/caused-by entity)
+              (assoc ::parent (get-in entity [:seon.message/caused-by :seon.message/id])))]))
+        (db/q '[:find [(pull ?message [:seon.message/id :seon.message/content
+                                        {:seon.message/to [:seon.agent/id]}
+                                        {:seon.message/from [:seon.agent/id]}
+                                        {:seon.message/caused-by [:seon.message/id]}]) ...]
                 :where [?message :seon.message/id _]]
-              db))))
+              db)))
+
+(defn- with-rows
+  "`database` with `rows` applied by the writer's own checks (`seon.db/with`);
+  a refusal is thrown whole, as a fixture write refusal is."
+  [database rows]
+  (let [after (db/with database rows)]
+    (if (:seon.error/message after)
+      (throw (ex-info (str (:seon.error/message after)) after))
+      after)))
 
 (defn- execute-command!
-  {:malli/schema [:=> [:cat :seon.db/connection :map :map :int] [:tuple :map :boolean]]}
-  [connection model command command-index]
+  "One generated command against the database VALUE `database`: the step's
+  next model, whether the stored facts agree with it, and the next value."
+  {:malli/schema [:=> [:cat :seon.db/database-value :map :map :int]
+                  [:tuple :map :boolean :seon.db/database-value]]}
+  [database model command command-index]
   (let [[next-model expected] (model-command model command command-index)]
     (if (= :human (::command command))
       (let [{::keys [message-id to content]}
-            (command-data model command command-index)]
-        (ask! connection message-id to content)
+            (command-data model command command-index)
+            after (with-rows database [{:seon.message/id message-id
+                                      :seon.message/to [:seon.agent/id to]
+                                      :seon.message/content content}])]
         [next-model
-         (= (::messages next-model) (actual-messages @connection))])
+         (= (::messages next-model) (actual-messages after))
+         after])
       (let [{::keys [sender trigger run-id ordinal chain-limit recipients]}
             (::data expected)
             value (mapv (fn [{::keys [to content]}]
@@ -463,10 +469,9 @@
             request (cond-> {:my.message/value value :seon.agent/id sender :seon.turn/id run-id :seon.cluster.eval/ordinal ordinal :seon.config.message/max-chain chain-limit}
                       trigger
                       (assoc :seon.message/trigger trigger))
-            delivery (message/delivery @connection request)
-            rows (:seon.message/rows delivery)]
-        (when (seq rows)
-          (test-support/transacted! connection rows))
+            delivery (message/delivery database request)
+            rows (:seon.message/rows delivery)
+            after (if (seq rows) (with-rows database rows) database)]
         [next-model
          (and
           (or (nil? chain-limit)
@@ -478,38 +483,52 @@
              (mapv #(select-keys % [:seon.message/no-limit :seon.message/chain-limit :seon.message/unknown-recipient]) (:seon.error/values delivery)))
           (every? #(schema/valid-candidate-value? (schema/handed-projection) :seon.error/value %)
                   (:seon.error/values delivery))
-          (= (::messages next-model) (actual-messages @connection))
+          (= (::messages next-model) (actual-messages after))
           (or (nil? chain-limit)
               (every? #(<= (::depth %) chain-limit)
-                      (vals (::messages next-model)))))]))))
+                      (vals (::messages next-model)))))
+         after]))))
 
 (defn- generated-history-agrees-with-database?
-  [{::keys [population-size chain-limit commands]}]
+  "Run one scenario from `base`, the prepared world holding every agent id.
+  Recipients are drawn only from the scenario's population or from
+  never-created ids, so agents beyond the population change nothing."
+  [base {::keys [population-size chain-limit commands]}]
   (let [population (subvec agent-ids 0 population-size)]
-    (test-support/with-database
-      (fn [connection]
-        (test-support/transacted! connection (test-support/agents-tx @connection population))
-        (second
-         (reduce
-          (fn [[model valid?] [command-index command]]
-            (let [[next-model step-valid?]
-                  (execute-command! connection model command command-index)]
-              [next-model (and valid? step-valid?)]))
-          [{::population population
-            ::chain-limit chain-limit
-            ::messages {}
-            ::message-order []}
-           true]
-          (map-indexed vector commands)))))))
+    (second
+     (reduce
+      (fn [[model valid? database] [command-index command]]
+        (let [[next-model step-valid? after]
+              (execute-command! database model command command-index)]
+          [next-model (and valid? step-valid?) after]))
+      [{::population population
+        ::chain-limit chain-limit
+        ::messages {}
+        ::message-order []}
+       true
+       base]
+      (map-indexed vector commands)))))
 
 (deftest generated-message-histories-preserve-identity-fanout-and-depth
-  (test-support/assert-check!
-   (tc/quick-check
-    60
-    (prop/for-all [scenario message-scenario-generator]
-      (generated-history-agrees-with-database? scenario))
-    :seed 202607280501)
-   "Generated message history diverged from durable facts."))
+  ;; The world is prepared once (every agent, one commit); each trial folds
+  ;; its commands over database VALUES with the writer's checks
+  ;; (`seon.db/with`), so trials share that read and never see each other's
+  ;; writes. A committed fixture branch per trial cost ~350 ms each (branch
+  ;; acquisition ~34 ms, ~50 ms per commit; JVM profile, tests-0627r:
+  ;; 20,980 ms for 60 trials).
+  (test-support/with-database
+    (fn [connection]
+      (test-support/transacted! connection (test-support/agents-tx @connection agent-ids))
+      (let [base @connection]
+        (is (= #{} (set (keys (actual-messages base))))
+            "the prepared world holds no message the model does not know")
+        (test-support/assert-check!
+         (tc/quick-check
+          60
+          (prop/for-all [scenario message-scenario-generator]
+            (generated-history-agrees-with-database? base scenario))
+          :seed 202607280501)
+         "Generated message history diverged from durable facts.")))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Delivery IS the wake — asserted from the direction that can break
@@ -580,17 +599,13 @@
       (is (nil? (message/trigger @connection "no-such-run"))))))
 
 (deftest a-non-temporal-run-retains-its-trigger-without-a-transaction-entity
-  (let [configuration {:store {:backend :memory :id (random-uuid)}
-                       :keep-history? false
-                       :schema-flexibility :write}
-        _ (d/create-database configuration)
-        connection (d/connect configuration)]
-    (try
-      (test-support/transacted!
-                   connection
-                   (schema.datahike/malli->datahike-schema-in (seon.schema/handed-projection) (schema/canonical-database-attributes (seon.schema/handed-projection))))
-      ;; A raw history-off store has no fixture cluster, so the agent comes
-      ;; from the creation writer itself (branch from the store's own config).
+  ;; The canonical fresh store (installed attributes, carried projection) with
+  ;; history off. It has no fixture cluster, so the agent comes from the
+  ;; creation writer itself (its branch from the store's own config).
+  (test-support/with-database
+    {:seon.test-support/fresh-store? true :seon.test-support/keep-history? false}
+    (fn [connection]
+      (is (false? (get-in @connection [:config :keep-history?])))
       (test-support/transacted! connection (cluster.agent/creation-tx
                                             {:seon.agent/id "alice" :seon.ns/name 'my.agents.alice
                                              :seon.cluster/name "fixture"}))
@@ -604,10 +619,7 @@
         (is (nil? (db/pull @connection '[*] transaction))
             "the HISTORY-OFF database has no transaction entity")
         (is (= "m-0" (message/trigger @connection "r-1"))
-            "the run's ordinary trigger ref survives independently"))
-      (finally
-        (d/release connection)
-        (d/delete-database configuration)))))
+            "the run's ordinary trigger ref survives independently")))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; THE CLASS-KILLER: the polite infinite conversation terminates
