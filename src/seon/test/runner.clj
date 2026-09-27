@@ -23,6 +23,7 @@
             [seon.program :as program]
             [seon.render :as render]
             [seon.render.value :as value]
+            [seon.sci.admit :as admit]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn])
   (:import (java.nio.charset StandardCharsets)))
@@ -1247,12 +1248,26 @@
                       (assoc size-key size blob-key (:seon.blob/digest write))))
                 (assoc failure size-key size)))
             failure))
+        ;; THE STORED ERROR IS ADMITTED, NEVER PRINTED WHOLE: its ex-data may
+        ;; name an offending value that is an endless lazy sequence (a refused
+        ;; render of `(map f (iterate inc 0))`), and `pr-str` realized it until
+        ;; default died of OutOfMemoryError (2026-09-27, value-test
+        ;; ai-realizes-only-the-members-it-prints). Admission emits EDN under
+        ;; the storage bound and stops there; over it, the marker is stored.
+        admission-caps
+        (into {} (map (fn [cap] [cap (db/q '[:find ?n . :in $ ?a :where [_ ?a ?n]] database cap)]))
+              [:seon.config.eval.result/max-bytes :seon.config.eval.result/max-source])
         whole-actual
         (fn [failure thrown]
-          (let [write (blob/stage! connection
-                                   (pr-str (seon.error.refusal/diagnostic
-                                            (java.util.Date.) :seon.test/execution `failure-report
-                                            {:seon.error/throwable thrown})))]
+          (let [admitted (admit/admit {:seon.sci.admit/value
+                                       (seon.error.refusal/diagnostic
+                                        (java.util.Date.) :seon.test/execution `failure-report
+                                        {:seon.error/throwable thrown})
+                                       :seon.sci.admit/interrupt-fn (constantly nil)
+                                       :seon.sci.admit/caps admission-caps})
+                write (blob/stage! connection
+                                   (or (:seon.sci.admit/edn admitted)
+                                       (admit/canonical-edn (admit/missing-marker admitted))))]
             (vswap! staged conj write)
             (-> failure
                 (with-meta nil)
