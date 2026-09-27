@@ -12,15 +12,20 @@
             [sci.core :as sci]
             [seon.ai.tokens :as tokens]
             [seon.config :as config]
+            [seon.db :as db]
             [seon.schema :as schema]
             [seon.error :as error]
             [seon.sci.eval :as eval]
-            [seon.sci.kernel :as kernel]))
+            [seon.sci.kernel :as kernel]
+            [seon.test-support :as test-support]))
 
 (defn- evaluate
-  "One evaluation through the agent's evaluate path in `ctx`."
+  "One evaluation through the agent's evaluate path in `ctx`, against the
+  executing member's database: an agent's evaluation always has one, and its
+  shown value renders a `:seon.render/unit`, which requires it."
   [ctx source time-limit-ms]
-  (eval/evaluate {:seon.schema/projection (schema/handed-projection)
+  (eval/evaluate {:seon.db/db (db/db (:seon.db/connection (test-support/execution-handle nil)))
+                  :seon.schema/projection (schema/handed-projection)
                   :seon.cluster.eval/source source
                   :seon.sci.admit/caps (config/result-caps config/defaults)
                   :seon.sci.eval/time-limit-ms time-limit-ms

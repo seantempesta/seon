@@ -838,3 +838,15 @@ Landed in c9b9fb2d2 (tests only; +122/−80):
   values with no `:seon.error/declared-schema` metadata; the recorder now runs armed.
 - program-change: seeds are a set.
 - Checks: lint of HEAD+diff from the archive has 0 errors, and the contracts compile of the 5 files gives [] in 81 ms.
+
+## Resume 21 — kernel/eval tests and the unit's required database
+
+The entry that renders with no database is `seon.sci.eval/evaluate` on a ctx with no custody (`eval/base-ctx db`,
+`build-base-ctx`) and a request naming no `:seon.db/db`. `shown-result` then hands `render.value/prepare` a unit
+without a database. Reproduced at default on 74a46362a: `"(/ 1 0)"` on `(eval/base-ctx db)` throws the unit refusal,
+and the same request with `:seon.db/db` evaluates. The throw also breaks the total REPL path; that is logged as a task
+in `tmp/perf-boot-opus/tasks-3.edn` for shrink-eval, which holds eval.clj.
+
+- kernel-test: its `evaluate` helper passes the executing member's database (committed).
+- eval-test (held by shrink-eval): `tmp/perf-boot-opus/eval-test-member-db.patch` does the same in `run-in`, which
+  also covers `run`, `deadlined-in` and `deadlined`. The 10 direct `eval/evaluate` requests need the same key.
