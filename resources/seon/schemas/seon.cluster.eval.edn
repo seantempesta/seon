@@ -61,6 +61,9 @@
                      [:seon.eval/shown-tokens {:optional true} :seon.eval/shown-tokens]
                      [:seon.eval/elisions {:optional true} :seon.eval/elisions]
                      [:seon.eval/full {:optional true} :seon.eval/full]
+                     [:seon.eval/unadmitted {:optional true} :seon.eval/unadmitted]
+                     [:seon.eval/replaced {:optional true} :seon.eval/replaced]
+                     [:seon.eval/ungeneratable {:optional true} :seon.eval/ungeneratable]
                      [:seon.print/length
                       {:optional true}
                       :seon.print/length]

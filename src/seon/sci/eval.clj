@@ -1019,18 +1019,14 @@
         (throw (ex-info (:seon.error/message unavailable) unavailable failure))
         (throw failure)))))
 
-(defn- unadmitted-notice
-  "The loud line for the functions and tests a failed form defined: a failed
-  evaluation admits nothing, so each stays a private definition of this
-  context with no program row. Nil when it defined none."
-  {:malli/schema [:=> [:cat [:maybe [:map-of :qualified-symbol :map]]] [:maybe :string]]}
+(defn- unadmitted-definitions
+  "The functions and tests a failed form defined: a failed evaluation admits
+  nothing, so each stays a private definition of this context with no program
+  row. Recorded as data (`:seon.eval/unadmitted`); the declared bound
+  (`:seon.config.eval/bounds`) makes it a finding in the reply map."
+  {:malli/schema [:=> [:cat [:maybe [:map-of :qualified-symbol :map]]] [:set :qualified-symbol]]}
   [definitions]
-  (when-let [names (seq (sort-by str (keep (fn [[qualified entry]]
-                                             (when (program-value? entry) qualified))
-                                           definitions)))]
-    (str ";; NOT ADMITTED: this form failed, so " (str/join ", " names)
-         " stayed a private definition with no program row (no tests, no merge)."
-         " Evaluate the definition again once its form succeeds.")))
+  (into (sorted-set) (keep (fn [[qualified entry]] (when (program-value? entry) qualified))) definitions))
 
 (defn- top-level-do?
   "Whether `form` is a `do`, whose children a top-level evaluation treats as
@@ -4128,6 +4124,24 @@
                     (catch Throwable _ (render.value/bounded-text diagnostics)))))
       record (assoc :seon.sci.admit/record record))))
 
+(defn shown-failure
+  "A failure's shown result: its small error map (`seon.error/reply-value`)
+  printed as data by the floor, while its handle and value stay the whole
+  error. A failure has no value size, so no value-size finding fires on it."
+  {:malli/schema [:=> [:cat :map :seon.sci.eval/shown-request [:maybe :seon.sci.admit/record]]
+                  :seon.sci.eval/shown]}
+  [error request record]
+  (let [ctx (:seon.sci.eval/ctx request)
+        handle (:seon.repl/handle request)
+        shown (shown-result (error/reply-value error)
+                            (assoc request :seon.render.value/options
+                                   {:seon.render.value/structural? true})
+                            record)]
+    (when (and ctx handle) (bind-result! ctx handle error))
+    (-> (apply dissoc shown [:seon.eval/value-tokens :seon.eval/shown-tokens
+                             :seon.eval/elisions :seon.eval/full])
+        (assoc :seon.sci.admit/value error))))
+
 (def ^:private value-size-keys
   "The shown value's recorded size, carried from `shown-result` to the
   evaluation and settled onto its receipt."
@@ -4144,7 +4158,9 @@
     restore! :seon.sci.eval/restore
     row :seon.program/row
     duration-ms :seon.eval/duration-ms
-    acquisition-ms :seon.eval/acquisition-ms}]
+    acquisition-ms :seon.eval/acquisition-ms
+    replaced :seon.eval/replaced
+    ungeneratable :seon.eval/ungeneratable}]
   (cond-> (cond-> {:seon.print/options print-options
                    :seon.cluster.eval/ns [:seon.ns/name namespace-name]
                    :seon.sci.eval/ending-ns ending-namespace
@@ -4166,6 +4182,8 @@
     ;; Allocation is the kernel's measurement, kept instead of dropped.
     :always (assoc :seon.eval/duration-ms duration-ms)
     (pos? acquisition-ms) (assoc :seon.eval/acquisition-ms acquisition-ms)
+    (seq replaced) (assoc :seon.eval/replaced replaced)
+    (seq ungeneratable) (assoc :seon.eval/ungeneratable ungeneratable)
     :always (merge (select-keys admitted value-size-keys))
     (pos? (get-in admitted [:seon.sci.admit/record :seon.eval/allocated-bytes] -1))
     (assoc :seon.eval/allocated-bytes
@@ -4187,6 +4205,7 @@
     record :seon.sci.admit/record
     value :seon.sci.admit/value
     interrupted-at :seon.cluster.eval/interrupted-at
+    unadmitted :seon.eval/unadmitted
     :as request}]
   (cond-> (cond-> {:seon.print/options print-options
                    :seon.cluster.eval/ns [:seon.ns/name namespace-name]
@@ -4209,6 +4228,7 @@
     (seq definitions) (assoc :seon.sci.eval/bindings definitions)
     (contains? request :seon.cluster.eval/interrupted-at)
     (assoc :seon.cluster.eval/interrupted-at interrupted-at)
+    (seq unadmitted) (assoc :seon.eval/unadmitted unadmitted)
     (or (seq output-prefix) (seq (str printed)))
     (assoc :seon.cluster.eval/output
            (evaluation-output output-prefix printed))))
@@ -4459,7 +4479,7 @@
         ending-namespace (volatile! namespace-name)
         print-options (volatile! {})
         session-observation (volatile! nil)
-        replaced-notice (volatile! nil)
+        replaced (volatile! nil)
         projection-state
         (or (::projection-state evaluation-ctx)
             (atom {:seon.schema/projection
@@ -4554,14 +4574,10 @@
                 ;; (owner 2026-09-27: "return data, not comments"): the floor
                 ;; prints the error map structurally, message, class, location
                 ;; and cause chain, bounded like any value, never a prose face.
-                admitted (shown-result value (assoc request :seon.render.call/function
-                                                    'seon.sci.kernel/failure-value
-                                                    :seon.render.value/options
-                                                    {:seon.render.value/structural? true})
-                                       record)]
+                admitted (shown-failure value request record)
+                unadmitted (unadmitted-definitions definitions)]
           (failed-evaluation
-           (cond-> {:seon.sci.eval/output-prefix (unadmitted-notice definitions)
-                    :seon.sci.eval/admitted admitted
+           (cond-> {:seon.sci.eval/admitted admitted
                     :seon.sci.admit/caps caps
                     :seon.sci.eval/printed printed
                     :seon.sci.eval/namespace-name namespace-name
@@ -4574,7 +4590,8 @@
              ;; presence IS the interrupted state; there is no label.
              (= :time (:seon.eval/outcome record))
              (assoc :seon.cluster.eval/interrupted-at
-                    (java.util.Date.))))))]
+                    (java.util.Date.))
+             (seq unadmitted) (assoc :seon.eval/unadmitted unadmitted)))))]
        (try
         (kernel/with-arm
        evaluation-ctx time-limit-ms
@@ -4603,14 +4620,12 @@
                     (throw (ex-info "SCI acquisition could not record a row fault." failure)))
                   (when (::base-ctx evaluation-ctx)
                     (regenerate-agent-context! evaluation-ctx base))
-                  ;; Say so loudly: the program advanced over these.
-                  (when-let [replaced (seq (replaced-definitions
-                                            before-snapshot
-                                            @(::kernel/program-snapshot evaluation-ctx) own))]
-                    (vreset! replaced-notice
-                             (str ";; PROGRAM CHANGE replaced your definition of "
-                                  (str/join ", " replaced)
-                                  " with its changed program row; re-evaluate yours to redefine it.")))))))
+                  ;; Recorded as data (:seon.eval/replaced): the program advanced
+                  ;; over these; a declared bound makes it a finding.
+                  (when-let [over (not-empty (replaced-definitions
+                                              before-snapshot
+                                              @(::kernel/program-snapshot evaluation-ctx) own))]
+                    (vreset! replaced over))))))
           (when-let [failure (first (:seon.test/acquisition-refusals
                                     (acquired-program evaluation-ctx)))]
             (throw (ex-info "SCI program acquisition refused a declaration." failure)))
@@ -4825,13 +4840,11 @@
            {:seon.sci.eval/admitted admitted
             :seon.sci.admit/caps caps
             :seon.sci.eval/printed printed
-            :seon.sci.eval/output-prefix
-            (str/join "\n"
-                      (remove str/blank?
-                               [output-prefix
-                                @replaced-notice
-                                (when row
-                                  (accretion/non-generatable-advisory row))]))
+            :seon.sci.eval/output-prefix output-prefix
+            :seon.eval/replaced @replaced
+            :seon.eval/ungeneratable (when (and row (:seon.schema/key row)
+                                                (false? (:seon.schema/generatable? row)))
+                                       #{(:seon.schema/key row)})
             :seon.sci.eval/namespace-name namespace-name
             :seon.sci.eval/ending-namespace @ending-namespace
             :seon.print/options @print-options
@@ -4902,12 +4915,13 @@
   [request evaluation refusal]
   (when-let [unavailable ((:seon.sci.eval/restore evaluation) nil (ex-info (:seon.error/message refusal) refusal))]
     (throw (ex-info (:seon.error/message unavailable) unavailable)))
-  (merge (dissoc evaluation :seon.program/row :seon.sci.eval/bindings :seon.eval/renderer)
-         ;; A refusal is shown as data, like the agent's own failure.
-         (shown-result refusal (assoc request :seon.render.value/options
-                                      {:seon.render.value/structural? true})
-                       (assoc (:seon.sci.admit/record evaluation)
-                              :seon.eval/outcome :error))))
+  (merge (dissoc evaluation :seon.program/row :seon.sci.eval/bindings :seon.eval/renderer
+                 :seon.eval/value-tokens :seon.eval/shown-tokens :seon.eval/elisions :seon.eval/full
+                 :seon.eval/replaced :seon.eval/ungeneratable)
+         ;; A refusal is its small error map as data, like the agent's own failure.
+         (shown-failure refusal request
+                        (assoc (:seon.sci.admit/record evaluation)
+                               :seon.eval/outcome :error))))
 
 (defn- candidate-test-result
   [test-symbol evaluation]

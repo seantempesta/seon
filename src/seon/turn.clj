@@ -168,7 +168,9 @@
       (assoc :seon.eval/allocated-bytes (:seon.eval/allocated-bytes evaluation))
       ;; The shown value's size (whole estimate, shown, cuts, full opt-in).
       :always (merge (select-keys evaluation [:seon.eval/value-tokens :seon.eval/shown-tokens
-                                              :seon.eval/elisions :seon.eval/full]))
+                                              :seon.eval/elisions :seon.eval/full
+                                              :seon.eval/unadmitted :seon.eval/replaced
+                                              :seon.eval/ungeneratable]))
       ;; A FORM'S OWN `set!` OF *print-length* / *print-level*. Captured
       ;; while sci's binding is still installed (`sci/eval.clj` print-options
       ;; volatile), it is what the response must print the value under.
@@ -1445,6 +1447,9 @@
    :seon.eval/shown-tokens
    :seon.eval/elisions
    :seon.eval/full
+   :seon.eval/unadmitted
+   :seon.eval/replaced
+   :seon.eval/ungeneratable
    :seon.print/length
    :seon.print/level
    :seon.test.accretion/gate-test-count
@@ -3926,7 +3931,8 @@
                     (:seon.eval/shown (final-shown cluster database agent-id [value] structural)))
              (not evaluated?)
              (assoc :seon.eval/shown
-                    (:seon.eval/shown (final-shown cluster database agent-id value structural))))))]
+                    (:seon.eval/shown (final-shown cluster database agent-id
+                                                   (error/reply-value value) structural))))))]
     {:seon.error/value value
      :seon.blob/staged-writes (:seon.blob/staged-writes recording)
      :seon.db/tx-data
@@ -5076,10 +5082,9 @@
                   ;; The refusal replaces a printed result: the one print
                   ;; owner renders it, and its render reads stay the form's.
                   (merge unrun (binding [db/*read-evidence-sink* captured]
-                                 (sci.eval/shown-result (:seon.sci.admit/value unrun)
-                                                        (assoc request :seon.render.value/options
-                                                               {:seon.render.value/structural? true})
-                                                        (:seon.sci.admit/record unrun)))))
+                                 (sci.eval/shown-failure (:seon.sci.admit/value unrun)
+                                                         request
+                                                         (:seon.sci.admit/record unrun)))))
                 evaluation)
               evaluation
               (merge (select-keys source [:seon.eval/origin])

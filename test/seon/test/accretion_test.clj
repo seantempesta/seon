@@ -116,7 +116,7 @@
     (is (false? (accretion/generatable?
                  [:fn {:error/message "must be an integer"} int?])))))
 
-(deftest schema-rows-record-the-derived-fact-and-teaching-advisory
+(deftest schema-rows-record-the-derived-generatable-fact
   (let [generatable
         (accretion/schema-row
          {:fixture/token [:re #"[a-z]+"]}
@@ -126,10 +126,11 @@
         {:seon.schema/key :fixture/custody
          :seon.schema/form "[:fn fixture/custody?]"
          :seon.schema/generatable? false}]
+    ;; The fact is data; an evaluation that admits a non-generatable schema
+    ;; records it (:seon.eval/ungeneratable) and a declared bound makes it a
+    ;; finding in the reply map, never :out prose.
     (is (true? (:seon.schema/generatable? generatable)))
-    (is (nil? (accretion/non-generatable-advisory generatable)))
-    (is (= "Schema :fixture/custody has no Malli generator; functions using it will skip auto-check."
-           (accretion/non-generatable-advisory non-generatable)))))
+    (is (false? (:seon.schema/generatable? non-generatable)))))
 
 (deftest one-gate-set-query-includes-edges-subjects-and-pending-tests
   (test-support/with-database

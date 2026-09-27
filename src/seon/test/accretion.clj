@@ -63,15 +63,6 @@
                  false
                  (throw failure)))))))
 
-(defn non-generatable-advisory
-  "One teaching line for an admitted schema that cannot generate values."
-  {:malli/schema [:=> [:cat :map] [:maybe :string]]}
-  [row]
-  (when (and (:seon.schema/key row)
-             (false? (:seon.schema/generatable? row)))
-    (str "Schema " (:seon.schema/key row)
-         " has no Malli generator; functions using it will skip auto-check.")))
-
 (defn data-contract!
   "Refuse function objects before a durable contract is printed as EDN."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary

@@ -1814,6 +1814,21 @@
                      {:entity (pr-str [:seon.error/id id])
                       :offset "0"}))
 
+(defn reply-value
+  "The small error map a reply's `:error` holds: what an agent acts on, as
+  data (owner 2026-09-27: render functions and data). The failure's own
+  message (its first cause link's, not the clojure.main wrapper that repeats
+  class and location), its class, the agent's own frames, and for a refusal
+  the member, expected shape and fix. The whole error stays retrievable
+  through the evaluation's result handle."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [error]
+  (let [cause (first (:seon.error/chain error))]
+    (cond-> (select-keys error [:seon.error/exception-class :seon.sci.eval/stacktrace
+                                :seon.error/member :seon.error/expected :seon.error/fix])
+      (or (:seon.error/message cause) (:seon.error/message error))
+      (assoc :seon.error/message (or (:seon.error/message cause) (:seon.error/message error))))))
+
 (defn render-ai
   "Render the flat error value, preserving its recorded diagnostic data."
   {:malli/schema [:=> [:cat :seon.render/unit] [:string {:min 1}]]}
