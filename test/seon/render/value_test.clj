@@ -1158,6 +1158,17 @@
       (let [cut (first (tree-cuts (value/prepare (probe-unit {:body (apply str (repeat 5000 "ab"))}))))]
         (is (= 'subs (first (:seon.print/continuation cut))))
         (is (= '(get-in result/e0123456789ab [:body]) (second (:seon.print/continuation cut))))))
+    (clojure.test/testing "the root's own cut is a valid continuation for a seq, a string and a map (live 2026-09-27: the armed contract refused the bare handle)"
+      (is (= 'result/e0123456789ab
+             (print/continuation {:seon.print/requery-id 'result/e0123456789ab :seon.print/elision-unit :children
+                                  :seon.render.data/path [] :seon.render.data/next-offset 0}))
+          "a whole collection at the root is read by its handle")
+      (is (str/includes? (value/render-ai (probe-unit (vec (range 3000)))) "…2997 (drop 3 result/e0123456789ab)]"))
+      (is (str/includes? (value/render-ai (probe-unit (apply str (repeat 5000 "ab"))))
+                         " (subs result/e0123456789ab "))
+      (let [text (value/render-ai (probe-unit (into (sorted-map) (map (fn [i] [i i])) (range 10))))]
+        (is (str/includes? text "…7 result/e0123456789ab}") text)
+        (is (not (str/includes? text "renderer failed")) text)))
     (clojure.test/testing "seon.print/full prints the value whole and says so"
       (let [whole (value/prepare (probe-unit (print/full raw)))]
         (is (:seon.render.value/full? whole))

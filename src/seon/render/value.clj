@@ -623,7 +623,7 @@
   from the next offset for a sequence or string; the whole collection for a
   map or set, whose shown order is not its iteration order, so `drop` would
   not name the rest. Nil without a source, and for a long keyword or symbol."
-  {:malli/schema [:=> [:cat :map] [:maybe [:sequential :seon.schema/value]]]}
+  {:malli/schema [:=> [:cat :map] [:maybe :seon.print/continuation]]}
   [node]
   (when (and (:requery-id node) (not= :name (:kind node)))
     (print/continuation

@@ -309,8 +309,9 @@
              :requery-refusal [:string {:min 1}],
              :full [:boolean {:description "Metadata seon.print/full puts on a value: this evaluation prints it whole, with no budget and no structural bound."}],
              :continuation
-             [:sequential {:description "The copyable plain-Clojure form (seon.print/continuation) that reads what one cut omitted from its next offset, e.g. (drop 32 result/e7b3); printed after the cut's marker."}
-              :seon.schema/value],
+             [:or {:description "The copyable plain-Clojure form (seon.print/continuation) that reads what one cut omitted from its next offset, e.g. (drop 32 result/e7b3); printed after the cut's marker. A whole collection at the root is the handle symbol itself (result/e7b3)."}
+              :symbol
+              [:sequential :seon.schema/value]],
              ; A cut's expander: the continuation URL at its path and next offset.
              :href [:string {:min 1}],
              :bound-by :qualified-keyword,

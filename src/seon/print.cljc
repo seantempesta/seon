@@ -307,11 +307,12 @@
   offset: `(drop n …)` for members, `(subs … n)` for characters, over the
   cut's path reached with plain `get-in` when every step is a key or index
   and with `seon.print/value-at` when a step is typed. Nil when the cut has no
-  source to read from (its `::requery-refusal` says why).
+  source to read from (its `::requery-refusal` says why). A cut of a whole
+  collection at the root is the handle itself, a symbol, which reads it all.
 
       (drop 32 result/e7b3)
       (subs (get-in result/e7b3 [:rows 0 :title]) 16)"
-  {:malli/schema [:=> [:cat :map] [:maybe [:sequential :seon.schema/value]]]}
+  {:malli/schema [:=> [:cat :map] [:maybe :seon.print/continuation]]}
   [{::keys [requery-id elision-unit] path :seon.render.data/path
     next-offset :seon.render.data/next-offset}]
   (when-let [source (requery-source requery-id)]
