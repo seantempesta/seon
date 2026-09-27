@@ -366,7 +366,11 @@
                         :seon.cluster.eval/output (apply str (repeat 400 "noisy line\n")))
             lines (str/split-lines (repl/response slow))]
         (is (= 3 (count lines)))
-        (is (str/starts-with? (first lines) ";; :seon.eval/duration-ms 1450 is over its bound [:<= 1000]: "))
-        (is (str/starts-with? (second lines) ";; :seon.repl/out-tokens "))
-        (is (str/starts-with? (peek lines) "#:seon.repl{:value 2"))
-        (is (every? #(re-find #": \S" %) (butlast lines)) "every finding carries its declared fix")))))
+        (is (str/starts-with? (first lines) ";; SLOW: 1450 ms, over one second"))
+        (is (str/starts-with? (second lines) ";; LARGE OUTPUT: ~"))
+        (is (str/starts-with? (peek lines) "#:seon.repl{:value 2"))))
+    (testing "a value over the whole-value bound names its handle, its whole and shown size"
+      (is (= [";; LARGE VALUE: result/ee5885 is ~4650 tokens whole (shown 30). A value this big usually means a query or function returns more than it should."]
+             (repl/findings (assoc emission :seon.eval/value-tokens 4650 :seon.eval/shown-tokens 30))))
+      (is (= [] (repl/findings (assoc emission :seon.eval/value-tokens 900 :seon.eval/shown-tokens 900)))
+          "within the bound the value is simply shown"))))

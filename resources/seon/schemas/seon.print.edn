@@ -228,6 +228,7 @@
                  {:optional true}
                  :seon.print/bound-by]
                 [:seon.print/requery-form {:optional true} :seon.print/requery-form]
+                [:seon.print/continuation {:optional true} :seon.print/continuation]
                 [:seon.print/requery-id
                  {:optional true}
                  :seon.print/requery-id]
@@ -287,9 +288,6 @@
                         :gen/elements [nil 0 1 8 32]}
                :seon.print/level]]
               [:seon.print/width {:optional true} :seon.print/width]
-              [:seon.print/rendered-token-ceiling
-               {:optional true}
-               :seon.print/rendered-token-ceiling]
               [:seon.print/namespace-maps?
                {:optional true}
                :seon.print/namespace-maps?]
@@ -309,6 +307,10 @@
              [:sequential {:description "Executable Clojure form retrieving the omitted value."}
               :seon.schema/value],
              :requery-refusal [:string {:min 1}],
+             :full [:boolean {:description "Metadata seon.print/full puts on a value: this evaluation prints it whole, with no budget and no structural bound."}],
+             :continuation
+             [:sequential {:description "The copyable plain-Clojure form (seon.print/continuation) that reads what one cut omitted from its next offset, e.g. (drop 32 result/e7b3); printed after the cut's marker."}
+              :seon.schema/value],
              ; A cut's expander: the continuation URL at its path and next offset.
              :href [:string {:min 1}],
              :bound-by :qualified-keyword,
@@ -323,6 +325,7 @@
               [:seon.print/prefix {:optional true} :seon.print/prefix]
               [:seon.print/bound-by {:optional true} :seon.print/bound-by]
               [:seon.print/requery-form {:optional true} :seon.print/requery-form]
+              [:seon.print/continuation {:optional true} :seon.print/continuation]
                 [:seon.print/requery-id
                {:optional true}
                :seon.print/requery-id]
@@ -401,10 +404,4 @@
               true
               false],
              :width [:int {:min 0, :seon.print/default 72}],
-             ;; THE BUDGET IS CHOSEN BY PROVENANCE (owner 2026-09-26). Text a
-             ;; declared AI render function produced is its deliberate first
-             ;; bound: the floor lays it out whole and cuts it only beyond this
-             ;; ceiling. Raw values keep the profile's token budget, length and
-             ;; level. Unit: estimated tokens (`seon.ai.tokens/estimate`).
-             :rendered-token-ceiling [:int {:min 1, :seon.config/dial true, :seon.config/optional true, :seon.print/default 50000}],
              :unknown-kind [:maybe :keyword]}

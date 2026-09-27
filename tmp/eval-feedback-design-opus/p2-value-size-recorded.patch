@@ -1,0 +1,172 @@
+diff --git a/resources/seon/schemas/seon.cluster.eval.edn b/resources/seon/schemas/seon.cluster.eval.edn
+index 050c1a5eb..1bfa01be1 100644
+--- a/resources/seon/schemas/seon.cluster.eval.edn
++++ b/resources/seon/schemas/seon.cluster.eval.edn
+@@ -57,6 +57,10 @@
+                       :seon.eval/duration-ms]
+                      [:seon.eval/acquisition-ms {:optional true} :seon.eval/acquisition-ms]
+                      [:seon.eval/allocated-bytes {:optional true} :seon.eval/allocated-bytes]
++                     [:seon.eval/value-tokens {:optional true} :seon.eval/value-tokens]
++                     [:seon.eval/shown-tokens {:optional true} :seon.eval/shown-tokens]
++                     [:seon.eval/elisions {:optional true} :seon.eval/elisions]
++                     [:seon.eval/full {:optional true} :seon.eval/full]
+                      [:seon.print/length
+                       {:optional true}
+                       :seon.print/length]
+diff --git a/resources/seon/schemas/seon.eval.edn b/resources/seon/schemas/seon.eval.edn
+index f712dbee0..1d0b4b7ef 100644
+--- a/resources/seon/schemas/seon.eval.edn
++++ b/resources/seon/schemas/seon.eval.edn
+@@ -36,6 +36,10 @@
+             :acquisition-ms [:int {:min 0 :seon.wake/context-inert true :description "Milliseconds of Seon's own SCI program acquisition inside one evaluation's arm, excluded from :seon.eval/duration-ms (the agent's reply time) and recorded beside it."}],
+             :fn-entries [:and {:seon.wake/context-inert true} :int],
+             :allocated-bytes [:and {:seon.wake/context-inert true} :int],
++            :value-tokens [:int {:min 0 :seon.wake/context-inert true :description "Estimated tokens of the evaluation's whole value, from the floor's cut counts (seon.render.value/whole-characters), never a second print. Past :seon.config.eval/bounds the reply says LARGE VALUE."}],
++            :shown-tokens [:int {:min 0 :seon.wake/context-inert true :description "Estimated tokens of the evaluation's shown text."}],
++            :elisions [:int {:min 0 :seon.wake/context-inert true :description "How many cuts the floor made showing the evaluation's value; the data that says whether the token budget elides too often."}],
++            :full [:boolean {:seon.wake/context-inert true :description "The evaluation opted into printing its value whole (seon.print/full)."}],
+             :outcome [:enum {:seon.wake/context-inert true} :ok :time :error],
+             :shown
+             [:string
+diff --git a/resources/seon/schemas/seon.sci.eval.edn b/resources/seon/schemas/seon.sci.eval.edn
+index a0a281c5e..9e84391b0 100644
+--- a/resources/seon/schemas/seon.sci.eval.edn
++++ b/resources/seon/schemas/seon.sci.eval.edn
+@@ -125,6 +125,10 @@
+                          :seon.schema.admission/reason "The printed value is any evaluated or replacing value."
+                          :gen/elements [nil false 0 "" :k [] {}]}]]
+                  [:seon.eval/shown :seon.eval/shown]
++                 [:seon.eval/shown-tokens {:optional true} :seon.eval/shown-tokens]
++                 [:seon.eval/value-tokens {:optional true} :seon.eval/value-tokens]
++                 [:seon.eval/elisions {:optional true} :seon.eval/elisions]
++                 [:seon.eval/full {:optional true} :seon.eval/full]
+                  [:seon.eval/renderer {:optional true} :seon.eval/renderer]
+                  [:seon.cluster.eval/diagnostics {:optional true} :seon.cluster.eval/diagnostics]
+                  [:seon.sci.admit/record {:optional true} :seon.sci.admit/record]],
+diff --git a/src/seon/render/transcript.clj b/src/seon/render/transcript.clj
+index bc859c55c..f81add270 100644
+--- a/src/seon/render/transcript.clj
++++ b/src/seon/render/transcript.clj
+@@ -289,6 +289,8 @@
+      ::comment (:seon.cluster.eval/comment receipt)
+      ::duration-ms (:seon.eval/duration-ms receipt)
+      ::allocated-bytes (:seon.eval/allocated-bytes receipt)
++     ::value-tokens (:seon.eval/value-tokens receipt)
++     ::shown-tokens (:seon.eval/shown-tokens receipt)
+      ::print-length (:seon.print/length receipt)
+      ::print-level (:seon.print/level receipt)
+      ::ending-ns (:seon.sci.eval/ending-ns receipt)
+@@ -492,6 +494,8 @@
+                                    (::duration-ms entry))
+       (::allocated-bytes entry) (assoc :seon.eval/allocated-bytes
+                                        (::allocated-bytes entry))
++      (::value-tokens entry) (assoc :seon.eval/value-tokens (::value-tokens entry))
++      (::shown-tokens entry) (assoc :seon.eval/shown-tokens (::shown-tokens entry))
+       (::branch-errors-text entry) (assoc :seon.repl/errors
+                                           (::branch-errors-text entry)))))
+ 
+diff --git a/src/seon/render.clj b/src/seon/render.clj
+index 2f7a8f529..110180e69 100644
+--- a/src/seon/render.clj
++++ b/src/seon/render.clj
+@@ -78,8 +78,7 @@
+           (:seon.db/invalid-read effective)
+           (:seon.schema/expected-value effective))
+     effective
+-    (cond->
+-     {:seon.render.profile/id :seon.render.profile/agent
++    {:seon.render.profile/id :seon.render.profile/agent
+       :seon.render.profile/token-budget
+       (:seon.config.render.agent/token-budget effective)
+       :seon.render.profile/max-depth
+@@ -87,12 +86,7 @@
+       :seon.render.profile/max-children
+       (:seon.config.render.agent/max-children effective)
+       :seon.render.profile/composition
+-      (:seon.config.render.agent/composition effective)}
+-      ;; The provenance ceiling (the floor's selection); absent before a store
+-      ;; adopts the dial, and then fit uses its declared default.
+-      (:seon.print/rendered-token-ceiling effective)
+-      (assoc :seon.print/rendered-token-ceiling
+-             (:seon.print/rendered-token-ceiling effective)))))
++      (:seon.config.render.agent/composition effective)}))
+ 
+ (def ^:private default-agent-profile
+   (delay (agent-render-profile config/defaults)))
+diff --git a/src/seon/sci/eval.clj b/src/seon/sci/eval.clj
+index ff5082d43..c8d6bd5ed 100644
+--- a/src/seon/sci/eval.clj
++++ b/src/seon/sci/eval.clj
+@@ -129,6 +129,7 @@
+             [seon.instrument :as instrument]
+             [seon.program :as program]
+             [seon.render :as render]
++            [seon.ai.tokens :as tokens]
+             [seon.render.value :as render.value]
+             [seon.schema :as schema]
+             [seon.schema.edn :as schema.edn]
+@@ -4073,15 +4074,32 @@
+         shown (if (contains? projection :seon.render.value/root-description) projection
+                   (or (:seon.render.value/value-text projection)
+                       (render.value/render-ai-data projection)))
+-        failures (into failures (:seon.render.value/diagnostics projection))]
++        failures (into failures (:seon.render.value/diagnostics projection))
++        shown (if (string? shown) shown (pr-str shown))]
++    ;; THE VALUE'S SIZE IS RECORDED BESIDE ITS SHOWN TEXT: the whole value's
++    ;; estimated tokens from the floor's own cut counts (never a second print),
++    ;; the shown tokens, how many cuts it made, and an explicit
++    ;; `seon.print/full` opt-in. Queryable; shown only past a declared bound.
+     (cond-> {:seon.sci.admit/value value
+-             :seon.eval/shown (if (string? shown) shown (pr-str shown))}
++             :seon.eval/shown shown
++             :seon.eval/shown-tokens (tokens/estimate shown)}
++      (int? (:seon.render.value/whole-characters projection))
++      (assoc :seon.eval/value-tokens
++             (tokens/estimate-of-characters (:seon.render.value/whole-characters projection)))
++      (int? (:seon.render.value/elisions projection))
++      (assoc :seon.eval/elisions (:seon.render.value/elisions projection))
++      (:seon.render.value/full? projection) (assoc :seon.eval/full true)
+       (:seon.render.call/selected-producer projection)
+       (assoc :seon.eval/renderer (:seon.render.call/selected-producer projection))
+       (seq failures)
+       (assoc :seon.cluster.eval/diagnostics (floor-text request (mapv flat-diagnostic failures)))
+       record (assoc :seon.sci.admit/record record))))
+ 
++(def ^:private value-size-keys
++  "The shown value's recorded size, carried from `shown-result` to the
++  evaluation and settled onto its receipt."
++  [:seon.eval/value-tokens :seon.eval/shown-tokens :seon.eval/elisions :seon.eval/full])
++
+ (defn- success-evaluation
+   [{admitted :seon.sci.eval/admitted
+     caps :seon.sci.admit/caps
+@@ -4116,6 +4134,7 @@
+     ;; Allocation is the kernel's measurement, kept instead of dropped.
+     :always (assoc :seon.eval/duration-ms duration-ms)
+     (pos? acquisition-ms) (assoc :seon.eval/acquisition-ms acquisition-ms)
++    :always (merge (select-keys admitted value-size-keys))
+     (pos? (get-in admitted [:seon.sci.admit/record :seon.eval/allocated-bytes] -1))
+     (assoc :seon.eval/allocated-bytes
+            (get-in admitted [:seon.sci.admit/record :seon.eval/allocated-bytes]))
+@@ -4152,6 +4171,7 @@
+                    (:seon.eval/shown admitted))
+             (:seon.cluster.eval/diagnostics admitted)
+             (assoc :seon.cluster.eval/diagnostics (:seon.cluster.eval/diagnostics admitted)))
++    :always (merge (select-keys admitted value-size-keys))
+     ;; The same one spelling on the failing path.
+     (int? (:seon.eval/duration-ms record))
+     (assoc :seon.eval/duration-ms (:seon.eval/duration-ms record))
+diff --git a/src/seon/turn.clj b/src/seon/turn.clj
+index 2649ee09f..885028cb9 100644
+--- a/src/seon/turn.clj
++++ b/src/seon/turn.clj
+@@ -166,6 +166,9 @@
+       (assoc :seon.eval/acquisition-ms (:seon.eval/acquisition-ms evaluation))
+       (int? (:seon.eval/allocated-bytes evaluation))
+       (assoc :seon.eval/allocated-bytes (:seon.eval/allocated-bytes evaluation))
++      ;; The shown value's size (whole estimate, shown, cuts, full opt-in).
++      :always (merge (select-keys evaluation [:seon.eval/value-tokens :seon.eval/shown-tokens
++                                              :seon.eval/elisions :seon.eval/full]))
+       ;; A FORM'S OWN `set!` OF *print-length* / *print-level*. Captured
+       ;; while sci's binding is still installed (`sci/eval.clj` print-options
+       ;; volatile), it is what the response must print the value under.

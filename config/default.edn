@@ -102,8 +102,16 @@
  ; The generic value face is fitted after admission and recursive producer
  ; selection. Its visible budget is estimated tokens; its other bounds are
  ; structural, and its blob threshold reuses the storage decision above.
- ; Unit: estimated tokens (`seon.ai.tokens/estimate`).
- :seon.config.render.agent/token-budget 15000
+ ; Unit: estimated tokens (`seon.ai.tokens/estimate`). Provenance (owner
+ ; 2026-09-27): 15,000 per value was far too big — a value this large usually
+ ; means a query or function returns more than it should. 1,000 is tuned from
+ ; data: every evaluation records its elisions and the whole value's estimated
+ ; tokens, so "elides too often" is a query, and the bound moves if it is.
+ ; A declared AI render function's text is cut at this same budget (no
+ ; separate ceiling). Reading more is plain Clojure on result/eN (each cut
+ ; prints its continuation form), or (seon.print/full result/eN) opts one
+ ; evaluation into printing the value whole.
+ :seon.config.render.agent/token-budget 1000
  ; Unit: nested structural nodes retained in the visible face.
  :seon.config.render.agent/max-depth 8
  ; Unit: children retained per collection node.
@@ -127,13 +135,6 @@
  ; the surviving JVM printer used 8 to keep accidental recursive values
  ; readable while leaving normal result shapes intact.
  :seon.print/level 8
-
- ; Unit: estimated tokens (`seon.ai.tokens/estimate`). The budget is chosen
- ; by provenance (owner 2026-09-26): text a declared AI render function
- ; produced is its own first bound and is cut only beyond this ceiling; raw
- ; values keep :seon.config.render.agent/token-budget. Provenance: about 3.3
- ; times the raw budget, so a curated render is never the thing cut first.
- :seon.print/rendered-token-ceiling 50000
 
  ; Unit: milliseconds of wall clock per agent evaluation.
  ; Provenance: the ONLY limit sci has — it counts no steps, so this is

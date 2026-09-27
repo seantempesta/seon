@@ -245,14 +245,18 @@
 (def ^:private bounds
   "The declared bounds, compiled at the first response after this namespace
   loads (one read of the packaged forms): a bound edited in the schema
-  resource is adopted at the next reload of `seon.repl`."
+  resource is adopted at the next reload of `seon.repl`. Each entry's
+  `:seon.repl/finding` is its line: strings verbatim, and each qualified
+  keyword the evaluation's value for it (a measure, `:seon.repl/result`)."
   (delay
    (let [form (get (schema.edn/packaged-forms) :seon.config.eval/bounds)
-         schema (m/schema form)]
+         schema (m/schema form)
+         lines (into {} (map (fn [[measure properties]] [measure (:seon.repl/finding properties)]))
+                     (m/children schema))]
      {::explainer (m/explainer schema)
       ::measures (m/explicit-keys schema)
-      ::fixes (into {} (map (fn [[measure properties]] [measure (:seon.repl/fix properties)]))
-                    (m/children schema))})))
+      ::lines lines
+      ::named (into #{} (comp (mapcat val) (filter qualified-keyword?)) lines)})))
 
 (defn cost
   "The measures the declared bounds judge for one evaluation: each one its
@@ -265,17 +269,20 @@
       (seq output) (assoc :seon.repl/out-tokens (tokens/estimate output)))))
 
 (defn findings
-  "One `;;` line per declared bound the evaluation's cost exceeds, naming the
-  measure, what was observed, the bound and the declared fix. Empty within
-  every bound, which is the normal reply: nothing is added to it."
+  "One `;;` line per declared bound the evaluation's cost exceeds, as the
+  entry's `:seon.repl/finding` declares it. Empty within every bound, which
+  is the normal reply: nothing is added to it."
   {:malli/schema [:=> [:cat :seon.repl/emission] [:vector :string]]}
   [emission]
-  (let [{explainer ::explainer fixes ::fixes} @bounds]
+  (let [{explainer ::explainer lines ::lines named ::named} @bounds
+        measured (cost emission)
+        values (cond-> (merge (select-keys emission named) measured)
+                 (:seon.repl/handle emission) (assoc :seon.repl/result (:seon.repl/handle emission)))]
     (into []
-          (map (fn [{[measure] :in observed :value schema :schema}]
-                 (str ";; " measure " " observed " is over its bound " (pr-str (m/form schema))
-                      ": " (get fixes measure))))
-          (:errors (explainer (cost emission))))))
+          (map (fn [{[measure] :in}]
+                 (apply str ";; " (map #(if (qualified-keyword? %) (get values % "?") %)
+                                       (get lines measure)))))
+          (:errors (explainer measured)))))
 
 (defn response
   "The reply map, after the declared renderer's output when there is one,

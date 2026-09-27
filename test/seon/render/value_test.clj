@@ -490,9 +490,9 @@
                          :seon.render.profile/id
                          :seon.print/requery-id])))
     (let [text (:seon.render.value/text projection)]
-      ;; One cut face and one legend naming how to read on (design §3d).
-      (is (str/includes? text (str "…" (- (count raw) kept) "]")) text)
-      (is (str/includes? text "(seon.print/value-at result/e0123456789ab [...])") text)
+      ;; One cut face carrying the form that reads the rest (owner 2026-09-27).
+      (is (str/includes? text (str "…" (- (count raw) kept) " (drop " kept " result/e0123456789ab)]")) text)
+      (is (str/includes? text "the form after each cut reads the rest") text)
       (is (= '(seon.print/value-at result/e0123456789ab [])
              (:seon.print/requery-form elision))))
     (is (str/includes? html "seon-print-elision")
@@ -647,7 +647,7 @@
   (let [visits (atom [])
         raw (map (fn [i] (swap! visits conj i) i) (iterate inc 0))
         text (value/render-ai (probe-unit raw))]
-    (is (str/starts-with? text "(0 1 2 …?)") text)
+    (is (str/starts-with? text "(0 1 2 …? (drop 3 result/e0123456789ab))") text)
     (is (= [0 1 2] @visits) "no member past the printed ones is realized")))
 
 (deftest strings-are-quoted-and-their-cut-path-is-associative
@@ -664,7 +664,8 @@
            (:seon.print/requery-form node)))
     (is (= (count large) (:seon.render.data/total node)))
     (is (pos? (:seon.print/omitted node)))
-    (is (str/includes? (lexical-hiccup-text (value/render-html (probe-unit large)))
+    ;; Both faces are one selection: the HTML of the same unit shows the same cut.
+    (is (str/includes? (lexical-hiccup-text (value/render-html request))
                        (str "…+" (:seon.print/omitted node))))))
 
 (deftest depth-cuts-name-the-bound-in-both-faces
@@ -675,7 +676,8 @@
     (is (= [:seon.render.profile/max-depth]
            (map :seon.print/bound-by (tree-cuts (value/prepare request)))))
     (is (= [[:a :b :c :d]] (map :seon.render.data/path (tree-cuts (value/prepare request)))))
-    (is (str/includes? ai "{:d {…1}}") ai)
+    ;; A map's cut reads the whole map: its shown order is not its iteration order.
+    (is (str/includes? ai "{:d {…1 (get-in result/e0123456789ab [:a :b :c :d])}}") ai)
     (is (not (str/includes? html "last-leaf")))
     (is (str/includes? html "seon-print-elision"))))
 
@@ -721,7 +723,7 @@
       (println "VALUE-RENDERER" label "AI-ms" ai-ms "HTML-ms" html-ms)
       (is (< ai-ms 100.0) (str label " AI took " ai-ms " ms"))
       (is (< html-ms 100.0) (str label " HTML took " html-ms " ms"))
-      (is (str/includes? ai "(seon.print/value-at result/e0123456789ab [...])") ai)
+      (is (re-find #"\((drop|subs) .*result/e0123456789ab" ai) ai)
       (is (not (str/includes? (hiccup/->string html) (or terminal (subs raw 0 1000))))))))
 
 (deftest elision-forms-execute-in-the-real-sci-context
@@ -1134,3 +1136,30 @@
        (is (= :unavailable (:seon.render.walk/continuation-reason
                             ((requiring-resolve 'seon.render.walk/continue)
                              (dissoc (request [:t] 0) :seon.db/connection)))))))))
+
+(deftest every-cut-prints-the-plain-clojure-form-that-reads-its-rest
+  ;; Owner 2026-09-27: each elision carries its exact continuation, copyable,
+  ;; and evaluating it answers the omitted rest; the whole value's size is
+  ;; estimated from the cuts, never by printing it; seon.print/full opts one
+  ;; value out of every bound.
+  (let [raw (vec (range 100))
+        projection (value/prepare (probe-unit raw))
+        text (:seon.render.value/text projection)
+        cut (first (tree-cuts projection))
+        form (:seon.print/continuation cut)]
+    (is (= '(drop 3 result/e0123456789ab) form))
+    (is (str/includes? text "…97 (drop 3 result/e0123456789ab)") text)
+    (is (= (drop 3 raw) (eval (map #(if (= 'result/e0123456789ab %) raw %) form)))
+        "evaluating the continuation answers exactly the omitted rest")
+    (is (= 1 (:seon.render.value/elisions projection)))
+    (is (< (count (first (str/split-lines text))) (:seon.render.value/whole-characters projection))
+        "the whole estimate exceeds what was shown, without printing the value")
+    (clojure.test/testing "a string cut continues with subs from its next offset"
+      (let [cut (first (tree-cuts (value/prepare (probe-unit {:body (apply str (repeat 5000 "ab"))}))))]
+        (is (= 'subs (first (:seon.print/continuation cut))))
+        (is (= '(get-in result/e0123456789ab [:body]) (second (:seon.print/continuation cut))))))
+    (clojure.test/testing "seon.print/full prints the value whole and says so"
+      (let [whole (value/prepare (probe-unit (print/full raw)))]
+        (is (:seon.render.value/full? whole))
+        (is (zero? (:seon.render.value/elisions whole)))
+        (is (str/includes? (:seon.render.value/text whole) " 99]"))))))

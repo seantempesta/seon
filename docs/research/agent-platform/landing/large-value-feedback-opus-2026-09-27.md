@@ -1,0 +1,168 @@
+---
+type: landing
+lane: eval-feedback-opus (owner slice 2026-09-27: large values are feedback)
+created: 2026-09-27
+status: "committed: budget 15,000 → 1,000; copyable continuation on every cut; seon.print/full opt-in; LARGE VALUE bound; renderer ceiling deleted. Recording (whole/shown tokens, elisions, full) is patch P2 for root; one test expectation is patch P3. RESET NEEDED. Tests ran only as scratch copies on default (pid 45188)."
+---
+# Landing: a large value is feedback, not a bigger print (2026-09-27)
+
+What exists after this cut:
+- The agent's per-value budget is 1,000 estimated tokens.
+- Every cut the floor makes prints the plain-Clojure form that reads the rest of that value, e.g.
+  `…2968 (drop 32 result/e7b3)`.
+- `(seon.print/full result/eN)` prints one value whole.
+- A value whose whole estimate is over 1,000 tokens gets one line above the reply map:
+  `;; LARGE VALUE: result/eN is ~N tokens whole (shown M). A value this big usually means a query or function returns more than it should.`
+  The line is declared in `:seon.config.eval/bounds`.
+- Once P2 lands, the whole and shown tokens, the number of cuts and the full opt-in are all stored on the receipt.
+
+## Broken first / not done
+
+1. **LARGE VALUE cannot fire until root applies P2.** The finding reads `:seon.eval/value-tokens` and
+   `:seon.eval/shown-tokens` from the evaluation. Only `seon.sci.eval/shown-result`, `seon.turn` settlement and the
+   transcript emission can put them there, and all three are held. Apply
+   `tmp/eval-feedback-design-opus/p2-value-size-recorded.patch` in the same adoption. Without it you still get:
+   - the 1,000 budget;
+   - the continuation forms;
+   - the opt-in;
+   - the other findings.
+2. **Renderer "no exemption" is only half done.** Declared AI render text is now cut at the value's own token budget.
+   The separate `:seon.print/rendered-token-ceiling` dial (50,000) is deleted, following the 27eab14c6 precedent for
+   dial deletion. But the allocator's `charge` still subtracts rendered widths (`(:rendered state)`), so a nested
+   render is budgeted apart from the raw nodes around it. Counting it would make a clipped root render refuse as
+   insufficient budget, because the clip marker plus the legend exceed B. That needs the clip to become a chunked
+   string node. That is a larger allocator change, not done here.
+3. **The whole-value estimate is a lower bound, and biased on growing scalars.** The floor estimates the omitted part
+   from what it already knows at each cut:
+   - a string's exact unshown characters;
+   - omitted members times the mean width of the shown members;
+   - a pending lazy tail counts as 0.
+
+   Measured against `pr-str`:
+
+   | Value | Estimate (chars) | Actual (chars) |
+   |---|---|---|
+   | 200 rows of maps | 15,354 | 15,099 |
+   | 10,000-character string | 10,032 | 10,002 |
+   | `(vec (range 3000))` | 5,124 | 13,891 |
+
+   The vector is underestimated because the shown members have 1–2 digits and the omitted ones 4. It is still about
+   1,600 tokens, so the bound fires. Nothing is printed to count it.
+4. **Two value_test reds reproduce identically on the live, unchanged `seon.render.value`, so they are not from this
+   cut:**
+   - `a-lazy-result-that-throws-while-printing-throws-as-clojure-prints-it`: the floor prints a diagnostic, it does not
+     throw;
+   - `large-values-have-bounded-work-in-both-faces`: the string's HTML contains 1,000 characters of the raw value at a
+     1,024-token budget.
+
+   24 more error in a scratch run only because their fixture requires `seon.test/run`.
+5. **Observed, not mine:** on branch `efd-6`, an MCP SCI `(vec (range 3000))` answered only
+   `#:seon.turn{:id "b4e11cc585aa"}`, with no reply map. It is the post-one-commit reply path; root should check it.
+   Branches `efd-3` and `efd-6` are retired.
+
+## Changed (commit below)
+
+- `src/seon/print.cljc`:
+  - `continuation`: the copyable form for a cut. Members read with `(drop n …)`, characters with `(subs … n)`. The
+    path uses `get-in` when every step is a key or index, and `seon.print/value-at` for typed steps.
+  - `form-text`: prints `'x` for a quoted form.
+  - `elided-text`: the one text face of a cut, the marker followed by its continuation. The emitter prints it and the
+    allocator measures it.
+  - `elision` carries `::continuation`, supplied or derived.
+  - `full`: marks a value with metadata to print whole. A string or number is returned unchanged, and `println`
+    prints a long string whole.
+- `src/seon/render/value.clj`:
+  - `node-continuation` is the single owner of the continuation, used by both `cut-text` (widths) and `cut-node`
+    (print), so a cut is measured with the same text it prints.
+  - A map or set cut reads the whole collection, because its shown order is not its iteration order, so `drop`
+    would name the wrong rest.
+  - `omitted-characters` builds the estimate.
+  - `prepare` returns `:seon.render.value/elisions`, `/whole-characters`, and `/full?` when the value carries the
+    opt-in. With the opt-in, the budget, member, depth and string bounds are unbounded.
+  - The rendered ceiling is now the token budget.
+  - The legend no longer names a second read route.
+- `src/seon/repl.clj`: each bound entry declares its line as `:seon.repl/finding` parts. A string part is printed
+  verbatim; a keyword part is replaced by the evaluation's value, e.g. `:seon.repl/result` → the handle. There are
+  still no measure-specific branches.
+- `resources/seon/schemas/seon.config.eval.edn`: four bounds with lines:
+  - SLOW: `:seon.eval/duration-ms` over 1,000;
+  - LARGE VALUE: `:seon.eval/value-tokens` over 1,000;
+  - LARGE ALLOCATION: `:seon.eval/allocated-bytes` over 512 MiB;
+  - LARGE OUTPUT: `:seon.repl/out-tokens` over 500.
+- `resources/seon/schemas/seon.print.edn`:
+  - `:seon.print/continuation` and `:seon.print/full` declared;
+  - the rendered-ceiling dial deleted.
+- `resources/seon/schemas/seon.render.value.edn`: the three projection keys are declared.
+- `config/default.edn`: `:seon.config.render.agent/token-budget` goes from 15,000 to 1,000, with its provenance; the
+  ceiling row is deleted.
+- Tests:
+  - `test/seon/render/value_test.clj`: new `every-cut-prints-the-plain-clojure-form-that-reads-its-rest` covers
+    evaluating the continuation, the string `subs` case, the full opt-in and the estimate. Four expectations were
+    updated to the new cut face.
+  - `test/seon/repl_test.clj`: the LARGE VALUE line, and the SLOW/LARGE OUTPUT lines.
+
+Size: +255 / −80 across 9 files.
+
+## Evidence (default pid 45188, HEAD 5aef37f42; scratch copies loaded into `scratch.efd-*`, never over default's Vars)
+
+- `(vec (range 3000))` prints `[0 1 … 31 …2968 (drop 32 result/e7b3)]`.
+- A 200-row map prints `…168 (drop 32 (get-in result/e7b3 [:rows]))`, and a map cut prints
+  `{…3 (get-in result/e7b3 [:rows 31])}`.
+- A 10k string prints `"abab…"…+6944 (subs result/e7b3 3056)`.
+- A lazy infinite seq prints `…? (drop 32 result/e7b3)`.
+- `full` of the 3000-vector: 0 elisions, 14,087 characters, 48 ms.
+- Warm `prepare` timing, median of 15 runs, new vs live:
+
+  | Value | New | Live |
+  |---|---|---|
+  | rows | 7.6 ms | 7.1 ms |
+  | 3000-vector | 0.43 ms | 0.60 ms |
+  | small set | 83 µs | 94 µs |
+
+  No regression.
+- Scratch test runs:
+  - repl_test: 18 tests, 93 assertions, 0 failures;
+  - value_test: 94 pass. The 2 failures are the ones item 4 shows are unchanged from live. The 24 errors are fixture
+    errors (need `seon.test/run`).
+- Static checks:
+  - `seon.contracts-compile-test/check` over the five changed source/test files returns `[]`; over P2's four patched
+    sources it returns 0 findings.
+  - `seon.schema/declaration-projection` over the checkout forms builds 3,552 forms.
+  - P2's receipt and `:seon.sci.eval/shown` validate with the new keys.
+  - `seon.config-test/checkout-effective` gives budget 1000 and no ceiling key.
+  - clj-kondo: 0 errors, with the same warning counts as HEAD.
+
+## Patches for root
+
+- **P2** `tmp/eval-feedback-design-opus/p2-value-size-recorded.patch`. Passes `git apply --check` on the tree.
+  - `seon.sci.eval/shown-result` records the value's size beside its shown text: `:seon.eval/value-tokens` (via
+    `tokens/estimate-of-characters` of the floor's whole-characters), `:seon.eval/shown-tokens`,
+    `:seon.eval/elisions` and `:seon.eval/full`.
+  - Success and failed evaluations carry these keys.
+  - `seon.turn` settles them onto the receipt.
+  - The transcript emission carries value/shown tokens, so the finding fires over MCP and in the next context.
+  - `seon.render/agent-render-profile` stops reading the deleted dial.
+  - Schemas: `seon.eval.edn` attributes, receipt entries, and `:seon.sci.eval/shown`.
+  - Afterwards the owner's two questions are queries over receipts:
+    - "does 1,000 elide too often?" is `[?e :seon.eval/elisions ?n]` grouped by agent;
+    - "who returns large values?" is `:seon.eval/value-tokens` joined with `:seon.cluster.eval/source` and the run's
+      agent.
+- **P3** `tmp/eval-feedback-design-opus/p3-cut-text-test-expectations.patch`: `test/seon/instrument_test.clj:713`
+  expects the new cut face. `test/seon/render/transcript_test.clj:500` asserts the cut includes `transcript-cut` via
+  the old legend form. It may turn red. I could not predict it without running it: that unit's requery identity is
+  its render call id, which now appears only in a cut's continuation.
+
+## Root runs (lanes run none)
+
+1. Apply P2 and P3 with this commit.
+2. `bin/test-check default --ns seon.repl-test`
+3. `--ns seon.render.value-test`
+4. `--ns seon.print-test`
+5. `--test seon.instrument-test/<the audit render test>`
+6. `--ns seon.render.transcript-test`
+7. After P2: `--ns seon.turn-test`.
+8. The two static checks.
+9. `seon.config-test`, because the default config changed and a dial was deleted.
+
+**RESET NEEDED.** A live store holding a `:seon.print/rendered-token-ceiling` config fact must accept the attribute's
+deletion at adoption. The dial was optional and had no known stored value.

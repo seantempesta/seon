@@ -241,6 +241,21 @@
   [value path]
   (reduce #(path-step %1 %2 nil) value path))
 
+(defn full
+  "`value`, marked to print whole as this evaluation's shown text: no token
+  budget and no member, depth or string bound, for this one evaluation only
+  (`(seon.print/full result/e7b3)`). The opt-in is recorded with the
+  evaluation. Reading a part is plain Clojure on the handle instead (`keys`,
+  `count`, `get-in`, `take`, `drop`, `take-last`), and each cut prints the form
+  that reads its rest. A value that cannot carry metadata (a string, a number)
+  is returned unchanged; `println` prints a long string whole."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Any value an agent holds may be printed whole; it is returned unchanged apart from the print mark.", :gen/elements [nil false 0 "" :k [] {}]}]]
+                  [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Returns its argument, marked when it can carry metadata.", :gen/elements [nil false 0 "" :k [] {}]}]]}
+  [value]
+  (if #?(:clj (instance? clojure.lang.IObj value) :cljs (satisfies? IWithMeta value))
+    (vary-meta value assoc ::full true)
+    value))
+
 (defn compare-values
   "Order whole values structurally without rendering their contents or invoking pairs."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}]] :int]}
@@ -272,18 +287,66 @@
                            (catch #?(:clj ClassCastException :cljs :default) _ 0)))))]
     (order-value left right)))
 
+(defn- requery-source
+  [source-identity]
+  (cond
+    (symbol? source-identity) source-identity
+    (seq? source-identity) source-identity
+    (or (vector? source-identity) (int? source-identity))
+    (list 'seon.db/pull (list 'quote '[*]) (list 'quote source-identity))))
+
 (defn- requery-form
-  [identity path]
-  (let [source (cond
-                 (symbol? identity) identity
-                 (seq? identity) identity
-                 (or (vector? identity) (int? identity))
-                 (list 'seon.db/pull (list 'quote '[*])
-                       (list 'quote identity)))]
-    (when source
-      (list 'seon.print/value-at source
-            (if (some #(or (symbol? %) (coll? %)) path)
-              (list 'quote path) path)))))
+  [source-identity path]
+  (when-let [source (requery-source source-identity)]
+    (list 'seon.print/value-at source
+          (if (some #(or (symbol? %) (coll? %)) path)
+            (list 'quote path) path))))
+
+(defn continuation
+  "The copyable form that reads what one elision omitted, from its next
+  offset: `(drop n …)` for members, `(subs … n)` for characters, over the
+  cut's path reached with plain `get-in` when every step is a key or index
+  and with `seon.print/value-at` when a step is typed. Nil when the cut has no
+  source to read from (its `::requery-refusal` says why).
+
+      (drop 32 result/e7b3)
+      (subs (get-in result/e7b3 [:rows 0 :title]) 16)"
+  {:malli/schema [:=> [:cat :map] [:maybe [:sequential :seon.schema/value]]]}
+  [{::keys [requery-id elision-unit] path :seon.render.data/path
+    next-offset :seon.render.data/next-offset}]
+  (when-let [source (requery-source requery-id)]
+    (let [path (vec path)
+          target (cond (empty? path) source
+                       (every? #(or (keyword? %) (nat-int? %)) path) (list 'get-in source path)
+                       :else (list 'seon.print/value-at source (list 'quote path)))
+          offset (or next-offset 0)]
+      (cond (zero? offset) target
+            (= :characters elision-unit) (list 'subs target offset)
+            :else (list 'drop offset target)))))
+
+(defn form-text
+  "A generated form as the text an agent would type: `'x` for `(quote x)`,
+  every other value as readable EDN under fixed print bindings."
+  {:malli/schema [:=> [:cat :seon.schema/value] :string]}
+  [form]
+  (cond (and (seq? form) (= 'quote (first form)) (= 2 (count form))) (str "'" (form-text (second form)))
+        (seq? form) (str "(" (str/join " " (map form-text form)) ")")
+        :else (literal form)))
+
+(defn elided-text
+  "The one text face of a cut: `…N` after shown members, `\"prefix\"…+N`
+  after a string's shown characters, `…?` for a pending tail, each followed by
+  its continuation form when the cut has a source. The floor's allocator
+  measures cuts with this same function."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [node]
+  (let [text (case (::elision-unit node)
+               :characters (str (literal (or (::prefix node) "")) "…+" (::omitted node))
+               :pending "…?"
+               (str "…" (::omitted node "?")))]
+    (if-some [form (::continuation node)]
+      (str text " " (form-text form))
+      text)))
 
 (defn render-elision-ai
   "Render omitted data as one readable EDN value with its coordinates.
@@ -393,10 +456,7 @@
       ;; coordinates stay on the node for HTML and continuation.
       ;; A cut with an expander (`::href`, the continuation at its path and
       ;; next offset) is a link in HTML; the text face is the same.
-      ::elided (let [text (case (::elision-unit node)
-                            :characters (str (literal (or (::prefix node) "")) "…+" (::omitted node))
-                            :pending "…?"
-                            (str "…" (::omitted node "?")))]
+      ::elided (let [text (elided-text node)]
                  [(if-some [href (::href node)]
                     (text-op ::elision text [:a {:class (css-class ::elision) :href href} text])
                     (text-op ::elision text))])
@@ -707,6 +767,7 @@
   identity retains the reason internally and prints no invented requery."
   {:malli/schema [:=> [:cat :seon.print/elision-request] :seon.print/node]}
   [{::keys [requery-id requery-refusal omitted elision-unit prefix bound-by]
+    supplied ::continuation
     profile-id :seon.render.profile/id
     path :seon.render.data/path
     next-offset :seon.render.data/next-offset
@@ -724,6 +785,12 @@
     (some? requery-id) (assoc ::requery-id requery-id)
     (requery-form requery-id (or path []))
     (assoc ::requery-form (requery-form requery-id (or path [])))
+    (some? supplied) (assoc ::continuation supplied)
+    (and (nil? supplied) (requery-source requery-id))
+    (assoc ::continuation (continuation
+                           {::requery-id requery-id ::elision-unit elision-unit
+                            :seon.render.data/path (or path [])
+                            :seon.render.data/next-offset next-offset}))
     (and (nil? requery-id) (some? requery-refusal))
     (assoc ::requery-refusal requery-refusal)
     (and (nil? requery-id) (nil? requery-refusal))

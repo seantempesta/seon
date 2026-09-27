@@ -47,7 +47,13 @@
                      [:seon.render.value/html :seon.render.value/html]
                      [:seon.render.value/options :seon.print/options]
                      [:seon.render.value/diagnostics {:optional true} :seon.render.value/diagnostics]
-                     [:seon.render.value/value-text {:optional true} :seon.render.value/value-text]],
+                     [:seon.render.value/value-text {:optional true} :seon.render.value/value-text]
+                     [:seon.render.value/elisions {:optional true} :seon.render.value/elisions]
+                     [:seon.render.value/whole-characters {:optional true} :seon.render.value/whole-characters]
+                     [:seon.render.value/full? {:optional true} :seon.render.value/full?]],
+                    :elisions [:int {:min 0 :description "How many cuts the selection made: each node that shows less than it holds."}],
+                    :whole-characters [:int {:min 0 :description "Estimated characters of the whole value: the shown text plus each cut's omitted part (seon.render.value/omitted-characters), never a second print; a lower bound when a lazy tail is pending."}],
+                    :full? [:boolean {:description "The value opted into printing whole (seon.print/full): no budget and no structural bound applied."}],
                     :value-text [:string {:description "The value's own text without the diagnostic line :seon.render.value/text appends: what a caller that records the diagnostics beside the value (seon.sci.eval/shown-result) saves as the shown text. Present exactly when diagnostics are."}],
                     :diagnostics [:vector {:min 1 :description "Presentation failures shown once beside the value they did not replace; the caller records each as a core fault."}
                                   [:or :seon.error/throwable :seon.error/base]],

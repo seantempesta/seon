@@ -618,12 +618,35 @@
   (when (keyword-lookup? value)
     (some-> (find value k) val)))
 
+(defn- node-continuation
+  "The form a cut of `node` prints to read its rest (`seon.print/continuation`):
+  from the next offset for a sequence or string; the whole collection for a
+  map or set, whose shown order is not its iteration order, so `drop` would
+  not name the rest. Nil without a source, and for a long keyword or symbol."
+  {:malli/schema [:=> [:cat :map] [:maybe [:sequential :seon.schema/value]]]}
+  [node]
+  (when (and (:requery-id node) (not= :name (:kind node)))
+    (print/continuation
+     {::print/requery-id (:requery-id node)
+      ::print/elision-unit (cond (= :string (:kind node)) :characters
+                                 (:pending? node) :pending
+                                 :else :children)
+      :seon.render.data/path (:path node)
+      :seon.render.data/next-offset (cond (:indexed? node) 0
+                                          (= :string (:kind node)) (+ (:base node 0) (:shown node))
+                                          :else (+ (:base node 0) (:n node)))})))
+
 (defn- cut-text
+  "The cut's text after a node's shown part, as `seon.print/elided-text`
+  prints it: the marker, then the continuation form that reads the rest when
+  the value has a source (a long keyword or symbol has no plain continuation)."
   {:malli/schema [:=> [:cat :map] :string]}
   [node]
-  (case (:kind node)
-    (:string :name) (str "…+" (- (:total node) (:shown node)))
-    (if (:pending? node) "…?" (str "…" (- (:total node) (:base node 0) (:n node))))))
+  (let [marker (case (:kind node)
+                 (:string :name) (str "…+" (- (:total node) (:shown node)))
+                 (if (:pending? node) "…?" (str "…" (- (:total node) (:base node 0) (:n node)))))
+        form (node-continuation node)]
+    (cond-> marker form (str " " (print/form-text form)))))
 
 (defn- more?
   {:malli/schema [:=> [:cat :map] :boolean]}
@@ -774,7 +797,10 @@
         value (if (contains? answer :value) (:value answer) value)
         base (cond-> {:id id :depth depth :path path :parent parent :indent (:indent position 0)
                       :outside (:outside position) :kids [] :n 0 :sum 0}
-               (:diagnostic answer) (assoc :diagnostic (:diagnostic answer)))
+               (:diagnostic answer) (assoc :diagnostic (:diagnostic answer))
+               ;; The source a cut's continuation form reads from.
+               (get-in context [:requery ::print/requery-id])
+               (assoc :requery-id (get-in context [:requery ::print/requery-id])))
         node (if declared
                (let [text (when (and (= ::print/projected (::print/face declared))
                                      (= :seon.render/ai (:seon.render/output declared)))
@@ -783,11 +809,11 @@
                                 (print/elision {::print/omitted (- (count text) ceiling)
                                                 ::print/elision-unit :characters
                                                 ::print/prefix (subs text 0 ceiling)
-                                                ::print/bound-by ::print/rendered-token-ceiling
+                                                ::print/bound-by :seon.render.profile/token-budget
                                                 :seon.render.data/path path
                                                 :seon.render.data/next-offset ceiling
                                                 :seon.render.data/total (count text)
-                                                ::print/requery-refusal "renderer text beyond its ceiling"})
+                                                ::print/requery-refusal "renderer text beyond the value's token budget"})
                                 declared)]
                  (assoc base :kind :leaf :node declared :rendered? true))
                (let [;; A root continuation pages from its absolute offset.
@@ -996,7 +1022,10 @@
                   (not (:pending? node))
                   (assoc ::print/bound-by (if (= bound :seon.render.profile/token-budget)
                                             (or (::print/bound-by (:profile context)) bound)
-                                            bound)))
+                                            bound))
+                  ;; The one continuation the cut's text was measured with.
+                  (node-continuation node)
+                  (assoc ::print/continuation (node-continuation node)))
         cut (print/elision
      (case (:kind node)
        (:string :name) (assoc request ::print/omitted (- (:total node) (:shown node))
@@ -1048,6 +1077,29 @@
             (recur (rest stack) (assoc built id result)))))
       (get built 0))))
 
+(defn- omitted-characters
+  "An estimate of the characters a selection left out, from what the floor
+  already knows at each cut, never by printing the value: a string's
+  unshown characters exactly, and a collection's omitted members at the mean
+  width of the members it did show (the mean over every shown collection
+  when it showed none). A pending tail's length is unknown and counts 0, so
+  the estimate is a lower bound."
+  {:malli/schema [:=> [:cat [:map-of :int :map]] :int]}
+  [nodes]
+  (let [shown (filter #(and (#{:map :coll} (:kind %)) (pos? (:n %))) (vals nodes))
+        members (reduce + 0 (map :n shown))
+        mean (if (pos? members) (/ (double (reduce + 0 (map :sum shown))) members) 1.0)]
+    (long (reduce + 0.0
+                  (keep (fn [node]
+                          (when (more? node)
+                            (case (:kind node)
+                              (:string :name) (- (:total node) (:shown node))
+                              (if (:pending? node)
+                                0
+                                (* (- (:total node) (:base node 0) (:n node))
+                                   (if (pos? (:n node)) (/ (double (:sum node)) (:n node)) mean))))))
+                        (vals nodes))))))
+
 (defn- breadcrumbs
   [unit path]
   (when (:seon.render.value/route-base unit)
@@ -1059,18 +1111,14 @@
           (range (count path)))]))
 
 (defn- legend-text
-  "The one line that follows a cut text: what `…N` means and how to read on."
+  "The one line that follows a cut text: what the markers mean. Each cut
+  carries its own continuation form, so the legend names no second route."
   {:malli/schema [:=> [:cat :map] :string]}
   [profile]
-  (let [source (:seon.print/requery-id profile)
-        form (when (some? source)
-               (:seon.print/requery-form (print/elision {:seon.print/requery-id source
-                                                         :seon.render.data/path []})))]
-    (str ";; …N = N more, …+N = N more characters, …? = not yet realized. "
-         (cond
-           (qualified-symbol? source) (str "Read any part with (seon.print/value-at " source " [...]).")
-           form (str "Read any part with (seon.print/value-at " (pr-str (second form)) " [...]).")
-           :else (str "Not retrievable: " (or (:seon.print/requery-refusal profile) "no source identity") ".")))))
+  (str ";; …N = N more, …+N = N more characters, …? = not yet realized"
+       (if (some? (:seon.print/requery-id profile))
+         "; the form after each cut reads the rest."
+         (str ". Not retrievable: " (or (:seon.print/requery-refusal profile) "no source identity") "."))))
 
 (defn- plain-projection
   "The total floor's last answer: `value` as plain bounded Clojure text, with
@@ -1142,8 +1190,16 @@
                       :max-string (or (:seon.render.profile/max-string-length profile) Long/MAX_VALUE)
                       :offset (max 0 (long (get-in unit [:seon.render.data/cursor :seon.render.data/offset] 0)))
                       :root-path path
-                      :ceiling (tokens/estimate-chars (or (:seon.print/rendered-token-ceiling profile)
-                                                          (:seon.print/rendered-token-ceiling (print/default-options))))}
+                      ;; A declared render's text follows the same budget: no
+                      ;; separate ceiling (owner 2026-09-27).
+                      :ceiling (tokens/estimate-chars (:seon.render.profile/token-budget profile))}
+             ;; THE EXPLICIT OPT-IN (`seon.print/full`): this one value prints
+             ;; whole, with no budget and no member, depth or string bound.
+             full? (true? (::print/full (meta (:seon.render/value unit))))
+             context (cond-> context
+                       full? (assoc :budget Long/MAX_VALUE :ceiling Long/MAX_VALUE
+                                    :max-children Long/MAX_VALUE :max-depth Long/MAX_VALUE
+                                    :max-string Long/MAX_VALUE))
              state (select-nodes (:seon.render/value unit) context)]
          ;; The selection answers its node state or its budget refusal.
          (if-not (:nodes state)
@@ -1170,12 +1226,16 @@
          (cond-> {:seon.render.value/tree selected
                   :seon.render.value/options options
                   :seon.render.value/truncated? (boolean (or cut? (pos? (:offset context))))
+                  :seon.render.value/elisions (count (filter more? (vals (:nodes state))))
+                  :seon.render.value/whole-characters
+                  (+ (count (:seon.print/text emitted)) (omitted-characters (:nodes state)))
                   :seon.render.value/text (cond-> text diagnostic (str "\n" diagnostic))
                   :seon.render.value/html
                   [:div {:id id :class "seon-data-panel"}
                    (breadcrumbs unit path)
                    (:seon.print/hiccup emitted)
                    (when diagnostic [:div {:class "seon-render-unavailable"} diagnostic])]}
+           full? (assoc :seon.render.value/full? true)
            (seq failed)
            (assoc :seon.render.value/diagnostics (mapv :diagnostic failed)
                   :seon.render.value/value-text text)
