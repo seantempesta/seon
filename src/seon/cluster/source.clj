@@ -1016,7 +1016,12 @@
                                           :parents (conj merged e-id)})]
                 (if (:db-after report)
                   {:seon.program/identities delta :seon.test.run/id run-id
-                   :seon.source/base-commit-id (db/commit-id (:db-before report))
+                   ;; The head this commit merged into is its parent other than
+                   ;; the merged ones: Datahike's own lineage. A report's
+                   ;; `:db-before` is the writer's uncommitted value and can name
+                   ;; an older commit (datahike writer.cljc:210).
+                   :seon.source/base-commit-id
+                   (first (remove (conj merged e-id) (d/parent-commit-ids (:db-after report))))
                    :seon.source/commit-id (db/commit-id (:db-after report))}
                   report))))
           (finally (d/release-materialized-db tested)))))))
