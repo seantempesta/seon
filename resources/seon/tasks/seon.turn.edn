@@ -125,4 +125,9 @@
              :kind :function
              :intent "The install gate builds each definition's settlement with with-settled -> settled-value -> db/with (row-tx) (turn.clj ~1415-1431, called at ~5089), then the writer rebuilds the same row-tx in receipt-settle-call (turn.clj ~1770-1772): x43 mean 315 ms and x93 mean 244 ms on pid 66629, the second on the writer thread where it serializes every write on the branch. One settle-batch! applied for 19,475 ms with no armed callee over 1.1 s (unverified: fits a batch of ~70 defining forms). Settle the gate's computed tx-data under an expected-basis fence (:datahike/expected-basis-t) and recompute only when the head moved. Done when a defining form's settlement runs row-tx once (profile count per form) and a moved head still settles correctly."
              :must-read #{seon.turn/receipt-settle-call seon.turn/with-settled seon.turn/row-tx}
-             :evidence #{"docs/research/agent-platform/perf-audit-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/perf-audit-2026-09-27.md"}}
+ #:seon.task{:name "a-trivial-agent-turn-takes-eleven-seconds"
+             :kind :function
+             :intent "A Seon agent turn whose scripted reply is two cheap forms took about 11 s from its wake message to its close on default (e999fdd1b, local stub provider, 2026-09-27): message tx 22:19:34.2 -> turn opened 22:19:39.6 (5.4 s) -> provider request 22:19:45 (5.4 s) -> closed 22:19:45.7; the same forms through MCP SCI answer in 13-112 ms. Five turns measured 1.9-9.1 s open-to-close. Name the armed functions in the wake-to-open and open-to-request windows (docs/seon/issues/a-turn-spends-seconds-before-its-provider-call.md is the earlier record) and make an ordinary turn's overhead sub-second."
+             :must-read #{seon.cluster.agent/turn-step seon.turn/system-turn}
+             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}]

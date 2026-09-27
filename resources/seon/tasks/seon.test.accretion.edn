@@ -14,4 +14,14 @@
              :kind :function
              :intent "schema-row compiles the row's key from raw forms in a fresh registry per call, so every reached reference compiles again and Malli's generator cache never hits: 86 rows cost 400 ms (1.5 s in the 2026-09-27 publication replay) where schema-row-in answers from a projection in 11.6 ms. Its last caller, seon.sci.eval's declared-row, converts to schema-row-in with its candidate projection (patch tmp/publication-cost-opus/sci-eval-schema-row-in.patch); then delete schema-row."
              :must-read #{seon.test.accretion/schema-row seon.test.accretion/schema-row-in}
-             :evidence #{"docs/research/agent-platform/boot-branch-open-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/boot-branch-open-2026-09-27.md"}}
+ #:seon.task{:name "the-install-gate-judges-absolute-results-not-the-change"
+             :kind :function
+             :intent "The install gate refuses a definition when any reaching test is red, whether or not it was red before the change: gate-report counts every failure of the candidate run (test/accretion.clj gate-report) and never compares with the same tests on the base program. With 19 of 34 tests reaching seon.render.value/tree already failing on the base (repl-dogfood 2026-09-27), no change to tree can install, and the reply cannot say which failures the change caused. Judge the candidate against the base: a test red on both is reported as pre-existing and does not refuse; a test the change turns red refuses and is named. Done when a regression installs a change whose only reaching red test was red on the base, and refuses one that turns a green test red, naming it."
+             :must-read #{seon.test.accretion/gate-report seon.test.accretion/install-refusal}
+             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}
+ #:seon.task{:name "file-loads-skip-the-auto-check-the-repl-runs"
+             :kind :namespace
+             :intent "The same defn is admitted from a file and refused at the REPL: the REPL's install gate runs the seeded auto-check, file loads never do. Unchanged first-party contracts therefore carry refusals nobody has seen: seon.render.value/tree [:=> [:cat :map :map] :map] returns nil for ({} {}), seon.cluster/mcp-get-value's offset :int admits -1 that render.walk/continue refuses (repl-dogfood 2026-09-27). A one-line body change at the REPL first has to repair the contract of code it did not touch. Run the seeded auto-check once per changed contracted definition at file admission too (publication or the edit hook), or report its result as feedback on both paths, so entry means the same thing for every entrant."
+             :must-read #{seon.test.accretion/gate-report seon.render.value/tree seon.cluster/mcp-get-value}
+             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}]

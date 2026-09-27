@@ -8,4 +8,9 @@
              :kind :function
              :intent "After d2604ede9 removed the launcher's compute half, :seon.config.flow.compute/concurrency is read only by seon.config's status display and its available-processors default; nothing executes with it. Retire it as 13387dc38 retired its sibling queue-depth, or name the executor that consumes it. The process root's :compute executor (resources/seon/operator/runtime.clj:17-22, availableProcessors platform threads) is likewise unused (active 0, 2026-09-27); test agents (option B) name it as the JVM-wide CPU bound for test bodies."
              :evidence #{"docs/prds/agent-platform/plan/lane-b3-errors-tasks-dials.md"
-                         "docs/research/agent-platform/test-agents-concurrency-2026-09-27.md"}}]
+                         "docs/research/agent-platform/test-agents-concurrency-2026-09-27.md"}}
+ #:seon.task{:name "no-provider-cannot-be-lifted-per-agent"
+             :kind :schema
+             :intent ":seon.config.ai/no-provider is [:= true] and per-agent: an agent overlay can set it but never lift it, so with the cluster's no-provider on (default's standing setting) a branch agent cannot be pointed at a local stub provider without retracting the cluster config row on its branch (what repl-dogfood 2026-09-27 had to do). Make the dial a boolean whose overlay value wins, or document the branch-row route as the entrance."
+             :must-read #{seon.config/effective seon.ai/agent-overlay}
+             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}]

@@ -28,4 +28,14 @@
              :name "refusal-names-nonexistent-define"
              :kind :function
              :intent "native-call-refusal tells agents to use my.program/define!, which does not exist (src/my/program.clj:791); a refusal's fix must name a real entrance."
-             :evidence #{"docs/research/agent-platform/docs-exploration-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/docs-exploration-2026-09-26.md"}}
+ #:seon.task{:name "a-one-line-change-resends-the-whole-definition"
+             :kind :namespace
+             :intent "There is no REPL entrance to change part of an existing definition: to add one map entry to seon.render.value/tree the agent resent the whole 38-line defn (about 1,200 tokens) each attempt, and the whole 45-line mcp-get-value (about 1,300 tokens) to change one contract keyword, where a file edit sends one line. my.edit edits files, not program entities. An entrance that takes the stored declaration, applies a form-level replacement and evaluates the result as the defn would make the REPL cheaper than the file for the common edit."
+             :must-read #{my.program/history my.edit/form!}
+             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}
+ #:seon.task{:name "propose-refusal-names-no-next-step"
+             :kind :function
+             :intent "(my.program/propose-merge! {}) on an unassigned branch answers the bare string \"seon.task is refused: unassigned.\" (the declared renderer shows only the message): no offending branch/agent, no fix naming who assigns (root's seon.task/assign!) or how a file task in resources/seon/tasks becomes assignable. An agent also has no my.* entrance to create its own branch (MCP's branch tool has none for Seon agents). The refusal names its assignment query and the call that fixes it."
+             :must-read #{my.program/propose-merge! seon.task/assignment seon.task/assign!}
+             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}]

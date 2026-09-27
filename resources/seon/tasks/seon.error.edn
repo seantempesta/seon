@@ -40,4 +40,9 @@
              :kind :function
              :intent "At 18:01Z 2026-09-27 all 10 open faults came from dead processes and 7 were stale: resolution (error.clj ~1309-1354) fires only when the digest of :seon.instrument/fn changes, and that fn is often the reporter (memory-pressure-crossed!, record-write-refusal-fault!, maintenance/exception-value) or an outer wrapper (seon.test/run's digest change resolved three record-tx signatures while record-tx still refused; settle-batch-refusal! stays open after its cause was fixed elsewhere), or absent (superv.async; see 3d1e36226ec4). runtime_status reads :faulted whenever any fault is open. Let the producer's error schema declare process scope (e.g. memory pressure, the write-refusal park, a stop's interrupt, :seon.flow/launcher-stopped) and resolve such a fault once none of its occurrences' processes is live; resolve by the failing operation (:seon.error/operation), not the outermost armed Var. Done when a regression's process-scoped fault reads resolved after its process ends, and editing an unrelated wrapper resolves nothing."
              :must-read #{seon.error/resolution seon.problems/open-faults seon.fault/fault!}
-             :evidence #{"docs/research/agent-platform/stability-sweep-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/stability-sweep-2026-09-27.md"}}
+ #:seon.task{:name "an-enum-refusal-prints-the-schema-properties"
+             :kind :function
+             :intent "Transacting :seon.config.ai/no-provider false answered 'expected a value satisfying should be true ([:= {:seon.config/display-label \"No provider\", ... :description \"Use virtual turns ...\"} true]), got a boolean false', printing the dial's whole property map inside the message (repl-dogfood 2026-09-27). The expected text is the schema's value (true), never its properties."
+             :must-read #{seon.error/problem-sentence}
+             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}]

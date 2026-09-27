@@ -9,4 +9,9 @@
              :kind :function
              :intent "The SCI reply's :seon.repl/ms is the arm's evaluation time only (repl.clj ~218-219): acquisition (339 ms on a probe, recorded as :seon.eval/acquisition-ms but not shown), the install gate's disposable branch, and settlement are absent, and no armed function is named. pid 66629's 82 s evaluations left nothing on the cluster (max recorded duration 471 ms). Record [sym ms] of armed calls over slow-ms into the evaluating kernel arm (already per evaluation and carried across threads, adopt-arm), settle them beside acquisition-ms, and show the whole wall time and those names when it exceeds one second; this lets explain-slow's JVM-wide window go (c7bc0c506aa4). Done when a regression whose evaluation waits over one second on an armed call gets a reply naming that call and the whole wall time, and concurrent work in other arms is not named."
              :must-read #{seon.profile/explain-slow seon.sci.kernel/adopt-arm seon.repl/response-entries}
-             :evidence #{"docs/research/agent-platform/perf-audit-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/perf-audit-2026-09-27.md"}}
+ #:seon.task{:name "every-reply-repeats-open-faults"
+             :kind :function
+             :intent "Each SCI reply's :errors repeated the agent's same open fault (seon.schema.datahike/decode-vectors, occurrence count 1..17) on every evaluation for the whole session, about 150 tokens per reply, whether or not the evaluation caused it, and after the fault's last occurrence. Show a fault in the reply of the evaluation that produced it or once when it opens; later replies can name the open count."
+             :must-read #{seon.repl/response}
+             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}]

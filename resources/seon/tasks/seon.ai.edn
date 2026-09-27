@@ -1,0 +1,5 @@
+[#:seon.task{:name "no-auth-refuses-at-complete"
+             :kind :function
+             :intent "An agent overlay with :seon.config.ai/no-auth true and a model with no descriptor row makes every turn fail at the provider call: configured-targets dissociates :seon.ai/api-key-variable, then seon.ai/complete's contract requires it (\"refused argument 1 at [:seon.ai/api-key-variable] ... Called from seon.turn/call-turn\"), fault d31e076c on default 2026-09-27. The agent test's local provider relies on the same dials. Either complete's contract admits a target without a key when no-auth holds, or no-auth is refused where it is configured."
+             :must-read #{seon.ai/complete seon.ai/targets}
+             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}]

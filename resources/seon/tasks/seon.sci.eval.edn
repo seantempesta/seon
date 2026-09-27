@@ -45,7 +45,8 @@
              :evidence #{"docs/research/agent-platform/dogfood-maintainer-opus-2026-09-26.md"
                          "docs/research/agent-platform/landing/fix-dogfood-api-2026-09-26.md"
                          "docs/research/agent-platform/landing/inv-heap-stuck-members-opus-2026-09-26.md"
-                         "docs/seon/issues/a-first-party-redefinition-gates-on-saturated-reach-interpreted-in-sci-and-is-refused.md"}}
+                         "docs/seon/issues/a-first-party-redefinition-gates-on-saturated-reach-interpreted-in-sci-and-is-refused.md"
+                         "docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}
  #:seon.task{:id "fc812316b5da"
              :name "a-registration-lets-a-later-redefinition-skip-its-gate"
              :kind :function
@@ -206,4 +207,9 @@
  #:seon.task{:name "defmacro-in-let-loses-its-location"
              :kind :function
              :intent "F3: defmacro inside let/when is refused as unindexed because SCI's defmacro expansion drops the form's source location (sci fns.cljc ~363-399; eval.clj ~627-673); the exact-span join the eval-path redesign relies on needs locations preserved through SCI's macro expansion (fork change)."
-             :evidence #{"docs/research/agent-platform/valid-clojure-corpus-probe-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/valid-clojure-corpus-probe-2026-09-27.md"}}
+ #:seon.task{:name "an-agent-cannot-read-the-private-code-it-must-change"
+             :kind :function
+             :intent "(doc seon.render.value/tree) answers documentation-unavailable because tree is private, though every private function is contracted and is what an agent edits; source, dir and doc are not referred in an agent's user namespace ('Unable to resolve symbol: source') although help teaches them; (clojure.repl/source f) works but prints to :out and draws the :large-output finding that tells the agent to return the value instead. Doc of a public function splits its summary mid-sentence at the first line break. Give an agent doc and source of private declarations as data (the declaration's stored source and contract), referred like help's other names (repl-dogfood 2026-09-27)."
+             :must-read #{seon.sci.eval/program-documentation seon.repl/response}
+             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}]

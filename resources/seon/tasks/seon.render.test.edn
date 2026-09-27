@@ -1,0 +1,5 @@
+[#:seon.task{:name "a-test-entity-shows-its-failures-twice"
+             :kind :function
+             :intent "Pulling a test entity renders '(clojure.core/identity \"Test ...: fail ... expected ... actual ...\")' then ';=> ' the same string, then the recorded-result map with the same failures a third time, every string escaped three levels deep; one four-assertion red test cost 1,001 shown tokens and was cut (repl-dogfood 2026-09-27). An AI render of a test shows its verdict and failures once, as data."
+             :must-read #{seon.render.test/render-ai seon.test/recorded-result}
+             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}]

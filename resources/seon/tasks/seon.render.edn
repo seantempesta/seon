@@ -34,4 +34,9 @@
              :kind :namespace
              :intent "b195ae037's scripted sweep retyped render functions' first input to :seon.render/unit (a map). A render function whose body and AI pair take a vector or lookup ref (seon.cluster.message/render-inbox-html, restored d55f390cf) then refused every real input. Audit every render function's first input: compare its declared schema with the values its callers and its pair actually pass (at the REPL on real values), and restore the owner's own declared schema where the sweep replaced it."
              :must-read #{seon.render/render-call}
-             :evidence #{"docs/research/agent-platform/red-triage-3-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/red-triage-3-2026-09-27.md"}}
+ #:seon.task{:name "a-transaction-report-prints-its-runs-bookkeeping"
+             :kind :function
+             :intent "An agent's (seon.db/transact! [...]) answers the raw datom list of the transaction it rode in, including its own run's turn and evaluation rows and receipt (about 1,000 tokens for a two-attribute write, repl-dogfood 2026-09-27). A transaction report renders what the caller's tx-data changed (entities by identity, retracted facts), not the settlement's bookkeeping."
+             :must-read #{seon.db/transact! seon.render/render-call}
+             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}]
