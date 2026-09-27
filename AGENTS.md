@@ -20,8 +20,12 @@ root.
   concurrent Flow graph. Parts compose as functions and stage values, never as parallel systems. MCP, the test
   harness and the web are views that enter through the agent's path and render its values; they hold no second
   model, evaluator, printer or store.
-- **There is one REPL path**: read → evaluate → record → print, from the agent's side of the prompt. Product agents,
-  outside agents through MCP and tests through the harness all use it. An entrant needing another reader or
+- **There is one REPL path**: read → evaluate → record → print, from the agent's side of the prompt: forms are read
+  once, SCI evaluates them, the facts come from what the evaluation observed (with clj-kondo's analysis of the same
+  text joined by exact source span), and one transaction records it all. Everything uses it — product agents,
+  outside agents through MCP, tests through the harness, render forms in context assembly (and the debug page,
+  which only displays that assembly), schema registration, gates and merge; none keeps its own reader, evaluator,
+  printer or recording. An entrant needing another reader or
   evaluator (JVM mode, a file, a test body) supplies that stage as a value to the same pipeline. A form is parsed
   once and evaluated once; its results and facts are stored and queryable. Everything before the print is a real
   value under its Malli schema — live in the runtime, a database fact or a blob — never a string built to be
