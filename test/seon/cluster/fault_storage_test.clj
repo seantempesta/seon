@@ -1,7 +1,6 @@
 (ns seon.cluster.fault-storage-test
   "The fault path keeps bulky evidence in the content-addressed store."
-  (:require [clojure.core.async.flow :as-alias flow]
-            [clojure.edn :as edn]
+  (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -12,7 +11,8 @@
             [seon.cluster.store :as store]
             [seon.config :as config]
             [seon.db :as db]
-            [seon.schema :as schema]
+            [seon.env :as env]
+            [seon.fault :as fault]
             [seon.test-support :as support])
   (:import [java.nio.file Files]))
 
@@ -47,20 +47,30 @@
 (def ^:private diagnostic-payload
   (apply str (repeat 10000 "diagnostic-content")))
 
-(def ^:private state-marker
-  "FLOW-STATE-MUTABLE-CACHE")
-
 (defn- fault-source
+  "A bulky failure: its ex-data carries the diagnostic payload."
   []
-  {::flow/state {:mutable-cache (apply str (repeat 200000 state-marker))}
-   ::flow/msg {:fault-message "diagnostic content"}
-   ::flow/ex (ex-info "diagnostic content"
-                      {:diagnostic-content diagnostic-payload})})
+  (ex-info "diagnostic content" {:diagnostic-content diagnostic-payload}))
 
 (defn- lossy-fault-source
+  "An error base whose data is over the fact's inline bound but under the blob
+  threshold, so the fact's face is lossy."
   []
-  {::flow/msg {:fault-message (apply str (repeat 2000 "diagnostic-content"))}
-   ::flow/ex (ex-info "diagnostic content" {})})
+  {:seon.error/at (java.util.Date.)
+   :seon.error/layer ::storm
+   :seon.error/operation `lossy-fault-source
+   :seon.error/message "diagnostic content"
+   :seon.error/data {:fault-message (apply str (repeat 2000 "diagnostic-content"))}})
+
+(defn- fault-world
+  "The environment a boundary holds for `cluster-name` on `connection`, with
+  root, the shipped escalation owner, seeded as boot does."
+  [connection cluster-name]
+  (cluster/seed-root-agent! connection cluster-name cluster/boot-process-identity)
+  (env/environment {:seon.boot/cluster-name cluster-name
+                    :seon.db/connection connection
+                    :seon.sci.admit/caps (config/result-caps
+                                          (config/effective (db/db connection) cluster-name))}))
 
 (defn- fault-evidence
   "The fault this committed fact names, with the occurrences carrying its
@@ -107,26 +117,24 @@
     (try
       (config/apply! {:seon.db/connection connection
                       :seon.boot/cluster-name cluster-name})
-      (let [projection (schema/projection-from-database @connection)
-            caps (config/result-caps config/defaults)
-            commit-fault! (var-get (ns-resolve 'seon.cluster 'commit-fault!))
+      ;; The one core-fault route (`seon.fault/fault!`; the cluster's own
+      ;; committer was deleted in 5d8e803f7).
+      (let [world (fault-world connection cluster-name)
             source (fault-source)
             ;; Establish the comparison point after the same collector policy
             ;; that the repeated-fault measurement uses.
             _ (registry/collect! opened (java.util.Date.))
             baseline (store-bytes directory)
-            invoke! (fn []
-                      (schema/call-with-projection
-                       projection
-                       #(commit-fault! connection cluster-name process caps
-                                       source)))
-            [fact outcome] (invoke!)]
+            invoke! #(fault/fault! world source {:seon.error/layer ::storm
+                                                 :seon.error/operation `oversized-fault-evidence-is-bounded-and-retrievable
+                                                 :seon.db.process/id process})
+            fact (invoke!)]
         (testing "the occurrence keeps a bounded face and publishes the blob"
           (let [fault (fault-evidence connection fact)
                 occurrences (:seon.error/occurrences fault)]
-            (is (= :seon.flow/committed outcome))
-            (is (= (:seon.error/id fact) (:seon.error/id fault))
-                "the returned fact names the fault the signature reached")
+            (is (true? (:seon.fault/committed? fact)))
+            (is (= (:seon.error/signature fact) (:seon.error/signature fault))
+                "the receipt names the fault the signature reached")
             (is (= 1 (count occurrences))
                 "one payload is one occurrence of its failure class")
             (let [occurrence (first occurrences)
@@ -138,15 +146,13 @@
               (is (pos? (:seon.error/data-size occurrence)))
               (is (:seon.error/capped? occurrence)
                   "an inline face that omitted evidence says so")
-              (is (not (str/includes? inline state-marker)))
               (let [evidence (when (string? digest)
                                (blob/get connection digest))]
                 (is (string? evidence))
                 (is (some? (edn/read-string evidence))
                     "the published evidence reads back as data")
                 (is (str/includes? evidence diagnostic-payload)
-                    "the complete diagnostic payload remains retrievable")
-                (is (not (str/includes? evidence state-marker)))))))
+                    "the complete diagnostic payload remains retrievable")))))
 
         (testing "repeated identical faults aggregate on one bounded occurrence"
           (let [before baseline
@@ -207,14 +213,11 @@
     (try
       (config/apply! {:seon.db/connection connection
                       :seon.boot/cluster-name cluster-name})
-      (let [projection (schema/projection-from-database @connection)
-            caps (config/result-caps config/defaults)
-            commit-fault! (var-get (ns-resolve 'seon.cluster 'commit-fault!))
-            source (lossy-fault-source)
-            [fact outcome] (schema/call-with-projection
-                            projection
-                            #(commit-fault! connection cluster-name process caps
-                                            source))
+      (let [source (lossy-fault-source)
+            fact (fault/fault! (fault-world connection cluster-name) source
+                               {:seon.error/layer ::storm
+                                :seon.error/operation `lossy-subthreshold-fault-evidence-is-retrievable
+                                :seon.db.process/id process})
             fault (fault-evidence connection fact)
             occurrences (:seon.error/occurrences fault)
             occurrence (first occurrences)
@@ -224,10 +227,10 @@
             full-evidence? (and (string? evidence)
                                 (< (count evidence) 262144)
                                 (str/includes? evidence
-                                                (:fault-message (::flow/msg source))))]
-        (is (= :seon.flow/committed outcome))
-        (is (= (:seon.error/id fact) (:seon.error/id fault))
-            "the returned fact names the fault the signature reached")
+                                                (get-in source [:seon.error/data :fault-message])))]
+        (is (true? (:seon.fault/committed? fact)))
+        (is (= (:seon.error/signature fact) (:seon.error/signature fault))
+            "the receipt names the fault the signature reached")
         (is (= 1 (count occurrences))
             "one payload is one occurrence of its failure class")
         (is (string? digest)

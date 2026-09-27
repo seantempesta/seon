@@ -324,7 +324,7 @@
         entity #(test-support/program-entity (db/db %1) %2 %3)
         s (keyword (str "gate-class-" (id/id)))]
     (test-support/transacted! h-conn [(test-support/namespace-entity (db/db h-conn) 'scratch.gate-class)
-                                      (entity h-conn '[:seon.fn/sym scratch.gate-class/f] "(defn f [] 1)")])
+                                      (entity h-conn '[:seon.fn/sym scratch.gate-class/f] "(defn f {:malli/schema [:=> [:cat] :int]} [] 1)")])
     (test-support/transacted! h-conn [(entity h-conn '[:seon.test/sym scratch.gate-class/f-check]
                                            "(clojure.test/deftest f-check (clojure.test/is (pos? (scratch.gate-class/f))))")])
     (try
@@ -333,7 +333,7 @@
                   (fn [execution]
                     ;; The real writer, never the fixture writer that binds its own custody.
                     (let [c (:seon.db/connection execution)
-                          written (db/transact! c [(entity c '[:seon.fn/sym scratch.gate-class/f] "(defn f [] 2)")])]
+                          written (db/transact! c [(entity c '[:seon.fn/sym scratch.gate-class/f] "(defn f {:malli/schema [:=> [:cat] :int]} [] 2)")])]
                       (is (:db-after written) (pr-str (select-keys written [:seon.error/message])))
                       #{[:seon.fn/sym 'scratch.gate-class/f]}))
                   (constantly #{}))]
@@ -369,7 +369,7 @@
         issue-id (str "merge-task-test-" (id/id))
         c (keyword (str "merge-task-test-c-" (id/id)))
         _ (write! h-conn [(test-support/namespace-entity (db/db h-conn) 'scratch.merge-tasks)
-                          (entity h-conn :seon.fn/sym "merge-tasked" "(defn merge-tasked [] 1)")])
+                          (entity h-conn :seon.fn/sym "merge-tasked" "(defn merge-tasked {:malli/schema [:=> [:cat] :int]} [] 1)")])
         _ (write! h-conn [(entity h-conn :seon.test/sym "merge-tasked-check" "(clojure.test/deftest merge-tasked-check (clojure.test/is (pos? (scratch.merge-tasks/merge-tasked))))")
                           {:seon.issue/id issue-id :seon.issue/title "Tasked" :seon.issue/status :open
                            :seon.issue/severity :cleanup :seon.issue/problem "Replace the tasked function."

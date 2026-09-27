@@ -4,6 +4,7 @@
             [clojure.data.json :as json]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [clojure.walk]
             [datahike.api :as d]
             [seon.render.web :as web]
             [seon.render.web-test :as web-test]
@@ -265,10 +266,17 @@
                                                         :seon.sci.reader/line 2
                                                         :seon.sci.reader/column 1}})
                                :seon.error/at (java.util.Date. 0) :seon.error/layer :seon.render.web-debug-test/fixture :seon.error/operation 'seon.render.web-debug-test/turn-details-use-the-loop-opening-and-exact-segments :seon.render/refused-member :seon.render/output}
-                              (assoc (select-keys directory [:seon.cluster.eval/source :seon.eval/renderer
-                                                            :seon.cluster.eval/read-evidence
-                                                            :seon.cluster.eval/read-basis-transaction])
-                                     :seon.eval/shown (repl/render-directory-ai {:functions [] :schemas {}}))]
+                              ;; A copy of the evidence, never the pulled component
+                              ;; itself: its :db/id would give the one read-evidence
+                              ;; entity a second owner, which the writer refuses
+                              ;; (multiple-component-owners).
+                              (cond-> (assoc (select-keys directory [:seon.cluster.eval/source :seon.eval/renderer
+                                                                     :seon.cluster.eval/read-evidence
+                                                                     :seon.cluster.eval/read-basis-transaction])
+                                             :seon.eval/shown (repl/render-directory-ai {:functions [] :schemas {}}))
+                                (:seon.cluster.eval/read-evidence directory)
+                                (update :seon.cluster.eval/read-evidence
+                                        (partial clojure.walk/postwalk #(if (map? %) (dissoc % :db/id) %))))]
                              (attempt "panel-attempt-1" 5000 0 5000) nil)
                  (seed-turn! :call "(inc 123)" [repeated]
                              (attempt "panel-attempt-2" 6000 0 6000) nil)

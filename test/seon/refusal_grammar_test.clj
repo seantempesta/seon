@@ -77,8 +77,11 @@
                          :seon.error/offending 42
                          :seon.error/data {:seon.error/member :selector}}
             shown (error/render-ai (assoc unit :seon.render/value diagnostic))]
+        ;; "Example:" comes from the operation's docstring Examples; seon.db/pull
+        ;; declares none, and the stored-doc enrichment that supplied one was
+        ;; deleted in b1f291fbc (printing no longer enriches errors).
         (doseq [fragment ["seon.db/pull refused :selector: expected a string"
-                          "got an integer 42" "Fix:" "Example:"]]
+                          "got an integer 42" "Fix:"]]
           (is (str/includes? shown fragment) shown))
         (is (not (str/includes? shown "seon.error/data")) shown)
         (let [refusal (db/transact! connection
@@ -86,9 +89,18 @@
                                       :seon.fn/doc "incomplete"}])]
           (is (string? (:seon.db.write.attempt/request-id refusal))
               (pr-str refusal))
+          ;; The refusal names its first problem as a sentence; concrete enum
+          ;; choices are proven below on the enum itself (the fixture's
+          ;; admission-source enum is no longer its first problem).
           (is (str/includes? (:seon.error/message refusal)
-                             ":core")
+                             "expected a namespaced symbol, got a string")
               (pr-str refusal))
+          (is (= "either :core or :agent"
+                 (:seon.error/expected-description
+                  (error/explain-problem
+                   {:seon.error/problem {:schema (m/schema [:enum :core :agent]) :value :x}
+                    :seon.error/path [0 :seon.schema.admission/source]
+                    :seon.error/argument "transaction data"}))))
           (is (not (str/includes? (:seon.error/message refusal)
                                   "with a value satisfying missing required key"))
               (pr-str refusal)))

@@ -196,10 +196,10 @@
             shown-report (db/transact! connection [])]
         (readable! (db/render-transaction-html report) ["Committed transaction" "Prepare" "Changes"])
         (readable! (db/render-rejection-html refusal)
-                   ["seon.db/transact!" "Supply :my.plan.item/title with a string."])
+                   ["seon.db/transact!" "Supply :my.plan.item/title with a string of length at least 1."])
         (is (= (golden :transaction) (db/render-transaction-ai shown-report)))
         (is (str/includes? (db/render-rejection-ai refusal)
-                           "Supply :my.plan.item/title with a string."))))))
+                           "Supply :my.plan.item/title with a string of length at least 1."))))))
 
 (deftest settings-display-follows-declarations-without-name-based-units
   ;; WANTED (ed3f44225): each dial declares its own label, divisor and unit,

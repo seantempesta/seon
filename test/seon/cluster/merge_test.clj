@@ -27,8 +27,8 @@
         fn-entity #(entity (db/db %1) :fn %2 %3)
         issue (str "merge-test-" (id/id))
         c (keyword (str "merge-test-c-" (id/id)))
-        _ (write! h-conn [(fn-entity h-conn "merge-callee" "(defn merge-callee [] 1)")
-                          (fn-entity h-conn "merge-caller" "(defn merge-caller [] (seon.cluster.merge-test/merge-callee))")])
+        _ (write! h-conn [(fn-entity h-conn "merge-callee" "(defn merge-callee {:malli/schema [:=> [:cat] :int]} [] 1)")
+                          (fn-entity h-conn "merge-caller" "(defn merge-caller {:malli/schema [:=> [:cat] :int]} [] (seon.cluster.merge-test/merge-callee))")])
         _ (write! h-conn [(entity (db/db h-conn) :test "merge-check" "(clojure.test/deftest merge-check (clojure.test/is (= 1 (seon.cluster.merge-test/merge-caller))))")
                           {:seon.issue/id issue :seon.issue/title "Merge" :seon.issue/status :open
                            :seon.issue/severity :cleanup :seon.issue/problem "Replace the callee."
@@ -43,24 +43,24 @@
                    (some->> (:seon.source/candidate p) (vswap! made conj)) p)]
     (try
       (testing "an equal revert is unchanged: nothing to merge"
-        (write! c-conn [(fn-entity c-conn "merge-callee" "(defn merge-callee [] (+ 0 1))")])
-        (write! c-conn [(fn-entity c-conn "merge-callee" "(defn merge-callee [] 1)")])
+        (write! c-conn [(fn-entity c-conn "merge-callee" "(defn merge-callee {:malli/schema [:=> [:cat] :int]} [] (+ 0 1))")])
+        (write! c-conn [(fn-entity c-conn "merge-callee" "(defn merge-callee {:malli/schema [:=> [:cat] :int]} [] 1)")])
         (is (= :seon.program/scope (:seon.program/missing-evidence (prepare)))))
       (testing "a red replacement is tested but its evidence refuses acceptance"
-        (let [_ (write! h-conn [(fn-entity h-conn "merge-extra" "(defn merge-extra [] 0)")])
-              _ (write! c-conn [(fn-entity c-conn "merge-callee" "(defn merge-callee [] 2)")])
+        (let [_ (write! h-conn [(fn-entity h-conn "merge-extra" "(defn merge-extra {:malli/schema [:=> [:cat] :int]} [] 0)")])
+              _ (write! c-conn [(fn-entity c-conn "merge-callee" "(defn merge-callee {:malli/schema [:=> [:cat] :int]} [] 2)")])
               red (prepare)
               before (db/commit-id (db/db h-conn))]
           (is (false? (:seon.test/passed? red)) (pr-str red))
           (is (= :seon.source/merge (:seon.error/layer (source/accept-merge! target store red))))
           (is (= before (db/commit-id (db/db h-conn))))))
       (testing "green: accept merges exactly the tested entities with lineage H C E; another entity's write never stales it"
-        (let [_ (write! c-conn [(fn-entity c-conn "merge-callee" "(defn merge-callee [] (* 1 1))")])
+        (let [_ (write! c-conn [(fn-entity c-conn "merge-callee" "(defn merge-callee {:malli/schema [:=> [:cat] :int]} [] (* 1 1))")])
               green (prepare)
               ;; Before, any head write (a turn, an evaluation, this title) refused as a stale basis-t.
               h (write! h-conn [{:seon.issue/id issue :seon.issue/title "Merge again"}])
               tested (digest c-conn "merge-callee")
-              _ (write! c-conn [(fn-entity c-conn "merge-callee" "(defn merge-callee [] 3)")])
+              _ (write! c-conn [(fn-entity c-conn "merge-callee" "(defn merge-callee {:malli/schema [:=> [:cat] :int]} [] 3)")])
               e (registry/branch-commit-id {:seon.store/store store :seon.store/branch (:seon.source/candidate green)})
               accepted (source/accept-merge! target store green)]
           (is (true? (:seon.test/passed? green)) (:seon.source/tally green))
@@ -73,11 +73,11 @@
           (is (= :seon.source/merge (:seon.error/layer (source/accept-merge! target store green)))
               "the merged proposal has nothing left to merge")))
       (testing "a head change to a merged entity refuses by name with both digests; then it is a conflict"
-        (write! c-conn [(fn-entity c-conn "merge-callee" "(defn merge-callee [] (- 3 2))")])
+        (write! c-conn [(fn-entity c-conn "merge-callee" "(defn merge-callee {:malli/schema [:=> [:cat] :int]} [] (- 3 2))")])
         (let [proposal (prepare)
               callee [:seon.fn/sym (sym "merge-callee")]
               expected (digest h-conn "merge-callee")
-              moved (write! h-conn [(fn-entity h-conn "merge-callee" "(defn merge-callee [] (- 2 1))")])
+              moved (write! h-conn [(fn-entity h-conn "merge-callee" "(defn merge-callee {:malli/schema [:=> [:cat] :int]} [] (- 2 1))")])
               refused (source/accept-merge! target store proposal)]
           (is (true? (:seon.test/passed? proposal)) (:seon.source/tally proposal))
           (is (= [:seon.source/expected-digests {callee expected} {callee (digest h-conn "merge-callee")}]
@@ -97,7 +97,7 @@
         h-conn (:seon.db/connection target)
         issue (str "merge-test-" (id/id))
         c (keyword (str "merge-test-c-" (id/id)))
-        _ (write! h-conn [(entity (db/db h-conn) :fn "merge-alone" "(defn merge-alone [] 1)")
+        _ (write! h-conn [(entity (db/db h-conn) :fn "merge-alone" "(defn merge-alone {:malli/schema [:=> [:cat] :int]} [] 1)")
                           (entity (db/db h-conn) :test "merge-other" "(clojure.test/deftest merge-other (clojure.test/is true))")])
         _ (write! h-conn [{:seon.issue/id issue :seon.issue/title "Lone" :seon.issue/status :open
                            :seon.issue/severity :cleanup :seon.issue/problem "Replace the lone function."
@@ -107,7 +107,7 @@
         candidate (cluster.agent/acquire-context! target nil {:seon.agent/branch c})
         c-conn (:seon.db/connection candidate)]
     (try
-      (write! c-conn [(entity (db/db c-conn) :fn "merge-alone" "(defn merge-alone [] (inc 0))")])
+      (write! c-conn [(entity (db/db c-conn) :fn "merge-alone" "(defn merge-alone {:malli/schema [:=> [:cat] :int]} [] (inc 0))")])
       (let [proposal (source/prepare-merge! target store c issue)
             before (db/commit-id (db/db h-conn))
             refusal (source/accept-merge! target store proposal)]
@@ -116,7 +116,7 @@
         (is (= before (db/commit-id (db/db h-conn))))
         (testing "a program write on S after the run refuses the named run"
           (let [s (cluster.agent/acquire-context! target nil {:seon.agent/branch (:seon.source/candidate proposal)})]
-            (try (write! (:seon.db/connection s) [(entity (db/db (:seon.db/connection s)) :fn "merge-alone" "(defn merge-alone [] 1)")])
+            (try (write! (:seon.db/connection s) [(entity (db/db (:seon.db/connection s)) :fn "merge-alone" "(defn merge-alone {:malli/schema [:=> [:cat] :int]} [] 1)")])
                  (finally (cluster.agent/release-context! s))))
           (is (= "The tested program changed after the named run."
                  (:seon.error/message (source/accept-merge! target store proposal)))))
