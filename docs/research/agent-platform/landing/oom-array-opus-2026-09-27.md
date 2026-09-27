@@ -44,6 +44,38 @@
   recorder reads it for delivery. It should be retired or given a reader; not
   done in this cut.
 
+### Red triage 2: instrument-test (b55d69c7c; RESET NEEDED, unproven on a JVM)
+
+- `an-invalid-refusal-retains-its-evidence-at-the-kernel-boundary` (producer:
+  `seon.sci.kernel/failure-value`). Instrument's minimal refusal records its
+  rejection in its own `:seon.error/chain`, never as a Throwable cause. The
+  kernel replaced that chain with the throwable's links and stripped the
+  carrier link, so the rejection's message and `:seon.instrument/problems`
+  data were lost. A refusal whose own chain holds links the throwable does not
+  carry now keeps that chain after its wrappers; relation indices are shifted.
+  Any other refusal keeps the old shape.
+- Stale subjects, updated to their rulings:
+  - `an-invalid-core-error-mode…` becomes
+    `an-invalid-apply-request-is-refused-at-its-crossing`. 7c40396b3 deleted
+    the mode, and the missing-projection registration error keeps its own
+    regression.
+  - `one-wrapper-per-adoption…`: 39960bb15 makes equal inputs answer the one
+    built projection.
+  - `semantic-admission…`: 36a3714b4 declares `failure-value` as
+    `[:or execution-error error]`.
+- `a-refusal-that-cannot-be-built…` `:missing-refusal-schema` (producer:
+  instrument.clj, held by defn-scan). A JVM probe on default shows
+  `references` under the masked arming projection throwing
+  `:malli.core/invalid-schema` from `identity-only-descriptors-in`
+  (schema.clj:3883). That bare Malli error escapes without members. The patch
+  `tmp/oom-array-opus/instrument-minimal-refusal.patch` stops referencing
+  under the suspect projection, because `diagnostic` already references the
+  observation under the handed one. Trade-off: with no handed projection, a
+  world in the offending arguments is not referenced (places still are).
+- Not fixed: `refusal-value-projection…` lines 716 (the HTML face lacks
+  members 103 onward) and 713 (a newline inside the AI cut). Both are render
+  owners' problems (triage suspects 09fe1d064 and 132d94015/33f700f37).
+
 ## Evidence
 
 - Heap dump: `data/heap/java_pid12212.hprof`, 6,964,021,613 bytes (6.5 GiB on
