@@ -52,6 +52,8 @@
 
 (def ^:dynamic *exec* nil)
 
+(declare gate-root! landing-files)
+
 (defn- without-native-guard
   "The landing deletes native-mutation (S9: removals are observed writes); its
   guard reads this flag, so a proof world runs without it."
@@ -745,23 +747,23 @@
 ;;; --- Per-world call sink (root: test ownership in the world) -----------------
 
 (defn- patched-sink-macro!
-  "The count seon.profile's armed wrapper makes at each call under the
-  profile-world-sink patch, loaded from the patch text into its own scratch
-  namespace (no existing Var is redefined)."
+  "The count seon.profile's armed wrapper makes at each call, loaded from
+  src/seon/profile.clj into its own scratch namespace (no existing Var is
+  redefined)."
   []
-  (let [patch (slurp (str dir "patches/profile-world-sink.patch"))
-        body (->> (str/split-lines patch)
-                  (drop-while #(not (str/starts-with? % "+(defmacro count-into-world!")))
-                  (take-while #(str/starts-with? % "+"))
-                  (map #(subs % 1))
-                  (str/join "\n"))]
+  (let [src (slurp "/Users/sean/src/seon/src/seon/profile.clj")
+        form-at (fn [start] (let [i (str/index-of src start)] (read-string (subs src i))))
+        adder (form-at "(def ^java.util.function.Function new-adder")
+        counter (form-at "(defmacro count-into-world!")]
     (binding [*ns* (create-ns 'one-path-proof.profile-sink)]
       (refer-clojure)
-      (load-string body))
-    (load-string "(fn [sym] (one-path-proof.profile-sink/count-into-world! sym))")))
+      (import '[java.util.concurrent.atomic LongAdder])
+      (eval adder)
+      (eval (clojure.walk/postwalk-replace {'seon.profile/new-adder 'one-path-proof.profile-sink/new-adder} counter)))
+    (eval '(fn [sym] (one-path-proof.profile-sink/count-into-world! sym)))))
 
 (defproof :sink-per-world :world
-  "Two concurrent test agents in two worlds call the same counted function; each world's sink counts only its own calls (1,000 and 1,500), where the JVM-wide armed counter counts both (the profile-world-sink patch's count, loaded from the patch)"
+  "Two concurrent test agents in two worlds call the same counted function; each world's sink counts only its own calls (1,000 and 1,500), where the JVM-wide armed counter counts both (seon.profile's count, loaded from its source)"
   (let [count! (patched-sink-macro!)
         ea (acquire!) eb (acquire!)]
     (try
@@ -824,6 +826,48 @@
         {:pass? (and (= head with) (not (some #(str/includes? (str (:refused with)) (str %)) mine)))
          :head head :with-batch with :keys (count mine)})
       (finally (sh/sh "rm" "-rf" root)))))
+
+;;; --- The branch entrance (dogfood 6): my.agent's, shared with MCP's tool -------
+
+(defn- scratch-my-agent
+  "src/my/agent.clj loaded as its own scratch namespace (no live Var is
+  redefined): the entrance as it lands."
+  []
+  (let [text (slurp "/Users/sean/src/seon/src/my/agent.clj")
+        text (str/replace-first text "(ns ^{:seon.ns/context-relevant? true} my.agent" "(ns one-path-proof.my-agent")]
+    (load-string text)
+    (fn [sym] @(ns-resolve 'one-path-proof.my-agent sym))))
+
+(defproof :branch-entrance :parity
+  "Dogfood 6: one my.agent entrance creates, lists and retires a lane branch: a created branch forks the cluster head's commit; an existing name and the cluster's own branch refuse as data; retiring a branch whose hosted agent ran retires the host first, then the roster entry; retiring an unheld branch (the state the MCP tool's NPE left tfp-sel in) retires it"
+  (let [f (scratch-my-agent)
+        instance (get @@(requiring-resolve 'seon.operator.runtime/running-instances) "default")
+        handle (:seon.turn.loop/cluster instance)
+        context {:seon.store/store (:seon.store/store instance) :seon.db/connection (:seon.db/connection handle)
+                 :seon.agent/routing (:seon.agent/routing handle)}
+        a (keyword (str "op-branch-" (subs (str (random-uuid)) 0 6)))
+        b (keyword (str "op-branch-" (subs (str (random-uuid)) 0 6)))
+        created ((f 'create-branch!) {:seon.store/branch a} context)
+        again ((f 'create-branch!) {:seon.store/branch a} context)
+        own ((f 'create-branch!) {:seon.store/branch (:my.agent/own-branch ((f 'branches) context))} context)
+        _ ((f 'create-branch!) {:seon.store/branch b} context)
+        host ((requiring-resolve 'seon.cluster.host/host!)
+              {:seon.turn.loop/cluster (assoc handle :seon.store/store (:seon.store/store instance))
+               :seon.agent/branch a :seon.agent/id (str "mcp/" (name a)) :seon.ns/name 'user})
+        hosted-before (some? ((requiring-resolve 'seon.cluster.host/hosted) handle a))
+        retired ((f 'retire-branch!) {:seon.store/branch a} context)
+        retired-unheld ((f 'retire-branch!) {:seon.store/branch b} context)
+        roster (:my.agent/roster ((f 'branches) context))]
+    {:pass? (and (:seon.cluster/created? created) (uuid? (:seon.cluster.registry/from created))
+                 (str/includes? (str (:seon.error/message again)) "already exists")
+                 (str/includes? (str (:seon.error/message own)) "shared")
+                 (some? host) hosted-before
+                 (= {:seon.store/branch a :my.agent/retired? true} retired)
+                 (= {:seon.store/branch b :my.agent/retired? true} retired-unheld)
+                 (not (contains? roster a)) (not (contains? roster b))
+                 (nil? ((requiring-resolve 'seon.cluster.host/hosted) handle a)))
+     :created (dissoc created :seon.cluster.registry/from) :refusals [(:seon.error/message again) (:seon.error/message own)]
+     :retired [retired retired-unheld]}))
 
 (def landing-files
   "The six namespaces and the schema resource step S3 copies into the tree."
