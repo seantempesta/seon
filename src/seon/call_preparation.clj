@@ -1007,11 +1007,27 @@
   [current plan-value world wrapped]
   ;; The step runs on every call of a prepared function, so it calls
   ;; `prepare` unarmed; the wrapped contract still validates what it returns.
-  (let [prepare-call (mi/-f->original prepare)]
+  ;;
+  ;; The world is read only when this call can receive a supplied default: a
+  ;; call matching a declared arity with no map-entry default is never
+  ;; prefixed, so it needs no environment. `world` derives the custody's
+  ;; database on every call it answers (`calling-environment`, ~1.9 us): at
+  ;; default one seon.db/q made 5 such calls and a pull 4, each a
+  ;; one-argument `carried-projection` or `schema-database` call that
+  ;; supplies nothing; a q under a host world took 64.6 us against 42.6 us
+  ;; with none (2026-09-27). A host test body counted 62 resolutions for one
+  ;; q, pull and pull-many (tests-0627r).
+  (let [prepare-call (mi/-f->original prepare)
+        by-count (:seon.call-preparation/by-supplied-count plan-value)]
     (fn [& arguments]
-      (if-let [environment (world)]
-        (let [prepared (prepare-call current environment plan-value (vec arguments))]
-          (if (vector? prepared)
-            (apply wrapped prepared)
-            prepared))
-        (apply wrapped arguments)))))
+      (let [answer (get by-count (count arguments))]
+        (if-let [environment (when-not (and answer
+                                             (not (:seon.call-preparation/ambiguous? answer))
+                                             (empty? (:seon.call-preparation/inserts answer))
+                                             (empty? (:seon.call-preparation/entries answer)))
+                               (world))]
+          (let [prepared (prepare-call current environment plan-value (vec arguments))]
+            (if (vector? prepared)
+              (apply wrapped prepared)
+              prepared))
+          (apply wrapped arguments))))))
