@@ -1189,26 +1189,41 @@
   ;; the measured fact this namespace's discipline exists for
   ;; (research §4.3): `alter-var-root`'s wrapper is undone by the new
   ;; `def`, the ::original meta is gone, NOTHING warns, and the schema
-  ;; stays registered so the registry now disagrees with reality
-  (instrumented!
-   '[seon.instrument-test/doubled]
-   (fn [_]
-     ;; 2.0 violates `:int` and yet multiplies perfectly well, which is
-     ;; what makes it the honest probe here: the point is that the
-     ;; UNPROTECTED call succeeds silently, not that it fails some other
-     ;; way (review-caught — a string would have thrown a
-     ;; ClassCastException and hidden the very thing under test)
-     (is (thrown? Exception (doubled 2.0)) "instrumented to begin with")
-     ;; a re-eval as the REPL does it: in the namespace, plain `defn`
-     (binding [*ns* (the-ns 'seon.instrument-test)]
-       (eval '(defn ^{:malli/schema [:=> [:cat :int] :int]}
-                doubled [n] (* 2 n))))
-     (is (= 4.0 (doubled 2.0))
-         "after a plain re-eval the wrapper is gone and the bad call
-          runs — silently, which is the whole problem")
-     (arm-suite! '[seon.instrument-test/doubled])
-     (is (thrown? Exception (doubled 2.0))
-         "and apply! is the explicit re-application that restores it"))))
+  ;; stays registered so the registry now disagrees with reality.
+  ;; The subject is a namespace of this test's own, removed in `finally`:
+  ;; the re-evaluated root never outlives the test (it once replaced this
+  ;; suite's `doubled` for the JVM's lifetime).
+  (let [scratch (symbol (str "seon.instrument-test.re-evaluation-" (random-uuid)))
+        subject (symbol (str scratch) "doubled")
+        contract [:=> [:cat :int] :int]
+        projection (schema/projection-with-function-contract
+                    (schema/handed-projection) subject contract
+                    {:seon.schema.admission/source :core})
+        define! #(binding [*ns* (the-ns scratch)]
+                   (eval (list 'defn (with-meta 'doubled {:malli/schema contract})
+                               '[n] '(* 2 n))))
+        call #(@(find-var subject) %)
+        arm! #(arm-suite! [subject] {:seon.schema/projection projection})]
+    (try
+      (binding [*ns* (create-ns scratch)] (refer-clojure))
+      (define!)
+      (arm!)
+      ;; 2.0 violates `:int` and yet multiplies perfectly well, which is
+      ;; what makes it the honest probe here: the point is that the
+      ;; UNPROTECTED call succeeds silently, not that it fails some other
+      ;; way (a string would throw a ClassCastException and hide the very
+      ;; thing under test)
+      (is (thrown? Exception (call 2.0)) "instrumented to begin with")
+      ;; a re-eval as the REPL does it: in the namespace, plain `defn`
+      (define!)
+      (is (= 4.0 (call 2.0))
+          "after a plain re-eval the wrapper is gone and the bad call
+           runs — silently, which is the whole problem")
+      (arm!)
+      (is (thrown? Exception (call 2.0))
+          "and apply! is the explicit re-application that restores it")
+      (finally
+        (remove-ns scratch)))))
 
 (deftest applying-uses-the-acquired-projection-without-publishing-it
   ;; No projection in the request: `apply!` arms from the acquired projection
