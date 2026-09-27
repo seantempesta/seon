@@ -209,7 +209,9 @@ root.
   current entities.
 - **Contract every admitted function, private ones included.** Complete, well-formed, fully namespaced Malli schemas
   and reaching tests. Compile touched contracts against the packaged projection; use declared schemas or registered
-  named predicates, never anonymous contract functions or incomplete forms. Justify polymorphic boundaries.
+  named predicates, never anonymous contract functions or incomplete forms. Justify polymorphic boundaries. Every
+  bug fix adds or tightens the contract at the producer of the bad value, so that class of bug is refused at its
+  source from then on. Existing uncontracted code is not back-filled wholesale: much of it is headed for deletion.
 - **Keep entry policy separate from merge.** Schema/test/test-first entry defaults to `:gate`, refusing before
   evaluation; explicit `:warn` admits experiments with declared diagnostics. Preserve malformed authored contracts
   as data; never arm them or substitute stale wrappers. Arm every valid contract: invalid inputs prevent entry,
