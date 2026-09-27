@@ -2204,12 +2204,13 @@
                                               (derivation-schema-keys declared analyzed))
                                        derivation-inputs)
                 stale (when (and database (empty? rederive))
-                        (let [stored-keys (into {} (db/q '[:find ?path ?key
-                                                           :where [?file :seon.fn.file/relative-path ?path]
-                                                                  [?file :seon.fn.file/derivation-digest ?key]]
-                                                         database))]
-                          (when (map? stored-keys)
-                            (refused! "Stored derivation keys could not be read." stored-keys))
+                        (let [held (db/q '[:find ?path ?key
+                                           :where [?file :seon.fn.file/relative-path ?path]
+                                                  [?file :seon.fn.file/derivation-digest ?key]]
+                                         database)
+                              _ (when (map? held)
+                                  (refused! "Stored derivation keys could not be read." held))
+                              stored-keys (into {} held)]
                           (into #{} (filter #(and (not (contains? selected %))
                                                   (not= (get stored-keys %) (get keyed %))))
                                 derivation-inputs)))
