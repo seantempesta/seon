@@ -53,4 +53,8 @@
              :evidence #{"docs/research/agent-platform/commit-floor-2026-09-26.md"
                          "docs/research/agent-platform/landing/fix-test-request-cost-2026-09-26.md"
                          "docs/research/agent-platform/landing/fix-write-cost-2026-09-26.md"
-                         "docs/research/agent-platform/landing/perf-admit-tests-opus-2026-09-26.md"}}]
+                         "docs/research/agent-platform/landing/perf-admit-tests-opus-2026-09-26.md"}}
+ #:seon.task{:name "admission-without-projection-embeds-its-error"
+             :kind :function
+             :intent "Since 9b8c5b405 the writer no longer carries the schema projection on a report's :db-before/:db-after; admitting such a report with no projection named returns {:opaque ... :projection-error ...} embedded in the value instead of refusing. AGENTS: derive missing profiles at entry or refuse explicitly. Admission derives the projection from the database value it is handed, or refuses naming the missing projection (rearm-scope-2, 0e63403d2)."
+             :evidence #{"docs/research/agent-platform/red-triage-3-2026-09-27.md"}}]
