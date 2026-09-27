@@ -4119,8 +4119,11 @@
            (let [settled (select-keys receipt [:seon.turn/id :seon.db.process/id :seon.cluster.eval/ordinal
                                                :seon.cluster.eval/ns :seon.sci.eval/ending-ns
                                                :seon.eval/shown :seon.cluster.eval/error])]
+             ;; A form that failed keeps its own error, and the refused
+             ;; publication is still delivered beside it: nothing of this
+             ;; run settled, whatever each form did.
              (if (:seon.cluster.eval/error settled)
-               settled
+               (assoc settled :seon.cluster.eval/diagnostics diagnostics)
                (assoc settled
                       :seon.cluster.eval/error
                       (str/join " " (remove str/blank?

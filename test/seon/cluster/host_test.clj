@@ -464,6 +464,12 @@
                       (map errors [0 2]))
               (pr-str errors))
           (is (str/includes? (nth errors 3) "Divide by zero") "a form's own body error stays its error")
+          (is (str/includes? (str (db/q '[:find ?d . :in $ ?id
+                                          :where [?run :seon.turn/id ?id] [?e :seon.cluster.eval/run ?run]
+                                          [?e :seon.cluster.eval/ordinal 3] [?e :seon.cluster.eval/diagnostics ?d]]
+                                        @connection run-id))
+                             "surviving referrers")
+              "and the refused publication is delivered beside it")
           (testing "the association is the refused write's recorded data"
             (is (= :seon.program/deletion-refused-error validator))
             (is (= [{:seon.program/identity [:seon.fn/sym helper] :seon.cluster.eval/ordinal 1}]
