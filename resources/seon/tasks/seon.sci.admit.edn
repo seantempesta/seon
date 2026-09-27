@@ -1,9 +1,10 @@
 [#:seon.task{:id "57f97689b302"
              :name "storage-edn-is-print-nodes"
              :kind :function
-             :intent "The admitted :seon.sci.admit/edn is a print-node tree, not value EDN: nil is stored as '#:seon.print{:face :seon.print/nil, :value nil}'. error/project-observation stores that string for write-attempt and schema observations and for occurrence :seon.error/data-edn (seen at HEAD on signature 3ee1d7a90eaf: a 15,779-byte datum of print nodes). Stored evidence must be readable value EDN."
+             :intent "The admitted :seon.sci.admit/edn is a print-node tree, not value EDN: nil is stored as '#:seon.print{:face :seon.print/nil, :value nil}'. error/project-observation stores that string for write-attempt and schema observations and for occurrence :seon.error/data-edn (seen at HEAD on signature 3ee1d7a90eaf: a 15,779-byte datum of print nodes). Stored evidence must be readable value EDN. Another case (stability sweep 2026-09-27): fault 317111871b50's inline :seon.error/data-edn keeps only the outer cause link plus :seon.sci.admit/remainder {:reason :over-bound :bytes 7826}, and its whole cause chain is a 107 KB evidence-blob STRING of #:seon.print{:face ...} nodes, not a value. Done when a recorded occurrence's data-edn and evidence blob read back as the value EDN of the whole cause chain."
              :must-read #{seon.error/project-observation seon.sci.admit/admit-partitioned}
-             :evidence #{"docs/research/agent-platform/landing/error-text-2026-09-26.md"
+             :evidence #{"docs/research/agent-platform/stability-sweep-2026-09-27.md"
+                         "docs/research/agent-platform/landing/error-text-2026-09-26.md"
                          "docs/research/agent-platform/landing/task-log-2026-09-26.md"}}
  #:seon.task{:id "6af99d6bdb94"
              :name "large-printed-output-refuses-the-evaluation"

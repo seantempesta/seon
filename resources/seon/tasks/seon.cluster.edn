@@ -73,4 +73,10 @@
              :kind :function
              :intent "invalid-value-retraction decodes each stored value with seon.schema.datahike/decode-attribute-value-in, which for an EDN-encoded attribute validates the decoded value against the attribute's NEW form and throws ::schema-invalid (datahike.clj:328-331). So a narrowed EDN-encoded attribute makes the whole adoption throw instead of retracting only the refused values, and an EDN-encoded cardinality-many attribute would validate one member against its whole [:vector ...] form. No installed many attribute is EDN-encoded today (117 probed on default, 2026-09-27), so the many case is latent. Decode without the slot validation here (the retraction validates), or share the writer's attribute plan (db.clj write-attribute-plan)."
              :must-read #{seon.cluster/invalid-value-retraction seon.schema.datahike/decode-attribute-value-in}
-             :evidence #{"docs/research/agent-platform/landing/register-anywhere-diagnosis-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/register-anywhere-diagnosis-2026-09-27.md"}}
+ #:seon.task{:id "47491ad902b3"
+             :name "runtime-status-throws-on-a-boot-window-read"
+             :kind :function
+             :intent "At 18:01:08Z 2026-09-27, 19 s into pid 75447, runtime_status threw open-faults' contract refusal ('expected must be an immutable Datahike database value, got a map') instead of answering: mcp-runtime-observation (cluster.clj ~620-624) calls db/db several times and passes its declared :seon.db/invalid-read-error map on (cause unverified). Read one database value; an error value makes problems unavailable (:seon.dev.mcp/problems-unavailable) and health :unknown. Done when a regression whose database read answers an error value gets an observation with health :unknown, never a throw."
+             :must-read #{seon.cluster/mcp-runtime-observation}
+             :evidence #{"docs/research/agent-platform/stability-sweep-2026-09-27.md"}}]
