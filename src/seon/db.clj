@@ -3595,17 +3595,20 @@
    it has none. `refuse!` receives the first storage fault (design §3.2): a
    cell whose element a sweep removed, a cell holding more than one element,
    positions other than 0..n-1, or cells of an attribute not present."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection :seon.instrument/callable
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.instrument/callable
                        :seon.db/entity-id [:vector :seon.db/entity-id] [:set :qualified-keyword]
                        [:or :nil :seon.instrument/callable] [:or :nil :seon.instrument/callable]]
                   [:map-of :qualified-keyword [:vector :seon.schema/value]]]}
-  [database projection plan parent cells present visit-child refuse!]
+  [database plan parent cells present visit-child refuse!]
   (let [rows (mapv (fn [cell]
                      (when visit-child (visit-child cell))
                      (let [cell-datoms (d/datoms database :eavt cell)]
                        {::cell cell
                         ::position (some #(when (= :seon.db.vector/position (:a %)) (:v %)) cell-datoms)
-                        ::members (filterv #(schema.datahike/vector-attribute-in? projection (:a %)) cell-datoms)}))
+                        ;; Whatever a cell holds beside its position is its element, so a
+                        ;; value whose declarations do not yet name the cells (the
+                        ;; publication writes them after the attributes) reads them alike.
+                        ::members (filterv #(not= :seon.db.vector/position (:a %)) cell-datoms)}))
                    cells)
         by-attribute (group-by #(:a (first (::members %))) (filter #(= 1 (count (::members %))) rows))]
     (when refuse!
@@ -3679,7 +3682,7 @@
     (if-not (or (::cells stored) (::present stored))
       entity-map
       (with-meta (merge entity-map
-                        (cell-vectors database projection plan entity-id (vec (::cells stored))
+                        (cell-vectors database plan entity-id (vec (::cells stored))
                                       (or (::present stored) #{}) visit-child refuse!))
         {::cells (::cells stored)}))))
 
@@ -4807,6 +4810,45 @@
   (let [projection (carried-projection database)]
     (write-entity-value database projection (write-attribute-plans projection database) entity-id)))
 
+(defn vector-migration-tx
+  "Transaction data moving every element stored directly on a parent (the
+   cardinality-many storage before cells) into cells, in datom order, with
+   presence: `[:db/retract p a v]` (no cascade, so component elements keep
+   their identity) and one parent map of cells per vector. Nothing when
+   `:seon.db.vector/cells` is not installed in `database`, or when every
+   element already lives in a cell: running it again yields nothing. The
+   operations are physical, marked encoded for the codec.
+   Datom order is the order `declaration-value` read before, so every stored
+   definition digest stays valid through the move.
+
+   # Costs
+   One AEVT range per installed vector-shaped attribute of `projection`, one
+   EAVT seek per member."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection] :seon.store/transaction-data]}
+  [database projection]
+  (let [installed (dbi/-schema database)]
+    (if-not (get installed :seon.db.vector/cells)
+      []
+      (schema.datahike/already-encoded
+       (into []
+            (comp
+             (filter #(and (keyword? %) (get installed %) (schema.datahike/vector-shaped-attr-in? projection %)))
+             (mapcat
+             (fn [attribute]
+               (let [legacy (remove #(first (d/datoms database :eavt (:e %) :seon.db.vector/position))
+                                    (d/datoms database :aevt attribute))]
+                 (mapcat (fn [members]
+                           (let [parent (:e (first members))]
+                             (conj (mapv #(vector :db/retract parent attribute (:v %)) members)
+                                 {:db/id parent
+                                  :seon.db.vector/present #{attribute}
+                                  :seon.db.vector/cells
+                                  (into [] (map-indexed (fn [position datom]
+                                                          {:seon.db.vector/position position attribute [(:v datom)]}))
+                                        members)})))
+                         (partition-by :e legacy))))))
+            (keys installed))))))
+
 (defn- declared-collections
   "`entity-map`, a row read datom by datom, with each attribute of `many` in its
    declared collection and its stored vectors restored from the cells read as
@@ -5290,6 +5332,12 @@
         namespaces (into #{} (keep #(when (:seon.program/definition-digest %) (:seon.ns/name %))) entity-maps)
         written (into #{} (keep #(some (fn [a] (when-some [v (get % a)] [a v])) [:seon.fn/sym :seon.test/sym])) entity-maps)]
     (cond-> request
+      ;; A store between installing the vector cells and declaring them (a
+      ;; publication writes schema rows after attributes, or in the same
+      ;; transaction) still writes vectors as members: move them, and any this
+      ;; transaction writes, into cells at its end, once the cells are installed.
+      (not (contains? (:seon.schema.projection/forms projection) :seon.db.vector/cells))
+      (update :tx-data #(conj (vec %) [:db.fn/call vector-migration-tx projection]))
       (seq namespaces) (update :tx-data #(conj (vec %) [:db.fn/call namespace-digests-tx projection namespaces written])))))
 
 (defn- write-refusal

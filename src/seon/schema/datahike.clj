@@ -389,6 +389,13 @@
   [operation]
   (vary-meta operation assoc encoded-operation-key true))
 
+(defn already-encoded
+  "`operations` marked as already encoded: physical storage operations (the
+   vector migration) this codec passes through unchanged."
+  {:malli/schema [:=> [:cat :seon.store/transaction-data] :seon.store/transaction-data]}
+  [operations]
+  (mapv mark-encoded operations))
+
 (def ^:private storage-readers
   {'seon.schema.datahike/keyword
    (fn [[namespace-name local-name]]

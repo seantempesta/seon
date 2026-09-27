@@ -170,8 +170,7 @@
              (get-in evaluation [:seon.print/options :seon.print/level]))
       (:seon.test.accretion/gate-tests settlement-evaluation)
       (assoc :seon.test.accretion/gate-tests
-             (mapv (fn [test-symbol] [:seon.test/sym test-symbol])
-                   (:seon.test.accretion/gate-tests settlement-evaluation)))
+             (vec (:seon.test.accretion/gate-tests settlement-evaluation)))
       (some? (:seon.test.accretion/gate-test-count settlement-evaluation))
       (assoc :seon.test.accretion/gate-test-count
              (:seon.test.accretion/gate-test-count settlement-evaluation))

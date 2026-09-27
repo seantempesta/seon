@@ -61,7 +61,8 @@
                         :advisories [:vector :string],
                         :install? :boolean,
                         :gate-tests
-                        [:vector :seon.db/ref],
+                        [:vector {:description "The tests the gate ran, observed by symbol: a receipt never blocks deleting a test."}
+                         :qualified-symbol],
                         :gate-test-count [:int {:min 0}],
                         :gate-pass-count [:int {:min 0}],
                         :gate-fail-count [:int {:min 0}],

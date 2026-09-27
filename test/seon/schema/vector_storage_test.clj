@@ -59,6 +59,12 @@
             (schema/projection-with-schema current schema-key definition {:seon.schema.admission/source :core}))
           projection forms))
 
+(defn- without-cells
+  "`projection` as a value older than the bridge carries it: no cells declared."
+  {:malli/schema [:=> [:cat :seon.schema/projection] :seon.schema/projection]}
+  [projection]
+  (update projection :seon.schema.projection/forms dissoc :seon.db.vector/cells))
+
 (defn- encoded
   "`transaction` encoded under `projection`, the vector call shown as
    [:vectors requests]."
@@ -84,7 +90,7 @@
 (deftest vector-attributes-are-declared-by-shape
   (support/with-database
    (fn [_connection]
-     (let [without (vector-projection (schema/handed-projection) subject-forms)
+     (let [without (without-cells (vector-projection (schema/handed-projection) subject-forms))
            with (vector-projection without bridge-forms)
            items :seon.vector-test.p/items]
        (testing "the installed declaration does not change: cardinality-many of the element"
@@ -156,7 +162,7 @@
          (is (= ::schema.datahike/vector-value-not-sequential
                 (refusal-rule #(encoded projection [{:db/id "r" items "a"}])))))
        (testing "without cells declared, today's storage is unchanged"
-         (let [legacy (vector-projection (schema/handed-projection) subject-forms)]
+         (let [legacy (without-cells (vector-projection (schema/handed-projection) subject-forms))]
            (is (= [{:db/id "n" items ["b" "a"]}]
                   (encoded legacy [{:db/id "n" items ["b" "a"]}])))))))))
 
@@ -331,8 +337,11 @@
        (is (= [{:seon.vector-test.t/id "t2"}]
               (:seon.vector-test.p/peers (pulled c [{:seon.vector-test.p/peers [:seon.vector-test.t/id]}] p)))))
      (testing "retracting the parent removes its cells; the target survives"
-       (tx! c [[:db/retractEntity p]])
-       (is (empty? (d/datoms @c :aevt :seon.db.vector/cells)))
+       (let [e (:db/id (db/pull @c [:db/id] p))
+             cells (mapv :v (d/datoms @c :eavt e :seon.db.vector/cells))]
+         (is (seq cells))
+         (tx! c [[:db/retractEntity p]])
+         (is (every? #(empty? (d/datoms @c :eavt %)) cells)))
        (is (= {:seon.vector-test.t/id "t2"} (pulled c [:seon.vector-test.t/id] [:seon.vector-test.t/id "t2"])))))))
 
 (deftest raw-vector-operations-keep-a-meaning
@@ -578,12 +587,33 @@
      (testing "an entity's stored values read its vectors whole, without bridge keys"
        (let [stored (db/stored-entity @c (:db/id (db/pull @c [:db/id] p)))]
          (is (= ["b" "a" "b"] (:seon.vector-test.p/items stored)))
-         (is (not-any? #(= "seon.db.vector" (namespace %)) (keys stored)))))))
-  (testing "without cells, a vector attribute's order is not stored, so it compares as a set"
-    (support/with-database
-     {:seon.test-support/extra-schema
-      (schema.datahike/malli->datahike-schema-in
-       (vector-projection (schema/handed-projection) subject-forms) (stored-attributes subject-forms))}
-     (fn [c]
-       (support/transacted! c (support/schema-entities @c subject-forms))
-       (is (= #{"a" "b"} (db/stored-collection @c :seon.vector-test.p/items ["b" "a" "b"])))))))
+         (is (not-any? #(= "seon.db.vector" (namespace %)) (keys stored))))))))
+
+;;; ---------------------------------------------------------------------------
+;;; S10: the switch moves stored members into cells
+;;; ---------------------------------------------------------------------------
+
+(deftest the-migration-moves-members-into-cells-and-keeps-identities
+  (with-vector-world
+   (fn [c]
+     (let [as-stored #(with-meta % {:seon.schema.datahike/encoded-operation true})
+           report (tx! c [(as-stored {:seon.vector-test.p/id "L" :seon.vector-test.p/items ["b" "a"]
+                                    :seon.vector-test.p/kids [{:seon.vector-test.k/name "x"} {:seon.vector-test.k/name "y"}]})
+                          [:db.fn/call db/vector-migration-tx (db/carried-projection @c)]])
+           e (:db/id (db/pull @c [:db/id] [:seon.vector-test.p/id "L"]))
+           added-kids (into [] (comp (filter #(and (= e (:e %)) (= :seon.vector-test.p/kids (:a %)) (:added %))) (map :v))
+                            (:tx-data report))]
+       (testing "members written as the store held them before the switch move into cells, in datom order"
+         (is (empty? (d/datoms @c :eavt e :seon.vector-test.p/items)))
+         (is (= {:seon.vector-test.p/items ["a" "b"]
+                 :seon.vector-test.p/kids [{:seon.vector-test.k/name "x"} {:seon.vector-test.k/name "y"}]}
+                (db/pull @c [:seon.vector-test.p/items {:seon.vector-test.p/kids [:seon.vector-test.k/name]}]
+                         [:seon.vector-test.p/id "L"]))))
+       (testing "the component elements keep their entities (a retract does not cascade)"
+         (is (= (sort added-kids) (sort (element-ids c [:seon.vector-test.p/id "L"] :seon.vector-test.p/kids))))
+         (is (= 1 (count (d/q '[:find [?k ...] :where [?k :seon.vector-test.k/name "x"]] @c)))))
+       (testing "running it again moves nothing"
+         (is (empty? (db/vector-migration-tx @c (db/carried-projection @c)))))
+       (testing "a member written around the encoder without the migration refuses"
+         (is (refused? c [(as-stored [:db/add e :seon.vector-test.p/items "raw"])]
+                       :seon.db/vector-member-outside-cell)))))))

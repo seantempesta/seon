@@ -1,0 +1,16 @@
+;; The bridge's storage for `[:vector T]` attributes (vector-storage design §2).
+;; Each element of a vector attribute `a` lives in one identity-less cell owned
+;; by its parent through `:seon.db.vector/cells`, holding its position and
+;; exactly one value of `a` itself; the parent names every present vector,
+;; empty ones included, in `:seon.db.vector/present`. Agents never read or
+;; write these: the codec (`seon.schema.datahike`, `seon.db`) converts at
+;; every seam. Declaring `:seon.db.vector/cells` is the switch
+;; (`seon.schema.datahike/vector-attribute-in?`).
+#:seon.db.vector{:cells [:set {:seon.db/component true :seon.db/component-schema :seon.db.vector/cell
+                               :description "The cells holding this entity's vector elements. Lifecycle: cascade (components)."}
+                         :seon.db/ref]
+                 :position [:int {:min 0 :description "A cell's index in its vector; the positions of one vector are exactly 0..n-1."}]
+                 :present [:set {:description "The vector attributes this entity holds, an empty vector included; absence is no member."}
+                           :qualified-keyword]
+                 :cell [:map {:seon.db/attributes true}
+                        [:seon.db.vector/position :seon.db.vector/position]]}

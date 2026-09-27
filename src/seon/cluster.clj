@@ -1278,7 +1278,10 @@
   `[e a v]`. Work is one AEVT range read of the attribute.
 
   Edge cases: a `[:vector …]` many attribute whose declaration is unchanged
-  retracts nothing (validating a set against it refused every value)."
+  retracts nothing (validating a set against it refused every value). An
+  element held in a vector cell is retracted from its parent, `[:db/retract
+  parent a v]`, so the vector request renumbers the survivors instead of
+  leaving an empty cell."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection :qualified-keyword]
                   :seon.store/transaction-data]}
   [database projection attribute]
@@ -1292,7 +1295,13 @@
           decode #(schema.datahike/decode-attribute-value-in projection attribute %)]
       (into []
             (keep #(when-not (valid? (decode (:v %)))
-                     [:db/retract (:e %) attribute (:v %)]))
+                     ;; An element held in a vector cell is retracted from its
+                     ;; parent's logical vector: the request renumbers the survivors.
+                     [:db/retract (or (when (and (get (:schema database) :seon.db.vector/position)
+                                                 (first (d/datoms database :eavt (:e %) :seon.db.vector/position)))
+                                        (:e (first (d/datoms database :avet :seon.db.vector/cells (:e %)))))
+                                      (:e %))
+                      attribute (:v %)]))
             (d/datoms database :aevt attribute)))))
 
 (defn- declaration-changes
