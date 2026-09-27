@@ -306,13 +306,14 @@
 (deftest a-run-reads-its-earlier-declarations
   ;; Before the run's working value, a redefinition that broke a test defined
   ;; earlier in the same run installed ungated: the gate read the connection,
-  ;; where the run's rows land only at settlement.
+  ;; where the run's rows land only at settlement. The bounded input keeps the
+  ;; seeded auto-check from overflowing (* x x x), so the only refusal is the test's.
   (with-host-world {}
     (fn [{:keys [handle branch!]}]
       (let [hosted (host-on! handle (branch!) "mcp/one-run")
-            shown (hosted-run! hosted (str "(defn run-square \"Square x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* x x))\n"
+            shown (hosted-run! hosted (str "(defn run-square \"Square x.\" {:malli/schema [:=> [:cat [:int {:min -1000 :max 1000}]] :int]} [x] (* x x))\n"
                                            "(clojure.test/deftest run-square-test (clojure.test/is (= 16 (run-square 4))))\n"
-                                           "(defn run-square \"Square x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* x x x))\n"
+                                           "(defn run-square \"Square x.\" {:malli/schema [:=> [:cat [:int {:min -1000 :max 1000}]] :int]} [x] (* x x x))\n"
                                            "(run-square 4)"))]
         (is (= "#'my.agents.host-probe/run-square" (first shown)) (pr-str shown))
         (is (re-find #"install refused" (str (nth shown 2))) "the gate ran the earlier test and refused the break")
