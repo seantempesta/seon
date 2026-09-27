@@ -8,6 +8,7 @@
    [clojure.walk :as walk]
    [datahike.db :as db]
    [datahike.query :as query]
+   [datahike.writer]
    [seon.db]
    [seon.schema]
    [seon.test-support]
@@ -94,3 +95,18 @@
     (is (not (contains? (:schema after) key)))
     (is (map? forms))
     (is (not (contains? forms key)))))))
+
+(deftest a-write-error-log-carries-no-stack-trace
+  ;; A failed transact! printed its whole stack (~30 frames) through trove to
+  ;; the writer thread's inherited *out*, which eval_clj replies carried
+  ;; unbounded; the caller already receives the error as the transaction's
+  ;; value (fork 591c825d).
+  (let [failure (ex-info "probe boom" {:seon.probe/secret 1}
+                         (IllegalStateException. "root"))
+        logged (#'datahike.writer/write-error-log
+                {:config {:branch :db} :meta {}} {:op 'transact!} failure)]
+    (is (= 'transact! (:op logged)))
+    (is (= "root" (get-in logged [:error :cause])))
+    (is (= 2 (count (get-in logged [:error :via]))) "each cause link is named")
+    (is (not (contains? (:error logged) :trace)) "no stack trace")
+    (is (not-any? :data (get-in logged [:error :via])) "no exception data")))
