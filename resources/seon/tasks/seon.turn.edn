@@ -93,4 +93,8 @@
  #:seon.task{:name "compaction-erases-no-history-form-text"
              :kind :function
              :intent "Form :seon.cluster.eval/source, comment, output, diagnostics and the turn's reply are declared :db/noHistory, so retracting a form at compaction erases its text permanently, contradicting the owner's ruling that compaction deletes nothing (history answers what was dropped). These attributes are write-once; remove the no-history flag before compaction retracts forms (data-model plan)."
+             :evidence #{"docs/research/agent-platform/repl-session-entity-design-2026-09-27.md"}}
+ #:seon.task{:name "a-refused-multi-form-settlement-returns-nothing"
+             :kind :function
+             :intent "A 22-form run on hosted agent mcp/design-1 had its settlement refused (fault recorded on design-1, turn 59962, never delivered); the caller got {:run ce27ba34bd16 :err nil :committed? false :forms 0} after 35 s: no error, no values, no events. Total-path violation, same class as a318b2d38. Deliver the refusal as a diagnostic beside every evaluated value."
              :evidence #{"docs/research/agent-platform/repl-session-entity-design-2026-09-27.md"}}]

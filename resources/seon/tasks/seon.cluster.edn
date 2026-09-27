@@ -68,4 +68,8 @@
              :kind :function
              :intent "seon.incremental-publication-test/non-program-inputs-have-their-own-publication-owner points publication at a fixture checkout with with-redefs-fn over clojure.java.io/resource and seon.cluster/publication-roots. Both are Var roots, so every thread of the shared JVM (default's agents, other test members) reads the fixture's schemas and roots while it runs. Give refresh-source! a source seam (publication roots and the schema resource directory passed as values) so the test hands its checkout, or declare the test isolated until then."
              :must-read #{seon.cluster/refresh-source! seon.cluster/publication-roots}
-             :evidence #{"test/seon/incremental_publication_test.clj"}}]
+             :evidence #{"test/seon/incremental_publication_test.clj"}}
+ #:seon.task{:name "schema-adoption-drops-every-value-of-a-vector-declared-many-attribute"
+             :kind :function
+             :intent "DATA LOSS. Redefining an entity schema marks all its attributes affected (turn.clj ~1097-1140); invalid-value-retraction (called from attribute-change-tx ~1174) validates a cardinality-many attribute's values as a SET, but 27 installed many attributes are declared [:vector ...] (e.g. :seon.cluster.eval/read-evidence, evaluation faults, :seon.fn/arities, :seon.render/units), which a set never satisfies, so every datom is retracted (459 for read-evidence on design-1). Components then orphan and the writer refuses; non-component attributes would be silently dropped. Validate each stored value against the element schema (cardinality-many stores members, not the collection), and prove on a branch that redefining :seon.cluster.eval/receipt retracts nothing valid. Blocks the agent data-model schema changes."
+             :evidence #{"docs/research/agent-platform/repl-session-entity-design-2026-09-27.md"}}]
