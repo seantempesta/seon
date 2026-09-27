@@ -4813,9 +4813,10 @@
 (defn- transact-call
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.db/connection :seon.store/transaction
-         [:maybe :seon.instrument/callable]]
+         [:? :seon.instrument/callable]]
     [:or :seon.db/transaction-report :seon.db/error-result]]}
-  [database connection transaction durable-failed!]
+  ;; An omitted `durable-failed!` stays absent: the write answers committed.
+  [database connection transaction & [durable-failed!]]
   (try
     (let [projection (carried-projection database)]
       (or (write-error database projection transaction)
@@ -5058,9 +5059,9 @@
   the committed report, or with `durable-failed!` the applied one."
   {:malli/schema
    [:=> [:cat [:or :seon.db/connection :seon.error/value] :seon.store/transaction
-         [:maybe :seon.instrument/callable]]
+         [:? :seon.instrument/callable]]
     [:or :seon.db/transaction-report :seon.db/transaction-refused-error]]}
-  [connection transaction durable-failed!]
+  [connection transaction & [durable-failed!]]
    (let [database (when (connection? connection) (resolve-database-value connection))
          result
          (or
@@ -5078,7 +5079,9 @@
 
             :else
             (or (foreign-connection-error database connection transaction)
-                (transact-call database connection transaction durable-failed!))))]
+                (if durable-failed!
+                  (transact-call database connection transaction durable-failed!)
+                  (transact-call database connection transaction)))))]
      (if-not (:db-after result)
        (let [refusal (assoc result :seon.db/transaction-refused true)]
          (if (:seon.db.write.attempt/request-id refusal)
@@ -5125,7 +5128,7 @@
   ([transaction]
    (transaction-result (transact! (current-connection) transaction)))
   ([connection transaction]
-   (transact-through connection transaction nil)))
+   (transact-through connection transaction)))
 
 (defn transact-applied!
   "Write `transaction` through `transact!`'s validated path and answer once the
