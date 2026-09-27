@@ -62,11 +62,14 @@
             (let [result (code "1\n#?(:clj 2 :cljs 3)\n(str *ns*)")]
               (is (:seon.turn/id result) (pr-str result))
               (is (= ["1" "2" (pr-str (str "my.agents." agent-id))] (shown connection result)))))
-          (testing "a run starts in the agent's namespace; in-ns moves only the rest of that run"
+          (testing "a run starts where the agent's previous run ended, as *ns* persists at a REPL (85b459845)"
             (is (= "\"seon.id\"" (last (shown connection (code "(in-ns 'seon.id)\n(str *ns*)"))))
                 "the run's own later form reads the namespace its earlier form entered")
-            (is (= [(pr-str (str "my.agents." agent-id))] (shown connection (code "(str *ns*)")))
-                "the next run starts in the assigned namespace again")
+            (is (= ["\"seon.id\""] (shown connection (code "(str *ns*)")))
+                "the next run starts where the last one ended")
+            (is (= [(pr-str (str "my.agents." agent-id))]
+                   (rest (shown connection (code (str "(in-ns 'my.agents." agent-id ")\n(str *ns*)")))))
+                "in-ns moves the agent back")
             (is (= ["\"seon.id\""]
                    (shown connection (agent/evaluate-source! (assoc request :seon.cluster.reply/text "(str *ns*)"
                                                                     :seon.turn/starting-ns [:seon.ns/name 'seon.id]))))

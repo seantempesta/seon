@@ -718,13 +718,17 @@
             (if (:seon.db/invalid-read namespace-row)
               namespace-row
               (:seon.ns/name namespace-row)))
-          (db/q '[:find ?namespace-name .
-                :in $ ?agent-id
-                :where
-                [?agent :seon.agent/id ?agent-id]
-                [?agent :seon.agent/namespace ?namespace]
-                [?namespace :seon.ns/name ?namespace-name]]
-                database agent-id))]
+          ;; segmentation reads where the writer will start the run: where
+          ;; the agent's previous run ended, else its assigned namespace
+          (or (some->> (db/pull database [:db/id] [:seon.agent/id agent-id]) :db/id
+                       (turn/previous-ending-namespace database))
+              (db/q '[:find ?namespace-name .
+                    :in $ ?agent-id
+                    :where
+                    [?agent :seon.agent/id ?agent-id]
+                    [?agent :seon.agent/namespace ?namespace]
+                    [?namespace :seon.ns/name ?namespace-name]]
+                    database agent-id)))]
     (cond
       (map? segment) segment
 
@@ -762,7 +766,9 @@
                  :seon.blob/staged-writes (:seon.blob/staged-writes staged-reply)
                  :seon.agent/run-request
                  (merge (dissoc staged-reply :seon.blob/staged-writes)
-                        {:seon.agent/id agent-id :seon.turn/id run-id :seon.db.process/id (:seon.db.process/id handle) :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name namespace-name] :seon.turn/reply-size (count (pr-str sources)) :seon.turn/sources sources})}
+                        ;; only a requested start is the caller's; the writer decides the rest
+                        (cond-> {:seon.agent/id agent-id :seon.turn/id run-id :seon.db.process/id (:seon.db.process/id handle) :seon.turn/opened-tx "datomic.tx" :seon.turn/reply-size (count (pr-str sources)) :seon.turn/sources sources}
+                          starting-ns (assoc :seon.turn/starting-ns [:seon.ns/name namespace-name])))}
                 ;; the request port is the armed graph's; arming is idempotent
                 requests (:seon.agent/requests
                           (arm! {:seon.turn.loop/cluster handle :seon.agent/id agent-id

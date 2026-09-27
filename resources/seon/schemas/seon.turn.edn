@@ -148,7 +148,9 @@
              [:seon.agent/id :seon.agent/id]
              [:seon.turn/id :seon.turn/id]
              [:seon.turn/opened-tx :seon.turn/opened-tx]
-             [:seon.turn/starting-ns :seon.turn/starting-ns]
+             ;; absent: the writer starts the run where the agent's previous
+             ;; run ended, else in its assigned namespace
+             [:seon.turn/starting-ns {:optional true} :seon.turn/starting-ns]
              [:seon.turn/sources :seon.cluster.reply/sources]
              [:seon.turn/reply {:optional true} :seon.turn/reply]
              [:seon.turn/reply-blob

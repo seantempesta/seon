@@ -581,11 +581,12 @@
     namespace-ref (:seon.ns/name
                    (db/pull db [:seon.ns/name] namespace-ref))))
 
-(defn- previous-ending-namespace
+(defn previous-ending-namespace
   "The namespace the agent's latest settled evaluation ended in, or nil.
 
   A REPL session keeps `*ns*` between inputs, so a run with no requested
   namespace starts where the agent's previous run ended."
+  {:malli/schema [:=> [:cat :seon.db/database-value :int] [:maybe :seon.ns/name]]}
   [db agent-eid]
   (when-let [evaluation (db/q '[:find (max ?evaluation) .
                                 :in $ ?agent
