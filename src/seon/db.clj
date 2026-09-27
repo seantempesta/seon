@@ -1513,11 +1513,14 @@
   ;; Also held by its declaration content: the commit of this very value keys
   ;; that content, and `content-projection` promotes the cell instead of
   ;; deriving again (90 ms per committed declaration write without it).
-  (let [content-key [::declaration-content builder (declaration-content-key database)]]
-    @(cache/lookup-or-miss value-projection-cache [builder value-key]
-                           (fn [_] (cache/lookup-or-miss
-                                    value-projection-cache content-key
-                                    (fn [_] (delay (schema/load-projection database (nearest-base builder database)))))))))
+  ;; The content key (~5 ms, one pass over the declaration datoms) is read only
+  ;; on a revision miss: a transaction function reads this value's projection
+  ;; once per stored collection it compares.
+  @(cache/lookup-or-miss value-projection-cache [builder value-key]
+                         (fn [_] (cache/lookup-or-miss
+                                  value-projection-cache
+                                  [::declaration-content builder (declaration-content-key database)]
+                                  (fn [_] (delay (schema/load-projection database (nearest-base builder database))))))))
 
 (defn- as-of-key
   "An as-of view's exact identity: its committed origin's commit and its time
@@ -1620,9 +1623,24 @@
                      (when-let [program (d/commit-as-db database commit {:secondary-indices? false})]
                        @(cache/lookup-or-miss projection-cache [::builder commit]
                                               (fn [_] (delay (builder-digest program))))))))
+        ;; An uncommitted value (a transaction function's argument, a report's
+        ;; :db-after) is keyed by the revisions of the attributes
+        ;; `builder-digest` reads: during boot no instance names its commit yet,
+        ;; and deriving per read cost a whole reach query each time a
+        ;; transaction compared a stored collection (298 of 581 writer samples,
+        ;; one cold boot publication, 2026-09-27).
+        revisions (fn [] (let [context (:cache-context database)]
+                           (when (:datahike.cache/connection-id context)
+                             [::builder-revisions
+                              (select-keys context [:datahike.cache/connection-id :datahike.cache/generation
+                                                    :datahike.cache/conservative-revision])
+                              (select-keys (:datahike.cache/attribute-revisions context)
+                                           [:seon.fn/sym :seon.fn/calls :seon.program/definition-digest])])))
         own (fn [] (if-let [commit (:datahike.value/commit-id (datahike.db/committed-value-identity database))]
                      (or (memo commit) (builder-digest database))
-                     (builder-digest database)))
+                     (if-let [k (revisions)]
+                       @(cache/lookup-or-miss value-projection-cache k (fn [_] (delay (builder-digest database))))
+                       (builder-digest database))))
         loaded-key (fn [commit] (or (memo commit) (id/digest 64 [::foreign-store commit (own)])))
         boots (into #{} (keep :seon.source/commit-id) instances)]
     (cond

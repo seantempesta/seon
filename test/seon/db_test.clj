@@ -730,6 +730,24 @@
                      (vals @@#'db/projection-cache))
            "no speculative projection entered the committed cache")))))
 
+;; CLASS: a per-read whole-program derivation during boot. Before a boot
+;; instance names its commit, an uncommitted value's builder identity was
+;; derived on every projection read: a transaction function comparing stored
+;; collections paid a reach query per read (298 of 581 writer samples in one
+;; cold boot publication).
+(deftest an-uncommitted-values-builder-is-derived-once
+  (test-support/with-database
+   (fn [connection]
+     (let [value (db/with (db/db connection) [(test-support/namespace-entity (db/db connection) (quote sample.builder))])
+           reads 20
+           [digests calls] (test-support/armed-calls
+                            '#{seon.db/builder-digest}
+                            #(vec (repeatedly reads (fn [] (@#'db/loaded-builder value {} nil)))))]
+       (is (not (:seon.error/at value)) (pr-str value))
+       (is (= 1 (count (set digests))))
+       (is (< (get calls 'seon.db/builder-digest 0) reads)
+           "the identity is derived once per revision set, not per read")))))
+
 (deftest query-and-pull-append-evidence-only-when-captured
   (test-support/with-database
    (fn [connection]
