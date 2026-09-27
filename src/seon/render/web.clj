@@ -268,6 +268,13 @@
     (::prompt-preview? debug-request)
     (assoc :prompt "true")))
 
+(defn- with-database
+  "`unit` carrying the database `request` renders against, when it has one: a
+  web render runs in no evaluation world, so the unit's required
+  `:seon.db/db` is handed, never supplied."
+  [unit request]
+  (cond-> unit (:seon.db/db request) (assoc :seon.db/db (:seon.db/db request))))
+
 (defn message-bar-html
   "`:seon.render/html` — the constant human-to-agent message bar.
 
@@ -352,7 +359,7 @@
          [:nav {:class "seon-agent-routes"}
           [:a {:href (route/path ::route/agent {:id id})} "agent"]
           [:a {:href (route/path ::route/agent-debug {:id id})} "debug"]])
-       (when (and id (not (::session? request)) (not (::agent-header? request))) (message-bar-html {:seon.agent/id id}))
+       (when (and id (not (::session? request)) (not (::agent-header? request))) (message-bar-html (with-database {:seon.agent/id id} request)))
        (seq page)]
       ;; OUTSIDE every morph target. A data-init inside one is stripped
       ;; by that element's first whole-element morph, and the tab then
@@ -512,7 +519,8 @@
 
             (not (:seon.render/refused-member fleet-output))
             (assoc :seon.render/output fleet-output)))
-        units (cond-> walked-units fleet-unit (conj fleet-unit))
+        units (mapv #(with-database % {:seon.db/db db})
+                    (cond-> walked-units fleet-unit (conj fleet-unit)))
         ranks (into {}
                     (map-indexed (fn [rank unit]
                                    [(:seon.render.walk/path unit) rank]))
@@ -737,7 +745,7 @@
             (system-action-form agent-id "virtual-turn" "Virtual turn")
             (system-action-form agent-id "compact" "Compact")]
            ::transcript/message-form
-           (message-bar-html {:seon.agent/id agent-id ::message-autofocus? false}))))
+           (message-bar-html (with-database {:seon.agent/id agent-id ::message-autofocus? false} request)))))
 
 (defn- debug-value-html
   {:malli/schema [:=> [:cat :seon.schema/value] :seon.render/hiccup]}
@@ -982,10 +990,10 @@
        "No source is stored for this function."])))
 
 (defn- debug-preview-html
-  [output rendered]
+  [output rendered database]
   [:div {:class "seon-debug-candidate-preview"}
    (cond
-     (:seon.render/refused-member rendered) (error/render-html rendered)
+     (:seon.render/refused-member rendered) (error/render-html (with-database rendered {:seon.db/db database}))
      (= output :seon.render/html) rendered
      :else [:pre (str rendered)])])
 
@@ -1045,7 +1053,7 @@
 
   A refused selection and an absent render function are both shown as such;
   this boundary never omits an unavailable projection."
-  [output experiment]
+  [output experiment database]
   (let [selection (:seon.render/selection experiment)
         selected (:seon.render.selection/selected selection)
         previews (:seon.render/previews experiment)
@@ -1056,12 +1064,14 @@
                    (:seon.render.selection.stage/value selected-stage)
                    (get previews selected))]
     (cond
-      (or (:seon.render/refused-member selection) (:seon.render/candidates selection)) (error/render-html selection)
-      (or (:seon.render/refused-member selected) (:seon.render/candidates selected)) (error/render-html selected)
+      (or (:seon.render/refused-member selection) (:seon.render/candidates selection))
+      (error/render-html (with-database selection {:seon.db/db database}))
+      (or (:seon.render/refused-member selected) (:seon.render/candidates selected))
+      (error/render-html (with-database selected {:seon.db/db database}))
       (nil? rendered)
       [:p {:class "seon-debug-empty"}
        "No render function produced a value for this projection."]
-      :else (debug-preview-html output rendered))))
+      :else (debug-preview-html output rendered database))))
 
 (defn- debug-selected-renderer-details
   [debug-request output experiment]
@@ -1270,7 +1280,8 @@
       [:section {:class "seon-debug-projection-column"}
        [:h4 "AI"]
        (if present?
-         (experiment-preview-html :seon.render/ai (:seon.render/ai experiments))
+         (experiment-preview-html :seon.render/ai (:seon.render/ai experiments)
+                                  (:seon.db/db render-request))
          [:p {:class "seon-debug-empty"}
           "No value is stored or connected for this attribute."])]
       [:section {:class "seon-debug-projection-column"}
@@ -1278,7 +1289,8 @@
        [:div
         (if present?
           (experiment-preview-html :seon.render/html
-                                   (:seon.render/html experiments))
+                                   (:seon.render/html experiments)
+                                   (:seon.db/db render-request))
           [:p {:class "seon-debug-empty"}
            "No value is stored or connected for this attribute."])]]]
      [:details {:class "seon-debug-data-details"}
@@ -3170,6 +3182,7 @@
         {:status 200
      :headers {"content-type" "text/html; charset=utf-8"}
      :body (shell {:seon.agent/id agent-id
+                   :seon.db/db database
                    ::agent-header? true
                    :seon.render/page
                    [(transcript/render-agent-header
@@ -3718,6 +3731,7 @@
     {:status 200
      :headers {"content-type" "text/html; charset=utf-8"}
      :body (shell {:seon.agent/id id
+                   :seon.db/db db
                    ;; A refused page (gone, malformed, over budget) is shown
                    ;; as the refusal value it is, at the root.
                    :seon.render/page

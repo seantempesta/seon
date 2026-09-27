@@ -219,7 +219,14 @@
                               :seon.render/rendering])
         profile (target-profile request)
         value (render-value request)
+        ;; A render unit's database is required: a request that names no
+        ;; database value renders against its connection's current one (its
+        ;; own, else its SCI context's custody).
+        connection (or (:seon.db/connection request)
+                       (get-in request [:seon.sci.eval/ctx :seon.sci.eval/custody :seon.db/connection]))
         context (cond-> context
+                  (and (not (:seon.db/db context)) connection)
+                  (assoc :seon.db/db (db/db connection))
                   profile (assoc :seon.render/profile profile)
                   (and (counted? value)
                        (not (contains? context :seon.render.data/total)))

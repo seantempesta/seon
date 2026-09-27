@@ -156,7 +156,7 @@
   ;; attribute's declared row schema over a closed key set, and an error's
   ;; renderer follows the schema its producer declared.
   (let [projection (schema/handed-projection)
-        owner #(#'render/entity-owner projection %)
+        owner #(#'render/entity-owner projection % nil)
         ambiguous (#'render/ambiguity 'entity-pairs.fixture :seon.render/ai
                                       ['entity-pairs.fixture/a 'entity-pairs.fixture/b])]
     (is (= :seon.agent/agent (owner {:seon.agent/id "root"})) "a partial entity is owned")
@@ -275,6 +275,7 @@
              rendered (fn [value]
                         (render/render-ai
                          {:seon.db/db database :seon.sci.eval/ctx ctx :seon.render/value value
+                          :seon.render.value/root 'seon.render.entity-pairs-test/probe
                           :seon.agent/id "db-viewer"
                           :seon.render/profile (render/agent-render-profile config/defaults)
                           :seon.sci.admit/caps (config/result-caps config/defaults)
