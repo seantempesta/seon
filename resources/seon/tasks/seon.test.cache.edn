@@ -1,0 +1,5 @@
+[#:seon.task{:name "dependency-revisions-are-not-test-inputs"
+             :kind :function
+             :intent "After the Datahike fork gitlink moved (916394523, fork fe1d4e26: compare-value ordering), seon.schema-in-place-test and its retype test answered from reused green evidence (executed 0 / reused 10, tests-0627u) although the behavior under test depends on the changed dependency. AGENTS: require current positive proof; unknown or red cannot reuse green. Local-root dependency revisions (gitlinks) are inputs to every test's evidence, or at least to tests whose execution reached the changed library; include them in seon.test.cache/input-roots or the evidence key."
+             :must-read #{seon.test.cache/input-roots}
+             :evidence #{"docs/research/agent-platform/landing/datahike-retype-2026-09-27.md"}}]
