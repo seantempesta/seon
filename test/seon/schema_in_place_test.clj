@@ -7,10 +7,8 @@
   refused because a program row still writes the attribute — each through the
   schema population owner `seon.cluster/accrete-schema-population!`.
 
-  The store is a fresh memory store the same owner populates from the packaged
-  declarations — the schema population's own input — rather than the canonical
-  fixture, so the regression does not depend on a published base
-  (`docs/seon/issues/test-fast-runs-on-a-published-base-older-than-heads-schema-validator.md`)."
+  Each test runs on its own branch of the executing test's world, which holds
+  the packaged population and the program that declares it."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [datahike.api :as d]
@@ -70,23 +68,20 @@
   (set (db/q [:find '[?v ...] :where ['_ attribute '?v]] (db/db connection))))
 
 (defn- with-population
-  "Run `body` on a fresh memory store carrying the packaged population and
-   the installed fixture declarations, released and deleted afterwards."
+  "Run `body` on the executing test's own branch (`support/with-database`),
+   which carries the packaged population and the program that declares it,
+   plus the installed fixture declarations.
+
+   WANTED: the fixture's world is its custody. A store built beside the test's
+   branch holds none of the program the population's owners read — schema
+   publication checks each declared renderer's contract row, and analysis
+   resolves `seon.db/transact!` only in a program that declares `seon.db` —
+   and writing it from the member's custody is refused as a foreign branch."
   [body]
-  (let [configuration {:store {:backend :memory :id (random-uuid)}
-                       :keep-history? true
-                       :schema-flexibility :write}]
-    (d/create-database configuration)
-    (try
-      (let [connection (d/connect configuration)]
-        (try
-          (schema/call-with-projection
-           (schema/declaration-projection (schema.edn/packaged-forms))
-           #(@#'seon.cluster/accrete-schema-population! connection nil false))
-          (support/transacted! connection installed-schema)
-          (body connection)
-          (finally (d/release connection))))
-      (finally (d/delete-database configuration)))))
+  (support/with-database
+   (fn [connection]
+     (support/transacted! connection installed-schema)
+     (body connection))))
 
 (defn- adopted-fixture
   [body]

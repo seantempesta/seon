@@ -10,6 +10,7 @@
   the application census is per attribute, never per namespace family."
   (:require [malli.core] [clojure.java.io :as io]
             [clojure.set :as set]
+            [clojure.string]
             [clojure.test :refer [deftest is testing]]
             [seon.ai :as ai]
             [seon.cluster :as cluster]
@@ -18,6 +19,7 @@
             [seon.db :as db]
             [seon.flow :as flow]
             [seon.fn :as seon.fn]
+            [seon.operator.runtime :as operator.runtime]
             [seon.render.web :as web]
             [seon.schema :as schema]
             [seon.test-support :as test-support]))
@@ -112,12 +114,31 @@
                             attribute))) forms)]
     (set/difference attributes literal request-routes environment-routes)))
 
-(defn- source-rows []
-  (into []
+(defn- running-system-rows
+  "The function rows of the running system's source — `src` and the operator
+  script — each with the keywords it reads.
+
+  WANTED: the `src` census is a query of the program rows the test's own
+  branch already holds (derived from those files), never a re-analysis of the
+  tree: rebuilding the manifest of `src` cost 4.2 s of this test's 5.3 s
+  (measured 2026-09-27 on default); the query costs 55 ms. The operator script
+  is outside the program's source roots, so its one file is analyzed (190 ms)."
+  [database]
+  (into (->> (db/q '[:find ?symbol ?keyword ?path
+                     :where [?function :seon.fn/sym ?symbol]
+                            [?function :seon.fn/keywords ?keyword]
+                            [?function :seon.fn/file ?file]
+                            [?file :seon.fn.file/relative-path ?path]]
+                   database)
+             (filter (fn [[_ _ path]] (clojure.string/starts-with? path "src/")))
+             (reduce (fn [keywords [function-symbol attribute _]]
+                       (update keywords function-symbol (fnil conj #{}) attribute))
+                     {})
+             (mapv (fn [[function-symbol keywords]]
+                     {:seon.fn/sym function-symbol :seon.fn/keywords keywords})))
         (mapcat :seon.fn.file/rows)
         (:seon.fn.manifest/artifacts
-         (seon.fn/build-manifest
-          {:seon.fn/roots ["src" "script/seon/operator.clj"]}))))
+         (seon.fn/build-manifest {:seon.fn/roots ["script/seon/operator.clj"]}))))
 
 (deftest every-config-entry-has-an-honest-application-contract
   (test-support/with-database
@@ -125,7 +146,7 @@
       (let [forms (:seon.schema.projection/forms
                    (schema/projection-from-database @connection))
             registered (config/dial-attributes (seon.schema/build-projection forms))
-            rows (source-rows)]
+            rows (running-system-rows (db/db connection))]
         (is (seq registered) "The canonical dial population must be present.")
         (is (= #{} (unapplied-attributes rows forms registered))
             "Each admitted dial has a literal consumer or a declared application route.")))))
@@ -227,26 +248,26 @@
         (test-support/delete-recursively! root)))))
 
 (deftest no-auth-is-consumed-as-the-credential-alternative
-  (let [starts (atom 0)
-        start boot/start!]
-    (with-redefs [boot/start!
-                  (fn [& args] (swap! starts inc) (apply start args))]
-      (test-support/with-database
-       (fn [connection]
-         (config/apply!
-          {:seon.db/connection connection
-           :seon.boot/cluster-name "application-no-auth"
-           :seon.config/manifest
-           (-> applied
-               (assoc :seon.config.ai/no-auth true)
-               (dissoc :seon.config.ai.backup/model
-                       :seon.config.ai.backup/endpoint
-                       :seon.config.ai.backup/api-key-variable
-                       :seon.config.ai.backup/timeout-ms))})
-         (let [primary (:seon.ai/primary
-                        (ai/targets (schema/handed-projection)
-                                    (config/effective (db/db connection) "application-no-auth")))]
-           (is (true? (:seon.config.ai/no-auth primary)))
-           (is (not (contains? primary :seon.ai/api-key-variable)))))))
-    (is (zero? @starts)
+  ;; WANTED: credential selection is proved without starting a cluster,
+  ;; observed on the process roster `boot/start!` publishes into, never by
+  ;; redefining `boot/start!` (no Var redefinitions in tests).
+  (let [cluster-name "application-no-auth"]
+    (test-support/with-database
+     (fn [connection]
+       (config/apply!
+        {:seon.db/connection connection
+         :seon.boot/cluster-name cluster-name
+         :seon.config/manifest
+         (-> applied
+             (assoc :seon.config.ai/no-auth true)
+             (dissoc :seon.config.ai.backup/model
+                     :seon.config.ai.backup/endpoint
+                     :seon.config.ai.backup/api-key-variable
+                     :seon.config.ai.backup/timeout-ms))})
+       (let [primary (:seon.ai/primary
+                      (ai/targets (schema/handed-projection)
+                                  (config/effective (db/db connection) cluster-name)))]
+         (is (true? (:seon.config.ai/no-auth primary)))
+         (is (not (contains? primary :seon.ai/api-key-variable))))))
+    (is (not (contains? @operator.runtime/running-instances cluster-name))
         "Credential selection is proved without starting a cluster.")))

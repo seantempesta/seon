@@ -65,8 +65,11 @@
             seeded (seeded-row rows)]
         (testing "the analyzer reads the ordered vector into owned occurrences"
           (is (= stored-in-order (:seon.test/seed seeded)))
-          (is (contains? (:seon.fn/references seeded) 'sample.seeded-test/week)
-              "a named seed is a reach edge of its test"))
+          ;; WANTED: a named seed is a CALL edge of its test, so changing the
+          ;; seed function selects the test (selection follows `:seon.fn/calls`
+          ;; only since 20a87b1d1; an unquoted symbol is exercised, not named).
+          (is (contains? (:seon.fn/calls seeded) 'sample.seeded-test/week)
+              "a named seed is a call-reach edge of its test"))
         (testing "the canonical writer stores the occurrences; ordinals rebuild the vector"
           (test-support/with-database
            (fn [connection]
