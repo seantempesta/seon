@@ -565,9 +565,14 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- semantic-leaf
-  "The runtime value of one print node that has no child node."
+  "The runtime value of one print node that has no child node. A projected
+  node (a declared render's output, or the total floor's plain text,
+  `seon.render.value/plain-projection`) is the text or hiccup it shows."
+  {:malli/schema [:=> [:cat :seon.print/node] :seon.schema/value]}
   [print-node]
   (case (::print/face print-node)
+    ::print/projected (::print/value print-node)
+
     (::print/nil ::print/boolean ::print/number ::print/keyword
      ::print/symbol ::print/char ::print/string ::print/inst ::print/uuid)
     (::print/value print-node)

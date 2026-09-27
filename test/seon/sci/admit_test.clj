@@ -35,6 +35,7 @@
             [seon.config :as config]
             [seon.env]
             [seon.print :as print]
+            [seon.render.value :as render.value]
             [seon.sci.admit :as admit]
             [seon.schema :as schema]
             [seon.test-support :as test-support]))
@@ -153,6 +154,22 @@
       (is (= print-node
              (:seon.sci.admit/print-node
               (admit/admit-value (request {:alpha [1 2 3]}))))))))
+
+(deftest a-projected-node-is-the-text-it-shows
+  ;; The MCP reply threw "No matching clause: :seon.print/projected" when the
+  ;; structural floor failed and its plain projection reached `semantic-value`.
+  (let [tree (:seon.render.value/tree
+              (#'render.value/plain-projection '[a b/c seon.problems/open-faults]
+                                               (ex-info "floor failed" {}) []))]
+    (is (= ::print/projected (::print/face tree)))
+    (is (= (::print/value tree) (admit/semantic-value tree))))
+  (testing "below the root a projected member is its shown text"
+    (is (= ["shown" 'a]
+           (admit/semantic-value
+            {::print/face ::print/vector
+             ::print/items [{::print/face ::print/projected :seon.render/output :seon.render/ai
+                             ::print/value "shown"}
+                            {::print/face ::print/symbol ::print/value 'a ::print/text "a"}]})))))
 
 (deftest every-identity-only-record-admits-as-identity-at-depth
   (let [payload (apply str (repeat 100000 \x))
