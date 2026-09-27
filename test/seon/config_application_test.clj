@@ -26,7 +26,6 @@
 
 (def ^:private applied
   {:seon.config.db/keep-history? true
-   :seon.config.flow.compute/queue-depth 3
    :seon.config.flow.compute/concurrency 1
    :seon.config.flow.io/queue-depth 5
    :seon.config.flow.io/concurrency 2
@@ -39,7 +38,6 @@
    :seon.config.eval/time-limit-ms 1234
    :seon.config.test/auto-check-cases 7
    :seon.config.agent/turn-completion-backstop-ms 600000
-   :seon.config.bootstrap/beyond-closure-token-budget 512
    :seon.config.error/recurrence-limit 2
    :seon.config.error/escalate-to "root"
    :seon.config.maintenance/min-usable-bytes 1048576
@@ -184,12 +182,9 @@
                             (:seon.store/store instance))
                          [:config :keep-history?]))))
           (testing "flow structure consumes its applied values"
-            ;; membership, not an exact census — carried accretions
-            ;; (the turn-completion backstop rides here now) never
-            ;; break the four consumed values being applied
-            (let [flow-keys [:seon.config.flow.compute/queue-depth
-                             :seon.config.flow.compute/concurrency
-                             :seon.config.flow.io/queue-depth
+            ;; WANTED: the work launcher carries the applied IO dials; it has
+            ;; had no compute half since d2604ede9. Membership, not a census.
+            (let [flow-keys [:seon.config.flow.io/queue-depth
                              :seon.config.flow.io/concurrency]]
               (is (= (select-keys applied flow-keys)
                      (select-keys (::flow/configuration launcher)

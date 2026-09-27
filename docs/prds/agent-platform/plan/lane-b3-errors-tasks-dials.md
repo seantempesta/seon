@@ -274,10 +274,10 @@ notes into a directory of tasks would be the "fake tasks" the owner ruled out.
 
 ### 2c. Dials
 
-Candidate removals (23 historical declarations), each gated by its consumer and bounded-event proof: `seon.config.ai.retry/*` (6 — one
+Candidate removals (22 historical declarations; `bootstrap/beyond-closure-token-budget` is retired), each gated by its consumer and bounded-event proof: `seon.config.ai.retry/*` (6 — one
 provider/failover policy must be preserved through B2's request owner; remove these only after its declared attempt bound replaces the retry mechanism), `ai.backup/timeout-ms` (only after the shared effective deadline preserves both attempts), `ai/chars-per-token-prior`, `shell/inline-output-bytes`,
 `shell/preview-bytes` (one inline cut: `fs/max-inline-bytes`),
-`test/auto-check-cases` (B4 agrees), `bootstrap/beyond-closure-token-budget`,
+`test/auto-check-cases` (B4 agrees),
 `agent/write-refusal-bound`, `agent/show-all-settings`, `error/recurrence-limit`,
 `error/escalate-to`, `error/max-evidence-bytes` (the render profile is the one
 bound), `maintenance/min-usable-ratio`, `web/max-search-results`,

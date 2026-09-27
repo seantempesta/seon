@@ -254,7 +254,7 @@
            original @#'config/reconcile-call
            transactions (atom [])
            changed (assoc request :seon.config/manifest
-                          {:seon.config.flow.compute/queue-depth 23})]
+                          {:seon.config.flow.io/queue-depth 23})]
        (with-redefs-fn
          {#'config/reconcile-call
           (fn [database desired request]
@@ -270,16 +270,16 @@
        (let [tx-data (first @transactions)
              rows (filter map? tx-data)]
          (is (= [[:db.fn/retractAttribute [:seon.config/cluster "difference"]
-                   :seon.config.flow.compute/queue-depth]]
+                   :seon.config.flow.io/queue-depth]]
                 (filterv vector? tx-data)))
          (is (= 1 (count rows)))
-         (is (= #{:db/id :seon.config/cluster :seon.config.flow.compute/queue-depth
+         (is (= #{:db/id :seon.config/cluster :seon.config.flow.io/queue-depth
                   :seon.config/overlay-keys}
                 (set (keys (first rows)))))
-         (is (= #{:seon.config.flow.compute/queue-depth}
+         (is (= #{:seon.config.flow.io/queue-depth}
                 (:seon.config/overlay-keys (first rows)))
              "the row records the one dial this apply decided")
-         (is (= 23 (:seon.config.flow.compute/queue-depth (first rows)))))))))
+         (is (= 23 (:seon.config.flow.io/queue-depth (first rows)))))))))
 
 (deftest converged-apply-uses-carried-projection-and-remains-exact
   (test-support/with-database
@@ -323,21 +323,21 @@
        (is (= basis (:max-tx @connection)))
        (let [compiled (config/compile-manifest {:seon.boot/cluster-name "default"})
              queue-depth (get-in compiled [:seon.config/effective
-                                          :seon.config.flow.compute/queue-depth])]
+                                          :seon.config.flow.io/queue-depth])]
          (let [edited (db/transact!
                        connection
                        [{:db/id [:seon.config/cluster "default"]
-                         :seon.config.flow.compute/queue-depth (inc queue-depth)}])]
+                         :seon.config.flow.io/queue-depth (inc queue-depth)}])]
            (is (some? (:db-after edited)) (pr-str edited))
            (is (= (inc queue-depth)
-                  (:seon.config.flow.compute/queue-depth
+                  (:seon.config.flow.io/queue-depth
                    (db/pull (db/db connection)
-                            [:seon.config.flow.compute/queue-depth]
+                            [:seon.config.flow.io/queue-depth]
                             [:seon.config/cluster "default"])))
                "the hand edit committed before reconciliation"))
          (is (false? (:seon.reconcile/converged? (config/apply! request)))
              "the same manifest repairs a hand edit")
-         (is (= queue-depth (:seon.config.flow.compute/queue-depth
+         (is (= queue-depth (:seon.config.flow.io/queue-depth
                              (config/effective @connection "default"))))
          (let [process-identity [:seon.db.process/id "config-apply-cost-initialization"]
                changed (update compiled :seon.config/initialization conj
@@ -357,7 +357,7 @@
                               (slurp config/default-manifest-path))
         packaged-decisions
         (assoc repository-decisions
-               :seon.config.flow.compute/queue-depth 19)]
+               :seon.config.flow.io/queue-depth 19)]
     (.mkdirs directory)
     (spit packaged-file (str (pr-str packaged-decisions) "\n"))
     (try
@@ -367,7 +367,7 @@
                         (-> packaged-file .toURI .toURL)
                         (resource path)))]
         (is (= 19
-               (:seon.config.flow.compute/queue-depth
+               (:seon.config.flow.io/queue-depth
                 (config/default-decisions)))
             "a packaged resource wins without copying the decision roster"))
       (finally
@@ -577,14 +577,14 @@
   (let [compiled
         (config/compile-manifest
          {:seon.config/manifest
-          {:seon.config.flow.compute/queue-depth 11
+          {:seon.config.flow.io/queue-depth 11
            :seon.config.db/keep-history? false
            :seon.config.eval/time-limit-ms 1234}
           :seon.config/environment
-          {:seon.config.flow.compute/queue-depth 12}
+          {:seon.config.flow.io/queue-depth 12}
           :seon.boot/cluster-name "alpha"})
         effective (:seon.config/effective compiled)]
-    (is (= 12 (:seon.config.flow.compute/queue-depth effective))
+    (is (= 12 (:seon.config.flow.io/queue-depth effective))
         "explicit environment wins over the selected sparse overlay")
     (is (= 1234 (:seon.config.eval/time-limit-ms effective))
         "the sparse overlay wins over shipped defaults")
@@ -622,9 +622,9 @@
             (test-support/refusal-data
              #(config/compile-manifest
                {:seon.boot/cluster-name "default" :seon.config/manifest
-                {:seon.config.flow.compute/queue-depth config/absent}}))]
+                {:seon.config.flow.io/queue-depth config/absent}}))]
         (is (= ::config/required-absent (::config/rule data)))
-        (is (= :seon.config.flow.compute/queue-depth
+        (is (= :seon.config.flow.io/queue-depth
                (::config/key data)))))))
 
 (deftest effective-config-is-independent-of-map-construction-order
@@ -633,12 +633,12 @@
          {:seon.boot/cluster-name "default" :seon.config/manifest
           (array-map
            :seon.config.eval/time-limit-ms 1234
-           :seon.config.flow.compute/queue-depth 22)})
+           :seon.config.flow.io/queue-depth 22)})
         right
         (config/compile-manifest
          {:seon.config/manifest
           (array-map
-           :seon.config.flow.compute/queue-depth 22
+           :seon.config.flow.io/queue-depth 22
            :seon.config.eval/time-limit-ms 1234)
           :seon.boot/cluster-name "other"})]
     (is (= (:seon.config/effective left)
@@ -689,12 +689,12 @@
           (test-support/refusal-data
            #(config/compile-manifest
              {:seon.boot/cluster-name "default" :seon.config/environment
-              {:seon.config.flow.compute/queue-depth 0}}))]
+              {:seon.config.flow.io/queue-depth 0}}))]
       (is (= :input (:seon.instrument/check data)))
       (is (= 'seon.config/compile-manifest
              (:seon.instrument/fn data)))
       (is (= #{[:seon.config/environment
-                :seon.config.flow.compute/queue-depth]}
+                :seon.config.flow.io/queue-depth]}
              (set (:seon.instrument/problem-paths data)))))))
 
 (deftest unreadable-manifest-refuses-by-name
@@ -747,7 +747,7 @@
         (config/apply!
          {:seon.db/connection connection
           :seon.config/manifest
-          {:seon.config.flow.compute/queue-depth 17}
+          {:seon.config.flow.io/queue-depth 17}
           :seon.boot/cluster-name "fork"})
         (is (= ["fork"]
                (filterv #{"ancestor" "fork"}
@@ -756,7 +756,7 @@
                         [_ :seon.config/cluster ?cluster-name]]
                       @connection))))
         (is (= 17
-               (:seon.config.flow.compute/queue-depth
+               (:seon.config.flow.io/queue-depth
                 (config/effective @connection "fork"))))))))
 
 (deftest a-config-row-cannot-be-left-without-a-required-result-cap
@@ -811,13 +811,13 @@
       (test-support/with-database
         (fn [beta]
           ;; The outer world is written under its own custody, not the inner one's.
-          (test-support/apply-config! alpha "alpha" {:seon.config.flow.compute/queue-depth 11})
-          (test-support/apply-config! beta "beta" {:seon.config.flow.compute/queue-depth 22})
+          (test-support/apply-config! alpha "alpha" {:seon.config.flow.io/queue-depth 11})
+          (test-support/apply-config! beta "beta" {:seon.config.flow.io/queue-depth 22})
           (is (= 11
-                 (:seon.config.flow.compute/queue-depth
+                 (:seon.config.flow.io/queue-depth
                   (config/effective @alpha "alpha"))))
           (is (= 22
-                 (:seon.config.flow.compute/queue-depth
+                 (:seon.config.flow.io/queue-depth
                   (config/effective @beta "beta"))))
           (let [missing-beta (config/effective @alpha "beta")
                 missing-alpha (config/effective @beta "alpha")]
