@@ -47,7 +47,6 @@
             [seon.flow :as flow]
             [seon.problems :as problems]
             [seon.render :as render]
-            [seon.render.data :as data]
             [seon.render.hiccup :as hiccup]
             [seon.render.value :as value]
             [seon.render.walk :as render.walk]
@@ -1009,22 +1008,20 @@ handle))}}
                      :seon.render.data/max-result-weight 4000
                      :seon.render.web/pull-max-work 4000
                      :seon.render.web/pull-max-results 4000}
-            calls (atom 0)
-            observe data/entity-observation]
-        (with-redefs [data/entity-observation
-                      (fn [observation-request]
-                        (swap! calls inc)
-                        (observe observation-request))]
-          (let [projection (sci.kernel/context-projection
-                            (support/fork-cluster-ctx connection))
-                first-result ((web-private 'acquire-debug-data)
-                              projection @connection request {})
-                retained {(:seon.render.web/debug-data-call-id first-result)
-                          (:seon.render.web/debug-data-entry first-result)}]
-            ((web-private 'acquire-debug-data)
-             projection @connection request retained)
-            (is (= 1 @calls)
-                "unchanged debug reads reuse the retained observation")))))))
+            projection (sci.kernel/context-projection
+                        (support/fork-cluster-ctx connection))
+            ;; The observation's armed counter; no Var is redefined.
+            [_ calls]
+            (support/armed-calls
+             '#{seon.render.data/entity-observation}
+             #(let [first-result ((web-private 'acquire-debug-data)
+                                  projection @connection request {})
+                    retained {(:seon.render.web/debug-data-call-id first-result)
+                              (:seon.render.web/debug-data-entry first-result)}]
+                ((web-private 'acquire-debug-data)
+                 projection @connection request retained)))]
+        (is (= 1 (get calls 'seon.render.data/entity-observation))
+            "unchanged debug reads reuse the retained observation")))))
 
 (deftest an-unchanged-head-re-derives-no-block-and-an-input-change-re-derives-its-block
   ;; The page key is the program and the committed value, never the database
@@ -1153,65 +1150,57 @@ handle))}}
 (deftest unrelated-transaction-reuses-debug-observation-and-render-call
   (with-server
     (fn [connection server context]
-      (let [counts (atom {:observation 0 :discovery 0 :invocation 0})
-            observe data/entity-observation
-            discover render/selection
-            invoke sci.kernel/invoke]
-        (with-redefs [data/entity-observation
-                      (fn [request]
-                        (swap! counts update :observation inc)
-                        (observe request))
-                      render/selection
-                      (fn [request]
-                        (swap! counts update :discovery inc)
-                        (discover request))
-                      sci.kernel/invoke
-                      (fn [request]
-                        (swap! counts update :invocation inc)
-                        (invoke request))]
-          (let [subject (URLEncoder/encode
-                         (pr-str [:seon.ns/name 'seon.flow]) "UTF-8")
-                stream (open-feed
-                        server
-                        (str "/feed/seon.flow?debug=true&viewer=seon.flow"
-                             "&subject=" subject
-                             "&output=%3Aseon.render%2Fhtml"))]
-            (try
-              (read-patches! stream 1)
-              (let [before @counts
-                    pass-before (derivations context)]
-                (is (= 1 (:observation before)))
-                (is (pos? (:discovery before))
-                    "the initial page selects a render function for its units")
-                ;; Invocations are content-keyed in the cache every fork of
-                ;; this cluster context shares, so a JVM that rendered this
-                ;; subject before answers the initial comparison from it.
-                ;; A data entity NO acquisition derives interest in: no identity,
-                ;; no listened attribute, no join. A bystander agent entity mints
-                ;; a half-agent beside the real creation path (peer issue
-                ;; an-unrelated-fixture-transaction-mints-a-half-agent).
-                (support/transacted!
-                 connection
-                 [{:seon.cluster/name "render.web.unrelated"
-                   :seon.cluster/config
-                   (:db/id (:seon.cluster/config
-                            (db/pull @connection [{:seon.cluster/config [:db/id]}]
-                                     [:seon.cluster/name "web-test"])))}])
-                (is (< pass-before (settle-render! context)))
-                (is (= before @counts)
-                    "the database wake reuses observation, discovery, and invocation")
-                (let [pass-after-unrelated (derivations context)]
-                  (support/transacted!
-                          connection
-                          [{:seon.ns/name 'seon.flow
-                            :seon.ns/doc (str "debug-cache-relevant-" (random-uuid))}])
-                  (is (< pass-after-unrelated (settle-render! context)))
-                  (is (= 2 (:observation @counts)))
-                  (is (> (:discovery @counts) (:discovery before))
-                      "a selected-data change selects again")
-                  (is (> (:invocation @counts) (:invocation before))
-                      "a selected-data change invokes applicable render functions again")))
-              (finally (.close stream)))))))))
+      ;; The armed counters of observation, discovery and invocation, read
+      ;; from the feed's opening; no Var is redefined.
+      (let [counted '#{seon.render.data/entity-observation seon.render/selection seon.sci.kernel/invoke}
+            opening (support/armed-counts counted)
+            counts #(let [now (merge-with - (support/armed-counts counted) opening)]
+                      {:observation (get now 'seon.render.data/entity-observation)
+                       :discovery (get now 'seon.render/selection)
+                       :invocation (get now 'seon.sci.kernel/invoke)})
+            subject (URLEncoder/encode
+                     (pr-str [:seon.ns/name 'seon.flow]) "UTF-8")
+            stream (open-feed
+                    server
+                    (str "/feed/seon.flow?debug=true&viewer=seon.flow"
+                         "&subject=" subject
+                         "&output=%3Aseon.render%2Fhtml"))]
+        (try
+          (read-patches! stream 1)
+          (let [before (counts)
+                pass-before (derivations context)]
+            (is (= 1 (:observation before)))
+            (is (pos? (:discovery before))
+                "the initial page selects a render function for its units")
+            ;; Invocations are content-keyed in the cache every fork of
+            ;; this cluster context shares, so a JVM that rendered this
+            ;; subject before answers the initial comparison from it.
+            ;; A data entity NO acquisition derives interest in: no identity,
+            ;; no listened attribute, no join. A bystander agent entity mints
+            ;; a half-agent beside the real creation path (peer issue
+            ;; an-unrelated-fixture-transaction-mints-a-half-agent).
+            (support/transacted!
+             connection
+             [{:seon.cluster/name "render.web.unrelated"
+               :seon.cluster/config
+               (:db/id (:seon.cluster/config
+                        (db/pull @connection [{:seon.cluster/config [:db/id]}]
+                                 [:seon.cluster/name "web-test"])))}])
+            (is (< pass-before (settle-render! context)))
+            (is (= before (counts))
+                "the database wake reuses observation, discovery, and invocation")
+            (let [pass-after-unrelated (derivations context)]
+              (support/transacted!
+                      connection
+                      [{:seon.ns/name 'seon.flow
+                        :seon.ns/doc (str "debug-cache-relevant-" (random-uuid))}])
+              (is (< pass-after-unrelated (settle-render! context)))
+              (is (= 2 (:observation (counts))))
+              (is (> (:discovery (counts)) (:discovery before))
+                  "a selected-data change selects again")
+              (is (> (:invocation (counts)) (:invocation before))
+                  "a selected-data change invokes applicable render functions again")))
+          (finally (.close stream)))))))
 
 (deftest runtime-evaluation-cannot-be-displaced-by-a-database-wake
   (with-server

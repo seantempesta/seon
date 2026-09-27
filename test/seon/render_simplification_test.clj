@@ -322,10 +322,9 @@
       (let [ctx (support/fork-cluster-ctx connection)
             call-id [:seon.render-simplification-test/cached-namespace]
             helper 'seon.render-simplification.fixture-a/cache-helper
-            discoveries (atom 0)
-            invocations (atom 0)
-            selection-of seon.render/selection
-            invoke kernel/invoke
+            ;; The armed counters of discovery and invocation; no Var is
+            ;; redefined.
+            counted '#{seon.render/selection seon.sci.kernel/invoke}
             request (fn [database retained captured]
                       (cond->
                         (assoc
@@ -382,82 +381,79 @@
             (sci/binding
               [sci/ns (sci/create-ns fixture-a)]
               (doseq [definition definitions] (sci/eval-form ctx definition)))))
-        (with-redefs
-          [seon.render/selection
-           (fn [request]
-             (swap! discoveries inc)
-             (selection-of request))
-           kernel/invoke
-           (fn [invocation] (swap! invocations inc) (invoke invocation))]
-          (let [first-captured (atom {})
-                first-output (target-call
-                               'seon.render
-                               'render-call
-                               (request (db/db connection) nil first-captured))
-                retained @first-captured
-                second-captured (atom {})
-                second-output (target-call
-                                'seon.render
-                                'render-call
-                                (request (db/db connection) retained second-captured))]
-            (is (= (str "A:" fixture-a ":one:H1") first-output second-output))
+        (let [opening (support/armed-counts counted)
+              counts #(let [now (merge-with - (support/armed-counts counted) opening)]
+                        {:discoveries (get now 'seon.render/selection)
+                         :invocations (get now 'seon.sci.kernel/invoke)})
+              first-captured (atom {})
+              first-output (target-call
+                             'seon.render
+                             'render-call
+                             (request (db/db connection) nil first-captured))
+              retained @first-captured
+              second-captured (atom {})
+              second-output (target-call
+                              'seon.render
+                              'render-call
+                              (request (db/db connection) retained second-captured))]
+          (is (= (str "A:" fixture-a ":one:H1") first-output second-output))
+          (is
+            (=
+              {:discoveries 1, :invocations 1}
+              (counts))
+            "the unchanged call skips candidate and nested invocation work")
+          (db/transact! connection [{:seon.cluster/name "cache-unrelated"}])
+          (let [unrelated-captured (atom {})
+                unrelated-output (target-call
+                                   'seon.render
+                                   'render-call
+                                   (request
+                                     (db/db connection)
+                                     @second-captured
+                                     unrelated-captured))]
+            (is (= first-output unrelated-output))
             (is
               (=
                 {:discoveries 1, :invocations 1}
-                {:discoveries @discoveries, :invocations @invocations})
-              "the unchanged call skips candidate and nested invocation work")
-            (db/transact! connection [{:seon.cluster/name "cache-unrelated"}])
-            (let [unrelated-captured (atom {})
-                  unrelated-output (target-call
-                                     'seon.render
-                                     'render-call
-                                     (request
-                                       (db/db connection)
-                                       @second-captured
-                                       unrelated-captured))]
-              (is (= first-output unrelated-output))
+                (counts))
+              "an unrelated database revision retains the call")
+            (db/transact! connection [{:seon.ns/name fixture-a, :seon.ns/doc "two"}])
+            (let [relevant-captured (atom {})
+                  relevant-output (target-call
+                                    'seon.render
+                                    'render-call
+                                    (request
+                                      (db/db connection)
+                                      @unrelated-captured
+                                      relevant-captured))]
+              (is (= (str "A:" fixture-a ":two:H1") relevant-output))
               (is
                 (=
-                  {:discoveries 1, :invocations 1}
-                  {:discoveries @discoveries, :invocations @invocations})
-                "an unrelated database revision retains the call")
-              (db/transact! connection [{:seon.ns/name fixture-a, :seon.ns/doc "two"}])
-              (let [relevant-captured (atom {})
-                    relevant-output (target-call
-                                      'seon.render
-                                      'render-call
-                                      (request
-                                        (db/db connection)
-                                        @unrelated-captured
-                                        relevant-captured))]
-                (is (= (str "A:" fixture-a ":two:H1") relevant-output))
+                  {:discoveries 2, :invocations 2}
+                  (counts))
+                "a changed read dependency invalidates the call")
+              (sci/binding
+                [sci/ns (sci/create-ns fixture-a)]
+                (sci/eval-form ctx '(defn cache-helper [] "H2")))
+              (kernel/cache-function!
+                ctx
+                helper
+                {:seon.sci.eval/function-private? true,
+                 :seon.fn/source "(defn cache-helper [] \"H2\")"})
+              (let [helper-captured (atom {})
+                    helper-output (target-call
+                                    'seon.render
+                                    'render-call
+                                    (request
+                                      (db/db connection)
+                                      @relevant-captured
+                                      helper-captured))]
+                (is (= (str "A:" fixture-a ":two:H2") helper-output))
                 (is
                   (=
-                    {:discoveries 2, :invocations 2}
-                    {:discoveries @discoveries, :invocations @invocations})
-                  "a changed read dependency invalidates the call")
-                (sci/binding
-                  [sci/ns (sci/create-ns fixture-a)]
-                  (sci/eval-form ctx '(defn cache-helper [] "H2")))
-                (kernel/cache-function!
-                  ctx
-                  helper
-                  {:seon.sci.eval/function-private? true,
-                   :seon.fn/source "(defn cache-helper [] \"H2\")"})
-                (let [helper-captured (atom {})
-                      helper-output (target-call
-                                      'seon.render
-                                      'render-call
-                                      (request
-                                        (db/db connection)
-                                        @relevant-captured
-                                        helper-captured))]
-                  (is (= (str "A:" fixture-a ":two:H2") helper-output))
-                  (is
-                    (=
-                      {:discoveries 3, :invocations 3}
-                      {:discoveries @discoveries, :invocations @invocations})
-                    "a helper program change invalidates its caller"))))))))))
+                    {:discoveries 3, :invocations 3}
+                    (counts))
+                  "a helper program change invalidates its caller")))))))))
 
 (deftest
   nested-values-render-their-declared-faces

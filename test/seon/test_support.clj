@@ -570,37 +570,43 @@
         result (binding [db/*read-evidence-sink* sink] (body))]
     [result (mapv #(get-in % [:seon.db/read-request :seon.db/read-operation] :index) @sink)]))
 
+(defn armed-counts
+  "The calls each of `symbols` has counted so far, summed over its armed
+  cells in seon.profile (`profile/cells`: the host Var's and any SCI
+  context's). Diff two readings to count the calls between them; no Var is
+  redefined. A symbol with no armed cell refuses, since a zero from an
+  unarmed Var proves nothing. The counters are JVM-wide: a concurrent request
+  calling the same Var counts too, so an exact count is honest only for a Var
+  no concurrent member reaches."
+  {:malli/schema [:=> [:cat [:set :qualified-symbol]] [:map-of :qualified-symbol :int]]}
+  [symbols]
+  (let [found (reduce (fn [found cell]
+                        (let [sym (:seon.profile/sym cell)]
+                          (if (contains? symbols sym)
+                            (update found sym (fnil + 0)
+                                    (.sum ^java.util.concurrent.atomic.LongAdder (:seon.profile/call-counter cell)))
+                            found)))
+                      {} (profile/cells))
+        missing (remove #(contains? found %) symbols)]
+    (when (seq missing)
+      (throw (ex-info (str "No armed profile cell counts " (vec missing) ": arm the Var before counting its calls.")
+                      {:seon.error/operation 'seon.test-support/armed-counts
+                       :seon.error/expected :seon.profile/cell
+                       :seon.error/offending (vec missing)})))
+    found))
+
 (defn armed-calls
   "Run `body` and answer `[result calls]`: `calls` maps each of `symbols` to
-  the calls its armed wrappers counted while `body` ran, read from
-  seon.profile's per-definition counters (`profile/cells`: the host Var's and
-  any SCI context's); no Var is redefined. A symbol with no armed cell
-  refuses, since a zero from an unarmed Var proves nothing. The counters are JVM-wide: a concurrent request calling the same
-  Var counts too, so an exact count is honest only for a Var no concurrent
-  member reaches."
+  the calls counted while `body` ran, other threads' included
+  (`armed-counts`)."
   {:malli/schema [:=> [:cat [:set :qualified-symbol] [:fn clojure.core/ifn?]]
                   [:tuple [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
                                  :seon.schema.admission/reason "The body's arbitrary result is returned unchanged."}]
                    [:map-of :qualified-symbol :int]]]}
   [symbols body]
-  (let [counts (fn []
-                 (reduce (fn [found cell]
-                           (let [sym (:seon.profile/sym cell)]
-                             (if (contains? symbols sym)
-                               (update found sym (fnil + 0)
-                                       (.sum ^java.util.concurrent.atomic.LongAdder (:seon.profile/call-counter cell)))
-                               found)))
-                         {} (profile/cells)))
-        before (counts)
-        missing (remove #(contains? before %) symbols)]
-    (when (seq missing)
-      (throw (ex-info (str "No armed profile cell counts " (vec missing) ": arm the Var before counting its calls.")
-                      {:seon.error/operation 'seon.test-support/armed-calls
-                       :seon.error/expected :seon.profile/cell
-                       :seon.error/offending (vec missing)})))
-    (let [result (body)
-          after (counts)]
-      [result (into {} (map (fn [sym] [sym (- (get after sym) (get before sym))])) symbols)])))
+  (let [before (armed-counts symbols)
+        result (body)]
+    [result (merge-with - (armed-counts symbols) before)]))
 
 (defn refusal-data
   "Return a flat error value, deepest thrown ex-data, or `committed`."
