@@ -1604,6 +1604,38 @@
       "the fact retains the row's typed cause as queryable evidence"))))))
 
 
+(deftest a-refer-to-a-missing-definition-refuses-by-name-when-called-never-the-acquisition
+  ;; WANTED: an agent namespace whose refer target was unmapped (probe on a
+  ;; branch: (ns u (:require [t :refer [increment]])), then
+  ;; (my.program/ns-unmap! 't/increment)) leaves the branch acquirable; only a
+  ;; call through the refer refuses, naming the missing target, and the
+  ;; target's qualified name stays deleted.
+  (test-support/with-database
+   (fn [connection]
+     (test-support/transacted!
+      connection
+      [(test-support/namespace-row (db/db connection) 'refer.target)
+       (program/declaration-row
+        (db/carried-projection (db/db connection))
+        {:seon.ns/name 'refer.consumer
+         :seon.ns/source "(ns refer.consumer (:require [refer.target :refer [gone]]))"
+         :seon.ns/requires #{'refer.target}
+         :seon.ns/refers [{:seon.ns.refer/local 'gone
+                           :seon.ns.refer/target-ns 'refer.target
+                           :seon.ns.refer/target-name 'gone}]}
+        :all :agent)])
+     (let [ctx (eval/build-base-ctx (schema/handed-projection))
+           acquired (eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)})
+           failure (try (sci/eval-string* ctx "(in-ns 'refer.consumer) (gone 1)")
+                        (catch Throwable failure failure))]
+       (is (map? acquired) "the acquisition answers")
+       (is (= 'refer.target/gone
+              (some (comp :seon.sci.eval/refused-function ex-data)
+                    (take-while some? (iterate ex-cause failure))))
+           "the call refuses by the missing target's name")
+       (is (nil? (sci/resolve ctx 'refer.target/gone))
+           "the missing target is not recreated in its namespace")))))
+
 (deftest
  acquisition-records-its-refusals-on-the-acquired-branch-under-foreign-custody
  ;; Custody review 2026-09-25 finding 1: the refusal recording owns its

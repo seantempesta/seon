@@ -1376,6 +1376,39 @@
                  (:seon.program/definition-digest committed)))))))
   nil)
 
+(defn- refusing
+  "A function that throws `refusal` whenever it is called."
+  {:malli/schema [:=> [:cat :seon.sci.eval/interpretation-error] ifn?]}
+  [refusal]
+  (fn refused [& _]
+    (throw (ex-info (:seon.error/message refusal) refusal))))
+
+(defn- install-namespace-bindings!
+  "Install `namespace-bindings` (`row-bindings`) for `namespace-name` from program rows.
+
+  A refer whose target names no installed Var (its row was unmapped or never
+  admitted) resolves to a Var that refuses by name when called, as Clojure's
+  refer keeps an unmapped Var: the rest of the namespace and the acquisition
+  stay available (`sci.core/install-namespace-bindings!` refuses the whole
+  namespace instead)."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :symbol :map] :seon.sci.eval/ctx]}
+  [ctx namespace-name namespace-bindings]
+  (let [missing (into {}
+                      (remove (fn [[_ target]]
+                                (sci.utils/var? (get-in @(:env ctx) [:namespaces (symbol (namespace target))
+                                                                     (symbol (name target))]))))
+                      (:refers namespace-bindings))]
+    (sci/install-namespace-bindings!
+     ctx namespace-name (update namespace-bindings :refers #(apply dissoc % (keys missing))))
+    (doseq [[local target] missing
+            :let [refusal (interpretation-error
+                           target (str namespace-name " refers to it as " local
+                                       ", but no installed definition has that name; define it or remove the refer."))]]
+      (swap! (:env ctx) assoc-in [:namespaces namespace-name :refers local]
+             (sci/new-var (symbol (name target)) (refusing refusal)
+                          {:ns (sci/create-ns (symbol (namespace target)))})))
+    ctx))
+
 (declare install-declared-classes! install-jvm-root! overridden-row?)
 
 (defn- install-function-from-database!
@@ -1411,8 +1444,7 @@
       (install-declared-classes! ctx [namespace-row])
       (sci/install-namespace-bindings!
        ctx namespace-name (assoc (row-bindings namespace-row) :refers {}))
-      (sci/install-namespace-bindings! ctx namespace-name
-                                       (row-bindings namespace-row))
+      (install-namespace-bindings! ctx namespace-name (row-bindings namespace-row))
       (let [event (one-event source namespace-name ctx (count source))]
         (sci/binding [sci/ns (sci/create-ns namespace-name)]
           (sci/eval-form ctx (:seon.sci.reader/form event)))
@@ -1519,8 +1551,7 @@
   [ctx function-symbol refusal]
   (let [namespace-name (symbol (namespace function-symbol))
         var-name (symbol (name function-symbol))
-        refused (fn refused [& _]
-                  (throw (ex-info (:seon.error/message refusal) refusal)))]
+        refused (refusing refusal)]
     ;; A Var acquisition declared (or copied into this generation) keeps its
     ;; identity, so callers analyzed against it reach the refusal by name.
     (if-let [declared (get-in @(:env ctx) [:namespaces namespace-name var-name])]
@@ -1592,8 +1623,15 @@
   at start `work` never runs. A change by another thread since `since` or an
   enclosing execution's start answers the refusal naming both identities
   instead of the result. This thread's own adoptions advance its expectations
-  (`advance-loaded-identity!`)."
-  {:malli/schema [:function
+  (`advance-loaded-identity!`).
+
+  ## Costs
+
+  Armed, measured 2026-09-27 on default: 0.8 us per call around an empty
+  `work`. Its profile cell is inclusive of `work` (a test member's body, an
+  evaluation), so its totals are its callers' costs, not its own."
+  {:seon/tasks #{"5f54ae50d841"}
+   :malli/schema [:function
                   [:=> [:cat :seon.sci.eval/loaded-identity :qualified-symbol [:=> [:cat] :any]] :any]
                   [:=> [:cat :seon.sci.eval/loaded-identity :qualified-symbol :map [:=> [:cat] :any]] :any]]}
   ([identity-atom operation work]
@@ -3079,7 +3117,7 @@
              ;; as an unclassified namespace-binding exception.
              (when (empty? (get function-rows-by-ns namespace-name))
                (when-let [row (get namespace-row-by-name namespace-name)]
-                 (sci/install-namespace-bindings!
+                 (install-namespace-bindings!
                   ctx namespace-name (row-bindings row))))
              ;; Rows carry no definition order, and SCI resolves a body's
              ;; free symbols when it analyzes it. Declare every new Var of
