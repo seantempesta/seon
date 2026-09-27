@@ -1474,11 +1474,15 @@
 
 (defn- content-projection
   "The projection of `database`'s declaration content, memoized by that
-  content and the loaded `builder`. A miss derives from its `nearest-base`."
+  content and the loaded `builder`. A miss takes the cell a speculative value
+  of the same content derived (`speculative-projection`), else derives from
+  its `nearest-base`."
   {:malli/schema [:=> [:cat :seon.source/digest :seon.db/database-value] :seon.schema/projection]}
   [builder database]
-  @(cache/lookup-or-miss projection-cache [::declaration-content builder (declaration-content-key database)]
-                         (fn [_] (delay (schema/load-projection database (nearest-base builder database))))))
+  (let [content-key [::declaration-content builder (declaration-content-key database)]]
+    @(cache/lookup-or-miss projection-cache content-key
+                           (fn [_] (or (cache/lookup value-projection-cache content-key)
+                                       (delay (schema/load-projection database (nearest-base builder database))))))))
 
 (defn- value-projection
   "The projection of a value whose `value-key` names its declaration content
@@ -1506,8 +1510,14 @@
                        :seon.db/database-value]
                   :seon.schema/projection]}
   [builder value-key database]
-  @(cache/lookup-or-miss value-projection-cache [builder value-key]
-                         (fn [_] (delay (schema/load-projection database (nearest-base builder database))))))
+  ;; Also held by its declaration content: the commit of this very value keys
+  ;; that content, and `content-projection` promotes the cell instead of
+  ;; deriving again (90 ms per committed declaration write without it).
+  (let [content-key [::declaration-content builder (declaration-content-key database)]]
+    @(cache/lookup-or-miss value-projection-cache [builder value-key]
+                           (fn [_] (cache/lookup-or-miss
+                                    value-projection-cache content-key
+                                    (fn [_] (delay (schema/load-projection database (nearest-base builder database)))))))))
 
 (defn- as-of-key
   "An as-of view's exact identity: its committed origin's commit and its time
