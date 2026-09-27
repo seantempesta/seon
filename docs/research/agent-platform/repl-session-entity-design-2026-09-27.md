@@ -1,6 +1,6 @@
 ---
 type: research
-status: data-model plan, seventh revision (one context assembly, many views §5d; sample-load diagnosis §19; tight-data render philosophy) — addresses Astra review e80bf7c0d (REVISE, 12 findings) and owner rulings of 2026-09-27 (declared reverse attachments, acknowledgement, relevance tiers, no home namespace, session render, distributed rendering, every modeling kind in the sample); for re-review, then the owner; no source changed
+status: data-model plan, eighth revision (canonical assembly path and deletions §5d; settlement-moved edge dropped as a schema kind §4) (one context assembly, many views §5d; sample-load diagnosis §19; tight-data render philosophy) — addresses Astra review e80bf7c0d (REVISE, 12 findings) and owner rulings of 2026-09-27 (declared reverse attachments, acknowledgement, relevance tiers, no home namespace, session render, distributed rendering, every modeling kind in the sample); for re-review, then the owner; no source changed
 created: 2026-09-27
 branch: refactor/agent-platform
 source-pin: d7d185a7e (checkout); live default pid 22787, commit 6ab93d43, basis 536879662
@@ -192,14 +192,14 @@ That is 25 test files naming `:seon.agent/namespace`. P2's rewrite manifest (§1
 
 ## 4. Relationships: five choices, statement or token, requiredness, deletion
 
-Kinds follow `docs/seon/architecture/data-modeling-guide.md:89-95`; statement versus token follows data-modeling
+Kinds follow `docs/seon/architecture/data-modeling-guide.md:89-96`; statement versus token follows data-modeling
 skill lines 40-70. Every "required" refuses an invalidating sweep only because the writer validates the surviving
 row (datahike skill lines 60-82). No ref enforces target existence by itself (guide §3, `db/utils.cljc:116-155`).
 
 | Relationship | Kind | Req. | Statement/token | Target deleted | Source deleted |
 |---|---|---|---|---|---|
 | agent → session | component | req. | statement | — | cascades session, turns, evaluations, evidence |
-| session → current ns | peer ref, moved by settlement | **req.** | statement | refuses unless the same transaction moves the session (`remove-ns!` repairs or refuses) | — |
+| session → current ns | required peer ref, written by settlement (§4 note) | **req.** | statement | refuses unless the same transaction moves the session (`remove-ns!` repairs or refuses) | — |
 | session → turns | component, ordered by `:seon.turn/ordinal` | opt. | statement | — | cascades |
 | turn → evaluations | component, ordered by ordinal | opt. | statement | — | cascades |
 | evaluation → evidence; turn → attempts | component | opt. | statement | — | cascades |
@@ -225,6 +225,19 @@ row (datahike skill lines 60-82). No ref enforces target existence by itself (gu
 | cluster → config | peer ref | **req.** (`seon.cluster.edn:7`) | statement | refuses | — |
 | occurrence → agent or turn (one, §5) | peer ref | opt. | statement | sweeps | — |
 | evaluation → delivered faults | peer ref set | opt. | statement (what was shown) | sweeps | — |
+
+**"Settlement moves an edge" is not a schema kind.** The guide's fifth row describes it as "Application logic
+writes a durable successor relationship. Not a native deletion mode; prove the writer's transition"
+(`data-modeling-guide.md:96`). It is a property of a **writer**, not of an attribute. The debug-view lane found no
+schema property that can declare it, and none is added: a `:seon.db/moved-by <writer>` stamp would restate in the
+schema what the writer's own contract and regression prove.
+
+The session's current namespace is therefore an ordinary **required peer ref**:
+- its description names its writers (settlement, and the open of a moving request);
+- its proof is regressions R1, R4 and R6.
+
+The view shows it as a required ref. The guide row stays as the name of a writer pattern, so the kind is dropped
+from the view's vocabulary.
 
 Messages stay peers because of their **independent lifecycle**: they outlive both parties' turns and are
 addressed by either side. Having two parties alone would not forbid ownership by one of them (review finding 5).
@@ -483,6 +496,36 @@ displaying the results."
 | `web/debug-response :3558` | the debug page's own request branch | displays an assembly |
 | `context/capture-tx` `context.clj:359` | records the prompt | records the assembly's hashes and tokens |
 | MCP replies (`script/seon/dev/mcp.clj` run events; `cluster.clj:389` JVM value) | per-evaluation text for outside agents | an MCP run reply is the evaluations' saved shown text, plus, on request, `assemble` for oversight |
+
+**The canonical path**, from the debug-view lane's read-only inventory (68a5fe147/def58aff8) and this lane's:
+
+1. **Assembly** is `seon.cluster.prompt/prompt` (`prompt.clj:421`) → `acquire-context-report` (`:366`) →
+   `seon.render/acquire-context!` (`render.clj:1713`) → `web/derive-context!` (`web.clj:2491`) →
+   `walk/history` (`walk.clj:857`) → `render/render-call` (`render.clj:1471`). `assemble` grows from it.
+2. **Render-form evaluation** is `evaluate-sources` (`turn.clj:5031`, called for ordinary turns at `:5322`) and
+   `sci.eval/evaluated-source` (`sci/eval.clj:4058`) for render entries.
+3. **No per-node assembly exists today.** `system-turn` assembles the agent's attached units through
+   `walk/neighborhood`, a different walk from the graph's.
+
+**Each parallel path and its deletion** (lines are the defining forms at the checkout):
+
+| Parallel path | file:line | Lines | Replaced by |
+|---|---|---|---|
+| opening walk `declared-sources` → `walk/neighborhood` | `turn.clj:1979`, `walk.clj:698` | 54 + 108 | `assemble`'s attachment nodes (A3) |
+| the web page's own walk `page-result` → `render.walk/neighborhood` | `web.clj:444` (call at `:479`) | 142 | the assembly value (A2) |
+| `render-walk-neighborhood` indirection and its caller | `render.clj:51-58`, `:1917` | 8 + caller | deleted with the walk (A3) |
+| render-form evaluation inside `system-turn` (`evaluate-sources` `:2263`, `preview-sources` `:2273`) | `turn.clj:2222-2400` | the preview/compare branch, ~70 | `assemble`'s read-only evaluation (A3). The refresh keeps its writer |
+| the `?subject=` debug page: `render-source-call` → `turn/preview-sources` + `transcript/render-ai` | `web.clj:1384-1470`, `transcript.clj:737` | 86 + 7 | the assembly of the subject (A5) |
+| the transcript's second evaluation model: `candidate-history`, `projection`, `history-entries`, `agent-history`, `receipt-entry` | `transcript.clj:650, 721, 823, 986, 258` | 71 + 16 + 41 + 15 + 45 | the assembly's node entries (A2) |
+| debug panels re-acquiring context | `transcript.clj:1382, 1659, 1736` | 3 calls | one assembly per request (A2) |
+| transcript printing through `render-call` | `transcript.clj:1576, 2130`; `walk.clj:762, 892` | call sites | `assemble`'s composition (A2) |
+| source output in `render.clj` | `render.clj:1547-1621` | 75 | kept as the one render-call body; its callers go through `assemble` |
+| eval driver's own transcript | `eval/drive.clj:279` `full-transcript` | 11 | the assembly's text (A5) |
+| `derive-context!` living in the web namespace; `history-segments`, `change-context` | `web.clj:2491, 2450, 2458` | 75 + 8 + 33 | moves into `seon.context` as `assemble`'s session node (A1) |
+| the debug graph traversal | `walk.clj:909-1100` | 192 | the assembly's nodes (A4) |
+
+These are upper bounds on deletion. `assemble` itself is estimated at ~+120 lines, built from the moved pieces,
+and each slice lists its own net at implementation.
 
 **Collapse, sequenced after plan item 0 (the one true REPL path):**
 
@@ -788,7 +831,7 @@ K keep · M move · D delete · N new.
 | order by ordinal | data-modeling skill lines 91-92; datahike skill lines 329-330 | yes |
 | identity-less components validated by component schema | datahike skill lines 88-90; `schema.clj:1517-1537` | yes |
 | evaluation namespace and renderer as values | data-modeling skill lines 40-70 | yes |
-| session ns as a required ref moved by settlement, repaired or refused on retraction | guide §3 rows 3 and 5; §2 ("repair … in the same transaction or refuse") | yes |
+| session ns as a required ref written by settlement, repaired or refused on retraction | guide §3 rows 3 and 5; §2 ("repair … in the same transaction or refuse") | yes |
 | declared reverse attachments, one derived selector | data-modeling skill lines 167-178; guide §7 ("derive the pulled shape from the entity schema and selector") | yes |
 | compacted history retained | datahike skill lines 106-121 | after the no-history change; old head history is not restored |
 
@@ -969,7 +1012,7 @@ The demo agent's admission is closed, so no turn can run for it.
 | settings → `[:seon.config/cluster "default"]` | required peer ref | the overrides' base |
 | message → demo (`:seon.message/to`) | required peer ref, listened | the wake edge |
 | demo → task; task → `seon.repl`; task → `seon.repl/response` | optional peer ref | current work; what it concerns |
-| session → `demo.work` | settlement-moved edge, required | where the next turn starts |
+| session → `demo.work` | required peer ref, written by settlement | where the next turn starts |
 | `demo-msg-1` `:seon.message/received-tx` | transition fact (tx ref by the recipient) | unread is derived from its absence |
 | demo's inbox (`:seon.message/_to`) | declared reverse attachment | one node, unread 1 of 2 |
 | `seon.repl`'s definitions (`:seon.fn/_ns`, existing program rows) | declared reverse attachment | the namespace half |
