@@ -82,9 +82,38 @@ status: three commits; static checks green; tests NOT run (root runs them after 
 - The lane's net so far is positive, from the correctness fix and the cache. The real deletions are slices 2, 7 and
   8 in the plan.
 
+## 4. The fork's acquisition is the only one (f7980f60c)
+
+`fork-cluster-ctx` now refuses with the callers' own error when refusals cannot be recorded. The duplicate
+`acquire!` calls right after a fork are deleted from the sci tests: branch_execution, program_change_report and
+eval_test. The two M9 timings now measure the fork.
+
+- test.clj: `tmp/shrink-eval-opus/test-fork-acquires.patch` (applies cleanly), for root.
+- agent.clj:1122 keeps its `acquire!`. Its base can also be `source-ctx` or a previous base, and for the fork
+  branch the call is a fast no-op.
+- Fast path, measured on default: `acquired-database?` for an equal program at a later commit takes 0.06-0.11 ms.
+- Duplicates left in other lanes' tests: test/my/test_test.clj:30, render_simplification_test.clj:539,
+  test/accretion_test.clj:182, test_test.clj:45.
+
+## 5. The print stage is total (b1112f457)
+
+These are perf-boot's task `shown-result-throws-when-its-unit-cannot-be-prepared`, fixed at the producer:
+
+1. `evaluate` falls back to the database a `base-ctx` was derived from (its snapshot's `:seon.db/db`).
+2. Any render-stage throw or refusal becomes one diagnostic, and the value shows as `render.value/bounded-text`.
+   The diagnostics print the same way when the floor itself cannot run.
+
+**Behaviour change:** a custody-less `base-ctx` evaluation now has a database, so admission runs for it.
+
+- The task is not appended as open, because it is fixed.
+- eval_test's `run-in` supplies the member database only when no ctx holds one. This is perf-boot's patch,
+  adapted.
+- Regressions: `a-print-the-render-stage-refuses-returns-the-value-with-one-diagnostic`,
+  `a-context-derived-from-a-database-evaluates-against-it`.
+
 ## Next
 
-Slice 2 (content-keyed base context) is marked REVISE by the review. It needs a complete-input key (config, supplied
+Slice 2 design for Astra: docs/research/agent-platform/shrink-eval-slice2-design-2026-09-27.md (987a90b62). It was marked REVISE by the review. It needs a complete-input key (config, supplied
 defaults, projection content, graph inputs), an `overridden-row?` branch-law fix, and conversion of every consumer
 (`loaded-basis`, `record-refusals-once!`, listener retirement, retention tests) in one slice. I will write that design
 before editing. Slice 3 follows it.
