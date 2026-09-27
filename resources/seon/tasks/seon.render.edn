@@ -29,4 +29,9 @@
  #:seon.task{:name "face-vocabulary-remains-in-code"
              :kind :namespace
              :intent "Owner 2026-09-27: there are no \"faces\", just render functions and data. About 215 occurrences of face remain in src/seon and resources/seon/schemas (e.g. :seon.print/face as a print-node classification, render.clj face-valid?, {:face rendered}). Rename per docs/research/agent-platform/face-concept-audit-2026-09-26.md (it names each rename: :seon.print/face is a print-node kind; the AI/HTML selector is the consumer or attachment key) in one scripted sweep across src, schemas and tests, converting every reader in the same commit; AGENTS.md is already clean (494c8b200)."
-             :evidence #{"docs/research/agent-platform/face-concept-audit-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/face-concept-audit-2026-09-26.md"}}
+ #:seon.task{:name "unit-sweep-retyped-non-map-render-inputs"
+             :kind :namespace
+             :intent "b195ae037's scripted sweep retyped render functions' first input to :seon.render/unit (a map). A render function whose body and AI pair take a vector or lookup ref (seon.cluster.message/render-inbox-html, restored d55f390cf) then refused every real input. Audit every render function's first input: compare its declared schema with the values its callers and its pair actually pass (at the REPL on real values), and restore the owner's own declared schema where the sweep replaced it."
+             :must-read #{seon.render/render-call}
+             :evidence #{"docs/research/agent-platform/red-triage-3-2026-09-27.md"}}]

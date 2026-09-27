@@ -28,4 +28,9 @@
              :kind :function
              :intent "An error-recording transaction's writer call carried the whole schema projection, so any refused write copied it into its refusal and the operator could not read the failure back (owner 2026-09-26, start --head at 7c40396b3). The call holds data and references; the writer reads its database's own projection."
              :must-read #{seon.error/recording seon.error/commit-call}
-             :evidence #{"docs/research/agent-platform/landing/err-s3-fault-identity-opus-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/err-s3-fault-identity-opus-2026-09-26.md"}}
+ #:seon.task{:name "refusal-html-reads-as-fragments"
+             :kind :function
+             :intent "Since ea802169d each shown value in a refusal's HTML is a block seon-data-panel mid-sentence, breaking the sentence; the sentence repeats the schema key after 'a string'; a missing key shows :seon.error/unknown as the offending value; the refusal path shows a raw entity id [56626 :my.plan.item/title]; a fault with no operation renders an empty seon-kicker paragraph. Values inline (a CSS rule for .seon-error-problem .seon-data-panel in resources/public/css/input.css), no repeated key, a missing key named as missing, no entity-id dump, no empty kicker; check browser paint (fix-html-views 1c10d3536)."
+             :must-read #{seon.error/render-html}
+             :evidence #{"docs/research/agent-platform/red-triage-3-2026-09-27.md"}}]
