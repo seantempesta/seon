@@ -1,6 +1,6 @@
 ---
 type: research
-status: data-model plan, sixth revision (sample-load diagnosis §19; tight-data render philosophy) — addresses Astra review e80bf7c0d (REVISE, 12 findings) and owner rulings of 2026-09-27 (declared reverse attachments, acknowledgement, relevance tiers, no home namespace, session render, distributed rendering, every modeling kind in the sample); for re-review, then the owner; no source changed
+status: data-model plan, seventh revision (one context assembly, many views §5d; sample-load diagnosis §19; tight-data render philosophy) — addresses Astra review e80bf7c0d (REVISE, 12 findings) and owner rulings of 2026-09-27 (declared reverse attachments, acknowledgement, relevance tiers, no home namespace, session render, distributed rendering, every modeling kind in the sample); for re-review, then the owner; no source changed
 created: 2026-09-27
 branch: refactor/agent-platform
 source-pin: d7d185a7e (checkout); live default pid 22787, commit 6ab93d43, basis 536879662
@@ -416,6 +416,87 @@ the checkout):
   (its §6, owner O4). Today's ruling makes the entity schema **declare** its reverse attachments, which is exactly
   what `:seon.render/units` holds. So the plan keeps `:seon.render/units` as that declaration and names it as its
   meaning. Only the extra readers are deleted, not the key. Owner Q7 confirms.
+
+### 5d. One context assembly, many views (owner, 2026-09-27)
+
+Owner: "The debug page should just be running the same context assembly system we are running for agents and
+displaying the results."
+
+**The one function.** `seon.context/assemble`, owned by `src/seon/context.clj`, which today owns capture:
+
+```clojure
+(seon.context/assemble request) ; => :seon.context/assembly, or its refusal
+;; request (:seon.context/request)
+{:seon.db/db             db        ; the basis; a turn's opening db for a historical view
+ :seon.context/subject   [:seon.agent/id "demo"]        ; whose record is assembled
+ :seon.context/viewer    [:seon.agent/id "demo"]        ; whose perspective; root may view demo
+ :seon.render/profile    profile   ; derived once (render/request-profile)
+ :seon.render/distance   n         ; recursion depth bound
+ :seon.ai.tokens/budget  tokens}   ; the floor's one budget
+;; the answer (:seon.context/assembly) is DATA
+{:seon.context/text     "…"        ; exactly what the agent receives
+ :seon.ai.tokens/estimate n
+ :seon.db/basis-t       t
+ :seon.context/nodes    [{:seon.context/node    [:seon.agent/id "demo"] ; or a component path / attachment
+                          :seon.context/parent  nil
+                          :seon.render/selected {:seon.render/step :schema-pair :seon.render/fn seon.cluster.agent/render-ai}
+                          :seon.context/entries [{:seon.cluster.eval/source "…" :seon.eval/shown "…"
+                                                  :seon.eval/shown-tokens n :seon.context/stored? false}]
+                          :seon.ai.tokens/estimate n
+                          :seon.context/cuts    [elision …]   ; bound, count, path, requery
+                          :seon.context/see     [lookup …]}]  ; back-pointers for repeated mentions
+ :seon.context/order    [lookup …]}                           ; definitions before uses; turns by ordinal
+```
+
+**What it does, in four steps:**
+1. **Pull the tree** with the schema-derived selector (§5a).
+2. **Render recursively** (§5c). Each node's render is chosen by the selection order.
+3. **Evaluate each returned form read-only through the ONE REPL path**, the path the REPL-path audit is fixing
+   (plan item 0). Render entries evaluate through `evaluate` with the rendering flag, as
+   `sci.eval/evaluated-source` does today (`sci/eval.clj:4058`, wired at `:4157`), in the viewer's SCI world. The
+   session node's entries are already stored evaluations: they are read, not re-evaluated.
+4. **Compose** under the composer laws: once per entity, back-pointers, order, the content-digest cache, depth
+   and the one budget.
+
+**Consumers only display it.** None evaluates or renders on its own.
+
+| Consumer | Reads |
+|---|---|
+| the agent's prompt | `:seon.context/text`. The opening system turn records the assembly's evaluated entries through `record-evaluated-tx` (`turn.clj:1636`), with no second evaluation |
+| the debug page | text + nodes. **The graph is the assembled tree**; a node's panel is that node's slice (render chosen, entries with results, tokens, cuts, requeries). Nothing is computed for the page alone |
+| MCP and root oversight | the assembly's summary (text for the subject; per-node tokens) |
+| tests | the assembly value, asserted as data |
+| context capture | `capture-tx` stores the assembly's hashes and token counts (§8c) |
+
+**Today's parallel paths** (file:line at the checkout):
+
+| Path | What it assembles or evaluates | Disposition |
+|---|---|---|
+| `seon.render/acquire-context!` `render.clj:1713` → `seon.render.web/derive-context!` `web.clj:2491` → `render.walk/history` `walk.clj:857` → `render/render-call` `render.clj:1471` | the history part of the prompt, with its own retained-call cache | **the canonical core today**. It becomes `assemble`'s session node and moves out of the web namespace |
+| `seon.cluster.prompt/prompt` `prompt.clj:421` → `acquire-context-report :366`, `select :301`, `compose :289`, `repl/frame repl.clj:51` | budget selection, composition, the turn-budget frame | the prompt consumer. `select`/`compose` become `assemble`'s composition; `frame` becomes a node (the session's run budget) |
+| `turn/declared-sources` `turn.clj:1979` → `walk/neighborhood` `walk.clj:698` | the opening, rendered and planned as system forms | replaced by `assemble`'s attachment nodes, recorded through `record-evaluated-tx` |
+| `turn/system-plan :2099`, `system-turn :2222`, `latest-evaluations :2033` | the refresh (changed reads re-appended) | stays as the refresh writer; it reads `assemble`'s entries to know what was shown |
+| `walk/graph` `walk.clj:1033` | the debug graph, its own traversal of every ref | **deleted**: the graph is `:seon.context/nodes` |
+| `transcript/render-session :1369`, `render-outline :1642`, `acquire-ledger-data :1849`, `render-ledger :2370` | debug panels, each calling `acquire-context!` again (`:1382`, `:1659`, `:1736`) | read one assembly value |
+| `transcript/candidate-history :650`, `render-ai :737`, `history-entries :823`, `agent-history :986`, `receipt-entry :258` | a second model of evaluations for views (audit F06) | deleted; views read the assembly's entries |
+| `web/render-source-call :1384` → `turn/preview-sources :5189`; `web/debug-preview-html :992`, `experiment-preview-html :1051` | page previews through the run loop's evaluator (with the F17 write-authority defect) | a preview is `assemble` of a hypothetical value, read-only by the REPL-path fix |
+| `web/debug-response :3558` | the debug page's own request branch | displays an assembly |
+| `context/capture-tx` `context.clj:359` | records the prompt | records the assembly's hashes and tokens |
+| MCP replies (`script/seon/dev/mcp.clj` run events; `cluster.clj:389` JVM value) | per-evaluation text for outside agents | an MCP run reply is the evaluations' saved shown text, plus, on request, `assemble` for oversight |
+
+**Collapse, sequenced after plan item 0 (the one true REPL path):**
+
+| Slice | What | Owner files | Deletes |
+|---|---|---|---|
+| A1 | `assemble` over the existing core; the prompt calls it | `context.clj`, `render.clj`, `render/web.clj` (moves `derive-context!` out), `cluster/prompt.clj`, `repl.clj` | `acquire-context!`'s web indirection |
+| A2 | debug panels display the assembly | `render/transcript.clj`, `render/web.clj` | the three re-acquisitions; `candidate-history` and its model (audit F06, ~420 lines) |
+| A3 | the opening from `assemble`, recorded without re-evaluation | `turn.clj` | `declared-sources`, `walk/neighborhood` |
+| A4 | the graph is the assembled tree | `render/walk.clj`, `render/web.clj`, `seon.render.walk.edn` | `walk/graph`'s traversal (the graph lane's current work is the input) |
+| A5 | previews and MCP oversight through `assemble` | `turn.clj`, `render/web.clj`, `script/seon/dev/mcp.clj` | page-only evaluation |
+
+A1 follows P2b/P3's session and P4's derived selector. A2–A5 follow A1. Each keeps its tests green, including
+`seon.render.web-debug-test/reverse-blocks-do-not-depend-on-the-graph-page`, which asserts exactly this
+independence.
 
 ## 6. Validation cost: two defects made prerequisites (review finding 1)
 
