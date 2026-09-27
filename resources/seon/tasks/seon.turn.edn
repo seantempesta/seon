@@ -65,4 +65,9 @@
              :kind :function
              :intent "seon.turn/receipt-terminal-attributes is a hand-written list of the receipt attributes the writer stores; it duplicates the receipt schema, so every new receipt key is silently dropped until someone edits the list (the LARGE VALUE cost keys of 2026-09-27 never landed because of it). Derive the stored attributes from the receipt's declared schema (CLAUDE.md: declare the partition on entity schemas, not in a hand list) and delete the list."
              :must-read #{seon.turn/receipt-terminal-attributes}
-             :evidence #{"docs/research/agent-platform/landing/large-value-feedback-opus-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/large-value-feedback-opus-2026-09-27.md"}}
+ #:seon.task{:name "opening-run-id-from-a-stale-count"
+             :kind :function
+             :intent "seon.turn/system-turn derives an opening's run id from a count of the agent's runs on its own connection read, so competing openers agree on one id and the writer admits one. Under reply-when-applied (B) an agent's answered run may not be committed yet, so an opening started inside that window can compute an id that collides with it; the writer refuses loudly (no corruption), but the opening fails. submit-source! was fixed by generating ids (5151be7ad); openings need a collision-free identity that still lets competing openers converge (e.g. derive the id from the triggering fact's identity, not a count)."
+             :must-read #{seon.turn/system-turn}
+             :evidence #{"docs/research/agent-platform/landing/one-commit-a-2026-09-26.md"}}]
