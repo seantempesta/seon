@@ -1,6 +1,6 @@
 ---
 type: research
-status: data-model plan, fifth revision — addresses Astra review e80bf7c0d (REVISE, 12 findings) and owner rulings of 2026-09-27 (declared reverse attachments, acknowledgement, relevance tiers, no home namespace, session render, distributed rendering, every modeling kind in the sample); for re-review, then the owner; no source changed
+status: data-model plan, sixth revision (sample-load diagnosis §19; tight-data render philosophy) — addresses Astra review e80bf7c0d (REVISE, 12 findings) and owner rulings of 2026-09-27 (declared reverse attachments, acknowledgement, relevance tiers, no home namespace, session render, distributed rendering, every modeling kind in the sample); for re-review, then the owner; no source changed
 created: 2026-09-27
 branch: refactor/agent-platform
 source-pin: d7d185a7e (checkout); live default pid 22787, commit 6ab93d43, basis 536879662
@@ -61,7 +61,7 @@ Skills and guides read end to end:
 |---|---|
 | The fact lives on the entity that states it (message → agent, fn → namespace). The reverse is a read path, never a stored copy. Each entity schema **declares** its reverse attachments, each with a render. One pull selector per entity kind is derived from the schema. Undeclared reverse refs stay queryable but never appear. Owned things are forward components. | §2, §5 |
 | Unread = to me without my acknowledgement. The agent writes one received fact on the message; there is no stored unread ref. | §5, §9 |
-| Relevance tiers are a render choice. The session's current namespace and task → namespace render `(dir ns)`. Task → function renders `(doc f)`. Resolving a symbol gives full source on demand. Render selection order is unchanged: inline override, then the viewing agent's namespace, then the schema pair, then the floor. | §5 |
+| Relevance tiers are a render choice. Renders return tight data (names, one-line meaning, contract shape), with docs folded in only when relevant; full `doc` and source on request. "Operations on this data" is a query over `:seon.fn.arity/input-refs`, not a stored relation (refined 2026-09-27, §5c). Render selection order is unchanged: inline override, then the viewing agent's namespace, then the schema pair, then the floor. | §5 |
 | The agent's current task is a peer ref, `:seon.agent/task`. | §2, §4 |
 | Definitions are namespace information; there is no "my functions". Authorship, if ever wanted, goes in transaction metadata. | §4 |
 | **There is no home namespace, only a current one.** `:seon.agent/namespace` is deleted. Creation sets `:seon.agent.session/ns`. A namespace agent is creation with a chosen namespace plus a task naming it. | §2, §3 (reader list), §8 |
@@ -277,8 +277,8 @@ reverse refs stop appearing:
 |---|---|---|---|
 | identity (scalars) | id, branch, current ns, namespaces it stewards | the agent pull | ~40 est. |
 | **session** | **the transcript** (§8): each turn by ordinal, each evaluation by ordinal, `ns=> source` then its saved `:seon.eval/shown` (or its error map) | a turn by ordinal; `as-of` before a compaction | root 34,593 stored today; 86% three repeated generated reads |
-| namespace half (session ns) | `(dir <ns>)` | `(doc sym)`; full source by resolving the symbol | 32 (`my.agents.root`) … 11,284 (`seon.turn`) raw |
-| task | `(dir <task ns>)` when it differs from the session ns; `(doc <task fn>)` | the task entity | ~100–2,000 |
+| namespace half (session ns) | its definitions as tight data (name, meaning, contract) | full `(dir ns)`, `(doc sym)`, source | est. about a third of the full `dir` (not measured); full is 32 (`my.agents.root`) … 11,284 (`seon.turn`) raw |
+| task | its intent plus its namespace and function as tight data, with operations | full `dir`/`doc` | ~120 |
 | plan | objective, current step, ready/blocked | `(seon.plan/plan {})` | ~130 |
 | settings | dials declared `:seon.config/shown` + the override set | `(seon.ai/agent-settings (seon.db/db) "root")`, 82 dials | ~90 / ~880 |
 | inbox | **unread**: `:seon.message/_to` without `:seon.message/received-tx`, oldest first | all messages to me; sent messages by `:seon.message/_from` | ~23 each (root: 27 messages, none acknowledged under the new fact) |
@@ -293,7 +293,7 @@ then the floor.
 
 **Per turn.** The opening after a compaction is the sum of the attachment renders plus the namespace half. Every
 later turn appends only what changed, under the existing refresh (turn PRD §14): an `in-ns` appends
-`(dir <new ns>)`, a new message re-renders the inbox, and a plan change re-renders the plan. The measured
+the new namespace's tight rendering, a new message re-renders the inbox, and a plan change re-renders the plan. The measured
 savings on root:
 - deleting the runtime-trigger read: −240 tokens per turn;
 - showing only unread messages instead of every message: −616 tokens per refresh.
@@ -311,14 +311,30 @@ There is no central context builder.
      the inbox attachment render;
    - a child render may in turn delegate.
    - Depth and the floor's one token budget bound the recursion. The composer dedupes, back-points and orders.
-3. **Reach beyond the tree when useful.** A render may:
-   - return forms that reach past the pulled tree, such as `(dir seon.repl)` for task → namespace or
-     `(doc seon.repl/response)` for task → function. These evaluate through the one REPL path and render through
-     the named entity's own pair;
-   - **read the database.** The database is a declared input of every render, supplied by schema name, and a
-     render uses it when it needs more context.
-
-   The norm is to focus on the data the render was handed; nothing blocks the rest.
+3. **Return tight data the agent can work with** (owner, 2026-09-27: "like command-line tools: how often do you
+   look up the documentation?"). A render returns data, not `(doc …)` forms, by default. A one-line meaning is
+   folded into the data only when it helps. Things must describe themselves well enough to say what they mean and
+   how they can be manipulated. So:
+   - A task's refs render as tight data: each namespace and function as its name, a one-line meaning (the
+     docstring's first sentence) and, for a function, its contract shape, for example
+     `{:seon.fn/sym seon.repl/response :seon.fn/meaning "The reply map for one evaluation." :seon.fn/contract [:=> [:cat :seon.repl/emission] :string]}`.
+   - Full `doc` and source stay one request away: `(doc f)`, or resolving the symbol.
+   - **Operations on this data.** A render may include the functions that operate on the value, found by a
+     **query**, not a stored relation: public toolkit functions whose arity declares the value's schema key or
+     identity key in `:seon.fn.arity/input-refs`, for example `my.message/received!` on a message.
+     - That attribute is a component of the function (via `:seon.fn/arities`) holding a set of qualified schema
+       keywords with `:seon.db/index true` (`resources/seon/schemas/seon.fn.arity.edn:3`), so the query is an AVET
+       seek.
+     - Measured on default: 3,415 input-ref values; one query takes 0.4-5 ms. Restricting it to the cluster
+       toolkit namespaces (`:seon.cluster/toolkit`, 13) gives `:seon.agent/id` → `my.agent/branch`,
+       `my.issue/add!`, `my.issue/tests!`, `my.program/propose-merge!`, and `:my.plan/request` → the ten `my.plan`
+       readers.
+     - Gap found: **no toolkit function declares a `:seon.message/*` key** (`:seon.message/message` and
+       `:seon.message/id` both return `[]`), and none declares `:seon.task/handle`, `:seon.ns/name` or
+       `:seon.fn/sym`. An operation is discoverable only if its contract names the entity's keys. The
+       acknowledgement function must take `[:cat :seon.message/id]`.
+   - A render may still **read the database** (a declared input, supplied by schema name) or return a form that
+     reaches past the tree when it needs more context. The norm is to render the data it was handed.
 4. **Perspective.** The viewing agent is a declared input of every render:
    - A message renders to its recipient with the acknowledgement form `(my.message/received! "id")`, and to its
      sender as delivered or received.
@@ -334,7 +350,8 @@ There is no central context builder.
    What changes from that design:
    - Traversal is the one pull of the derived selector, not a level-by-level walk of every reverse ref to depth N
      (its §2, §4.2).
-   - Relevance lives in the render functions: which namespace gets `dir`, which function gets `doc`.
+   - Relevance lives in the render functions: which refs are shown as tight data, and which operations are
+     offered.
    - The recursion follows the pulled tree plus the forms renders return.
 6. **How context is realized.** Under additive context (turn PRD §14) the opening is a system turn whose forms
    are the ones the agent's recursive render returned. The prompt is then the session render, the transcript, over
@@ -360,11 +377,11 @@ Estimated tokens (chars/4); seon.repl measured on default.
 
 | Entity / kind | Render (where declared) | Returns | Tokens |
 |---|---|---|---|
-| agent `demo` | `:seon.agent/agent` pair (schema default) | `(my.agent/whoami)`, `(my.task/current)`, `(seon.plan/plan {})`, `(seon.agent/effective-settings)`, `(my.message/unread)`: one form per non-empty attachment | ~40 + parts |
-| task `demo0task001` | `:seon.task/task` pair (schema default) | its intent, then `(dir seon.repl)` and `(doc seon.repl/response)` | ~40 + parts |
-| namespace `seon.repl` | `:seon.ns/ns` pair (default, `seon.render.ns/render-ai`) | its `dir` value (30 functions): definitions through the declared `:seon.fn/_ns` attachment | ~2,726 |
-| function `seon.repl/response` | `:seon.fn` pair (default) | its `doc` value; full source by resolving the symbol on demand | ~65 |
-| inbox | the `:seon.message/_to` attachment pair on the agent schema (`seon.cluster.message/render-inbox-ai`) | the unread messages, each through the message pair with the recipient perspective | ~25 (1 unread) |
+| agent `demo` | `:seon.agent/agent` pair (schema default) | an identity map (id, branch, current ns); each attachment delegated to its own render | ~40 + parts |
+| task `demo0task001` | `:seon.task/task` pair (schema default) | `{:seon.task/id … :seon.task/intent … :seon.task/namespace {:seon.ns/name seon.repl :seon.ns/meaning "…" :seon.ns/functions 30} :seon.task/function {:seon.fn/sym seon.repl/response :seon.fn/meaning "…" :seon.fn/contract […]}}` | ~120 |
+| namespace `seon.repl` (on request, or as the session namespace) | `:seon.ns/ns` pair (default) | names, one-line meanings and contract shapes of its 30 definitions (declared `:seon.fn/_ns`); full `dir` on request | ~900 tight, est. (full `dir` 2,726 measured) |
+| function `seon.repl/response` (on request) | `:seon.fn` pair (default) | name, meaning, contract, operations; `(doc f)` and source on request | ~40 (full doc ~65) |
+| inbox | the `:seon.message/_to` attachment pair on the agent schema | unread messages as data, each with its operations (`my.message/received!` once its contract names `:seon.message/id`) | ~30 (1 unread) |
 | settings | `:seon.agent/settings` attribute pair (`seon.agent/render-settings-ai`) | the shown dials + override set | ~90 |
 | session transcript | `:seon.agent.session/session` pair (new, default) | turns by ordinal, evaluations by ordinal: `ns=> source` + saved shown text | ~150 for demo's 5 evaluations |
 | root oversight | `:seon.agent/oversees` attribute pair (new, default) | one summary map per overseen agent | ~30 per agent |
@@ -373,13 +390,14 @@ Every row above is a **global default**: the schema's declared pair. Where a nam
 
 | Override (hypothetical) | Who sees it |
 |---|---|
-| `demo.work/render-task-ai` returning each task function's full source instead of `(doc f)` | demo after its `in-ns 'demo.work` |
-| `seon.repl/render-fn-ai` showing a function's callers alongside its doc | any agent in `seon.repl` |
+| `demo.work/render-task-ai` returning each task function's full source instead of its tight data | demo after its `in-ns 'demo.work` |
+| `seon.repl/render-fn-ai` adding a function's callers to its tight data | any agent in `seon.repl` |
 | `my.agents.root/render-agent-ai` summarizing an overseen agent with its recent faults | root |
 
 An inline `:seon.render/ai` on one message (a producer's special notice) wins over all of them.
 
-- **demo's whole opening context:** about 40 + 40 + 2,726 + 65 + 25 + 90 ≈ 3,000 tokens, then the transcript.
+- **demo's whole opening context:** about 40 + 120 + 900 (session namespace, tight, est.) + 30 + 90 ≈ 1,200 tokens,
+  then the transcript. The full `dir`/`doc` are requests, not defaults.
 - **root's opening:** its identity, plan, settings, faults, schedules and one line per overseen agent.
 
 **What in today's code fights this** (file:line; the graph code is being changed by another lane, so these are at
@@ -779,8 +797,8 @@ selector; it must stay under ~100 added lines or return with the smaller alterna
 - **R3.** A scratch namespace is not in `changed-identities`, and `prepare-merge!`'s scoped digest reads never
   include it. P0.2 decides the `defn` case.
 - **R4.** A request carrying `:seon.ns/name` moves the session before its turn; the move shows in the next turn.
-- **R5.** After `in-ns`, the next prompt appends `(dir x)`; earlier evaluations keep their own `ns=>` prompts; the
-  task's namespace and function render as `dir`/`doc`.
+- **R5.** After `in-ns`, the next prompt appends the new namespace's tight rendering; earlier evaluations keep
+  their own `ns=>` prompts; the task's namespace and function render as tight data with their operations.
 - **R6.** `remove-ns!` of a session's namespace moves the session in the same transaction or refuses; compaction
   keeps the session ns.
 - **R7.** The inbox shows unread (no ack) messages. An accepted reply with no claim, a system turn, and an
@@ -927,3 +945,94 @@ Not measured:
 - test-harness worlds
 - any test run
 - the sample on a branch
+
+## 19. Findings from the sample load (for the fix lane fix-register-anywhere-opus and for root)
+
+Root's two attempts to load `:run-1` on branch `design-1` (hosted agent `mcp/design-1`) failed. Per the owner,
+the sample is **not** changed to avoid either failure. Both are our defects, owned by the fix lane. Diagnosis
+below is read-only, from the branch head (commit `6ab94f9b-6617-5430-9387-571aa96a167f`) and from default.
+
+### 19a. The rejected row, and why
+
+- **The rejected row was not a schema row.** The fault the run recorded on `design-1` (turn eid 59962, at
+  2026-09-27T17:17:15Z) says: "Complete component validation refused: unowned-entity … `:seon.db/entity 54842`".
+  - Entity 54842 is a `:seon.cluster.eval/read-evidence` component; its dependency plan reads `:seon.fn/calls`.
+  - Before the transaction it was owned by evaluation 39443, one of root's earlier forms,
+    `(let [r (my.program/breaks …)] …)` (`[?o :seon.cluster.eval/read-evidence 54842]` → 39443).
+  - After the transaction it had no owner, so the final writer refused the whole settlement
+    (`write-owned-values-error`, `db.clj:3540`; Datahike's "Transaction report validation rejected",
+    `transaction.cljc:1231`).
+- **Why the owner edge disappeared.** `:run-1` redefines `:seon.cluster.eval/receipt` (the design's P3 change:
+  `:seon.cluster.eval/run` optional, `:seon.cluster.eval/namespace` added). Adoption then does two things:
+  1. `schema-attribute-change-tx` (`turn.clj:1097-1140`) marks every attribute of the redefined entity map as
+     affected, including `:seon.cluster.eval/read-evidence`.
+  2. For each kept attribute, `seon.cluster/attribute-change-tx` (`cluster.clj:1174`) calls
+     `invalid-value-retraction`. Its docstring says "a cardinality-many attribute validates each entity's whole
+     value set" (`cluster.clj` `invalid-value-retraction`): it builds `(into #{} …)` and validates that **set**.
+- **Where it breaks.** `:seon.cluster.eval/read-evidence` is declared
+  `[:vector {:seon.db/component true …} :seon.db/ref]` (`seon.cluster.eval.edn`). A set never satisfies
+  `[:vector …]`, so every value is judged invalid and retracted. That orphans every evidence component, and the
+  final validator refuses. Probe on default:
+
+| Check | Result |
+|---|---|
+| `(projection-validator p :seon.cluster.eval/read-evidence)` on `#{55733 55734}` | **false** |
+| same validator on `[55733 55734]` | **true** |
+| `(seon.cluster/invalid-value-retraction d p :seon.cluster.eval/read-evidence)` | **459 retractions, i.e. every datom** |
+
+- **The class.** 27 installed cardinality-many attributes are declared with `[:vector …]`, among them
+  `:seon.cluster.eval/faults`, `:seon.fn/arities`, `:seon.fn.arity/arguments`, `:seon.fn.binding/entries` and
+  `/children`, `:seon.test/failures`, `:seon.render/units` and `:seon.test.accretion/gate-tests`.
+  - Redefining any entity schema that lists one of them drops that attribute's whole population on adoption.
+  - Where the attribute is a component, the adoption refuses instead.
+  - **This blocks the plan's P2b/P3 schema adoption on the live store too**, not only the sample.
+- **The same run shows two total-path defects.** The caller got `{:err nil :committed? false :forms 0}` after 35
+  s, with no events and no error value. The fault was recorded on the branch but never delivered to the caller
+  (AGENTS "Deliver every error to whoever can act on it"). This is the same class as a318b2d38.
+
+### 19b. Task entries for root to file
+
+Both belong in `resources/seon/tasks/seon.cluster.agent.edn` or `seon.dev.mcp.edn`; root's call.
+
+1. **"Branch MCP takes one form, so a multi-form registration cannot be sent."**
+   - `eval_clj` in SCI branch mode refuses a second form (`script/seon/dev/mcp.clj:377-398`, "Evaluation accepts
+     exactly one form").
+   - `seon.schema/register!` refuses outside a run's top-level registration delta (`src/seon/schema.clj:1310-1320`,
+     "Schema declarations require an isolated registration delta").
+   - Together they mean no sequence of schema declarations can be sent to a branch through MCP. Root had to call
+     `seon.cluster.agent/evaluate-source!` directly.
+   - Fix direction: the branch entrance segments code as the root entrance does ("SCI without a branch evaluates
+     every form in order as one run"), or `register!` accepts any position in a run.
+2. **"A refused multi-form settlement returns no error and no events."**
+   - `evaluate-source!` on `mcp/design-1` with 22 top-level `register!` forms answered
+     `{:run "ce27ba34bd16", :err nil, :committed? false, :forms 0}` after 35 s.
+   - The branch holds the recorded fault "Complete component validation refused: unowned-entity …" (turn 59962).
+     The caller received neither it nor any evaluation event.
+   - Total-path law: the value and its failure must return to the caller. Related: a318b2d38.
+
+A third finding, for the schema-adoption owner rather than a new task if one exists:
+`invalid-value-retraction` validates a cardinality-many attribute's value **set** against a `[:vector …]` form
+and drops every value (§19a, 459 on default).
+
+### 19c. Is the sample right per the design?
+
+- **Yes, with one correction made.** `:seon.agent/branch` was the placeholder `:design-sample`. The agent's
+  custody fact must name the branch that holds it, so it is now `:design-1`.
+- Everything else matches the design, including the one change that triggered §19a: redefining
+  `:seon.cluster.eval/receipt` is exactly the P3 change the design needs.
+- `load.clj` now states the two blockers at its top and is not run.
+
+### 19d. Schemas are not namespaces
+
+A schema is identified by its qualified keyword alone. This document ties no schema to a namespace; the only
+namespace-scoped things here are definitions (`:seon.fn/ns`) and tests (`:seon.test/ns`).
+
+**Observation for the owner.** The source does tie them today:
+- the schema row has `:seon.schema/ns`, described as "The namespace where this schema was declared"
+  (`resources/seon/schemas/seon.schema.edn:87`, member at `:114`);
+- `seon.sci.eval/directory-value` lists a namespace's schemas through `:seon.schema/_ns` (`sci/eval.clj:2577-2590`),
+  so `(dir ns)` shows "declared schemas".
+
+That relation is where a declaration was written (provenance), not what a schema is. Under the owner's statement
+it belongs in transaction metadata, like authorship, rather than as a namespace attachment. This is not changed
+here.
