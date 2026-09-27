@@ -159,11 +159,14 @@
         owner #(#'render/entity-owner projection % nil)
         ambiguous (#'render/ambiguity 'entity-pairs.fixture :seon.render/ai
                                       ['entity-pairs.fixture/a 'entity-pairs.fixture/b])]
-    (is (= :seon.agent/agent (owner {:seon.agent/id "root"})) "a partial entity is owned")
+    ;; A partial map stays a partial map (M5 958bf0ed6, task 135d92ea1308):
+    ;; owning is satisfying the row. A complete row is owned in
+    ;; an-inline-face-overrides-the-schema-default-for-just-that-face.
+    (is (nil? (owner {:seon.agent/id "root"})) "a partial entity is not owned")
     (is (nil? (owner {:seon.agent/id "root" :seon.render/output :seon.render/ai}))
         "an envelope carrying a foreign key stays on the floor")
     (is (nil? (owner {:seon.agent/id "root" :seon.turn/id "t"})) "conflicting identities own nothing")
-    (is (= :seon.error/error (owner {:seon.error/id "e" :seon.error/signature "s"})))
+    (is (nil? (owner {:seon.error/id "e" :seon.error/signature "s"})) "a partial error is not owned")
     (is (nil? (owner {:db/id 1})) ":db/id alone names no owner")
     (is (= #{:seon.schema/key :seon.fn/sym :seon.ns/name :seon.lint/id :seon.test/sym
              :seon.fn.file/relative-path}
@@ -175,11 +178,13 @@
       (is (= ['seon.error/elision-prose]
              (declared (with-meta ambiguous {:seon.error/declared-schema :seon.render.walk/elided-error})))
           "the producer's declaration selects, never a guess from the value's members")
-      (is (= [] (declared ambiguous))
+      ;; `ambiguity` itself declares its schema (M3 3cf5ff927), so "nobody
+      ;; declared" is that value without the declaration.
+      (is (= [] (declared (with-meta ambiguous nil)))
           (str "an error nobody declared is data for the floor: its members never select "
                "(owner 2026-09-26, no error-specific dispatch)"))
       (is (= []
-             (declared (assoc ambiguous :seon.error/operation 'entity-pairs.fixture/none)))
+             (declared (with-meta (assoc ambiguous :seon.error/operation 'entity-pairs.fixture/none) nil)))
           (str "the operation names where an error was raised, not a function that "
                "returned it, so it selects no renderer")))))
 
@@ -189,9 +194,12 @@
   ;; itself, each face independent of the other and of the schema default.
   (support/with-database
    (fn [connection]
+     ;; A complete agent row (canonical writer, pulled): a partial map is not
+     ;; an agent (M5 958bf0ed6).
+     (support/transacted! connection (support/agent-tx @connection "inline-face"))
      (let [database (db/db connection)
            ctx (support/fork-cluster-ctx connection)
-           agent-value {:seon.agent/id "inline-face"}
+           agent-value (db/pull database '[*] [:seon.agent/id "inline-face"])
            selected (fn [value output]
                       (:seon.render.selection/selected
                        (render/selection
@@ -229,6 +237,7 @@
   (support/with-database
    (fn [connection]
      (support/transacted! connection (support/agent-tx @connection "viewer" 'my.agents.viewer))
+     (support/transacted! connection (support/agent-tx @connection "someone"))
      (support/transacted!
       connection
       [(support/program-fn-row
@@ -245,7 +254,8 @@
                                  :seon.sci.admit/caps (config/result-caps config/defaults)
                                  :seon.sci.eval/time-limit-ms 5000}
                           viewer (assoc :seon.agent/id viewer)))))
-           agent-value {:seon.agent/id "someone"}]
+           ;; a complete row: a partial map is not an agent (M5 958bf0ed6)
+           agent-value (db/pull database '[*] [:seon.agent/id "someone"])]
        (is (= 'seon.cluster.agent/render-identity-ai (selected nil agent-value :seon.render/ai))
            "with no viewing agent the schema default renders")
        (is (= 'my.agents.viewer/agent-view (selected "viewer" agent-value :seon.render/ai))

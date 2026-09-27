@@ -7,6 +7,7 @@
             [seon.blob :as blob]
             [seon.cluster.registry :as registry]
             [seon.db :as db]
+            [seon.env :as env]
             [seon.id :as id])
   (:import [java.lang.management ManagementFactory]
            [com.sun.management HotSpotDiagnosticMXBean HotSpotDiagnosticMXBean$ThreadDumpFormat]))
@@ -56,12 +57,19 @@
   {:malli/schema [:=> [:cat :seon.cluster.status/request]
                   [:or :seon.cluster.status/value :seon.error/base
                    :seon.cluster.status/unavailable-error]]}
-  [{database :seon.db/db connection :seon.db/connection}]
+  [{database :seon.db/db connection :seon.db/connection :as request}]
   (try
-    (let [;; two reads, not a pull inside :find: Datahike plans a find-pull
+    (let [;; THE CALLER'S CONTEXT NAMES THE CLUSTER: a forked branch holds
+          ;; its parent's cluster rows too, so "some cluster row" observed
+          ;; another cluster's commit (web-context-test unrelated-adoption).
+          ;; Without a context, a database holding one cluster row names it.
+          named (:seon.boot/cluster-name (or (env/of (:seon.sci.eval/ctx request)) (env/of request)))
+          ;; two reads, not a pull inside :find: Datahike plans a find-pull
           ;; as a dependency on every attribute, so any commit re-rendered
           ;; the status block
-          cluster (some->> (db/q '[:find ?c . :where [?c :seon.cluster/name]] database)
+          cluster (some->> (if named
+                             (db/q '[:find ?c . :in $ ?name :where [?c :seon.cluster/name ?name]] database named)
+                             (db/q '[:find ?c . :where [?c :seon.cluster/name]] database))
                            (db/pull database [:seon.cluster/name :seon.source/commit-id]))
           heap (.getHeapMemoryUsage (ManagementFactory/getMemoryMXBean))
           faults (db/q '[:find ?signature (sum ?count)
