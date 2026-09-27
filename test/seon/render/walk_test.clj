@@ -6,7 +6,6 @@
             [seon.db :as db]
             [seon.render.walk :as walk]
             [seon.schema :as schema]
-            [seon.schema.edn :as schema.edn]
             [seon.test-support :as support]))
 
 (def ^:private caps (config/result-caps config/defaults))
@@ -86,27 +85,19 @@
      (seed-agent-and-inbox! connection)
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)
-           database-projection-resolutions (atom 0)
-           schema-resource-reads (atom 0)
-           projection-from-database schema/projection-from-database
-           read-schema-resource @#'schema.edn/read-schema-resource
            warnings (java.io.StringWriter.)
-           units
+           ;; The armed per-Var counters observe projection resolutions and
+           ;; resource reads; no Var is redefined.
+           [units calls]
            (binding [*err* warnings]
-             (with-redefs
-               [schema/projection-from-database
-               (fn [& arguments]
-                 (swap! database-projection-resolutions inc)
-                 (apply projection-from-database arguments))
-               schema.edn/read-schema-resource
-               (fn [resource]
-                 (swap! schema-resource-reads inc)
-                 (read-schema-resource resource))]
-               (schema/call-with-projection-state
+             (support/armed-calls
+              '#{seon.schema/projection-from-database seon.schema.edn/read-schema-resource}
+              #(schema/call-with-projection-state
                 (atom {})
-                #(walk/neighborhood
-                  (assoc (request database ctx 2 :seon.render/html)
-                         :seon.db/connection connection)))))]
+                (fn []
+                  (walk/neighborhood
+                   (assoc (request database ctx 2 :seon.render/html)
+                          :seon.db/connection connection))))))]
        (let [error-valued-units (filterv :seon.error/value units)]
          (is (seq units) "the supplied projection traverses an existing entity")
          (is (every? #(= :seon.render/distance
@@ -119,9 +110,9 @@
              "every distance-cap error carries its continuation subject"))
        (is (some #(str/includes? (str (:seon.render/output %)) agent-id) units)
            "the seeded subject reaches database reads and HTML emission")
-       (is (zero? @database-projection-resolutions)
+       (is (zero? (get calls 'seon.schema/projection-from-database))
            "the walk reuses its context-carried projection without rebuilding")
-       (is (zero? @schema-resource-reads)
+       (is (zero? (get calls 'seon.schema.edn/read-schema-resource))
            "the exact-basis database projection reads no schema resources")
        (is (not (str/includes? (str warnings)
                                "DECLARATION POPULATION FALLBACK"))

@@ -9,7 +9,6 @@
             [seon.db :as db]
             [seon.render :as render]
             [seon.render.value :as value]
-            [seon.render.walk :as walk]
             [seon.render.web]
             [seon.render.web-test :as web-test]
             [seon.sci.kernel :as kernel]
@@ -70,54 +69,52 @@
                       :seon.cluster.eval/at (java.util.Date.)
                       :seon.cluster.eval/source "(+ 1 1)" :seon.eval/shown "2"}])
            (let [request (dissoc request :seon.turn/id)
-                 invoke kernel/invoke
-                 calls (atom 0)
-                 history walk/history
-                 walks (atom 0)
-                 checks (atom 0)
-                 read-current? db/read-evidence-current?]
-             (with-redefs [kernel/invoke (fn [input] (swap! calls inc) (invoke input))
-                           walk/history (fn [input] (swap! walks inc) (history input))
-                           db/read-evidence-current? (fn [database evidence]
-                                                       (swap! checks inc)
-                                                       (read-current? database evidence))]
-               (let [first-result (render/acquire-context! (assoc request :seon.db/db (db/db connection)))
-                     first-count @calls
-                     _ (reset! checks 0)
-                     second-result (render/acquire-context! (assoc request :seon.db/db (db/db connection)))]
-                 (is (zero? @checks) "carried wrappers of one commit skip all read replay")
-                 (is (pos? first-count))
-                 (is (= (:seon.cluster.prompt/text first-result) (:seon.cluster.prompt/text second-result)))
-                 (is (= first-count @calls) "unchanged saved evaluations reuse their retained calls")
-                 (is (= 1 @walks) "current retained history is not queried and folded again")
-                 (is (identical? (:seon.render.history/entries first-result)
-                                 (:seon.render.history/entries second-result)))
-                 ;; UNRELATED means unrelated: an entity NO acquisition
-                 ;; derives interest in. An inbox edge to the agent under test
-                 ;; is a LISTENED attribute and would be a wake; a message to a
-                 ;; bystander agent mints a half-agent beside the real creation
-                 ;; path (peer issue
-                 ;; an-unrelated-fixture-transaction-mints-a-half-agent). A
-                 ;; `:db/doc` probe entity carries no identity and joins
-                 ;; nothing. It sits on the transaction entity: a bare entity
-                 ;; is refused as unowned by the writer's component check.
-                 (support/transacted! connection
-                          [{:db/id "datomic.tx" :db/doc "An unrelated fact on an entity nothing derives interest in."}])
-                 (let [unrelated (render/acquire-context! (assoc request :seon.db/db @connection))]
-                   (is (= 1 @walks) "an unrelated transaction preserves the acquired history")
-                   (is (identical? @connection (:seon.db/db unrelated)))
-                   (reset! checks 0)
-                   (render/acquire-context! (assoc request :seon.db/db (db/db connection)))
-                   (is (zero? @checks) "reuse carries the successfully checked committed basis"))
-                 (let [changed (db/transact! connection
-                                 [(assoc (db/pull @connection '[*] [:seon.cluster.eval/id "retained-history"])
-                                         :seon.eval/shown "3")])]
-                   (is (:db-after changed) (pr-str changed)))
-                 (is (= "3" (:seon.eval/shown (db/pull @connection [:seon.eval/shown] [:seon.cluster.eval/id "retained-history"]))))
-                 (let [changed (render/acquire-context! (assoc request :seon.db/db @connection))]
-                   (is (> @calls first-count) "changed saved bytes invalidate the retained call")
-                   (is (= 2 @walks) "a changed evaluation invalidates the retained history root")
-                   (is (not= (:seon.cluster.prompt/text first-result) (:seon.cluster.prompt/text changed)))))))))))))
+                 ;; The armed per-definition counters observe invocations,
+                 ;; history walks and read checks; no Var is redefined.
+                 counted (fn [thunk]
+                           (let [[result calls] (support/armed-calls
+                                                 '#{seon.sci.kernel/invoke seon.render.walk/history
+                                                    seon.db/read-evidence-current?}
+                                                 thunk)]
+                             [result {:calls (get calls 'seon.sci.kernel/invoke)
+                                      :walks (get calls 'seon.render.walk/history)
+                                      :checks (get calls 'seon.db/read-evidence-current?)}]))
+                 acquire #(render/acquire-context! (assoc request :seon.db/db %))
+                 [first-result first-counts] (counted #(acquire (db/db connection)))
+                 [second-result second-counts] (counted #(acquire (db/db connection)))]
+             (is (zero? (:checks second-counts)) "carried wrappers of one commit skip all read replay")
+             (is (pos? (:calls first-counts)))
+             (is (= (:seon.cluster.prompt/text first-result) (:seon.cluster.prompt/text second-result)))
+             (is (zero? (:calls second-counts)) "unchanged saved evaluations reuse their retained calls")
+             (is (= 1 (+ (:walks first-counts) (:walks second-counts)))
+                 "current retained history is not queried and folded again")
+             (is (identical? (:seon.render.history/entries first-result)
+                             (:seon.render.history/entries second-result)))
+             ;; UNRELATED means unrelated: an entity NO acquisition
+             ;; derives interest in. An inbox edge to the agent under test
+             ;; is a LISTENED attribute and would be a wake; a message to a
+             ;; bystander agent mints a half-agent beside the real creation
+             ;; path (peer issue
+             ;; an-unrelated-fixture-transaction-mints-a-half-agent). A
+             ;; `:db/doc` probe entity carries no identity and joins
+             ;; nothing. It sits on the transaction entity: a bare entity
+             ;; is refused as unowned by the writer's component check.
+             (support/transacted! connection
+                      [{:db/id "datomic.tx" :db/doc "An unrelated fact on an entity nothing derives interest in."}])
+             (let [[unrelated unrelated-counts] (counted #(acquire @connection))
+                   [_ reuse-counts] (counted #(acquire (db/db connection)))]
+               (is (zero? (:walks unrelated-counts)) "an unrelated transaction preserves the acquired history")
+               (is (identical? @connection (:seon.db/db unrelated)))
+               (is (zero? (:checks reuse-counts)) "reuse carries the successfully checked committed basis"))
+             (let [changed (db/transact! connection
+                             [(assoc (db/pull @connection '[*] [:seon.cluster.eval/id "retained-history"])
+                                     :seon.eval/shown "3")])]
+               (is (:db-after changed) (pr-str changed)))
+             (is (= "3" (:seon.eval/shown (db/pull @connection [:seon.eval/shown] [:seon.cluster.eval/id "retained-history"]))))
+             (let [[changed changed-counts] (counted #(acquire @connection))]
+               (is (pos? (:calls changed-counts)) "changed saved bytes invalidate the retained call")
+               (is (= 1 (:walks changed-counts)) "a changed evaluation invalidates the retained history root")
+               (is (not= (:seon.cluster.prompt/text first-result) (:seon.cluster.prompt/text changed)))))))))))
 
 (deftest unrelated-adoption-preserves-pages-with-an-unchanged-sci-snapshot
   (#'web-test/with-server
@@ -219,53 +216,49 @@
 (deftest selected-session-defers-prompt-acquisition
   (#'web-test/with-server
    (fn [_connection server _context]
-     (let [derive-prompt render/acquire-context!
-           calls (atom 0)]
-       (with-redefs-fn {#'render/acquire-context!
-                       (fn [& args] (swap! calls inc) (apply derive-prompt args))}
-         (fn []
-           (let [ordinary (#'web-test/fetch server "/agent/root/debug")]
-             (is (= 200 (.statusCode ordinary)))
-             (is (= 1 @calls) "The ledger acquires current history once for saved entities and byte totals.")
-             (is (str/includes? (.body ordinary) "Turn ledger"))
-             (is (str/includes? (.body ordinary) "Record")))
-           (let [explicit (#'web-test/fetch server "/agent/root/debug?prompt=true")]
-             (is (= 200 (.statusCode explicit)))
-             (is (= 1 @calls) "The explicit session defers its selected prompt; it adds no acquisition.")
-             (is (str/includes? (.body explicit) "Session")))
-           (let [inspection (#'web-test/fetch server "/agent/root/debug?subject=%5B%3Aseon.agent%2Fid%20%22root%22%5D")]
-             (is (= 200 (.statusCode inspection)))
-             (is (str/includes? (.body inspection) "Session"))
-             (is (str/includes? (.body inspection) "debug-units"))
-             (is (not (str/includes? (.body inspection) "Context now")))
-             (is (not (str/includes? (.body inspection) "debug-ai-"))))))))))
+     ;; The armed counter of the acquisition observes the server thread's
+     ;; calls; no Var is redefined.
+     (let [acquisitions (fn [thunk]
+                          (let [[result calls] (support/armed-calls '#{seon.render/acquire-context!} thunk)]
+                            [result (get calls 'seon.render/acquire-context!)]))
+           [ordinary ordinary-calls] (acquisitions #(#'web-test/fetch server "/agent/root/debug"))
+           [explicit explicit-calls] (acquisitions #(#'web-test/fetch server "/agent/root/debug?prompt=true"))
+           inspection (#'web-test/fetch server "/agent/root/debug?subject=%5B%3Aseon.agent%2Fid%20%22root%22%5D")]
+       (is (= 200 (.statusCode ordinary)))
+       (is (= 1 ordinary-calls) "The ledger acquires current history once for saved entities and byte totals.")
+       (is (str/includes? (.body ordinary) "Turn ledger"))
+       (is (str/includes? (.body ordinary) "Record"))
+       (is (= 200 (.statusCode explicit)))
+       (is (zero? explicit-calls) "The explicit session defers its selected prompt; it adds no acquisition.")
+       (is (str/includes? (.body explicit) "Session"))
+       (is (= 200 (.statusCode inspection)))
+       (is (str/includes? (.body inspection) "Session"))
+       (is (str/includes? (.body inspection) "debug-units"))
+       (is (not (str/includes? (.body inspection) "Context now")))
+       (is (not (str/includes? (.body inspection) "debug-ai-")))))))
 
 (deftest a-new-message-does-not-reinvoke-the-identity-pair
   (#'web-test/with-server
    (fn [connection server context]
      (flow/pause (:graph context))
-     (let [invoke kernel/invoke
-           calls (atom 0)]
-       (with-redefs [kernel/invoke
-                     (fn [request]
-                       (when (#{"seon.cluster.agent/render-identity-html"}
-                              (str (:seon.fn/sym request)))
-                         (swap! calls inc))
-                       (invoke request))]
-         (let [before (#'web-test/fetch server "/agent/root")
-               initial @calls]
-           (is (= 200 (.statusCode before)))
-           (is (pos? initial))
-           (support/transacted! connection
-                                [{:seon.message/id "identity-cache-message" :seon.message/to [:seon.agent/id "root"] :seon.message/content "A newly connected message."}])
-           (let [after (#'web-test/fetch server "/agent/root")]
-             (is (= 200 (.statusCode after)))
-             (is (= "A newly connected message."
-                    (:seon.message/content
-                     (db/pull @connection [:seon.message/content]
-                              [:seon.message/id "identity-cache-message"]))))
-             (is (= initial @calls)
-                 "reverse concern changes are not inputs to the scalar identity pair"))))))))
+     ;; The identity pair's armed counter observes its invocations; no Var is
+     ;; redefined.
+     (let [identity-renders (fn [thunk]
+                              (let [[result calls] (support/armed-calls '#{seon.cluster.agent/render-identity-html} thunk)]
+                                [result (get calls 'seon.cluster.agent/render-identity-html)]))
+           [before initial] (identity-renders #(#'web-test/fetch server "/agent/root"))]
+       (is (= 200 (.statusCode before)))
+       (is (pos? initial))
+       (support/transacted! connection
+                            [{:seon.message/id "identity-cache-message" :seon.message/to [:seon.agent/id "root"] :seon.message/content "A newly connected message."}])
+       (let [[after calls] (identity-renders #(#'web-test/fetch server "/agent/root"))]
+         (is (= 200 (.statusCode after)))
+         (is (= "A newly connected message."
+                (:seon.message/content
+                 (db/pull @connection [:seon.message/content]
+                          [:seon.message/id "identity-cache-message"]))))
+         (is (zero? calls)
+             "reverse concern changes are not inputs to the scalar identity pair"))))))
 
 (clojure.test/deftest read-only-mcp-return-preserves-root-page
   (#'seon.render.web-test/with-server
