@@ -815,3 +815,26 @@ from other lanes' render changes. Re-run them first.
   `seon.sci.eval/loaded-identity` is process-wide, so a test adopting on its own store (e.g.
   adoption-contract-freshness-test's development `refresh-source!`) renames the JVM's loaded program. The unconfirmed
   6ab855c9 observation is recorded in the task. The subject mark is on `seon.cluster/call-with-program-change`.
+
+## Resume 20 — red triage 2 (c9b9fb2d2)
+
+Still open, first:
+- entity-pairs `a-declared-database-input-is-supplied-and-a-callers-is-kept` is not reproduced without a run. At
+  default, `schema/function-accepts-in?` accepts a unit renderer (`seon.ai/model-ai`) with `:seon.db/db` present and
+  refuses it without, so the namespace stage's argument, which carries the request's db, should fit. The next step is
+  root's run plus `render/selection` evidence for `my.agents.db-viewer/probe-view` (render.clj is held by shrink-web).
+- web-test `a-reconnect-refuses-a-pass-derived-before-it-connected`: the latch `[:pass-held-mid-derivation]` was
+  never observed in 20 s, so the with-redefs of `render.walk/neighborhood` is no longer on the pass's path. This is
+  not traced here: web.clj is held by shrink-web, and the test's with-redefs is itself forbidden.
+- transcript `selected-run-requires-its-database-in-both-projections`: the producer is fixed by the patch
+  `tmp/perf-boot-opus/transcript-absent-run.patch` (transcript.clj is held by shrink-web). A run the database does
+  not hold is not selected, so `render-run-*` refuses `missing-selected-run` instead of pulling a nil opened-tx.
+
+Landed in c9b9fb2d2 (tests only; +122/−80):
+- problems-test: with-redefs is gone; a local wrapper counts acquisitions.
+- call-preparation 3 and fn-test 8: updated to their rulings.
+- The fn-test contract-finding fixture now uses a core-admitted namespace.
+- turn-loop 2: the fixtures declare their error schemas. The `seon.error/recording` nil came from hand-built failure
+  values with no `:seon.error/declared-schema` metadata; the recorder now runs armed.
+- program-change: seeds are a set.
+- Checks: lint of HEAD+diff from the archive has 0 errors, and the contracts compile of the 5 files gives [] in 81 ms.
