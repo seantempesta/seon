@@ -188,7 +188,22 @@ That is net ≈ −0, and **well over the 100-added-line bound**. CLAUDE.md requ
   - *Cost:* B plus a keyword-reach seed (`:seon.fn/keywords`, fn.clj:600) and its test.
   - *Sacrifice:* a schema change on a branch can interpret large closures. This is an owner decision.
 
-**Measure before choosing:** a bounded sample of real acquisitions on default recording empty function delta
+**Measured 2026-09-27 01:55Z on default (pid 73942, archive 03103544a).**
+
+- **Method.** A bounded read-only poller of `base-context-cache` entries ran during one run of seven test
+  namespaces: sci kernel, eval, entry-gate and restoration; test accretion; test-test; entity-pairs. The run took
+  217 s.
+- **Derivations.** There were 29 derivations and 33 `base-ctx` calls. The poller captured 30 new keys.
+- **Empty function delta.** 18 of 30 (60%) had `interpreted-count` 0. The other 12 had 1-4 interpreted
+  functions. These are tests that write function rows by design, so the window is biased toward program-change
+  tests.
+- **Cost.** Derivation totalled 4,427 ms over the window, ~130 ms mean; that is about 2% of the test wall time.
+  `acquire!` ran 313 times, and 284 of those took the fast path.
+- **What option A saves.** It removes the 60% share: ~2.3 s per such run here, and the 235 ms-1 s first
+  acquisition of every agent or MCP branch with no function change.
+
+The earlier plan was: measure first, from a bounded sample of real acquisitions on default recording empty
+function delta vs. non-empty. a bounded sample of real acquisitions on default recording empty function delta
 vs. non-empty. That is the review's "complete empty deltas", not `interpreted-count`. A counts only the former.
 
 ## Verification limits
