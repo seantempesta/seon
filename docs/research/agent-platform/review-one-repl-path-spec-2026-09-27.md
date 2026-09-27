@@ -4,238 +4,230 @@ status: revise
 created: 2026-09-27
 revised: 2026-09-27
 spec: docs/research/agent-platform/one-repl-path-spec-2026-09-27.md
-spec-commit: 5205cd9b2
-scope: review only, revision 3
+spec-commit: 79f88387e
+scope: review only, revision 4 and landed steps
 ---
 
-# Review: one REPL path specification, revision 3
+# One REPL path: revision 4 review
 
-The proposed implementation has one stage-valued fold, per-form speculative validation, an SCI producer observer, and a final recording transaction. The supplied suite reproduces **63/63**, but additional REPL proofs falsify totality, exact attribution, single semantic reading, and final reply correctness. **REVISE** before executing the landing instructions.
+The implementation composes a stage-valued fold, SCI producer observations, per-form speculative validation, and one recording transaction. The named rev-4 proofs pass after correcting the review's namespace-isolation harness, but additional REPL proofs find execution blockers in totality, provenance, exact spans, deferred gating, world propagation, and call accounting. **REVISE: C1–C6 below.**
 
-The complete `AGENTS.md`, revision 3 specification and proof suite were read, with the REPL, data-oriented Clojure, testing and database-owner guidance. The owner's Q1 A, forgiving input, per-form db-after, storable registered attributes and def/defonce entities remain settled. This review replaces revision 2 in place; the previous review is preserved at `a531e47ab`.
+This replaces the revision-3 review at `f3c1db347`. AGENTS.md and the rev-4 spec were read in full, with the REPL, data-oriented Clojure, testing and database-owner guidance. Q1 A, forgiving input, threaded db-after, storable registered keys, def/defonce entities, and the owner's acceptance of +429 prototype lines are settled. This review does not reopen those decisions.
 
-## Evidence and reproducibility
+## REPL evidence
 
-Review target: `5205cd9b2`; source references below are that commit's `tmp/one-path/src`, unless another revision is stated. The six namespaces, schemas, pinned-SCI adapter, fork diff and proof artifacts were read. **The patched SCI observer is not installed in default.** Its rows in `one-path-proof/prove!` read saved scratch results; they are not live observer executions.
-
-The first requested run was interrupted by an external default restart, from PID 71396 to 84717. No restart or reset was requested or performed by this review. The replacement JVM already held the spec lane's `seon.batch`, `seon.sci.*`, `seon.turn.batch` and `one-path-proof` namespaces. I did not redefine, unload or use that lane's mutable proof state. A `git archive 5205cd9b2 tmp/one-path` copy under `tmp/one-path-review/baseline` was loaded with only namespace names and evidence paths changed: `one-path-review.impl.*` and `one-path-review.baseline-proof`. Keyword contracts remained unchanged; the sentinel counterexample accounts for its auto-qualified keyword. The corpus runner was likewise copied into a review-owned namespace. These are ownership accommodations, not implementation fixes.
-
-At MCP `eval_clj`, explicit root `/Users/sean/src/seon`, cluster `default`, mode `jvm`, review session `one-path-review-v3b`:
+The rev-4 baseline is an archive of `79f88387e`, not the concurrently changing prototype directory. Its namespaces and corpus runner were copied under `one-path-review.v4.*`; contracts retain their original keyword identities. MCP calls used root `/Users/sean/src/seon`, cluster `default`, mode `jvm`, sessions `one-path-review-v4` and `one-path-review-v4b`. Database probes acquired disposable agent executions and released them in `finally`. No production test request, `bin/test` gate, default stop/reset, worktree, or foreign session operation was started.
 
 ```clojure
-(one-path-review.baseline-proof/prove!)
-;; {:pass 63, :of 63, :failing []}
+(one-path-review.v4.one-path-proof/prove!)
+;; initial isolated run: 90/92
+(one-path-review.v4.one-path-proof/run-proofs!
+  #{:world-members-agree :b4-writer-refusal-reply})
+;; both PASS after repairing the isolation harness: 92/92 across run + rerun
 ```
 
-The successful run took **105,617.69 ms**. Heap in use was 6,929 MiB before and 4,429 MiB after; old generation after its last GC was 2,452/1,621 MiB. These are shared-JVM observations, not isolated allocation measurements. An earlier completed attempt encountered a transient foreign `Unexpected projection construction` exception and returned 16/63; it is retained separately and is not counted as an implementation failure. The successful rerun followed a disposable probe showing the boundary available again. Runs acquired disposable agent executions and released them in `finally`; no production test request or `bin/test` was started.
+The first two reds were review-harness errors, not implementation defects: the namespace rewrite changed a schema namespace string and the diagnostic's `:seon.batch/settle` keyword. The corrected copy also resolves the schema's sink predicate in the review namespace. No implementation logic was changed to obtain these passes. Twelve rows read saved SCI-fork evidence; they are not twelve fresh fork executions. The 94-item corpus passed, with its ten declared differences. Summed proof time was 179,014 ms; shared-JVM heap use was 2,840 MiB before and 1,356 MiB after (not retained batch size).
 
-| Probe | Reproduced result | What it proves |
+| Requested measurement | Reproduced at MCP JVM | Limit of the evidence |
 |---|---|---|
-| One contracted defn | 623, 257, 228, 235, 215 ms | Five complete prototype batches; warm result is 215–257 ms, not the obsolete 40 ms docstring. |
-| h36, 22 registrations | 2,450 ms; apply 1,895.40 ms | Every version is applied; schema threading is not yet sub-second. |
-| 40 chained definitions, 79 forms | 16,998 ms; apply 13,125.41 ms; settle 1,463.77 ms | The cost remains concentrated in speculative application. The requested suite includes this long probe; this is not ordinary-operation approval. |
-| Concurrent test agents | PASS, 673 ms, two distinct branches | Two prototype bodies and their recording can run concurrently. It does not prove concurrent production `clojure.test` assertion reporting. |
-| MCP/agent-turn equivalence | PASS, eight examples, 4,388 ms | Equality of two wrappers around the proposed function after transport normalization and timing removal. No actual MCP handler or agent Flow turn was converted. |
-| JVM feedback | `{:seon.feedback/changed []}`, 24 ms | Feedback key exists for `(+ 1 2)`. It proves neither JVM definition observation nor the one floor printer. |
-| Schema-name/contract proof | 53 forms, 89 contracts; PASS, 13 ms | Malli compiles these forms. This is weaker than the required source-admission gate; see B5. |
+| One contracted defn, complete recorded batch | 265, 234, 264, 269, 217 ms | Last run: derive 9.71, apply/gate 82.55, settle 118.98 ms. |
+| h36, 22 registrations | 2,789 ms | Apply 2,034.89 ms. Threading is real; this remains a multi-second batch. |
+| Forty chained definitions, 79 forms | 11,329 ms | Apply 9,305.81 ms. This was the expressly requested proof-suite probe, not approval of an ordinary operation taking this long. |
+| Fresh hub feedback | 10 tests: 28 ms; 22: 20 ms; 150: 37 ms | Default's own 22-test head: 10 ms, 11 stale/11 never-run. Under 50 ms reproduced. |
+| Concurrent test agents | PASS, 618 ms | Distinct disposable branches; production assertion/member recording still awaits conversion. |
+| MCP/agent reply parity | PASS, nine behaviors | Prototype wrappers around the common reply; not an installed MCP/Flow integration test. |
+| JVM feedback | PASS, 238 ms | Arithmetic receives the feedback key. It does not establish JVM world custody; C5 does the database probe. |
+| Forgiving input | 52 replies, 35 ms; repaired and malformed tagged-reader cases PASS | B3's duplicate semantic-read counterexamples are closed. |
+| S3 contracts admission | 0 findings, 532.46 ms | Actual `seon.contracts-compile-test/check`, archived eight source files, packaged resources, empty source baselines. |
 
-Raw review evidence is in `tmp/one-path-review/`: `suite-summary-retry.edn`, the baseline's `proof-results.edn`, `counter-results.edn`, `counter2.edn`, `counter3.edn`, `jvm-floor.edn`, `manifest-check.edn`, and `proposed-contract-findings.edn`. Counterexample definitions are in **`proof.clj`, namespace `one-path-review`**. They are finite MCP probes, not test-runner requests. Their essential forms and outputs are included below so the findings survive independently of disposable files.
+Default was initially unavailable, recovered as PID 23961, then was externally restarted as PID 30305. The first JVM did not expose `sci.lang/*write-observer*`; the second did. The review neither requested nor performed either restart. On the second JVM, the actual observer was loaded only into a review namespace and substituted as the request's observer stage. Concurrent `alter-var-root` and `intern` calls on two forks produced exactly 20 and 30 observations, final values 20/30, and left the base at 0. This is positive evidence for scoped observation, but not for watch provenance (C2).
 
-## What revision 3 actually closes
-
-| Prior finding | Verified disposition |
-|---|---|
-| V2-1: producer callback in retry/after watches | The fork diff moves `bindRoot` outside the env swap and before watches. Arming uses the exact Var and suppresses its own notification. Saved inherited, nested-callback, throwing-watch, intern and concurrency rows support these fixes. Full patched-observer integration remains unproven; B2 names a concrete missing connection. |
-| V2-2: provenance/captures | Saved origins now distinguish generated roots, and the record helper carries its owning declaration. Live captured-local and record-acquisition proofs pass. Exact matching and expansion-to-entity composition are still false, B2. |
-| V2-3: totality | Supplied misreported-span, shadowed namespace, and ordinary injected failures pass. Other lawful values and later failures lose outcomes, B1. |
-| V2-4: schema versions | Re-registration and register-then-use pass. Independently, an unresolved replacement is refused and the earlier `:int` schema remains committed. Projection performance remains a separate owner-boundary concern. |
-| V2-5: ordered effects | Supplied remove/rebind/remove-ns/read-only proofs pass. Additional remove-ns, recreate, define and read probe commits the recreated definition. |
-| V2-6: semantic rereads | Valid tagged prose suffix and repair-before-require pass. A tagged value inside a repaired form is read twice, B3. |
-| V2-7: loadable cut | No new schema-name collision; require graph proof passes. Actual admission of the six files refuses, B5. The reference inventory needs resource coverage. |
-| V2-8: entrants/recording | Prototype JVM recording, nested-render settlement and concurrent test bodies pass. Production entrant conversion is still an instruction, not installed evidence. The JVM implementation still has a second printer, B6. |
-| OQ1 | Ordinary malformed facts are logged and omitted, and the moved-head example commits the surviving facts. Final refusal delivery and feedback are wrong, B4. |
-
-The SCI patch's +107/−32 and four additional test functions are real. The reported 397 tests/1,517 assertions with five failures versus 393/1,485 with the same five failures is saved evidence, not a fresh SCI suite run by this review. No claim of independent patched-SCI installation is made.
+Raw evidence and finite counterexample forms are in `tmp/one-path-review/v4/`: `runtime/proof-results.edn`, `corrected-isolation-results.edn`, `proof.clj`, `counter-results.edn`, `s3-runtime/proof.clj`, `s3-counter-results.edn`, `producer2-results.edn`, `committed-sink.edn`, and `jvm-world.edn`. The essential failing forms are reproduced below so the findings survive independently of disposable files. `producer-results.edn` retains an earlier probe with a reused turn ID; its recording refusal is a harness mistake, corrected with a fresh ID in `producer2-results.edn`.
 
 ## Execution blockers
 
-Severity **P0** means lost evaluated outcomes or inability to pass a required landing gate. **P1** means a required semantic guarantee fails. Each finding includes its smallest producer-level fix; none reopens an owner ruling.
+Source locations in this section are the landed S3 archive `af8ee847e`, except C2 (SCI `ac3b0a30`) and C6 (S3b `7749eb1c7`). All six findings are independently reproduced at the REPL; none is inferred merely from a missing test.
 
-### B1 — P0: a later print failure can erase the evaluated value
+### C1 — P0: an observation-stage failure still loses an evaluated value
 
-**Failing proof:** `(one-path-review/nil-print-failure)`. It supplies a one-form reader, an evaluator returning nil, and a show stage throwing `ex-info`. The result is:
-
-```clojure
-{:entries []
- :diagnostics ["fold: Cannot invoke ... Class.getName() ... is null"]}
-```
-
-`seon.batch/show-last:193–207` catches the intended print failure, then calls `.getName` on `(class nil)`. The enclosing `guard :fold` restores the batch from **before evaluation**. Thus the documentation saying the value was already published is false at the actual guard boundary.
-
-Two additional proofs expose the same boundary:
+`seon.batch/evaluate-step`, `src/seon/batch.clj:193`, retains the value in a local volatile but publishes it only after processing observations. Its final `assoc` into each observation can throw; the outer fold then returns the batch from before the evaluation.
 
 ```clojure
-;; The actual original sentinel value is :seon.batch/none.
-;; An observer calls the evaluator, then throws.
-(one-path-review/actual-sentinel)
-;; one error entry; no :seon.batch/value, no observer diagnostic
-
-(one-path-review/malformed-observation)
-;; observer emits 42, evaluator returns 42
-;; {:entries [], :diagnostics ["fold: ... Long cannot be cast ... Associative ..."]}
+;; tiny-request reads one nil form and its evaluator returns 42.
+(b/evaluate-batch
+  (assoc (tiny-request 42) :seon.batch/observe
+    (fn [_ _ write! run]
+      (run)
+      (write! (sorted-map 1 :bad)))))
+;; values []
+;; diagnostic: "fold: class java.lang.Long cannot be cast to class clojure.lang.Keyword ..."
 ```
 
-The first collides with `evaluate-step:118`'s keyword sentinel; the second fails while enriching observations at line 142, after the evaluator returned. A broken later producer is precisely the totality boundary, not permission to erase the result.
+This extends B1's imported non-map case: the malformed observation is a map, so `map?` lets it reach the throwing normalization. The failure belongs beside `42`; losing it is forbidden even when a stage supplies malformed data. The same counterexample fails on rev 4 and S3.
 
-**Smallest fix:** retain the minimal outcome at the evaluator-return boundary independently of the fallible form-step result. Use a unique object sentinel, make the nil fallback total, and guard observation bookkeeping/printing against that retained batch. Preserve the original failure diagnostic, rather than replacing it with fallback failure. The regression must assert both entry presence and `contains? :seon.batch/value`, so nil is distinguishable from absence.
+**Smallest fix:** publish the evaluated entry before any observation normalization, classification, or timing/finalization that can fail. Guard that remaining work using the batch that already contains the value. Tighten the observation producer's contract as well; validation itself must not discard the published entry.
 
-### B2 — P1: the exact-span and generated-definition path is not implemented end to end
+### C2 — P0: a watch's rebinding inherits a definition's origin and persists false source
 
-**Failing proof:** `(one-path-review/exact-end-mismatch)` supplies an observed authored span `[1 1 1 12]` and a kondo definition of the same name spanning `[1 1 1 30]`. `join-write` returns **`:matched`**. At `seon.turn.batch:145–150`, an empty exact match falls back to start-position and containment candidates. This is a heuristic even when the producer supplied an authoritative complete span.
-
-**Failing proof:** `(one-path-review/generated-with-producer-origin)` evaluates:
+SCI `src/sci/impl/evaluator.cljc:55` binds `*def-origin*` around `bindRoot`; `src/sci/lang.cljc:111` invokes both the observer and watches inside that binding. A later write made by a watch therefore appears to be the original definition.
 
 ```clojure
-(defmacro single [] (list 'def 'made 7))
-(single)
-made
-;; value 7; made is not stored; private reason :no-definition-at-origin
+(def watched 0)
+(add-watch #'watched :once
+  (fn [_ v _ _]
+    (remove-watch v :once)
+    (alter-var-root v inc)))
+(def watched 2)
+watched
+;; live result: 3
+;; BOTH final writes have origin {:line 3 :column 1 ...}
+;; stored :seon.fn/source: "(def watched 2)"
+;; diagnostics []
 ```
 
-The proof supplies the saved patched-producer origin for `made`, `{:line 2 :column 1 :end-line 2 :end-column 9 :expanded-by 'single}`, through the observer stage. It does not pretend the fork is installed. The ordinary adapter run fails identically. `seon.sci.observe:15–38` binds only `*write-observer*`; it never binds `*expansion-observer*`. `seon.turn.batch/analyze-form:196–206` calls `runtime-analysis-batch` without expansion evidence. The standalone `q1-single-def-kondo` scratch hook proves a mechanism that these six landing namespaces do not compose.
+`one-path-review.s3.counter/watch-rebinding-origin` uses the real SCI producer observer on a disposable world. Reacquiring the stored definition would produce 2, not the observed 3. The imported throwing-watch proof tests delivery order, not this re-entrant provenance. B2/B7 cannot be considered closed for this class.
 
-**Smallest fix:** reject a full authored-span mismatch without fallback; confine the temporary start-only adapter rule to that adapter. Bind and carry the actual expansion evidence into the per-form analyzer's hook, keyed by the exact owning call occurrence; prove stored entities and reacquisition, not only classified events. Do not add macro-name cases.
+**Smallest fix:** capture the direct write's origin/kind in its event, then clear those dynamic producer tags while invoking observer callbacks and watches. A nested genuine def installs its own tag; an `alter-var-root` rebinding has no definition origin. Add this counterexample to the fork proof and verify that the pipeline keeps the rebinding private rather than storing stale source.
 
-### B3 — P1: delimiter repair repeats a semantic reader effect
+### C3 — P0: exact-span observation and Q1 expansion delivery are not connected
 
-**Failing proof:** `(one-path-review/repaired-tag-read-count)` uses a scratch SCI context and explicit reader:
+Three independently exercised seams fail:
+
+1. `src/seon/sci/batch.clj:19` takes the old reader's options without `:end-location true`. The actual producer emits `{:end-line nil :end-column nil}`. Literal definitions reach the start-only fallback in `src/seon/turn/batch.clj:119`; generated definitions use containment. These are not exact joins, and the nil ends violate the declared origin schema.
+2. `src/seon/sci/observe.clj:24` destructures `:end-line`/`:end-column` from form metadata. SCI actually returns `:end-row`/`:end-col`. Even with end locations explicitly enabled, no `:expansion` event is emitted.
+3. `join-write` checks full span only when `:expanded-by` is absent. `expansion-hooks` at `src/seon/turn/batch.clj:203`, and the S8a patch, key only by start coordinates and treat batch coordinates as form-relative coordinates.
 
 ```clojure
-(let [calls (atom 0)
-      opts {:readers {'review/tag (fn [x] (swap! calls inc) x)}}]
-  (seon.sci.forgive/forms (sci.core/init {}) opts :code "[#review/tag 1")
-  @calls)
-;; 2, although the accepted result is one [#review/tag 1] form
+(defmacro review-single [] (list 'def 'review-made 7))
+(review-single)
+review-made
+;; value 7; zero :expansion events
+;; review-made private: :no-definition-at-origin
+;; enabling :end-location fixes origin ends, but still emits zero expansions
+
+;; Same analyzed defn/call [1 1 1 30], supplied origin [1 1 1 12]:
+(join-write analysis coords
+  {:seon.batch/sym 'user/f
+   :seon.batch/origin {:line 1 :column 1 :end-line 1 :end-column 12
+                      :expanded-by 'defn}})
+;; :matched -- must refuse this non-identical span
+
+;; Hook for observed [2 1 2 99] substitutes into actual (single) at [2 1 2 9].
+;; A batch-line-12 event finds no call in the sliced per-form analysis.
 ```
 
-`read-one:89–106` executes the tag reader before encountering the missing bracket. `next-form:230–242` repairs and semantically reads the accepted form again. Neutral structural trials fix look-ahead alias/tag effects, but do not undo the first reader effect. The supplied test covers a valid tagged suffix, not this case.
+These are `producer-spans`, `generated-full-span`, and `hook-spans` in the review proofs. A standalone hook invoked with already-correct row numbers does not prove the observer → sliced source → synthetic analyzer composition.
 
-**Smallest fix:** complete the structural delimiting/repair decision before the one semantic read of that accepted form. Preserve live namespace resolution at the semantic cursor. A malformed semantic tag should return its declared read error, not trigger a second invocation. Keep this in the one input stage; no tag-specific retry cache.
+**Smallest fix:** enable end locations in the single semantic reader; translate SCI metadata keys at the observer; carry/translate all four coordinates from batch to form to synthetic text. Match the owning macro call by its complete span before assigning generated members, and key hooks by that same complete span. Remove the production start-only fallback. Before S8a converts callers, prove stored generated entities and reacquisition for a macro call on a later line and an indented call, including multiple generated definitions.
 
-### B4 — P1: settlement can hide failure and report facts that never committed
+### C4 — P0: deferred gating commits a bad definition and hides its refusal
 
-**Failing proof:** `(one-path-review/writer-refusal-reply)` evaluates 42 with a writer returning `{:seon.error/message "review writer refusal"}`. Both attempts refuse. The batch retains 42 and the refusal, but `reply` returns:
+`src/seon/turn/gate.clj:108` chooses only the first failing entity in a form, and removes only that entity. `src/seon/turn/batch.clj:619` records the locally gated batch but returns only the commit on the successful first attempt, losing the updated entries/program/feedback from the reply.
 
 ```clojure
-{:seon.batch/evaluations [{:seon.batch/ordinal 0 :seon.batch/shown "42" ...}]
- :seon.batch/diagnostics []
- :seon.batch/commit {}}
+(declare late)
+(do
+  (defn deferred-a {:malli/schema [:=> [:cat] :int]} [] (late))
+  (defn deferred-b {:malli/schema [:=> [:cat] :int]} [] (late)))
+(defn late {:malli/schema [:=> [:cat] :string]} [] "bad")
+42
+;; applied true; value 42 retained
+;; stored: deferred-a false, deferred-b true
+;; facts-errors []; reply diagnostics []
+;; feedback changed: [user/deferred-a user/deferred-b user/late]
 ```
 
-`settle:657–662` returns `:seon.batch/refused`; `reply:743–745` selects only applied/count/storage-error, silently dropping it. No diagnostic reaches `record-faults` for this refusal. A writer or storage failure must remain beside the value and reach the agent.
+Both functions fail their own output contract. One is committed, and the reply names the rejected definition as changed while omitting its error. This falsifies OQ1's “only validated facts” and B4's final reply claim with ordinary source, not an injected writer.
 
-**Failing proof:** `(one-path-review/moved-head-feedback)` extends the suite's moved-head case. The old basis has `review-base`; the actual head adds `review-dep` calling it. The batch defines `review-new`, attempts to unmap `review-base`, and returns 9. Rebase correctly refuses the deletion and commits the rest, but:
+**Smallest fix:** gate the entire deferred form's change, reject that form consistently, and re-fold/revalidate surviving changes and their dependencies. Return the final batch state to the caller on every settlement path, including first-attempt success, and conclude from that state. The same refusal must be visible in the stored evaluation, immediate MCP reply, and next agent reply.
+
+### C5 — P1: the world is incomplete at real execution boundaries
+
+Four finite proofs identify the missing construction/binding work:
 
 ```clojure
-{:applied? true :base-stored? true
- :errors ["Program retraction refused."]
- :feedback {:seon.feedback/changed [user/review-new]
-            :seon.feedback/removed [user/review-base] ...}}
+(world/agent-world execution {})
+(world/jvm-world "default" disposable-connection {})
+;; both contain :seon.agent/id nil; the member is optional, but nil is invalid
+
+(world/read-only-world agent-world database)
+;; retains the IDENTICAL :seon.batch/sink, contrary to §7's "none"
+
+;; A throwing evaluation followed by a show stage that reads b/*world*:
+;; world-at-print nil, even though the request has the agent's world
+
+;; Through jvm-request with a declared disposable connection/database:
+(seon.db/pull [:seon.agent/id] [:seon.agent/id "root"])
+;; seon.db/missing-connection-error, instead of the branch's root record
 ```
 
-`evaluate-batch:285–300` concludes before settlement; rebase replaces only entries. The feedback is not from the committed facts as specified.
+Locations: `src/seon/turn/world.clj:25,61,76`; `src/seon/batch.clj:256` fallback printing; `src/seon/turn/batch.clj:899` JVM request. The successful thread-hop proof explicitly calls `with-world`; these paths do not all do so. The JVM observation is of the supplied S3 request on the installed pre-S3a runtime; the full supply change must repeat it armed, rather than relying on the arithmetic-only JVM proof.
 
-**Smallest fix:** make settlement answer the final accepted working/program state and complete refusal as data. Finalize feedback from that state, including the rebase path, before constructing the recorded/shown reply. Route unrecoverable settlement failures through the existing fault owner and include their typed diagnostic in both entrants' reply. Do not silently select the refusal away.
+**Smallest fix:** conditionally associate the optional agent id, remove the sink from read-only worlds, and establish the declared world around every evaluation/print path, including JVM evaluation and failure printing. Use the existing `with-world` boundary to carry custody/read basis where required. Test omitted and explicitly supplied members after the S3a wrapper is armed; explicit caller values must still win.
 
-### B5 — P0: S3 fails the required contracts gate
+### C6 — P1: the committed sink patch drops calls made in a nested world
 
-The suite compiles Malli forms, whereas the landing gate also checks complete contracts on every newly admitted function. The actual installed `seon.contracts-compile-test/check`, against an archive with the proposed six files and schema added, with empty baselines for those new files, returns **six `:incomplete-contract` errors** in 440.83 ms:
-
-| File under `tmp/one-path/src` | Function/line | Refusal |
-|---|---|---|
-| `seon/sci/arm.clj` | `var-symbol:11` | bare `:any` |
-| `seon/sci/batch.clj` | `evaluate:35` | bare `:any` |
-| `seon/sci/batch.clj` | `around:68` | bare `:any` |
-| `seon/sci/forgive.clj` | `structural-forms:112` | bare `:any` |
-| `seon/sci/forgive.clj` | `structured?:177` | no contract |
-| `seon/sci/observe.clj` | `observe:15` | bare `:any` |
-
-Reproducing form, with `paths` naming those new archive files:
+S3b `7749eb1c7`, `src/seon/profile.clj:138`, retains one Boolean re-entry guard per cell/thread. When a counted function enters another world and invokes the same function, that second world's call bypasses the sink entirely.
 
 ```clojure
-(seon.contracts-compile-test/check
- {:seon.contracts-compile-test/root archive
-  :seon.contracts-compile-test/paths paths
-  :seon.contracts-compile-test/baselines (zipmap paths (repeat ""))})
+(let [f (profile/with-cell (profile/cell {:seon.profile/sym 'review/f})
+          (fn f [inner?]
+            (profile/timed
+              (if inner? :inner
+                (binding [batch/*world* world-b] (f true))))))]
+  (binding [batch/*world* world-a] (f false)))
+;; world-a calls {review/f 1}
+;; world-b calls {} -- expected {review/f 1}
 ```
 
-**Smallest fix:** use the already declared form/Var/batch schemas where applicable, justify genuinely polymorphic pass-through boundaries under the established exemption, and add `structured?`'s contract. Run this exact gate, including the observer, before calling the six files ready to copy into S3. Publicizing private Vars does not repair these findings.
+Reproduced both from the spec patch and the committed S3b source, loaded in scratch namespaces. The imported 1,000/1,500 proof invokes the counter macro directly and cannot exercise `timed`'s guard. C5's retained read-only sink also contaminates the caller's sink once wrappers use it.
 
-### B6 — P1: the JVM entrant retains a separate, unbounded printer
+**Smallest fix:** make call-accounting re-entry distinguish the current world/sink, while preserving the intended same-world wrapper deduplication and JVM-wide inclusive timing. Restore the prior world entry on exit. Prove the real composed wrapper, including nested worlds and exceptional returns, not just `count-into-world!` in isolation.
 
-**Failing proof:** `(one-path-review/jvm-floor)` passes this through `jvm-request` and the common fold:
+## What is closed and what still needs installation proof
 
-```clojure
-(apply str (repeat 12000 "x"))
-;; full value length 12000; shown length 12002
-;; feedback {:seon.feedback/changed []}
-```
+B1's nil/sentinel/non-map examples pass; C1 extends the remaining totality gap. B2's authored mismatch passes, but C2/C3 block provenance and full exactness. B3 is closed by structural repair before semantic reading. B4's writer refusal and moved-head example pass; C4 exposes the deferred-settlement path. B5's source contracts gate is now genuinely green for S3; C5 is an output-world defect outside the named case. B6's shared JVM floor proofs pass. B7's joined concurrent callbacks and lazy-print definition pass; callback provenance and nested-world accounting still fail.
 
-`seon.turn.batch/jvm-request:835–850` uses its own `pr-str` with `*print-length* 20` / `*print-level* 4`, and its own `"ERR "` stringifier. Those limits do not bound strings. The emitted text is approximately 3,000 estimated tokens for this one value, without the declared floor's cut/requery behavior. The SCI show stage uses the existing show owner; the JVM stage bypasses it. The host evaluator is an allowed stage difference; this second printer is not.
+The rev-4 supply patch is explicitly a plan, not installed proof. Its existing missing-key and arity machinery has to be checked through the armed wrapper with every world member, optional map entries, explicit foreign database/connection arguments, validation order, no matching-arity prefixing, and a raw executor hop. The supplied proof map contains no complete armed supply matrix. This is a required S3a completion check, not a new request to change the owner's ruling.
 
-**Smallest fix:** supply the same value/error floor stage to JVM mode, with explicit world/profile and host observation data rather than an SCI evaluator dependency. Delete the local printer and error stringifier. Prove a bounded string, a throwing value printer and a declared renderer through both entrant adapters. The existing `jvm-gets-feedback` arithmetic proof is insufficient.
+The change-relative gate's named pure tests pass. This does not yet establish the S5/S12 production test-agent lifecycle and requester-side `:seon.test.member/*` recording. `test-outcomes` forks one context, reacquires test sources, and calls `eval/run-tests`; the production harness/recording conversion remains to be reviewed when committed. An absent/refused test result must be unknown/refused, never accepted as green (`test-outcomes` currently maps missing results to `:absent`). No production test runs were started to fill that gap.
 
-### B7 — P1: the batch drops valid concurrent and print-time observations
+## Per-step review
 
-**Failing proof:** `(one-path-review/concurrent-observation)` supplies the declared observer stage, starts eight finite futures, waits for all of them, and then returns the evaluator's value. Each future calls `on-write` 1,000 times with a valid namespace event. In 13 ms:
+| Step / commit observed | Review result and remaining execution boundary |
+|---|---|
+| S1 `3afba653f`, SCI `ac3b0a30` | Producer Vars now verified in the restarted JVM; two concurrent forks preserve the base and observe every write. C2 is a concrete fork blocker. Saved 397-test/five-baseline-failure evidence was read, not rerun as a separate SCI suite. |
+| S2 Q4 | No separate landing observed at this cutoff. Named lone-key proof passes through prototype interim logic; removing that logic still requires the schema/datahike producer change in the same cut. |
+| S3 `af8ee847e` | Eight namespaces and schema land additively. All eight load in isolated namespaces (115 ms). Archive lint: **0 errors, 945 warnings, 16 info**, 502 files, 5,012 ms. Real contracts gate: **0 findings**, empty baselines. C1–C5 survive this commit. No old evaluator caller was converted or retired in this step. Publicizing helper seams/moving `captured-locals` to the analyzer, listed in S3, did not land here; private Var calls remain. |
+| S3a supply | Full supply implementation not yet a reviewed commit. `cdb0418cd` makes `read-evidence-current?`'s database slot named and adjusts its caller-preservation regression; this is only one part of S3a. Required armed matrix above remains outstanding. |
+| S3b `7749eb1c7` | Committed macro composition reproduced C6. The change adds the sink increment, but does not convert the old exact-count tests. Root should run `seon.profile-test` with the new nested-world regression after arming. |
+| S3c host bindings | No landing observed; no installation claim. |
+| S4 product turns | No converted diff observed; C4 must be fixed before this becomes the product reply. |
+| S5 install gate | No production caller retirement observed; deferred gate fails C4. Test-agent lifecycle/member recording still needs its actual converted diff. |
+| S6 refresh | No converted diff observed. Supplied observed-write classifier proof passes. |
+| S7 MCP | `ada9deecd` adds the `my.agent` branch owners and schemas. The MCP conversion is still a patch, so it is not proof that the tool uses that owner. `run-form`/`run-events`, JVM evaluation and projection conversion remain outstanding. C5 names a JVM world failure. |
+| S7a `6996cd574`, `a3c1bcf81`, `9ac21b93f` | Reviewed diffs: history selector now retains evidence refs, render reach keys include the as-of identity, vector-pull uses the central cache, and `latest-evaluations` pulls full evidence only for kept evaluations. The latter retires the old body in place and keeps its caller signature. Earlier prototype equality passes; newly installed behavior still needs root’s refresh tests. The last commit bounds captured index patterns; its matching schema bound is explicitly pending. Its diff was reviewed after the final archive snapshot, not independently benchmarked here. |
+| S8 input/render | Forgiving stage is present; product/render/web caller retirement not observed. |
+| S8a analyzer hooks | Patch read; C3 prevents its instructions working as written. End-to-end generated entity/reacquisition proof is required. |
+| S9 acquisition/removal | No converted production diff observed. The new acquisition request loads, but old evaluator consumers remain. |
+| S10/S11 evaluator/reader deletion | No retirement observed; refresh the complete manifest immediately before these cuts. |
+| S12 test agents | Prototype concurrency passes; actual production member evidence and recorded assertion outcomes remain unproven. |
+| S13 proof tests | No landed `seon.batch-proof-test` observed. Root owns the central test list. |
+| S14 extensions | Explicitly deferred, not an implemented entrant. |
+| §12 `036a92fce` | Diff uses existing `nearest-base` and the bounded value tier, avoiding speculative insertion into the committed projection cache. Regression added: `seon.db-test/speculative-declarations-never-enter-the-committed-projection-cache`. The committed implementation's before/after numbers were not independently reproduced in this review's still-older JVM. |
 
-```clojure
-{:expected 8000 :observed 2705 :values [42]}
-```
+The 126-row manifest was checked against fresh S3 clj-kondo Var-use analysis. It includes namespace requires and internal calls scheduled for deletion, not 126 distinct surviving calls. There are 120 live filtered usages; normalizing absent/nil `:from-var` and line shifts leaves no newly omitted surviving Clojure caller. Current shifted examples are `test/seon/ai_test.clj:681,778` and `test/seon/render_simplification_test.clj:760,783`. The manifest still does not inventory resource symbols: examples include `resources/seon/tasks/seon.turn.edn:19,62` and `resources/seon/tasks/seon.sci.eval.edn:44,55,198`. Include them in the appropriate owner-coordinated deletion step before retiring the named Vars. Their current existence is not evidence that a future deletion is loadable.
 
-`seon.batch/evaluate-step:117,127` uses a volatile vector and `vswap!`, which is not an atomic read-modify-write across threads. Dynamic binding conveyance is not accumulation safety. The fork's two-threads proof gives each thread its own observer; it does not exercise several futures feeding one batch's callback.
+The net −900 production-line figure is a remaining-cut estimate, not an achieved measurement: S3 is additive and S4 onward have not retired the old paths. The accepted +429 prototype lines are not a blocker. No claim is made that all fourteen intermediate commits or all entrants have been proved merely because the additive namespace load succeeds.
 
-**Failing proof:** `(one-path-review/lazy-definition)`:
+## Landing and central verification
 
-```clojure
-(lazy-seq (def late-root 42) (list late-root))
-;; shown (42), live late-root = 42, stored? false, no diagnostic
-```
+Only this review document is committed; production/test/resource/reference-code net change is **0**. Review-owned scratch proofs and raw evidence are retained under `tmp/one-path-review/v4` and excluded from the commit.
 
-The observer exits when evaluation returns; `form-step` realizes the value in `show-last` afterward. A producer binding therefore cannot see the definition performed during printing. This is distinct from deliberate read-only rendering in a separate render entrant.
+Final verification used `git archive` HEAD (`a3c1bcf81`) plus only this document’s diff: `clj-kondo --lint src script test --cache false` returned **0 errors, 945 warnings, 16 info** over 502 files in 7,408 ms. The contracts compile check read 494 JVM source files in 1,866.50 ms: **0 src/test findings**, and the same **10 pre-existing script-only findings** as the rev-3 review, at `script/seon/dev/docstring.clj:285,318,334,360` and `script/seon/dev/markdown.clj:1020,1050,1090,1124,1170,1215`. Thus the full script contracts check is not green; the review introduces none of those failures. No foreign file was changed to make a check pass. Later documentation-only evidence updates do not change the checked source, scripts, tests, or schema inputs. All **23 review-owned namespaces were unloaded**, zero remained, and the foreign prototype namespaces were verified preserved. The documentation change itself requires no behavioral test run. Root's focused list for the reviewed implementation is `seon.profile-test`, `seon.call-preparation-test`, `seon.sci.eval-test`, `seon.sci.kernel-test`, `seon.repl-test`, `seon.test.accretion-test`, `seon.dev.mcp-bridge-test`, `seon.turn-test`, `seon.rereads-test`, and the exact new database regression above. Add the counterexample regressions to S13's `seon.batch-proof-test`: `malformed-map-observation`, `watch-rebinding-origin`, `producer-spans`, `generated-full-span`, `hook-spans`, `deferred-gates`, `constructor-absence`, `error-print-world`, `read-only-sink`, and `nested-world-sink`. These names identify required proofs, not already installed tests.
 
-**Smallest fix:** serialize/atomically accumulate this call's concurrent producer events, with an explicit completion boundary before draining them. Keep the same observation scope through the value realization owned by this form's print stage, then derive from those effects. An atomic per-call accumulator has a concrete concurrency reason; a context-wide env watch or a lazy-value special case does not repair this owner boundary.
+Foreign boundaries: default's external restart and existing health faults; the spec/implementation lane's loaded namespaces; in-flight source, resource, dependency and test changes; full supply/adoption not yet installed. No foreign session or file was resumed, messaged, edited, restored, staged, or committed.
 
-## Instructions, caller inventory and size
+## Revision-4 verdict
 
-Fresh `clj-kondo --cache false` analysis of `src script test` in an archive of `e999fdd1b` corroborates the manifest's surviving Clojure Var references. Normalizing archive filenames and an absent versus nil `:from-var` leaves no new surviving caller missing from the supplied inventory. Four manifest rows are calls inside functions themselves scheduled for deletion (`gate-function-install` and `planned-sources`); they need step ordering, not an additional conversion. The listed 126 entries include namespace requires, not 126 distinct live call sites.
-
-The manifest is **not** the complete source/test/schema/task inventory claimed in §10. Committed resource references remain outside kondo's Var-use analysis, including `resources/seon/tasks/seon.turn.edn:5,19,31,62,77,87` and `resources/seon/tasks/seon.sci.eval.edn:176`. Add these to the exact S4/S5/S8/S9 retirement checklist and coordinate with their owner; the source cut must not leave task `:must-read` symbols naming retired functions. No foreign resource was edited by this review.
-
-S3's additive require structure is materially better than revision 2. Passing a graph-cycle check does not prove fourteen intermediate commits load; B5 supplies a direct gate failure before any caller conversion. S4–S12 still require their actual converted diffs to pass archive lint/load. S14 is explicitly deferred and should not be counted as a completed extension path. S12 explicitly leaves assertion-as-data open: the concurrent proof uses ordinary expression values, not production assertion counters or test member facts. Complete that declared interface before executing S12; it is not supplied by the concurrency timing.
-
-The **≈−900 production lines** is an estimate combining 2,286 measured deletions with 1,642 new namespace lines and estimated conversion ranges. It is no longer the earlier −1,600 claim, and is not a measured net landing diff. No separate verdict blocker is raised for an honestly labeled estimate. Owner decisions Q1–Q5 are unchanged; the listed costs do not include the remaining producer, finalization and gate fixes above.
-
-## Incoming world/projection amendment
-
-At the world snapshot check, HEAD was `9abfbbe93`; the world changes and their proof updates are **still uncommitted**, and the owning spec still presents §12 as options. They were independently copied and hash-pinned under `tmp/one-path-review/amendment`, then loaded only as `one-path-review.world.*`. The source/hash manifest is `source-hashes.json`; the captured `seon/turn/batch.clj` SHA-256 is `c6752c2eba1c642126214e2fa9f17e3a277078aec1337a26d1cf8e23fe63c179`. The original working files still matched the captured hashes at the last check. This is review of that concrete incoming code, not acceptance of a future committed amendment or a claim that §12 has been implemented in `seon.db`.
-
-The supplied `world-members-agree`, `worlds-never-cross`, `world-survives-compute-hop` and `speculative-batch-keeps-committed-projection` probes all pass through MCP. Explicit writer arguments and re-established custody are the right composition; two forks preserve independent definitions. The projection-only direct-from-basis operation measured **34 ms before / 31 ms after** h36. The existing cached path measured **7 / 5 ms** in this run, so this run does **not** reproduce the reported cache-eviction slowdown. Nor does calling `schema/load-projection` directly prove the proposed change in every `db/with` and writer path. Preserve the measured distinction and require the same held basis and validated transaction through the actual changed owner for the §12 landing proof.
-
-**Additional B5 failure in this snapshot:** `(one-path-review/world-contracts)` builds both `agent-world` and `jvm-world` with `{:seon.agent/id "root"}`, as the supplied world probes do, and validates their outputs using `malli.core/validate`/`explain` with the declared `:seon.batch/world`. Both are invalid at `[:seon.turn/id]`, whose value is nil. The constructors at lines 59–70 and 85 always install that optional key, whereas the schema permits absence, not nil. **Smallest fix:** conditionally associate omitted optional ids, or declare the id required at the constructor input and supply it before calling. Validate the actual worlds in the proof, not only agreement among selected members.
-
-The actual new-function admission check on the snapshot reports **eight** incomplete contracts: the original six plus `seon.turn.batch/with-world:105` and `test-body-value:581`. Apply B5's schema/exemption fix to these too. The world/projection addition does not change the failing B1–B4/B6–B7 implementation boundaries.
-
-## Landing verification and boundaries
-
-This review changes only this document; net production/test/resource/reference-code lines are **0**. Its counterexamples and raw results remain in the authorized review-owned `tmp/one-path-review` directory and are not included in the commit.
-
-The landing archive is **HEAD `9abfbbe93` plus only this document**, not the shared working tree. `clj-kondo --lint src script test --cache false` reports **0 errors, 948 warnings, 16 informational findings**, 4,855 ms over 494 files (exit 2 for warnings). The static `seon.contracts-compile-test/check` compiles the archive's packaged schemas and contracts across **486** JVM source/script/test paths: **2,074.92 ms**, the same ten pre-existing `:contract-compile` findings in `script/seon/dev/docstring.clj:285,318,334,360` and `script/seon/dev/markdown.clj:1020,1050,1090,1124,1170,1215`. There are **zero source/test contract findings**. This is not a claim of a green whole-tree contract check. Markdown validation is valid with zero violations; `git diff --check` is clean.
-
-Foreign boundaries are the externally restarted, faulted default JVM (13 open faults at reconnection), the spec lane's loaded prototype namespaces and uncommitted amendment, concurrent test/source/dependency/task-resource changes, and the ten script-only contract findings. None was repaired, resumed, messaged, staged or included in this review. No worktree, default stop/reset, source publication or production test run occurred. Disposable executions were released; all 17 review-owned loaded namespaces were unloaded (zero remain; foreign prototype namespaces verified present), with the spec lane's namespaces left alone.
-
-**Focused tests for root:** this doc-only landing needs no behavioral test request. Before implementation lands, promote these exact review proofs into `seon.batch-proof-test`: `nil-print-failure`, `actual-sentinel`, `malformed-observation`, `exact-end-mismatch`, `generated-with-producer-origin`, `repaired-tag-read-count`, `writer-refusal-reply`, `moved-head-feedback`, `jvm-floor`, `concurrent-observation`, `lazy-definition`, and `world-contracts`. Run the supplied proof regressions there plus `seon.sci.forgive-test`, `seon.sci.eval-test`, `seon.dev.mcp-bridge-test`, `seon.test.one-request-test`, and `seon.contracts-compile-test/every-declared-contract-compiles-against-the-packaged-projection` in the one central list. The MCP test must exercise the actual handler and agent reply; the test-agent test must include failing assertions and member facts. Run the SCI fork's `sci.write-observer-test` centrally with the patched observer actually wired into this path. No separate lane test request was started.
-
-## Revision 3 verdict
-
-**REVISE — B1–B7.** Retain every evaluated outcome across all later failures; join exact spans and wire observed expansions/realization effects through derivation; perform repairs before semantic reader effects; deliver settlement failures and derive feedback from the final accepted facts; pass the actual contracts admission gate; remove the JVM entrant's second printer; and retain concurrent and print-time producer events. Each has a failing finite proof and a producer-level fix above.
+**REVISE — C1 totality; C2 watch provenance; C3 exact spans and expansion delivery; C4 deferred gate/settlement; C5 world construction and bindings; C6 nested-world call accounting.** Each has a failing REPL form and a bounded producer fix above. Passing the named map, archive lint, and contracts compilation does not close these failures.
