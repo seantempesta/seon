@@ -138,7 +138,14 @@ EXISTING store (prove adoption on a branch of the live store, never only on a fr
 | Datahike fork | fe1d4e26: values of different classes order by class name (in-place retype); pushed; gitlink 916394523 |
 
 ### The order (rewritten in place 2026-09-27 ~17:30Z)
-**0. THE AGENT DATA MODEL — the most important work now (owner).** No source edits on the run/eval/session/settings model
+**0. THE ONE TRUE REPL PATH FIRST (owner 2026-09-27: "before we can finish the data model changes we need to fix the one
+true path so this shit is solid").** Every valid-Clojure failure seen works at top level and breaks nested ((do (defn …)) unadmitted,
+nested in-ns loses the run a318b2d38, register! in do refused, a refused multi-form settlement returns nothing). Evidence:
+valid-clojure-corpus-probe-2026-09-27.md (corpus through the real path vs plain SCI and clj-kondo); audit:
+eval-path-audit-2-2026-09-27.md (Astra: every fact decided by form position, every form-shape special case, every lost reply,
+target pipeline read once → SCI evaluates → facts from observed effects + kondo analysis of the whole source → one settlement
+upserting every namespace → total reply; deletion-first slices). No per-case patches until then (register! fix held to diagnosis).
+**1. THE AGENT DATA MODEL (owner) — design continues; implementation after 0.** No source edits on the run/eval/session/settings model
 until the owner reviews the plan. Authority: `repl-session-entity-design-2026-09-27.md` (being revised under the rulings in
 "Standing rulings → agent data model"), with `repl-session-prior-art-2026-09-27.md` and `agent-session-vocabulary-2026-09-27.md`.
 Next: design lane finishes the revision (five modeling choices per relationship, statement vs token, component-validation
