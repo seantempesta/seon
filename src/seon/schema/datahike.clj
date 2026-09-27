@@ -9,6 +9,7 @@
             [clojure.walk :as walk]
             [malli.core :as m]
             [malli.registry :as mr]
+            [seon.cache]
             [seon.schema :as schema]
             [seon.id :as id]
             [seon.schema.internal :as internal]
@@ -662,14 +663,27 @@
 (defn vector-pull
   "`[physical-selector logical-spec]` for pulling logical `selector` under
    `projection`, or nil when the pull reads no cells (none declared, or no
-   vector attribute or wildcard at any depth). [[decode-vectors]] takes the spec."
+   vector attribute or wildcard at any depth). [[decode-vectors]] takes the spec.
+
+   ## Costs
+
+   A function of the projection's content and the selector, so derived once
+   per pair in `seon.cache`: the render walk's root selector (289 K
+   characters) took 18 ms unarmed, and a cold agent turn lowered it 63 times,
+   1.2 s (default, 2026-09-27)."
   {:malli/schema [:=> [:cat :seon.schema/projection :seon.schema/pull-selector]
                   [:or :nil [:tuple :seon.schema/pull-selector :map]]]}
   [projection selector]
   (when (contains? (:seon.schema.projection/forms projection) :seon.db.vector/cells)
-    (let [spec (pull-parser/parse-pull selector)]
-      (when (reads-cells? projection spec)
-        [(physical-selector projection spec) spec]))))
+    ;; nil is never retained, so the answer is held as the one-element vector
+    (first
+     (seon.cache/lookup ::vector-pull
+                        [(schema/projection-identity projection)
+                         (true? (::cells-installed? projection)) selector]
+                        #(* 48 (count (tree-seq coll? seq %)))
+                        #(let [spec (pull-parser/parse-pull selector)]
+                           [(when (reads-cells? projection spec)
+                              [(physical-selector projection spec) spec])])))))
 
 (declare decode-vectors)
 

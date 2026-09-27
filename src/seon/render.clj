@@ -14,6 +14,7 @@
   (:require [seon.error.refusal]
             [clojure.string]
             [datahike.db :as datahike.db]
+            [datahike.db.interface :as dbi]
             [malli.core :as m]
             [malli.transform :as mt]
             [sci.core :as sci]
@@ -32,7 +33,8 @@
             [seon.schema.internal :as internal]
             [seon.sci.admit :as admit]
             [seon.sci.kernel :as sci.kernel])
-  (:import [java.util Date]))
+  (:import [datahike.db AsOfDB]
+           [java.util Date]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
@@ -830,31 +832,51 @@
                            (= entity (get-in snapshot [section member]))) entities))
                evidence)))
 
+(defn- call-reach-key
+  "The content identity of `database`'s `:seon.fn/sym` and `:seon.fn/calls`,
+  or nil. A committed value keys by the two attributes' Datahike revisions
+  (`source-context-unchanged?`, `reference-code/datahike/src/datahike/query.cljc:3009-3029`),
+  so unrelated writes keep the key. An as-of value over a committed origin at
+  a time point the origin has reached is a fixed point: its connection,
+  generation and time point name its content (the rule `seon.db` keys retained
+  reads on). A turn renders its history at its opening basis, an as-of value,
+  so without this key every rendered evaluation re-derived the reach: x147,
+  3.6 s per cold prompt on default (2026-09-27)."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:maybe [:or [:tuple :seon.db/connection-id :uuid :int]
+                           [:tuple :seon.db/connection-id :uuid [:maybe :uuid]
+                            [:maybe :uuid] [:maybe :uuid]]]]]}
+  [database]
+  (if (instance? AsOfDB database)
+    (let [origin (dbi/-origin database)
+          time-point (dbi/-time-point database)
+          {:datahike.cache/keys [connection-id generation]} (:cache-context origin)]
+      (when (and connection-id generation (some? (datahike.db/committed-value-identity origin))
+                 (integer? time-point) (<= (long time-point) (long (dbi/-max-tx origin))))
+        [connection-id generation time-point]))
+    (let [{:datahike.cache/keys [connection-id generation conservative-revision attribute-revisions]}
+          (:cache-context database)]
+      (when (and connection-id generation)
+        [connection-id generation conservative-revision
+         (get attribute-revisions :seon.fn/sym)
+         (get attribute-revisions :seon.fn/calls)]))))
+
 (defn- call-reach
-  "`db/stored-call-reach` of `selected`, derived once per revision of the two
-  attributes it reads (`:seon.fn/sym`, `:seon.fn/calls`). Datahike's own
-  validity rule for a cached read (`source-context-unchanged?`,
-  `reference-code/datahike/src/datahike/query.cljc:3009-3029`): the same
-  connection and generation, the same conservative revision, the same
-  revision of each attribute read. Unrelated writes keep the key. A value
-  with no connection identity is derived directly.
+  "`db/stored-call-reach` of `selected`, derived once per content identity of
+  the two attributes it reads (`call-reach-key`). A value with no content
+  identity is derived directly.
 
   ## Costs
 
-  Unarmed miss ~6.6 ms for a 795-symbol reach (default, 2026-09-26); a hit is
-  one cache lookup."
+  Unarmed miss ~6.6 ms for a 795-symbol reach, armed ~24 ms (default,
+  2026-09-27); a hit is one cache lookup."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.fn/sym] [:set :symbol]]}
   [database selected]
-  (let [{:datahike.cache/keys [connection-id generation conservative-revision attribute-revisions]}
-        (:cache-context database)]
-    (if (and connection-id generation)
-      (seon.cache/lookup ::call-reach
-                         [selected connection-id generation conservative-revision
-                          (get attribute-revisions :seon.fn/sym)
-                          (get attribute-revisions :seon.fn/calls)]
-                         #(* 80 (count %))
-                         #(db/stored-call-reach database selected))
-      (db/stored-call-reach database selected))))
+  (if-let [content (call-reach-key database)]
+    (seon.cache/lookup ::call-reach (into [selected] content)
+                       #(* 80 (count %))
+                       #(db/stored-call-reach database selected))
+    (db/stored-call-reach database selected)))
 
 (defn- render-program-evidence
   "The program entities a retained call reaches over recorded call edges."

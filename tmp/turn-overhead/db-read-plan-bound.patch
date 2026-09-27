@@ -1,0 +1,91 @@
+--- a/src/seon/db.clj
++++ b/src/seon/db.clj
+@@ -544,10 +544,28 @@
+             ::ambient-branch ambient-branch
+             ::explicit-branch explicit-branch}}))))))
+ 
++(def ^:private read-index-pattern-bound
++  "The most index patterns one read source keeps: the `:max` of
++  `:seon.db/read-index-patterns` (seon.db.edn), which the writer enforces."
++  128)
++
+ (defn- append-read-evidence!
++  "Collect one captured read, keeping its index patterns only within the bound.
++
++  A plan references its read (sources, attributes, basis) and never copies
++  what the read returned. Patterns bound per pulled entity grow with the
++  result: root's opening `(seon.error/for-agent (seon.db/db) \"root\")` kept
++  30,729, stored as 4.5 M characters and decoded on every turn (default,
++  2026-09-27). Past the bound the read keeps its attributes and revision, the
++  evidence a read over `:all` already has: freshness replays or regenerates
++  the read and the shown-value comparison decides."
++  {:malli/schema [:=> [:cat :map] :nil]}
+   [evidence]
+   (when *read-evidence-sink*
+-    (swap! *read-evidence-sink* conj evidence))
++    (swap! *read-evidence-sink* conj
++           (cond-> evidence
++             (< read-index-pattern-bound (count (:seon.db/read-index-patterns evidence)))
++             (dissoc :seon.db/read-index-patterns))))
+   nil)
+ 
+ (defn- append-database-evidence!
+--- a/resources/seon/schemas/seon.db.edn
++++ b/resources/seon/schemas/seon.db.edn
+@@ -71,7 +71,11 @@
+            [:seon.db/pattern-entity {:optional true} :seon.db/pattern-entity]
+            [:seon.db/pattern-attribute {:optional true} :seon.db/pattern-attribute]
+            [:seon.db/pattern-value {:optional true} :seon.db/pattern-value]],
+-          :read-index-patterns [:vector :seon.db/read-index-pattern],
++          ;; A stored plan references its read; it never copies the result. Patterns
++          ;; bound per pulled entity grow with the result (root's opening fault read
++          ;; stored 30,729, 4.5 M characters, 2026-09-27): past 128 the capture
++          ;; keeps none (seon.db/append-read-evidence!) and the writer refuses more.
++          :read-index-patterns [:vector {:max 128} :seon.db/read-index-pattern],
+           :read-basis-t :seon.db/basis-t,
+           :read-dependency-attributes [:or [:= :all] [:set :qualified-keyword]],
+           :read-dependency-source
+--- a/test/seon/read_evidence_test.clj
++++ b/test/seon/read_evidence_test.clj
+@@ -1,5 +1,6 @@
+ (ns seon.read-evidence-test
+   (:require [clojure.test :refer [deftest is]]
++            [malli.core :as m]
+             [seon.config :as config]
+             [seon.db :as db]
+             [seon.sci.eval :as eval]
+@@ -144,3 +145,34 @@
+                                                :seon.message/from]])
+          (is (false? (db/read-evidence-current? @connection evidence)))
+          (is (= 1 (count (db/q query @connection [:seon.agent/id "juniper"])))))))))
++
++(deftest a-plan-references-its-read-and-never-copies-the-result
++  ;; Root's opening fault read kept one pattern per pulled datom: 30,729,
++  ;; stored as 4.5 M characters and decoded on every turn (2026-09-27).
++  (test-support/with-database
++   (fn [connection]
++     (test-support/transacted!
++      connection
++      (into (test-support/agents-tx @connection ["juniper"])
++            (map (fn [n] {:seon.message/id (str "m" n) :seon.message/content (str "c" n)
++                          :seon.message/to [:seon.agent/id "juniper"]}))
++            (range 80)))
++     (let [captured (atom [])
++           result (binding [db/*read-evidence-sink* captured]
++                    (db/q '[:find [(pull ?m [:seon.message/id :seon.message/content]) ...]
++                            :in $ ?recipient :where [?m :seon.message/to ?recipient]]
++                          @connection [:seon.agent/id "juniper"]))
++           evidence (db/read-evidence @captured)
++           sources (mapcat #(get-in % [:datahike.read/dependency-plan
++                                       :datahike.query.dependency/sources])
++                           evidence)
++           registry (:seon.schema.projection/registry (db/carried-projection @connection))
++           pattern {:seon.db/pattern-attribute :seon.message/content}]
++       (is (= 80 (count result)))
++       (is (seq sources))
++       (is (not-any? :seon.db/read-index-patterns sources) (pr-str sources))
++       (is (true? (db/read-evidence-current? @connection evidence)))
++       (test-support/transacted! connection [[:db/add [:seon.message/id "m0"] :seon.message/content "changed"]])
++       (is (false? (db/read-evidence-current? @connection evidence)))
++       (is (m/validate :seon.db/read-index-patterns (vec (repeat 128 pattern)) {:registry registry}))
++       (is (not (m/validate :seon.db/read-index-patterns (vec (repeat 129 pattern)) {:registry registry})))))))

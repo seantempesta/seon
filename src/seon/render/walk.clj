@@ -881,9 +881,9 @@
                        {:seon.error/message "The history lookup does not name an agent."
                        :seon.render/refused-member :seon.render.walk/lookup}) assoc :seon.error/declared-schema :seon.render/request-error)
                       :else
-                      (if-let [selector (:seon.db/pull-selector request)]
-                        (evaluation/of-agent database agent-id selector)
-                        (evaluation/of-agent database agent-id)))
+                      (evaluation/of-agent database agent-id
+                                           (or (:seon.db/pull-selector request)
+                                               evaluation/history-selector)))
         selected (when-let [id (:seon.turn/id request)]
                    (db/pull database [:db/id :seon.turn.work/situation]
                             [:seon.turn/id id]))]

@@ -6,12 +6,20 @@
 
 (schema.edn/load! {})
 
+(def history-selector
+  "The evaluation as history renders it: every attribute, its namespace's
+  name, and its read evidence as references only. A stored read plan is
+  freshness evidence no render shows; decoding root's 477 of them (36.5 MB)
+  was 3.7 s of every cold prompt on default (2026-09-27)."
+  '[* {:seon.cluster.eval/ns [:db/id :seon.ns/name]}
+    {:seon.cluster.eval/read-evidence [:db/id]}])
+
 (defn of-agent
   "Return every evaluation of the agent, in turn transaction and ordinal order.
 
   The optional pull selector narrows the projection; identity, turn, ordinal and
   transaction remain present. Namespace and read-evidence refs are expanded by
-  default. This reads saved facts only;
+  default; `history-selector` keeps read evidence as references. This reads saved facts only;
   it does not execute source or apply a presentation limit. A missing agent
   is a diagnostic, distinct from an existing agent with no evaluations."
   {:malli/schema
@@ -19,8 +27,10 @@
     [:=> [:cat :seon.db/db :seon.agent/id]
      [:or [:vector [:and :seon.eval/entity
                     [:map [:db/id :int] [:t :seon.db/basis-t]]]] :seon.db/invalid-read-error :seon.agent/no-such-agent-error]]
+    ;; a selector names what it reads: a narrowed ref is a reference, not
+    ;; the whole component `:seon.eval/entity` declares
     [:=> [:cat :seon.db/db :seon.agent/id :seon.db/pull-selector]
-     [:or [:vector [:and :seon.eval/entity
+     [:or [:vector [:and :seon.db/pulled-entity
                     [:map [:db/id :int] [:t :seon.db/basis-t]]]] :seon.db/invalid-read-error :seon.agent/no-such-agent-error]]]}
   ([database agent-id]
    (of-agent database agent-id
