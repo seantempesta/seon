@@ -75,14 +75,23 @@
    :isError true})
 
 (defn- failure
-  "A bridge failure as data: `request`'s fields, the failure's declared kind
-  (its ex-data's, else `kind`), and the whole cause — `Throwable->map`'s class,
-  message and ex-data per link and its trace — printed once as EDN, so symbols
-  and keywords stay native through the JSON envelope."
+  "A bridge failure as the one error shape (`seon.error.refusal/diagnostic`,
+  resolved from the tooling classpath the bridge runs on, `bin/mcp-server`):
+  `request`'s fields, the failure's declared kind (its ex-data's, else
+  `kind`), and the whole cause chain — class, message and ex-data per link,
+  with only first-party frames. Bounded by construction: `Throwable->map`
+  here printed every frame of every link, a ~100-frame babashka stack for a
+  repl-unavailable reply."
+  {:malli/schema [:=> [:cat :map :keyword :seon.error/throwable] :seon.error/base]}
   [request kind ^Throwable throwable]
-  (assoc request
-         :seon.dev.mcp/failure (or (:seon.dev.mcp/failure (ex-data throwable)) kind)
-         :seon.dev.mcp/error (pr-str (Throwable->map throwable))))
+  (merge request
+         ((requiring-resolve 'seon.error.refusal/diagnostic)
+          {:seon.error/at (java.util.Date.)
+           :seon.error/layer :seon.dev.mcp/bridge
+           :seon.error/operation 'seon.dev.mcp/handle-request
+           :seon.error/message (or (ex-message throwable) (.getName (class throwable)))
+           :seon.error/throwable throwable})
+         {:seon.dev.mcp/failure (or (:seon.dev.mcp/failure (ex-data throwable)) kind)}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Operator-derived discovery

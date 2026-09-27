@@ -133,15 +133,18 @@
                           :where [?f :seon.test.failure/actual ?shown]
                                  [?f :seon.test.failure/actual-blob ?digest]]
                         (db/db connection) shown)
-           whole (some->> digest (blob/get connection))]
+           ;; the blob is the thrown value's artifact, read back as its value
+           artifact (some->> digest (blob/get connection) value/read-artifact)
+           whole (when (:seon.sci.admit/print-node artifact) (value/artifact-value artifact))]
        (is (some? failure) "the fixture write is refused")
        (is (vector? committed) (pr-str committed))
        (is (= reported shown) "the stored shown text is the reporter's text")
        (is (<= (count reported) (inc (:floor-chars @#'value/text-limits)))
            "the shown text is bounded by the floor")
        (is (string? digest) "the stored failure references its whole value")
-       (is (str/includes? (str whole) (pr-str (ex-message failure)))
-           "the whole refusal is retrievable from the stored failure")))))
+       (is (nil? (:seon.render.value/unreadable-artifact artifact)) (pr-str artifact))
+       (is (= (ex-message failure) (:seon.error/message (first (:seon.error/chain whole))))
+           "the whole refusal is retrievable from the stored failure as its error value")))))
 
 
 (deftest ^{:seon.test/platform

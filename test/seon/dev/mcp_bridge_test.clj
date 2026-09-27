@@ -4,6 +4,8 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [seon.cluster]
+            [seon.error.refusal]
+            [seon.schema]
             [seon.config]
             [seon.test-support]
             [clojure.test :refer [deftest is testing]])
@@ -733,11 +735,18 @@
   (bridge-var 'run-events)
   (is (not-any? #(ns-resolve 'seon.dev.mcp %) '[window-bases window-form branch-errors! max-window-errors])))
 
-(deftest ^{:seon/tasks #{"18051e0ee3e2"}} a-bridge-failure-carries-its-whole-cause
+(deftest ^{:seon/tasks #{"18051e0ee3e2"}} a-bridge-failure-is-the-one-error-shape
+  ;; A repl-unavailable reply printed `Throwable->map`, every frame of every
+  ;; link: a ~100-frame babashka stack (2026-09-27). It is the one error shape.
   (let [data ((bridge-var 'failure) {:seon.dev.mcp/cluster "c"} :transport
-              (ex-info "outer" {:probe/value 7} (ex-info "inner" {:probe/cause :sentinel})))
-        cause (read-string (:seon.dev.mcp/error data))]
+              (ex-info "outer" {:probe/value 7} (ex-info "inner" {:probe/cause :sentinel})))]
     (is (= :transport (:seon.dev.mcp/failure data)))
-    (is (= ["outer" "inner"] (mapv :message (:via cause))))
-    (is (= [{:probe/value 7} {:probe/cause :sentinel}] (mapv :data (:via cause)))
-        "each link's ex-data survives as native EDN")))
+    (is (= ["c" "outer"] ((juxt :seon.dev.mcp/cluster :seon.error/message) data)))
+    (is (= [["outer" {:probe/value 7}] ["inner" {:probe/cause :sentinel}]]
+           (mapv (juxt :seon.error/message :seon.error/data) (:seon.error/chain data)))
+        "each link's ex-data survives as native EDN")
+    (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.error/base) data)
+        (pr-str data))
+    (is (every? seon.error.refusal/first-party-frame?
+                (mapcat :seon.error/frames (:seon.error/chain data)))
+        "no dependency or host frame is carried")))

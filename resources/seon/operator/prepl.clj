@@ -50,6 +50,51 @@
                                                   (failure-text failure))))})))
          false]))))
 
+(defn evaluate
+  "Read `source` with the one reader (`seon.sci.reader/read`) in
+  `namespace-symbol`, with that namespace's aliases, Vars, classes and data
+  readers, and evaluate its one form there, leaving the session in it. A
+  reader refusal is thrown as the reader's own; more or fewer than one form
+  refuses with where the second starts.
+
+  The MCP bridge calls this from this namespace (`(do (in-ns
+  'seon.operator.prepl) (evaluate …))`, `seon.dev.mcp/jvm-evaluation-form`),
+  so every frame between the prepl and the caller's form is the prepl
+  wire's, which a fault never names: a compile error has no first-party
+  frame and a runtime error's is the caller's form. The bridge's wrapper
+  evaluated in `user` named itself (`user$eval… NO_SOURCE_FILE 61`)."
+  {:malli/schema [:=> [:cat [:map [:seon.dev.mcp/source :string]
+                             [:seon.dev.mcp/namespace :symbol]
+                             [:seon.dev.mcp/read-only? :boolean]]]
+                  :any]}
+  [{source :seon.dev.mcp/source namespace-symbol :seon.dev.mcp/namespace read-only? :seon.dev.mcp/read-only?}]
+  ((requiring-resolve 'seon.cluster/project-next-prepl-value!) {:seon.dev.mcp/read-only? read-only?})
+  (in-ns namespace-symbol)
+  (refer 'clojure.core)
+  (let [target *ns*
+        events ((requiring-resolve 'seon.sci.reader/read)
+                {:seon.sci.reader/text source
+                 :seon.sci.reader/ns namespace-symbol
+                 :seon.sci.reader/aliases (into {} (map (fn [[alias-name aliased]] [alias-name (ns-name aliased)]))
+                                                (ns-aliases target))
+                 :seon.sci.reader/refers (into {} (keep (fn [[s v]] (cond (var? v) [s (symbol v)]
+                                                                          (class? v) [s (symbol (.getName ^Class v))])))
+                                               (ns-map target))
+                 :seon.sci.reader/tags *data-readers*
+                 :seon.config.eval.result/max-source (count source)})
+        failure (if (map? events) events (some :seon.sci.reader/error events))
+        second-form (second events)]
+    (cond
+      failure (throw (ex-info (:seon.error/message failure) failure))
+      (= 1 (count events)) (eval (:seon.sci.reader/form (first events)))
+      :else (throw (ex-info (if second-form
+                              (str "Evaluation accepts exactly one form; the second form starts at line "
+                                   (:seon.sci.reader/line second-form) ", column "
+                                   (:seon.sci.reader/column second-form) ". Wrap sequences in `(do ...)`.")
+                              "Your reply had no form; only comments/prose. Send a form.")
+                            (select-keys second-form [:seon.sci.reader/line :seon.sci.reader/column
+                                                      :seon.sci.reader/source]))))))
+
 (defn io-prepl
   "Print PREPL events, retaining no evaluation result in *1/*2/*3/*e, then
   perform a requested process exit after the flush. The out-fn never throws:
