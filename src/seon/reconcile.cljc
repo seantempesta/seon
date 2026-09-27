@@ -434,14 +434,15 @@
   surfaced before any transaction when the pre-check already sees them
   and atomically from inside the writer otherwise."
   {:malli/schema [:=> [:cat :seon.db/connection ::request] [:or ::result :seon.db/error-result]]}
-  [connection request]
-  (let [tx-data (plan (seon.db/db connection) request)
+  [connection {write! :seon.db/writer :or {write! seon.db/transact!} :as request}]
+  (let [request (dissoc request :seon.db/writer)
+        tx-data (plan (seon.db/db connection) request)
         operations (count tx-data)]
     (if (zero? operations)
       {::converged? true
        ::operations 0}
       (let [result
-            (seon.db/transact!
+            (write!
              connection
              {:tx-data [[:db.fn/call #'reconcile-call request]]
               :tx-meta

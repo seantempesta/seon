@@ -2991,7 +2991,9 @@
   [{connection :seon.store/connection-object
     :keys [:seon.agent/id]
     caps :seon.sci.admit/caps
-    process :seon.db.process/id}
+    process :seon.db.process/id
+    write! :seon.db/writer
+    :or {write! db/transact!}}
    inbound]
   (let [request
         {:seon.agent/id (:seon.agent/id inbound)
@@ -3002,7 +3004,7 @@
         decision (message/inbound-tx (db/db connection) request)]
     (if (vector? decision)
       (let [result
-            (db/transact!
+            (write!
              connection
              {:tx-data [[:db.fn/call #'message/inbound-tx request]]
               :tx-meta (inbound-tx-meta (db/db connection) process id)})]

@@ -104,10 +104,10 @@
       (let [refusal {:seon.db.write.attempt/request-id "reconcile-refusal" :seon.error/at (java.util.Date.) :seon.error/layer :seon.db/invocation :seon.error/operation 'seon.db/transact!
                      :seon.error/message "injected reconcile refusal"}
             result
-            (with-redefs [db/transact! (fn [& _] refusal)]
-              (reconcile/reconcile!
-               connection
-               (request [(config-entity "refused" 10)])))]
+            (reconcile/reconcile!
+             connection
+             (assoc (request [(config-entity "refused" 10)])
+                    :seon.db/writer (fn [_connection _transaction] refusal)))]
         (is (= refusal result))))))
 
 (deftest a-hand-edit-is-repaired-by-the-next-apply

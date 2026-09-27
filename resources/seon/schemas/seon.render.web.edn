@@ -93,6 +93,7 @@
                     :seon.render.web/wanted-port]],
                   :service
                   [:map
+                   [:seon.db/writer {:optional true :description "Writes an inbound message; seon.db/transact! when absent."} :seon.db/writer]
                    [:seon.store/connection-object :seon.store/connection-object]
                    [:seon.agent/id :seon.agent/id]
                    [:seon.sci.admit/caps :seon.sci.admit/caps]

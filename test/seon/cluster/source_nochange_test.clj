@@ -11,20 +11,18 @@
    (fn [store]
      (let [published (#'fixture/publish store @#'fixture/digest-a)
            transactions (atom 0)
-           populations (atom 0)
-           transact! db/transact!
-           populate! fixture/populate!
+           ;; Publication's writer counts its writes, and the population names a
+           ;; Var that does not exist, so populating at all would refuse by
+           ;; name: no Var is redefined.
            repeated
-           (with-redefs [db/transact! (fn [& arguments]
-                                       (swap! transactions inc)
-                                       (apply transact! arguments))
-                         fixture/populate! (fn [request]
-                                             (swap! populations inc)
-                                             (populate! request))]
-             (#'fixture/publish store @#'fixture/digest-a))]
+           (#'fixture/publish store @#'fixture/digest-a
+                              'seon.cluster.source-nochange-test/no-population
+                              {:seon.db/writer (fn [connection transaction]
+                                                 (swap! transactions inc)
+                                                 (db/transact! connection transaction))})]
        (is (= (:seon.source/commit-id published) (:seon.source/commit-id repeated)))
        (is (= (:seon.source/commit-id published)
               (:seon.source/commit-id (source/current store))))
        (is (false? (:seon.source/built? repeated)))
-       (is (= [0 0] [@transactions @populations]))
+       (is (zero? @transactions))
        (is (empty? (#'fixture/scratch-branches store)))))))

@@ -9,6 +9,7 @@
                  :process [:string {:min 1}],
                  :request
                  [:map
+                  [:seon.db/writer {:optional true :description "Writes the reconcile transaction; seon.db/transact! when absent."} :seon.db/writer]
                   [:seon.reconcile/desired :seon.reconcile/desired]
                   [:seon.reconcile/process :seon.reconcile/process]
                   [:seon.reconcile/adopt-identities

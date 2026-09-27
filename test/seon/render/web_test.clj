@@ -2130,8 +2130,8 @@ handle))}}
                    :seon.error/message "core failure"
                    :seon.db.write/attempt {:seon.db.write.attempt/completion-unavailable "No completion was observed."}}
                   500]]]
-          (let [response (with-redefs [db/transact! (fn [& _] result)]
-                           (web/inbound service inbound))]
+          (let [response (web/inbound (assoc service :seon.db/writer (fn [_connection _transaction] result))
+                                      inbound)]
             (is (= expected-status (:status response)))
             (is (= (:seon.error/message result) (:body response)))))))))
 
