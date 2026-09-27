@@ -123,8 +123,16 @@
         (.delete directory)))))
 
 (deftest config-loads-the-packaged-population-in-a-fresh-jvm
+  ;; The child is a fresh JVM on THIS member's classpath, started in its
+  ;; working directory: the committed archive the JVM runs (`user.dir` is
+  ;; data/source/<commit>), never the checkout. `clojure -M:dev` resolved the
+  ;; alias and loaded source cold: 9.6 s in tests-0627w, 23.0 s under load at
+  ;; default da10c8912; the same form on the member's classpath took 2.2-3.0 s
+  ;; (four runs).
   (let [command
-        ["clojure" "-M:dev" "-e"
+        [(str (System/getProperty "java.home") "/bin/java")
+         "-cp" (System/getProperty "java.class.path")
+         "clojure.main" "-e"
          (str
           "(require 'seon.config 'seon.schema) "
           "(when-not (contains? (seon.schema/registered-schemas) "
