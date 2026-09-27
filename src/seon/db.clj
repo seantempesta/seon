@@ -3384,12 +3384,6 @@
               by-identity)))
         {} forms)))))
 
-(defn- write-validator
-  [projection compiled]
-  (schema/projection-cache-value
-   projection [::write-validator compiled]
-   #(m/validator compiled)))
-
 (defn- invalid-write
   {:malli/schema [:=> [:cat :seon.schema/projection :qualified-keyword :seon.schema/value :seon.schema/value [:sequential :seon.schema/value] :seon.schema/value :seon.schema/value :seon.schema/value] :seon.error/base]}
   [_projection attribute compiled value path entity-form cause candidates]
@@ -3466,6 +3460,10 @@
       (normalize value))))
 
 (defn- write-attribute-error
+  "The refusal of one submitted attribute value, or nil when it validates."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection :seon.schema/value :seon.schema/value
+                       [:vector :seon.schema/value] :seon.schema/value :boolean]
+                  [:or :nil :seon.error/base]]}
   [database projection attribute value path entity-form single?]
   (let [installed (get (dbi/-schema database) attribute)
         authored (get (:seon.schema.projection/forms projection) attribute)]
@@ -3505,7 +3503,7 @@
             ;; Dependency-owned schema attributes have no authored Malli form;
             ;; Datahike continues to validate and classify those declarations.
             (when (and authored
-                       (not ((write-validator projection form)
+                       (not ((m/validator form)
                              (write-value database projection attribute value single?))))
               (invalid-write projection attribute form value path entity-form
                              ::invalid-value nil)))))))
@@ -3584,7 +3582,7 @@
                     identity)]
        {::decode decode
         ::validate (when authored
-                     (write-validator projection
+                     (m/validator
                                       (if many?
                                         (schema.datahike/value-schema form)
                                         (mr/schema (:seon.schema.projection/registry projection) attribute))))}))))
@@ -3707,7 +3705,7 @@
       (some
        (fn [schema-key]
          (when-not
-          ((write-validator projection (mr/schema (:seon.schema.projection/registry projection) schema-key)) entity-map)
+          ((m/validator (mr/schema (:seon.schema.projection/registry projection) schema-key)) entity-map)
            (let [explain (schema/projection-cache-value
                           projection [::write-explainer schema-key]
                           #(schema/projection-explainer projection schema-key))
