@@ -39,13 +39,9 @@
   "Show an assertion's exact claim, ordered contexts, and known source site."
   {:malli/schema [:=> [:cat [:or :seon.test.failure/value :seon.test.failure/report]] :string]}
   [failure]
-  (let [;; Shown text inline, and the stored whole value's retrieval form
-        ;; when there is one (a thrown actual keeps both).
-        field (fn [inline blob]
-                (let [shown (get failure inline)
-                      whole (some->> (get failure blob) (list 'seon.blob/get) pr-str)]
-                  (cond (and shown whole) (str shown "\n  whole: " whole)
-                        :else (or shown whole))))
+  (let [;; The shown text only: a stored whole value is the failure's
+        ;; `...-blob` digest, data the reply carries, never a text hint.
+        field (fn [inline] (get failure inline))
         path (or (:seon.test.failure/reported-file failure)
                  (get-in failure [:seon.test.failure/file :seon.fn.file/relative-path]))]
     (str/join "\n"
@@ -54,10 +50,10 @@
               (when path (str " " path ":" (:seon.test.failure/line failure))))
          (when (seq (:seon.test.failure/testing-contexts failure))
            (str/join " > " (:seon.test.failure/testing-contexts failure)))
-         (field :seon.test.failure/message :seon.test.failure/message-blob)
-         (when-let [expected (field :seon.test.failure/expected :seon.test.failure/expected-blob)]
+         (field :seon.test.failure/message)
+         (when-let [expected (field :seon.test.failure/expected)]
            (str "expected: " expected))
-         (when-let [actual (field :seon.test.failure/actual :seon.test.failure/actual-blob)]
+         (when-let [actual (field :seon.test.failure/actual)]
            (str "actual: " actual))]))))
 
 (defn failure-message

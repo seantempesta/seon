@@ -93,7 +93,7 @@
  :seon.error/base
  [:map [:seon.sci.eval/pending-namespaces :seon.sci.eval/pending-namespaces]]],
                 :defs-fork-request
-                [:map
+                [:map {:description "A turn fork request. Its connection, when omitted, is supplied from the calling evaluation's world: fork-for-turn never reads it, so absence carries no meaning."}
                  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
                  [:seon.sci.eval/agent-ctx
                   {:optional true}

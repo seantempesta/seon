@@ -37,7 +37,7 @@
                     [:seon.sci.eval/ctx :seon.sci.eval/ctx]
                     [:seon.db/connection
                      {:optional true}
-                     :seon.db/connection]
+                     :seon.render.walk/read-connection]
                     [:seon.render.walk/lookup :seon.render.walk/lookup]
                     [:seon.render/output
                      [:enum :seon.render/ai :seon.render/html
@@ -54,7 +54,7 @@
                     [:seon.sci.eval/ctx :seon.sci.eval/ctx]
                     [:seon.db/connection
                      {:optional true}
-                     :seon.db/connection]
+                     :seon.render.walk/read-connection]
                     [:seon.render.walk/lookup :seon.render.walk/lookup]
                     [:seon.sci.admit/caps :seon.sci.admit/caps]
                     [:seon.sci.eval/time-limit-ms
@@ -133,8 +133,14 @@
   [:seon.render.walk/continuation-node :seon.render.walk/continuation-node]
   [:seon.render.data/cursor :seon.render.data/cursor]
   [:seon.db/db {:optional true} :seon.db/db]
-  [:seon.db/connection {:optional true} :seon.db/connection]
-  [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx]]
+  [:seon.db/connection {:optional true} :seon.render.walk/read-connection]
+  [:seon.sci.eval/ctx {:optional true} :seon.render.walk/read-ctx]]
+ :seon.render.walk/read-connection
+ [:and {:description "A render's connection: a render reads, so an absent one is never supplied from the calling evaluation's world (its absence keeps the render read-only)."}
+  :seon.db/connection]
+ :seon.render.walk/read-ctx
+ [:and {:description "A continued render's context: absent, the continuation renders without evaluating, and it is never supplied from the calling evaluation's world."}
+  :seon.sci.eval/ctx]
  :seon.render.walk/continuation-error
  [:and :seon.error/base
   [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}

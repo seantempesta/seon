@@ -1,351 +1,110 @@
-{my.agent/branch
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- my.agent-test/agent-value
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- my.agent-test/held-branch
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- my.program/accept-merge!
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- my.program/cluster-custody
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- my.program/ns-unalias!
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- my.program/ns-unmap!
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- my.program/prepare-merge!
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- my.program/propose-merge!
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- my.program/remove-ns!
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- my.program/retract-operation!
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- my.program/supplied-context
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- my.program/write-back!
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- my.test/check
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- my.test/run-owned
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.call-preparation/prepare
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.call-preparation/supply
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.call-preparation-test/malformed-base-supplier
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.call-preparation-test/probe-optional-connection?
- [:seon.db/connection],
- seon.cluster/adopt-then-test!
- [:my.program/base-ctx :seon.sci.eval/base-ctx],
- seon.cluster/candidate-gate!
- [:my.program/base-ctx :seon.sci.eval/base-ctx],
- seon.cluster/development-source-refresh! [:seon.sci.eval/ctx],
- seon.cluster/reaching-run
- [:my.program/base-ctx :seon.sci.eval/base-ctx],
- seon.cluster/save-gate! [:seon.sci.eval/ctx],
- seon.cluster.acquisition-test/declare!
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.cluster.acquisition-test/evaluate!
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.cluster.agent/acquire-context!
- [:my.program/base-ctx :seon.sci.eval/base-ctx],
- seon.cluster.agent/release-context!
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.cluster.agent-custody-test/held-connection
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.cluster.agent-custody-test/poisoned-child!
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.cluster.boot/boot-timeline [:seon.sci.eval/ctx],
- seon.cluster.boot/readiness [:seon.sci.eval/ctx],
- seon.cluster.boot/stand-boot-layers! [:seon.sci.eval/ctx],
- seon.cluster.boot/stand-cluster-runtime! [:seon.sci.eval/ctx],
- seon.cluster.boot/stop! [:seon.sci.eval/ctx],
- seon.cluster.branch-release-retention-test/released-cycle!
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.cluster.entrance-supplier-test/caller-context
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.cluster.entrance-supplier-test/supplied-acquisition-proof
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.cluster.host/host!
- [:my.program/base-ctx :seon.sci.eval/base-ctx],
- seon.cluster.host/hosted
- [:my.program/base-ctx :seon.sci.eval/base-ctx],
- seon.cluster.host/retire!
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.cluster.host/start!
- [:my.program/base-ctx
-  :my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db
-  :seon.sci.eval/base-ctx],
- seon.cluster.release-context-test/release-failure
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.cluster.release-context-test/retains-branch?
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.cluster.source/accept-merge!
- [:my.program/base-ctx :seon.sci.eval/base-ctx],
- seon.cluster.source/prepare-merge!
- [:my.program/base-ctx :seon.sci.eval/base-ctx],
- seon.cluster.source/publish! [:seon.db/writer],
- seon.cluster.store/listen-failures!
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.cluster.store/listener-failed!
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.config/reconcile-call [:seon.db/writer],
- seon.db/call-with-custody [:seon.db/connection],
- seon.db/supplied-connection
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.db/supplied-database-value
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.env/carry
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.env/environment-state
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.env/refuse-incomplete-environment!
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.env/replace-environment!
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.env/scope
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.env/supplied-agent-id
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.error/commit-call [:seon.agent/id],
- seon.error/commit-tx [:seon.agent/id],
- seon.error/normalize [:seon.agent/id],
- seon.error/notice [:seon.agent/id],
- seon.error/notice-ai-prose [:seon.agent/id],
- seon.error/prepare [:seon.agent/id],
- seon.error/prepare-result [:seon.sci.eval/ctx],
- seon.error/recording [:seon.agent/id],
- seon.eval.drive/run-episode! [:seon.sci.eval/ctx],
- seon.fault/fault!
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.flow/start-work-launcher!
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.flow/submit!
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.fn/analysis-projection [:seon.db/connection],
- seon.fn/analyze-entities [:seon.db/connection],
- seon.fn/analyzed-files [:seon.db/connection],
- seon.fn/build-manifest [:seon.db/connection],
- seon.fn/changed-schema-keys [:seon.db/connection],
- seon.fn/desired-entities [:seon.db/connection],
- seon.fn/incremental-projection [:seon.db/connection],
- seon.fn/index! [:seon.db/connection],
- seon.fn/program-entities [:seon.db/connection],
- seon.fn/reconciled-paths [:seon.db/connection],
- seon.instrument/apply! [:seon.db/db],
- seon.oversight/flow-status [:seon.sci.eval/ctx],
- seon.oversight/unit [:seon.sci.eval/ctx],
- seon.reconcile/plan [:seon.db/writer],
- seon.reconcile/reconcile! [:seon.db/writer],
- seon.reconcile/reconcile-call [:seon.db/writer],
- seon.render/call-with-walk-context
- [:seon.db/connection :seon.db/db :seon.sci.eval/ctx],
- seon.render/request-profile [:seon.render/profile],
- seon.render.walk/continue
- [:seon.db/connection :seon.db/db :seon.sci.eval/ctx],
- seon.render.walk/history [:seon.db/connection],
- seon.render.walk/neighborhood [:seon.db/connection],
- seon.render.web/context-action-response [:seon.db/writer],
- seon.render.web/context-response [:seon.db/writer],
- seon.render.web/create-owner-response [:seon.db/writer],
- seon.render.web/entrance-fault!
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.render.web/feed [:seon.sci.eval/ctx],
- seon.render.web/graph-debug-html [:seon.db/writer],
- seon.render.web/handler [:seon.db/writer],
- seon.render.web/inbound [:seon.db/writer],
- seon.render.web/sent-context-html [:seon.db/writer],
- seon.render.web/shell [:seon.agent/id],
- seon.render.web/start! [:seon.db/writer],
- seon.sci.eval/cluster-ctx [:seon.sci.eval/loaded-connection],
- seon.sci.eval/evaluate
- [:seon.agent/id :seon.db/db :seon.sci.eval/ctx],
- seon.sci.eval/evaluated-source
- [:seon.agent/id :seon.db/connection :seon.db/db],
- seon.sci.eval/fork-cluster-ctx
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db
-  :seon.sci.eval/loaded-connection],
- seon.sci.eval/fork-for-turn
- [:seon.db/connection :seon.sci.eval/agent-ctx],
- seon.sci.eval/install-evaluated-rows!
- [:seon.sci.eval/agent-ctx :seon.sci.eval/written-on],
- seon.sci.eval/refuse-install
- [:seon.agent/id :seon.db/db :seon.sci.eval/ctx],
- seon.sci.eval/run-test [:seon.db/connection],
- seon.sci.eval/run-tests [:seon.db/connection],
- seon.sci.eval/shown-failure
- [:seon.agent/id :seon.db/connection :seon.db/db],
- seon.sci.eval/shown-result
- [:seon.agent/id :seon.db/connection :seon.db/db],
- seon.test/apply-seeds!
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.test/attempt-request-context
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.test/bounded-result
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.test/changes [:my.program/base-ctx :seon.sci.eval/base-ctx],
- seon.test/clean-request-handle
- [:my.program/base-ctx :seon.sci.eval/base-ctx],
- seon.test/member-result
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.test/run
- [:my.program/base-ctx :seon.db/writer :seon.sci.eval/base-ctx],
- seon.test.overlay-world-test/admit!
- [:my.program/executing-ctx
-  :seon.agent/id
-  :seon.db/connection
-  :seon.db/db],
- seon.test.runner/report-value [:seon.db/db],
- seon.test.runner/run-var! [:seon.db/connection],
- seon.test.runner/run-vars! [:seon.db/connection],
- seon.turn/evaluate-sources [:seon.db/db],
- seon.turn/gate-function-install
- [:seon.agent/id :seon.db/db :seon.sci.eval/ctx]}
+{:inline
+ {:entries [:seon.db/connection :seon.db/db :seon.sci.eval/ctx],
+  :functions
+  [seon.call-preparation-test/probe-optional-connection?
+   seon.render/call-with-walk-context
+   seon.sci.eval/run-test
+   seon.sci.eval/run-tests
+   seon.test/bounded-result
+   seon.test.runner/report-value]},
+ :seon.boot/instance
+ {:entries [:seon.sci.eval/ctx],
+  :functions
+  [seon.cluster/development-source-refresh!
+   seon.cluster/save-gate!
+   seon.cluster.boot/boot-timeline
+   seon.cluster.boot/readiness
+   seon.cluster.boot/stand-boot-layers!
+   seon.cluster.boot/stand-cluster-runtime!
+   seon.cluster.boot/stop!
+   seon.eval.drive/run-episode!
+   seon.oversight/flow-status]},
+ :seon.db/custody-request
+ {:entries [:seon.db/connection],
+  :functions
+  [seon.db/call-with-custody
+   seon.test.runner/run-var!
+   seon.test.runner/run-vars!]},
+ :seon.error/commit-tx-request
+ {:entries [:seon.agent/id],
+  :functions [seon.error/commit-tx seon.error/recording]},
+ :seon.error/normalize-request
+ {:entries [:seon.agent/id], :functions [seon.error/normalize]},
+ :seon.error/notice
+ {:entries [:seon.agent/id], :functions [seon.error/notice-ai-prose]},
+ :seon.error/notice-request
+ {:entries [:seon.agent/id], :functions [seon.error/notice]},
+ :seon.error/prepare-request
+ {:entries [:seon.agent/id], :functions [seon.error/prepare]},
+ :seon.fault/context
+ {:entries [:seon.agent/id], :functions [seon.fault/fault!]},
+ :seon.fn/index-request
+ {:entries [:seon.db/connection],
+  :functions
+  [seon.fn/analysis-projection
+   seon.fn/analyze-entities
+   seon.fn/analyzed-files
+   seon.fn/build-manifest
+   seon.fn/changed-schema-keys
+   seon.fn/desired-entities
+   seon.fn/incremental-projection
+   seon.fn/index!
+   seon.fn/program-entities
+   seon.fn/reconciled-paths]},
+ :seon.instrument/request
+ {:entries [:seon.db/db], :functions [seon.instrument/apply!]},
+ :seon.oversight/request
+ {:entries [:seon.sci.eval/ctx], :functions [seon.oversight/unit]},
+ :seon.reconcile/request
+ {:entries [:seon.db/writer],
+  :functions
+  [seon.config/reconcile-call
+   seon.reconcile/plan
+   seon.reconcile/reconcile!
+   seon.reconcile/reconcile-call]},
+ :seon.render.walk/continue-request
+ {:entries [:seon.db/connection :seon.sci.eval/ctx],
+  :functions [seon.render.walk/continue]},
+ :seon.render.walk/history-request
+ {:entries [:seon.db/connection],
+  :functions [seon.render.walk/history]},
+ :seon.render.walk/request
+ {:entries [:seon.db/connection],
+  :functions [seon.render.walk/neighborhood]},
+ :seon.render.web/feed-request
+ {:entries [:seon.sci.eval/ctx], :functions [seon.render.web/feed]},
+ :seon.render.web/page-request
+ {:entries [:seon.agent/id], :functions [seon.render.web/shell]},
+ :seon.render.web/service
+ {:entries [:seon.db/writer],
+  :functions
+  [seon.render.web/context-action-response
+   seon.render.web/context-response
+   seon.render.web/create-owner-response
+   seon.render.web/graph-debug-html
+   seon.render.web/handler
+   seon.render.web/inbound
+   seon.render.web/sent-context-html
+   seon.render.web/start!]},
+ :seon.sci.eval/defs-fork-request
+ {:entries [:seon.db/connection],
+  :functions [seon.sci.eval/fork-for-turn]},
+ :seon.sci.eval/request
+ {:entries [:seon.agent/id :seon.db/db :seon.sci.eval/ctx],
+  :functions
+  [seon.sci.eval/evaluate
+   seon.sci.eval/refuse-install
+   seon.turn/gate-function-install]},
+ :seon.sci.eval/shown-request
+ {:entries [:seon.agent/id :seon.db/connection :seon.db/db],
+  :functions
+  [seon.sci.eval/evaluated-source
+   seon.sci.eval/shown-failure
+   seon.sci.eval/shown-result]},
+ :seon.source/publish-request
+ {:entries [:seon.db/writer],
+  :functions [seon.cluster.source/publish!]},
+ :seon.test/request
+ {:entries [:seon.db/writer], :functions [seon.test/run]},
+ :seon.turn.loop/evaluate-sources-request
+ {:entries [:seon.db/db], :functions [seon.turn/evaluate-sources]}}

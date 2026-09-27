@@ -476,49 +476,26 @@
 
 (defn- branch-form
   "Create (off the cluster head's commit), list or retire one named branch
-  through `seon.cluster.registry`; the cluster's own branch never qualifies."
+  through the one entrance agents use, `my.agent/create-branch!`,
+  `my.agent/branches` and `my.agent/retire-branch!`, with the cluster's
+  store, connection and routing as the context."
+  {:malli/schema [:=> [:cat :string :string [:maybe :string]] :string]}
   [cluster action branch]
   (pr-str
    `(let [instance# (get @@(requiring-resolve 'seon.operator.runtime/running-instances) ~cluster)
           handle# (:seon.turn.loop/cluster instance#)
-          store# {:seon.store/store (:seon.store/store instance#)}
-          connection# (:seon.db/connection handle#)
-          own# (get-in @connection# [:config :branch])
-          branch# ~(some-> branch keyword)
-          ;; A hosted agent retires through its owner before the branch is released.
-          _# (when (and handle# (= "retire" ~action) (not= own# branch#))
-               (some-> ((requiring-resolve 'seon.cluster.host/hosted) handle# branch#)
-                       ((requiring-resolve 'seon.cluster.host/retire!))))
-          held# (vec (some-> (get-in (some-> (:seon.agent/routing handle#) deref)
-                                     [:seon.agent/children branch#])
-                             deref :seon.agent/contexts))
-          refuse# (fn [message# data#]
-                    (merge {:seon.error/at (java.util.Date.) :seon.error/layer :seon.dev.mcp/branch
-                            :seon.error/operation '~(symbol "seon.dev.mcp" (str "branch-" action))
-                            :seon.error/message message# :seon.dev.mcp/branch branch#} data#))
+          context# {:seon.store/store (:seon.store/store instance#)
+                    :seon.db/connection (:seon.db/connection handle#)
+                    :seon.agent/routing (:seon.agent/routing handle#)}
+          request# {:seon.store/branch ~(some-> branch keyword)}
           call# (fn [sym# & args#] (apply (requiring-resolve sym#) args#))]
       (cond
-        (nil? handle#) (refuse# "The cluster layer is not running." {:seon.dev.mcp/cluster ~cluster})
-        (= "list" ~action) {:seon.dev.mcp/cluster-branch own#
-                            :seon.dev.mcp/branches (vec (sort (call# 'seon.cluster.registry/roster (:seon.store/store store#))))}
-        (= own# branch#) (refuse# "The cluster's own branch is shared; name a lane branch." {})
-        (= "create" ~action)
-        (let [source# @connection#
-              from# (call# 'seon.db/commit-id source#)
-              result# (call# 'seon.cluster.registry/branch!
-                             (assoc store# :seon.store/branch branch# :seon.cluster.registry/from from#))]
-          (if (:seon.cluster/created? result#)
-            ;; the fork basis: the branch inherits every datom up to it
-            (assoc result# :seon.cluster.registry/from from#
-                   :seon.db/basis-t (call# 'seon.db/basis-t source#))
-            (refuse# "The branch already exists; retire it or name another." {})))
-        (some (comp :seon.agent/id second) held#)
-        (refuse# "Agents hold this branch; disarm them first." {:seon.agent/id (vec (keep (comp :seon.agent/id second) held#))})
-        :else
-        (do (doseq [[_# execution#] (sort-by (comp :seon.agent/owns-connection? second) held#)]
-              (call# 'seon.cluster.agent/release-context! execution#))
-            (call# 'seon.cluster.registry/retire-branch! (assoc store# :seon.store/branch branch#))
-            {:seon.store/branch branch# :seon.dev.mcp/retired? true})))))
+        (nil? handle#) {:seon.error/at (java.util.Date.) :seon.error/layer :seon.dev.mcp/branch
+                        :seon.error/operation '~(symbol "seon.dev.mcp" (str "branch-" action))
+                        :seon.error/message "The cluster layer is not running." :seon.dev.mcp/cluster ~cluster}
+        (= "list" ~action) (call# 'my.agent/branches context#)
+        (= "create" ~action) (call# 'my.agent/create-branch! request# context#)
+        :else (call# 'my.agent/retire-branch! request# context#)))))
 
 (defn- execute-branch
   [{:keys [root cluster action timeout_ms] branch :name}]

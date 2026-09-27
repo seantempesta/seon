@@ -1,6 +1,8 @@
+diff --git a/script/seon/dev/mcp.clj b/script/seon/dev/mcp.clj
+index 7e0691580..8b682807e 100644
 --- a/script/seon/dev/mcp.clj
 +++ b/script/seon/dev/mcp.clj
-@@ -476,49 +476,25 @@
+@@ -476,49 +476,26 @@
  
  (defn- branch-form
    "Create (off the cluster head's commit), list or retire one named branch
@@ -8,6 +10,7 @@
 +  through the one entrance agents use, `my.agent/create-branch!`,
 +  `my.agent/branches` and `my.agent/retire-branch!`, with the cluster's
 +  store, connection and routing as the context."
++  {:malli/schema [:=> [:cat :string :string [:maybe :string]] :string]}
    [cluster action branch]
    (pr-str
     `(let [instance# (get @@(requiring-resolve 'seon.operator.runtime/running-instances) ~cluster)
@@ -63,6 +66,8 @@
  
  (defn- execute-branch
    [{:keys [root cluster action timeout_ms] branch :name}]
+diff --git a/test/seon/dev/mcp_bridge_test.clj b/test/seon/dev/mcp_bridge_test.clj
+index b6011a8ac..2db2f8ac3 100644
 --- a/test/seon/dev/mcp_bridge_test.clj
 +++ b/test/seon/dev/mcp_bridge_test.clj
 @@ -680,10 +680,10 @@

@@ -680,10 +680,10 @@
       (is (= "hi\n" (printed "(println \"hi\")" branch)) "the run's receipts carry what it printed")
       (is (nil? ((requiring-resolve 'sci.core/resolve) (:seon.sci.eval/ctx (get instances cluster)) (symbol "user" probe)))
           "the shared context never sees it")
-      (is (contains? (set (:seon.dev.mcp/branches (run "list" nil))) (keyword branch)))
-      (is (:seon.dev.mcp/retired? (run "retire" branch)))
+      (is (contains? (:my.agent/roster (run "list" nil)) (keyword branch)))
+      (is (:my.agent/retired? (run "retire" branch)))
       (is (not (held)) "retire released the host's execution")
-      (is (not (contains? (set (:seon.dev.mcp/branches (run "list" nil))) (keyword branch))))
+      (is (not (contains? (:my.agent/roster (run "list" nil)) (keyword branch))))
       (is (:seon.error/message (run "retire" (name (get-in @(:seon.db/connection (:seon.turn.loop/cluster (get instances cluster))) [:config :branch]))))
           "the cluster's own branch refuses")
       (finally
@@ -713,7 +713,7 @@
         cluster (first (sort (keys instances)))
         data (result-data ((bridge-var 'execute-branch)
                                   {:root @(bridge-var 'project-root) :cluster cluster :action "list"}))]
-    (is (vector? (:seon.dev.mcp/branches (read-string (:seon.dev.mcp/value data)))) (pr-str data))
+    (is (set? (:my.agent/roster (read-string (:seon.dev.mcp/value data)))) (pr-str data))
     (is (not (contains? data :seon.dev.mcp/events)))))
 
 (deftest ^{:seon/tasks #{"18051e0ee3e2"}} a-run-reply-is-the-response-the-agents-context-reads

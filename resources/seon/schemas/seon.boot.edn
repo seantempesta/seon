@@ -43,6 +43,9 @@
                 "must be a java.util.concurrent Executor for I/O work"
                 :gen/gen seon.flow/executor-generator}
                seon.flow/executor?]]],
+            :instance-ctx
+            [:and {:description "A boot instance's cluster context: absent during a partial boot (the REPL opens before the store), so it is never supplied from the calling evaluation's world."}
+             :seon.sci.eval/ctx]
             :instance
             [:map
              [:seon.boot/config :seon.boot/config]
@@ -58,7 +61,7 @@
              [:seon.boot/cluster-connection
               {:optional true}
               :seon.store/connection-object]
-             [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx]
+             [:seon.sci.eval/ctx {:optional true} :seon.boot/instance-ctx]
              [:seon.boot/config-result
               {:optional true}
               :seon.reconcile/result]

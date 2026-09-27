@@ -41,6 +41,7 @@
             [malli.core :as m]
             [malli.registry :as mr]
             [malli.instrument :as mi]
+            [seon.batch]
             [seon.db :as db]
             [seon.error.refusal :as error]
             [seon.schema :as schema]
@@ -541,6 +542,22 @@
     {:seon.call-preparation/ambiguous? true
      :seon.call-preparation/candidates (candidate-indexes derived)}))
 
+(def ^:private world-candidates
+  "A supplied default for each member of an evaluation's world
+  (`seon.batch/world-members`), keyed by the schema name a function declares
+  it under. Its value comes from the calling evaluation's world
+  (`seon.batch/*world*`) and nowhere else."
+  (into {} (for [[schema-key member] seon.batch/world-members]
+             [schema-key {:seon.call-preparation/key member
+                          :seon.call-preparation/schema-key schema-key
+                          :seon.call-preparation/supplier-symbol `seon.batch/world-members}])))
+
+(defn- world-member?
+  "Whether `schema-key` names a member of an evaluation's world."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "An argument slot's declared schema is any Malli form.", :gen/elements [nil :k [] {}]}]] :boolean]}
+  [schema-key]
+  (contains? seon.batch/world-members schema-key))
+
 (defn- slot-of
   [candidate position]
   {:seon.fn.argument/index (long position)
@@ -552,13 +569,17 @@
   "One compiled arity joined to the supplied defaults by declared schema name:
   a slot by its schema name, a map entry by its key AND value schema name, and
   a map whose required entries are all supplied as a slot of its own."
+  {:malli/schema [:=> [:cat [:map-of :qualified-keyword :seon.call-preparation/supplied-default] :map]
+                  :seon.call-preparation/arity-plan]}
   [index {arguments ::arity-arguments variadic? :seon.call-preparation/variadic? :as arity}]
   (let [entries (vec (for [{position :seon.fn.argument/index map-entries ::map-entries} arguments
                            [entry-key optional? value] map-entries
                            :let [candidate (get index value)]
-                           ;; Only a REQUIRED entry is supplied: an optional one's
-                           ;; absence is the caller's meaning, never a gap to fill.
-                           :when (and (not optional?)
+                           ;; A required entry is supplied, and so is an optional one
+                           ;; whose schema is a world member (owner ruling): a function
+                           ;; whose meaning needs that member absent declares another
+                           ;; name. Any other optional entry's absence is the caller's.
+                           :when (and (or (not optional?) (world-member? value))
                                       (= entry-key (:seon.call-preparation/key candidate)))]
                        (assoc (slot-of candidate position) :seon.call-preparation/entry-key entry-key)))
         slots (vec (for [{position :seon.fn.argument/index rest? :seon.fn.argument/rest?
@@ -585,9 +606,13 @@
       (assoc :seon.call-preparation/argument-validators (mapv (comp m/validator ::argument-schema) arguments)))))
 
 (defn- planned-arities
-  "`sym`'s contract arities in `projection` planned against `current`, or nil."
+  "`sym`'s contract arities in `projection` planned against `current`, or nil.
+  A world member's schema name is planned from the world, whatever row also
+  names it."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.call-preparation/snapshot :qualified-symbol]
+                  [:maybe :seon.call-preparation/arity-plans]]}
   [projection current sym]
-  (let [index (by-schema-key (:seon.call-preparation/supplied-defaults current))]
+  (let [index (merge (by-schema-key (:seon.call-preparation/supplied-defaults current)) world-candidates)]
     (some->> (get (contract-arities projection) sym)
              (mapv #(arity-plan index %)))))
 
@@ -604,7 +629,7 @@
   (let [entities (db/q database entity-query)
         current (when-not (db/read-refusal? entities) (snapshot database (db/carried-projection database)))]
     (or (first (filter db/read-refusal? [entities current]))
-        (->> (for [{order :seon.fn.arity/order entries :seon.call-preparation/entries} (planned-arities database current sym)
+        (->> (for [{order :seon.fn.arity/order entries :seon.call-preparation/entries} (planned-arities (db/carried-projection database) current sym)
                    {index :seon.fn.argument/index entry-key :seon.call-preparation/entry-key} entries]
                [order index entry-key])
              sort
@@ -779,14 +804,45 @@
 
 
 
+(declare supply-from-world supply-from-row)
+
 (defn supply
-  "Call one supplied default's supplier with this call's environment.
+  "One supplied value: a world member from the calling evaluation's world,
+  any other row's by calling its supplier with this call's environment.
 
   The symbol is resolved LIVE, so hot reload stays visible and no cached
   plan captures a function root. The result is validated against the row's
   value schema even when the ordinary instrumentation dial is `:record`: a
   wrong-shaped success is the supplier's fault and must never reach the
   target disguised as its own contract violation."
+  {:malli/schema
+   [:=> [:cat :seon.call-preparation/snapshot :seon.env/environment
+         :seon.call-preparation/slot :seon.fn/sym]
+    [:or :seon.schema/value :seon.call-preparation/unavailable-error :seon.call-preparation/invalid-supplied-value-error]]}
+  [current environment slot sym]
+  (if (= `seon.batch/world-members (:seon.call-preparation/supplier-symbol slot))
+    (supply-from-world slot sym)
+    (supply-from-row current environment slot sym)))
+
+(defn- supply-from-world
+  "The calling evaluation's world member for `slot`, or the refusal naming
+  the schema key the world lacks: no global, no default, never nil."
+  {:malli/schema [:=> [:cat :seon.call-preparation/slot :seon.fn/sym]
+                  [:or :seon.schema/value :seon.call-preparation/unavailable-error]]}
+  [slot sym]
+  (let [member (:seon.call-preparation/key slot)
+        world seon.batch/*world*
+        v (get world member ::absent)]
+    (if (or (nil? v) (= ::absent v))
+      (unavailable sym slot {:seon.error/message
+                             (str "This evaluation's world holds no "
+                                  (some (fn [[k m]] (when (= m member) k)) seon.batch/world-members)
+                                  (when-not world " (no evaluation is running on this thread)")
+                                  "; pass it explicitly.")})
+      v)))
+
+(defn- supply-from-row
+  "Call one supplied-default row's supplier with this call's environment."
   {:malli/schema
    [:=> [:cat :seon.call-preparation/snapshot :seon.env/environment
          :seon.call-preparation/slot :seon.fn/sym]

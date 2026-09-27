@@ -179,7 +179,10 @@
           :custody-request
           [:map
            {:description "The cluster custody one scope hands to another as a value. The connection present means the scope runs as that cluster's own work and the elided seon.db arities reach it; absent means no custody, and those arities refuse."}
-           [:seon.db/connection {:optional true} :seon.db/connection]],
+           [:seon.db/connection {:optional true} :seon.db/custody-connection]],
+          :custody-connection
+          [:and {:description "A custody request's connection: its absence means no custody, so it is never supplied from the calling evaluation's world (a world member's schema name would be)."}
+           :seon.db/connection],
           :connection-id [:vector [:or :uuid :keyword]],
           :connection-identity
           [:map

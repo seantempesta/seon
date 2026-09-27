@@ -28,7 +28,7 @@
             [seon.sci.eval :as eval]
             [seon.sci.forgive :as forgive]
             [seon.fn :as sfn]
-            [seon.sci.pinned :as pinned]
+            [seon.sci.observe :as observe]
             [seon.turn.batch :as turn.batch]
             [seon.turn.world :as world]))
 
@@ -99,7 +99,7 @@
          {:seon.batch/text text
           :seon.batch/world (cond-> (assoc w :seon.turn/id (str "op3-" (subs (str (random-uuid)) 0 8)))
                               (:writer opts) (assoc :seon.db/writer (:writer opts)))
-          :seon.batch/observe pinned/observe :seon.sci.pinned/roots (pinned/observer-state)}
+          :seon.batch/observe observe/observe}
          (dissoc opts :writer :mode)))
 
 (defn run
@@ -358,12 +358,15 @@
             here (world/with-world w probe)
             bare (.get (.submit pool ^Callable (fn [] (try (probe) (catch Throwable t [:refused (ex-message t)])))))
             carried (.get (.submit pool ^Callable (fn [] (world/with-world w probe))))
-            ;; a whole batch whose evaluate stage hops to the pool, carrying the world
+            ;; a whole batch whose evaluate stage hops to the pool, carrying the
+            ;; world as a value; the observation scope is the evaluation's own
+            ;; dynamic binding, conveyed as a future conveys it (bound-fn): a
+            ;; write on the pool thread is observed and stored
             hop-req (assoc (turn.batch/code-request (request w "(defn hopf [x] x)\n(:seon.fn/sym (seon.db/pull [:seon.fn/sym] [:seon.fn/sym 'user/hopf]))" {}))
                            :seon.batch/evaluate (fn [req form working]
-                                                  (.get (.submit pool ^Callable
-                                                                 (fn [] (world/with-world (:seon.batch/world req)
-                                                                          #(seon.sci.batch/evaluate req form working)))))))
+                                                  (let [^Callable task (bound-fn [] (world/with-world (:seon.batch/world req)
+                                                                                      #(seon.sci.batch/evaluate req form working)))]
+                                                    (.get (.submit pool task)))))
             b (batch/evaluate-batch hop-req)]
         {:pass? (and (= "root" (:seon.agent/id here)) (= here carried)
                      (not= here bare)
@@ -869,6 +872,108 @@
      :created (dissoc created :seon.cluster.registry/from) :refusals [(:seon.error/message again) (:seon.error/message own)]
      :retired [retired retired-unheld]}))
 
+;;; --- The supply stage (S3a): world members filled from the calling world -------
+
+(defn- scratch-call-preparation
+  "src/seon/call_preparation.clj as it lands, loaded as its own scratch
+  namespace (no live Var is redefined): its plan and prepare over a contract."
+  []
+  (let [text (-> (slurp "/Users/sean/src/seon/src/seon/call_preparation.clj")
+                 (str/replace-first "(ns seon.call-preparation" "(ns one-path-proof.call-preparation")
+                 (str/replace "'seon.call-preparation/state?" "'one-path-proof.call-preparation/state?")
+                 (str/replace "[:fn seon.call-preparation/state?]" "[:fn one-path-proof.call-preparation/state?]"))]
+    (load-string text)
+    (fn [sym] @(ns-resolve 'one-path-proof.call-preparation sym))))
+
+(defn- scratch-plan
+  "The invocation plan the landing arms `contract` with, under `registry`,
+  from the world members alone (no supplied-default rows)."
+  [cp contract registry]
+  (let [arities ((cp 'arity-facts) (m/schema contract {:registry registry}))
+        index @(ns-resolve 'one-path-proof.call-preparation 'world-candidates)
+        plans (mapv #((cp 'arity-plan) index %) arities)]
+    ((cp 'compiled-plan) 'user/target plans)))
+
+(defproof :supply-from-the-world :supply
+  "S3a: an omitted world member (positional or a missing map key, required or optional) is filled from the calling evaluation's world before validation; a caller's own value (another branch's connection) is never replaced; a non-member optional key stays absent; no argument is prefixed when an arity already matches; a member the world lacks refuses by name; a render request's and a custody request's connection (renamed) are never filled"
+  (let [cp (scratch-call-preparation)
+        prepare (cp 'prepare)
+        live (db/carried-projection (wdb (world)))
+        mine (merge (edn/read-string (slurp "/Users/sean/src/seon/resources/seon/schemas/seon.db.edn"))
+                    (edn/read-string (slurp "/Users/sean/src/seon/resources/seon/schemas/seon.render.walk.edn")))
+        registry (mr/composite-registry mine (:seon.schema.projection/registry live))
+        w (world)
+        conn (:seon.db/connection w)
+        other (:seon.db/connection *exec*)
+        blob-get [:=> [:cat :seon.db/connection :string] :any]
+        indexed [:=> [:cat :seon.fn/index-request] :any]
+        custody [:=> [:cat :seon.db/custody-request :int] :any]
+        walk [:=> [:cat :seon.render.walk/continue-request] :any]
+        run (fn [world contract args]
+              (binding [seon.batch/*world* world]
+                (prepare nil (:seon.env/environment world) (scratch-plan cp contract registry) args)))
+        positional (run w blob-get ["d"])
+        passed (run w blob-get [::other-connection "d"])
+        map-filled (run w indexed [{:seon.fn/changed-paths #{"a"}}])
+        map-kept (run w indexed [{:seon.db/connection other}])
+        custody-args (run w custody [{} 1])
+        walk-args (run w walk [{:seon.render.walk/continuation-node 'a/b :seon.render.data/cursor {}}])
+        lacking (run (dissoc w :seon.db/connection) blob-get ["d"])]
+    {:pass? (and (identical? conn (first positional)) (= "d" (second positional))
+                 (= [::other-connection "d"] passed)
+                 (identical? conn (:seon.db/connection (first map-filled)))
+                 (not (contains? (first map-filled) :seon.fn/root))
+                 (identical? other (:seon.db/connection (first map-kept)))
+                 (= [{} 1] custody-args)
+                 (not (contains? (first walk-args) :seon.db/connection))
+                 (not (contains? (first walk-args) :seon.sci.eval/ctx))
+                 (= :seon.db/connection (:seon.call-preparation/unavailable-key lacking))
+                 (str/includes? (str (:seon.error/message lacking)) ":seon.db/connection"))
+     :lacking (:seon.error/message lacking)
+     :walk (keys (first walk-args)) :custody custody-args}))
+
+(defproof :supply-per-world :supply
+  "S3a: two concurrent test agents in two worlds each receive their own world's connection, and a body moved to another thread receives the world it carries (with-world), never the submitting thread's"
+  (let [cp (scratch-call-preparation)
+        prepare (cp 'prepare)
+        registry (:seon.schema.projection/registry (db/carried-projection (wdb (world))))
+        plan (scratch-plan cp [:=> [:cat :seon.db/connection :string] :any] registry)
+        ea (acquire!) eb (acquire!)]
+    (try
+      (let [requester (:seon.db/connection *exec*)
+            wa (world/test-agent-world ea requester {:seon.agent/id "root"})
+            wb (world/test-agent-world eb requester {:seon.agent/id "root"})
+            call (fn [] (first (prepare nil (:seon.env/environment seon.batch/*world*) plan ["d"])))
+            [a b] [(future (world/with-world wa call)) (future (world/with-world wb call))]
+            hop (binding [seon.batch/*world* wa] @(future (world/with-world wb call)))]
+        {:pass? (and (identical? @a (:seon.db/connection wa)) (identical? @b (:seon.db/connection wb))
+                     (not (identical? @a @b)) (identical? hop (:seon.db/connection wb)))})
+      (finally (release! ea) (release! eb)))))
+
+(defproof :supply-reads-the-working-value :supply
+  "S3a: the world the fold binds around each evaluation holds the batch's working value (every earlier form's validated facts), the database a supplied :seon.db/database-value reads"
+  (on-fresh-branch
+   (fn []
+     (let [seen (atom [])
+           w (world)
+           req (turn.batch/code-request (request w "(defn supply-probe [x] x)\n(+ 1 2)" {}))
+           req (update req :seon.batch/evaluate
+                       (fn [ev] (fn [r form working]
+                                  (swap! seen conj [(identical? working (:seon.db/db seon.batch/*world*))
+                                                    (stored? (:seon.db/db seon.batch/*world*) 'user/supply-probe)])
+                                  (ev r form working))))
+           b (batch/evaluate-batch req)]
+       {:pass? (and (applied? b) (= [[true false] [true true]] @seen)) :seen @seen}))))
+
+(defproof :blob-get-without-connection :supply
+  "A digest is data; (seon.blob/get digest) with no connection returns the stored content through the one path"
+  (on-fresh-branch
+   (fn []
+     (let [w (world)
+           digest ((requiring-resolve 'seon.blob/put!) (:seon.db/connection w) "the whole value")
+           b (run w (str "(seon.blob/get " (pr-str digest) ")"))]
+       {:pass? (= ["the whole value"] (values b)) :values (values b) :digest digest}))))
+
 (def landing-files
   "The six namespaces and the schema resource step S3 copies into the tree."
   ["src/seon/batch.clj" "src/seon/sci/forgive.clj" "src/seon/sci/batch.clj" "src/seon/sci/arm.clj"
@@ -920,7 +1025,7 @@
   (let [w (world)
         req (assoc (turn.batch/code-request (request w "42" {}))
                    :seon.batch/observe (fn [r working on-write thunk]
-                                         (pinned/observe r working on-write thunk)
+                                         (observe/observe r working on-write thunk)
                                          (throw (ex-info "stop failed" {}))))
         b (batch/evaluate-batch req)]
     {:pass? (and (= [42] (values b)) (some #(str/includes? % "stop failed") (diags b)) true)
@@ -1361,18 +1466,21 @@
                  :tasks ["a-trivial-agent-turn-takes-eleven-seconds" "history-acquisition-decodes-stored-read-plans" "call-reach-is-recomputed-per-render"]}}))
 
 (defproof :feedback-hub-fresh :timing
-  "Reaching-test feedback for a changed hub (10 and 22 reaching tests) on a freshly committed head, from the batch's changed definition and digest (no reach digest re-derived): under 50 ms fresh; a 150-test hub reported"
+  "Reaching-test feedback for a changed hub (10 and 22 reaching tests) on a freshly committed head, from the batch's changed definition and digest (no reach digest re-derived): under 50 ms for the first call on the fresh head, with the armed breakdown; a 150-test hub reported. A later call on the same head reuses the head's declaration reads (content-keyed), so only the first is fresh"
   (on-fresh-branch
-   #(let [_ (run (world) "(def feedback-fresh-head 1)")
-          db (wdb (world))
-          reaching @#'turn.batch/reaching-tests
-          time (fn [hub] (let [t0 (System/nanoTime)
-                               r (reaching db db {hub "a moved digest"})]
-                           {:fresh-ms (ms-since t0) :tests (count (:seon.feedback/tests r)) :counts (:seon.feedback/counts r)}))
-          small (time 'seon.render.value/bounded-text)
-          mid (time 'seon.repl/shown-value)
-          big (time 'seon.config/effective)
-          ;; on default's own head its recorded results count (a branch's never certify it)
+   #(let [reaching @#'turn.batch/reaching-tests
+          fresh (fn [hub i]
+                  (let [_ (run (world) (str "(def feedback-fresh-head " i ")"))
+                        db (wdb (world))
+                        m (seon.profile/begin)
+                        t0 (System/nanoTime)
+                        r (reaching db db {hub "a moved digest"})
+                        ms (ms-since t0)]
+                    {:fresh-ms ms :tests (count (:seon.feedback/tests r)) :counts (:seon.feedback/counts r)
+                     :armed (vec (take 6 (drop 2 (:seon.profile/lines (seon.profile/explain m 8)))))}))
+          small (fresh 'seon.render.value/bounded-text 0)
+          mid (fresh 'seon.repl/shown-value 1)
+          big (fresh 'seon.config/effective 2)
           head (live-db)
           t0 (System/nanoTime)
           on-head (reaching head head {'seon.repl/shown-value "a moved digest"})
@@ -1381,20 +1489,6 @@
                    (pos? (get-in on-head [:seon.feedback/counts :stale] 0)) (< head-ms 50))
        :bounded-text small :shown-value mid :config-effective big
        :default-head {:ms head-ms :counts (:seon.feedback/counts on-head)}})))
-
-(defn- used-heap []
-  (System/gc) (System/gc)
-  (.getUsed (.getHeapMemoryUsage (java.lang.management.ManagementFactory/getMemoryMXBean))))
-
-(defn retained-mb
-  "[value retained-MB]: the heap still used, after full collections, while
-  `f`'s value (a batch) is held, over the heap used before it ran. Other
-  threads' allocation is included, so it is an upper bound."
-  [f]
-  (let [before (used-heap)
-        v (f)
-        held (used-heap)]
-    [v (/ (Math/round (/ (- held before) 1e4)) 100.0) (identity v)]))
 
 (defproof :time-one-defn :timing
   "One contracted defn, warm: read, evaluate, derive, validated apply, gate, recorded commit"

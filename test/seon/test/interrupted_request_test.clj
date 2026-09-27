@@ -149,8 +149,8 @@
        (is (not (contains? (first latest) :seon.test/failure-message))
            "a result read builds no failure text")
        (is (< allocated (quot (count huge) 2)) (str "the read allocated " allocated " bytes"))
-       (is (str/includes? (sut/failure-message (first latest)) "seon.blob/get")
-           "the shown text names the blob")))))
+       (is (not (str/includes? (sut/failure-message (first latest)) "seon.blob/get"))
+           "the shown text is the claim only: its blob digest is data on the report")))))
 
 (deftest ^{:seon.test/long "admit-run measured 13.7-15.3 s on default pid 90963 (2026-09-23), the rest under 1 s: it derives the program digest from every program entity changed since the source seal (docs/seon/issues/admit-run-derives-the-program-digest-from-every-change-since-the-seal.md)." :seon.test/long-ms 30000}
   a-deleted-tests-red-member-is-history-not-a-failed-test
