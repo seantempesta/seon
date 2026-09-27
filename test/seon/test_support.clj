@@ -830,11 +830,15 @@
          rows (seon.fn/source-rows
                database (program/shapes-in projection) ns-row
                source (set (keys (:seon.schema.projection/forms projection))))]
+     ;; Finalized as an agent's definition is: its contract's parsed facts
+     ;; (`seon.fn/contract-facts-row`), then the digest of the final row.
      (revised-row
       database
-      (or (some #(when (= declaration-symbol (get % attribute)) %) rows)
-          (throw (ex-info "The fixture source did not define the requested declaration."
-                          {:seon.program/identity identity :seon.program/source source})))
+      (seon.fn/contract-facts-row
+       projection ns-row
+       (or (some #(when (= declaration-symbol (get % attribute)) %) rows)
+           (throw (ex-info "The fixture source did not define the requested declaration."
+                           {:seon.program/identity identity :seon.program/source source}))))
       overrides ns-row))))
 
 (defn replacement-tx
