@@ -167,8 +167,11 @@
            cache (render/shared-cache ctx)
            pull-keys (set (keys @cache))
            observed-at (observed-after-seed)]
-       (is (= [[:seon.agent/id "root"]] (:seon.render.walk/order before)))
-       (is (= 1 (count pull-keys)) "the real root was pulled")
+       ;; The root's page walks its one-hop attachments (plan, settings,
+       ;; runtime) and namespaces, so the root is the first of
+       ;; several members; the invariance below is over that whole page.
+       (is (= [:seon.agent/id "root"] (first (:seon.render.walk/order before))))
+       (is (seq pull-keys) "the real root was pulled")
        (doseq [at [observed-at (Date. (+ (.getTime observed-at) 60000))]]
          (is (= 1 (schedule/fire-due! connection "root" at (execution-context))))
          (is (true? (db/read-evidence-current?
@@ -414,6 +417,9 @@
   ;; two entries this assertion happens to read.
   (test-support/with-database
    (fn [connection]
+     ;; cluster-handle reads its dials from the named cluster's effective
+     ;; config (4d163db4b); a member's world holds only "default" until seeded
+     (test-support/seed-cluster! connection "seon.schedule-test")
      (let [environment (test-support/environment "seon.schedule-test"
                                                  connection)
            handle (env/carry

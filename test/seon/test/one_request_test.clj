@@ -419,8 +419,11 @@
                             :seon.test/policy :named
                             :seon.test/identities #{'seon.test.one-request-test/refused-recording}})
            refusal @refused
+           ;; The refusal's own declared operation (the writer's) names the
+           ;; fault; the observing boundary's (`seon.test/admit-run`) is used
+           ;; only when the failure declares none (seon.error/prepare, 2f380a4d6).
            recorded {:seon.error/signature
-                     (db/q '[:find ?signature . :where [?e :seon.error/operation seon.test/admit-run]
+                     (db/q '[:find ?signature . :where [?e :seon.error/operation seon.db/transact!]
                              [?e :seon.error/signature ?signature]]
                            (db/db connection))}]
        (is (= {:error ::writer-refused} (:seon.error/data (peek (:seon.error/chain refusal))))

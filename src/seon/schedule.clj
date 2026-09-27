@@ -622,7 +622,11 @@
     (catch Throwable failure
       {:seon.error/declared-schema :seon.schedule/handler-failed-error
        :seon.maintenance.settlement/result
-       (cond-> (seon.error.refusal/diagnostic (Date.) :seon.schedule/execution 'seon.schedule/invoke-handler
+       ;; The failure's own declared operation names it (the producer declares
+       ;; identity); this boundary's name only when the failure declares none.
+       (cond-> (seon.error.refusal/diagnostic (Date.) :seon.schedule/execution
+                (let [operation (:seon.error/operation (ex-data failure))]
+                  (if (qualified-symbol? operation) operation 'seon.schedule/invoke-handler))
                 {:seon.error/message (or (ex-message failure) "The scheduled handler failed.")
          :seon.schedule/failed-handler-symbol function
          :seon.error/throwable failure})

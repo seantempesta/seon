@@ -409,12 +409,19 @@
           (.getStackTrace failure))))
 
 (defn- contract-violation-data
-  "The reporter's declared function/arm evidence, from an admitted source."
+  "The reporter's declared function/arm evidence: the `ex-data` of the source's
+  Throwable (bare or flow's `::flow/ex`), else the source itself when it is
+  the reporter's map. It reads the live source, never its admission: since
+  ab6b71e2b the admitted evidence replaces the Throwable with its cause chain,
+  and a read of the admission lost every contract fault's function and arm."
   {:malli/schema [:=> [:cat :seon.error/source]
-                  [:or :nil :map]]}
+                  [:or :nil [:map [:seon.instrument/fn :seon.instrument/fn]
+                             [:seon.instrument/arm [:enum :input :output :guard]]]]]}
   [source]
-  (let [observation (if (map? (::flow/ex source)) (:data (::flow/ex source)) source)
-        data observation]
+  (let [failure (throwable source)
+        data (cond failure (ex-data failure)
+                   (map? (::flow/ex source)) (:data (::flow/ex source))
+                   :else source)]
     (when (and (map? data)
                (qualified-symbol? (:seon.instrument/fn data))
                (#{:input :output :guard} (:seon.instrument/arm data)))
@@ -516,6 +523,24 @@
           fact
           (recur (max 1 (quot field-limit 2))))))))
 
+(defn- offending-evidence
+  "One offending value as a stored record keeps it: whole when its canonical EDN
+  fits `evidence-bytes`, else its admission under the evidence caps (the
+  missing marker over them). The bound is on the value's bytes, as the fact's
+  own evidence is (`fit-fact-payload`): admission bounds its print-node bytes,
+  about ten times the value's, so a 1,731-character value measured 16,410
+  admitted bytes and was stored as the marker under a 16,384-byte bound."
+  {:malli/schema [:=> [:cat :seon.error/source :seon.sci.admit/caps :seon.sci.admit/caps
+                       [:int {:min 1}] [:maybe :seon.schema/projection]]
+                  :seon.error/source]}
+  [value caps field-caps evidence-bytes projection]
+  (let [whole (bounded-admission value caps projection)]
+    (:seon.sci.admit/value
+     (if (and (not (::marker whole))
+              (<= (utf8-size (value-edn whole)) evidence-bytes))
+       whole
+       (bounded-admission value field-caps projection)))))
+
 (defn- offending-record
   "What a stored result keeps of an offending value: each problem's path with
   the value at it, admitted under the fault's evidence bound (over it, the
@@ -541,8 +566,8 @@
                                     :seon.error/path (vec (:seon.error/path problem)))
                        (find problem :seon.error/offending)
                        (assoc :seon.error/offending
-                              (:seon.sci.admit/value
-                               (bounded-admission (:seon.error/offending problem) field-caps projection)))))
+                              (offending-evidence (:seon.error/offending problem)
+                                                  caps field-caps evidence-bytes projection))))
                    problems)}
       (not (::marker whole))
       (assoc :seon.error/offending-digest (id/id (:seon.sci.admit/value whole) 64)))))
@@ -650,8 +675,7 @@
         ;; number when a caller omitted it was a silent fallback on the
         ;; ordinary path, which is a defect even while it is right.
         inline-limit evidence-bytes
-        projected-source (:seon.sci.admit/value admitted)
-        instrument-data (contract-violation-data projected-source)
+        instrument-data (contract-violation-data source)
         flow? (map? source)
         error-value (error.refusal/references projection
                                               (if failure (refusal failure) source))
@@ -1909,28 +1933,37 @@
 
 (defn declared-output-validators
   "Compile the named error alternatives of one declared arity.
-  This inspects the supplied contract, never an error value or the registry population."
-  {:malli/schema [:=> [:cat :seon.schema/projection :seon.schema/value [:int {:min 0}]]
+  This inspects the supplied contract, never an error value or the registry population.
+
+  ## Edge cases
+
+  - A function with no contract (`authored` nil) declares no alternatives: `[]`.
+    Compiling nil threw `::m/invalid-schema`, which `seon.schedule/invoke-handler`
+    caught as the handler's own failure, so every uncontracted handler's result
+    was recorded as a failure of `seon.schedule/invoke-handler`."
+  {:malli/schema [:=> [:cat :seon.schema/projection [:maybe :seon.schema/value] [:int {:min 0}]]
                   [:vector [:tuple :qualified-keyword :seon.schema/compiled-validator]]]}
   [projection authored argument-count]
-  (schema/projection-cache-value
-   projection [::declared-output-validators authored argument-count]
-   (fn []
-     (let [contract (m/schema
-                     (schema/compilable-form authored (schema/predicate-functions-in projection))
-                     {:registry (:seon.schema.projection/registry projection)})]
-       (into []
-             (comp (map m/-function-info)
-                   (filter #(and (<= (:min %) argument-count)
-                                 (or (nil? (:max %)) (<= argument-count (:max %)))))
-                   (mapcat #(mu/subschemas (:output %)))
-                   (filter (fn [{:keys [schema in]}]
-                             (and (empty? in)
-                                  (qualified-keyword? (m/form schema))
-                                  (not= :seon.error/base (m/form schema))
-                                  (internal/extends-schema? schema :seon.error/base))))
-                   (map (fn [{:keys [schema]}] [(m/form schema) (m/validator schema)])))
-             (m/-function-schema-arities contract))))))
+  (if (nil? authored)
+    []
+    (schema/projection-cache-value
+     projection [::declared-output-validators authored argument-count]
+     (fn []
+       (let [contract (m/schema
+                       (schema/compilable-form authored (schema/predicate-functions-in projection))
+                       {:registry (:seon.schema.projection/registry projection)})]
+         (into []
+               (comp (map m/-function-info)
+                     (filter #(and (<= (:min %) argument-count)
+                                   (or (nil? (:max %)) (<= argument-count (:max %)))))
+                     (mapcat #(mu/subschemas (:output %)))
+                     (filter (fn [{:keys [schema in]}]
+                               (and (empty? in)
+                                    (qualified-keyword? (m/form schema))
+                                    (not= :seon.error/base (m/form schema))
+                                    (internal/extends-schema? schema :seon.error/base))))
+                     (map (fn [{:keys [schema]}] [(m/form schema) (m/validator schema)])))
+               (m/-function-schema-arities contract)))))))
 
 (defn declared-schema-keys
   "Canonical base-extension declarations in this projection, excluding aliases.

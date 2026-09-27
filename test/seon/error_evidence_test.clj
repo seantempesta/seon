@@ -41,6 +41,9 @@
 (deftest a-capped-turn-fault-is-recoverable-in-full-from-its-blob
   (support/with-database
    (fn [connection]
+     ;; cluster-handle reads its dials from the named cluster's effective
+     ;; config (4d163db4b); a member's world holds only "default" until seeded
+     (support/seed-cluster! connection "evidence-turn")
      (let [operation 'seon.error-evidence-test/turn-boundary
            cluster (support/cluster-handle
                     {:seon.db/connection connection
