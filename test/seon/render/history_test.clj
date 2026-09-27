@@ -76,10 +76,9 @@
                 (selected message :seon.message/to)))
          (let [recipient (:seon.message/to (render/transacted message))
                form (message/inbox-form recipient)]
-           (is (= 'seon.db/pull (first form)))
-           (is (contains? (first (second (second form))) :seon.message/_to)
-               (pr-str form))
-           (is (= recipient (last form)))))
+           (is (= 'my.message/inbox (first form))
+               "the unread read, derived from acknowledgements")
+           (is (contains? (second form) :seon.agent/id) (pr-str form))))
        (testing "an attribute with no declared pair reaches the generic printer"
          ;; Owner ruling 2026-09-17 (decision 9, option 1): asking about one
          ;; attribute never silently answers about the entity, so every

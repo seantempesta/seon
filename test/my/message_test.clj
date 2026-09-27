@@ -37,10 +37,12 @@
       (is (= [{:my.message/id "m-1"
                :my.message/from "alice"
                :my.message/at (db/q '[:find ?at . :where [?m :seon.message/id "m-1"] [?m :seon.message/to _ ?tx] [?tx :db/txInstant ?at]] @connection)
-               :my.message/content "First message"}
+               :my.message/content "First message"
+               :seon.render/operations ['(my.message/received! "m-1")]}
               {:my.message/id "m-2"
                :my.message/at (db/q '[:find ?at . :where [?m :seon.message/id "m-2"] [?m :seon.message/to _ ?tx] [?tx :db/txInstant ?at]] @connection)
-               :my.message/content (apply str (repeat 200 "x"))}]
+               :my.message/content (apply str (repeat 200 "x"))
+               :seon.render/operations ['(my.message/received! "m-2")]}]
              (message/inbox @connection "bob")))
       (is (= ["m-1" "m-2"]
              (mapv :my.message/id

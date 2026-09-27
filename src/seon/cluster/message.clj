@@ -485,22 +485,32 @@
    (:seon.message/id message)])
 
 (defn inbox-form
-  "Read the recipient's messages through the exact reverse inbox edge."
+  "Read the recipient's unread messages, oldest first, through `my.message/inbox`.
+
+  Unread derives from the acknowledgement facts, so the read's evidence names
+  `:seon.message/to` and `:seon.message/received-tx`: a new message or a new
+  acknowledgement changes it. Each entry offers `(my.message/received! id)`;
+  acknowledged messages are one `(my.message/read ...)` away. A recipient
+  handed as an entity id is resolved in the form itself."
   {:malli/schema [:=> [:cat :seon.message/to] :seon.render/form]}
   [recipient]
-  (list 'seon.db/pull
-        (list 'quote '[{:seon.message/_to
-                       [:seon.message/id :seon.message/content
-                        {:seon.message/from [:seon.agent/id]}]}])
-        recipient))
+  (list 'my.message/inbox
+        {:seon.agent/id
+         (cond
+           (and (vector? recipient) (= :seon.agent/id (first recipient))) (second recipient)
+           (and (map? recipient) (:seon.agent/id recipient)) (:seon.agent/id recipient)
+           :else (list :seon.agent/id
+                       (list 'seon.db/pull [:seon.agent/id]
+                             (if (map? recipient) (:db/id recipient) recipient))))}))
 
 (defn render-inbox-ai
   "Show an inbox from the agent's side.
 
   An agent's own `:seon.message/_to` concern hands its recipient reference:
-  the render is the REPL entry reading that inbox ([[inbox-form]]), so the
-  opening evaluates the read and its read evidence names the inbox; a
-  changed message is then a changed read in the next context.
+  the render is the REPL entry reading its unread messages ([[inbox-form]]),
+  so the opening evaluates the read and its read evidence names the inbox and
+  its acknowledgements; a new, changed or acknowledged message is then a
+  changed read in the next context.
   Handed the acquired messages, it shows them as data: the unread oldest
   first, each offering `(my.message/received! id)`, and the received count.
 
@@ -602,9 +612,11 @@
 
 (defn- listing-entry
   [database message]
+  ;; an unread entry offers its acknowledgement, as message-view does
   (cond-> {:my.message/id (:seon.message/id message)
            :my.message/at (message-instant database message)
-           :my.message/content (:seon.message/content message)}
+           :my.message/content (:seon.message/content message)
+           :seon.render/operations [(list 'my.message/received! (:seon.message/id message))]}
     (endpoint-id message :seon.message/from)
     (assoc :my.message/from
            (endpoint-id message :seon.message/from))))
