@@ -317,6 +317,25 @@
                (is (true? (:seon.fault/committed? receipt)) (pr-str receipt))
                (is (= [#{origin}] (branches-seen attempt since)) "recorded where it happened")
                (is (= [] (branches-seen cluster since)) "and not copied onto the cluster"))
+             ;; The world creates its own agent, placed on the world's branch
+             ;; after the cluster forked: only the world places it there, so
+             ;; its fault is not the cluster's (agent-test's backstop fault
+             ;; reached default this way, 2026-09-27).
+             (test-support/transacted!
+              attempt (agent/creation-tx {:seon.agent/id "member" :seon.ns/name 'my.agents.member
+                                          :seon.cluster/name cluster-name :seon.agent/branch origin}))
+             (let [since (db/basis-t (db/db attempt))
+                   cluster-since (db/basis-t (db/db cluster))
+                   receipt (fault/fault! (env/environment
+                                          {:seon.boot/cluster-name cluster-name
+                                           :seon.db/connection attempt
+                                           :seon.sci.admit/caps (config/result-caps config/defaults)})
+                                         (nested-failure)
+                                         (assoc context :seon.agent/id "member"))]
+               (is (true? (:seon.fault/committed? receipt)) (pr-str receipt))
+               (is (= [#{origin}] (branches-seen attempt since)) "the member's fault is recorded on its world")
+               (is (= [] (branches-seen cluster cluster-since))
+                   "and not copied onto a cluster that does not place the agent there"))
              (finally
                (store/release-branch! cluster)
                (registry/retire-branch! {:seon.store/store store :seon.store/branch home})))))))))

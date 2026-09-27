@@ -77,9 +77,10 @@
     holds the cluster branch open, it writes twice: once on the origin, once on
     the cluster branch naming the origin, so the record outlives the branch's
     retirement. A cluster this process does not run (a fixture's name) gets no
-    copy, and neither does a fault whose agent has no row naming its branch:
-    it is recorded only on the connection's own branch (a test member's world
-    records there, never on the cluster it was forked from).
+    copy, and neither does a fault whose agent the cluster branch does not
+    place on the origin branch (no agent entity, or one only the origin
+    places there): it is recorded only on the connection's own branch (a test
+    member's world records there, never on the cluster it was forked from).
   - An unreadable agent branch records on the connection's own branch; the
     fault is not lost.
   - `outcome` is the first write that did not commit, even if the second did.
@@ -152,10 +153,12 @@
         ;; tagged agent's branch, else this connection's) and the cluster
         ;; branch, whose copy names that origin and so outlives its retirement.
         (let [here (get-in db [:config :branch])
-              agent-branch (when agent-id
-                             (db/q '[:find ?branch . :in $ ?id
-                                     :where [?agent :seon.agent/id ?id] [?agent :seon.agent/branch ?branch]]
-                                   db agent-id))
+              placed-on (fn [database]
+                          (when agent-id
+                            (db/q '[:find ?branch . :in $ ?id
+                                    :where [?agent :seon.agent/id ?id] [?agent :seon.agent/branch ?branch]]
+                                  database agent-id)))
+              agent-branch (placed-on db)
               ;; an unreadable agent branch records here: the fault is not lost
               origin (if (keyword? agent-branch) agent-branch here)
               commit-on
@@ -186,13 +189,17 @@
                    (when (db/database-value? (:db-after result))
                      (delivered-to result (:seon.error/signature prepared-fact)))]))
               home (cluster.branch/cluster-branch cluster-name)
-              ;; The copy is the record of an AGENT's branch, kept past that
-              ;; branch's retirement: a fault no agent entity places on a branch
-              ;; stays where it happened (a test member's world names its
-              ;; cluster but is not one of its agents' branches). No copy when
-              ;; this process runs no such cluster (a fixture's name).
-              copy? (and (keyword? agent-branch) (not= home origin)
-                         (or (= home here) (some? (db/branch-connection db home))))
+              home-connection (if (= home here) connection (db/branch-connection db home))
+              ;; The copy is the record of one of the CLUSTER's agents'
+              ;; branches, kept past that branch's retirement, so the cluster
+              ;; itself must place the agent there. A test member's world names
+              ;; its cluster and may create agents placed on the world's own
+              ;; branch; the cluster places none of them there, so their faults
+              ;; stay where they happened (agent-test's backstop fault was
+              ;; copied onto default, 2026-09-27). No copy when this process
+              ;; runs no such cluster (a fixture's name).
+              copy? (and (keyword? agent-branch) (not= home origin) (some? home-connection)
+                         (= origin (placed-on (db/db home-connection))))
               [[outcome occurrence recipients] :as outcomes] (mapv commit-on (cond-> [origin] copy? (conj home)))]
           [fact (or (some #(when (not= :seon.flow/committed %) %) (map first outcomes)) outcome)
            occurrence recipients])
