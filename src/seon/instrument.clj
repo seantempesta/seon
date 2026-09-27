@@ -540,13 +540,29 @@
 
 (defn calling-environment
   "The world of the evaluation calling now: its context's environment, naming
-  that context for suppliers that act on it, or nil when none runs."
+  that context for suppliers that act on it, or nil when none runs.
+
+  Its database is the custody in force at the call (`seon.db/db`: the
+  evaluation's scoped read basis, else the custody connection's current
+  value), so a call inside `seon.db/call-with-custody` — a fixture branch, a
+  deliberate write elsewhere — is supplied that custody's database, never the
+  value its world was scoped with. Without custody the world stands as it is.
+
+  # Costs
+  Unarmed, measured at default 2026-09-27: ~0.9 us without custody, ~1.0 us
+  with an evaluation's read basis bound, ~2.3 us deriving a connection's
+  current value (a host test body)."
   {:malli/schema [:=> [:cat] [:or :nil :seon.env/environment]]}
   []
   ;; Called on every prepared call, so it reads the arm and scopes unarmed.
   (when-let [ctx ((mi/-f->original kernel/world-ctx))]
     (when-let [environment ((mi/-f->original env/of) ctx)]
-      ((mi/-f->original env/scope) environment {:my.program/executing-ctx ctx}))))
+      (let [database (when (or db/*read-database* db/*conn*)
+                       ((mi/-f->original db/db)))]
+        ((mi/-f->original env/scope)
+         environment
+         (cond-> {:my.program/executing-ctx ctx}
+           ((mi/-f->original db/database-value?) database) (assoc :seon.db/db database)))))))
 
 (defn- compiled-wrapper
   {:seon/tasks #{"a57e8b27de67"}
