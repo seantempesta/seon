@@ -943,7 +943,7 @@
         cut #(first (tree-cuts (value/prepare (probe-unit %))))]
     (doseq [[raw shown] [['(0 0 0 0) "(0 0 0 …1 (drop 3 result/e0123456789ab))"]
                          [(range 5) "(0 1 2 …2 (drop 3 result/e0123456789ab))"]
-                         [[0 0 0 0] "[0 0 0 …1 (drop 3 result/e0123456789ab)]"]]]
+                         [(vec (repeat 30 0)) "[0 0 0 …27 (drop 3 result/e0123456789ab)]"]]]
       (is (= shown (text raw)))
       (is (= {:seon.render.data/total (count raw) :seon.render.data/next-offset 3
               :seon.print/omitted (- (count raw) 3)
@@ -1048,8 +1048,52 @@
            expected (str "{:seon.turn/agent [:seon.agent/id " (pr-str id) "]}")
            text #(:seon.render.value/text (value/prepare (render-request connection %)))]
        (is (int? eid))
-       (is (= expected (text {:seon.turn/agent eid})))
-       (is (= expected (text {:seon.turn/agent {:db/id eid}})))))))
+       (is (= expected (text {:seon.turn/agent {:db/id eid}})) "a pull's reference is its referent")
+       (is (= (str "{:db/id 7, :seon.turn/agent [:seon.agent/id " (pr-str id) "]}")
+              (text {:db/id 7 :seon.turn/agent eid}))
+           "inside an entity an integer under a ref attribute is its referent")
+       ;; Fault-resolution design 2026-09-27 §9.2: `(frequencies …)` returned
+       ;; `{:seon.error/resolved-tx 9}` and printed the entity 9 names.
+       (is (= (str "{:seon.turn/agent " eid "}") (text {:seon.turn/agent eid}))
+           "outside an entity a number is a number, whatever its key")
+       (is (= (str "{:seon.error/resolved-tx " eid "}") (text {:seon.error/resolved-tx eid})))))))
+
+(deftest a-relation-query-result-prints-as-the-set-it-is
+  ;; Stability sweep 2026-09-27 / fault-resolution §9.3: Datahike answers a
+  ;; relation `:find` with `datahike.java.QueryResult`, a set the floor showed
+  ;; as an opaque object.
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "set-floor")
+     (let [database (db/db connection)
+           empty-result (db/q '[:find ?e :where [?e :seon.agent/id "no-such-agent"]] database)
+           rows (db/q '[:find ?name :where [_ :seon.cluster/name ?name]] database)
+           text #(:seon.render.value/text (value/prepare (registered-unit connection %)))]
+       (is (instance? datahike.java.QueryResult empty-result) (pr-str (class empty-result)))
+       (is (= "#{}" (text empty-result)))
+       (is (instance? datahike.java.QueryResult rows) (pr-str (class rows)))
+       (is (= rows (edn/read-string (text rows))))))))
+
+(deftest a-cut-costs-less-than-it-hides-and-never-lands-in-a-tuple
+  ;; Stability sweep 2026-09-27: an MCP reply showed frame tuples as
+  ;; `[…4 (get-in … [0 :seon.error/frames 4])]`, each cut costing more than
+  ;; the four values it hid. A tuple is admitted whole or not at all, and a
+  ;; tail that costs no more than its cut is shown instead of the cut.
+  (let [projection #(value/prepare (probe-unit %))
+        text #(:seon.render.value/text (projection %))
+        frame ['seon.cluster.agent/evaluate-source! 'invoke "agent.clj" 100]
+        frames (vec (repeat 20 frame))]
+    (is (= "[0 0 0 0]" (text [0 0 0 0])) "past the member bound, a tuple is whole")
+    (is (= "[0 0 0 …27 (drop 3 result/e0123456789ab)]" (text (vec (repeat 30 0))))
+        "a tail larger than its cut is still cut")
+    (is (every? #(= [] (:seon.render.data/path %)) (tree-cuts (projection frames)))
+        "the only cut is the frames' own, never one inside a frame")
+    (is (= (vec (repeat 3 frame))
+           (vec (butlast (edn/read-string (str/replace (text frames) #"…\d+ \(drop 3 result/e0123456789ab\)" ":cut"))))))
+    (let [strings [(apply str (repeat 40 "x")) (apply str (repeat 400 "y"))]
+          capped (assoc-in (probe-unit strings) [:seon.render/profile :seon.render.profile/token-budget] 35)]
+      (is (not-any? #(= [0] (:seon.render.data/path %)) (tree-cuts (value/prepare capped)))
+          "a string whose rest is shorter than its cut is shown whole"))))
 
 (deftest vars-and-namespaces-print-by-name
   ;; As clojure.main prints them: #'ns/name and #namespace[name], from their

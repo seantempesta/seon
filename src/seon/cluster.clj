@@ -394,82 +394,77 @@
           :seon.dev.mcp/windowed? false}
 
          :else
+         ;; ONE BUDGET, IN ESTIMATED TOKENS: the floor selects the held value
+         ;; under the MCP profile, and only a value it cut is stored, so each
+         ;; cut's continuation reads the rest from the blob. A value shown
+         ;; whole commits nothing, however large its print-node artifact.
          (let [instance-projection
                (some-> (:seon.sci.eval/ctx instance)
                        env/of
                        :seon.schema/projection)
-               admitted
-                 (admit/admit-value
-                  (cond-> {:seon.sci.admit/value value
-                           :seon.sci.admit/interrupt-fn (fn [])
-                           :seon.sci.admit/caps caps}
-                    instance-projection
-                    (assoc :seon.schema/projection instance-projection)))
-               artifact (render.value/artifact admitted)
-               content (render.value/artifact-edn artifact)
-               content-digest (blob/digest content)
-               threshold (:seon.config.eval.result/blob-threshold effective)
-               oversized? (> (count content) threshold)
-               artifact-backed? oversized?
-               profile
-               (cond-> (assoc (render/agent-render-profile effective)
+               profile (assoc (render/agent-render-profile effective)
                               :seon.render.profile/id :seon.render.profile/mcp)
-                 (and artifact-backed? connection)
-                 (assoc :seon.print/requery-id
-                        (list 'seon.render.value/artifact-value
-                              (list 'seon.render.value/read-artifact
-                                    (list 'seon.blob/get
-                                          (list 'seon.cluster.boot/connection cluster-name)
-                                          content-digest))))
-
-                 (not (and artifact-backed? connection))
-                 (assoc :seon.print/requery-refusal
-                        (if artifact-backed?
-                          "the cluster has no database connection"
-                          "the value has no durable MCP artifact")))
+               selected (fn [value profile]
+                          (render.value/prepare
+                           (cond-> {:seon.render/value value
+                                    :seon.render/profile profile
+                                    :seon.render.value/root [:seon.dev.mcp/value]
+                                    :seon.sci.admit/caps caps}
+                             ;; A JVM evaluation has no evaluation world: the unit's
+                             ;; required database is the cluster's own, handed here.
+                             connection (assoc :seon.db/db (db/db connection)))))
+               held (selected value (assoc profile :seon.print/requery-refusal
+                                           (if connection
+                                             "the value was shown whole"
+                                             "the cluster has no database connection")))
+               admitted (when (and connection (:seon.render.value/truncated? held))
+                          (admit/admit-value
+                           (cond-> {:seon.sci.admit/value value
+                                    :seon.sci.admit/interrupt-fn (fn [])
+                                    :seon.sci.admit/caps caps}
+                             instance-projection
+                             (assoc :seon.schema/projection instance-projection))))
+               ;; An admission over its storage bound stored nothing: the held
+               ;; value's page stands, and the reason rides beside it.
+               artifact (when (and admitted (not (:seon.sci.admit/reason admitted)))
+                          (render.value/artifact admitted))
+               content (some-> artifact render.value/artifact-edn)
+               content-digest (some-> content blob/digest)
                ;; The first page and every continuation select ONE backing
                ;; (one-render-path §3g): a stored value's page is selected
                ;; from the artifact `get_value` continues, so a cut's path and
-               ;; offset address the value it was cut from; an unstored one
-               ;; is the held value, whose cuts advertise no continuation.
-               projection
-               (render.value/prepare
-                (cond-> {:seon.render/value (if (and artifact-backed? connection)
-                                              (render.value/artifact-value artifact)
-                                              value)
-                         :seon.render/profile profile
-                         :seon.render.value/root [:seon.blob/digest content-digest]
-                         :seon.sci.admit/caps caps}
-                  ;; A JVM evaluation has no evaluation world: the unit's
-                  ;; required database is the cluster's own, handed here.
-                  connection (assoc :seon.db/db (db/db connection))))
+               ;; offset address the value it was cut from.
+               projection (if artifact
+                            (selected (render.value/artifact-value artifact)
+                                      (assoc profile :seon.print/requery-id
+                                             (list 'seon.cluster/mcp-value cluster-name content-digest)))
+                            held)
                projected-node (:seon.render.value/tree projection)
-               ;; THE BLOB IS THE WHOLE RECORD. The content-addressed tier
-               ;; already stores the value by digest and `get_value` reads it
-               ;; by that digest, so a windowed result commits NO transaction:
-               ;; a probe advances no basis, and nothing downstream re-derives.
-               ;; An unreferenced blob goes with the next explicit GC sweep.
-               stored-digest (when (and artifact-backed? connection)
-                               (blob/put! connection content))]
+               ;; THE BLOB IS THE WHOLE RECORD. `get_value` reads it by digest,
+               ;; so a windowed result commits NO transaction: a probe advances
+               ;; no basis. An unreferenced blob goes with the next GC sweep.
+               stored-digest (when artifact (blob/put! connection content))]
            (cond-> {:seon.dev.mcp/value
                     (if (:seon.error/at projection)
                       projection
                       ;; A cut is data an agent reads: its one text and
                       ;; continuation form, as the agent's own reply prints it
-                      ;; (`print/elided-text`), never the node's bookkeeping
-                      ;; (face, bound, profile and the same requery form three
-                      ;; times: ~1,100 characters a cut on runtime_status).
+                      ;; (`print/elided-text`), never the node's bookkeeping.
                       (walk/postwalk #(if (and (map? %) (= :seon.print/elided (:seon.print/face %)))
                                         (print/elided-text %)
                                         %)
                                      (admit/semantic-value projected-node)))
-                    :seon.dev.mcp/windowed? artifact-backed?}
-             artifact-backed?
+                    :seon.dev.mcp/windowed? (boolean artifact)}
+             artifact
              (assoc :seon.blob/digest content-digest
                     :seon.blob/size (count content)
                     :seon.dev.mcp/retrievable? (boolean stored-digest))
 
-             (and artifact-backed? (nil? stored-digest))
+             (:seon.sci.admit/reason admitted)
+             (assoc :seon.dev.mcp/remainder
+                    (select-keys admitted [:seon.sci.admit/reason :seon.sci.admit/bytes]))
+
+             (and (:seon.render.value/truncated? held) (nil? connection))
              (assoc :seon.dev.mcp/remainder
                     "The cluster has no database connection; the remainder is not retrievable."))))
          (and (seq diagnostics) (not (:seon.config/error-key caps)))
@@ -515,6 +510,36 @@
          ;; Never re-enter admission or a failed producer: the Throwable floor
          ;; renders the whole bounded cause chain from the Throwable alone.
          (pr-str (render.value/floor failure)))))))
+
+(defn mcp-value
+  "The value an MCP reply stored under `content-digest`, read back from its
+  artifact: the source every cut of that reply continues from. The reader's
+  refusal when the blob holds no value artifact.
+
+  ## Examples
+
+      (drop 5 (get-in (seon.cluster/mcp-value \"default\" \"2133…\") [0 :seon.error/frames]))"
+  {:malli/schema [:=> [:cat :seon.boot/cluster-name :seon.blob/digest]
+                  [:or :seon.render.value/unreadable-artifact-error
+                   [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                          :seon.schema.admission/reason "A stored MCP value is any evaluation result."
+                          :gen/elements [nil false 0 "" :k [] {}]}]]]}
+  [cluster-name content-digest]
+  (let [connection (:seon.boot/cluster-connection (mcp-instance cluster-name))
+        content (when connection (blob/get connection content-digest))
+        artifact (when content (render.value/read-artifact content))]
+    (cond
+      (nil? content)
+      (let [reason (if connection
+                     (str "No blob is stored under " content-digest ".")
+                     (str "Cluster " cluster-name " has no database connection."))]
+        (assoc (seon.error.refusal/diagnostic (Date.) :seon.render.value/artifact 'seon.cluster/mcp-value
+                                              {:seon.error/message reason
+                                               :seon.error/expected :seon.render.value/artifact
+                                               :seon.error/data {:seon.blob/digest content-digest}})
+               :seon.render.value/unreadable-artifact reason))
+      (:seon.render.value/unreadable-artifact artifact) artifact
+      :else (render.value/artifact-value artifact))))
 
 (defn mcp-get-value
   "Read and drill one stored MCP value artifact without mutating REPL state."

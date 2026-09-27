@@ -398,6 +398,7 @@
 (def ^:private chunk-width 16)
 (def ^:private nest-cap 6)
 (def ^:private sorted-bound 64)
+(def ^:private tuple-bound 8)
 
 (defn- escaped-width
   "Characters `pr-str` spends on chars [from, to) of `s`: `.length`, `.charAt`."
@@ -539,12 +540,18 @@
           (scalar ::print/number x (str "#bigdec[≈" (integer-digits u) " digits]"))))
       (#{clojure.lang.PersistentArrayMap clojure.lang.PersistentHashMap clojure.lang.PersistentTreeMap} c)
       ;; A keyword key names a path step only where `keyword-lookup?` permits.
-      {:kind :map :face ::print/map :open "{" :close "}" :total (count x) :indexed? true
-       :lookup? (keyword-lookup? x)
-       :members (held-order x identity-attributes key)}
+      ;; An entity (it carries `:db/id` or an installed identity attribute) is
+      ;; the one map whose attributes the database schema describes.
+      (let [lookup? (keyword-lookup? x)]
+        {:kind :map :face ::print/map :open "{" :close "}" :total (count x) :indexed? true
+         :lookup? lookup?
+         :entity? (boolean (and lookup? (or (find x :db/id) (some #(find x %) identity-attributes))))
+         :members (held-order x identity-attributes key)})
       (#{clojure.lang.PersistentVector clojure.lang.MapEntry} c)
       {:kind :coll :face ::print/vector :open "[" :close "]" :total (count x) :members (seq x)}
-      (#{clojure.lang.PersistentHashSet clojure.lang.PersistentTreeSet} c)
+      ;; Datahike's relation result is an APersistentSet over an array: count
+      ;; and seq read that array (datahike/java/QueryResult.java).
+      (#{clojure.lang.PersistentHashSet clojure.lang.PersistentTreeSet datahike.java.QueryResult} c)
       {:kind :coll :face ::print/set :open "#{" :close "}" :total (count x) :ordered? true :indexed? true
        :members (held-order x identity-attributes identity)}
       ;; Every seq and every other Sequential prints as a list, as Clojure's
@@ -593,6 +600,33 @@
       :else
       {:kind :scalar :node {::print/face ::print/object
                             ::print/class (clojure.lang.Compiler/demunge (.getName c))}})))
+
+(defn- tuple-node
+  "A short sequential value whose every member is a scalar, a name or a short
+  string, as one whole print node, else nil. Such a tuple (a frame
+  `[class method file line]`, a lookup ref) is admitted whole or not at all:
+  a cut inside it would cost more to name than the members it hides."
+  {:malli/schema [:=> [:cat :map [:set :qualified-keyword] :seon.render.data/path] [:maybe :map]]}
+  [c identity-attributes path]
+  (when (and (= :coll (:kind c)) (#{::print/vector ::print/list} (:face c))
+             (not (:pending? c)) (<= (:total c) tuple-bound)
+             ;; every member reached: a seq stepped short of its count is no tuple
+             (= (:total c) (count (:members c))))
+    (let [items (map-indexed
+                 (fn [i member]
+                   ;; A collection is never a tuple member: it is not
+                   ;; classified, so no lazy member is realized here.
+                   (let [x (if (coll? member) {:kind :coll} (classify member identity-attributes 1))
+                         node (case (:kind x)
+                                :scalar (:node x)
+                                :name (assoc (:node x) ::print/text (:text x))
+                                :string (when (<= (:total x) scalar-bound)
+                                          {::print/face ::print/string ::print/value (:value x)})
+                                nil)]
+                     (some-> node (assoc :seon.render.data/path (conj path i)))))
+                 (:members c))]
+      (when (every? some? items)
+        {::print/face (:face c) ::print/items (vec items) :seon.render.data/total (:total c)}))))
 
 (defn- leaf-width
   "The flat width of a leaf print node, as the emitter prints it at `depth`:
@@ -818,8 +852,11 @@
                                 declared)]
                  (assoc base :kind :leaf :node declared :rendered? true))
                (let [;; A root continuation pages from its absolute offset.
-                     c (classify value identity-attributes (+ (:offset context 0) (:max-children context)))]
-                 (case (:kind c)
+                     c (classify value identity-attributes (+ (:offset context 0) (:max-children context)))
+                     ;; A root paged from an offset keeps its members addressable.
+                     tuple (when (or (pos? id) (zero? (:offset context 0))) (tuple-node c identity-attributes path))]
+                 (case (if tuple :tuple (:kind c))
+                   :tuple (assoc base :kind :leaf :node tuple)
                    :scalar (assoc base :kind :leaf :node (:node c))
                    :name (if (<= (count (:text c)) scalar-bound)
                            (assoc base :kind :leaf :node (assoc (:node c) ::print/text (:text c)))
@@ -828,7 +865,7 @@
                    :string (let [shown (min chunk-width (:total c) (:max-string context))]
                              (assoc base :kind :string :value (:value c) :total (:total c)
                                     :shown shown :shown-width (escaped-width (:value c) 0 shown)))
-                   (merge base (select-keys c [:kind :face :name :open :close :total :pending? :prefix :ordered? :indexed? :lookup?])
+                   (merge base (select-keys c [:kind :face :name :open :close :total :pending? :prefix :ordered? :indexed? :lookup? :entity?])
                           {:pending (:members c) :outside (:prefix c)}))))
         node (if (= :leaf (:kind node)) (assoc node :width (leaf-width (:node node) depth)) node)]
     (assoc node :flat (flat-width node))))
@@ -857,16 +894,33 @@
                               {:op :member :parent (:id node) :ord 1 :shell shell}))
     state))
 
+(defn- grown-to
+  "`state` with string or name node `node` shown through character `to`."
+  {:malli/schema [:=> [:cat :map :map :int :map] :map]}
+  [state node to context]
+  (let [text (if (= :name (:kind node)) (:text node) (:value node))
+        grown (-> node (assoc :shown to)
+                  (update :shown-width + (if (= :name (:kind node)) (- to (:shown node))
+                                             (escaped-width text (:shown node) to))))]
+    (settle state (assoc-in state [:nodes (:id node)] grown) (:id node) (:width context))))
+
+(defn- complete-chunk
+  "The string or name shown whole when its cut would cost at least the
+  characters it hides (AGENTS.md: an elision costs less than what it hides),
+  else nil: the whole charge may not rise."
+  {:malli/schema [:=> [:cat :map :map :map] [:maybe :map]]}
+  [state work context]
+  (let [node (get-in state [:nodes (:id work)])]
+    (when (and (more? node) (<= (- (:total node) (:shown node)) (count (cut-text node))))
+      (let [whole (grown-to state node (:total node) context)]
+        (when (<= (charge whole) (charge state)) whole)))))
+
 (defn- admit-chunk
   {:malli/schema [:=> [:cat :map :map :map] [:maybe :map]]}
   [state work context]
   (let [node (get-in state [:nodes (:id work)])
         to (min (:total node) (+ (:shown node) chunk-width) (:max-string context))
-        text (if (= :name (:kind node)) (:text node) (:value node))
-        grown (-> node (assoc :shown to)
-                  (update :shown-width + (if (= :name (:kind node)) (- to (:shown node))
-                                             (escaped-width text (:shown node) to))))
-        next (settle state (assoc-in state [:nodes (:id node)] grown) (:id node) (:width context))]
+        next (grown-to state node to context)]
     (when (and (> to (:shown node))
                (<= (charge next) (:budget context)))
       (cond-> next
@@ -886,16 +940,22 @@
 
 (defn- reference-value
   "A non-component reference attribute's value as its referent's identity,
-  never an entity id: an eid or a bare {:db/id n} becomes the referent's
-  lookup ref. Any other value, or a key that is not such an attribute, is
-  itself."
-  {:malli/schema [:=> [:cat :map :seon.schema/value :seon.schema/value] :seon.schema/value]}
-  [context attribute value]
+  never an entity id: a bare {:db/id n} (a pull's reference) becomes the
+  referent's lookup ref, and so does an integer, but only inside an entity
+  (`entity?`), whose attributes the database schema describes. Any other
+  value, or a key that is not such an attribute, is itself.
+
+  ## Edge cases
+
+  - `(frequencies …)` keyed by a ref attribute, `{:seon.error/resolved-tx 9}`,
+    is no entity: 9 prints as 9, never as the entity 9 names."
+  {:malli/schema [:=> [:cat :map :boolean :seon.schema/value :seon.schema/value] :seon.schema/value]}
+  [context entity? attribute value]
   (let [database (:seon.db/db (:unit context))
         properties (when (and database (identical? (class attribute) clojure.lang.Keyword))
                      (get (:schema (db/schema-database database)) attribute))
         one (fn [v]
-              (let [eid (cond (int? v) v
+              (let [eid (cond (and entity? (int? v)) v
                               (and (map? v) (= [:db/id] (keys v))) (:db/id v))]
                 (if eid (referent-identity database (:identity-attributes context) eid) v)))]
     (cond
@@ -907,7 +967,7 @@
 (defn- admit-member
   {:malli/schema [:=> [:cat :map :map :map] [:maybe :map]]}
   [state work context]
-  (when (<= (:ord work) (:max-children context))
+  (when (or (:past-max-children? context) (<= (:ord work) (:max-children context)))
   (let [parent (get-in state [:nodes (:parent work)])
         [held & more] (:pending parent)
         ordinal (:ord work)
@@ -925,7 +985,7 @@
                 k (make-node context (key member) (+ 1 next-id) depth
                              (conj (:path parent) [:seon.render.data/entry index :seon.render.data/key])
                              entry-id {:indent indent})
-                v (make-node context (reference-value context (key member) (val member))
+                v (make-node context (reference-value context (boolean (:entity? parent)) (key member) (val member))
                              (+ 2 next-id) depth
                              (conj (:path parent) (if (and (:lookup? parent) (keyword? (key member)))
                                                     (key member)
@@ -945,11 +1005,37 @@
     (cond
       (<= (charge next) (:budget context))
       (cond-> (reduce #(schedule %1 %2 shell context) next (remove #(= :entry (:kind %)) added))
-        (and (seq more) (< ordinal (:max-children context)))
+        (seq more)
         (push-work (max (:shell work) depth (inc ordinal)) depth (inc ordinal) (update work :ord inc)))
       ;; The root's first member is the least any page must show (§3c):
       ;; its charge is what an insufficient budget reports.
       (and (zero? (:id parent)) (zero? (:n parent))) (assoc state :first-refused (charge next))))))
+
+(defn- complete-tail
+  "Every remaining member of the work's parent admitted at once when the cut
+  it would otherwise keep costs at least what they hold (AGENTS.md: an elision
+  costs less than what it hides), else nil. Each member must print whole
+  without further work, and the whole charge may not rise; the attempt stops
+  as soon as the members shown exceed the cut they would replace."
+  {:malli/schema [:=> [:cat :map :map :map] [:maybe :map]]}
+  [state work context]
+  (let [parent-id (:parent work)
+        before (charge state)
+        ;; Past the member bound too; classification keeps its own step limit.
+        open (assoc context :budget Long/MAX_VALUE :past-max-children? true)
+        whole? (fn [node] (or (#{:leaf :entry} (:kind node))
+                              (and (#{:string :name} (:kind node)) (not (more? node)))))]
+    (when-not (:pending? (get-in state [:nodes parent-id]))
+      (loop [current state ordinal (:ord work)]
+        (let [parent (get-in current [:nodes parent-id])]
+          (if-not (seq (:pending parent))
+            (when (<= (charge current) before) (assoc current :queue (:queue state)))
+            (let [admitted (admit-member current (assoc work :ord ordinal) open)
+                  grown (get-in admitted [:nodes parent-id])]
+              (when (and admitted
+                         (every? #(whole? (get-in admitted [:nodes %])) (range (:next-id current) (:next-id admitted)))
+                         (<= (- (charge admitted) (if (more? grown) (count (cut-text grown)) 0)) before))
+                (recur admitted (inc ordinal))))))))))
 
 (defn- insufficient-budget
   "The declared refusal when B cannot show the root, or a page's first member
@@ -999,8 +1085,10 @@
                     (if-let [[key work] (first (:queue state))]
                       (let [state (update state :queue dissoc key)
                             admitted (case (:op work)
-                                       :chunk (admit-chunk state work context)
-                                       :member (admit-member state work context))]
+                                       :chunk (or (admit-chunk state work context)
+                                                  (complete-chunk state work context))
+                                       :member (or (admit-member state work context)
+                                                   (complete-tail state work context)))]
                         (recur (or admitted state)))
                       state))]
         (if (and (:first-refused state) (zero? (get-in state [:nodes 0 :n])))

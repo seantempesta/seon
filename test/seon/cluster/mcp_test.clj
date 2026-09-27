@@ -129,8 +129,9 @@
             (:seon.config.render.agent/token-budget effective))
         "nested collection and string bulk cannot escape the profile's budget")
     (is (< (utf8-size result) (utf8-size nested-value)))
-    (is (true? (:seon.dev.mcp/windowed? result)))
-    (is (string? (:seon.blob/digest result)))))
+    ;; This cluster has no instance, so nothing can hold the remainder.
+    (is (false? (:seon.dev.mcp/windowed? result)))
+    (is (str/includes? (:seon.dev.mcp/remainder result) "not retrievable"))))
 
 (deftest sci-evaluations-project-the-repl-text-face
   (let [cluster-name "mcp-text-face-test"
@@ -368,14 +369,14 @@
     (is (zero? @fresh-stores)
         "Flow-health projection needs only an ordinary canonical branch.")))
 
-(defn- oversized-values-share-one-digest-across-storeless-and-stored-modes
+(defn- a-cut-value-is-stored-only-where-a-connection-can-hold-it
   [connection]
   (let [cluster-name "mcp-value-test"
         value (vec (range 2000))
         effective config/defaults
         storeless (projected cluster-name effective value)]
-    (is (true? (:seon.dev.mcp/windowed? storeless)))
-    (is (false? (:seon.dev.mcp/retrievable? storeless)))
+    (is (false? (:seon.dev.mcp/windowed? storeless)))
+    (is (not (contains? storeless :seon.blob/digest)) "an unstored value names no digest")
     (is (str/includes? (:seon.dev.mcp/remainder storeless)
                        "not retrievable"))
     (config/apply! {:seon.db/connection connection
@@ -390,7 +391,7 @@
                      cluster-name content-digest [] 7)
             past-end (cluster/mcp-get-value
                       cluster-name content-digest [] 9000)]
-        (is (= (:seon.blob/digest storeless) content-digest))
+        (is (string? content-digest))
         (is (true? (:seon.dev.mcp/retrievable? stored)))
         (is (str/starts-with? (:seon.dev.mcp/text drilled) "[7 8 9 10 11 12 13 14")
             (:seon.dev.mcp/text drilled))
@@ -467,7 +468,12 @@
               continuation (read-string (subs cut (inc (str/index-of cut " "))))]
           (is (string? cut) "a clipped value's cut is its one text, as the agent reply prints it")
           (is (= (drop shown value) (eval continuation))
-              "the cut's continuation form reads the stored remainder"))
+              "the cut's continuation form reads the stored remainder")
+          ;; Stability sweep 2026-09-27: each MCP cut cost ~70 tokens, more
+          ;; than the values it hid; its source is now one short call.
+          (is (= (list 'seon.cluster/mcp-value cluster-name content-digest) (last continuation)))
+          (is (< (tokens/estimate cut) (tokens/estimate (pr-str (drop shown value))))
+              "the cut costs less than what it hides"))
         (let [absent (apply str (repeat 64 "0"))]
           (is (= [:gone [:seon.blob/digest absent]]
                  ((juxt :seon.render.walk/continuation-reason :seon.render.walk/continuation-node)
@@ -506,6 +512,36 @@
       (finally
         (swap! running-instances dissoc cluster-name)))))
 
+(defn- a-value-shown-whole-stores-nothing
+  ;; Stability sweep 2026-09-27: an 8 KB result was windowed into a blob
+  ;; because its print-node artifact passed the byte threshold. The budget is
+  ;; estimated tokens: a value the floor shows whole is its own reply.
+  [connection]
+  (let [cluster-name "mcp-whole-value-test"
+        effective config/defaults
+        value (into {} (map (fn [i] [(keyword "probe" (str "k" i)) (apply str (repeat 40 \y))])) (range 30))]
+    (config/apply! {:seon.db/connection connection
+                    :seon.boot/cluster-name cluster-name})
+    (support/seed-cluster! connection cluster-name)
+    (swap! running-instances assoc cluster-name
+           (running-instance connection cluster-name))
+    (try
+      (let [artifact-size (count (render.value/artifact-edn
+                                  (render.value/artifact
+                                   (admit/admit-value {:seon.sci.admit/value value
+                                                       :seon.sci.admit/interrupt-fn (fn [])
+                                                       :seon.sci.admit/caps (config/result-caps effective)}))))
+            before (db/commit-id (db/db connection))
+            result (projected cluster-name effective value)]
+        (is (< (:seon.config.eval.result/blob-threshold effective) artifact-size)
+            "the artifact exceeds the byte threshold the old rule windowed by")
+        (is (= value (:seon.dev.mcp/value result)) "the whole value is the reply")
+        (is (false? (:seon.dev.mcp/windowed? result)))
+        (is (not (contains? result :seon.blob/digest)))
+        (is (= before (db/commit-id (db/db connection)))))
+      (finally
+        (swap! running-instances dissoc cluster-name)))))
+
 (deftest artifact-lifecycle-preserves-identity-paging-and-retraction
   ;; Every scenario configures and seeds its cluster, which a program-less
   ;; fresh store cannot take (config resolves the functions it names to program
@@ -514,7 +550,8 @@
   ;; reads this branch's commit, and the absent digest is absent everywhere.
   (let [scenarios
         [[:exception jvm-exceptions-keep-the-whole-cause]
-         [:identity oversized-values-share-one-digest-across-storeless-and-stored-modes]
+         [:identity a-cut-value-is-stored-only-where-a-connection-can-hold-it]
+         [:whole a-value-shown-whole-stores-nothing]
          [:string stored-strings-page-by-character-offset]
          [:nested ordinary-value-artifacts-drill-from-the-result-root]
          [:blob-only retrievable-artifacts-commit-no-transaction]]
@@ -523,7 +560,7 @@
                     (into [] (map (fn [[scenario verify!]] (verify! connection) scenario))
                           scenarios)))]
     (is (= (mapv first scenarios) executed)
-        "All five artifact cases execute, with the blob-only case last.")))
+        "All six artifact cases execute, with the blob-only case last.")))
 
 (deftest only-an-evaluation-that-changed-loaded-code-drops-cached-pages
   ;; 24z: the page-cache signal follows evidence after the evaluation
