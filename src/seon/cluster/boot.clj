@@ -664,7 +664,7 @@
                                               (assoc :seon.db/db (db/db connection)))))))
                                      @running-instances)})
                   (:seon.operator/verbose? request)
-                  (assoc :seon.operator/footprint (fs/footprint (str (io/file root "data")))))
+                  (assoc :seon.operator/footprint (fs/filesystem-space (str (io/file root "data")))))
         :open (let [instance (selected-instance name)]
                 (if-let [url (get-in instance [:seon.render.web/served :seon.render.web/url])]
                   {:seon.boot/cluster-name (get-in instance [:seon.boot/config :seon.boot/cluster-name])

@@ -76,7 +76,6 @@
   [request]
   (swap! handler-calls conj request)
   {:seon.operator.footprint/root (:seon.operator/managed-root request)
-   :seon.operator.footprint/file-bytes 4096
    :seon.operator.footprint/usable-bytes 8192
    :seon.operator.footprint/total-bytes 12288
    :seon.operator.footprint/usable-ratio 0.5

@@ -92,7 +92,6 @@
                 [:map
                  #:seon.db{:attributes true}
                  [:seon.operator.footprint/root :string]
-                 [:seon.operator.footprint/file-bytes [:int {:min 0}]]
                  [:seon.operator.footprint/usable-bytes
                   [:int {:min 0}]]
                  [:seon.operator.footprint/total-bytes [:int {:min 0}]]

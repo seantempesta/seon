@@ -51,7 +51,7 @@
          :seon.config.maintenance/min-usable-bytes 1
          :seon.maintenance-schema-test/extra-request-value true}
         result
-        {:seon.operator.footprint/file-bytes 4096
+        {:seon.operator.footprint/usable-bytes 4096
          :seon.operator/low-space? false
          :seon.maintenance-schema-test/extra-result-value true}
         receipt
@@ -137,7 +137,7 @@
                          :seon.maintenance.receipt/completed-at observed-at
                          :seon.maintenance.receipt/result
                          {:seon.maintenance.result/id receipt-id
-                          :seon.operator.footprint/file-bytes 4096
+                          :seon.operator.footprint/usable-bytes 4096
                           :seon.operator/low-space? false}}]))
         (is (= #{[receipt-id task-id 4096 false]}
                (db/q
@@ -148,7 +148,7 @@
                   [?request :seon.maintenance.request/task ?task]
                   [?task :seon.schedule.task/id ?task-id]
                   [?receipt :seon.maintenance.receipt/result ?result]
-                  [?result :seon.operator.footprint/file-bytes ?bytes]
+                  [?result :seon.operator.footprint/usable-bytes ?bytes]
                   [?result :seon.operator/low-space? ?low-space]]
                 @connection)))))))
 

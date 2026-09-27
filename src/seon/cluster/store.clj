@@ -409,9 +409,7 @@
     (log-deletion!
      {::root target
       ::targets [target]
-      ::file-bytes (long (or (:seon.operator.footprint/file-bytes
-                              (fs/footprint target))
-                             0))
+      ::file-bytes (fs/tree-bytes target)
       ::operation "seon.cluster.store/create-store!"})
     (fs/delete-recursively! target target))
   (d/create-database configuration)
@@ -479,8 +477,7 @@
                       {::root dir ::target dir
                        ::declared-root (declared-operator-root)})]
           (log-deletion! {::root dir ::targets [target]
-                          ::file-bytes (:seon.operator.footprint/file-bytes
-                                        (fs/footprint target))
+                          ::file-bytes (fs/tree-bytes target)
                           ::operation "seon.cluster.store/open-store!"})
           (fs/delete-recursively! dir target)))
       (let [probe-configuration (datahike-configuration dir)

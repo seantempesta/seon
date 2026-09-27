@@ -10,8 +10,7 @@
 (defn- store-bytes
   {:malli/schema [:=> [:cat :seon.db/connection] [:int {:min 0}]]}
   [connection]
-  (:seon.operator.footprint/file-bytes
-   (fs/footprint (get-in @connection [:store :backing :base]))))
+  (fs/tree-bytes (get-in @connection [:store :backing :base])))
 
 (deftest one-listened-write-produces-one-commit-and-no-fault-write
   (support/with-database

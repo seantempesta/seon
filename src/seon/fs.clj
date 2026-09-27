@@ -29,13 +29,12 @@
       (finally (Files/deleteIfExists temporary)))))
 
 (defn filesystem-space
-  "Observe the requested volume without traversing its directory tree."
-  {:malli/schema [:=> [:cat :string]
-                  [:map [:seon.operator.footprint/root :string]
-                   [:seon.operator.footprint/usable-bytes [:int {:min 0}]]
-                   [:seon.operator.footprint/total-bytes [:int {:min 0}]]
-                   [:seon.operator.footprint/usable-ratio :double]
-                   [:seon.operator.footprint/observed-at :inst]]]}
+  "Observe the requested volume without traversing its directory tree.
+
+  The volume's own space accounting (`statfs`) answers in microseconds
+  whatever the store's file count; it is the footprint a maintenance or
+  status decision reads."
+  {:malli/schema [:=> [:cat :string] :seon.operator/footprint]}
   [root]
   (let [file (.getAbsoluteFile (io/file root))
         ^java.io.File existing (loop [candidate file]
@@ -49,21 +48,6 @@
      :seon.operator.footprint/usable-ratio
      (if (pos? total) (/ (double usable) (double total)) 0.0)
      :seon.operator.footprint/observed-at (java.util.Date.)}))
-
-(defn footprint
-  "Measure only the requested tree, treating symbolic links as leaves of zero size."
-  {:malli/schema [:=> [:cat :string] :seon.operator/footprint]}
-  [root]
-  (letfn [(size-of [^Path path]
-            (cond
-              (Files/isSymbolicLink path) 0
-              (not (Files/exists path no-follow)) 0
-              (Files/isDirectory path no-follow)
-              (with-open [children (Files/newDirectoryStream path)]
-                (reduce + 0 (map size-of (iterator-seq (.iterator children)))))
-              :else (Files/size path)))]
-    (assoc (filesystem-space root) :seon.operator.footprint/file-bytes
-           (size-of (.toPath (io/file root))))))
 
 (defn- destructive-canonical-path [path]
   (.getCanonicalPath (io/file path)))
@@ -278,6 +262,27 @@
   (try
     (Files/readAttributes path BasicFileAttributes no-follow)
     (catch NoSuchFileException _ nil)))
+
+(defn tree-bytes
+  "The bytes of the regular files under `root`; symbolic links are leaves of
+  zero size and are never followed, and an absent root is zero.
+
+  Costs: unarmed, proportional to the tree's entries, one attribute read each
+  (`Files/readAttributes` with NOFOLLOW_LINKS). Only a deletion's log and a
+  whole-store collection pay it; decisions read `filesystem-space`. Loads in
+  babashka, which runs this namespace for the operator."
+  {:malli/schema [:=> [:cat :string] [:int {:min 0}]]}
+  [root]
+  (letfn [(size-of [^Path path]
+            (let [attribute (attributes path)]
+              (cond
+                (nil? attribute) 0
+                (.isDirectory attribute)
+                (with-open [children (Files/newDirectoryStream path)]
+                  (reduce (fn [total child] (+ total (size-of child))) 0 children))
+                (.isRegularFile attribute) (.size attribute)
+                :else 0)))]
+    (size-of (.toPath (io/file root)))))
 
 (defn- entry-kind
   "The count a deleted entry adds to: its link, directory or file."

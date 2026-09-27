@@ -542,8 +542,7 @@
   {:seon.operator.collect/objects
    (count (k/keys (operation-konserve operation-store) {:sync? true}))
    :seon.operator.collect/bytes
-   (:seon.operator.footprint/file-bytes
-    (fs/footprint (:seon.store/dir operation-store)))})
+   (fs/tree-bytes (:seon.store/dir operation-store))})
 
 (defn- resolves-to-digest?
   {:malli/schema [:=> [:cat [:map-of :keyword :seon.schema/malli-form] :seon.schema/malli-form] :boolean]}
@@ -955,12 +954,13 @@
               (collect-store! root held))))))))
 
 (defn observe-footprint!
-  "Measure only this managed data directory; the schedule records the result."
+  "Observe the volume holding this managed data directory through its own
+  space accounting (no directory walk); the schedule records the result."
   {:malli/schema [:=> [:cat :seon.operator/footprint-request]
                       [:or :seon.operator/footprint-observation :seon.operator/failed-error]]}
   [{root :seon.operator/managed-root :as request}]
   (attempt
-   #(let [observation (fs/footprint (str (io/file root "data")))]
+   #(let [observation (fs/filesystem-space (str (io/file root "data")))]
       (assoc observation :seon.operator/low-space?
              (boolean
               (or (when-let [minimum (:seon.config.maintenance/min-usable-bytes request)]
