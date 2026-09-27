@@ -255,6 +255,29 @@
                  "No message is addressed to this agent yet."]]
                (message/render-inbox-html [] @connection)))))))
 
+;; Class (E1, 89629b13c): the agent's `:seon.message/_to` concern hands its
+;; recipient reference, and the opening reads its inbox only when that render
+;; is declared REPL entries. A render that prints the reference instead leaves
+;; no inbox read, so a changed message is never refreshed.
+(deftest an-inbox-reference-renders-the-inbox-read-as-repl-entries
+  (let [recipient [:seon.agent/id "bob"]
+        ;; the loaded Var's own contract over the packaged schemas (409 ms, 2026-09-27)
+        projection (schema/build-projection
+                    (schema.edn/packaged-forms)
+                    {'seon.cluster.message/render-inbox-ai
+                     (:malli/schema (meta #'message/render-inbox-ai))})
+        source (message/render-inbox-ai recipient)]
+    (is (= (message/inbox-form recipient) (read-string source))
+        "the render is the reverse-ref inbox read, runnable as shown")
+    (is (= [:seon.render/source]
+           (schema/function-matching-outputs-in
+            projection 'seon.cluster.message/render-inbox-ai [recipient]))
+        "seon.render evaluates the reference arity as REPL entries")
+    (is (= [] (schema/function-matching-outputs-in
+               projection 'seon.cluster.message/render-inbox-ai
+               [[{:seon.message/id "inbox/1" :seon.message/to recipient}]]))
+        "acquired messages are never read as source: they need the database arity")))
+
 (deftest message-html-separates-attribution-time-and-authored-content
   (with-database
     (fn [connection]
