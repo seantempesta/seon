@@ -2,234 +2,253 @@
 type: review
 status: REVISE
 created: 2026-09-27
-reviewed: 378b1529f
-scope: test agents on Flow; blocking findings only
+reviewed: 38e5a6d47
+prototype: 33e878596
+scope: test agents on Flow; execution blockers only
 ---
 
-# Review: test agents on Flow
+# Review: revised test agents on Flow
 
-**REVISE.** Keep option B's direction: several clusters' non-platform tests must run concurrently
-in one JVM, each member through the one REPL path, with MCP and agent requests sharing that path.
-The proposed deletions are blocked by the six findings below. The −535 source-line estimate is
-not an implemented or measured diff.
+**REVISE.** Option B remains the right direction: concurrent non-platform tests from several clusters in one JVM,
+each body on its own branch through the same REPL path. The revision supplies an executable batch/Flow composition,
+but the six execution blockers below prevent replacing the current owners. The proposed deletions are not yet safe.
 
-The review used MCP `eval_clj`, root `/Users/sean/src/seon`, cluster `default`, owned session
-`test-agents-review`, JVM namespace `tmp.test-agents-review`. Bodies and writes used the disposable
-`:test-agents-review` branch or owned descendants. No test request, reload, adoption, reset,
-restart or production definition change was made. These are diagnostic probes, not recorded green tests.
+The prototype runs a body on a virtual thread, enters a carried world, and supplies recording to
+`seon.batch/evaluate-batch` as a stage value. Run and member Flow procs observe completion. This fixes parts of the
+original review; the new findings concern the remaining execution guarantees, not a demand for another runner.
 
-Exact forms: [proof.clj](../../../tmp/test-agents-review/proof.clj), numbered P1 onward;
-complete returned envelopes: [initial](../../../tmp/test-agents-review/envelopes.json) and
-[later](../../../tmp/test-agents-review/envelopes-later.json), and
-[final checks](../../../tmp/test-agents-review/envelopes-final.json). Failed exploratory forms are retained:
-P3 selected the Runnable submit overload and returned nil; P4 corrects it with an explicit Callable.
-P12 encountered an unloaded test namespace; P13 corrects that observation. P20 used the wrong
-store location; P21 verifies cleanup using the retained owned handle. Failed probes are not proof.
+## Evidence and scope
 
-## 1. Graph termination does not prove compute-body exit
+MCP `eval_clj`, root `/Users/sean/src/seon`, cluster `default`, owned session `test-agents-review-v2`.
+Exact forms R0 onward extend [proof.clj](../../../tmp/test-agents-review/proof.clj);
+[envelopes.json](../../../tmp/test-agents-review/v2/envelopes.json) preserves the returned envelopes, including failures.
+P1–P22 retain the original audit evidence. No harness test request or gate was started.
 
-**Evidence, P10 (35 ms).** A one-proc graph observed its submitted compute Future for 20 ms.
-After that wait timed out, stopping and joining the graph returned:
+R0 loads copies under **owned scratch namespaces**, with only namespace/require renaming: batch from
+`38e5a6d47`, agent and thirteen proofs from `33e878596` (the commit that contains the prototype accompanying
+the design revision). Literal `:seon.batch/*` keys are unchanged. The originals and SHA-256 manifest are in
+[tmp/test-agents-review/v2](../../../tmp/test-agents-review/v2/source-manifest.json).
+No foreign prototype namespace, source, spec or session was changed.
 
-```clojure
-{:observation :timeout :join nil :graph-exited? true
- :body-exited? false :future-done? false}
-```
+**R1/R2: 12/13 PASS, 8,302 ms.** All twelve revision-behavior proofs passed their declared schemas. The failing
+`b3-counterexample` returned `[[:child :child] "java.util.concurrent.TimeoutException"]`: its parents have no
+barrier before submitting children, so it does not deterministically saturate both workers. This does not refute
+the revised virtual-thread design. The positive nested-progress proof passed in 267.81 ms.
+The proof result schema checks `:pass?` is boolean; it is not a complete world, recording or delivery contract.
+The rerun finished with zero running and zero waiting roster entries.
 
-The body was held by a finite latch, then released and joined in cleanup. The installed
-`seon.flow/join-graph!` joins only the graph's private executor
-(`src/seon/flow.clj:138`); the body in §5.2 is on the separate process compute executor.
-The statement “the graph does not join” while the body remains alive is therefore not an
-existing guarantee. A proc waiting forever instead cannot itself record the timeout or process stop.
-A member also cannot synchronously join its own executor from its stop transition.
+## 1. B1: a bounded close silently abandons the join
 
-**Smallest fix.** Keep actual body-exit ownership until a body-finally completion arrives.
-Let the run agent observe the deadline and record unfinished; let the member retain its branch
-until actual exit. The parent joins the member graph after that exit. Specify this ordering before
-deleting `bounded-result` and its watcher; a cancelled/done Future is not an exit fact.
-
-## 2. Moving the body to compute drops its world
-
-**Evidence, P4 (4 ms).** With the branch connection and member bound on the submitting thread,
-an explicit Callable on the installed compute executor returned:
+The revised `b1-exit-owned` passes: the branch remains held at the deadline, then release and member join follow
+body exit. **R9, 186 ms**, tests the remaining close boundary with a real held member:
 
 ```clojure
-{:plain {:connection? false :member? false :virtual? false}
- :bound {:connection? true :member? true}}
+{:unfinished [:held] :close-result nil :executor-terminated? false}
 ```
 
-P15 confirmed that connection custody, test member, kernel host world, schema projection and
-effect request context are dynamic Vars. Thread-local means non-serializing; it does not mean
-automatically conveyed. Today's `bounded-result` explicitly uses `bound-fn`, replaces custody,
-and binds the member/host world (`src/seon/test.clj:250–292`).
-`var-process` also documents that Flow conveys no bindings (`src/seon/flow.clj:293`).
+`close!` returns the same nil for its own wait timeout as for a successful join
+(prototype `agent.clj:320`). `run-request!` starts an unrostered virtual closer with a 600,000 ms wait and
+discards its outcome (`:327`). If the body exits after that wait, no caller remains to close the run graph.
+The 20 ms probe verifies the failure at the common close seam; it does not claim to have waited ten minutes.
+The probe released its body and joined both graphs afterward.
 
-**Smallest fix.** Carry the member's environment, projection, context, effect owner and
-connection as stage inputs, and enter those owners on the worker thread before resolution,
-seeding and evaluation. Preserve the existing binding behavior in the cut. Apply it at the
-common body entrance so MCP and Seon agents obtain identical custody and evidence.
+**Smallest fix.** Return the declared wait/join error, and keep the run's lifecycle owner until actual completion
+and successful join. Observe late completion from that owner instead of dropping a bounded closer's result.
+Keep current exit ownership until this includes close timeout and join failure.
 
-## 3. A fixed pool of blocking bodies can starve nested requests
+## 2. B2: the carried world omits the effect/agent identity required by real bodies
 
-**Evidence, P2/P7.** The actual executor has 18 platform workers, an effectively unbounded
-`LinkedBlockingQueue` (remaining capacity 2,147,483,647), and initially zero completed tasks.
-Eighteen finite held bodies produced `{:active 18 :queued 1 :last-done? false}`; releasing
-them allowed the queued body to finish. This verifies the active-worker bound, not progress.
-
-Existing non-platform harness bodies synchronously run nested requests; for example
-`seon.test.one-request-test/a-member-that-never-exits-holds-only-its-own-test-and-the-next-request-runs`
-(`test/seon/test/one_request_test.clj:175`). If every worker waits for a nested member,
-all nested members queue behind their parents. A timeout can end the wait but is not a successful
-test result. The same exhaustion arises from enough uninterruptible host bodies.
-The estimate “body CPU divided by 18” does not account for these waits or other JVM work.
-
-**Smallest fix.** Keep request orchestration and waits on the agents' `:io` procs; submit
-only work whose completion does not require another queued member to the fixed compute pool.
-Make nested test requests asynchronous through the same request/delivery path and keep
-nonterminating host work in its declared platform isolation. Prove saturated nested requests,
-not just N+1 independent bodies, before claiming progress for every cluster.
-
-## 4. Direct-body classification misses fixtures; deleting S17 is premature
-
-**Evidence, P14 (3 ms).** Static forms read through MCP from the *loaded archive* positively found
-`seon.profile-test/an-sci-installation-owns-its-own-cell`. Its body contains no mutation from §5.4's
-listed set, but the same namespace installs:
+`b2-world-carried` correctly restores connection, member, SCI host world and projection.
+**R6, 218 ms**, additionally found agent id nil and effect request context absent inside `enter`.
+**R7, 276 ms**, invokes the real effect entrance from a prototype member; it refuses before any capability effect:
 
 ```clojure
-(use-fixtures :each preserving-roots)
+{:seon.error/operation seon.effect/request*
+ :seon.effect/missing-context-member :seon.turn/id
+ :seon.error/message "Invoke the capability from a current evaluation."}
 ```
 
-That local fixture contains two `alter-var-root` sites, iterating over instrumented Vars
-(`test/seon/profile_test.clj:20–33`). It is neither the test body nor a directly called
-`seon.test-support` helper. Local helper chains, once/each fixtures and top-level namespace load
-effects must participate in classification.
+The world constructor/entrance (`agent.clj:47,60`) supplies neither the attempt's agent/turn nor
+`seon.effect/*request-context*`. **R22** also called the armed `my.test/run-owned` with that acquired world;
+the contract refused its missing `:seon.agent/id` before any test selection ran.
+Four restored bindings therefore do not justify deleting the current attempt-context owner.
 
-There is also production arming outside test bodies: `arm-first-loads!`
-(`src/seon/test.clj:2138–2200`) computes fresh namespaces, requires them, diffs `all-ns`,
-then calls global `instrument/apply!`. Simultaneous first loads can enter that interval together.
-Clojure serializes each `require` through `RT/REQUIRE_LOCK`
-(`reference-code/clojure/src/clj/clojure/core.clj:6146`); that does not make the surrounding
-discovery/arming interval atomic. The audit's classification does not remove this owner.
+**Smallest fix.** Construct the real agent/evaluation/effect ownership through the ordinary path and include it in
+the one world value; enter the effect context alongside custody. Preserve the existing attempt context until its
+replacement passes the real effect-reaching member contract. Do this in the common test entrant used by MCP and
+`my.test`, not a wrapper-specific patch.
 
-**Smallest fix.** Derive host-global effects over the actual test invocation graph, including
-fixtures and local helper chains, stopping at explicitly understood production boundaries instead
-of traversing indiscriminately into every production armer. Include first-load/arming as publication
-ownership with a positive ready state before bodies start. Route the unconverted mutation cases
-to platform. Remove S17 only after that coverage is demonstrated.
+## 3. B3: roster identity collisions defeat admission, and nesting has no CPU/world bound
 
-Additional shared-state checks, to delimit this finding:
+Replacing fixed-pool bodies fixes the demonstrated nested deadlock. It does not establish the claimed bound.
 
-- **Loaded identity:** P13 exercised the real detector with an owned identity atom; a changed
-  identity returns `:seon.cluster/adoption`. It detects overlap, not a mutex. No live identity changed.
-- **Central cache:** P11 (27 ms), using a disposable cache through `seon.cache/lookup`, proved a
-  same-key caller waits and receives the first derivation; a different key completes independently.
-  This serializer is absent from the audit. It is not a global test lock. Cache budget/configuration
-  mutations and assertions on process-wide counters are global subjects.
-- **SCI base:** P13 found distinct base maps and env atoms, and no leaked private definition.
-  A shared atom placed in an owned SCI ancestor *was* shared across its forks (value 1).
-  Forking isolates definitions, not arbitrary mutable objects inherited in their values.
-  Use clean member worlds and classify shared-object mutation; do not claim base-map isolation
-  proves deep isolation.
-- **Dynamic Vars:** P4/P15 establish the handoff problem in finding 2, not serialization.
-  Global profiling counters also include concurrent activity; `seon.profile/explain` documents
-  this explicitly (`src/seon/profile.clj:230`).
+**R3, 175 ms:** two requests use the same member key, a shared process roster and limit 1. Their bodies are held
+on a finite latch, so overlap is directly observed:
 
-## 5. Pressure admission has no specified resume wake or allocation bound
+```clojure
+{:limit 1 :first-started true :second-started true :roster-running 1}
+```
 
-**Evidence, P7/P15/P16.** With 18 workers occupied and another queued, kernel pressure remained nil.
-Heap usage later was 5,154,414,816 of 10,997,465,088 bytes; last collected old-generation usage was
-4,894,367,968 bytes. These are snapshots, not retained per-agent sizes or a peak bound.
+`admit!` tests only whether the member key exists after the swap (`agent.clj:132`); an existing entry makes
+a refused second admission look successful. Release is also keyed only by member and can remove the other run's
+claim. The public request contract does not require globally unique member keys.
 
-`kernel/memory-pressure` checks a volatile state, and clears it only when called and collection
-usage is below the resume threshold (`src/seon/sci/kernel.clj:161–173`). P16 used its supplied-state
-arity: pressure cleared to nil, with no branch transaction. `watch-memory!` subscribes to the
-*enter* collection-threshold notification (`:175–194`), not to a resume fact for waiting run agents.
-A run whose members all refuse can have no member exit to wake it. “Next wake” in §5.3 is unspecified.
+**R16, 306 ms:** one parent at limit 1 started six held children; all six entered and the roster contained seven
+bodies. A nested request bypasses admission without a finite child bound. A waiting parent's slot does not bound
+its independently runnable children or materialized worlds; the request's limit is not enforced on them.
 
-The queue holds no allocation reservation: arbitrarily many member graphs/contexts may be
-created while the last collected usage remains below enter. Pressure is a reactive admission
-guard, not a hard guarantee that concurrent allocations remain within heap.
+**Smallest fix.** Key claims by the owning run/member identity and prove the swap acquired that exact claim;
+release only that claim. Carry one process admission budget through nesting. A parent waiting for children must
+yield runnable ownership so children can acquire it, without abandoning parent exit ownership. Preserve the bound
+through the common nested-request path; simply exempting nested requests is not a bound.
 
-**Smallest fix.** Keep pending members as facts until resource admission permits materialization;
-specify a kernel-owned resume notification delivered to waiting run graphs, including the zero-running
-case and deadline delivery. Describe pressure honestly as reactive and measure retained/peak member
-cost under concurrent admission before claiming a heap bound. Do not add a second pressure monitor.
+## 4. B4: readiness does not cover overlapping loads, and classification still admits reloads
 
-## 6. Recording must be a supplied stage, not an unresolved post-loop call
+The revised invocation-graph proof catches the original fixture counterexample. Two independent failures remain.
 
-**Evidence, P1/P15 and the named spec.** `evaluate-batch` is not installed on this JVM.
-The installed body owner is `runner/run-var!` at line 438, and recording is
-`runner/commit-results!` at line 1813. Thus no installed stage-valued test recording was demonstrated.
-The checked-in one-path spec remains revision 2 (`eb590e3ec`); revision 3 is in progress and was not edited.
-Its test-body entrant says no/no/no, its request declares only `:seon.eval/settle?`, and S13 leaves
-recording outside the batch. These are precisely [V2-8](review-one-repl-path-spec-2026-09-27.md#v2-8--p1-every-entrant-calls-the-loop-but-recording-is-still-split).
-§5.5 of the concurrency proposal leaves that ruled requirement as a question.
+**R5, 2 ms:** hold the loader for `[:program #{shared.ns}]`, then request
+`[:program #{shared.ns another.ns}]` against the same readiness owner:
 
-**Smallest fix.** Make the existing test evidence writer a supplied recording/settlement stage
-in the common orchestrator, retaining the evaluated body value when recording fails. Separate
-“no program derivation” from “no recording.” Settle each owning event once; a later actual-exit
-event may need its own durable transaction. Align S13 and this cut before implementing their
-deletions. Prove invocation count, transaction ownership, and identical value/fault delivery from
-MCP and `my.test`; a new MCP-only test tool is not the fix.
+```clojure
+{:both-loaders-entered? true :a :ready-a :b :ready-b}
+```
 
-## Measurement audit and landing evidence
+The delay key is the entire namespace set (`agent.clj:169–180`), so overlapping requests can concurrently arm
+the same Vars. This proves the ownership race without mutating production instrumentation.
+Neither `ready!` nor `host-global` is called by `request!`/`start-member`; their standalone proofs do not
+establish a pre-body execution gate.
 
-These observations support the findings; they are not additional blockers.
+**R11, 7 ms:** kondo analyzes, but never executes,
 
-| Requested claim | REPL result and limit |
+```clojure
+(deftest reloads (require 'clojure.set :reload))
+```
+
+The test is found and its `require` call is present; `host-global` returns `{}`.
+The mutator set (`agent.clj:343`) misses this JVM-global reload. The 1,973 remainder is not therefore a proven
+concurrent-safe set. Loaded-program identity comparison detects some overlap; it cannot undo another body's
+execution under changed Vars. Keeping a global snapshot/restore path (S17) is not safe concurrent isolation either.
+
+**Smallest fix.** Own first load/arming by the actual overlapping namespace/declaration identities, and require
+positive readiness before dispatch. Include reload syntax and known mutation helpers in classification and route
+those tests to the platform JVM before execution. Do not restore global roots over another cluster's work.
+
+Other shared subjects from P11/P13/P15 remain relevant: the central cache serializes same-key derivations;
+SCI forks isolate definitions but can share mutable values inherited from the ancestor; process-wide cache,
+profiling and instrumentation mutations are global; dynamic bindings need explicit conveyance. None is made
+cluster-local by renaming a branch.
+
+## 5. B5: another pressure reader can consume the resume transition without waking waiters
+
+The revision's collection-notice proof passes when its listener clears pressure. **R4, 2 ms**, calls the real
+`kernel/memory-pressure` on the supplied owned state first, then delivers the collection notification:
+
+```clojure
+{:pressure-cleared? true :reader-result nil :wake nil}
+```
+
+`resume-listener` (`agent.clj:153`) requires pressure still to be present before it checks for a clear.
+Another admission reader can clear the shared volatile first. A waiting run with no active member then receives
+neither this wake nor a member-exit wake, and may reach its deadline despite available memory.
+
+**Smallest fix.** Have the kernel's transition owner deliver the resume notice, or make qualifying collection
+notices wake pending runs when pressure is already clear. Notification must not depend on this listener being the
+first reader to clear the shared state. Keep the admission predicate and resume event in the same owner.
+
+The design now correctly calls pressure reactive. R18 held four complete member worlds/graphs across an ordinary
+young collection: used heap was 3,158,902,928 bytes versus 3,144,760,776 before acquisition; an empty control had
+already shifted by 22,166,808 bytes, and release left 3,156,430,472. Last-collected old generation was unchanged.
+This shared-heap observation cannot identify retained bytes per member. R13 found neither JOL nor MemoryMeter
+installed. The rerun's roughly 28.3 MB/thread allocation per fork is not retained size or a heap guarantee.
+Combined with finding 3's unbounded descendants, no finite live-world bound has been proved.
+
+## 6. B6: the real recording refusal is returned as a successful settlement
+
+Supplying `:seon.batch/settle` closes the original architectural question: recording **is** a stage value
+(V2-8). The throwing-stage proof passes. The actual writer returns declared errors as values too.
+
+**R8, 2,688 ms:** on a disposable branch, the real selection/admission writer admits one existing test identity;
+`record-interrupted!` records an honest unstarted red member: zero passes, zero failures, one error,
+`began? false`, `ended? false`, and completed/terminated transaction facts. No test body was run and no green
+was fabricated. This proves the actual member writer is available, not the prototype's green/reach integration.
+
+**R14, 3,636 ms:** pass deliberately mismatched branch provenance to that writer as the prototype settle stage.
+The writer correctly refuses the transition; the common batch/prototype completion reports:
+
+```clojure
+{:admitted? true :value [42] :diagnostics []
+ :commit-error {:seon.test/execution-refusal :seon.test.run/immutable}
+ :unfinished [] :recorded-completion? false}
+```
+
+The batch's settle guard catches throws but accepts the error map as `:seon.batch/commit`
+(pinned `batch.clj:296–305`). The run answers complete with no recorded completion and no settle diagnostic.
+A synthetic marker transaction and an exception-only negative case did not exercise this interface.
+
+**Smallest fix.** Define and consume the settle result's success/error alternatives at the common stage boundary.
+Keep body values, attach and deliver the recording fault, and refuse recorded success when the writer refuses.
+Supply actual member counts and reach digest from the member's observed execution to the requester's writer.
+Prove both positive member evidence and a real refusal before removing runner-side recording.
+
+Rev 3's test-agent landing is **S12**; **S13** now ports proofs as tests. The body thunk belongs in the shared
+`seon.turn.batch/test-request` entrant. The prototype currently repeats its synthetic reader/evaluator in
+`member-request` rather than calling that constructor. Converge there with the world, observer, settle and reply
+stages; otherwise improving this prototype does not improve the MCP/`my.test` entrance.
+
+## Coverage limits and landing evidence
+
+These measurements delimit the execution findings; they are not additional blockers:
+
+| Requested gap | REPL result |
 |---|---|
-| 3.5× | P9 verifies the arithmetic: 6 × 12.1 / 20.7 = 3.50725. No request-level benchmark was repeated because this lane is prohibited from starting test runs. The original multi-request timing remains historical, not independently reproduced or a proof of option B. Root must repeat serial and N=6 requests on disposable worlds, retaining member outcomes as well as wall/CPU/GC measurements. |
-| Per-branch writer not a bottleneck | P8 held one branch's writer inside a finite transaction function. A second write on that branch waited; a write on another branch committed in 110.43 ms. All three committed. This proves independent writers, not that shared recording or store I/O can never bottleneck. |
-| Roster permit | P5 held the real store's roster permit; second roster admission refused with `:reachability-permit-unavailable`, while a blob permit succeeded. Both released. Store-wide exclusivity verified in 2 ms; 23/66 ms historical latency not remeasured. |
-| 2.8 s fixed work | Historical parts sum to 2,779 ms. P9 measured selection 1,697.20 ms for 14 members and `program-written-since?` 1,273.26 ms even at the current basis (false). Both exceed one second and reproduce the costly owners, but this is not the old 13-member population. The 900 ms clean-world and 701 ms admission totals were not reexecuted; no test reservation or checkpoint sweep was made. |
-| Compute pool | P2/P7 verify 18 active workers and queueing. Findings 2–3 limit the claimed guarantee. |
-| Per-test fork/graph | P6 built five real one-proc graphs, each with an isolated branch and SCI fork, ran `(+ 1 1)` on compute, then stopped/joined and released. Branch/context acquisition: 89.76 ms first, then 30.28–31.52 ms. Additional SCI fork: 0.003–0.018 ms. Graph construction: 0.138–0.266 ms. Body dispatch/evaluation: 0.269–0.440 ms. All returned 2 and joined. Whole probe 265 ms. This measures primitives, not host-agent entity creation, seeding, arming, one-path recording or retained memory. The proposed one-path API is absent. |
+| Option B versus serial | R12: eight identical `reduce` bodies, same request/recording, limits 1/4/4/1: **350.36/410.84/400.94/359.27 ms**, all eight correct each time. Parallel throughput was **0.874× serial** here. Includes branch/fork/graph lifecycle; uses quiet recording. This is a small-body counterexample to an unconditional speedup, not a real-suite throughput estimate. |
+| Two clusters | R15, 132 ms: distinct requester branches, cluster names **["default" "default"]**, identical store UUID **224560ae-b0ba-3d5c-b6db-6d7415ad66e7**. The rerun proves concurrent branch isolation within one store, not two independently booted cluster configurations. |
+| MCP / my.test delivery | R21: real MCP SCI on a disposable hosted branch evaluates `(my.test/run {:seon.ns/name 'review.test-agents-v2.empty})`, returning `[]` in 30 ms evaluated time (tool 1.6 s). R23's empty prototype returns its internal results/unfinished/pending map in 117 ms. Empty selection invokes no harness run; it cannot prove member counts, reach, refusal or reply-projection parity. The prototype is not wired into the installed entrance. |
+| Retained heap | R18 measures live heap with four held worlds and controls; retained attribution remains unknown, as explained in finding 5. |
+| Real member writer | R8 records genuine unstarted red evidence; R14 demonstrates lost refusal delivery. Positive executed-member/reach evidence belongs to root's central test round. |
 
-The slow selection and program-history checks belong to the existing test-cost findings, not a new
-performance fix in this review. Instrumentation contamination is already tracked by task
-`b9933ca067dc` (`resources/seon/tasks/seon.test.edn`). Root owns task ingestion for the blocking
-cases above; this lane did not edit task files or the issue index.
+The full rerun costs 8.3 s because it includes a deliberate 3 s pending deadline, 2.18 s population-wide
+kondo analysis (2,378 tests), and bounded negative cases. R8/R14 exceed one second in the existing real
+selection/admission/recording path; their 2.688/3.636 s are end-to-end probes, not isolated batch costs.
+No additional production profiler mutation was used to assign exclusive function costs.
 
-Live baseline: PID 71396, start 2026-09-27T22:01:39.330Z, archive `cd4ca3d39`.
-Both operator status and MCP reported **faulted**, 13 open fault signatures, including
-`seon.sci.kernel/acquire-arm`; readiness was 47,189 ms. These pre-existing faults are not green
-or attributed to this review. Shared activity makes timings observations, not isolated throughput.
+Foreign boundary: the in-flight one-path sources and test/member writer/schema edits were neither changed nor
+loaded. The main probes ran on PID **84717**, archive **e999fdd1bf4876e0bceced3de14817eda8a8d61f**.
+An external replacement at 22:45:47Z changed default to PID **96991**, archive
+**31afcffa921b0ff858bfbb4e04b0579dac458b4c**; the first delivery probe saw a missing advertisement and the next an
+absent disposable branch. After readiness, the branch was recreated, the empty-route probe completed and the
+branch was retired. No stop/reset/restart was issued here. Default reported 13 existing open fault signatures.
 
-Dependency pins at reviewed HEAD: Datahike `591c825d`, SCI `743d1c43`, core.async `dc35f3e0`,
-Malli `43c6dca8`. No dependency was changed. The temporary probe file is roughly 5,000 estimated
-tokens. Envelopes preserve the exact returned tool responses; P19 retrieves a compact, complete
-finding-location list after P18's contract messages hit the printer budget.
+Failed exploratory forms are retained, not counted as proof: R10 used kondo's unsupported stdin argument and
+timed out; R11 supplies `with-in-str`. R17 had a reader delimiter error, corrected in R18. R19/R20 were interrupted
+by the external replacement. R22's missing-agent contract refusal is evidence for finding 2, not delivery parity.
 
-Cleanup: P17 released the parent execution, found none of the five graph-sample branches in the
-roster, and observed compute active/queued = 0/0. MCP retirement confirmed the named branch retired.
-Writer-probe descendants release in finally. All probe latches/futures and graph executors completed.
-P21 positively verified the named branch and scratch host namespace absent. Later static checks
-used `user` and defined no Vars. Temporary archive directories retain static-check evidence only;
-they are not running operator roots.
-
-Static validation used an owned `git archive` of HEAD `71af4f638` plus this document, after another
-lane advanced HEAD during review. `clj-kondo --cache false --lint src script test`: **0 errors,
-948 warnings**, 8,519 ms, exit 2 for warnings. [Lint output](../../../tmp/test-agents-review/lint-final.txt).
-The static `seon.contracts-compile-test/check` examined **486 files**, with the archive's packaged
-projection, in **2,725.65 ms** (MCP 2,734 ms). Its population-wide work is proportional to those
-486 files; it starts no test run. It reproduced **ten pre-existing contract compile errors**:
+Static validation used a `git archive` of HEAD **b57f01ba4a0ba74b345dcb91074d6ed4451365e4** plus only this
+document's diff, refreshed after foreign code commits advanced HEAD. `clj-kondo --cache false --lint src script test`:
+**0 errors, 948 warnings**, 6,243 ms, exit 2 for warnings;
+[lint output](../../../tmp/test-agents-review/v2/lint-landing.txt).
+R30 ran `seon.contracts-compile-test/check` over **486 archived files** against their packaged projection:
+**1,984.34 ms**, ten pre-existing compile errors, zero source/test findings. The additional foreign boundary is
 `script/seon/dev/docstring.clj:285,318,334,360` and
-`script/seon/dev/markdown.clj:1020,1050,1090,1124,1170,1215`. There were **zero source/test findings**.
-These developer-script contracts are the foreign boundary, already recorded by the one-path
-review; this is not a green whole-tree contracts check. Shared uncommitted files were excluded.
-Production/source/test net change: **0**. Only this review document is committed; probe evidence
-stays under `tmp/test-agents-review/`. No runtime publication clock applies to a document change.
+`script/seon/dev/markdown.clj:1020,1050,1090,1124,1170,1215`. This is not a green whole-tree contracts check.
+These are static source checks, not test requests; no archive JVM or worktree was created.
 
-No runtime tests are needed for this documentation-only commit. Root's focused implementation
-round should include these existing tests (not run by this lane):
+R27 confirms zero running/waiting prototype members, the delivery branch absent and all three owned scratch
+namespaces removed. R26's unqualified `ProcessHandle` failed compilation before cleanup; R27 corrects it.
+All owned body latches were released and the observed graphs joined. Disposable writer branches released in
+`finally`; the archive is only retained static evidence, not an operator root. Source/test net change: **0**.
+
+No runtime tests are required for this documentation-only commit. Root's focused implementation list is:
 
 - `seon.test.one-request-test/a-member-body-runs-on-its-own-listed-branch`
 - `seon.test.one-request-test/a-body-outliving-its-bound-is-released-only-after-it-exits`
 - `seon.test.one-request-test/a-member-that-never-exits-holds-only-its-own-test-and-the-next-request-runs`
+- `seon.test.clean-world-test/a-member-world-is-the-loaded-program-with-boot-facts-only`
+- `seon.test.effect-attempt-test/an-agent-capability-stub-settles-a-receipt-only-in-an-effect-reaching-attempt`
+- `seon.test.first-load-arming-test/a-namespace-first-loaded-by-a-request-has-its-contracts-armed`
 - `seon.flow-test/stop-joins-the-graph-only-after-its-procs-exit`
 - `seon.custody-stability-test/cross-cluster-write-isolation`
 
-New regression targets, explicitly not installed: concurrent two-cluster requests with member/effect
-custody; saturated nested requests; graph join before external-body exit; fixture/helper mutation
-classification; pressure resume with no running members; one body value and one owned recording
-through agent and MCP entrants, including recording failure.
+Add the exact R3/R4/R5/R7/R9/R11/R14/R16 behavior regressions to that central round, plus a positive real
+member/reach writer and nonempty MCP/`my.test` delivery comparison. Those new regression tests are not installed.
+Release only this review document and `tmp/test-agents-review/`; no source/test net change or runtime publication.
