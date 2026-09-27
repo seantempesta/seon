@@ -1472,13 +1472,18 @@
          [:db/add (:db/id receipt) attribute reference])))
 
 (defn- receipt-terminal-assertions
-  "Terminal assertions present in `request`, targeting `receipt`."
+  "Terminal assertions present in `request`, targeting `receipt`. A set is a
+  cardinality-many value: one assertion per element, and an empty set asserts
+  nothing (a whole set in one `:db/add` is refused by the writer as a value
+  of the element type)."
   [receipt request]
   (into
    []
-   (keep (fn [attribute]
-           (when-some [value (get request attribute)]
-             [:db/add (:db/id receipt) attribute value])))
+   (mapcat (fn [attribute]
+             (when-some [value (get request attribute)]
+               (if (set? value)
+                 (map (fn [element] [:db/add (:db/id receipt) attribute element]) value)
+                 [[:db/add (:db/id receipt) attribute value]]))))
    receipt-terminal-attributes))
 
 (defn- receipt-read-evidence-tx
