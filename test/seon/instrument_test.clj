@@ -686,6 +686,11 @@
             (is (str/includes? message function-name)
                 "the bounded headline still names the violated function")
             (is (str/includes? message "refused"))
+            (is (str/includes? message "Called from seon.instrument-test (")
+                "the bounded headline keeps the caller and its location")
+            (when (= :output expected-arm)
+              (is (str/includes? message "Fix: Change seon/instrument_test.clj:")
+                  "an output's fix names the returning function's definition"))
             (is (< (tokens/estimate message) 64)
                 "the headline is a concise diagnosis measured in estimated tokens")
             (is (= 200 (:seon.instrument/problem-count instrument-data))
@@ -1508,9 +1513,12 @@
            refusal (test-support/refusal-data #(wrapped (db/db connection) []))
            message (:seon.error/message refusal)]
        (is (= :seon.fn.arity/output (:seon.error/member refusal)) (pr-str refusal))
-       (is (str/includes? message "refused the return value") message)
-       (is (str/includes? message "Fix: Change seon.problems/open-faults to return") message)
-       (is (str/includes? message "seon.problems/open-faults (seon/problems.clj:") message)))))
+       ;; the fix names the definition; the expectation is already the sentence's
+       (is (str/includes? message "seon.problems/open-faults refused its result") message)
+       (is (str/includes? message "Fix: Change seon/problems.clj:") message)
+       (is (str/starts-with? (:seon.error/fix (first (:seon.error/problems refusal)))
+                             "Change seon/problems.clj:")
+           "the problem's fix key carries the same location")))))
 
 (deftest host-diagnostics-use-the-loaded-vars-arglists
   (test-support/with-database

@@ -335,7 +335,8 @@
 
 (defn- attributed-problem
   "Name the expectation by the contract's own schema name and give the fix
-  its subject: the caller for an argument, the function for its return.
+  its subject: the caller for an argument, the function's definition for its
+  return (`location`, `file:line`, or the function itself when it has none).
 
   Malli's declared `:error/message` is both the expectation and, for a
   predicate, the fix (`seon.error/explain-problem`), so the sentence read
@@ -344,9 +345,9 @@
   {:malli/schema [:=> [:cat :seon.error/problem-description
                        [:or :nil :qualified-keyword]
                        [:enum :input :output :guard]
-                       :qualified-symbol :boolean]
+                       :qualified-symbol [:or :nil :string] :boolean]
                   :seon.error/problem-description]}
-  [description named arm function-symbol keyed?]
+  [description named arm function-symbol location keyed?]
   (let [{:seon.error/keys [expected-description fix argument path]} description
         expectation (if (and named (not keyed?))
                       (str named " (" expected-description ")")
@@ -357,9 +358,14 @@
       (and (= :input arm) (= fix expected-description))
       (assoc :seon.error/fix (str "Pass " (or named expected-description)
                                   " as " argument at "."))
+      ;; The sentence already states the expectation and the path; a located
+      ;; fix names only where to change it, which keeps the headline inside
+      ;; its token bound with the caller named (2026-09-27).
       (= :output arm)
-      (assoc :seon.error/fix (str "Change " function-symbol " to return "
-                                  (or named expected-description) at ".")))))
+      (assoc :seon.error/fix (if location
+                               (str "Change " location ".")
+                               (str "Change " function-symbol " to return "
+                                    (or named expected-description) at "."))))))
 
 (defn- definition-location
   "Where the loaded function is defined, as `file:line`, or nil."
@@ -409,6 +415,8 @@
            arm (case kind :malli.core/invalid-output :output
                           :malli.core/invalid-guard :guard :input)
            supplied-entries (when (= :input arm) (supplied-entry-problems function-symbol))
+           ;; an output's fix names where the returning function is defined
+           location (when (= :output arm) (definition-location function-symbol))
            problems
            (if arity?
              [{:seon.error/argument "argument count"
@@ -452,7 +460,7 @@
                                          unmarked (if (.startsWith written "_") (subs written 1) written)]
                                      (when-not (= "" unmarked) unmarked)))
                       argument (case arm
-                                 :output "the return value"
+                                 :output "its result"
                                  :guard "arguments and return value"
                                  (str "argument " position
                                       (when-let [argument-name (or (some-> label name) bound-name)]
@@ -472,7 +480,7 @@
                      problem
                      supplied?)
                     (schema-name offended (vec (:path problem)))
-                    arm function-symbol
+                    arm function-symbol location
                     (or supplied? (= :malli.core/missing-key (:type problem))))
                    :seon.error/schema-path (vec (:path problem)))
                     (= :guard arm)
@@ -506,11 +514,6 @@
                (error/scalar-text (:seon.error/offending first-problem)))
               (when (qualified-keyword? expected)
                 (str " Contract: " expected "."))
-              (when (= :output arm)
-                (str " " function-symbol
-                     (when-let [location (definition-location function-symbol)]
-                       (str " (" location ")"))
-                     " returned it."))
               (when caller (str " Called from " caller ".")))
          :seon.error/expected expected
          :seon.error/offending offending
