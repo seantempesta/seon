@@ -320,7 +320,8 @@
             message (:seon.test/failure-message result)]
         (is (= 1 (:seon.test/error-count result)))
         (is (str/includes? message "Test execution failed"))
-        (is (str/includes? message "seon.error/problem-sentence refused operation")
+        ;; The headline names the refused argument by position and binding (2014f98b6).
+        (is (str/includes? message "seon.error/problem-sentence refused argument 0 `operation`")
             "the stored text names the refusal")
         (is (< (count message) 10000)
             "the whole argument in the refusal's ex-data is not printed"))

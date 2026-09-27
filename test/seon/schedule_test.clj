@@ -84,12 +84,16 @@
    :seon.operator/low-space? false})
 
 (defn flat-error-handler
+  ;; A returned error is an error only as its arity declares it: an
+  ;; uncontracted handler declares no alternatives (a7a2c68c2).
+  {:malli/schema [:=> [:cat :map] :seon.schedule/handler-failed-error]}
   [request]
   (swap! handler-calls conj request)
   {:seon.error/at (Date.)
    :seon.error/layer :seon.schedule-test/handler
    :seon.error/operation 'seon.schedule-test/flat-error-handler
-   :seon.error/message "The scheduled test handler returned an error."})
+   :seon.error/message "The scheduled test handler returned an error."
+   :seon.schedule/failed-handler-symbol 'seon.schedule-test/flat-error-handler})
 
 (defn throwing-handler
   [request]
@@ -349,7 +353,7 @@
         (is (= 0 (count-with @connection
                              :seon.maintenance.receipt/completed-at)))))))
 
-(deftest returned-and-thrown-handler-errors-use-the-existing-root-wake
+(deftest returned-and-thrown-handler-errors-record-one-fault-for-root
   (doseq [[task-id handler expected-operation]
           [["schedule-test/returned" (quote seon.schedule-test/flat-error-handler)
             'seon.schedule-test/flat-error-handler]
@@ -367,7 +371,9 @@
           (is (= 1 (count-with @connection :seon.maintenance.receipt/id)))
           (is (= 1 (count-with @connection :seon.maintenance.receipt/error)))
           (is (= 1 (count-with @connection :seon.error/id)))
-          (is (= 1 (count-with @connection :seon.message/id)))
+          ;; Root's own handler fault is read through for-agent, never mailed
+          ;; back to root: a message is a wake (ffa4e6982).
+          (is (= 0 (count-with @connection :seon.message/id)))
           (let [[_evaluation-id error-id task nominal]
                 (first (db/q '[:find ?evaluation-id ?error-id ?task ?nominal
                         :where
@@ -408,7 +414,9 @@
              (db/q '[:find ?flag .
                      :where
                      [?receipt :seon.maintenance.receipt/error ?error]
-                     [?error :seon.maintenance/disabled-collection-flag ?flag]]
+                     ;; the declared schema's own fields live on the occurrence
+                     [?error :seon.error/occurrences ?occurrence]
+                     [?occurrence :seon.maintenance/disabled-collection-flag ?flag]]
                    @connection))))))
 
 (deftest schedule-remains-the-third-proc-in-the-agent-graph

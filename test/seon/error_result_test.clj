@@ -52,7 +52,10 @@
         (println "ERROR-RESULT-TIMING" stage
                  (/ (- (System/nanoTime) started) 1e6) "ms")))))
 
-(defn- verify-stored! [connection request value]
+(defn- verify-stored!
+  "`value` is the observed value as the error stores it: a place is named by
+  its class and identity, never entered (seon.error.refusal/referenced, 9e051dba7)."
+  [connection request value]
   (let [started (System/nanoTime)
         recording (measured :recording #(error/recording (db/db connection) request))
         report (measured :transaction #(support/transacted! connection (:seon.db/tx-data recording)))
@@ -85,8 +88,10 @@
 (deftest core-results-use-the-printer-for-arbitrary-objects
   (support/with-database
    (fn [connection]
-     (let [value [(atom 42) identity (Object.)]]
-       (verify-stored! connection (request connection (observation value)) value)))))
+     (let [place (atom 42)
+           value [place identity (Object.)]
+           named (str "#object[clojure.lang.Atom 0x" (Integer/toHexString (System/identityHashCode place)) "]")]
+       (verify-stored! connection (request connection (observation value)) (assoc value 0 named))))))
 
 (deftest large-result-keeps-complete-and-profile-capped-printer-text
   (support/with-database
