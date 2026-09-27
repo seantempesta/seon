@@ -137,7 +137,7 @@ EXISTING store (prove adoption on a branch of the live store, never only on a fr
 | Operator | hermetic program classpath from pins (93b342cc0); fallback proven by the next move |
 | Datahike fork | fe1d4e26: values of different classes order by class name (in-place retype); pushed; gitlink 916394523 |
 
-### The order (rewritten in place 2026-09-27 ~23:00Z)
+### The order (rewritten in place 2026-09-27 late night)
 **0. THE ONE SIMPLE PATH — today's major work (owner: "How hard is it to parse and eval and save the results? It's data
 being generated and then passed … one transaction to write it all correctly"; "Everything should be using this one simple
 system").** Pipeline (AGENTS "There is one REPL path"): text → read ONCE (forms with exact spans) → SCI evaluates each form
@@ -151,15 +151,34 @@ Evidence: `valid-clojure-corpus-probe-2026-09-27.md` (plain SCI runs every case 
 layers F1–F12); `eval-path-audit-2-2026-09-27.md` (verdict NO: 52 shape branches, 21 syntax-decided facts, 17 lossy
 boundaries, our own do-evaluator; ~16k lines around the path); `landing/register-anywhere-diagnosis-2026-09-27.md`;
 `landing/oom-63809-2026-09-27.md` (default OOM = corpus `(range)` realized by unbound-value?'s post-eval walk).
-Sequence (owner-approved "safety now, then one core rewrite"):
-  a. **Safety slice (running: safety-slice-opus)** — OOM walk d1efccd3ab7e (bounded by admission), namespace upsert
-     a318b2d38, total reply (evaluate-source! keeps refusals; post-eval failures never replace the value).
-  b. **Astra redesign (running: astra-audit-eval-path, resumed)** of §5 to the owner's invariant: one read; SCI observes
-     definitions AT definition (fork seam); exact-span kondo join; total. Then root resumes it with the full entrant list
-     and the parallel-path inventory (`repl-session-entity-design-2026-09-27.md` §5d) so the plan converts every entrant.
-  c. **ONE core rewrite** (Opus implements in the existing owners, deleting in the same cut: reader prediction, our do
-     evaluator, declared-row, shape branches, singular-row plumbing, the parallel render/preview evaluators), Astra
-     diff-review, proven by the corpus going green + focused suites; then the entity-vocabulary renames inside those files.
+**Reframing (owner, 2026-09-27 night): everything goes through this pipeline, which accommodates every behavior with no
+parallel code.** MCP tools are thin wrappers around it ("Do not improve one without improving the other"): every behavior
+is proven through BOTH an MCP eval and a Seon agent turn (scripted local provider stub, no paid calls). Tests are *test
+agents*: an ordinary agent with its own Flow graph, SCI fork and branch, running its body through the path, so N clusters'
+non-platform tests run concurrently in one JVM (owner: "if we can't then we have a bad design"). Feedback (missing
+contracts, reaching test results, linked faults) is a query over the batch's db-after that the reply carries, fed by
+everything the language spec makes parsable. Goal: "working with the repl is the best way to build in the system."
+Method: REPL workbenches. The prototype IS the code that lands. Proofs are a map of named, schema-validated, armed-timed
+values. Astra falsifies by adding counterexamples at the REPL. Proofs become the deftests. Say entities, facts and values,
+never rows.
+Sequence:
+  a. Safety slice LANDED 9e61340b2.
+  b. **Spec rev 3 (running: one-path-spec-opus)**, `one-repl-path-spec-2026-09-27.md`:
+     - rev 2 eb590e3ec;
+     - Astra rev-2 review a531e47ab REVISE V2-1..8, all accepted;
+     - owner OQ1: execute all forms, commit only facts validated per form; a bad form's error is its logged value, with no
+       whole-batch rejection;
+     - rev 3 is done when tmp/one-path/proof.clj is all green across the corpus, every counterexample, the owner behaviors,
+       every entrant on both sides and the timings.
+  c. Beside it, feeding the spec (all docs, REPL-proven):
+     - test-agents-concurrency-2026-09-27.md (running): audit of every serializer, a concurrent measurement, and the
+       test-agent design with three priced options;
+     - feedback-from-facts-2026-09-27.md (running): inventory of the language constructs parsed and stored; feedback
+       queries with ms and tokens;
+     - repl-dogfood-2026-09-27.md (running): one real change entirely through the REPL, MCP versus agent turn, measured
+       against the file workflow.
+  d. **ONE core rewrite** in the spec's step order (Opus implements, Astra reviews the diff at the REPL), then the
+     entity-vocabulary renames inside those files.
   Open corpus classes the rewrite must close: F1 copied JVM import hides SCI's (defrecord/deftype/import), F3 defmacro in
   let loses location (SCI fork), F4 two defns per form, F5 nested register!, F8 generated-input gate refuses valid code,
   F10 ns-unmap! within a run, F11 non-defn definitions store no entity, F12 cost (0.7–1.1 s per contracted defn).
