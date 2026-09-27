@@ -45,7 +45,7 @@ there is no VAET index to assume.
 
 **Grounding:** `reference-code/datahike/src/datahike/db/transaction.cljc:641-715`
 upsert; `reference-code/datahike/src/datahike/db/utils.cljc:307-313` indexing;
-`src/seon/schema/datahike.clj:66-67,95-102,176-181` symbol/identity projection.
+`src/seon/schema/datahike.clj:26-27,100-106,182` symbol/identity projection; §9 maps every declaration shape.
 
 ## 2. Retraction and lifecycle closure
 
@@ -174,8 +174,8 @@ defines cumulative observation and lifetime semantics.
 
 ## 6. Collections, tuples and native values
 
-Cardinality-many is a set even when a source schema used vector/sequential notation.
-Store explicit ordinal/position facts when order matters. A tuple is one fixed
+Cardinality-many is a set even when a source schema used vector/sequential notation
+(§9). Store explicit ordinal/position facts when order matters. A tuple is one fixed
 ordered observation; its complete value is the index key. Members do not become
 independently indexed attributes or live refs. A ref-shaped tuple member gets neither
 ref resolution nor incoming-ref sweep. Scalar qualified function identity stays scalar.
@@ -254,3 +254,75 @@ static graph and explicit subjects. If a useful query instead needs text parsing
 name conventions or a manually maintained list, identify the missing declaration at
 its single writer. A historical observation, derived query and asserted decision are
 different facts; preserving that distinction prevents absence from becoming success.
+
+## 9. How a Malli declaration becomes Datahike schema
+
+One Malli declaration per attribute is the only authored shape; the bridge
+`seon.schema.datahike` derives the Datahike attribute from it. The fold
+`compiled-storage` (`src/seon/schema/datahike.clj:77-145`) walks the compiled
+schema to a value type and cardinality; `malli->datahike-attr-in` (`:147-186`)
+adds the properties and refuses what has no storable shape. `compiled-attribute-selection`
+(`:220-252`) chooses which declarations become attributes at all. The store owner
+transacts the result; nothing else writes Datahike schema. Probe (JVM, default,
+2026-09-27, 42 ms): 1,258 attributes derive with no refusal — 347 string, 255 ref,
+244 long, 180 keyword, 99 symbol, 65 boolean, 30 instant, 18 double, 12 tuple,
+8 uuid; 48 identity, 92 `:db/index`, 16 `:db/noHistory`, 25 EDN-encoded.
+
+| Declaration | Datahike result | Why |
+|---|---|---|
+| `[T {:seon.db/identity true}]` | `:db/unique :db.unique/identity` (`:182`); Datahike adds `:db/index` (`reference-code/datahike/src/datahike/db/utils.cljc:315`) | The natural identity of an entity (`:seon.fn/sym`, `:seon.schema/key`, `:seon.agent/id`); transaction data naming it upserts onto the existing entity at admission (§1). An attribute that reuses an identity attribute's value shape by name does **not** inherit identity: the fold drops `:seon.db/identity`/`:seon.db/unique` across a named reference (`:100-106`) |
+| `:string` `:re` `:int` `:double` `:float` `:keyword` `:qualified-keyword` `:boolean` `:inst`/`inst?` `:uuid` `:symbol` `:qualified-symbol` | the native `:db.type/*` (`:16-29`, `:142`); `:int` is `:db.type/long` | Native values stay native: symbols are `:db.type/symbol`, never strings converted at each reader |
+| `[:= literal]`, `[:enum :k …]` | the literal's native type (`:35-50`, `:131-133`); keyword enums are `:db.type/keyword` (`:134-136`) | A bounded state is a keyword value; a non-scalar literal or non-keyword enum refuses by name (`:166-167`) |
+| `[:and {props} T]` | `T`'s storage with the `:and`'s properties (`:65`, `:108-109`) | Properties are authored where refinement is |
+| `[:maybe T]` | refused (`:137`, message `:168`) | Datahike stores no nil: absence is no datom, clearing is a retraction |
+| `:seon.db/ref` | `:db.type/ref`, cardinality one (`:90-91`); Datahike indexes refs (`utils.cljc:319`) | A statement about a living entity (§3). The fold stops at this named reference: the target's own shape is not consulted |
+| `[… {:seon.db/component true :seon.db/component-schema :child/key} :seon.db/ref]` | `:db/isComponent true` (`:185`) | The child is part of the parent's value: pull expands it and parent retraction cascades (§4). `:seon.db/component-schema` never reaches Datahike; the final writer reads it from the projection to validate the complete owned value (`src/seon/db.clj:3553-3562`, missing target refuses at `:3700`) and declaration requires it (`src/seon/schema.clj:3355-3380`). A component position also accepts the child's own entity map as transaction data (`:seon.db/component-entity`, `:116-120`) |
+| `[:set T]`, `[:vector T]`, `[:sequential T]` | `:db.cardinality/many` of `T`'s type (`:111-114`) | Datahike's cardinality-many is a **set** of datoms (`reference-code/datahike/src/datahike/index/persistent_set.cljc`). A `[:vector …]` declaration is therefore stored as an unordered set today: order and duplicate members are lost on the round trip. Where order matters the child carries an explicit ordinal (`:seon.fn.arity/order`, `:seon.fn.argument/order`, `:seon.test.seed/ordinal`). The [vector-storage design](../../research/agent-platform/vector-storage-design-2026-09-27.md) (in progress) owns the target |
+| `[:tuple A B …]` | `:db.type/tuple` with `:db/tupleTypes` (`:138-141`, `:180`); a collection of tuples is cardinality-many of tuples | One fixed ordered observation; its whole value is the index key (§6). Collection or unstorable members refuse |
+| `{:db.secondary/only true}` on a float/double tuple | `:db.secondary/only` (`:173-181`) | The fork's secondary-index seam for embeddings; no attribute declares it today |
+| `{:seon.db/no-history? true}` | `:db/noHistory true` (`:186`) | Datahike writes no history datoms for the attribute (`reference-code/datahike/src/datahike/db/transaction.cljc:448`). Declared on three groups: large evaluation and reply text (`:seon.cluster.eval/source`, `output`, `diagnostics`, `comment`, `:seon.turn/reply`), so compaction's `retractEntity` of evaluations (`src/seon/turn.clj:2393-2423`) actually releases their text instead of keeping it in history; opaque payload strings (`:seon.effect/request-edn`, `result-edn`, `:seon.ai.attempt/usage-edn`, `settings-edn`, `:seon.test.accretion/report-edn`, `:seon.dev.mcp.artifact/digest`); and overwritten gauges (`:seon.error.occurrence/count`, `last-at`, `:seon.ai.model/last-*`). History/as-of cannot answer their past, and read evidence refuses to prove them unchanged through history (`src/seon/db.clj:1157`) |
+| `{:seon.db/index true}` | `:db/index true` (`:184`) | Puts a value attribute in AVET for value lookup and reverse queries (symbol edges, message routing); refs and unique attributes are indexed by Datahike already |
+| `{:seon.db/unique true}` | `:db.unique/value` (`:183`) | Uniqueness without upsert; no attribute declares it today |
+| `[:or …]` whose members share one native type | that type (`:122-127`) | e.g. `[:or [:= :a] [:= :b]]` is a keyword |
+| `[:or …]` of mixed or non-scalar members (maps, vectors, symbol-or-string, symbol-or-hiccup) | `:db.type/string` holding canonical EDN (`:128-129`); encoded at the transaction seam (`encode-transaction-in`, `:506-523`) and decoded, validated and canonical-checked on read (`decode-attribute-value-in`, `:559-575`) | A heterogeneous value has no native Datahike type; the codec keeps the logical value whole. Two-keyword many-values are split into `:db/add`s so Datahike does not read them as a lookup ref (`explicit-value-members`, `:440-468`) |
+| `[:map {:seon.db/attributes true} …]` (an entity schema) | no attribute of its own; each entry's attribute is selected for installation (`:229-240`) | The entity schema describes the entity; it stamps no kind. Required entries must be storable (`src/seon/schema/internal.cljc:290-299`) |
+| entity-schema properties: `:seon.program/partition`, `:seon.render/ai`, `:seon.render/html`, `:seon.render/form`, `:seon.render/units`, `:seon.db/component-schema`, … | each qualified property whose own declaration is storable is installed (`:244-249`) and written onto the schema's own entity (identity `:seon.schema/key`) beside `:seon.schema/form` (`storable-properties-in`, `:268-287`; `canonical-schema-rows`, `src/seon/schema.clj:3689-3716`) | The schema declaration is itself an entity, so the program graph can query which schemas are program (`:seon.program/partition :seon.program`, read at `src/seon/program.cljc:50-56`) and which render pair each declares. Readers of the live program read the same properties from the compiled projection (`internal/entity-properties`, `src/seon/schema/internal.cljc:122`) |
+
+### Open questions (accidental or contradicting mappings)
+
+Each is evidence for an owner decision; the bridge is unchanged.
+
+1. **Ordered declarations stored as sets.** 28 cardinality-many attributes are
+   declared `[:vector …]`. Those with an explicit ordinal child are intentional.
+   The rest lose order and duplicates, contradicting their own descriptions:
+   `:seon.sci.eval/stacktrace` ("innermost first", `seon.sci.eval.edn:423`),
+   `:seon.render/units` ("Ordered forward attributes", `seon.render.edn:171-174`),
+   `:my.shell/failed-argv` (argv order and repeated arguments),
+   `:seon.render/candidates`, `:seon.config.ai/stop`, `:seon.config.fs/roots`,
+   `:seon.ai/wire`, `:seon.test/failing-assertions`. Owner: the vector-storage design.
+2. **Render pairs stored as EDN strings.** `:seon.render/ai` is
+   `[:or :qualified-symbol :string]` and `:seon.render/html`
+   `[:or :qualified-symbol :seon.render/hiccup]`, so every schema entity stores
+   its renderer symbol as an EDN string (`:122-129`). The decoded value is a
+   symbol, but a Datalog clause over the raw datom cannot match
+   `'seon.render.ns/schema-ai`, against AGENTS "symbols stay Datahike symbols".
+3. **Hand-encoded EDN strings beside the codec.** `:seon.effect/request-edn`,
+   `result-edn` and `:seon.test.accretion/report-edn` are declared `:string` and
+   encoded by their writers; §6 forbids a hand-encoded EDN mirror of a declared
+   value. The `:seon.ai.attempt/*-edn` attributes are declared opaque provider
+   bytes and are the allowed case.
+4. **Optional entity members silently not installed.** An optional entry of a
+   `:seon.db/attributes` entity schema whose declaration is not storable is
+   skipped (`:235-237`) while a required one refuses at declaration. 16 such
+   members exist (e.g. `:seon.error/chain`, `:seon.task/base`,
+   `:seon.task/proposed`, `:seon.await/subject`); writing one fails at Datahike
+   ("not defined in current schema") rather than at declaration. Are these
+   in-memory-only members by intent?
+5. **Undeclared and unused properties.** `:seon.db/value-type` is read by the
+   bridge (`:124`, `:128`) but declared in no schema resource and set by none;
+   `:seon.db/unique` and `:db.secondary/only` are declared but used by no
+   attribute. AGENTS "add no hypothetical restrictions" asks each to name its
+   caller or go.
+6. **Schema-entity copy of `:seon.render/units`.** The walker reads units from
+   the compiled projection, so live rendering keeps order; the stored copy on the
+   schema entity is an unordered set (question 1) and is not what renders.
