@@ -415,7 +415,10 @@
         (with-open [callback# (java.net.Socket. "127.0.0.1" ~port)
                     writer# (~'clojure.java.io/writer callback#)]
           (.write writer# (str (pr-str coordinates#) "\n")) (.flush writer#)
-          (let [final# (some-> ~program java.io.File.)
+          ;; Built here, not in the child: `(some-> nil java.io.File.)` does not
+          ;; compile (two one-argument File constructors match a nil local), so a
+          ;; launch without a program class directory opened no REPL at all.
+          (let [final# ~(when program `(java.io.File. ~program))
                 staging# (when (and final# (not (.isDirectory final#)))
                            (java.io.File. (str final# ".staging-" (:seon.boot/pid identity#))))
                 _# (some-> staging# .mkdirs)
