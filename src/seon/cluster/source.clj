@@ -584,7 +584,11 @@
     populate :seon.source/populate
     populate-request :seon.source/populate-request
     progress! :seon.source/progress!
-    :or {progress! (constantly nil)}}]
+    ;; The writer of publication's own scratch writes (schema and seal), an
+    ;; explicit value so a caller supplies another without redefining a Var.
+    transact! :seon.source/transact!
+    :or {progress! (constantly nil)
+         transact! db/transact!}}]
   (let [published (current store)
         moved? (and requested-commit published
                     (not= requested-commit (:seon.source/commit-id published)))
@@ -654,7 +658,7 @@
                                                    (keys definition)))))
                             (schema.datahike/malli->datahike-schema-in projection source-attributes))]
               (when (seq missing)
-                (require-committed! (db/transact! connection {:tx-data missing})
+                (require-committed! (transact! connection {:tx-data missing})
                                    ::scratch-schema-refused
                                    "the source scratch schema transaction was refused"
                                    {:seon.source/digest source-digest})))
@@ -679,7 +683,7 @@
             ;; install canonical schema/program entities and boot/config process
             ;; facts; the digest and build instant are the final complete fact.
             (when-not unchanged? (require-committed!
-             (db/transact!
+             (transact!
               connection
               (cond-> {:tx-data
                [(let [prior-id (db/q '[:find ?entity . :where [?entity :seon.source/digest]]

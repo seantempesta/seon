@@ -146,7 +146,8 @@
          previous (db/carry-projection-state
                    database (sci.eval/projection-state database (:seon.schema/projection opened)))]
     (try
-     (source/publish! (merge (select-keys populate-request [:seon.source/expected-commit-id])
+     (source/publish! (merge (select-keys populate-request [:seon.source/expected-commit-id
+                                                            :seon.source/transact!])
                      {:seon.store/store opened
                      :seon.source/digest digest
                      :seon.source/populate populate
@@ -157,7 +158,7 @@
                      (merge {:seon.fn/manifest (:seon.fn/manifest opened)
                              :seon.source/previous-database previous
                              :seon.source/change-classes #{:program}}
-                            populate-request)
+                            (dissoc populate-request :seon.source/transact!))
                      :seon.source/progress! @#'cluster/*source-progress!*}))
      (finally (d/release-materialized-db database))))))
 
@@ -215,17 +216,27 @@
   flat-scratch-write-refusal-retires-the-candidate
   (with-store
     (fn [opened]
-      (let [result
-            (with-redefs [db/transact!
-                          (fn [& _]
-                            {:seon.db.write.attempt/request-id "source-refusal" :seon.error/at (java.util.Date.) :seon.error/layer :seon.db/invocation :seon.error/operation 'seon.db/transact!
-                             :seon.error/message "injected refusal"})]
-              (refusal #(publish opened digest-a)))]
-        (is (= :seon.cluster.source/scratch-schema-refused
-               (:seon.cluster.source/rule result)))
+      ;; Publication's writer is an explicit request value: this one refuses
+      ;; flatly, echoing the transaction it was handed. The fixture store
+      ;; already holds the source attributes, so the first scratch write it
+      ;; reaches is the seal.
+      (let [refusing-writer
+            (fn [_connection transaction]
+              {:seon.db.write.attempt/request-id "source-refusal" :seon.error/at (java.util.Date.)
+               :seon.error/layer :seon.db/invocation :seon.error/operation 'seon.db/transact!
+               :seon.error/message "injected refusal" :seon.error/offending transaction})
+            result (refusal #(publish opened digest-a 'seon.cluster.source-test/populate!
+                                      {:seon.source/transact! refusing-writer}))]
+        (is (= :seon.cluster.source/source-seal-refused
+               (:seon.cluster.source/rule result))
+            (pr-str result))
         (is (= "injected refusal"
                (get-in result
                        [:seon.source/transaction-result :seon.error/message])))
+        (is (= digest-a
+               (get-in result [:seon.source/transaction-result :seon.error/offending
+                               :tx-data 0 :seon.source/digest]))
+            "the refused write is the seal of this publication")
         (is (= #{:db :current-src} (set (registry/roster opened))))
         (is (empty? (scratch-branches opened)))))))
 
