@@ -353,8 +353,8 @@
   (`:seon.cluster.eval/faults`, `seon.turn/fault-window`: the window
   (previous settlement, this settlement], read once by the writer), keyed by
   evaluation entity id, for `:all` of the agent's evaluations or the `shown`
-  set, each as its recorded observation (`seon.error/latest-fact`) with its
-  resolution when resolved. Nothing is reconstructed from occurrence counters.
+  set, each as its value (`seon.error/value` of `seon.error/latest-fact`)
+  with its occurrence count, origin branch and resolution when resolved. Nothing is reconstructed from occurrence counters.
   A refused read is thrown whole."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id
                        [:or [:= :all] [:set :int]]]
@@ -372,8 +372,18 @@
                     [eid (mapv (fn [[_ error]]
                                  (let [pulled (read-or-throw (db/pull db selector error))
                                        resolved (read-or-throw (error/resolution db (:seon.error/signature pulled)))]
-                                   (cond-> (error/latest-fact pulled)
-                                     resolved (assoc :seon.error/resolution resolved))))
+                                   ;; ONE ERROR, SHOWN ONCE: its value (message
+                                   ;; once, evidence by blob reference) and what
+                                   ;; this window adds. The whole observation
+                                   ;; repeated the message three times (base,
+                                   ;; occurrence, capped data-edn) and printed
+                                   ;; the evidence inline; it stays reachable
+                                   ;; by :seon.error/id.
+                                   (let [fact (error/latest-fact pulled)]
+                                     (cond-> (merge (error/value fact)
+                                                    (select-keys fact [:seon.error.occurrence/count
+                                                                       :seon.error.occurrence/branch]))
+                                       resolved (assoc :seon.error/resolution resolved)))))
                                group)])))
           (group-by first rows))))
 

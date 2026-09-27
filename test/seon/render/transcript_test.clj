@@ -1479,12 +1479,14 @@
                                             :seon.agent/id "worker"}))]
                (is (true? (:seon.fault/committed? receipt)) (pr-str receipt)))
              (settled-evaluation! cluster "cluster-copy-1" 1)
-             (let [responses (into {} (map (juxt :seon.cluster.eval/ordinal :seon.render.history/printed-value))
+             ;; each settlement is its own one-evaluation run (ordinal 0,
+             ;; 6afc9415e), so entries are keyed by their form
+             (let [responses (into {} (map (juxt :seon.render.history/form :seon.render.history/printed-value))
                                    (transcript/history-entries (unit cluster)))]
-               (is (= #{0 1} (set (keys responses))) "each entry names its evaluation's ordinal")
-               (is (str/includes? (str (get responses 1)) "raised on the worker's branch") (pr-str responses))
-               (is (str/includes? (str (get responses 1)) (str origin)) "the copy names its origin branch")
-               (is (not (str/includes? (str (get responses 0)) "raised on the worker's branch"))))
+               (is (= #{"(identity 0)" "(identity 1)"} (set (keys responses))) "each entry names its evaluation")
+               (is (str/includes? (str (get responses "(identity 1)")) "raised on the worker's branch") (pr-str responses))
+               (is (str/includes? (str (get responses "(identity 1)")) (str origin)) "the copy names its origin branch")
+               (is (not (str/includes? (str (get responses "(identity 0)")) "raised on the worker's branch"))))
              (finally
                (store/release-branch! cluster)
                (registry/retire-branch! {:seon.store/store store :seon.store/branch home})))))))))
