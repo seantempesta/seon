@@ -9,4 +9,9 @@
  #:seon.task{:name "generated-input-gate-refuses-valid-code"
              :kind :function
              :intent "F8: the install gate's generated-input test refuses valid code (a declared forward call; a :pre narrower than the contract) and the reply omits the failing input (test/accretion.clj ~384-405). A refusal names its offending generated input as data; forward declarations and narrower preconditions are not contract violations."
-             :evidence #{"docs/research/agent-platform/valid-clojure-corpus-probe-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/valid-clojure-corpus-probe-2026-09-27.md"}}
+ #:seon.task{:name "schema-row-compiles-every-reached-form"
+             :kind :function
+             :intent "schema-row compiles the row's key from raw forms in a fresh registry per call, so every reached reference compiles again and Malli's generator cache never hits: 86 rows cost 400 ms (1.5 s in the 2026-09-27 publication replay) where schema-row-in answers from a projection in 11.6 ms. Its last caller, seon.sci.eval's declared-row, converts to schema-row-in with its candidate projection (patch tmp/publication-cost-opus/sci-eval-schema-row-in.patch); then delete schema-row."
+             :must-read #{seon.test.accretion/schema-row seon.test.accretion/schema-row-in}
+             :evidence #{"docs/research/agent-platform/boot-branch-open-2026-09-27.md"}}]

@@ -49,8 +49,14 @@
          (throw failure))))))
 
 (defn schema-row
-  "Accrete the derived generatability fact onto one canonical schema row."
-  {:malli/schema [:=> [:cat :map :map] :map]}
+  "Accrete the derived generatability fact onto one canonical schema row.
+
+  # Known issues
+  Compiles every form the row reaches again per call; `schema-row-in` answers
+  from a projection. Its last caller converts and this function is deleted
+  (task 0dfdcc8e447e)."
+  {:seon/tasks #{"0dfdcc8e447e"}
+   :malli/schema [:=> [:cat :map :map] :map]}
   [forms row]
   (let [registry (mr/composite-registry (m/default-schemas)
                                         (mr/fast-registry forms))]
@@ -62,6 +68,24 @@
                (if (= ::m/invalid-schema (:type (ex-data failure)))
                  false
                  (throw failure)))))))
+
+(defn schema-row-in
+  "Accrete the derived generatability fact onto one canonical schema row.
+
+  Generates from `projection`'s own compiled schema for the row's key. The
+  projection's registry retains each compiled schema, so a reference is
+  compiled once and Malli's generator cache on that object serves every row
+  reaching it; `schema-row` compiles every reachable form again for each row.
+  Both answer the same fact (all 3,568 packaged keys, default 2026-09-27).
+
+  # Costs
+  Armed, default's REPL 2026-09-27: 86 rows 11.6 ms on a fresh projection,
+  0.1 ms again; `schema-row` 400 ms for the same rows."
+  {:malli/schema [:=> [:cat :seon.schema/projection :map] :map]}
+  [projection row]
+  (assoc row :seon.schema/generatable?
+         (generatable? (mr/schema (:seon.schema.projection/registry projection)
+                                  (:seon.schema/key row)))))
 
 (defn data-contract!
   "Refuse function objects before a durable contract is printed as EDN."

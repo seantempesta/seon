@@ -409,12 +409,21 @@
   ;; generator by symbol in `:gen/gen`; malli handed the symbol to gen/fmap and
   ;; threw an AssertionError that only a catch-everything hid. The fork now
   ;; resolves the symbol, and any other "cannot generate" is a typed ex-info.
+  ;; The projection route (`schema-row-in`, what publication uses) answers
+  ;; exactly what the raw-forms route answers, for every packaged key.
   (let [forms (schema.edn/packaged-forms)
+        projection (schema/declaration-projection forms)
         answers (into {} (map (fn [schema-key]
                                 [schema-key (:seon.schema/generatable?
-                                             (accretion/schema-row forms {:seon.schema/key schema-key}))]))
+                                             (accretion/schema-row-in projection {:seon.schema/key schema-key}))]))
                       (keys forms))]
     (is (every? boolean? (vals answers)))
     (is (true? (answers :seon.sci.eval/evaluation))
         "a map whose member names its generator by symbol generates")
-    (is (true? (answers :seon.test/var)))))
+    (is (true? (answers :seon.test/var)))
+    (is (= answers
+           (into {} (map (fn [schema-key]
+                           [schema-key (:seon.schema/generatable?
+                                        (accretion/schema-row forms {:seon.schema/key schema-key}))]))
+                 (keys forms)))
+        "the raw-forms route agrees on every key")))

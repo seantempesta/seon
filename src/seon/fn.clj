@@ -3293,8 +3293,19 @@
     #{}))
 
 (defn- incremental-projection
-  "Reuse the prior declaration world for body edits; rebuild only when its
-  schema or contract population actually changes. The bridge owns compilation."
+  "Reuse the prior declaration world for body edits; when its schema or
+  contract population changes, derive from it by replacement, so only the
+  changed declarations and their reverse closure recompile
+  (`schema/build-projection` with the prior as its base). The bridge owns
+  compilation.
+
+  The prior's own admissions, exports and predicate bindings carry over
+  (`schema/population-options`); the derived projection equals the whole
+  build of the same forms and contracts in every other member.
+
+  # Costs
+  Armed, measured at default's REPL 2026-09-27: ten changed files (eight
+  changed contracts) 854 ms as a whole build, 43 ms derived."
   {:malli/schema [:=> [:cat :seon.fn/index-request :seon.program/rows] [:or :nil :map]]}
   [request source-rows]
   (when-let [database (:seon.source/previous-database request)]
@@ -3322,8 +3333,7 @@
         prior
         (schema/build-projection forms
           (merge (apply dissoc prior-contracts removed) authored-contracts)
-          {:seon.schema/predicate-functions (schema/predicate-functions-in prior)
-           :seon.schema/validate-render-contracts? true})))))
+          (assoc (schema/population-options prior) :seon.schema/projection prior))))))
 
 (defn- desired-entities
   {:malli/schema [:=> [:cat :seon.fn/index-request [:or :nil [:=> [:cat :string] :seon.schema/value]]] :seon.program/rows]}
@@ -3354,9 +3364,11 @@
                                        projection (into (changed-schema-keys request)
                                                         (keep :seon.schema/key) changed-entities)))
                          packaged-forms)
+        ;; Generatability is judged in the packaged population, from its
+        ;; compiled schemas (the population's projection, already built).
         canonical-schemas
         (if (seq selected-forms)
-          (mapv (partial accretion/schema-row packaged-forms)
+          (mapv (partial accretion/schema-row-in (schema/declaration-projection packaged-forms))
                 (schema/canonical-schema-entities projection selected-forms)) [])
         canonical-keys (into #{} (map :seon.schema/key) canonical-schemas)
         source-only
@@ -3597,8 +3609,14 @@
   (let [projection (or (db/carried-projection database)
                        (schema/projection-from-database database))
         identity-attributes (db/identity-attributes database)
-        entity (memoize #(db/pull database '[*] %))
-        desired-identities (into #{} (map program/row-identity) entity-maps)
+        ;; ONE READ for every desired entity: inside the transaction each
+        ;; `db/pull` paid its read's declaration lookup, 0.42 ms a call (6,106
+        ;; calls, 2.56 s of a 306-file publication, default 2026-09-27).
+        identities (mapv program/row-identity entity-maps)
+        pulled (db/pull-many database '[*] identities)
+        held (when (vector? pulled) (zipmap identities pulled))
+        entity (memoize #(if-let [entry (find held %)] (val entry) (db/pull database '[*] %)))
+        desired-identities (set identities)
         removed (remove desired-identities previous-identities)
         ;; A note citing a removed file is uncited text. Its citation
         ;; component's `:seon.issue.citation/file` is a required ref, so the
@@ -3611,6 +3629,8 @@
                     (:e citation)))
         removed (into (vec removed) (sort uncited))
         desired (vec entity-maps)]
+    (if-not held
+      pulled
     (loop [pending desired changes []]
       (if-let [entity-map (first pending)]
         (let [current (entity (program/row-identity entity-map))]
@@ -3663,7 +3683,7 @@
                                   (mapcat :seon.fn/retractions) changes)
                             identity-operations)
                       entities)
-                keyword-operations))))))
+                keyword-operations)))))))
 
 (defn reconcile-tx
   "Replace source definitions while retaining identities and agent facts.

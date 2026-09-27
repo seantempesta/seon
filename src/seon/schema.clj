@@ -2600,7 +2600,7 @@
   [projection]
   (every? #(contains? projection %) incremental-projection-keys))
 
-(defn- population-options
+(defn population-options
   "The [[build-projection]] options that reproduce `projection`'s own
    admissions, exports and predicate bindings; a replacement changes one."
   {:malli/schema [:=> [:cat :map] :map]}
