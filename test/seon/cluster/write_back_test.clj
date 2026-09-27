@@ -23,7 +23,9 @@
   "One small namespace: a callee and its caller. The test reaching both is the
   agent's, written at its REPL, as a lane writes one."
   [fixture-ns]
-  (str "(ns " fixture-ns "\n  \"Write-back fixture.\")\n\n"
+  ;; the file requires clojure.test: the agent's tests name it, and write-back
+  ;; refuses a candidate file whose analysis finds an unrequired namespace
+  (str "(ns " fixture-ns "\n  \"Write-back fixture.\"\n  (:require [clojure.test]))\n\n"
        "(defn callee\n  \"Add one.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (+ x 1))\n\n"
        "(defn caller\n  \"Call the callee.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (callee x))\n"))
 
@@ -289,7 +291,7 @@
   ;; merge carries that entity with the declaration that needs it, and write-back
   ;; splices the `ns` form's span; the namespace's other declarations are
   ;; re-derived under it, so the reindexed file equals the merged program.
-  (let [ns-form #(str "(ns " % "\n  \"Write-back fixture.\"\n  (:require [clojure.set]))")]
+  (let [ns-form #(str "(ns " % "\n  \"Write-back fixture.\"\n  (:require [clojure.set] [clojure.test]))")]
     (merge-world!
      "wbns" "set-check"
      [ns-form (fn [_] "(clojure.test/deftest set-check (clojure.test/is (= #{1 2} (clojure.set/union #{1} #{2}))))")]
