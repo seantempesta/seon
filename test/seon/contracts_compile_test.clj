@@ -16,7 +16,13 @@
   edamame, against the projection built from `seon.schema.edn/packaged-forms`
   (the resources on disk now). It loads no namespace it reads. `bin/seon-hook`
   calls it in the live root for the files a hook event changes; the deftests
-  run it over all of `src/` and `test/` and over the three historical forms."
+  run it over all of `src/` and `test/` and over the three historical forms.
+
+  Given the file as it was (`::baselines`), [[check]] also refuses every
+  `defn`/`defn-` the edit adds or changes without a complete contract: no
+  `:malli/schema`, or an `:any` standing in for a data shape. Unchanged
+  functions are not judged (owner 2026-09-27: agents editing files specify
+  every function they touch; REPL agents are warned, merge refuses)."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -175,6 +181,67 @@
           (definition-forms forms))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Completeness: every function an edit adds or changes is specified
+;;; ---------------------------------------------------------------------------
+
+(def ^:private function-heads
+  "The definition heads the completeness rule judges (owner 2026-09-27)."
+  #{'defn 'defn-})
+
+(defn- exempt-any?
+  "True for `[:any {...}]` declaring a justified polymorphic boundary."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "An authored contract node is arbitrary data until it compiles.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
+  [node]
+  (boolean (and (vector? node) (= :any (first node)) (map? (second node))
+                (:seon.schema.admission/exemption (second node)))))
+
+(defn- stand-in-any?
+  "True when `contract` names `:any` outside a declared exemption."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "An authored contract is arbitrary data until it compiles.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
+  [contract]
+  (boolean (some #{:any} (tree-seq #(and (coll? %) (not (exempt-any? %))) seq contract))))
+
+(def ^:private shape-advice
+  (str "Declare each data shape it takes and returns as a registered schema first "
+       "(resources/seon/schemas/<namespace>.edn), then name those shapes: "
+       "{:malli/schema [:=> [:cat :my.ns/request] :my.ns/result]}. A genuinely "
+       "polymorphic boundary says so: [:any {:seon.schema.admission/exemption "
+       ":seon.schema.admission/polymorphic-boundary :seon.schema.admission/reason \"...\"}]."))
+
+(defn incomplete-changes
+  "Findings for every `defn`/`defn-` in `text` that `baseline` lacks or
+  defines differently and whose contract is missing or uses `:any` as a
+  stand-in. Forms compare as read data, so moving or reformatting a function
+  changes nothing; a baseline of \"\" is a new file."
+  {:malli/schema [:=> [:cat :string :string :string] [:vector :map]]}
+  [path text baseline]
+  (let [forms (read-source text)
+        namespace-name (or (some #(when (and (seq? %) (= 'ns (first %))) (second %)) forms)
+                           'user)
+        before (into {} (map (juxt second identity))
+                     (definition-forms (read-source baseline)))]
+    (into []
+          (keep (fn [form]
+                  (when (and (function-heads (first form))
+                             (not= form (get before (second form))))
+                    (let [authored (declared-schema form)
+                          {:keys [row col]} (meta form)
+                          function-symbol (symbol (str namespace-name) (name (second form)))
+                          change (if (find before (second form)) "changes" "adds")
+                          refusal (fn [problem]
+                                    {:filename path :row row :col col :level :error
+                                     :type :incomplete-contract
+                                     :message (str "This edit " change " " function-symbol
+                                                   " (" (first form) ") " problem " "
+                                                   shape-advice)})]
+                      (cond
+                        (nil? authored) (refusal "without a :malli/schema.")
+                        (stand-in-any? authored)
+                        (refusal (str "with :any standing in for a data shape: "
+                                      (pr-str authored) ".")))))))
+          (definition-forms forms))))
+
+;;; ---------------------------------------------------------------------------
 ;;; Compilation: the publication path
 ;;; ---------------------------------------------------------------------------
 
@@ -307,9 +374,10 @@
                            [::paths {:optional true} [:sequential :string]]
                            [::sources {:optional true} [:map-of :string :string]]
                            [::projection {:optional true} :map]
-                           [::candidate {:optional true} :map]]]
+                           [::candidate {:optional true} :map]
+                           [::baselines {:optional true} [:map-of :string :string]]]]
                   [:vector :map]]}
-  [{::keys [root paths sources projection candidate] :or {root "."}}]
+  [{::keys [root paths sources projection candidate baselines] :or {root "."}}]
   (let [projection (or projection
                        (when (and candidate
                                   (= (checkout-packaged-forms root)
@@ -319,7 +387,11 @@
         texts (merge (into {} (map (fn [path] [path (slurp path)])) paths)
                      sources)
         contexts (namespace-contexts texts)]
-    (into []
+    (into (into []
+                (mapcat (fn [[path text]]
+                          (when-some [[_ baseline] (find baselines path)]
+                            (incomplete-changes path text baseline))))
+                (sort-by key texts))
           (comp (mapcat (fn [[path text]]
                           (declared-contracts path text
                                               (get contexts path no-namespace-context))))
@@ -392,3 +464,32 @@
       (is (str/includes? (:message (first (get by-file "src/seon/render/web.clj"))) ":vector")))
     (testing "every finding names file, row and definition"
       (is (every? #(and (:row %) (str/starts-with? (:message %) "seon.")) findings)))))
+
+(deftest a-new-or-changed-function-needs-a-complete-contract
+  ;; Owner 2026-09-27: the edit hook refuses a function an edit adds or
+  ;; changes without a complete contract; unchanged functions are untouched.
+  (let [baseline "(ns seon.probe)
+(defn legacy [x] x)
+(defn- kept {:malli/schema [:=> [:cat :int] :int]} [x] x)"
+        edited "(ns seon.probe)
+(defn legacy [x] x)
+(defn- kept {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))
+(defn fresh [x] x)
+(defn- private-fresh [x] x)
+(defn loose {:malli/schema [:=> [:cat :any] :int]} [x] 1)
+(defn justified {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary :seon.schema.admission/reason \"Any read value.\"}]] :int]} [x] 1)
+(defn specified {:malli/schema [:=> [:cat :int] :int]} [x] x)"
+        findings (check {::sources {"src/seon/probe.clj" edited}
+                         ::baselines {"src/seon/probe.clj" baseline}})
+        refused (filterv #(= :incomplete-contract (:type %)) findings)
+        named (fn [fragment] (some #(str/includes? (:message %) fragment) refused))]
+    (is (= 3 (count refused)) (pr-str refused))
+    (is (named "adds seon.probe/fresh (defn) without a :malli/schema"))
+    (is (named "adds seon.probe/private-fresh (defn-) without a :malli/schema"))
+    (is (named "adds seon.probe/loose (defn) with :any standing in"))
+    (is (every? #(str/includes? (:message %) "registered schema") refused))
+    (is (not (named "seon.probe/legacy")) "an unchanged uncontracted function is untouched")
+    (is (not (named "seon.probe/justified")) "a declared polymorphic boundary is complete")
+    (testing "without a baseline the corpus check judges compilation only"
+      (is (empty? (filter #(= :incomplete-contract (:type %))
+                          (check {::sources {"src/seon/probe.clj" edited}})))))))

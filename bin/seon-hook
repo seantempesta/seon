@@ -575,9 +575,16 @@
     (try
       (let [absolute-paths (mapv absolute-file-path file-paths)
             request (if prospective-content
+                      ;; The file as it stands before the edit is the
+                      ;; baseline: a function the edit adds or changes needs
+                      ;; a complete contract; an unchanged one is not judged.
                       {:seon.contracts-compile-test/root repo-root
                        :seon.contracts-compile-test/sources
-                       {(first absolute-paths) prospective-content}}
+                       {(first absolute-paths) prospective-content}
+                       :seon.contracts-compile-test/baselines
+                       {(first absolute-paths)
+                        (let [current (io/file (first absolute-paths))]
+                          (if (.isFile current) (slurp current) ""))}}
                       {:seon.contracts-compile-test/root repo-root
                        :seon.contracts-compile-test/paths absolute-paths})
             form (pr-str
@@ -996,10 +1003,20 @@
                   (str "ms=" (quot (- (System/nanoTime) started) 1000000))
                   (str (:seon.hook.analysis/reason analysis)))
             (when (seq errors)
-              {:decision "block"
-               :reason (contract-compile-refusal
-                        "BLOCKED: this edit declares contracts that do not compile"
-                        errors)})))))))
+              (let [{incomplete true uncompiled false}
+                    (group-by #(= :incomplete-contract (:type %)) errors)]
+                {:decision "block"
+                 :reason (str/join
+                          "\n"
+                          (remove nil?
+                                  [(when (seq incomplete)
+                                     (str "BLOCKED: every function this edit adds or changes "
+                                          "needs a complete contract whose data shapes are "
+                                          "declared schemas:\n"
+                                          (format-clj-kondo-findings incomplete)))
+                                   (contract-compile-refusal
+                                    "BLOCKED: this edit declares contracts that do not compile"
+                                    uncompiled)]))}))))))))
 
 (defn- contract-compile-feedback
   "Post-edit contract findings for the landed files, and unavailability named."
