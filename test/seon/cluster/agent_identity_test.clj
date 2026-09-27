@@ -84,12 +84,11 @@
             indexed (db/pull database
                              '[:seon.fn/sym
                                {:seon.fn/arities
-                                [:seon.fn.arity/order
-                                 :seon.fn.arity/argument-count
+                                [:seon.fn.arity/argument-count
                                  :seon.fn.arity/input
                                  :seon.fn.arity/output]}]
                              [:seon.fn/sym "seon.cluster.agent/whoami"])
-            arities (sort-by :seon.fn.arity/order (:seon.fn/arities indexed))
+            arities (:seon.fn/arities indexed)
             expected (agent/whoami {:seon.db/db database :seon.agent/id agent-id})
             acquired (sci.eval/cluster-ctx database connection)
             environment (env/refuse-incomplete-environment!

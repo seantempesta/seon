@@ -299,7 +299,7 @@
       (let [result (runner/run-var! test-var {})]
         (is (= 1 (:seon.test/fail-count result)) (pr-str result))
         (is (zero? (:seon.test/error-count result)) (pr-str result))
-        (is (= [[[0 "[:seon.fn/sym a/b]"]]]
+        (is (= [["[:seon.fn/sym a/b]"]]
                (mapv :seon.test.failure/contexts (:seon.test.failure/reports result)))))
       (finally (remove-ns (ns-name (:ns (meta test-var))))))))
 

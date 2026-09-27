@@ -1,5 +1,4 @@
-#:seon.fn.binding.entry{:order :int,
-                        :spelling
+#:seon.fn.binding.entry{:spelling
                         [:enum :explicit :keys :strs :syms],
                         :binding
                         [:and {:seon.db/component true :seon.db/component-schema :seon.fn.binding/row} :seon.db/ref],
@@ -7,8 +6,6 @@
                         :row
                         [:map
                          #:seon.db{:attributes true :seon.program/partition :seon.program}
-                         [:seon.fn.binding.entry/order
-                          :seon.fn.binding.entry/order]
                          [:seon.fn.binding.entry/spelling
                           :seon.fn.binding.entry/spelling]
                          [:seon.fn.binding.entry/binding

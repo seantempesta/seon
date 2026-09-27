@@ -726,10 +726,11 @@
 (declare binding-entity)
 
 (defn- binding-child
+  "One positional child of a destructuring binding, as a component row."
+  {:malli/schema [:=> [:cat :symbol :int :int [:vector :seon.schema/value] :int :keyword :seon.schema/value] :map]}
   [function-symbol arity-order argument-index path order role binding]
   {:db/id (binding-id function-symbol arity-order argument-index
                       (conj path :child order))
-   :seon.fn.binding.child/order (long order)
    :seon.fn.binding.child/role role
    :seon.fn.binding.child/binding
    (binding-entity function-symbol arity-order argument-index
@@ -754,6 +755,9 @@
   (symbol (name binding-symbol)))
 
 (defn- map-binding-entries
+  "A map binding's entries in canonical order, each carrying its position for
+   its component id (never stored: the entries vector keeps the order)."
+  {:malli/schema [:=> [:cat :map] [:sequential :map]]}
   [binding]
   (let [directive-name (fn [value]
                          (when (keyword? value) (keyword (name value))))
@@ -788,7 +792,8 @@
          (map-indexed
           (fn [order entry]
             (let [local-binding (:seon.fn.binding.entry/local-binding entry)]
-              (cond-> (assoc entry :seon.fn.binding.entry/order (long order))
+              ;; The position names the entry's component id only; the vector keeps its order.
+              (cond-> (assoc entry ::entry-position (long order))
                 (and (symbol? local-binding)
                      (contains? defaults local-binding))
                 (assoc :seon.fn.binding.entry/default-edn
@@ -842,8 +847,10 @@
       base)))
 
 (defn- binding-entry-entity
+  "One map-binding entry as a component row."
+  {:malli/schema [:=> [:cat :symbol :int :int [:vector :seon.schema/value] :map] :map]}
   [function-symbol arity-order argument-index path
-   {order :seon.fn.binding.entry/order
+   {order ::entry-position
     spelling :seon.fn.binding.entry/spelling
     source-key :seon.fn.binding.entry/source-key
     local-binding :seon.fn.binding.entry/local-binding
@@ -852,7 +859,6 @@
    (merge
     {:db/id (binding-id function-symbol arity-order argument-index
                         (conj path :entry order))
-     :seon.fn.binding.entry/order order
      :seon.fn.binding.entry/spelling spelling
      :seon.fn.binding.entry/binding
      (binding-entity function-symbol arity-order argument-index
@@ -1021,14 +1027,15 @@
     (symbol? label) (assoc :seon.fn.argument/label-symbol label)))
 
 (defn- argument-entity
+  "One argument of an arity as a component row; its position is its place in
+   the arity's arguments vector."
+  {:malli/schema [:=> [:cat :symbol :int :map :int :map] :map]}
   [function-symbol arity-order source-signature order
    {label :seon.fn.argument/label}]
   (let [bindings (:seon.fn.signature/bindings source-signature)
         rest-index (:seon.fn.signature/rest-index source-signature)]
     (cond->
      {:db/id (component-id function-symbol [:arity arity-order :argument order])
-      :seon.fn.argument/order (long order)
-      :seon.fn.argument/index (long order)
       :seon.fn.argument/rest? (= order rest-index)
       :seon.fn.argument/binding
       (binding-entity function-symbol arity-order order [] (nth bindings order))}
@@ -1037,7 +1044,9 @@
 (defn- arity-entity
   "One stored arity row. `references` are this arity's `[input output guard]`
    reference sets, derived with the compiled contract in its own compilation
-   world ([[seon.schema/contract-references]]); they are never re-derived here."
+   world ([[seon.schema/contract-references]]); they are never re-derived here.
+   Its position is its place in the function's arities vector."
+  {:malli/schema [:=> [:cat :symbol :int :map [:sequential :seon.schema/value] :map] :map]}
   [function-symbol order info references source-signature]
   (let [[input-refs output-refs guard-refs] references
         slots (input-slots (:input info))
@@ -1061,7 +1070,6 @@
                         (range) slots)]
     (cond->
      {:db/id (component-id function-symbol [:arity order])
-      :seon.fn.arity/order (long order)
       :seon.fn.arity/arity (pr-str (:arity info))
       :seon.fn.arity/min (long (:min info))
       :seon.fn.arity/argument-count (long (count arguments))}

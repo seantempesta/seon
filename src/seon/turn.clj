@@ -2318,8 +2318,7 @@
                                      evaluation (get-in preview [:seon.turn.loop/evaluated-sources 0
                                                                  :seon.sci.eval/evaluation])]
                                  (concat
-                                  (map (fn [evidence] [:db.fn/retractEntity (:db/id evidence)])
-                                       (:seon.cluster.eval/read-evidence previous))
+                                  ;; The read-evidence vector below replaces the previous one whole.
                                   [[:db/add (:db/id previous) :seon.cluster.eval/read-basis-transaction
                                     (:seon.cluster.eval/read-basis-transaction evaluation)]]
                                   (when-let [origin (:seon.eval/origin source)]

@@ -489,24 +489,22 @@
                                   [(test-support/namespace-entity (db/db connection) 'sample)
                                    schema-entity positional mapped])
         (let [positional-address
-              (db/q '[:find ?index ?binding-shape
+              (db/q '[:find ?binding-shape
                       :in $ ?function-symbol
                       :where
                       [?function :seon.fn/sym ?function-symbol]
                       [?function :seon.fn/arities ?arity]
                       [?arity :seon.fn.arity/arguments ?argument]
-                      [?argument :seon.fn.argument/index ?index]
                       [?argument :seon.fn.argument/binding ?binding]
                       [?binding :seon.fn.binding/shape ?binding-shape]]
                     @connection (quote sample/positional))
               map-address
-              (db/q '[:find ?index ?binding-shape ?key
+              (db/q '[:find ?binding-shape ?key
                       :in $ ?function-symbol
                       :where
                       [?function :seon.fn/sym ?function-symbol]
                       [?function :seon.fn/arities ?arity]
                       [?arity :seon.fn.arity/arguments ?argument]
-                      [?argument :seon.fn.argument/index ?index]
                       [?argument :seon.fn.argument/binding ?binding]
                       [?binding :seon.fn.binding/shape ?binding-shape]
                       [?binding :seon.fn.binding/entries ?binding-entry]
@@ -514,8 +512,8 @@
                     @connection (quote sample/mapped))]
           (is (= 1 (count positional-address)))
           (is (= 1 (count map-address)))
-          (is (= [0 :symbol] (first positional-address)))
-          (is (= [0 :map :sample/ambient] (first map-address))))))))
+          (is (= [:symbol] (first positional-address)))
+          (is (= [:map :sample/ambient] (first map-address))))))))
 
 (deftest source-contract-join-refuses-disagreement-and-records-overrides
   (let [spec [:=> [:cat :int] :int]
@@ -602,11 +600,8 @@
             (and (= (set (map :join-key descriptors)) actual-keys)
                  (every?
                   (fn [arity]
-                    (and (= (:seon.fn.arity/argument-count arity)
-                            (count (:seon.fn.arity/arguments arity)))
-                         (= (range (:seon.fn.arity/argument-count arity))
-                            (map :seon.fn.argument/index
-                                 (:seon.fn.arity/arguments arity)))))
+                    (= (:seon.fn.arity/argument-count arity)
+                       (count (:seon.fn.arity/arguments arity))))
                   arities))))
          :seed 202608050012)]
     (test-support/assert-check! result)))
@@ -624,17 +619,14 @@
         facts (parsed-contract (quote sample/complete) spec forms)
         arities (:seon.fn/arities facts)]
     (testing "one compiled contract yields Malli's exact ordered arities"
-      (is (= [{:seon.fn.arity/order 0
-               :seon.fn.arity/arity "1"
+      (is (= [{:seon.fn.arity/arity "1"
                :seon.fn.arity/min 1
                :seon.fn.arity/max 1}
-              {:seon.fn.arity/order 1
-               :seon.fn.arity/arity ":varargs"
+              {:seon.fn.arity/arity ":varargs"
                :seon.fn.arity/min 1
                :seon.fn.arity/max 2}]
              (mapv #(select-keys %
-                                 [:seon.fn.arity/order
-                                  :seon.fn.arity/arity
+                                 [:seon.fn.arity/arity
                                   :seon.fn.arity/min
                                   :seon.fn.arity/max])
                    arities))))
@@ -711,17 +703,16 @@
                 (db/pull @connection
                         [:seon.fn/spec
                          {:seon.fn/arities
-                          [:seon.fn.arity/order :seon.fn.arity/min
+                          [:seon.fn.arity/min
                            :seon.fn.arity/max
                            {:seon.fn.arity/arguments
-                            [:seon.fn.argument/index]}]}]
+                            [:seon.fn.argument/rest?]}]}]
                         [:seon.fn/sym function-symbol])]
             (is (= (pr-str new-spec) (:seon.fn/spec redefined)))
-            (is (= [{:seon.fn.arity/order 0
-                     :seon.fn.arity/min 1
+            (is (= [{:seon.fn.arity/min 1
                      :seon.fn.arity/max 1
                      :seon.fn.arity/arguments
-                     [{:seon.fn.argument/index 0}]}]
+                     [{:seon.fn.argument/rest? false}]}]
                    (:seon.fn/arities redefined)))
             (is (every? #(empty? (db/datoms @connection :eavt %))
                         old-components))))))))
@@ -1233,8 +1224,8 @@
                           database attributes))
           census-attributes #{:seon.fn/sym :seon.ns/name :seon.test/sym
                               :seon.schema/key :seon.fn.file/relative-path
-                              :seon.lint/id :seon.fn.arity/order
-                              :seon.fn.argument/order :seon.fn.binding/form
+                              :seon.lint/id :seon.fn.arity/arity
+                              :seon.fn.argument/rest? :seon.fn.binding/form
                               :seon.ns.alias/local :seon.ns.import/local
                               :seon.ns.refer/local}
           installed (set (db/q '[:find [?a ...] :where [_ ?a]] database))

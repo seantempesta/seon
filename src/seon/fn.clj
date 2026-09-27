@@ -528,8 +528,9 @@
 
   A symbol (form 2) is its qualified name; literal entity maps (form 1) keep
   the attributes they write; an inline `(fn [input] ...)` (form 3) keeps only
-  its ordinal. Values stay in the test source."
-  {:malli/schema [:=> [:cat :seon.schema/projection :map :qualified-symbol :any]
+  its form. Each occurrence's position is its place in the vector. Values
+  stay in the test source."
+  {:malli/schema [:=> [:cat :seon.schema/projection :map :qualified-symbol :seon.schema/value]
                   [:vector :seon.test.seed/occurrence]]}
   [projection context test-symbol entries]
   (when-not (vector? entries)
@@ -537,26 +538,25 @@
   (into []
         (map-indexed
          (fn [ordinal entry]
-           (assoc
-            (cond
-              (symbol? entry)
-              {:seon.test.seed/function
-               (or (when (qualified-symbol? entry) (seed-symbol context entry))
-                   (seed-refused! :unqualified-symbol test-symbol ordinal
-                                  {:seon.error/offending entry}))}
+           (cond
+             (symbol? entry)
+             {:seon.test.seed/form :function
+              :seon.test.seed/function
+              (or (when (qualified-symbol? entry) (seed-symbol context entry))
+                  (seed-refused! :unqualified-symbol test-symbol ordinal
+                                 {:seon.error/offending entry}))}
 
-              ;; Its calls and reads are the test's own analysis; derive, never copy.
-              (and (seq? entry) ('#{fn fn* clojure.core/fn} (first entry)))
-              {}
+             ;; Its calls and reads are the test's own analysis; derive, never copy.
+             (and (seq? entry) ('#{fn fn* clojure.core/fn} (first entry)))
+             {:seon.test.seed/form :inline}
 
-              (or (map? entry) (and (vector? entry) (every? map? entry)))
-              (let [writes (literal-seed-writes projection test-symbol ordinal
-                                                (if (map? entry) [entry] entry))]
-                (cond-> {} (seq writes) (assoc :seon.test.seed/writes writes)))
+             (or (map? entry) (and (vector? entry) (every? map? entry)))
+             (let [writes (literal-seed-writes projection test-symbol ordinal
+                                               (if (map? entry) [entry] entry))]
+               (cond-> {:seon.test.seed/form :literal} (seq writes) (assoc :seon.test.seed/writes writes)))
 
-              :else
-              (seed-refused! :unknown-form test-symbol ordinal {:seon.error/offending entry}))
-            :seon.test.seed/ordinal ordinal)))
+             :else
+             (seed-refused! :unknown-form test-symbol ordinal {:seon.error/offending entry}))))
         entries))
 
 (def ^:private seed-contract
@@ -579,7 +579,7 @@
                        (when (:seon.error/at entity) (throw (ex-info (:seon.error/message entity) entity)))
                        (when (:seon.fn/sym entity) entity))))]
     (doseq [{test-symbol :seon.test/sym seeds :seon.test/seed} entities
-            {ordinal :seon.test.seed/ordinal function-symbol :seon.test.seed/function} seeds
+            [ordinal {function-symbol :seon.test.seed/function}] (map-indexed vector seeds)
             :when function-symbol
             :let [entity (when-not (removed function-symbol)
                         (or (get authored function-symbol) (read-entity function-symbol)))
@@ -2724,7 +2724,7 @@
   #{:seon.fn/sym :seon.fn/arglists :seon.fn/arities :seon.fn/private?
     :seon.fn/macro? :seon.fn/inline? :seon.fn/defined-by :seon.fn/constant?
     :seon.fn.arity/arity :seon.fn.arity/min :seon.fn.arity/max
-    :seon.fn.arity/argument-count :seon.fn.arity/order})
+    :seon.fn.arity/argument-count})
 
 (defn caller-files
   "Direct caller files of declarations whose signature the committed report
@@ -3252,9 +3252,7 @@
          []
          (mapcat
           (fn [[function function-symbol spec source arglists namespace-name]]
-            (let [current (db/pull db [:seon.fn/arities]
-                                  function)
-                  parsed
+            (let [parsed
                   (program/contract-facts
                    {:seon.program/function-symbol function-symbol
                     :seon.program/spec spec
@@ -3266,12 +3264,8 @@
                     :seon.program/reader-namespace namespace-name
                     :seon.program/reader-aliases
                     (get aliases-by-namespace namespace-name {})})]
-              (concat
-               (keep (fn [attribute]
-                       (when (contains? current attribute)
-                         [:db.fn/retractAttribute function attribute]))
-                     [:seon.fn/arities])
-               [(assoc parsed :db/id function)]))))
+              ;; The arities vector replaces the stored one whole.
+              [(assoc parsed :db/id function)])))
          (sort-by second missing))]
     (when (seq tx-data)
       (require-committed!

@@ -53,7 +53,7 @@
         [(str (name (:seon.test.failure/type failure))
               (when path (str " " path ":" (:seon.test.failure/line failure))))
          (when (seq (:seon.test.failure/contexts failure))
-           (str/join " > " (map second (sort-by first (:seon.test.failure/contexts failure)))))
+           (str/join " > " (:seon.test.failure/contexts failure)))
          (field :seon.test.failure/message :seon.test.failure/message-blob)
          (when-let [expected (field :seon.test.failure/expected :seon.test.failure/expected-blob)]
            (str "expected: " expected))

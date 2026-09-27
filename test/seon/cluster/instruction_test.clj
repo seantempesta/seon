@@ -11,6 +11,8 @@
 (def ^:private reader-options {:eof ::eof})
 
 (defn- code-spans
+  "The fenced and inline Clojure code spans of `text`."
+  {:malli/schema [:=> [:cat :string] [:vector :string]]}
   [text]
   (mapv (fn [[_ fenced inline]] (or fenced inline))
         (re-seq #"(?s)```clojure\s*(.*?)```|`([^`\n]+)`" text)))
@@ -43,15 +45,16 @@
         (code-spans text)))
 
 (defn- call-resolution
+  "`call` with the callee's stored arities and whether one admits its count."
+  {:malli/schema [:=> [:cat :seon.db/database-value :map] :map]}
   [db call]
   (let [function-symbol (:seon.cluster.instruction/symbol call)
         function (db/pull db
                          [{:seon.fn/arities
-                           [:seon.fn.arity/order
-                            :seon.fn.arity/min
+                           [:seon.fn.arity/min
                             :seon.fn.arity/max]}]
                          [:seon.fn/sym function-symbol])
-        arities (sort-by :seon.fn.arity/order (:seon.fn/arities function))
+        arities (:seon.fn/arities function)
         call-arity (:seon.cluster.instruction/arity call)]
     (assoc call
            :seon.cluster.instruction/accepted-arities arities

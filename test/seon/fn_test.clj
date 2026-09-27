@@ -669,7 +669,7 @@
             (db/q '[:find ?argument ?argument-tx ?index-tx ?binding-tx
                     :where
                     [_ :seon.fn.arity/arguments ?argument ?argument-tx]
-                    [?argument :seon.fn.argument/index _ ?index-tx]
+                    [?argument :seon.fn.argument/rest? _ ?index-tx]
                     [?argument :seon.fn.argument/binding _ ?binding-tx]]
                   db)
             functions-by-role

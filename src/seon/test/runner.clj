@@ -208,7 +208,7 @@
     ;; A label prints as `clojure.test/testing-contexts-str` prints it, by `str`
     ;; (`reference-code/clojure/src/clj/clojure/test.clj:307`);
     ;; the stored context is its string, whatever value the label was.
-    (assoc :seon.test.failure/contexts (mapv vector (range) (map str (reverse test/*testing-contexts*))))
+    (assoc :seon.test.failure/contexts (mapv str (reverse test/*testing-contexts*)))
     (:file event) (assoc :seon.test.failure/reported-file (str (:file event)))
     (and (integer? (:line event)) (pos? (:line event)))
     (assoc :seon.test.failure/line (:line event))
@@ -1361,7 +1361,11 @@
           (:seon.test.runner/results completion))]
     (assoc completion :seon.test.runner/results results :seon.blob/staged-writes @staged)))
 
-(defn- failure-replacement-tx [database test-entity-id failures run-ref at]
+(defn- failure-replacement-tx
+  "Transaction data replacing one test's stored failures with `failures`."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:or :int :string] [:sequential :map] :seon.schema/value :inst]
+                  :seon.store/transaction-data]}
+  [database test-entity-id failures run-ref at]
   (let [previous (when-not (string? test-entity-id)
                    (db/pull database '[{:seon.test/failures [*]}] test-entity-id))
         previous-by-id (into {} (map (juxt :seon.test.failure/id identity)) (:seon.test/failures previous))
@@ -1391,12 +1395,7 @@
               (for [attribute (keys (dissoc old :db/id :seon.test.failure/id))
                     :when (not (contains? entity attribute))]
                 [:db.fn/retractAttribute (:db/id old) attribute])
-              ;; The one cardinality-many failure attribute changes member by
-              ;; member; only the members the new entity drops are retracted.
-              (let [wanted (set (:seon.test.failure/contexts entity))]
-                (for [context (:seon.test.failure/contexts old)
-                      :when (not (contains? wanted context))]
-                  [:db/retract (:db/id old) :seon.test.failure/contexts context]))
+              ;; The contexts vector, when asserted, replaces the stored one whole.
               [entity]))) failures))))
 
 (defn complete-members
@@ -1548,6 +1547,8 @@
   reads the WRITER's own database value — a caller pre-read could strand
   a retract's lookup ref against a concurrently retracted row and reject
   the whole result transaction."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test.run/completion]
+                  :seon.store/transaction-data]}
   [database
    {results :seon.test.runner/results
     run :seon.test.run/provenance
@@ -1655,7 +1656,6 @@
                                       (remove wanted-members held-members))
               added-members (into #{} (remove held-members) wanted-reach)
               wanted-digest (get digests test-symbol)
-              wanted-assertions (set (:seon.test/failing-assertions result))
               result-entity
               (cond-> (assoc (dissoc result :seon.test/failures :seon.test.run/terminated?)
                              :db/id test-entity-id
@@ -1697,12 +1697,10 @@
                  (contains? current :seon.test/reach-unknown))
             (conj [:db.fn/retractAttribute test-ref :seon.test/reach-unknown])
 
-            exists?
-            (into (comp (remove wanted-assertions)
-                        (map (fn [assertion]
-                               [:db/retract test-ref :seon.test/failing-assertions
-                                assertion])))
-                  (:seon.test/failing-assertions current))
+            ;; The failing-assertions vector, when asserted, replaces the stored one whole.
+            (and exists? (not (contains? result :seon.test/failing-assertions))
+                 (contains? current :seon.test/failing-assertions))
+            (conj [:db.fn/retractAttribute test-ref :seon.test/failing-assertions])
 
             exists? (into retracted-members)
             true (conj result-entity))

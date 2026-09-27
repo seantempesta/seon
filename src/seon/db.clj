@@ -4280,31 +4280,22 @@
 (defn- prepared-arity-bounds
   "The call counts `callee`'s STORED arities admit once its invocation plan's
   suppliable slots may be omitted: each stored arity row's minimum widened by
-  the slot count of the plan arity of the same order. The stored rows are what
-  the program graph knows, so a changed arity row is compared as written; the
-  compiled contract contributes only which slots a call may omit."
-  {:malli/schema [:=> [:cat [:=> [:cat :seon.db/query :seon.db/database-value :qualified-symbol]
-                             [:or :seon.schema/value :seon.db/error-result]]
-                       :seon.db/database-value :qualified-symbol [:maybe :map]]
+  the slot count of the plan arity at the same position of the callee's
+  arity vector. The stored rows are what the program graph knows, so a
+  changed arity row is compared as written; the compiled contract contributes
+  only which slots a call may omit."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol [:maybe :map]]
                   [:or :seon.fn/declared-arities :seon.db/error-result]]}
-  [query-fn database callee plan]
-  (let [entity-maps (query-fn '[:find ?order ?minimum ?maximum
-                         :in $ ?callee
-                         :where
-                         [?function :seon.fn/sym ?callee]
-                         [?function :seon.fn/arities ?arity]
-                         [?arity :seon.fn.arity/min ?minimum]
-                         [(get-else $ ?arity :seon.fn.arity/order -1) ?order]
-                         [(get-else $ ?arity :seon.fn.arity/max -1) ?maximum]]
-                       database callee)
+  [database callee plan]
+  (let [pulled (pull database [{:seon.fn/arities [:seon.fn.arity/min :seon.fn.arity/max]}] [:seon.fn/sym callee])
         slots (into {} (map (juxt :seon.fn.arity/order (comp count :seon.call-preparation/slots)))
                     (:seon.call-preparation/arities plan))]
-    (if (:seon.db/invalid-read entity-maps)
-      entity-maps
-      (->> entity-maps
-           (map (fn [[order minimum maximum]]
-                  (cond-> {:seon.fn.arity/min (max 0 (- (long minimum) (long (get slots order 0))))}
-                    (nat-int? maximum) (assoc :seon.fn.arity/max maximum))))
+    (if (:seon.db/invalid-read pulled)
+      pulled
+      (->> (:seon.fn/arities pulled)
+           (map-indexed (fn [order {minimum :seon.fn.arity/min maximum :seon.fn.arity/max}]
+                          (cond-> {:seon.fn.arity/min (max 0 (- (long minimum) (long (get slots order 0))))}
+                            (nat-int? maximum) (assoc :seon.fn.arity/max maximum))))
            distinct
            (sort-by (juxt :seon.fn.arity/min #(get % :seon.fn.arity/max Long/MAX_VALUE)))
            vec))))
@@ -4313,11 +4304,9 @@
   "Refuse or report `candidates` (calls no stored arity admits) that the
   callee's stored arities do not admit even with its plan's suppliable slots
   omitted. `snapshot` is the call-preparation snapshot its caller acquired."
-  {:malli/schema [:=> [:cat [:=> [:cat :seon.db/query :seon.db/database-value :qualified-symbol]
-                             [:or :seon.schema/value :seon.db/error-result]]
-                       :seon.db/database-value [:maybe :map] :map [:vector :seon.schema/value] :int :int]
+  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :map] :map [:vector :seon.schema/value] :int :int]
                   [:or :seon.fn/arity-mismatch-report :seon.db/error-result]]}
-  [query-fn database snapshot bounds candidates checked edges]
+  [database snapshot bounds candidates checked edges]
   (let [refusal (or (when (and snapshot (nil? (:seon.call-preparation/basis-t snapshot))) snapshot)
                     (first (:seon.call-preparation/refusals snapshot)))]
     (or refusal
@@ -4326,7 +4315,7 @@
                                     [callee (@call-preparation-plan-for database snapshot callee)]))
                           callees)
               refused (some #(when (and % (nil? (:seon.fn/sym %))) %) (vals plans))
-              prepared (into {} (map (fn [callee] [callee (prepared-arity-bounds query-fn database callee (get plans callee))]))
+              prepared (into {} (map (fn [callee] [callee (prepared-arity-bounds database callee (get plans callee))]))
                              callees)
               unreadable (some #(when (:seon.db/invalid-read %) %) (vals prepared))]
           (or refused
@@ -4361,7 +4350,7 @@
                   [:or :seon.fn/arity-mismatch-report :seon.db/error-result]]}
   [database projection report {candidates ::candidates bounds ::bounds checked ::checked edges ::edges}]
   (let [candidates (vec candidates)]
-    (arity-mismatch-report storage-q database
+    (arity-mismatch-report database
                            (when (seq candidates) (@call-preparation-report-snapshot report projection))
                            bounds candidates checked edges)))
 
@@ -4377,7 +4366,7 @@
               candidates (filterv (fn [[_ [callee n]]]
                                     (not (arity-admitted? (get bounds callee) n)))
                                   checked)]
-          (arity-mismatch-report query-fn database
+          (arity-mismatch-report database
                                  (when (seq candidates) (@call-preparation-snapshot database projection))
                                  bounds candidates (count checked) (count edges))))))
 

@@ -2193,7 +2193,7 @@
                 (db/db connection) '[:seon.test/sym sample.seedorder/seeded]
                 (str "(clojure.test/deftest ^{:seon.test/seed [{:seon.test/skip-reason \"a\"}"
                      " {:seon.test/skip-reason \"b\"}]} seeded (clojure.test/is true))"))]
-       (is (= [0 1] (mapv :seon.test.seed/ordinal (:seon.test/seed entity))))
+       (is (= [:literal :literal] (mapv :seon.test.seed/form (:seon.test/seed entity))))
        (test-support/transacted!
         connection [(test-support/namespace-entity (db/db connection) 'sample.seedorder) entity])
        (is (= (:seon.program/definition-digest entity)

@@ -2410,7 +2410,7 @@
   [:seon.fn/sym :seon.fn/doc :seon.fn/doc-order :seon.fn/arglists :seon.fn/spec
    :seon.schema.admission/source
    {:seon.fn/arities
-    [:seon.fn.arity/order :seon.fn.arity/arity
+    [:seon.fn.arity/arity
      '(limit :seon.fn.arity/input-refs nil)
      '(limit :seon.fn.arity/output-refs nil)]}])
 
@@ -2645,6 +2645,7 @@
 
 (defn- program-doc-var
   "Resolve in the calling SCI namespace; read facts when the form executes."
+  {:malli/schema [:=> [:cat] :seon.schema/value]}
   []
   (sci/new-macro-var
    'doc

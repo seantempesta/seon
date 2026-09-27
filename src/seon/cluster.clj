@@ -1360,26 +1360,35 @@
   Counts every current datom of the dropped attributes in `database` (read
   before the change) and names the indexed source files of the program rows
   carrying them — function and test rows through `:seon.fn/file`, lint rows
-  through `:seon.lint/file` — so the publication re-derives exactly those
-  files. Other data is left for the agent that wrote it to reapply. Work is
-  one AEVT range read per dropped attribute and one join per file relation."
+  through `:seon.lint/file`, a component's row through the declaration that
+  owns it — so the publication re-derives exactly those files. Other data is
+  left for the agent that wrote it to reapply. Work is one AEVT range read per
+  dropped attribute and one AVET seek per component attribute per owner step."
   {:malli/schema [:=> [:cat :seon.db/database-value [:vector :qualified-keyword]]
                   [:map
                    [:seon.db/datom-count :seon.db/datom-count]
                    [:seon.fn/changed-paths :seon.fn/changed-paths]]]}
   [database attributes]
   (let [attributes (filterv #(contains? (:schema database) %) attributes)
+        components (into [] (keep (fn [[attribute declaration]]
+                                    (when (and (keyword? attribute) (:db/isComponent declaration)) attribute)))
+                         (:schema database))
+        ;; A dropped attribute on a component (an arity's, an argument's) is
+        ;; re-derived by the file of the declaration that owns it: climb owners.
+        owning-root (fn [entity]
+                      (loop [entity entity seen #{}]
+                        (let [owner (some #(:e (first (d/datoms database :avet % entity))) components)]
+                          (if (and owner (not (seen owner)))
+                            (recur owner (conj seen entity))
+                            entity))))
+        roots (delay (into #{} (comp (mapcat #(d/datoms database :aevt %)) (map :e) (distinct) (map owning-root))
+                           attributes))
         paths (fn [file-attribute]
                 (if (and (seq attributes) (contains? (:schema database) file-attribute))
-                  (let [result (db/q '[:find [?path ...]
-                                       :in $ [?attribute ...] ?file-attribute
-                                       :where [?entity ?attribute]
-                                              [?entity ?file-attribute ?file]
-                                              [?file :seon.fn.file/relative-path ?path]]
-                                     database attributes file-attribute)]
-                    (if (:seon.error/at result)
-                      (throw (ex-info (:seon.error/message result) result))
-                      result))
+                  (into []
+                        (comp (keep #(:v (first (d/datoms database :eavt % file-attribute))))
+                              (keep #(:v (first (d/datoms database :eavt % :seon.fn.file/relative-path)))))
+                        @roots)
                   []))]
     {:seon.db/datom-count
      (transduce (map #(count (d/datoms database :aevt %))) + 0 attributes)

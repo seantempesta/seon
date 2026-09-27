@@ -53,9 +53,9 @@
        "   {:seon.test.seed/tx-data [{:seon.test/skip-reason (helper database)}]})]"))
 
 (def ^:private stored-in-order
-  [{:seon.test.seed/ordinal 0 :seon.test.seed/writes #{:seon.test/skip-reason}}
-   {:seon.test.seed/ordinal 1 :seon.test.seed/function 'sample.seeded-test/week}
-   {:seon.test.seed/ordinal 2}])
+  [{:seon.test.seed/form :literal :seon.test.seed/writes #{:seon.test/skip-reason}}
+   {:seon.test.seed/form :function :seon.test.seed/function 'sample.seeded-test/week}
+   {:seon.test.seed/form :inline}])
 
 (deftest seed-entries-of-all-three-forms-are-admitted-and-stored-in-order
   (with-seeded-root
@@ -70,19 +70,18 @@
           ;; only since 20a87b1d1; an unquoted symbol is exercised, not named).
           (is (contains? (:seon.fn/calls seeded) 'sample.seeded-test/week)
               "a named seed is a call-reach edge of its test"))
-        (testing "the canonical writer stores the occurrences; ordinals rebuild the vector"
+        (testing "the canonical writer stores the occurrences as a vector, in order"
           (test-support/with-database
            (fn [connection]
              (test-support/transacted! connection (seon.fn/reconcile-tx (db/db connection) entities []))
              (let [pulled (db/pull (db/db connection)
-                                   [{:seon.test/seed [:seon.test.seed/ordinal :seon.test.seed/function
+                                   [{:seon.test/seed [:seon.test.seed/form :seon.test.seed/function
                                                       :seon.test.seed/writes]}]
                                    [:seon.test/sym 'sample.seeded-test/seeded])]
                (is (= stored-in-order
                       (->> (:seon.test/seed pulled)
                            (map (fn [occurrence]
                                   (update-vals occurrence #(if (sequential? %) (set %) %))))
-                           (sort-by :seon.test.seed/ordinal)
                            vec)))))))))))
 
 (deftest an-empty-seed-vector-adds-no-occurrences
@@ -125,7 +124,7 @@
                                    namespace-entity source #{})
         [_ settled] (seon.fn/analyze-form database source
                                           [:seon.ns/name 'seon.fn.seed-admission-test] entity)]
-    (is (= [{:seon.test.seed/ordinal 0 :seon.test.seed/writes #{:seon.test/skip-reason}}]
+    (is (= [{:seon.test.seed/form :literal :seon.test.seed/writes #{:seon.test/skip-reason}}]
            (:seon.test/seed entity) (:seon.test/seed settled)))
     (is (contains? (:seon.fn/keywords entity) :seon.test/skip-reason))
     (is (contains? (:seon.fn/keywords settled) :seon.test/skip-reason))))

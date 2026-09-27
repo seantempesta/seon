@@ -6,7 +6,7 @@
  :message :string
  :message-blob :seon.blob/digest
  :message-size [:int {:min 0}]
- :contexts [:vector [:tuple [:int {:min 0}] :string]]
+ :contexts [:vector {:description "The report's `testing` contexts, outermost first."} :string]
  :expected :string
  :expected-blob :seon.blob/digest
  :expected-size [:int {:min 0}]

@@ -20,8 +20,7 @@
               :seon.fn/source "(defn value [] 1)"
               :seon.fn/arglists "([])" :seon.fn/private? false
               :seon.fn/doc "old documentation"
-              :seon.fn/arities [{:seon.fn.arity/arity "0"
-                                :seon.fn.arity/order 0}]}
+              :seon.fn/arities [{:seon.fn.arity/arity "0"}]}
              {:seon.fn/sym (second removed) :seon.fn/ns namespace-ref
               :seon.schema.admission/source :core
               :seon.fn/source "(defn removed [] nil)"}
@@ -40,8 +39,7 @@
              {:seon.fn/sym (second kept) :seon.fn/ns namespace-ref
               :seon.fn/source "(defn value [x] x)"
               :seon.fn/arglists "([x])" :seon.fn/private? false
-              :seon.fn/arities [{:seon.fn.arity/arity "1"
-                                :seon.fn.arity/order 0}]}
+              :seon.fn/arities [{:seon.fn.arity/arity "1"}]}
              {:seon.fn/sym 'sample.development/new-value :seon.fn/ns namespace-ref
               :seon.fn/source "(defn new-value [] (value 2))"
               :seon.fn/calls [kept]}
