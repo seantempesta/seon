@@ -30,7 +30,7 @@ root.
   classification) is attached beside the value as a diagnostic and recorded as a fault; it never replaces, blocks or
   wedges the value.
 - **Agents change the program in REPL terms**: `defn` inside the target namespace or by its fully qualified name,
-  `my.program/ns-unmap!` and `my.program/remove-ns!` to delete. Files are the write-back of accepted rows, not the
+  `my.program/ns-unmap!` and `my.program/remove-ns!` to delete. Files are the write-back of accepted entities, not the
   working medium. Product agents use declared evaluation, adoption and test requests, never shell self-modification.
 
 ## How to think
@@ -126,11 +126,11 @@ root.
   environment-variable names. `seon.config/defaults` is a compiled constant, not a cluster's configuration. Boot
   reads each dial from the configuration it applied, never the store's pre-adoption value, so a new dial exists at
   its first read.
-- **The program is rows**: functions, tests, schemas, namespaces, render pairs, contracts, analysis and test
+- **The program is entities**: functions, tests, schemas, namespaces, render pairs, contracts, analysis and test
   evidence keyed by exercised definition digests. Turns, evaluations, messages, errors, tasks and live results are
   data and never merge as program; declare that partition on entity schemas, not in a hand list. Default's program
   rows and loaded namespaces derive from files. A JVM has one set of compiled Vars; other branches interpret
-  differing rows and their affected callers in SCI and bind compiled Vars for the rest. Compute host-bound status
+  differing entities and their affected callers in SCI and bind compiled Vars for the rest. Compute host-bound status
   per declaration, never from a namespace roster; refuse an unsupported override by name instead of running other
   code.
 - **An agent's context** is its SCI world; its task selects custody of the live cluster head or its own branch.
@@ -138,7 +138,7 @@ root.
   atoms and objects survive program changes advanced in place at idle boundaries; each turn reacquires from the
   branch head, reusing content-valid derivations.
 - **Reload and adoption.** A reload is `require :reload` for changed namespaces and their dependents. Adoption goes
-  rows → load → arm → record and waits for no one. Stability comes from branch custody: work that overlaps a reload
+  entities → load → arm → record and waits for no one. Stability comes from branch custody: work that overlaps a reload
   compares the loaded program identity at start and end and pushes back, never takes a lock. Failure leaves affected
   execution unavailable until exact bytes, behavior and arming converge; never call an unchanged record healthy.
   Ordinary clusters keep their program; selected development clusters adopt explicitly.
@@ -147,7 +147,7 @@ root.
   cluster head and a copy of the agent's world — with easy tools to move data between them, and chooses exactly what
   to take by identity from the diff value; the task never lists what to merge. Acceptance requires the task's tests
   to pass on the combined program plus whatever root chose to run, recorded as evidence; reaching-test counts are
-  shown, not gated. Conflicts stay on the merge branch for repair. The writer checks the touched rows' digests; only
+  shown, not gated. Conflicts stay on the merge branch for repair. The writer checks the touched entities' digests; only
   root's acceptance advances the cluster pointer, and the agent's branch retires when its merge closes. Local green
   never implies shared acceptance.
 - **Write-back** uses the same gate, checks file bases, stages exact-span changes and reindexes to prove equivalent
@@ -189,7 +189,7 @@ root.
   nil-valued map keys.
 - **Validate final owning values.** Include swept refs and identity-less components; refuse missing children,
   cycles, multiple owners and exhausted bounds. Admission and completeness rules judge writes; reading committed
-  rows never re-applies them. Retraction deletes; history answers what existed, as it was written. Required refs
+  entities never re-applies them. Retraction deletes; history answers what existed, as it was written. Required refs
   refuse invalidating deletion, optional refs may sweep, components cascade. Repair surviving declaration references
   in the same transaction or refuse; never invent placeholder functions or tests.
 - **Separate storage from observation.** Store a value when it must outlive its subject. Derive pulled shapes and
@@ -199,7 +199,7 @@ root.
 - **Use the database owner.** Direct `datahike.api` calls belong only in `seon.db`, store/registry, classified
   branch-custody owners and system listeners; keep `my.*` thin. Put provenance on transactions, derive write bounds
   from it and retain proposed data in bounded refusals. Reconcile config differences; resolve function symbols to
-  current rows.
+  current entities.
 - **Contract every admitted function, private ones included.** Complete, well-formed, fully namespaced Malli schemas
   and reaching tests. Compile touched contracts against the packaged projection; use declared schemas or registered
   named predicates, never anonymous contract functions or incomplete forms. Justify polymorphic boundaries.
@@ -295,7 +295,7 @@ root.
   inputs, the same for humans and agents. The harness prepares worlds once through canonical writers and helpers —
   every fixture write carries what the writer checks, digests included — surfaces every refusal, shares reads and
   branches writes from a captured commit. Use real SCI, armed contracts and fixed render profiles; substitute only
-  external effects, as explicit values. No hand-built rows, bespoke fixture machinery or Var redefinitions. Tests are
+  external effects, as explicit values. No hand-built entities, bespoke fixture machinery or Var redefinitions. Tests are
   deterministic: generated inputs are bounded so every seed passes.
 - **Run tests as agents run.** Fork the context onto the test branch, inject custody, run the body in its member's
   context, unlink. Call the agent's owners, never a test-side copy. Ordinary work uses the main JVM; only
@@ -346,7 +346,7 @@ root.
   nuke, never deleted internals. Every JVM runs a committed archive, submodules at their pinned revisions, never the working tree: `start` launches HEAD;
   `start --head` replaces a live root with HEAD, retaining store and caches; a dependency-class miss is filled before
   the old JVM stops, and our own classes are cached as boot loads them, so a miss never lengthens downtime. Reset
-  unlinks and forks from program rows, retaining caches. Nuke replaces one JVM, holds the sibling store lock through
+  unlinks and forks from program entities, retaining caches. Nuke replaces one JVM, holds the sibling store lock through
   deletion of the store and all derived caches and the rebuild and boot from committed inputs, reports full failures
   and falls back to the newest booting commit rather than refusing recovery. A competing start that wins the
   replacement gap is never killed or deleted by the loser. Destructive drills and signals need a root and a verified
