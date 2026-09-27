@@ -2,163 +2,197 @@
 type: design
 lane: shrink-eval-opus
 date: 2026-09-27
-status: design for Astra review; no source edits
-responds-to: docs/research/agent-platform/review-eval-shrink-plan-2026-09-26.md (slice 2 REVISE)
+status: design revision 2, for Astra review; no source edits
+responds-to: docs/research/agent-platform/review-eval-shrink-plan-2026-09-26.md, verdict "slice-2 design at 987a90b62 — REVISE" (ca792f0b4)
 owning task: d215b1ebde7c acquisition-rebuilds-the-whole-program
-source: HEAD b1112f457 (sci/eval.clj line numbers below are at this commit)
+source: HEAD 056abea62. eval.clj line numbers are the review's (7e8043de1) unless marked
 ---
 
-# Slice 2 design: acquisition cost follows the branch's changed rows
+# Slice 2 design (revision 2): a shared loaded base, and receiving acquisition by complete delta
 
-**What exists.** `base-ctx` memoizes one whole interpreted program per `base-ctx-key`. That key is a
-connection-scoped revision basis, so every agent, MCP and test branch derives its own base: 235 ms mean, up to
-1-3 s. The derivation reads the whole program: all function, namespace and test rows, two digest maps,
-~460 namespace pulls and ~4,000 host Var copies. Only the rows that differ from the loaded program make the
-branch's context differ from the loaded program's.
+**What exists.** `base-ctx` memoizes one whole interpreted program per `base-ctx-key`, and that key is
+connection-scoped. So every agent, MCP and test branch derives the whole program again: 235 ms mean, and 1-3 s
+cold. Only the branch's differences from the loaded program distinguish its context.
 
-**Principal approach.** Split the one memoized value into two values of explicit inputs:
+**Principal approach (the review accepts the split).**
 
-1. **The loaded base.** The acquisition of the JVM's loaded program commit itself. It is shared by every branch
-   in the process and keyed by the loaded program's identity. By definition it has no overrides, so it is almost
-   all host Var copies and namespace bindings.
-2. **The branch delta.** The rows where the branch differs from the loaded program (function, test and namespace
-   rows, compared regardless of authorship), plus their affected callers. They are installed on the receiving
-   context's own SCI fork of the loaded base. They are never cached across branches.
+- One **shared base** per `[store, L]`, where L is the loaded program commit resolved from the adopting authority.
+  It is built only from L and fixed process inputs.
+- Each context receives it through `fork-cluster-ctx`'s receiving-world composition.
+- A **receiving acquisition** then installs the complete delta between the branch and L.
+- The receiving acquisition's identity is the delta's content, never a connection or commit stamp.
 
-The delta's cost is proportional to the changed rows, their reverse closure, and one diff read. The live
-evidence is that all four bases held in the cache now (four agent branches) have `interpreted-count` 0. Their
-whole derivation duplicates the loaded base.
+This revision answers the review's five gaps (§2-§6) and its construction rules (§1). **§7 prices the result.**
+It is larger than the first design, so I recommend landing it in two correctness-ordered cuts, the first of
+which is small.
 
-## 1. Inputs, and which value owns each (Astra's table)
+## 1. Shared base: built only from L (review "construction rules")
 
-| input | read by | owner after the split |
+| rule | design |
+|---|---|
+| L's authority | Resolve L once per acquisition through `loaded-source(snapshot, V)` (`::loaded-connection`, the adopting cluster's live connection; eval.clj:1620). The branch's own adoption record is never used. Unknown or failed adoption refuses as today and is never cached. The start/end loaded-identity check (`call-detecting-program-change`, :1614) stays. The one-argument `base-ctx` resolves L the same way before lookup. |
+| materialization | Derive from `commit-as-db` through the **authority connection's** store, which lives as long as the cluster, not the caller's branch store. The base retains no database value; that is today's invariant (`derive-base-ctx` dissocs `::loaded-database`), and the retention test keeps proving it. Materialization is ~3 ms and is not cached separately. |
+| projection (item C) | The loaded projection is `schema/projection-from-database` of L's materialization. Its construction inputs are L's forms and contracts plus the process compile options. The base key therefore carries the projection's construction key (`schema/build-projection`'s `[forms contracts options]`, schema.clj:2403), which is already computed, as `[store, L, projection-construction-key]`. It is never a fingerprint. |
+| recorder | Removed from shared derivation. The base returns its refusals as data (`::acquisition-refusals`). The receiver records and delivers them through its own recorder, with dedup keyed `[store, receiving acquisition identity, target]`. Only successful recordings are retained, and failures retry (§5). |
+| loader | `:seon.test/class-loader` (eval.clj:3427) moves off the base and becomes a receiver attachment set by the test owner's execution. |
+| late host loads (item A) | On every receiving acquisition, including an empty delta and an equal identity, the receiver binds **admitted identities that are missing an SCI binding** by copying their host root under the receiver's loader. This is `install-first-party-namespaces!`'s selection restricted to missing bindings. Deleted identities and delta overrides are never bound (tombstones in §2). Cost: O(admitted identities) map lookups, measured in the slice. |
+| cache | `seon.cache` kind `::loaded-base`, under the one byte budget. The weight is calibrated in the slice against the retained structure (namespace bindings plus descriptors, measured), not `256 × Vars`. A derivation that throws is not retained. A base carrying refusal data is retained, because it is a value of L. |
+
+Receiving composition: `copy-base-ctx` alone is insufficient, as the review says. Receiving goes through
+`fork-cluster-ctx`'s existing custody, projection, environment and recorder composition (eval.clj:3766).
+Schema-declared injected bindings are refreshed when the receiving projection's injected population differs
+from the base's (`program/base-context-injected-symbols`, program.cljc:136).
+
+## 2. Delta completeness (review gap B)
+
+B1 is withdrawn. The delta is computed from **narrow, complete selection reads** on both values: the branch value
+V and L's materialization. Each read is compared as a set. Datahike's dependency-aware query cache reuses each read
+across V's own commits that leave its attributes untouched (query.cljc:2582).
+
+| read (both sides) | tuple | covers |
 |---|---|---|
-| loaded program and host bindings (`loaded-source`, `loaded-program`, `build-base-ctx`, `install-first-party-namespaces!`, `install-caller-host-bindings!`, `install-declared-classes!`) | construction | **loaded base**, key `[store identity, loaded commit]` |
-| deferred test namespaces becoming loadable (`load-core-namespaces!` defers `test` roots) | host binding | loaded base. **Open item A** below |
-| branch function population (sym, source, admission, privacy, digest; symbol removal) | `acquire-program!` :2830-2870, `kernel/cache-program!` | **delta**: rows differing from loaded, and rows absent on either side |
-| branch namespace rows (source, admission, requires, aliases, imports, refers) | :2800-2890, :3005 | **delta**: namespaces whose canonical row differs, or which are absent on either side |
-| branch tests | :2882, :3083 | **delta**: differing, added and removed test rows |
-| call graph / declared invocation targets (`seon.fn/reverse-closure`) | :2842 | **delta**: the closure is computed from the delta's seeds over the *branch* value, as today |
-| pulled declaration facts (`install-row!` spec, arglists, host-bound, bindings) | :1717-1814 | **delta**: pulled from the branch value for delta rows only |
-| projection content | `derive-base-ctx` :3372, wrappers | loaded base uses the loaded commit's projection; the **delta** arms against the receiving branch's projection (`fork-cluster-ctx` already re-arms interpreted wrappers for the receiving projection, :3764) |
-| arming config (`instrumentation-config`) and supplied-default declarations (`call-preparation/snapshot`) | `install-function-contract!` | **delta** only: in the loaded base, compiled Vars carry the JVM's arming, and no row of the loaded base is interpreted. **Verify at the REPL** that no interpreted wrapper exists in a loaded base (`interpreted-count` 0) |
-| fault recorder | wrappers, refusal recording | the loaded base records its own refusals once per `[loaded commit, target]`; the **delta** records through the receiving context's recorder. The recorder leaves the base key |
+| functions | `[sym digest admission host-bound? private? calls-set]` | source/definition change, authorship-independent differences (branch law), host-bound change, calls-only or analysis-only change (`calls-set` is the row's own `:seon.fn/calls` targets) |
+| tests | `[sym source-digest admission ns-name]` | test changes and removals |
+| namespaces | `[name source admission requires aliases imports refers]`, with refs **normalized to names** (namespace components are not compared by entity id) | reader-context changes and removals |
+| declared invocation edges | `[holder-identity attribute target]` for every attribute a `:seon.fn/invokes` declaration names (fn.clj:1714) | invocation targets held on data rows |
 
-The loaded base's key is `[store identity, loaded commit]`. It is built by deriving from the loaded commit's own
-materialization and the loaded program's projection. No branch content goes into it, so it needs no
-completeness proof over branch inputs. What it reads is one immutable commit.
+- **Selection.** `changed = (symmetric difference by identity)`, and `seeds = changed functions ∪ removed
+  functions ∪ edge holders whose edges changed`.
+- **Closure.** `(seon.fn/reverse-closure V seeds)` on the branch, including absent seeds (fn.clj:1938), returns
+  `:affected` and `:tests`.
+- **Acquisition identity:** `[store, L, projection-construction-key(V), arming inputs (§3), sorted changed tuples
+  of V, closure result]`.
+  - The closure result is in the identity, so removing a formerly affected caller changes it.
+- **Missing evidence refuses.** A function row without a digest, or without analysis where calls are expected,
+  refuses by name as `::incoherent-delta`. It never counts as equal.
+- **Memo.** The identity is memoized in `seon.cache` by `[store, committed-value identity of V, L]`, using
+  `db/committed-value-identity`, which excludes `d/with` values (db.clj:3001). A candidate `d/with` world computes
+  its identity fresh.
+- **Cost.** O(N) set comparison per new committed value (N = program rows), with reads reused by Datahike.
+  Installation is O(changed + closure).
 
-## 2. The delta and the branch law (`overridden-row?` fix)
+**Tombstones.** A removed identity is unmapped and purged from the receiver's kernel snapshot (source,
+namespace descriptor, installed marker; kernel.clj:207, :261). Late binding (§1) skips tombstones.
 
-`CLAUDE.md:125`: other branches interpret the rows that differ and their affected callers; authorship is not the
-test. Today `overridden-row?` (:1697) and the `authored` filter (:2853) run the loaded JVM Var for a
-file-derived row that differs. The delta replaces both:
+**A surviving compiled caller of a removed function.** The caller is in the closure, so it is interpreted
+against the branch program and fails loudly at the missing name, as Clojure would. It does not reach the loaded
+implementation.
 
-```text
-delta(branch, loaded) =
-  {:functions  {sym → branch-row-or-::absent}  for sym where digest(branch) ≠ digest(loaded), or present on one side only
-   :tests      likewise for test rows
-   :namespaces likewise over canonical namespace rows}
-interpreted = delta function syms that are present on the branch
-              ∪ (reverse-closure branch-value interpreted-seeds)
-```
+**Namespace deltas.** Replacing or removing an alias, refer or import updates the namespace's bindings (the old
+ones are removed). A changed function in an unchanged namespace gets its namespace's full branch bindings.
 
-- A host-bound delta row still refuses by name (`host-bound-row?`, unchanged). An absent row (a deletion)
-  unmaps its Var on the fork.
-- **Diff cost.** The branch side is one `function-digests` query. Datahike's query cache reuses it across the
-  branch's own data-only commits (`query.cljc:2582`, attribute-dependency reuse within one connection
-  generation). The loaded side is `loaded-digests`, which slice 1 retains per commit. Namespace and test rows
-  are two small queries.
-- **Open item B: completeness of "differs".** `:seon.program/definition-digest` omits admission, calls,
-  host-bound status and analysis evidence (`program.cljc:373`). Two choices:
-  - **(B1) recommended.** Diff by `[digest admission host-bound?]` read in the same query, and treat
-    re-analysis without a source change as a program change on the branch that made it.
-    - The re-analysing writer rewrites `:seon.fn/calls`. `acquired-database?` then sees a new delta identity
-      only if the calls enter the identity.
-    - So the delta identity uses the canonical row (`program/canonical-row`) **of delta rows only**. Rows
-      outside the delta are equal by digest and are not canonicalized.
-  - **(B2)** Canonicalize every row per commit. That is complete but O(program) pulls, the cost this slice
-    removes.
+- A namespace-only change seeds every function in that namespace, because its resolver context changed.
+- If a seeded function's analysis predates the namespace row, it refuses as not current.
 
-## 3. The receiving context
+**Install order is preserved exactly** (eval.clj:3031-3114): classes, then namespace bindings, then caller host
+bindings, then generation-local declares, then functions in namespace order, then tests.
 
-`acquire!` for value V on context C:
+**Effective kernel snapshot.** This is the loaded descriptors with delta replacements and removals, including
+namespace descriptors. It is published before any install. `install-row!`, lazy acquisition (:1377) and test
+resolution (§4) all read it. The host-bound refusal checks both the branch row and the loaded row (:1788), as
+today.
 
-1. `loaded ← loaded-program(V)`. `base ← (seon.cache/lookup ::loaded-base [store loaded-commit] …)`, a
-   derivation of the loaded commit. Failures are not retained (`seon.cache/lookup` rethrows and removes).
-2. `delta ← delta(V, loaded)`, and `identity ← [store, loaded-commit, delta identity, projection key]`.
-   - `acquired-database?` becomes `(= identity (::acquired-identity snapshot))`. It is computed at most once per
-     committed value (a `seon.cache` entry keyed by commit id: an immutable value, so it is never stale).
-3. If the identity differs: fork the base (`copy-base-ctx`, unchanged), install the delta rows with
-   `install-row!` in namespace order (the existing `namespace-order` code), then carry the context's own
-   interns as `acquire!` does today (:3620-3640).
+## 3. Receiving arming (review: config, caps, supplied defaults)
 
-Private objects stay per world. An agent-authored data def (`(def a (atom 0))`, now a program row by ruling)
-is in the delta, so it is evaluated on each branch's own fork and never shared. Compiled first-party roots are
-shared exactly as today: every branch already copies the same JVM Var roots.
+- **Arming inputs.** These are exactly what `install-function-contract!` reads: the receiving projection's
+  construction key, `:seon.config.error/max-evidence-bytes`, and the `call-preparation/snapshot` content (its
+  declaration rows' key, schema and supplier identity; call_preparation.clj:111, :285).
+  - `result-caps` is read but not used by `compiled-wrapper` (instrument.clj:554). **The read is dropped at its
+    owner** (`instrumentation-config`, eval.clj:1334), so caps do not enter the identity.
+- **Rearm without replay.** If only arming inputs changed, the receiver rearms its interpreted roots without
+  re-evaluating source. It uses the existing `install-function-contract!` loop that `fork-cluster-ctx` already runs
+  (eval.clj:3764).
+  - A config refusal surfaces as the named refusal.
+  - Recovery is a new identity, which rearms.
+- **Compiled roots under a branch schema or default change.** Today a compiled host root carries the JVM's arming
+  of L. This design **states that semantics and keeps it** (it is the existing loaded-program behaviour):
+  - a branch's schema-only or default-only change reaches a function's calls only when that function is in the
+    delta or closure;
+  - making every compiled function whose contract names a changed schema key interpretable is a separate
+    decision, listed for the owner in §7 (option C).
 
-## 4. What disappears, and consumers converted in the same slice
+## 4. Test execution (review gap: the executor chooses by authorship)
 
-| deleted | lines (eval.clj @ b1112f457) | its consumer, converted |
-|---|---:|---|
-| `revision-basis`, `program-basis`, `commit-id-of`, `remember-program-identity!`, `program-identity`, `program-identity-cache` | ~70 | `base-ctx-key`, `acquired-database?`, `record-refusals-once!` → the identity above |
-| `watch-program-identity!` and both `d/listen` sites (`cluster-ctx*`, `fork-cluster-ctx`) | ~15 | nothing needs notification: identities derive from the value. Callbacks already registered live until the JVM restarts (every landing restarts); new code registers none |
-| `acquisition-attributes` | ~18 | none left (`acquisition_attributes_test.clj` becomes the identity-collision test) |
-| `loaded-basis`, `loaded-program-current?` | ~30 | the loaded commit id is in the identity; `acquire!` compares it |
-| the lineage branch of `acquired-database?` | ~20 | identity equality |
-| `base-context-cache` + `program-cache-policy` (core.cache atoms) | ~20 | `seon.cache` kind `::loaded-base`, weight `256 × installed Vars` (one byte budget, no per-kind dial) |
-| `refusal-recording-cache` | ~5 | `seon.cache` kind keyed `[loaded commit or delta identity, target]`, retaining only successful recordings |
-| the `authored` filter + `overridden-row?`'s admission test | ~15 | delta by difference |
-| whole-program reads in `acquire-program!` for a delta acquisition | ~60 | `acquire-program!` splits into `derive-loaded-base` (the current body, run on the loaded commit) and `install-delta!` |
+`seon.test/resolve-test` (test.clj:1514) runs a test in SCI only when its admission is `:agent`. The receiving
+acquisition publishes its **interpreted-tests set**: the changed tests plus the closure's `:seon.fn/tests`. Tests
+in that set resolve in the receiving SCI context; every other test resolves its JVM Var under the test loader, as
+today.
 
-Estimate: −250 deleted, +140 added (delta, identity, cache kinds), net ≈ −110, in one loadable slice.
-Tests converted in the same commit:
+This is a patch to test.clj, which shrink-test owns and root applies. The branch-law fix is authorship-independent,
+so a changed file-derived test on a branch runs the branch's version.
 
-- `branch_release_retention_test` (private cache atoms → `seon.cache/retained ::loaded-base`, and inspect
-  wrapper and recorder references);
-- `acquisition_attributes_test`;
-- `branch_execution_test`'s memo test (`base-ctx` twice → one `::loaded-base` miss).
+## 5. Adoption identity and consumers (review: consumer table)
 
-## 5. Cost targets (measured before and after on the same probe)
+| consumer | conversion |
+|---|---|
+| `acquired-database?` | the identity (§2) equals the context's `::acquired-identity`; L is resolved from the authority each time. The same branch value after an adoption has a new L, so a new identity |
+| `install-evaluated-rows!` / `installation-covers-program-change?` | after the proved installation, the context's `::acquired-identity` advances to the identity of the settled `:db-after`, computed incrementally: the settled rows are the only changed tuples, plus a closure refresh. No revision comparison remains |
+| `regenerate-agent-context!` | receives through §6's order |
+| both `base-ctx` arities | resolve L from the authority, then look up the shared base, then receive |
+| `fork-cluster-ctx` | keeps its acquisition of the supplied value (47d9d4419); the test owner relies on it (3a14c33ef) |
+| lazy install (`acquire-function-from-database!`, :1377) | reads the effective snapshot (§2) |
+| `record-refusals-once!` | key `[store, receiving identity, target]`; only successful outcomes are retained; failures retry (eval.clj:3568) |
+| `::program-identity` listeners | **retired in code**: until every live connection is replaced, `cluster-ctx*` and `fork-cluster-ctx` call `d/unlisten connection ::program-identity` (idempotent; datahike core.cljc:213) where they used to `d/listen`. A later cut deletes the unlisten |
+| deleted | `revision-basis`, `program-basis`, `commit-id-of`, `remember-program-identity!`, `program-identity`, `program-identity-cache`, `acquisition-attributes`, `loaded-basis`, `loaded-program-current?`, the lineage branch of `acquired-database?`, `base-context-cache`, `refusal-recording-cache`, `program-cache-policy`, `watch-program-identity!`, `overridden-row?`'s authorship test, the `authored` filter |
 
-| operation | today | target |
-|---|---|---|
-| first acquisition on a new branch with no delta | 235 ms mean (up to 1-3 s) | fork (~13 ms) + diff read (≤ 20 ms cold) |
-| `acquired-database?` per form, same program | 0.06-3.6 ms | one identity lookup per new commit; ≤ 1 ms |
-| loaded base derivation | same as today's derive (~400 ms) | once per loaded commit per process, or again after eviction |
-| branch with k delta rows | whole derive | fork + O(k + closure(k)) installs |
+## 6. Live-root preservation (review gap 5)
 
-## 6. Required regressions (Astra's six, mapped)
+A receiving acquisition on a **continuing** context proceeds in this order:
 
-1. Sibling branches with equal content share one `::loaded-base` miss, before and after data-only commits.
-   Eight branches, not four. Concurrent callers count one miss.
-2. Different deltas give different results, and an unchanged transitive caller calls the branch's override.
-   Cover: an older file-derived row across adoption (the branch-law fix, checking returned values), a
-   host-bound override refused, a namespace change, function and test additions and retractions, and lazy
-   first invocation.
-3. A config, supplied-default or re-analysed call change on a delta row changes behaviour; unrelated data
-   leaves the identity equal.
-4. Projections with colliding fingerprints do not share delta arming. Adoption moves the loaded commit, and
-   the old base is not used for the new commit.
-5. Custody, fault routing and wrappers stay each branch's own. Private Vars, atoms and data-def roots do not
-   leak between siblings.
-6. A failed derivation retries. Eviction releases only `::loaded-base` values, never a live context.
+1. Compute the new identity. If it is equal, do nothing except the late-binding refresh (§1).
+2. Compute `delta-of-delta`: the tuples that differ between the context's previous identity and the new one.
+3. **Carry first.** Every owned root whose row is unchanged in the delta-of-delta keeps its Var and its root,
+   carried before any analysis. This covers agent data defs (atoms), privates, and closures over them. It extends
+   `acquire!`'s own-intern carry (eval.clj:3639) and `regenerate-agent-context!`'s generation filter (:3214) to
+   program data-def rows. Newly analyzed callers then resolve the carried Var, not a new one.
+4. **Install only changed rows** (and their closure). Initializers run only for rows whose content changed. A
+   program row that left the delta because an adoption made it equal to L keeps its continuing root; the root is
+   not replaced by the host root.
+5. **Rearm-only** when only arming inputs changed (§3). No initializer runs.
 
-## 7. Open items for Astra
+A **new** branch context evaluates its own agent data-def roots once, on its own fork. Roots are never shared
+across siblings, because deltas are never cached across branches; only the base is shared.
 
-- **A. Late host namespaces.** A deferred test namespace that becomes loadable under the same loaded commit
-  (`seon.test/resolve-test` requires it) is absent from a base built earlier. Proposal: `install-delta!`
-  also binds the host namespaces the receiving context names that the base lacks. This is the existing
-  `host-namespace!` owner, per namespace, and no epoch is added.
-- **B.** B1 vs B2 (above).
-- **C.** Whether anything in `build-base-ctx` besides interpreted wrappers depends on the projection. If
-  something does, the loaded base key adds the loaded commit's projection key (`seon.cache` `::projection`
-  content key), which is still branch-independent.
-- **D.** The one-argument `base-ctx` entrance keys the loaded identity as nil today (:3421). After the split,
-  it resolves `loaded-program` before lookup, as the review asks.
+## 7. Cost, size and three priced options
+
+The review's required regressions (its seven bullets) are adopted unchanged as the acceptance list.
+
+**Size estimate.**
+
+| file | added | deleted | notes |
+|---|---:|---:|---|
+| eval.clj | ~+320 | ~−330 | loaded-base derivation extracted from `acquire-program!`, the delta reads, the receiving install, identity, live-root carry, consumer conversion |
+| test.clj | ~+15 | ~−5 | patch for root (§4) |
+| instrument / call-preparation | 0 | 0 | the `result-caps` read is dropped in eval.clj |
+
+That is net ≈ −0, and **well over the 100-added-line bound**. CLAUDE.md requires stopping and pricing it:
+
+- **A. (Recommended first) Shared base plus namespace-and-test-only receiving deltas.** The receiver installs only
+  namespace rows and agent tests over the shared base. Any function or edge delta falls back to today's full
+  per-branch derivation, keyed by the new identity (§2), so it is correct.
+  - *Guarantee:* the common agent, MCP and test branch has a namespace row, possibly tests, and no function
+    delta. It pays fork + binding refresh + selection reads, not a 235 ms-1 s derivation. No live-root
+    replacement risk arises, because no function row is installed on a continuing world.
+  - *Cost:* ~1 day; ~+150/−200 in eval.clj (the identity, base and consumer deletions of §5; no §6 carry).
+  - *Sacrifice:* branches with function overrides still derive fully, as today.
+  - *Also needed:* the branch-law fix (authorship-independent selection and resolve-test) lands as its own
+    correctness slice, B0.
+- **B. The full design above.**
+  - *Guarantee:* cost follows changed rows for every branch.
+  - *Cost:* ~3 days; the size above.
+  - *Sacrifice:* the live-root carry (§6) is new machinery that must be proven by the review's mutated-atom
+    regression before it lands.
+- **C. A and B, plus compiled functions whose contracts reference a changed schema or default key become
+  interpreted on the branch (§3).**
+  - *Guarantee:* branch schema and default changes reach every call.
+  - *Cost:* B plus a keyword-reach seed (`:seon.fn/keywords`, fn.clj:600) and its test.
+  - *Sacrifice:* a schema change on a branch can interpret large closures. This is an owner decision.
+
+**Measure before choosing:** a bounded sample of real acquisitions on default recording empty function delta
+vs. non-empty. That is the review's "complete empty deltas", not `interpreted-count`. A counts only the former.
 
 ## Verification limits
 
-Line counts are estimates from function sizes, not a diff. The "four cached bases all `interpreted-count` 0"
-figure is one read of the live cache (pid 59300), not a distribution. The first step of the slice is a counter
-over a day's derivations: how many had an empty delta.
+Everything above is design. No production source was changed for slice 2. The line estimates are estimates. The
+claims that the listed reads cover `acquire-program!`'s inputs follow the review's input table plus a re-read of
+eval.clj:2803-3120. They are proven only by the regressions.
