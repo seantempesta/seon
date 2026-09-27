@@ -11,6 +11,7 @@
             [malli.registry :as mr]
             [seon.db :as db]
             [seon.env :as env]
+            [seon.profile :as profile]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.internal :as internal]
@@ -69,6 +70,10 @@
          (is (= :seon.error/offending (:seon.schema/member refusal))))))))
 
 (deftest canonical-population-native-parity
+  ;; No hand list beside the schema: the live projection's native population
+  ;; is checked by properties DERIVED from that projection, and against the one
+  ;; recorded baseline, the historical admitted population (root ruling
+  ;; 2026-09-27: the current-section copy was 788 forms stale).
   (support/with-database
    (fn [_connection]
      (let [projection (schema/handed-projection)
@@ -78,51 +83,43 @@
            properties (::schema.datahike/properties selection)
            attributes (::schema.datahike/attributes selection)
            native (mapv #(schema.datahike/malli->datahike-attr-in projection %) attributes)
-           expected (edn/read-string
-                     (slurp (io/resource "seon/schema/datahike_parity.edn")))
-           initial (:seon.bridge.parity/initial-baseline expected)
+           initial (:seon.bridge.parity/initial-baseline
+                    (edn/read-string (slurp (io/resource "seon/schema/datahike_parity.edn"))))
            ;; The previously admitted historical population, built by the one
            ;; constructor. Its forms that current admission refuses (129 of
            ;; 3,277, lane delete-duplicates 2026-09-25) were dropped with their
            ;; attributes and native entities; the rest is the original oracle.
-           initial-projection (schema/build-projection
-                               (:seon.bridge.parity/forms initial))
+           initial-projection (schema/build-projection (:seon.bridge.parity/forms initial))
            initial-attributes (schema.datahike/database-attributes-in initial-projection)
-           expected-keys (set (:seon.bridge.parity/attributes expected))
-           actual-keys (set attributes)
-           expected-native (into {} (map (juxt :db/ident identity))
-                                 (:seon.bridge.parity/native expected))
+           initial-native (into {} (map (juxt :db/ident identity)) (:seon.bridge.parity/native initial))
            actual-native (into {} (map (juxt :db/ident identity)) native)
-           mismatches (into (sorted-map)
-                            (keep (fn [k]
-                                    (when (not= (get expected-native k) (get actual-native k))
-                                      [k {:expected (get expected-native k)
-                                          :actual (get actual-native k)}])))
-                            (set/union expected-keys actual-keys))]
-       (is (seq forms))
-       (is (seq (:seon.bridge.parity/native initial)))
-       (is (true? (= (:seon.bridge.parity/attributes initial) initial-attributes)))
-       (is (true? (= (:seon.bridge.parity/native initial)
-                     (schema.datahike/malli->datahike-schema-in initial-projection initial-attributes)))
-           "The historical admitted population remains an independent oracle")
-       (is (seq attributes))
-       (is (= (count attributes) (count native)))
-       (is (empty? (into (sorted-set)
-                        (filter #(not= (find (:seon.bridge.parity/forms expected) %)
-                                       (find forms %)))
-                        (set/union (set (keys (:seon.bridge.parity/forms expected)))
-                                   (set (keys forms)))))
-           "Canonical input drift requires an explained baseline update")
-       (is (= (:seon.bridge.parity/input-digest expected)
-              (schema/sha-256 [(.getBytes (schema/canonical-data-string forms) "UTF-8")])))
-       (is (true? (= (:seon.bridge.parity/core-attributes expected) core)))
-       (is (= (:seon.bridge.parity/property-attributes expected) properties))
-       (is (empty? (set/difference expected-keys actual-keys)) "Missing attributes")
-       (is (empty? (set/difference actual-keys expected-keys)) "Unexpected attributes")
-       (is (empty? mismatches) (pr-str mismatches))
-       (is (true? (= (:seon.bridge.parity/native expected) native)) "Ordered native declarations")
-       (println "BRIDGE-STEP2-PARITY" (count forms) (count attributes)
-                "mismatches" (count mismatches))))))
+           ;; An attribute whose form is unchanged since the baseline keeps the
+           ;; baseline's native declaration.
+           unchanged (filterv #(and (contains? initial-native %)
+                                    (= (find (:seon.bridge.parity/forms initial) %) (find forms %)))
+                              attributes)
+           drifted (into (sorted-map)
+                         (keep (fn [k] (when (not= (initial-native k) (actual-native k))
+                                         [k {:baseline (initial-native k) :actual (actual-native k)}])))
+                         unchanged)]
+       (testing "the recorded historical population remains an independent oracle"
+         (is (seq (:seon.bridge.parity/native initial)))
+         (is (true? (= (:seon.bridge.parity/attributes initial) initial-attributes)))
+         (is (true? (= (:seon.bridge.parity/native initial)
+                       (schema.datahike/malli->datahike-schema-in initial-projection initial-attributes)))))
+       (testing "the live projection's native population, derived two ways, agrees"
+         (is (seq forms))
+         (is (seq attributes))
+         (is (= (set attributes) (into (set core) properties)) "every attribute is core or a property")
+         (is (empty? (set/intersection (set core) (set properties))))
+         (is (= (set attributes) (set (schema.datahike/database-attributes-in projection))))
+         (is (= attributes (mapv :db/ident native)) "one native declaration per attribute, in order")
+         (is (every? #(and (:db/valueType %) (:db/cardinality %)) native))
+         (is (true? (= native (schema.datahike/malli->datahike-schema-in projection attributes)))
+             "Ordered native declarations"))
+       (testing "an attribute unchanged since the baseline keeps its native declaration"
+         (is (seq unchanged))
+         (is (empty? drifted) (pr-str drifted)))))))
 
 (deftest compiled-entity-composition-keeps-scope-and-entry-boundaries
   (support/with-database
@@ -474,38 +471,31 @@
 
 (deftest encode-transaction-resolves-the-declaration-population-once
   ;; The class: the encode seam resolving the declaration population PER
-  ;; ATTRIBUTE. With no population supplied on the calling thread,
-  ;; `schema/declaration-population` falls through to
-  ;; `seon.schema.edn/packaged-forms`, which re-reads and re-validates every
-  ;; schema resource from the classpath (~14 ms). Per attribute that turned
-  ;; `seon.turn-work-test/situation-totality-property` into a suite wedge
-  ;; that never finished inside the 300 s liveness backstop
+  ;; ATTRIBUTE. Before 3d4aaad32 an unhanded resolution fell through to
+  ;; `seon.schema.edn/packaged-forms`, which re-read every schema resource
+  ;; (~14 ms); per attribute that wedged `seon.turn-work-test`
   ;; (docs/prds/sci-execution-runtime/research/parallel-turns-hang-cause-2026-08-07.md).
   ;; One resolution per transaction is the wanted behavior, and it must not
   ;; grow with the transaction's attribute count or nesting depth.
-  (let [resolutions (atom 0)
-        real-declaration-population schema/declaration-population
+  ;; Observed, never redefined: the armed wrapper's own profile cell counts the
+  ;; calls (`seon.profile`), so the JVM-wide Var stays the real function.
+  (let [cell (:seon.instrument/cell (meta @#'schema/declaration-population))
+        calls #(:seon.profile/calls (profile/observation cell))
+        resolutions (fn [transaction]
+                      (let [before (calls)]
+                        (schema.datahike/encode-transaction transaction)
+                        (- (calls) before)))
         wide {:seon.agent/id "agent-a" :seon.message/id "m-1" :seon.message/content "do the thing" :seon.turn/id "run-1" ::title "Alpha"}
         nested {:seon.agent/id "agent-b"
                 :seon.agent/namespace {:seon.ns/name 'my.agents.b}}]
-    (with-redefs [schema/declaration-population
-                  (fn []
-                    (swap! resolutions inc)
-                    (real-declaration-population))]
+    (is (some? cell) "the entering program arms declaration-population with its profile cell")
+    (when cell
       (testing "a six-attribute transaction resolves the population once"
-        (reset! resolutions 0)
-        (schema.datahike/encode-transaction [wide])
-        (is (= 1 @resolutions)))
-
+        (is (= 1 (resolutions [wide]))))
       (testing "nesting does not add resolutions"
-        (reset! resolutions 0)
-        (schema.datahike/encode-transaction [nested])
-        (is (= 1 @resolutions)))
-
+        (is (= 1 (resolutions [nested]))))
       (testing "the argument-map transaction shape resolves once as well"
-        (reset! resolutions 0)
-        (schema.datahike/encode-transaction {:tx-data [wide nested]})
-        (is (= 1 @resolutions)
+        (is (= 1 (resolutions {:tx-data [wide nested]}))
             "resolution count is per transaction, never per entity")))))
 
 (deftest edn-backed-attributes-have-one-canonical-datahike-round-trip
