@@ -480,7 +480,9 @@
         (is (some? (db/pull @connection [:seon.fn/sym] [:seon.fn/sym helper])) "nothing of the refused run settled")
         (is (= ["2"] (hosted-run! hosted "(refused-caller 1)")) "the run closed and SCI still holds the helper")))))
 
-(deftest a-refused-deletion-is-associated-only-with-the-one-evaluation-proposing-it
+(deftest ^{:seon.test/long "Eight ordinary runs of a hosted agent (five gated defns, two refused or repaired deletion runs, a complete repair; ~200-500 ms each with gate and settlement) plus five evaluate-sources batches: 5.9 s measured on default (tests-0627k, 2026-09-27)."
+           :seon.test/long-ms 10000}
+  a-refused-deletion-is-associated-only-with-the-one-evaluation-proposing-it
   ;; An association, never a cause: the writer names broken final relations,
   ;; so a deletion is associated only when exactly one settled row deletes the
   ;; named identity and none declares it; otherwise the reason is named.

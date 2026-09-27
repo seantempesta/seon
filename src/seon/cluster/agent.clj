@@ -731,7 +731,14 @@
             sources (segment text namespace-name max-source)]
         (if (:seon.cluster.reply/no-forms sources)
           (assoc sources :seon.agent/refused-source-agent agent-id)
-          (let [run-id (turn/next-id database (:seon.cluster/name handle) agent-id)
+          ;; A SUBMISSION'S RUN IS ITS OWN IDENTITY, minted here. It was
+          ;; `turn/next-id` over this caller's connection value: the agent's
+          ;; previous run is answered when its settlement is applied, before
+          ;; the connection commits it, so the count was stale and the new
+          ;; run repeated the settled run's id (the writer refused it
+          ;; agent-already-running). The request port serializes submissions;
+          ;; nothing needs two submitters to derive one id.
+          (let [run-id (id/id)
                 staged-reply (turn/stage-reply! connection text)
                 reply (async/promise-chan)
                 request
