@@ -3426,9 +3426,10 @@
   then the walk from `root` (an EDN lookup or entity id; default the agent) at
   N (0-3) as a graph, a per-schema summary, and each node's AI face beside its
   HTML face, its grouped attributes, size and the path that included it.
-  `branch` reads that branch's open connection instead of the cluster's, with
-  its own projection; `mode=both` follows every ref both ways instead of the
-  forward story. Every face goes through `render/render-call`, retained in the
+  The walked subject and the viewing agent `agent-id` are distinct: the header
+  names both. `branch` reads that branch's head value (`db/branch-database`, no
+  connection) instead of the cluster's, with its own projection; `mode=both`
+  follows every ref both ways instead of the forward story. Every face goes through `render/render-call`, retained in the
   ctx's shared render cache."
   {:malli/schema [:=> [:cat :seon.render.web/service :seon.agent/id [:map-of :string [:maybe :string]]] :seon.render/hiccup]}
   [service agent-id query]
@@ -3437,20 +3438,23 @@
         branch (not-empty (get query "branch"))
         forward? (not= "both" (get query "mode"))
         lookup (if root-text (try (reader.edn/read-string root-text) (catch Exception _ root-text)) [:seon.agent/id agent-id])
-        connection (cond->> (:seon.store/connection-object service)
-                     branch (#(db/branch-connection (db/db %) (keyword branch))))
-        database (some-> connection db/db)
+        ;; A branch view is a read: the branch head's value, no connection.
+        connection (when-not branch (:seon.store/connection-object service))
+        database (if branch
+                   (db/branch-database (db/db (:seon.store/connection-object service)) (keyword branch))
+                   (db/db connection))
         cache (render/shared-cache (:seon.sci.eval/ctx service))
         cache-key [agent-id lookup n branch forward?]
         captured-calls (atom {})
-        request {:seon.db/db database :seon.db/connection connection :seon.sci.eval/ctx (:seon.sci.eval/ctx service)
-                 :seon.sci.admit/caps (:seon.sci.admit/caps service) :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms service)
-                 :seon.agent/id agent-id
-                 ;; Calls, not invocations: with captured invocations a source-producing AI face defers its forms to the caller.
-                 :seon.render/retained-calls (get-in @cache [::graph-calls cache-key] {}) :seon.render/captured-calls captured-calls}
+        request (cond-> {:seon.db/db database :seon.sci.eval/ctx (:seon.sci.eval/ctx service)
+                         :seon.sci.admit/caps (:seon.sci.admit/caps service) :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms service)
+                         :seon.agent/id agent-id
+                         ;; Calls, not invocations: with captured invocations a source-producing AI face defers its forms to the caller.
+                         :seon.render/retained-calls (get-in @cache [::graph-calls cache-key] {}) :seon.render/captured-calls captured-calls}
+                  connection (assoc :seon.db/connection connection))
         graph (cond
-                (nil? connection)
-                {:seon.error/message (str "This process holds no open connection to branch " branch "; open one (the branch's writer does), then reload.")
+                (nil? database)
+                {:seon.error/message (str "This store has no branch named " branch ".")
                  :seon.error/offending branch}
                 (or (int? lookup) (and (vector? lookup) (= 2 (count lookup)) (qualified-keyword? (first lookup))))
                 (render.walk/graph (assoc request :seon.render.walk/lookup lookup :seon.render/distance n :seon.render.walk/forward-only? forward?))
@@ -3493,7 +3497,7 @@
                                  (keyword "data-on:click") (str "document.querySelectorAll('.seon-graph-node').forEach(d => d.open = " %1 ")")} %2)]
     [:section {:class "seon-graph-page"}
      [:header {:class "seon-graph-head"}
-      [:h1 (str "Context · " agent-id (when branch (str " · branch " branch)))]
+      [:h1 (str "Context · " (pr-str lookup) (when branch (str " · branch " branch)) " · viewed by " agent-id)]
       (into [:nav {:class "seon-graph-distance" :aria-label "distance N"}]
             (map #(vector :a (cond-> {:href (graph-debug-href agent-id query {"n" (str %)})} (= % n) (assoc :aria-current "page")) (str "N=" %)))
             (range 4))
@@ -3504,7 +3508,7 @@
        (for [k ["n" "branch" "mode"] :let [v (get query k)] :when v] [:input {:type "hidden" :name k :value v}])
        [:input {:name "root" :value (pr-str lookup) :spellcheck "false" :aria-label "walk root lookup"}]
        [:button {:type "submit" :class "seon-graph-toggle"} "walk"]
-       [:a {:href (graph-debug-href agent-id query {"root" nil})} "agent root"]]
+       [:a {:href (graph-debug-href agent-id query {"root" nil})} (str "walk from the viewer, " agent-id)]]
       (when nodes
         [:p {:class "seon-graph-counts"}
          (str (count order) (if (= 1 (count order)) " node" " nodes") " · ≈" (format "%,d" (reduce + (map size order))) " tokens · "
@@ -3514,7 +3518,8 @@
        "AI face: the text the model reads. HTML face: what a human explores. #k: graph order (definitions before uses, turns by time)."
        " " (toggle "true" "open all") " " (toggle "false" "close all")]]
      [:details {:class "seon-graph-sent" (keyword "data-on:toggle") (str "el.open && @get('" (route/path ::route/agent-debug {:id agent-id} {:sent "true"}) "')")}
-      [:summary "The context as sent — the prompt this agent's next turn composes (seon.cluster.prompt/prompt): its turns' stored shown text, render forms with their results; the walk below is not yet on that path"]
+      [:summary (str "The context as sent — the prompt the viewer " agent-id "'s next turn composes on the cluster (seon.cluster.prompt/prompt),"
+                     " not the walked subject's: its turns' stored shown text, render forms with their results; the walk below is not yet on that path")]
       [:div {:id (block/surface-id (keyword "graph-sent" agent-id))} "Composing…"]]
      (cond
        (not database) [:p {:class "seon-debug-empty"} (:seon.error/message graph)]

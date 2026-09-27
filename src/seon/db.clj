@@ -362,6 +362,24 @@
   (connections/active-connection
    (datahike.store/connection-id (assoc (dbi/-config database) :branch branch))))
 
+(defn branch-database
+  "The head database value of `branch` in `database`'s store, else nil.
+  A read: it opens no connection and owns nothing to release. The head is
+  loaded as its commit through `database` (`datahike.versioning/branch-as-db`
+  then `commit-as-db`, `versioning.cljc:503`, `:473`), so it carries a
+  committed identity under `database`'s connection generation and retained
+  render calls on it are reused; a bare `branch-as-db` value is detached and
+  would re-render every face.
+
+  # Costs
+  Unarmed, about 7 ms for both loads on the default store (measured
+  2026-09-27); its projection derives once per declaration content."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/branch]
+                  [:maybe :seon.db/database-value]]}
+  [database branch]
+  (when-let [head (d/branch-as-db database branch)]
+    (d/commit-as-db database (d/commit-id head) {:secondary-indices? false})))
+
 (defn connection-identity
   "Plain-data identity of a Datahike connection, or the typed unknown.
   A RELEASED connection has no derivable identity: its wrapped state is

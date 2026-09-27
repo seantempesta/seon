@@ -4,6 +4,7 @@
             [clojure.data.json :as json]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [datahike.api :as d]
             [seon.render.web :as web]
             [seon.render.web-test :as web-test]
             [seon.sci.eval :as sci.eval]
@@ -1133,13 +1134,14 @@
            (is (<= (count (get-in forward ["elements" "edges"])) (count (get-in both ["elements" "edges"]))))))
        (testing "node detail groups the node's attributes with their declared schemas"
          (is (str/includes? (hiccup/->string (#'web/graph-debug-html service "root" {"n" "0"})) "declared schema")))
-       (testing "a branch this process holds no connection to is refused by name, never read from the cluster"
+       (testing "a branch the store lacks is refused by name, never read from the cluster"
          (is (str/includes? (hiccup/->string (#'web/graph-debug-html service "root" {"n" "1" "branch" "no-such-branch"}))
-                            "no open connection to branch no-such-branch")))))))
+                            "no branch named no-such-branch")))))))
 
 (deftest the-graph-debug-page-reads-a-named-branch-read-only
-  ;; WANTED: `branch=<name>` walks that branch's own database value and projection through the
-  ;; connection this process holds for it; the cluster's page does not see the branch's entities.
+  ;; WANTED: `branch=<name>` walks that branch's head value and projection with no connection open to it
+  ;; (a read after a restart); the cluster's page does not see the branch's entities. The header names the
+  ;; walked subject and the viewing agent apart.
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "graph-branch")
@@ -1151,11 +1153,19 @@
           (support/seed-cluster! design "graph-branch")
           (support/transacted! design (agent/creation-tx {:seon.agent/id "design-agent" :seon.cluster/name "graph-branch"
                                                           :seon.ns/name 'my.agents.design}))
-          (let [branch (name (:branch (:config @design)))
+          ;; A branch no connection holds: only its head is stored.
+          (let [unopened :seon.render.web-debug-test/unopened
+                branch (name unopened)
                 page #(hiccup/->string (#'web/graph-debug-html service "root" (merge {"n" "1" "root" "[:seon.agent/id \"design-agent\"]"} %)))]
-            (is (str/includes? (page {"branch" branch}) "class=\"seon-graph-node\"") "the branch's agent is walked")
-            (is (str/includes? (page {"branch" branch}) (str "branch " branch)) "the header names the branch read")
-            (is (not (str/includes? (page {}) "class=\"seon-graph-node\"")) "the cluster's own value has no such agent"))))))))
+            (d/branch! design (d/commit-id @design) unopened)
+            (try
+              (is (nil? (db/branch-connection @connection unopened)) "no connection is open to the branch read")
+              (is (str/includes? (page {"branch" branch}) "class=\"seon-graph-node\"") "the branch's agent is walked")
+              (is (str/includes? (page {"branch" branch}) (str "branch " branch)) "the header names the branch read")
+              (is (str/includes? (page {"branch" branch}) "Context · [:seon.agent/id ") "the header names the walked subject")
+              (is (str/includes? (page {"branch" branch}) "viewed by root") "the header names the viewing agent")
+              (is (not (str/includes? (page {}) "class=\"seon-graph-node\"")) "the cluster's own value has no such agent")
+              (finally (d/delete-branch! design unopened))))))))))
 
 (deftest the-graph-groups-a-many-relationship-into-one-counted-node
   ;; WANTED: a declared attachment with ten members is one node `← :seon.message/to · 10`; its first eight members
