@@ -607,8 +607,12 @@
                                                         ": the refusal could not be built: "
                                                         (ex-message failure))
                                :seon.error/throwable failure}
-                        offending (assoc :seon.error/offending
-                                         (seon.error.refusal/references projection (val offending)))))]))
+                        ;; NOT under the arming projection: this path runs because building
+                        ;; the refusal against it failed, so its registry is the suspect (a
+                        ;; masked refusal-result threw ::invalid-schema from identity-only
+                        ;; descriptors, and the refusal had no members). `diagnostic`
+                        ;; references the whole observation under the handed projection.
+                        offending (assoc :seon.error/offending (val offending))))]))
         ;; A BOUND FIRING IS ITS OWN REPORT: explaining re-checks the value, so
         ;; an evaluation deadline can fire mid-refusal (or mid-validation,
         ;; which Malli reports as ::invalid-schema-at-call). SCI's interrupt
