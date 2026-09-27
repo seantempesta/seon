@@ -309,7 +309,9 @@
      :refused (into #{} (map :seon.sci.eval/refused-function)
                     (:seon.test/acquisition-refusals acquired))
      :unavailable (into #{} (keep #(when (= :unavailable (:seon.sci.eval/load-state %)) (:seon.fn/sym %)))
-                        (:seon.sci.eval/load-results acquired))}))
+                        ;; `acquired-program` carries no load results; the
+                        ;; snapshot's acquisition (what `acquire!` returned) does.
+                        (:seon.sci.eval/load-results (:seon.sci.eval/acquisition snapshot)))}))
 
 (deftest ^{:seon.test/long "Four complete SCI acquisitions of the canonical fixture program (one per loaded commit and branch) plus two fixture writes and two branches."
            :seon.test/long-ms 12000}
@@ -341,7 +343,9 @@
          (is (= #{} (:refused baseline)) "the fixture's own program interprets nothing it refuses")
          ;; WANTED since be96a64ba: a host-bound row acquired from the database
          ;; refuses by name when called, never the acquisition.
-         (is (= #{} (:refused unadopted)) "the changed row does not refuse the acquisition")
+         ;; Whether the rest of its closure interprets is the unoverridden
+         ;; test's assertion; this one asks only about the subject.
+         (is (not (contains? (:refused unadopted) subject)) "the changed row does not refuse the acquisition")
          (is (contains? (:unavailable unadopted) subject))
          (is (= subject (:seon.sci.eval/refused-function unadopted-call))
              "before adoption the agent's changed host-bound row differs from the loaded program and refuses by name when called")
@@ -368,7 +372,7 @@
                                 ctx (db/db child) child
                                 (eval/projection-state (db/db child) (db/carried-projection (db/db child)))))]
                 (println "M9-ADOPTION-ISOLATED-MS" ms)
-                (is (= (select-keys adopted [:loaded :interpreted :interpreted-count :refused])
+                (is (= (select-keys adopted [:loaded :interpreted :interpreted-count :refused :unavailable])
                        (acquisition-view fork))
                     "an isolated branch at the head compares against the cluster's record"))))
            (on-branch connection before cluster-name :m9-adoption-stable
@@ -434,23 +438,27 @@
              _ (support/transacted! connection (agent-revision-tx before [changed]))
              acquired (measured #(eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)}))
              view (acquisition-view ctx)
-             ;; derive-page reads the private def stream-strip-id, serve! and
-             ;; selected-instance the referred defonce running-instances,
-             ;; handler the dependency alias ring/router.
-             callers '[seon.render.web/derive-page seon.render.web/handler
-                       seon.cluster/serve! seon.cluster.boot/selected-instance]
-             running @@(resolve 'seon.operator.runtime/running-instances)
-             cluster-name (first (keep (fn [[k v]] (when (map? v) k)) running))]
-         (is (every? (:interpreted view) (conj callers changed)) "the changed helper's closure reaches each caller")
-         (is (= (zipmap callers (repeat :interpreted))
-                (into {} (keep (fn [{sym :seon.fn/sym state :seon.sci.eval/load-state}]
-                                 (when (some #{sym} callers) [sym state])))
-                      (:seon.sci.eval/load-results (:value acquired))))
+             ;; Callers in class-value's current closure (the indexed program,
+             ;; 2026-09-27): derive-page reads the private def stream-strip-id,
+             ;; request! the referred defonce running-instances, arm-agents!
+             ;; the dependency alias async/chan. selected-instance no longer
+             ;; reaches class-value.
+             callers '[seon.render.web/derive-page seon.cluster.boot/request!
+                       seon.cluster/arm-agents!]
+             ;; The indexer marks handler and serve! host-bound: unchanged
+             ;; host-bound callers install a root that refuses by name when
+             ;; called (be96a64ba), never an SCI definition.
+             host-bound-callers '[seon.render.web/handler seon.cluster/serve!]
+             load-states (fn [syms]
+                           (into {} (keep (fn [{sym :seon.fn/sym state :seon.sci.eval/load-state}]
+                                            (when (some #{sym} syms) [sym state])))
+                                 (:seon.sci.eval/load-results (:value acquired))))]
+         (is (every? (:interpreted view) (concat callers host-bound-callers [changed]))
+             "the changed helper's closure reaches each caller")
+         (is (= (zipmap callers (repeat :interpreted)) (load-states callers))
              "each caller is an SCI definition, analyzed against its private def, referred defonce and dependency alias")
-         (is (some? cluster-name) "this JVM runs a cluster instance")
-         (is (identical? (get running cluster-name)
-                         (sci/eval-string* ctx (str "(seon.cluster.boot/selected-instance " (pr-str cluster-name) ")")))
-             "the interpreted caller reads the compiled defonce Var's value")
+         (is (= (zipmap host-bound-callers (repeat :unavailable)) (load-states host-bound-callers)))
+         (is (= 'seon.render.web/handler (:seon.sci.eval/refused-function (refusal-of ctx 'seon.render.web/handler))))
          ;; A caller expanding a JVM macro that reads &env (async/go-loop in a
          ;; loaded test namespace) still refuses: the host-bound classification
          ;; gap recorded in the affected-callers issue, not an unbound name.
