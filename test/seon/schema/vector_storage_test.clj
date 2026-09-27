@@ -7,6 +7,9 @@
   here: [[vector-projection]] declares them with the test's own vector
   attributes on the executing projection."
   (:require [clojure.test :refer [deftest is testing]]
+            [datahike.api :as d]
+            [datahike.constants :as const]
+            [seon.db :as db]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.test-support :as support]))
@@ -213,3 +216,223 @@
        (testing "a selector naming no vector needs no lowering"
          (is (not (schema.datahike/vector-selector? projection [:seon.vector-test.p/id])))
          (is (schema.datahike/vector-selector? projection '[*])))))))
+
+;;; ---------------------------------------------------------------------------
+;;; A database world: the synthetic declarations installed and stored as rows
+;;; ---------------------------------------------------------------------------
+
+(defn- stored-attributes
+  "The attribute keys of `forms`, entity map schemas excluded."
+  {:malli/schema [:=> [:cat [:vector [:tuple :qualified-keyword :seon.schema/malli-form]]] [:vector :qualified-keyword]]}
+  [forms]
+  (into [] (comp (remove (fn [[_ definition]] (and (vector? definition) (= :map (first definition)))))
+                 (map first))
+        forms))
+
+(defn- with-vector-world
+  "Call `body` with a connection on an isolated branch whose writer stores
+   vectors in cells: the bridge and subject declarations installed and written
+   as schema rows, so the writer's carried projection declares them."
+  {:malli/schema [:=> [:cat :seon.instrument/callable]
+                  [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                         :seon.schema.admission/reason "A fixture returns its body's arbitrary result unchanged."}]]}
+  [body]
+  (let [forms (into subject-forms bridge-forms)]
+    (support/with-database
+     {:seon.test-support/extra-schema
+      (schema.datahike/malli->datahike-schema-in
+       (vector-projection (schema/handed-projection) forms) (stored-attributes forms))}
+     (fn [connection]
+       (support/transacted! connection (support/schema-entities @connection forms))
+       (body connection)))))
+
+(defn- tx!
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.store/transaction] :seon.db/transaction-report]}
+  [connection transaction]
+  (support/transacted! connection transaction))
+
+(defn- refused?
+  "True when writing `transaction` refuses with `cause` named anywhere in the refusal."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.store/transaction :qualified-keyword] :boolean]}
+  [connection transaction cause]
+  (let [result (db/transact! connection transaction)]
+    (boolean (and (map? result) (nil? (:db-after result))
+                  (some #{cause} (tree-seq coll? seq result))))))
+
+(defn- pulled
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.db/pull-selector :seon.schema/value] [:or :nil :map]]}
+  [connection selector entity]
+  (db/pull @connection selector entity))
+
+(defn- effective
+  "Datoms a report changed besides its transaction entity."
+  {:malli/schema [:=> [:cat :seon.db/transaction-report] :int]}
+  [report]
+  (count (remove #(<= (long const/tx0) (long (:e %))) (:tx-data report))))
+
+(defn- element-ids
+  "The element entity ids of `parent`'s vector `attribute`, in position order."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.schema/value :qualified-keyword] [:vector :int]]}
+  [connection parent attribute]
+  (mapv :db/id (get (pulled connection [{attribute [:db/id]}] parent) attribute)))
+
+(def ^:private p [:seon.vector-test.p/id "p"])
+
+;;; ---------------------------------------------------------------------------
+;;; S3 + S4: the writer's vector function and final validation
+;;; ---------------------------------------------------------------------------
+
+(deftest vectors-round-trip-with-order-duplicates-and-presence
+  (with-vector-world
+   (fn [c]
+     (testing "order, duplicates, two-keyword elements and tuples"
+       (tx! c [{:seon.vector-test.p/id "p" :seon.vector-test.p/items ["b" "a" "b"]
+                :seon.vector-test.p/keys [:seon.vector-test.p/id :seon.vector-test.t/id]
+                :seon.vector-test.p/pairs [[1 "x"] [0 "y"] [1 "x"]]}])
+       (is (= {:seon.vector-test.p/items ["b" "a" "b"]
+               :seon.vector-test.p/keys [:seon.vector-test.p/id :seon.vector-test.t/id]
+               :seon.vector-test.p/pairs [[1 "x"] [0 "y"] [1 "x"]]}
+              (pulled c [:seon.vector-test.p/items :seon.vector-test.p/keys :seon.vector-test.p/pairs] p))))
+     (testing "a new component's inline cells, then an existing entity's diff"
+       (tx! c [{:seon.vector-test.p/id "n" :seon.vector-test.p/kids
+                [{:seon.vector-test.k/name "k" :seon.vector-test.k/args [{:seon.vector-test.a/name "x"} {:seon.vector-test.a/name "x"}]}]}])
+       (let [[kid] (element-ids c [:seon.vector-test.p/id "n"] :seon.vector-test.p/kids)]
+         (tx! c [{:db/id kid :seon.vector-test.k/args [{:seon.vector-test.a/name "y"} {:seon.vector-test.a/name "x"} {:seon.vector-test.a/name "x"}]}])
+         (is (= ["y" "x" "x"] (mapv :seon.vector-test.a/name (:seon.vector-test.k/args (pulled c '[*] kid)))))))
+     (testing "[] is present and empty; retracting the attribute makes it absent"
+       (tx! c [{:seon.vector-test.p/id "empty" :seon.vector-test.p/items []} {:seon.vector-test.p/id "absent"}])
+       (is (= [] (:seon.vector-test.p/items (pulled c '[*] [:seon.vector-test.p/id "empty"]))))
+       (is (not (contains? (pulled c '[*] [:seon.vector-test.p/id "absent"]) :seon.vector-test.p/items)))
+       (tx! c [{:seon.vector-test.p/id "p" :seon.vector-test.p/items []}])
+       (is (= {:seon.vector-test.p/items []} (pulled c [:seon.vector-test.p/items] p)))
+       (tx! c [[:db/retract p :seon.vector-test.p/items]])
+       (is (= {:seon.vector-test.p/items :none} (pulled c [[:seon.vector-test.p/items :default :none]] p))))
+     (testing "reasserting an unchanged vector emits nothing"
+       (tx! c [{:seon.vector-test.p/id "u" :seon.vector-test.p/items ["a" "b" "a"]
+                :seon.vector-test.p/kids [{:seon.vector-test.k/name "x"} {:seon.vector-test.k/name "y"}]}])
+       (is (zero? (effective (tx! c [{:seon.vector-test.p/id "u" :seon.vector-test.p/items ["a" "b" "a"]
+                                      :seon.vector-test.p/kids [{:seon.vector-test.k/name "x"} {:seon.vector-test.k/name "y"}]}]))))))))
+
+(deftest peer-vectors-keep-ref-semantics
+  (with-vector-world
+   (fn [c]
+     (testing "order, duplicates and a target created in the same transaction"
+       (tx! c [{:seon.vector-test.t/id "t1"}])
+       (tx! c [{:db/id "t2" :seon.vector-test.t/id "t2"}
+               {:seon.vector-test.p/id "p" :seon.vector-test.p/peers [[:seon.vector-test.t/id "t2"] [:seon.vector-test.t/id "t1"] "t2"]}])
+       (is (= [{:seon.vector-test.t/id "t2"} {:seon.vector-test.t/id "t1"} {:seon.vector-test.t/id "t2"}]
+              (:seon.vector-test.p/peers (pulled c [{:seon.vector-test.p/peers [:seon.vector-test.t/id]}] p)))))
+     (testing "retracting a target alone refuses: the element would vanish"
+       (is (refused? c [[:db/retractEntity [:seon.vector-test.t/id "t1"]]] :seon.db/vector-element-swept)))
+     (testing "retracting a target with the vector reasserted is admitted"
+       (tx! c [[:db/retractEntity [:seon.vector-test.t/id "t1"]]
+               {:seon.vector-test.p/id "p" :seon.vector-test.p/peers [[:seon.vector-test.t/id "t2"]]}])
+       (is (= [{:seon.vector-test.t/id "t2"}]
+              (:seon.vector-test.p/peers (pulled c [{:seon.vector-test.p/peers [:seon.vector-test.t/id]}] p)))))
+     (testing "retracting the parent removes its cells; the target survives"
+       (tx! c [[:db/retractEntity p]])
+       (is (empty? (d/datoms @c :aevt :seon.db.vector/cells)))
+       (is (= {:seon.vector-test.t/id "t2"} (pulled c [:seon.vector-test.t/id] [:seon.vector-test.t/id "t2"])))))))
+
+(deftest raw-vector-operations-keep-a-meaning
+  (with-vector-world
+   (fn [c]
+     (tx! c [{:seon.vector-test.t/id "t1"} {:seon.vector-test.t/id "t2"}
+             {:seon.vector-test.p/id "p" :seon.vector-test.p/items ["a" "b" "a"] :seon.vector-test.p/peers []}])
+     (testing "add appends; retract of a value removes every occurrence"
+       (tx! c [[:db/add p :seon.vector-test.p/items "c"]
+               [:db/add p :seon.vector-test.p/peers [:seon.vector-test.t/id "t1"]]
+               [:db/add p :seon.vector-test.p/peers [:seon.vector-test.t/id "t2"]]])
+       (tx! c [[:db/retract p :seon.vector-test.p/items "a"]])
+       (is (= {:seon.vector-test.p/items ["b" "c"] :seon.vector-test.p/peers [{:seon.vector-test.t/id "t1"} {:seon.vector-test.t/id "t2"}]}
+              (pulled c [:seon.vector-test.p/items {:seon.vector-test.p/peers [:seon.vector-test.t/id]}] p))))
+     (testing "one identity asserting a vector twice: the last wins"
+       (tx! c [{:seon.vector-test.p/id "p" :seon.vector-test.p/items ["x"]}
+               {:seon.vector-test.p/id "p" :seon.vector-test.p/items ["y" "z"]}])
+       (is (= {:seon.vector-test.p/items ["y" "z"]} (pulled c [:seon.vector-test.p/items] p))))
+     (testing "a raw operation on a new entity and one tempid asserting a vector twice refuse"
+       (is (refused? c [[:db/add "r" :seon.vector-test.p/items "a"]] ::schema.datahike/vector-tempid-operation))
+       (is (refused? c [{:db/id "x" :seon.vector-test.p/items ["a"]} {:db/id "x" :seon.vector-test.p/items ["b"]}]
+                     :seon.db/vector-positions))))))
+
+(deftest component-vectors-keep-identity
+  (with-vector-world
+   (fn [c]
+     (testing "retracting the parent cascades cells and elements"
+       (let [entity-datoms #(count (remove (fn [datom] (<= (long const/tx0) (long (:e datom)))) (d/datoms @c :eavt)))
+             before (entity-datoms)]
+         (tx! c [{:seon.vector-test.p/id "gone" :seon.vector-test.p/kids
+                  [{:seon.vector-test.k/name "x" :seon.vector-test.k/args [{:seon.vector-test.a/name "1"} {:seon.vector-test.a/name "2"}]}
+                   {:seon.vector-test.k/name "y"}]}])
+         (tx! c [[:db/retractEntity [:seon.vector-test.p/id "gone"]]])
+         (is (= before (entity-datoms)))))
+     (testing "a reorder by id or by value keeps both entities"
+       (tx! c [{:seon.vector-test.p/id "p" :seon.vector-test.p/kids [{:seon.vector-test.k/name "A" :seon.vector-test.k/args [{:seon.vector-test.a/name "1"}]}
+                                                                    {:seon.vector-test.k/name "B"}]}])
+       (let [[a b] (element-ids c p :seon.vector-test.p/kids)]
+         (tx! c [{:seon.vector-test.p/id "p" :seon.vector-test.p/kids [{:db/id b} {:db/id a}]}])
+         (is (= [b a] (element-ids c p :seon.vector-test.p/kids)))
+         (is (= ["B" "A"] (mapv :seon.vector-test.k/name (:seon.vector-test.p/kids (pulled c '[*] p)))))
+         (tx! c [{:seon.vector-test.p/id "p" :seon.vector-test.p/kids [{:seon.vector-test.k/name "A" :seon.vector-test.k/args [{:seon.vector-test.a/name "1"}]}
+                                                                      {:seon.vector-test.k/name "B"}]}])
+         (is (= [a b] (element-ids c p :seon.vector-test.p/kids)))))
+     (testing "replacing one element keeps the others and leaves no ownerless child"
+       (tx! c [{:seon.vector-test.p/id "r" :seon.vector-test.p/kids [{:seon.vector-test.k/name "A"} {:seon.vector-test.k/name "B"} {:seon.vector-test.k/name "C"}]}])
+       (let [[a b cc] (element-ids c [:seon.vector-test.p/id "r"] :seon.vector-test.p/kids)]
+         (tx! c [{:seon.vector-test.p/id "r" :seon.vector-test.p/kids [{:seon.vector-test.k/name "A"} {:seon.vector-test.k/name "Z"} {:seon.vector-test.k/name "C"}]}])
+         (let [[a' _ c'] (element-ids c [:seon.vector-test.p/id "r"] :seon.vector-test.p/kids)]
+           (is (= [a cc] [a' c']))
+           (is (empty? (d/datoms @c :eavt b)) "the replaced component is destroyed with its cell"))))
+     (testing "equal independent maps stay two entities"
+       (tx! c [{:seon.vector-test.p/id "two" :seon.vector-test.p/kids [{:seon.vector-test.k/name "x"} {:seon.vector-test.k/name "x"}]}])
+       (is (= 2 (count (distinct (element-ids c [:seon.vector-test.p/id "two"] :seon.vector-test.p/kids))))))
+     (testing "one component twice refuses: a component has one owner"
+       (let [[a] (element-ids c p :seon.vector-test.p/kids)]
+         (is (refused? c [{:seon.vector-test.p/id "p" :seon.vector-test.p/kids [{:db/id a} {:db/id a}]}]
+                       :seon.db/multiple-component-owners))))
+     (testing "an append is one cell: link, position, element and the component's datom"
+       (tx! c [{:seon.vector-test.p/id "app" :seon.vector-test.p/kids [{:seon.vector-test.k/name "A"}] :seon.vector-test.p/items ["a"]}])
+       (is (= 7 (effective (tx! c [{:seon.vector-test.p/id "app" :seon.vector-test.p/kids [{:seon.vector-test.k/name "A"} {:seon.vector-test.k/name "B"}]
+                                    :seon.vector-test.p/items ["a" "b"]}])))))
+     (testing "a nested vector inside a component updates in place"
+       (let [[a] (element-ids c [:seon.vector-test.p/id "app"] :seon.vector-test.p/kids)]
+         (tx! c [{:db/id a :seon.vector-test.k/args [{:seon.vector-test.a/name "2"} {:seon.vector-test.a/name "1"}]}])
+         (is (= [{:seon.vector-test.a/name "2"} {:seon.vector-test.a/name "1"}]
+                (get-in (pulled c [{:seon.vector-test.p/kids [{:seon.vector-test.k/args [:seon.vector-test.a/name]}]}]
+                                [:seon.vector-test.p/id "app"])
+                        [:seon.vector-test.p/kids 0 :seon.vector-test.k/args]))))))))
+
+(deftest the-writer-refuses-vector-storage-faults
+  (with-vector-world
+   (fn [c]
+     (testing "a vector attribute's datom outside a cell (a write that bypassed the encoder)"
+       (tx! c [{:seon.vector-test.p/id "p"}])
+       (let [e (:db/id (pulled c [:db/id] p))]
+         (is (refused? c [(with-meta [:db/add e :seon.vector-test.p/items "raw"] {:seon.schema.datahike/encoded-operation true})]
+                       :seon.db/vector-member-outside-cell))))
+     (testing "cells written around the encoder refuse by cause"
+       (let [e (:db/id (pulled c [:db/id] p))
+             raw (fn [& operations] (mapv #(with-meta % {:seon.schema.datahike/encoded-operation true}) operations))]
+         (is (refused? c (raw {:db/id "c" :seon.db.vector/position 0 :seon.vector-test.p/items ["a" "b"]}
+                              [:db/add e :seon.db.vector/cells "c"] [:db/add e :seon.db.vector/present :seon.vector-test.p/items])
+                       :seon.db/vector-cell-ambiguous))
+         (is (refused? c (raw {:db/id "c" :seon.db.vector/position 0 :seon.vector-test.p/items ["a"]}
+                              [:db/add e :seon.db.vector/cells "c"])
+                       :seon.db/vector-cells-without-presence))
+         (is (refused? c (raw {:db/id "c" :seon.db.vector/position 1 :seon.vector-test.p/items ["a"]}
+                              [:db/add e :seon.db.vector/cells "c"] [:db/add e :seon.db.vector/present :seon.vector-test.p/items])
+                       :seon.db/vector-positions))))
+     (testing "a declared bound on the vector refuses at the write"
+       (let [forms [[:seon.vector-test.q/id [:string {:seon.db/identity true}]]
+                    [:seon.vector-test.q/two [:vector {:max 2} :string]]
+                    [:seon.vector-test.q/row [:map {:seon.db/attributes true :seon.program/partition :seon.data} [:seon.vector-test.q/id :seon.vector-test.q/id]
+                                              [:seon.vector-test.q/two {:optional true} :seon.vector-test.q/two]]]]]
+         (tx! c (schema.datahike/malli->datahike-schema-in
+                 (vector-projection (db/carried-projection @c) forms) (stored-attributes forms)))
+         (tx! c (support/schema-entities @c forms))
+         (tx! c [{:seon.vector-test.q/id "q" :seon.vector-test.q/two ["a" "b"]}])
+         (is (refused? c [{:seon.vector-test.q/id "q" :seon.vector-test.q/two ["a" "b" "c"]}] :seon.db/transaction-refused)
+             "the submitted vector refuses before it is written")
+         (is (= ["a" "b" "c"]
+                (:seon.db/offending (db/transact! c [[:db/add [:seon.vector-test.q/id "q"] :seon.vector-test.q/two "c"]])))
+             "an append past the bound refuses at the final report, naming the whole logical vector"))))))
