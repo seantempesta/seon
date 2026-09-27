@@ -35,6 +35,7 @@
         (case @mode
           :green (is true)
           :blob (is (= :small (apply str (repeat 5000 "é"))) "large actual")
+          :thrown (throw (ex-info "probe thrown" {::probe :thrown}))
           :red (testing "outer" (testing "inner"
                  (is (= 1 2) "first claim")
                  (is (= :a :b) "second claim"))))))
@@ -139,6 +140,39 @@
                                            [?member :seon.test.member/failures ?report]
                                            [?report :seon.test.report/id ?id]]
                                   (db/db connection) s))))))))))
+
+(deftest a-rethrown-error-records-each-execution
+  ;; A thrown actual is stored whole as an error value carrying its own
+  ;; `:seon.error/at`, so each execution stores another blob. The report id
+  ;; covered only the captured signature and position, so the second run of
+  ;; an unchanged erroring test collided with the first report and the writer
+  ;; refused the whole completion as :seon.test/report-conflict (fault
+  ;; 93e4a1e2 on default, 2026-09-27: turn-test and agent-test recorded nothing).
+  (support/with-database
+    (fn [connection]
+      (with-probe connection
+        (fn [s _ mode]
+          (reset! mode :thrown)
+          (let [record #(sut/run {:seon.test/execution (support/execution-handle connection)
+                                  :seon.test/recording-connection connection
+                                  :seon.test/policy :named :seon.test/identities #{s}})
+                first-run (record)
+                second-run (record)
+                report (fn [run] (first (reports (first (:seon.test/results run)))))]
+            (doseq [run [first-run second-run]]
+              (is (nil? (:seon.test/recording-refusal run)) (pr-str (:seon.test/recording-refusal run)))
+              (is (= 1 (:seon.test/executed-count run)))
+              (is (= 1 (:seon.test/error-count (first (:seon.test/results run)))))
+              (is (= 'clojure.lang.ExceptionInfo (:seon.test.failure/throwable (report run)))))
+            (is (= (:seon.test/failure-identity (report first-run))
+                   (:seon.test/failure-identity (report second-run)))
+                "the claim is unchanged")
+            (is (not= (:seon.test.failure/actual-blob (report first-run))
+                      (:seon.test.failure/actual-blob (report second-run)))
+                "each execution stored its own thrown value")
+            (is (not= (:seon.test.report/id (report first-run))
+                      (:seon.test.report/id (report second-run)))
+                "so each is its own report")))))))
 
 (deftest a-green-run-is-the-latest-result-and-keeps-red-history
   (support/with-database

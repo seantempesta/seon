@@ -1128,20 +1128,26 @@
    :seon.test.run/basis-t (db/basis-t database)
    :seon.test.run/branch (get-in database [:config :branch])})))
 
-(def ^:private report-position-attributes
-  ;; Where a claim was reported: the facts `failure-identity` leaves out of
-  ;; the captured signature, which covers the claim's content (type, message,
-  ;; expected, actual, event signature).
-  [:seon.test.failure/line :seon.test.failure/reported-file :seon.test.failure/contexts])
+(def ^:private report-occurrence-attributes
+  ;; The facts `failure-identity` leaves out of the captured signature, which
+  ;; covers the claim's content (type, message, expected, actual text, event
+  ;; signature): where the claim was reported, and the digest of the whole
+  ;; thrown value this execution stored (`prepare-failures!`). That value
+  ;; carries its own `:seon.error/at`, so a rerun of the same claim stores
+  ;; another blob; under the signature alone it collided with the stored
+  ;; report and refused the whole completion (fault 93e4a1e2, 2026-09-27).
+  [:seon.test.failure/line :seon.test.failure/reported-file :seon.test.failure/contexts
+   :seon.test.failure/actual-blob])
 
 (defn report-entity
   "The stored report for one captured failure of `test-symbol`.
 
-  Its identity is the captured signature and the position it was reported
-  at: the same claim reported from a moved line is another report, never a
-  conflict with the earlier one, while other content under an unchanged
-  signature at the same position is the same identity with different facts,
-  which the recorder refuses as a report conflict."
+  Its identity is the captured signature, the position it was reported at
+  and the stored thrown value: the same claim reported from a moved line, or
+  thrown again as another stored value, is another report, never a conflict
+  with the earlier one, while other content under an unchanged signature,
+  position and thrown value is the same identity with different facts, which
+  the recorder refuses as a report conflict."
   {:malli/schema [:=> [:cat [:vector :qualified-keyword] :seon.test/sym :map]
                   [:map [:seon.test.report/id :string]
                    [:seon.test.report/symbol :seon.test/sym]]]}
@@ -1151,7 +1157,7 @@
                             :seon.test.report/symbol test-symbol))]
     (assoc report :seon.test.report/id
            (id/id [test-symbol (:seon.test/failure-identity report)
-                   (into (sorted-map) (select-keys report report-position-attributes))]))))
+                   (into (sorted-map) (select-keys report report-occurrence-attributes))]))))
 
 (defn- execution-refusal! [operation run-id kind expected observed]
   (let [failure (assoc (seon.error.refusal/diagnostic (java.util.Date.) :seon.test/execution operation
