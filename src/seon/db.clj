@@ -4163,25 +4163,28 @@
                        ;; A retracted Datahike attribute entity is identified by
                        ;; `:db/ident`; a surviving writer still names it.
                        attribute (:db/ident identities)
+                       ;; [relation target removed-identity]: the family is known
+                       ;; here, so each break carries its typed removed identity.
                        obligations (concat
                                     (when function-symbol
-                                      (map #(vector % function-symbol)
+                                      (map #(vector % function-symbol [:seon.fn/sym function-symbol])
                                            [:seon.fn/calls :seon.fn/references :seon.test/subject
                                             :seon.effect/capability]))
                                     (when namespace-symbol
-                                      [[:seon.ns/requires namespace-symbol]])
+                                      [[:seon.ns/requires namespace-symbol [:seon.ns/name namespace-symbol]]])
                                     (when schema-key
-                                      (map #(vector % schema-key)
+                                      (map #(vector % schema-key [:seon.schema/key schema-key])
                                            [:seon.fn/writes :seon.schema/references
                                             :seon.fn.arity/input-refs :seon.fn.arity/output-refs
                                             :seon.fn.arity/guard-refs]))
                                     (when (qualified-keyword? attribute)
-                                      [[:seon.fn/writes attribute]]))]
-                   (for [[attribute target] obligations
+                                      [[:seon.fn/writes attribute [:db/ident attribute]]]))]
+                   (for [[attribute target removed-identity] obligations
                          datom (d/datoms database :avet attribute target)
                          :when (or (not= :seon.effect/capability attribute)
                                    (seq (d/datoms database :eavt (:e datom) :seon.fn/sym)))]
                      {:seon.program/subject target
+                      :seon.program/identity removed-identity
                       :seon.program/relation attribute
                       :seon.program/referrer
                       (into {}
@@ -4195,7 +4198,10 @@
               removed)]
     (when (seq breaks)
       (let [breaks (vec (sort-by pr-str breaks))]
-        (diagnostic
+        ;; The producer declares what it refused; `write-observation` carries
+        ;; that identity as `:seon.db.write/validator-schema`.
+        (vary-meta
+         (diagnostic
          {::transaction-refused true
           :seon.program/referrers breaks
           :seon.error/message (str "Program deletion leaves surviving referrers: "
@@ -4205,7 +4211,8 @@
           :seon.error/operation 'seon.db/transact!
           :seon.error/member :seon.program/referrer
           :seon.error/expected :seon.program/deletion-row
-          :seon.error/offending breaks})))))
+          :seon.error/offending breaks})
+         assoc :seon.error/declared-schema :seon.program/deletion-refused-error)))))
 
 (defn deletion-error
   "Refuse a publication removing definitions still named in its final database.
@@ -4732,6 +4739,11 @@
   [database transaction observation]
   (vary-meta
    (-> observation
+      ;; The validator's own declared identity (e.g. a deletion refusal) is
+      ;; provenance beside the generic write-attempt identity, never replaced.
+      (cond-> (some-> (meta observation) :seon.error/declared-schema
+                      (not= :seon.db.write/validation-refusal))
+        (assoc :seon.db.write/validator-schema (:seon.error/declared-schema (meta observation))))
       (assoc :seon.db.write.attempt/request-id (id/id)
              :seon.error/basis
              {:seon.error.basis/store (datahike.store/store-identity (:store (dbi/-config database)))
