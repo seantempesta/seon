@@ -6,8 +6,7 @@
                :cljs [cljs.tools.reader.reader-types :as rt])
             #?(:clj [clojure.spec.alpha :as s])
             #?(:clj [clojure.core.specs.alpha])
-            [sci.core :as sci]
-            [seon.error.refusal :as error]))
+            [sci.core :as sci]))
 
 (def ^:private eof ::eof)
 

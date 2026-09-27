@@ -101,7 +101,6 @@
             [datahike.api :as d]
             [edamame.core :as edamame]
             [clojure.java.io :as io]
-            [clojure.main :as main]
             [clojure.string :as str]
             [clojure.walk :as walk]
             [clojure.test]
@@ -1073,7 +1072,7 @@
         (seq rows) (update ::declared conj (program-identity-name (first rows)))))))
 
 (defn- bindings
-  [ctx _namespace-name before _source _form _observed-built-in-calls]
+  [ctx before]
   (into {}
         (keep (fn [[qualified {sci-var :seon.sci.eval/var
                               value :seon.sci.eval/value}]]
@@ -3301,7 +3300,7 @@
      :seon.sci.eval/private-state
      (if carried? :preserved-in-memory :absent)}))
 
-(def program-cache-policy
+(def ^:private program-cache-policy
   "Bound the memoized program identities and base contexts independently of commits."
   {::program-identity-cache-size 256
    ::program-identity-cache-reason
@@ -3875,18 +3874,7 @@
                   (schema/predicate-functions-in candidate-projection)
                   :seon.program/schema-keys (set (keys forms))
                   :seon.program/schema-forms forms}))))
-          raw-row)
-        base-declared-row
-        (if (:seon.fn/spec base-declared-row)
-          (program/with-contract-facts
-           {:seon.program/row base-declared-row
-            :seon.program/compile-options
-            (:seon.schema.projection/compile-options projection)
-            :seon.program/predicate-functions
-            (schema/predicate-functions-in projection)
-            :seon.program/schema-keys
-            (set (keys (:seon.schema.projection/forms projection)))})
-          base-declared-row)]
+          raw-row)]
     {:seon.sci.eval/base-declared-row base-declared-row
      :seon.sci.eval/live-declaration? live-declaration?
      :seon.sci.eval/schema-value schema-value
@@ -4131,7 +4119,6 @@
 
 (defn- success-evaluation
   [{admitted :seon.sci.eval/admitted
-    caps :seon.sci.admit/caps
     output-prefix :seon.sci.eval/output-prefix
     printed :seon.sci.eval/printed
     namespace-name :seon.sci.eval/namespace-name
@@ -4176,7 +4163,6 @@
 
 (defn- failed-evaluation
   [{admitted :seon.sci.eval/admitted
-    caps :seon.sci.admit/caps
     output-prefix :seon.sci.eval/output-prefix
     printed :seon.sci.eval/printed
     namespace-name :seon.sci.eval/namespace-name
@@ -4395,16 +4381,10 @@
         ;; acquisition. One clock difference, approximate by design.
         elapsed-ms (fn [] (quot (- (System/nanoTime) started-at @acquisition-nanos) 1000000))
         arm-state (volatile! nil)
-        interrupt-fn (get-in evaluation-ctx
-                             [::kernel/guard ::kernel/interrupt-fn])
         record (fn [outcome]
                  (if-let [armed-record (::kernel/record @arm-state)]
                    (armed-record outcome)
                    (kernel/unarmed-record started-at)))
-        built-in-calls (fn []
-                         (if-let [observed (::kernel/built-in-calls @arm-state)]
-                           (observed)
-                           #{}))
         ;; Printed output is stored with the evaluation, so it streams under
         ;; the same UTF-8 storage bound as external evidence: the fragment that
         ;; would cross `max-bytes` refuses (admission's declared
@@ -4536,16 +4516,13 @@
                             throwable)
                 definitions
                 (when-let [{failed-ctx :seon.sci.eval/ctx
-                            before :seon.sci.eval/before-intern-values
-                            failed-form :seon.sci.eval/form}
+                            before :seon.sci.eval/before-intern-values}
                            observation]
                   ;; A failed evaluation has no durable program row. Any def
                   ;; it installed before the later throw/cut therefore belongs
                   ;; to the agent's defs, including a contracted def whose declaration
                   ;; never reached the terminal transaction.
-                  (bindings
-                   failed-ctx namespace-name before source failed-form
-                   (built-in-calls)))
+                  (bindings failed-ctx before))
                 arity-message (interpreted-arity-message throwable)
                 value (cond->
                           (kernel/failure-value
@@ -4813,8 +4790,7 @@
               evaluation-record (record :ok)
               ;; Capture exact evaluated roots; settlement installs rows from them.
               definitions
-              (bindings execution-ctx namespace-name before-intern-values
-                         source form (built-in-calls))
+              (bindings execution-ctx before-intern-values)
               ;; A top-level call's contracted head names the root value's
               ;; declared returns; any other form supplies no producer.
               head (some-> (render/request-projection request)

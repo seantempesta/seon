@@ -166,7 +166,7 @@
   (when (instance? sci.impl.types.SciTypeInstance value)
     (str (sci.types/-get-type value))))
 
-(defn record-name
+(defn- record-name
   "The declared SCI or JVM name of a record value."
   {:malli/schema [:=> [:cat :map] :string]}
   [value]
