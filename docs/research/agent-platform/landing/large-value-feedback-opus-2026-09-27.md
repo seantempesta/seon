@@ -236,3 +236,43 @@ Fix:
 
 Regression: `seon.repl-test/every-reply-path-reads-the-recorded-cost-its-findings-need`. Scratch repl_test: 19 tests,
 96 assertions, 0 failures. Contracts compile over repl.clj, repl_test and P7's transcript with 0 findings.
+
+## Round 4: red triage 2 (tests-0627h)
+
+Live check first, branch `efd-16` on pid 52335: the renderer-throws value
+(`{:seon.render/ai (fn [_] (throw …)) :rows …300 maps}`) answers end to end with:
+- `;; LARGE VALUE: … ~4463 tokens whole (shown 553)`;
+- the bounded print, with `…268 (drop 32 (get-in result/e… [:rows]))`;
+- one diagnostic.
+
+1. **`render.value-test/a-renderer-that-throws-…-large-value`: the test was wrong, not the code.** The one diagnostic
+   carries the renderer's refusal as its `:seon.error/offending`, and that refusal has its own `:seon.error/at`, so
+   counting `:seon.error/at` gave 2. The test now counts the render-layer entry.
+2. **`render.value-test/dir-of-a-large-namespace-is-its-declared-renderer-text`: caused by ad0f8dab2** (the 50k
+   rendered ceiling became the value budget).
+   - A render's text past the budget was turned into a characters elision node. That printed it as a quoted string
+     and lost `:seon.render.call/selected-producer`, so `:seon.eval/renderer` was nil.
+   - Fixed in value.clj: the clipped text stays the render's own node, with its first B characters then `…+N`,
+     printed as REPL text, and the producer is kept.
+   - The test now expects the cut: prefix, `…+N` at the end, length ≤ B + 16, and the renderer named.
+3. **`dev.mcp-bridge-test/runtime-status-…`: caused by ad0f8dab2.**
+   - At a 1,000-token budget, `seon.cluster/runtime-observation-ai` came to 1,107 tokens live and the MCP reply fell
+     to a blob handle. By family: open faults 479, cache status 232, over-second lines 134, replaced roots 82.
+   - **P8**, `tmp/eval-feedback-design-opus/p8-status-face-fits.patch`: three entries per family and three
+     over-second lines. The live measure is 876 tokens (2,805 characters).
+   - `mcp_test` now expects 3, and a whole face under 3,200 characters.
+   - The cache status stays whole, because its schema requires every per-kind counter. Its kinds grow with the
+     cache, so the face's margin narrows as kinds are added.
+   - P8 also passes `:seon.db/db` to `runtime-observation-ai` from `script/seon/dev/mcp.clj`. Since 93144cb71
+     requires the database on every render unit, live `runtime_status` answered the refusal
+     `runtime-observation-ai refused unit at [:seon.db/db]`.
+4. **`cluster.host-test/a-run-reads-its-earlier-declarations`: mine through ad0f8dab2's budget, with a second
+   owner.**
+   - The install refusal's `:seon.test.accretion/orientation` ("… · install refused") comes late in the map.
+   - At a 1,000-token budget the floor print of a refusal carrying a long-overflow auto-check error cuts before it.
+     On branch `efd-16`, without the overflow, the whole map fits and shows the phrase.
+   - The real fix is that the refusal's declared teaching face (`seon.test.accretion/render-ai`, which leads with
+     the orientation) should be the one shown. The failed evaluation's value prints through `seon.sci.kernel/failure-value`'s
+     returns instead, so the floor prints the raw map.
+   - That selection belongs to the eval/error owner. It is not fixed here; the options are that fix, or a test that
+     reads the orientation from the error value.

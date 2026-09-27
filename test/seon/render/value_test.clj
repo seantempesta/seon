@@ -876,7 +876,12 @@
        (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
        (is (> (tokens/estimate rendered) (:seon.render.profile/token-budget profile))
            "the directory exceeds the raw budget")
-       (is (= rendered shown) "the renderer's text is shown whole")
+       ;; Owner 2026-09-27: a render follows the value's budget (no separate
+       ;; ceiling). Its text is cut there, still printed as the render's REPL
+       ;; text, and the renderer that produced it is still named.
+       (is (str/starts-with? shown (subs rendered 0 500)) shown)
+       (is (re-find #"…\+\d+$" shown) (subs shown (max 0 (- (count shown) 80))))
+       (is (<= (count shown) (+ (tokens/estimate-chars (:seon.render.profile/token-budget profile)) 16)))
        (is (= 'seon.repl/render-directory-ai (:seon.eval/renderer result)))))))
 
 (deftest transacted-preserves-error-entities-as-data
@@ -1204,6 +1209,9 @@
        (is (< 1000 (:seon.eval/value-tokens evaluation)) "the whole value's estimate is recorded")
        (is (<= (:seon.eval/shown-tokens evaluation) 1100) "the print stays within the value budget")
        (is (str/includes? shown "(drop 32 (get-in result/elargerender1 [:rows]))") shown)
-       (is (= 1 (count (re-seq #":seon.error/at" (str (:seon.cluster.eval/diagnostics evaluation)))))
+       ;; The diagnostic holds the renderer's refusal as its offending value
+       ;; (which has its own :seon.error/at), so count the render-layer entry.
+       (is (= 1 (count (re-seq #":seon.error/layer :seon.render/invocation"
+                               (str (:seon.cluster.eval/diagnostics evaluation)))))
            "one renderer-failed diagnostic, beside the value")
        (is (str/starts-with? reply ";; LARGE VALUE: result/elargerender1 is ~") reply)))))

@@ -1,0 +1,65 @@
+diff --git a/script/seon/dev/mcp.clj b/script/seon/dev/mcp.clj
+index 6f7c48000..cdf283eb0 100644
+--- a/script/seon/dev/mcp.clj
++++ b/script/seon/dev/mcp.clj
+@@ -671,7 +671,10 @@
+                 ;; The observation's declared AI face, the one `bin/seon status` prints.
+                 ((requiring-resolve 'seon.cluster/runtime-observation-ai)
+                  {:seon.render/value
+-                  ((requiring-resolve 'seon.cluster/mcp-runtime-observation) ~cluster)})))
++                  ((requiring-resolve 'seon.cluster/mcp-runtime-observation) ~cluster)
++                  ;; A render unit carries the database it renders against.
++                  :seon.db/db ((requiring-resolve 'seon.db/db)
++                               ((requiring-resolve 'seon.cluster.boot/connection) ~cluster))})))
+             default-timeout-ms))]
+       (or (:seon.dev.mcp/value projected) projected))
+     (catch Throwable throwable
+diff --git a/src/seon/cluster.clj b/src/seon/cluster.clj
+index eb759a713..e7276d14d 100644
+--- a/src/seon/cluster.clj
++++ b/src/seon/cluster.clj
+@@ -660,8 +660,13 @@
+   {:malli/schema [:=> [:cat :seon.render/unit] :seon.dev.mcp/runtime-status]}
+   [unit]
+   (let [observation (:seon.render/value unit)
++        ;; THE FACE FITS THE VALUE BUDGET BY SELECTING LESS (owner 2026-09-27):
++        ;; at the 1,000-token agent budget five fault rows and five
++        ;; over-second lines beside the cache counters came to 1,107 tokens,
++        ;; and the MCP reply fell to a blob handle. Three of each family; the
++        ;; whole value is one read away.
+         top (fn [entries select-entry total]
+-              (let [shown (mapv select-entry (take 5 entries))]
++              (let [shown (mapv select-entry (take 3 entries))]
+                 (cond-> {:seon.dev.mcp/count total :seon.dev.mcp/top shown}
+                   (< (count shown) total) (assoc :seon.dev.mcp/omitted (- total (count shown))))))
+         failure #(select-keys % [:seon.error/operation :seon.error/layer])
+@@ -698,7 +703,7 @@
+       (assoc :seon.dev.mcp/program-unavailable (failure (:seon.dev.mcp/program-unavailable observation)))
+       (:seon.dev.mcp/profile observation)
+       (assoc :seon.profile/over-second-lines
+-             (get-in observation [:seon.dev.mcp/profile :seon.profile/over-second-lines])))))
++             (vec (take 3 (get-in observation [:seon.dev.mcp/profile :seon.profile/over-second-lines])))))))
+ 
+ ;;; ---------------------------------------------------------------------------
+ ;;; Pure resolution — defaults are THE defaults document for this layer
+diff --git a/test/seon/cluster/mcp_test.clj b/test/seon/cluster/mcp_test.clj
+index 88413df7d..3ce6c8dfb 100644
+--- a/test/seon/cluster/mcp_test.clj
++++ b/test/seon/cluster/mcp_test.clj
+@@ -315,11 +315,13 @@
+              (is (= :seon.dev.mcp/runtime-observation
+                     (last (:malli/schema (meta #'cluster/mcp-runtime-observation)))))
+              (is (= (count shown) (:seon.dev.mcp/count status-faults)))
+-             (is (= 5 (count (:seon.dev.mcp/top status-faults))))
+-             (is (= (- (count shown) 5) (:seon.dev.mcp/omitted status-faults)))
++             (is (= 3 (count (:seon.dev.mcp/top status-faults))))
++             (is (= (- (count shown) 3) (:seon.dev.mcp/omitted status-faults)))
+              (is (not-any? :seon.error/message (:seon.dev.mcp/top status-faults))
+                  "a fault is named by operation, never by its unbounded message")
+-             (is (< (count (pr-str (dissoc status :seon.profile/over-second-lines))) 4096))))
++             ;; It fits the 1,000-token agent budget (~3,200 characters) whole,
++             ;; so the MCP reply is the face, never a blob handle.
++             (is (< (count (pr-str status)) 3200))))
+          (finally (swap! running-instances dissoc cluster-name)))))))
+ 
+ (deftest ^{:seon.test/fixture-observation

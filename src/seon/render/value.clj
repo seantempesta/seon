@@ -805,15 +805,13 @@
                (let [text (when (and (= ::print/projected (::print/face declared))
                                      (= :seon.render/ai (:seon.render/output declared)))
                             (::print/value declared))
+                     ;; A render's text past the value's budget keeps being the
+                     ;; render (its producer, printed as REPL text, not a quoted
+                     ;; string): its first B characters, then `…+N`. The value
+                     ;; itself is read through its handle, not the render text.
                      declared (if (and text (> (count text) ceiling))
-                                (print/elision {::print/omitted (- (count text) ceiling)
-                                                ::print/elision-unit :characters
-                                                ::print/prefix (subs text 0 ceiling)
-                                                ::print/bound-by :seon.render.profile/token-budget
-                                                :seon.render.data/path path
-                                                :seon.render.data/next-offset ceiling
-                                                :seon.render.data/total (count text)
-                                                ::print/requery-refusal "renderer text beyond the value's token budget"})
+                                (assoc declared ::print/value
+                                       (str (subs text 0 ceiling) "…+" (- (count text) ceiling)))
                                 declared)]
                  (assoc base :kind :leaf :node declared :rendered? true))
                (let [;; A root continuation pages from its absolute offset.
