@@ -80,4 +80,9 @@
              :kind :function
              :intent "seon.turn/analyze-settlement re-analyzes a settled program row outside SCI, so it cannot see declared-without-root Vars and drops their call edges (the gap b3f1a7ae7 fixed in sci.eval/analyzed-rows). It appears unreached in production: every settle! call site passes :seon.error/value, ordinary runs settle through receipt-settle-batch-tx which does not re-analyze, and its only database-arity caller with a program row is test/seon/fn_test.clj:544. Verify no caller, then delete it and that test (fix-declare-edges, b3f1a7ae7)."
              :must-read #{seon.turn/analyze-settlement}
-             :evidence #{"docs/research/agent-platform/landing/program-test-candidate-projection-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/program-test-candidate-projection-2026-09-27.md"}}
+ #:seon.task{:name "a-nested-in-ns-loses-the-whole-run"
+             :kind :function
+             :intent "Probed on disposable branch p0-probe 2026-09-27: the run \"(do (in-ns 'p0.nested) 1) (+ 1 2)\" writes the second form's :seon.cluster.eval/ns as the lookup ref [:seon.ns/name p0.nested], but namespace-rows (turn.clj ~619) creates rows only for namespaces segmentation saw (top-level in-ns), so the settlement transaction is refused ('Nothing found for entity id', logged unbounded twice by Datahike) and the caller gets 'The awaited channel closed before completion' with no run id, no values, no events. Total-path violation. Every namespace an evaluation actually ran in or ended in is upserted as {:seon.ns/name sym} in the same settlement transaction (the owner's session-entity plan P2a, docs/research/agent-platform/repl-session-entity-design-2026-09-27.md problem 3)."
+             :must-read #{seon.turn/evaluate-sources}
+             :evidence #{"docs/research/agent-platform/repl-session-entity-design-2026-09-27.md"}}]
