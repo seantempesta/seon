@@ -250,7 +250,10 @@ root.
   contract fits the value, defined in the viewing agent's namespace; the schema's declared pair; the floor. A render
   function's face is its attachment key where attached, else its declared output schema, never a separate fact; like
   any function, its omitted declared inputs are supplied by schema name.
-- **An AI render returns REPL entries** (`;;` comments and forms); the one REPL path evaluates each form read-only
+- **Return data, not comments.** What comes back to an agent is data whenever possible: a reply is one map whose
+  keys carry the value, its handle, its timing, its errors and its findings; comment lines are confusing next to data
+  and agents repeat them. **An AI render returns REPL entries** (forms; `;;` only for prose that has no data form); the
+  one REPL path evaluates each form read-only
   in the viewing agent's SCI world and prints form and result as the transcript the agent reads, so every line is
   runnable. Rendering is lazy: a render is evaluated (and recorded) when a context that shows it is built, cached by
   the value's content digest, so only what is shown is rendered and nothing twice; the context an agent receives is
