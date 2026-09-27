@@ -71,17 +71,17 @@
 (defn write-event
   "A producer write as the batch records it: the Var's symbol, origin and kind."
   {:malli/schema [:=> [:cat :map] :seon.batch/write]}
-  [{:keys [op var origin kind ns sym root] :as w}]
+  [{op :op the-var :var origin :origin kind :kind namespace-symbol :ns sym :sym root :root :as w}]
   (case op
-    :bind (cond-> {:seon.batch/op :bind :seon.batch/sym (var-symbol var)
-                   :seon.batch/kind (or kind :root) :seon.batch/var var}
+    :bind (cond-> {:seon.batch/op :bind :seon.batch/kind (or kind :root) :seon.batch/var the-var}
+            (var-symbol the-var) (assoc :seon.batch/sym (var-symbol the-var))
             origin (assoc :seon.batch/origin origin)
-            (:sci.impl/member-of (meta var)) (assoc :seon.batch/member-of (:sci.impl/member-of (meta var)))
+            (:sci.impl/member-of (meta the-var)) (assoc :seon.batch/member-of (:sci.impl/member-of (meta the-var)))
             (contains? w :seon.batch/arm-error) (assoc :seon.batch/arm-error (:seon.batch/arm-error w))
             (fn? root) (assoc :seon.batch/fn? true))
-    :unmap {:seon.batch/op :unmap :seon.batch/sym (symbol (str ns) (str sym))}
-    :remove-ns {:seon.batch/op :remove-ns :seon.batch/ns ns}
-    :namespace {:seon.batch/op :namespace :seon.batch/ns ns}))
+    :unmap {:seon.batch/op :unmap :seon.batch/sym (symbol (str namespace-symbol) (str sym))}
+    :remove-ns {:seon.batch/op :remove-ns :seon.batch/ns namespace-symbol}
+    :namespace {:seon.batch/op :namespace :seon.batch/ns namespace-symbol}))
 
 (defn changed-namespaces
   "Namespaces whose SCI namespace map is not the one it was before: every

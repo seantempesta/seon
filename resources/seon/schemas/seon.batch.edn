@@ -1,0 +1,228 @@
+#:seon.batch
+{:world [:map {:description "The one world an entrant hands the path; every stage reads it from the request, never from an ambient binding. It extends :seon.db/custody-request (the connection). Built by seon.turn.batch/agent-world, test-agent-world, jvm-world, read-only-world or merge-world."}
+         [:seon.boot/cluster-name :seon.boot/cluster-name]
+         [:seon.agent/branch {:optional true} :seon.agent/branch]
+         [:seon.db/connection {:optional true} :seon.db/connection]
+         [:seon.db/db :seon.db/database-value]
+         [:seon.db/writer {:optional true} :seon.db/writer]
+         [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx]
+         [:seon.sci.eval/base-ctx {:optional true :description "The cluster context the agent's fork came from: a reaching test's before-world forks it at the basis."} :seon.sci.eval/ctx]
+         [:seon.env/environment {:optional true :description "Where the fault stage records: the execution's environment."} :seon.env/environment]
+         [:seon.db.process/id {:optional true} :seon.db.process/id]
+         [:seon.batch/sink {:optional true :description "This world's armed-call counts (seon.batch/sink): a test agent's counters see only its own calls."} :seon.batch/sink]
+         [:seon.agent/id {:optional true} :seon.agent/id]
+         [:seon.task/id {:optional true} :seon.task/id]
+         [:seon.render/profile {:optional true} :seon.render/profile]
+         [:seon.sci.eval/time-limit-ms {:optional true} :seon.sci.eval/time-limit-ms]
+         [:seon.turn/id {:optional true} :seon.turn/id]
+         [:seon.batch/settlement {:optional true} [:map [:seon.db/connection :seon.db/connection]]]]
+ :gate [:map {:description "The install gate's judgement of one changed contracted function, as data: whether it blocks (its own contract check failed or a reaching test is newly red), what failed, and the contract findings delivered as feedback."}
+        [:seon.gate/sym :qualified-symbol]
+        [:seon.gate/blocks? :boolean]
+        [:seon.gate/tests nat-int?]
+        [:seon.gate/own-failures {:optional true} [:vector [:map [:seon.gate/arguments :any] [:seon.gate/error {:optional true} :string]]]]
+        [:seon.gate/contract-findings {:optional true} [:vector [:map [:seon.gate/contract :qualified-symbol] [:seon.gate/arguments :any]]]]
+        [:seon.gate/newly-red {:optional true} [:vector [:map [:seon.test/sym :qualified-symbol]]]]
+        [:seon.gate/still-red {:optional true} [:vector [:map [:seon.test/sym :qualified-symbol]]]]]
+ :text [:string {:description "Exact text of a batch; after reading, its repaired text: what is evaluated, stored and rendered."}]
+ :start-ns :symbol
+ :mode [:enum :reply :code]
+ :pos nat-int?
+ :line-starts [:vector nat-int?]
+ :reader [:any {:description "The live SCI source reader at the cursor (sci.core/source-reader); a host object, never stored."}]
+ :text-version [:map
+                [:seon.batch/text :seon.batch/text]
+                [:seon.batch/pos :seon.batch/pos]
+                [:seon.batch/line-starts {:optional true} :seon.batch/line-starts]
+                [:seon.batch/reader {:optional true} :seon.batch/reader]]
+ :repair-kind [:enum :prose :prompt-marker :delimiters]
+ :prose :string
+ :at nat-int?
+ :repair [:map
+          [:seon.batch/repair-kind :seon.batch/repair-kind]
+          [:seon.batch/prose {:optional true} :seon.batch/prose]
+          [:seon.batch/at {:optional true} :seon.batch/at]]
+ :repairs [:vector :seon.batch/repair]
+ :structured? :boolean
+ :last-code-end nat-int?
+ :read-state [:map
+              [:seon.batch/version :seon.batch/text-version]
+              [:seon.batch/repairs :seon.batch/repairs]
+              [:seon.batch/structured? {:optional true} :seon.batch/structured?]
+              [:seon.batch/last-code-end {:optional true} :seon.batch/last-code-end]]
+ :version :seon.batch/text-version
+ :form [:any {:description "One read form, as the reader answered it."}]
+ :start nat-int?
+ :end nat-int?
+ :refused [:enum :fabricated-response]
+ :eof [:= true]
+ :unread-from nat-int?
+ :reason [:or :keyword :string]
+ :read-step [:or
+             [:map [:seon.batch/form :seon.batch/form] [:seon.batch/start :seon.batch/start]
+              [:seon.batch/end :seon.batch/end] [:seon.batch/version :seon.batch/text-version]
+              [:seon.batch/repairs :seon.batch/repairs]
+              [:seon.batch/refused {:optional true} :seon.batch/refused]]
+             [:map [:seon.batch/eof :seon.batch/eof] [:seon.batch/version :seon.batch/text-version]
+              [:seon.batch/repairs :seon.batch/repairs]]
+             [:map [:seon.batch/unread-from :seon.batch/unread-from] [:seon.batch/reason :seon.batch/reason]
+              [:seon.batch/version :seon.batch/text-version] [:seon.batch/repairs :seon.batch/repairs]]]
+ :op [:enum :bind :unmap :remove-ns :namespace :expansion]
+ :sym :qualified-symbol
+ :ns :symbol
+ :kind [:enum :root :extend]
+ :def-origin [:or
+              [:map [:line pos-int?] [:column pos-int?]
+               [:end-line {:optional true} pos-int?] [:end-column {:optional true} pos-int?]
+               [:expanded-by {:optional true} :symbol]]]
+ :origin :seon.batch/def-origin
+ :member-of :symbol
+ :arm-error :string
+ :var [:any {:description "The live SCI Var written; held only during the call."}]
+ :write [:multi {:dispatch :seon.batch/op}
+         [:bind [:map [:seon.batch/op [:= :bind]] [:seon.batch/sym {:optional true} :seon.batch/sym]
+                 [:seon.batch/kind :seon.batch/kind] [:seon.batch/var :seon.batch/var]
+                 [:seon.batch/origin {:optional true} :seon.batch/origin]
+                 [:seon.batch/member-of {:optional true} :seon.batch/member-of]
+                 [:seon.batch/arm-error {:optional true} :seon.batch/arm-error]
+                 [:seon.batch/fn? {:optional true} :boolean]
+                 [:seon.batch/ordinal {:optional true} :seon.cluster.eval/ordinal]]]
+         [:unmap [:map [:seon.batch/op [:= :unmap]] [:seon.batch/sym :seon.batch/sym]
+                  [:seon.batch/ordinal {:optional true} :seon.cluster.eval/ordinal]]]
+         [:remove-ns [:map [:seon.batch/op [:= :remove-ns]] [:seon.batch/ns :seon.batch/ns]
+                      [:seon.batch/ordinal {:optional true} :seon.cluster.eval/ordinal]]]
+         [:expansion [:map {:description "One macro call SCI expanded during the evaluation: the call occurrence's authored span, its macro and the expansion, which the per-form analyzer's hook substitutes at exactly that occurrence."}
+                      [:seon.batch/op [:= :expansion]] [:seon.batch/macro :symbol]
+                      [:seon.batch/call-span [:tuple pos-int? pos-int? pos-int? pos-int?]]
+                      [:seon.batch/expansion :seon.batch/form]
+                      [:seon.batch/ordinal {:optional true} :seon.cluster.eval/ordinal]]]
+         [:namespace [:map [:seon.batch/op [:= :namespace]] [:seon.batch/ns :seon.batch/ns]
+                      [:seon.batch/ordinal {:optional true} :seon.cluster.eval/ordinal]]]]
+ :join-kind [:enum :matched :member :rebound :unanalyzed]
+ :join-reason [:enum :no-definition-at-origin :ambiguous :captures-locals :no-source]
+ :join [:map [:seon.batch/join :seon.batch/join-kind]
+        [:seon.batch/sym {:optional true} :seon.batch/sym]
+        [:seon.batch/reason {:optional true} :seon.batch/join-reason]
+        [:seon.batch/member-of {:optional true} :seon.batch/member-of]
+        [:seon.batch/captured {:optional true} [:set :symbol]]
+        [:seon.batch/other-namespace {:optional true} :boolean]
+        [:seon.batch/definition {:optional true} :map]]
+ :note [:or
+        [:map [:seon.schema/key :qualified-keyword] [:seon.schema/installed? [:= false]] [:seon.error/message :string]]
+        [:map [:seon.batch/sym :seon.batch/sym] [:seon.batch/arm-error :seon.batch/arm-error]]]
+ :change [:map
+          [:seon.batch/entities [:vector :seon.program/row]]
+          [:seon.batch/removals [:vector :symbol]]
+          [:seon.batch/schema-keys [:set :qualified-keyword]]
+          [:seon.batch/namespaces [:set :symbol]]
+          [:seon.batch/private {:optional true} [:vector :seon.batch/join]]
+          [:seon.batch/uncontracted {:optional true} [:vector :qualified-symbol]]
+          [:seon.batch/deferred {:optional true} [:vector :qualified-symbol]]
+          [:seon.batch/notes {:optional true} [:vector :seon.batch/note]]]
+ :stage :keyword
+ :diagnostic [:map [:seon.error/message :string] [:seon.batch/stage :seon.batch/stage]
+              [:seon.batch/ordinal {:optional true} :seon.cluster.eval/ordinal]
+              [:seon.error/throwable-class {:optional true} :string]
+              [:seon.error/data {:optional true} :map]]
+ :value [:any {:description "The form's live value, kept whole; never stored."}]
+ :error [:any {:description "The form's thrown failure, kept whole; its error value rides :seon.batch/error-value."}]
+ :facts-error [:map {:description "The writer's or the install gate's refusal of this form's facts: its logged return value. The facts were not proposed."}
+               [:seon.error/message :string]]
+ :entry [:map {:description "One top-level form: its value or error, published the moment evaluation returned, then where it came from and what its facts became."}
+         [:seon.batch/ordinal :seon.cluster.eval/ordinal]
+         [:seon.batch/value {:optional true} :seon.batch/value]
+         [:seon.batch/error {:optional true} :seon.batch/error]
+         [:seon.batch/duration-ms {:description "Evaluation alone, to the value's return."} number?]
+         [:seon.batch/allocated-bytes {:optional true :description "Bytes the evaluating thread allocated during the evaluation (HotSpot ThreadMXBean)."} :int]
+         [:seon.batch/total-ms {:optional true :description "Evaluation, observation and the one print."} number?]
+         [:seon.batch/source {:optional true} :string]
+         [:seon.batch/line {:optional true} pos-int?]
+         [:seon.batch/column {:optional true} pos-int?]
+         [:seon.batch/ns-before {:optional true} :symbol]
+         [:seon.batch/ns-after {:optional true} :symbol]
+         [:seon.batch/change {:optional true} :seon.batch/change]
+         [:seon.batch/facts-error {:optional true} :seon.batch/facts-error]
+         [:seon.batch/private {:optional true} [:vector :seon.batch/join]]
+         [:seon.batch/uncontracted {:optional true} [:vector :qualified-symbol]]
+         [:seon.batch/notes {:optional true} [:vector :seon.batch/note]]
+         [:seon.batch/shown {:optional true} :string]]
+ :applied :boolean
+ :tx-count nat-int?
+ :sink [:fn {:description "A per-world call sink: java.util.concurrent.ConcurrentHashMap of symbol -> LongAdder (seon.batch/sink)." :gen/gen seon.turn.world/sink-generator} seon.batch/sink?]
+ :printed [:map {:description "The show stage's answer: the one print, and the printer's own diagnostics (a renderer that refused) as text."}
+           [:seon.batch/shown :string] [:seon.batch/print-diagnostics {:optional true} :string]]
+ :storage-error :string
+ :writer-refusal [:map {:description "The settlement writer's refusal of the recording: kept beside the values as data, and delivered as a diagnostic through the fault stage."}
+                  [:seon.error/message :string]]
+ :rebased [:map {:description "What a settlement that re-derived on a moved head committed: its entries, program, working value and the feedback concluded from it."}]
+ :commit [:or
+          [:map [:seon.batch/applied :seon.batch/applied] [:seon.batch/tx-count :seon.batch/tx-count]
+           [:seon.batch/after {:optional true} :seon.db/database-value]
+           [:seon.batch/first-refusal {:optional true} :map]
+           [:seon.batch/rebased {:optional true} :seon.batch/rebased]]
+          [:map [:seon.batch/writer-refusal :seon.batch/writer-refusal] [:seon.batch/first-refusal {:optional true} :map]]
+          [:map [:seon.batch/storage-error :seon.batch/storage-error]]]
+ :feedback [:map {:description "Feedback queried from the batch's validated working value, scoped by the definitions it changed (the feedback-from-facts interface: :seon.eval/feedback)."}
+            [:seon.feedback/changed [:vector :qualified-symbol]]
+            [:seon.feedback/removed {:optional true} [:vector :symbol]]
+            [:seon.feedback/missing-contracts {:optional true} [:vector :qualified-symbol]]
+            [:seon.feedback/contract-findings {:optional true} [:vector [:map [:seon.gate/contract :qualified-symbol]]]]
+            [:seon.feedback/tests {:optional true :description "Each test reaching a changed definition: never run, stale (its closure changed) or unknown."}
+             [:map-of :qualified-symbol [:enum :stale :never-run :unknown]]]
+            [:seon.feedback/counts {:optional true} [:map-of :keyword nat-int?]]]
+ :batch [:map {:description "What the one function answers. Absent keys are stages not run."}
+         [:seon.batch/entries [:vector :seon.batch/entry]]
+         [:seon.batch/writes [:vector :seon.batch/write]]
+         [:seon.batch/diagnostics [:vector :seon.batch/diagnostic]]
+         [:seon.batch/text {:optional true} :seon.batch/text]
+         [:seon.batch/repairs {:optional true} :seon.batch/repairs]
+         [:seon.batch/unread {:optional true} [:map [:seon.batch/unread-from :seon.batch/unread-from]
+                                               [:seon.batch/reason :seon.batch/reason]]]
+         [:seon.batch/program {:optional true} :map]
+         [:seon.batch/commit {:optional true} :seon.batch/commit]
+         [:seon.eval/contract-note {:optional true} :string]
+         [:seon.eval/contract-warning {:optional true} [:vector :qualified-symbol]]
+         [:seon.eval/feedback {:optional true} :seon.batch/feedback]
+         [:seon.batch/faults {:optional true} [:vector :any]]
+         [:seon.batch/timings {:optional true} [:map-of :keyword number?]]
+         [:seon.batch/total-ms {:optional true} number?]]
+ :request [:map {:description "One batch request: text, basis, and every stage as a value. An entrant is a choice of stage values."}
+           [:seon.batch/text :seon.batch/text]
+           [:seon.batch/world :seon.batch/world]
+           [:seon.batch/start-ns {:optional true} :seon.batch/start-ns]
+           [:seon.batch/mode {:optional true} :seon.batch/mode]
+           [:seon.batch/read-state [:=> [:cat :string] :seon.batch/read-state]]
+           [:seon.batch/read-next [:=> [:cat :map :seon.batch/read-state] :seon.batch/read-step]]
+           [:seon.batch/evaluate [:=> [:cat :map :any :seon.db/database-value] :any]]
+           [:seon.batch/ns-name [:=> [:cat :map] :symbol]]
+           [:seon.batch/around {:optional true} [:=> [:cat :map [:=> [:cat] :any]] :any]]
+           [:seon.batch/observe {:optional true}
+            [:=> [:cat :map :seon.db/database-value [:=> [:cat :seon.batch/write] :any] [:=> [:cat] :any]] :any]]
+           [:seon.batch/derive {:optional true}
+            [:=> [:cat :map :map :seon.db/database-value :seon.batch/entry [:vector :seon.batch/write]]
+             [:map [:seon.batch/change :seon.batch/change] [:seon.batch/derive-state :map]]]]
+           [:seon.batch/facts {:optional true} [:=> [:cat :map :seon.db/database-value :seon.batch/change] :seon.store/transaction-data]]
+           [:seon.batch/apply {:optional true}
+            [:=> [:cat :map :seon.db/database-value :seon.store/transaction-data :seon.batch/change]
+             [:or [:map [:seon.batch/working :seon.db/database-value]] [:map [:seon.batch/refusal :map]]]]]
+           [:seon.batch/fold {:optional true} [:=> [:cat :map :map :seon.batch/change] :map]]
+           [:seon.batch/conclude {:optional true} [:=> [:cat :map :seon.batch/batch] :map]]
+           [:seon.batch/settle {:optional true} [:=> [:cat :map :seon.batch/batch] :seon.batch/commit]]
+           [:seon.batch/show {:optional true} [:=> [:cat :map :seon.batch/entry] [:or :string :seon.batch/printed]]]
+           [:seon.batch/fault {:optional true} [:=> [:cat :map :seon.batch/diagnostic] :any]]
+           ]
+ :reply [:map {:description "The one reply: a Seon agent's next context and the MCP tool's JSON carry the same data."}
+         [:seon.batch/evaluations [:vector [:map [:seon.batch/ordinal :seon.cluster.eval/ordinal] [:seon.batch/shown :string]
+                                             [:seon.batch/duration-ms {:optional true} number?]
+                                             [:seon.batch/error? {:optional true} :boolean]
+                                             [:seon.batch/facts-error {:optional true} :string]
+                                             [:seon.batch/notes {:optional true} [:vector :seon.batch/note]]
+                                             [:seon.batch/private {:optional true} [:vector :map]]]]]
+         [:seon.batch/diagnostics [:vector :string]]
+         [:seon.batch/repairs {:optional true} :seon.batch/repairs]
+         [:seon.batch/unread {:optional true} :map]
+         [:seon.eval/feedback {:optional true} :seon.batch/feedback]
+         [:seon.eval/contract-note {:optional true} :string]
+         [:seon.eval/contract-warning {:optional true} [:vector :qualified-symbol]]
+         [:seon.batch/faults {:optional true} [:vector :any]]
+         [:seon.batch/commit {:optional true} :map]]}

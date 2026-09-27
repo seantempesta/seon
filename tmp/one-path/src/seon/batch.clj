@@ -135,10 +135,9 @@
                        (and (nat-int? start) (nat-int? end) (<= start end (count text))))]
     (cond-> (-> batch
                 (assoc :seon.batch/step r)
-                (update :seon.batch/read-state assoc
-                        :seon.batch/version (:seon.batch/version r)
-                        :seon.batch/repairs (:seon.batch/repairs r)
-                        :seon.batch/last-code-end end)
+                (update :seon.batch/read-state #(cond-> (assoc % :seon.batch/version (:seon.batch/version r)
+                                                               :seon.batch/repairs (:seon.batch/repairs r))
+                                                   end (assoc :seon.batch/last-code-end end)))
                 (clock :read t0))
       (not in-bounds?)
       (-> (update :seon.batch/diagnostics conj

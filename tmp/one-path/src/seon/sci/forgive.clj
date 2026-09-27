@@ -260,7 +260,7 @@
   {:malli/schema [:=> [:cat :string] :seon.batch/read-state]}
   [text]
   {:seon.batch/version (version text 0) :seon.batch/structured? (structure? text)
-   :seon.batch/repairs [] :seon.batch/last-code-end nil})
+   :seon.batch/repairs []})
 
 (defn forms
   "Every form of `text` through `next-form`, read only.

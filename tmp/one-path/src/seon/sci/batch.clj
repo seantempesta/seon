@@ -71,3 +71,19 @@
   [{start-ns :seon.batch/start-ns} body]
   (sci/with-bindings {sci/ns (sci/create-ns start-ns)}
     (body)))
+
+(defn acquire-request
+  "Acquisition of stored definitions: their source read as code and evaluated
+  in the request's world, with no observation, derivation, recording or
+  print (the facts already exist)."
+  {:malli/schema [:=> [:cat :map] :seon.batch/request]}
+  [{{db :seon.db/db} :seon.batch/world :as request}]
+  (merge {:seon.batch/read-state forgive/read-state
+          :seon.batch/read-next read-code
+          :seon.batch/evaluate evaluate
+          :seon.batch/ns-name current-ns
+          :seon.batch/around around
+          :seon.batch/start-ns 'user
+          :seon.batch/mode :code
+          :seon.sci.batch/delta (schema/begin-registration-delta (db/carried-projection db))}
+         request))

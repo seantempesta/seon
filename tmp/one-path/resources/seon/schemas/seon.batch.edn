@@ -20,7 +20,7 @@
         [:seon.gate/sym :qualified-symbol]
         [:seon.gate/blocks? :boolean]
         [:seon.gate/tests nat-int?]
-        [:seon.gate/own-failures {:optional true} [:vector [:map [:seon.gate/arguments :any] [:seon.gate/error [:maybe :string]]]]]
+        [:seon.gate/own-failures {:optional true} [:vector [:map [:seon.gate/arguments :any] [:seon.gate/error {:optional true} :string]]]]
         [:seon.gate/contract-findings {:optional true} [:vector [:map [:seon.gate/contract :qualified-symbol] [:seon.gate/arguments :any]]]]
         [:seon.gate/newly-red {:optional true} [:vector [:map [:seon.test/sym :qualified-symbol]]]]
         [:seon.gate/still-red {:optional true} [:vector [:map [:seon.test/sym :qualified-symbol]]]]]
@@ -44,7 +44,7 @@
           [:seon.batch/at {:optional true} :seon.batch/at]]
  :repairs [:vector :seon.batch/repair]
  :structured? :boolean
- :last-code-end [:maybe nat-int?]
+ :last-code-end nat-int?
  :read-state [:map
               [:seon.batch/version :seon.batch/text-version]
               [:seon.batch/repairs :seon.batch/repairs]
@@ -80,7 +80,7 @@
  :arm-error :string
  :var [:any {:description "The live SCI Var written; held only during the call."}]
  :write [:multi {:dispatch :seon.batch/op}
-         [:bind [:map [:seon.batch/op [:= :bind]] [:seon.batch/sym [:maybe :seon.batch/sym]]
+         [:bind [:map [:seon.batch/op [:= :bind]] [:seon.batch/sym {:optional true} :seon.batch/sym]
                  [:seon.batch/kind :seon.batch/kind] [:seon.batch/var :seon.batch/var]
                  [:seon.batch/origin {:optional true} :seon.batch/origin]
                  [:seon.batch/member-of {:optional true} :seon.batch/member-of]
@@ -148,7 +148,7 @@
          [:seon.batch/shown {:optional true} :string]]
  :applied :boolean
  :tx-count nat-int?
- :sink [:fn {:description "A per-world call sink: java.util.concurrent.ConcurrentHashMap of symbol -> LongAdder (seon.batch/sink)."} seon.batch/sink?]
+ :sink [:fn {:description "A per-world call sink: java.util.concurrent.ConcurrentHashMap of symbol -> LongAdder (seon.batch/sink)." :gen/gen seon.turn.world/sink-generator} seon.batch/sink?]
  :printed [:map {:description "The show stage's answer: the one print, and the printer's own diagnostics (a renderer that refused) as text."}
            [:seon.batch/shown :string] [:seon.batch/print-diagnostics {:optional true} :string]]
  :storage-error :string
@@ -213,7 +213,7 @@
            ]
  :reply [:map {:description "The one reply: a Seon agent's next context and the MCP tool's JSON carry the same data."}
          [:seon.batch/evaluations [:vector [:map [:seon.batch/ordinal :seon.cluster.eval/ordinal] [:seon.batch/shown :string]
-                                             [:seon.batch/duration-ms {:optional true} [:maybe number?]]
+                                             [:seon.batch/duration-ms {:optional true} number?]
                                              [:seon.batch/error? {:optional true} :boolean]
                                              [:seon.batch/facts-error {:optional true} :string]
                                              [:seon.batch/notes {:optional true} [:vector :seon.batch/note]]

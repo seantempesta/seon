@@ -29,7 +29,8 @@
             [seon.sci.forgive :as forgive]
             [seon.fn :as sfn]
             [seon.sci.pinned :as pinned]
-            [seon.turn.batch :as turn.batch]))
+            [seon.turn.batch :as turn.batch]
+            [seon.turn.world :as world]))
 
 (def dir "/Users/sean/src/seon/tmp/one-path/")
 
@@ -63,13 +64,13 @@
   (:seon.db.process/id (:seon.turn.loop/cluster (get @@(requiring-resolve 'seon.operator.runtime/running-instances) "default"))))
 
 (defn world
-  "A fresh agent world (`seon.turn.batch/agent-world`) on the suite's
+  "A fresh agent world (`seon.world/agent-world`) on the suite's
   disposable branch, reading that branch's head now. Writes land there
   through `seon.db/transact!`."
   ([] (world {}))
   ([opts]
    (without-native-guard
-    (turn.batch/agent-world *exec* (merge {:seon.agent/id "root"
+    (world/agent-world *exec* (merge {:seon.agent/id "root"
                                            :seon.turn/id (str "op3-" (subs (str (random-uuid)) 0 8))
                                            :seon.db.process/id (live-process)}
                                           opts)))))
@@ -240,10 +241,10 @@
         b (run (world) "(def base-v 41)\n(def dep-v {:k base-v})\n(defonce once-v (inc base-v))")
         a (after b)
         rs (for [s '[user/base-v user/dep-v user/once-v]] (db/pull a '[:seon.fn/sym :seon.fn/source :seon.fn/calls] [:seon.fn/sym s]))
-        acq (batch/evaluate-batch (turn.batch/acquire-request
+        acq (batch/evaluate-batch (sci.batch/acquire-request
                                    {:seon.batch/text (str/join "\n" (map :seon.fn/source rs))
                                     :seon.batch/world fresh}))
-        got (values (batch/evaluate-batch (turn.batch/acquire-request
+        got (values (batch/evaluate-batch (sci.batch/acquire-request
                                            {:seon.batch/text "[once-v dep-v]" :seon.batch/world fresh})))]
     {:pass? (and (applied? b) (every? :seon.fn/source rs)
                  (contains? (set (:seon.fn/calls (second rs))) 'user/base-v)
@@ -295,19 +296,19 @@
         texec (acquire!)
         results
         (try
-          (let [test-agent (without-native-guard (turn.batch/test-agent-world texec requester {:seon.agent/id "root"}))
+          (let [test-agent (without-native-guard (world/test-agent-world texec requester {:seon.agent/id "root"}))
                 worlds {:agent-turn agent :mcp-sci mcp
-                        :mcp-jvm (turn.batch/jvm-world "default" conn {:seon.agent/id "root"})
+                        :mcp-jvm (world/jvm-world "default" conn {:seon.agent/id "root"})
                         :test-agent test-agent
-                        :render (turn.batch/read-only-world agent (wdb agent))
-                        :gate (turn.batch/read-only-world agent (wdb agent))
+                        :render (world/read-only-world agent (wdb agent))
+                        :gate (world/read-only-world agent (wdb agent))
                         :register (world {:seon.agent/id "root"})
-                        :merge (without-native-guard (turn.batch/merge-world *exec* {}))}
+                        :merge (without-native-guard (world/merge-world *exec* {}))}
                 members (update-vals worlds world-members)
                 ;; a write through each writable world: a fresh namespace entity, found only where it should land
                 wrote (into {} (for [[k w] worlds
                                      :let [n (symbol (str "op3.world." (name k) "." (subs (str (random-uuid)) 0 6)))
-                                           target (turn.batch/settlement-connection w)]]
+                                           target (world/settlement-connection w)]]
                                  [k (if-let [writer (:seon.db/writer w)]
                                       (let [r (writer target [{:seon.ns/name n}])]
                                         {:landed (boolean (db/pull (db/db target) [:db/id] [:seon.ns/name n]))
@@ -332,8 +333,8 @@
   "Two agent worlds on two branches (two executions) and two concurrent test agents: databases, writes and SCI state stay separate"
   (let [ea (acquire!) eb (acquire!)]
     (try
-      (let [wa (without-native-guard (turn.batch/agent-world ea {:seon.agent/id "root"}))
-            wb (without-native-guard (turn.batch/agent-world eb {:seon.agent/id "root"}))
+      (let [wa (without-native-guard (world/agent-world ea {:seon.agent/id "root"}))
+            wb (without-native-guard (world/agent-world eb {:seon.agent/id "root"}))
             ba (future (batch/evaluate-batch (turn.batch/code-request (request wa "(def op3-cross :a)\nop3-cross" {}))))
             bb (future (batch/evaluate-batch (turn.batch/code-request (request wb "(def op3-cross :b)\nop3-cross" {}))))
             [ra rb] [@ba @bb]
@@ -346,20 +347,20 @@
       (finally (release! ea) (release! eb)))))
 
 (defproof :world-survives-compute-hop :world
-  "A form evaluated on another thread (a compute-pool hop) loses the submitting thread's bindings; carrying the world as a value and re-establishing them from it (seon.turn.batch/with-world) gives the same custody, read basis and context"
+  "A form evaluated on another thread (a compute-pool hop) loses the submitting thread's bindings; carrying the world as a value and re-establishing them from it (seon.world/with-world) gives the same custody, read basis and context"
   (let [w (world)
         pool (java.util.concurrent.Executors/newFixedThreadPool 1)]
     (try
       (let [probe #(db/pull [:seon.agent/id] [:seon.agent/id "root"])
             ;; on the submitting thread, under the world
-            here (turn.batch/with-world w probe)
+            here (world/with-world w probe)
             bare (.get (.submit pool ^Callable (fn [] (try (probe) (catch Throwable t [:refused (ex-message t)])))))
-            carried (.get (.submit pool ^Callable (fn [] (turn.batch/with-world w probe))))
+            carried (.get (.submit pool ^Callable (fn [] (world/with-world w probe))))
             ;; a whole batch whose evaluate stage hops to the pool, carrying the world
             hop-req (assoc (turn.batch/code-request (request w "(defn hopf [x] x)\n(:seon.fn/sym (seon.db/pull [:seon.fn/sym] [:seon.fn/sym 'user/hopf]))" {}))
                            :seon.batch/evaluate (fn [req form working]
                                                   (.get (.submit pool ^Callable
-                                                                 (fn [] (turn.batch/with-world (:seon.batch/world req)
+                                                                 (fn [] (world/with-world (:seon.batch/world req)
                                                                           #(seon.sci.batch/evaluate req form working)))))))
             b (batch/evaluate-batch hop-req)]
         {:pass? (and (= "root" (:seon.agent/id here)) (= here carried)
@@ -765,11 +766,11 @@
         ea (acquire!) eb (acquire!)]
     (try
       (let [requester (:seon.db/connection *exec*)
-            wa (turn.batch/test-agent-world ea requester {:seon.agent/id "root"})
-            wb (turn.batch/test-agent-world eb requester {:seon.agent/id "root"})
+            wa (world/test-agent-world ea requester {:seon.agent/id "root"})
+            wb (world/test-agent-world eb requester {:seon.agent/id "root"})
             jvm-wide (java.util.concurrent.atomic.LongAdder.)
             f (fn [] (.increment jvm-wide) (count! 'user/counted))
-            go (fn [w n] (future (turn.batch/with-world w #(dotimes [_ n] (f)))))
+            go (fn [w n] (future (world/with-world w #(dotimes [_ n] (f)))))
             [a b] [(go wa 1000) (go wb 1500)]]
         @a @b
         (let [ca (batch/calls (:seon.batch/sink wa)) cb (batch/calls (:seon.batch/sink wb))]
@@ -777,10 +778,58 @@
            :a ca :b cb :jvm-wide (.sum jvm-wide)}))
       (finally (release! ea) (release! eb)))))
 
+(defproof :s3-schema-rehearsal :landing
+  "S3 rehearsal: every :seon.batch/* declaration the landing publishes registers through the one path on a disposable branch of the live store, applied and stored, with no refusal"
+  (on-fresh-branch
+   (fn []
+     (let [forms (edn/read-string (slurp (str dir "resources/seon/schemas/seon.batch.edn")))
+           refs (fn [f] (into #{} (filter #(and (keyword? %) (contains? forms %))) (tree-seq coll? seq f)))
+           ;; declarations before their users, as one resource publishes them together
+           ordered (loop [done [] seen #{} left (set (keys forms))]
+                     (if (empty? left) done
+                         (let [ready (sort (filter #(every? (fn [r] (or (= r %) (seen r))) (refs (forms %))) left))
+                               ready (if (seq ready) ready [(first (sort left))])]
+                           (recur (into done ready) (into seen ready) (reduce disj left ready)))))
+           text (str/join "\n" (for [k ordered] (str "(seon.schema/register! " (pr-str k) " '" (pr-str (forms k)) ")")))
+           t0 (System/nanoTime)
+           b (run (world) text)
+           a (after b)
+           errors (vec (keep (fn [e] (when (contains? e :seon.batch/error) (ex-message (:seon.batch/error e)))) (:seon.batch/entries b)))
+           stored (count (db/q '[:find [?k ...] :where [_ :seon.schema/key ?k] [(namespace ?k) ?n] [(= ?n "seon.batch")]] a))]
+       ;; register! (the REPL's path) admits a [:fn] predicate only once the
+       ;; predicate is a proven program entity: seon.batch/sink? becomes one when
+       ;; its file publishes, so the sink and the world that names it are the
+       ;; publication's (`s3-population-admits`), not the REPL's
+       {:pass? (let [reaches-sink? (fn reaches? [k seen] (or (= k :seon.batch/sink)
+                                                              (some #(and (not (seen %)) (reaches? % (conj seen %))) (refs (forms k)))))
+                     sink-bound (set (filter #(reaches-sink? % #{%}) (keys forms)))]
+                 (and (applied? b) (empty? (facts-errors b))
+                      (every? (fn [e] (some #(str/includes? e (str %)) sink-bound)) errors)
+                      (= (- (count forms) (count sink-bound)) stored)))
+        :keys (count forms) :stored stored :ms (ms-since t0) :errors (vec (take 3 errors)) :facts-errors (vec (take 3 (facts-errors b)))
+        :notes (vec (take 3 (mapcat :seon.batch/notes (:seon.batch/entries b))))}))))
+
+(defproof :s3-population-admits :landing
+  "S3 rehearsal of publication: the packaged population of git archive HEAD with seon.batch.edn added passes schema admission (seon.schema.edn/admit) exactly as far as HEAD's own population does in this JVM: the new file adds no refusal"
+  (let [root (gate-root!)]
+    (try
+      (let [files (->> (.listFiles (io/file root "resources/seon/schemas"))
+                       (filter #(.endsWith (.getName ^java.io.File %) ".edn")) (sort-by #(.getName ^java.io.File %)))
+            all (apply merge (map #(edn/read-string (slurp %)) files))
+            mine (set (keys (edn/read-string (slurp (str dir "resources/seon/schemas/seon.batch.edn")))))
+            admit (fn [forms] (try {:admitted (count (seon.schema.edn/admit {:seon.schema/forms (seon.schema.edn/derive-config-forms forms)}))}
+                                   (catch Throwable t {:refused (ex-message t)})))
+            head (admit (apply dissoc all mine))
+            with (admit all)]
+        {:pass? (and (= head with) (not (some #(str/includes? (str (:refused with)) (str %)) mine)))
+         :head head :with-batch with :keys (count mine)})
+      (finally (sh/sh "rm" "-rf" root)))))
+
 (def landing-files
   "The six namespaces and the schema resource step S3 copies into the tree."
   ["src/seon/batch.clj" "src/seon/sci/forgive.clj" "src/seon/sci/batch.clj" "src/seon/sci/arm.clj"
-   "src/seon/sci/observe.clj" "src/seon/turn/batch.clj" "resources/seon/schemas/seon.batch.edn"])
+   "src/seon/sci/observe.clj" "src/seon/turn/world.clj" "src/seon/turn/gate.clj" "src/seon/turn/batch.clj"
+   "resources/seon/schemas/seon.batch.edn"])
 
 (defn gate-root!
   "A disposable root: `git archive HEAD` with the landing files copied in."
@@ -939,9 +988,9 @@
         b (run (world) "(defrecord OpR [a])\n(:a (->OpR 1))")
         a (after b)
         srcs (distinct (keep #(:seon.fn/source (db/pull a [:seon.fn/source] [:seon.fn/sym %])) '[user/->OpR user/map->OpR]))
-        acq (batch/evaluate-batch (turn.batch/acquire-request
+        acq (batch/evaluate-batch (sci.batch/acquire-request
                                    {:seon.batch/text (str/join "\n" srcs) :seon.batch/world fresh}))
-        got (values (batch/evaluate-batch (turn.batch/acquire-request
+        got (values (batch/evaluate-batch (sci.batch/acquire-request
                                            {:seon.batch/text "(:a (->OpR 7))" :seon.batch/world fresh})))]
     {:pass? (and (= 1 (last (values b))) (= 1 (count srcs)) (= [7] got) (empty? (diags acq)))
      :sources srcs :acquired got}))
@@ -951,7 +1000,7 @@
   (let [w (world)
         _ (sci/eval-string* (wctx w) "(def shared (atom 0))")
         b (batch/evaluate-batch (turn.batch/render-request
-                                 (request (turn.batch/read-only-world w (wdb w))
+                                 (request (world/read-only-world w (wdb w))
                                           "(def leaked 1)\n(seon.db/transact! [{:db/id \"x\" :seon.ns/name 'render.leak}])\n(swap! shared inc)" {})))]
     {:pass? (and (nil? (sci/resolve (wctx w) 'user/leaked))
                  (= 'seon.db/missing-connection-error (:seon.error/operation (second (values b))))
@@ -962,7 +1011,7 @@
   "V2-8: a form that renders (a nested read-only batch) contributes to its run's one transaction: one commit for the batch"
   (let [w (world)
         commits (atom 0)
-        render! (fn [text] (shown (batch/evaluate-batch (turn.batch/render-request (request (turn.batch/read-only-world w (wdb w)) text {})))))
+        render! (fn [text] (shown (batch/evaluate-batch (turn.batch/render-request (request (world/read-only-world w (wdb w)) text {})))))
         _ (sci/intern (wctx w) (sci/find-ns (wctx w) 'user) 'render! render!)
         b (run w "(defn nr [x] x)\n(render! \"(+ 1 2)\")" {:writer (fn [conn tx] (swap! commits inc) (db/transact! conn tx))})]
     {:pass? (and (= ["3"] (second (values b))) (= 1 @commits) (applied? b)) :commits @commits :values (mapv str (values b))}))
@@ -971,7 +1020,7 @@
   "V2-8 (MCP JVM entrant): host reader and eval, several forms with an alias, an error kept beside later values, the run recorded in one transaction"
   (let [conn (:seon.db/connection *exec*)
         commits (atom 0)
-        w (turn.batch/jvm-world "default" conn {:seon.agent/id "root"
+        w (world/jvm-world "default" conn {:seon.agent/id "root"
                                                :seon.db/writer (fn [c tx] (swap! commits inc) (db/transact! c tx))})
         b (batch/evaluate-batch
            (turn.batch/jvm-request (request w "(ns op3.jvm (:require [clojure.string :as s]))\n(s/upper-case \"a\")\n(/ 1 0)\n(+ 1 2)" {})))
@@ -990,7 +1039,7 @@
     (try
       (binding [*exec* exec]
         (let [w (without-native-guard
-                 (turn.batch/test-agent-world exec requester {:seon.agent/id "root" :seon.sci.eval/time-limit-ms 5000}))
+                 (world/test-agent-world exec requester {:seon.agent/id "root" :seon.sci.eval/time-limit-ms 5000}))
               req (request w body {})
               b (batch/evaluate-batch (turn.batch/code-request req))
               recorded (count (d/q '[:find [?e ...] :in $ ?id :where [?r :seon.turn/id ?id] [?e :seon.cluster.eval/run ?r]]
@@ -1347,10 +1396,10 @@
         a (after (run w text))
         srcs (vec (for [i (range 100)] (:seon.fn/source (db/pull a [:seon.fn/source] [:seon.fn/sym (symbol "user" (str "acq" i))]))))
         t0 (System/nanoTime)
-        b (batch/evaluate-batch (turn.batch/acquire-request {:seon.batch/text (str/join "\n" srcs)
+        b (batch/evaluate-batch (sci.batch/acquire-request {:seon.batch/text (str/join "\n" srcs)
                                                              :seon.batch/world fresh}))
         ms (ms-since t0)
-        got (values (batch/evaluate-batch (turn.batch/acquire-request {:seon.batch/text "(acq99 1)" :seon.batch/world fresh})))]
+        got (values (batch/evaluate-batch (sci.batch/acquire-request {:seon.batch/text "(acq99 1)" :seon.batch/world fresh})))]
     {:pass? (and (every? some? srcs) (= 100 (count (:seon.batch/entries b))) (= [100] got))
      :entities 100 :ms ms :us-per-entity (Math/round (/ (* 1000.0 ms) 100))}))))
 

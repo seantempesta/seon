@@ -18,7 +18,7 @@
   show     each entry's shown text through the one printer
 
   Entrants (`turn-request`, `code-request`, `jvm-request`, `test-request`,
-  `render-request`, `acquire-request`) are `seon.batch/evaluate-batch`
+  `render-request`) and `seon.sci.batch/acquire-request` are `seon.batch/evaluate-batch`
   requests that differ only in these values."
   (:require [clj-kondo.core :as kondo]
             [sci.impl.vars]
@@ -26,9 +26,7 @@
             [my.program :as my.program]
             [sci.core :as sci]
             [seon.db :as db]
-            [seon.fault :as fault]
             [seon.fn :as sfn]
-            [seon.config :as config]
             [seon.batch]
             [seon.fn.analyzer :as analyzer]
             [seon.program :as program]
@@ -38,93 +36,11 @@
             [seon.sci.batch :as sci.batch]
             [seon.sci.eval :as eval]
             [seon.sci.forgive :as forgive]
+            [seon.turn.gate :as gate]
+            [seon.turn.world :as world]
             [seon.sci.kernel :as kernel]
-            [seon.test.accretion :as accretion]
-            [seon.id :as id])
+            [seon.test.accretion :as accretion])
   (:import (java.nio.charset StandardCharsets)))
-
-;;; ---------------------------------------------------------------------------
-;;; The world: one value every entrant hands the path, every stage reads
-;;; ---------------------------------------------------------------------------
-
-(defn agent-world
-  "A Seon agent's world from its acquired execution (`agent/acquire-context!`):
-  its cluster and branch, its connection, the value read at the batch's
-  start, the writer, its SCI context forked onto that connection, its id and
-  task, render profile and settlement inputs. An MCP SCI run's world is this
-  one (MCP only supplies the agent id and transport)."
-  {:malli/schema [:=> [:cat :map :map] :seon.batch/world]}
-  [{conn :seon.db/connection base :seon.sci.eval/base-ctx cluster :seon.cluster/name branch :seon.agent/branch
-    environment :seon.env/environment}
-   {agent-id :seon.agent/id turn-id :seon.turn/id task :seon.task/id profile :seon.render/profile
-    limit :seon.sci.eval/time-limit-ms writer :seon.db/writer process :seon.db.process/id}]
-  (let [db (db/db conn)]
-    (cond-> {:seon.boot/cluster-name cluster
-             :seon.db/connection conn
-             :seon.db/db db
-             :seon.db/writer (or writer db/transact!)
-             :seon.sci.eval/ctx (eval/fork-cluster-ctx base db conn)
-             :seon.sci.eval/base-ctx base
-             :seon.agent/id agent-id
-             :seon.batch/sink (seon.batch/sink)
-             :seon.sci.eval/time-limit-ms (or limit 30000)}
-      turn-id (assoc :seon.turn/id turn-id)
-      environment (assoc :seon.env/environment environment)
-      process (assoc :seon.db.process/id process)
-      branch (assoc :seon.agent/branch branch)
-      task (assoc :seon.task/id task)
-      profile (assoc :seon.render/profile profile))))
-
-(defn test-agent-world
-  "A test agent's world: its own execution's branch, connection and context,
-  its run recorded on the requesting agent's branch (`requester`)."
-  {:malli/schema [:=> [:cat :map :seon.db/connection :map] :seon.batch/world]}
-  [execution requester opts]
-  (assoc (agent-world execution opts) :seon.batch/settlement {:seon.db/connection requester}))
-
-(defn jvm-world
-  "An MCP JVM evaluation's world: the cluster's connection and value and the
-  writer; no SCI context (the host evaluates)."
-  {:malli/schema [:=> [:cat :seon.boot/cluster-name :seon.db/connection :map] :seon.batch/world]}
-  [cluster conn {agent-id :seon.agent/id turn-id :seon.turn/id writer :seon.db/writer
-                 environment :seon.env/environment process :seon.db.process/id profile :seon.render/profile}]
-  (cond-> {:seon.boot/cluster-name cluster :seon.db/connection conn :seon.db/db (db/db conn)
-           :seon.db/writer (or writer db/transact!) :seon.agent/id agent-id
-           :seon.batch/sink (seon.batch/sink)}
-    turn-id (assoc :seon.turn/id turn-id)
-    environment (assoc :seon.env/environment environment)
-    process (assoc :seon.db.process/id process)
-    profile (assoc :seon.render/profile profile)))
-
-(defn read-only-world
-  "A render's, context assembly's or the install gate's world: `db` as the
-  only custody (no connection, no writer: a write refuses), the viewer's
-  context forked."
-  {:malli/schema [:=> [:cat :seon.batch/world :seon.db/database-value] :seon.batch/world]}
-  [world db]
-  (-> world
-      (dissoc :seon.db/connection :seon.db/writer :seon.batch/settlement)
-      (assoc :seon.db/db db :seon.sci.eval/ctx (sci/fork (:seon.sci.eval/ctx world)))))
-
-(defn merge-world
-  "Root's world on a merge branch: merge moves entities by identity and
-  evaluates nothing, so it reads the same members as any agent world."
-  {:malli/schema [:=> [:cat :map :map] :seon.batch/world]}
-  [execution opts]
-  (agent-world execution (merge {:seon.agent/id "root"} opts)))
-
-(defn with-world
-  "Run `f` with the world's bindings re-established on this thread: its
-  custody (the connection, when it has one) for the elided seon.db arities,
-  and its value as the read basis. A body moved to another thread (a
-  compute-pool hop) carries the world as a value and calls this; nothing is
-  inherited from the submitting thread."
-  {:malli/schema [:=> [:cat :seon.batch/world [:=> [:cat] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary :seon.schema.admission/reason "Any body runs in the world: its value passes through unchanged." :gen/elements [nil false 0 "" :k [] {}]}]]] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary :seon.schema.admission/reason "Any body runs in the world: its value passes through unchanged." :gen/elements [nil false 0 "" :k [] {}]}]]}
-  [world f]
-  (db/call-with-custody (select-keys world [:seon.db/connection])
-                        #(binding [db/*read-database* (:seon.db/db world)
-                                   seon.batch/*world* world]
-                           (f))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Analysis and the join
@@ -142,11 +58,11 @@
 
 (defn namespace-entity
   "The namespace fact a form's analysis resolves through: SCI's live resolver
-  bindings (aliases, refers, requires, imports) of `ns-name`."
+  bindings (aliases, refers, requires, imports) of `namespace-name`."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :symbol] :map]}
-  [ctx ns-name]
-  (merge {:seon.ns/name ns-name}
-         (#'eval/binding-rows (#'eval/reader-context ctx ns-name))))
+  [ctx namespace-name]
+  (merge {:seon.ns/name namespace-name}
+         (#'eval/binding-rows (#'eval/reader-context ctx namespace-name))))
 
 (defn analyzed-entities
   "The program entities one analysis derives, keyed by [request-index utf8-offset name]."
@@ -305,13 +221,13 @@
                               " (when-some [e (get at [row col])] {:node (api/coerce e)}))))")]))})))
 
 (defn- analyze-form
-  "One clj-kondo analysis of `source` in `ns-name`, every Var the batch has
+  "One clj-kondo analysis of `source` in `namespace-name`, every Var the batch has
   bound declared, with its entities."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :symbol :string [:vector :qualified-symbol]
                        [:vector :seon.batch/write]] :map]}
-  [ctx db ns-name source declared expansions]
-  (let [req (cond-> {:namespace-name ns-name :form-source source
-                     :seon.fn/namespace-row (namespace-entity ctx ns-name)
+  [ctx db namespace-name source declared expansions]
+  (let [req (cond-> {:namespace-name namespace-name :form-source source
+                     :seon.fn/namespace-row (namespace-entity ctx namespace-name)
                      :seon.fn/declared declared}
               ;; the evaluation's observed expansions: the analyzer's hooks
               ;; (analyzer-expansion-hooks patch) analyze a generated definition at its call
@@ -587,96 +503,6 @@
         (into (mapcat #(entity-facts db' %)) entities)
         (into (mapcat #(removal-facts db' %)) removals))))
 
-(declare acquire-request)
-
-(defn- test-outcomes
-  "Each reaching test run as a test agent in a fork of world `w`: its
-  namespace's resolver bindings installed from its stored namespace entity,
-  its stored source evaluated through the one path there (so it calls the
-  world's definitions, not the Vars an earlier acquisition compiled it
-  against), then run. Its pass, fail and error counts, or `:absent` when `w`'s
-  value holds no such test."
-  {:malli/schema [:=> [:cat :seon.batch/world [:vector :qualified-symbol]] :map]}
-  [w tests]
-  (let [db (:seon.db/db w)
-        agent-world (update w :seon.sci.eval/ctx sci/fork)
-        ctx (:seon.sci.eval/ctx agent-world)
-        stored (into {} (keep (fn [t] (let [e (db/pull db [:seon.test/source {:seon.test/ns [:seon.ns/name]}] [:seon.test/sym t])]
-                                        (when (:seon.test/source e) [t e]))))
-                     tests)]
-    (doseq [n (distinct (keep #(get-in % [:seon.test/ns :seon.ns/name]) (vals stored)))
-            :let [ns-entity (db/pull db '[*] [:seon.ns/name n])]]
-      (sci/create-ns n)
-      (when-not (sci/find-ns ctx n) (sci/eval-form ctx (list 'clojure.core/create-ns (list 'quote n))))
-      (#'eval/install-namespace-bindings! ctx n (#'eval/row-bindings ns-entity)))
-    (doseq [[_ {src :seon.test/source {n :seon.ns/name} :seon.test/ns}] stored]
-      (seon.batch/evaluate-batch (acquire-request {:seon.batch/text src :seon.batch/world agent-world :seon.batch/start-ns n})))
-    (let [vars (into {} (keep (fn [t] (when-let [v (and (stored t) (sci/resolve ctx t))] [t v]))) tests)
-          results (when (seq vars)
-                    (with-world agent-world #(eval/run-tests {:seon.sci.eval/ctx ctx :seon.test/vars (vec (vals vars))
-                                                              :seon.sci.eval/time-limit-ms (or (:seon.sci.eval/time-limit-ms w) 30000)})))
-          by-sym (into {} (when (vector? results) (map (juxt :seon.test/sym identity) results)))]
-      (into {} (for [t tests]
-                 [t (if-let [r (get by-sym t)]
-                      (select-keys r [:seon.test/pass-count :seon.test/fail-count :seon.test/error-count])
-                      :absent)])))))
-
-(defn- red?
-  "Whether a test outcome counts a failure or an error."
-  {:malli/schema [:=> [:cat [:maybe [:or [:= :absent] [:map [:seon.test/fail-count {:optional true} nat-int?] [:seon.test/error-count {:optional true} nat-int?]]]]] :boolean]}
-  [outcome]
-  (and (map? outcome) (pos? (+ (:seon.test/fail-count outcome 0) (:seon.test/error-count outcome 0)))))
-
-(defn- gate-entity
-  "The install gate for one changed contracted function, judging the change:
-  its seeded contract check on the working value blocks only on its own
-  contract (a callee's contract refusing a generated argument is a contract
-  finding, delivered as feedback), and its reaching tests block only when
-  newly red: red after the change and not red on the batch's basis (run in a
-  world acquired from the basis database, never reused as green). Answers the
-  gate value as data."
-  {:malli/schema [:=> [:cat :seon.batch/request :seon.db/database-value :seon.program/row] :seon.batch/gate]}
-  [{world :seon.batch/world} working {sym :seon.fn/sym :as row}]
-  (let [after-world (read-only-world world working)
-        {fork :seon.sci.eval/ctx turn-id :seon.turn/id cluster :seon.boot/cluster-name limit :seon.sci.eval/time-limit-ms} after-world
-        effective (config/effective working (or cluster "default"))
-        check (with-world after-world
-                #(accretion/auto-check
-                  {:seon.sci.eval/ctx fork :seon.db/db working :seon.program/row row
-                   :seon.schema/projection (db/carried-projection working)
-                   :seon.config.test/auto-check-cases (:seon.config.test/auto-check-cases effective)
-                   :seon.test.accretion/seed (accretion/seed-for (id/evaluation (or turn-id "batch") 0))
-                   :seon.sci.eval/time-limit-ms (or limit 30000)
-                   :seon.sci.admit/caps (:seon.sci.admit/caps (#'eval/instrumentation-config working))}))
-        failures (for [g (:seon.test.accretion/failure-groups (accretion/gate-report {:seon.fn/sym sym :seon.test.accretion/results []
-                                                                                       :seon.test.accretion/auto-check check}))
-                       f (:seon.test.accretion/failures g)]
-                   f)
-        callee (fn [f] (let [a (:seon.test.accretion/actual f)
-                             by (when (map? a) (:seon.instrument/fn a))]
-                         (when (and by (not= by sym)) by)))
-        own (vec (for [f failures :when (not (callee f))]
-                   {:seon.gate/arguments (:seon.test.accretion/arguments f)
-                    :seon.gate/error (let [a (:seon.test.accretion/actual f)] (if (map? a) (:seon.error/message a) (str a)))}))
-        findings (vec (distinct (for [f failures :let [c (callee f)] :when c]
-                                  {:seon.gate/contract c :seon.gate/arguments (:seon.test.accretion/arguments f)})))
-        tests (let [t (sfn/gate-set working sym)] (if (vector? t) t []))
-        after (when (seq tests) (test-outcomes after-world tests))
-        base (when (some red? (vals after))
-               (when-let [base-ctx (:seon.sci.eval/base-ctx world)]
-                 (test-outcomes (assoc world :seon.sci.eval/ctx
-                                       (eval/fork-cluster-ctx base-ctx (:seon.db/db world) (:seon.db/connection world)))
-                                tests)))
-        newly-red (vec (for [[t o] after :when (and (red? o) (not (red? (get base t))))] (assoc o :seon.test/sym t)))
-        still-red (vec (for [[t o] after :when (and (red? o) (red? (get base t)))] (assoc o :seon.test/sym t)))]
-    (cond-> {:seon.gate/sym sym
-             :seon.gate/blocks? (boolean (or (seq own) (seq newly-red)))
-             :seon.gate/tests (count tests)}
-      (seq own) (assoc :seon.gate/own-failures (vec (take 3 own)))
-      (seq findings) (assoc :seon.gate/contract-findings findings)
-      (seq newly-red) (assoc :seon.gate/newly-red newly-red)
-      (seq still-red) (assoc :seon.gate/still-red still-red))))
-
 (defn apply-facts
   "`tx` on `working` through the writer's own validation, then the install
   gate for each contracted function the change defines. A refusal of either
@@ -692,19 +518,19 @@
         (let [gated (try (vec (for [row (:seon.batch/entities change)
                                     :when (and (:seon.fn/sym row) (:seon.fn/spec row)
                                                (not (contains? (set (:seon.batch/deferred change)) (:seon.fn/sym row))))]
-                                (gate-entity request after row)))
+                                (gate/gate-entity request after row)))
                          (catch Throwable t t))
               blocking (when (vector? gated) (first (filter :seon.gate/blocks? gated)))]
           (cond
             (instance? Throwable gated)
             {:seon.batch/refusal {:seon.error/message (str "The install gate could not run: " (ex-message gated))
-                                  :seon.error/operation `gate-entity :seon.error/data (ex-data gated)}}
+                                  :seon.error/operation `gate/gate-entity :seon.error/data (ex-data gated)}}
             blocking {:seon.batch/refusal (assoc blocking
                                                  :seon.error/message (str "The install gate refused " (:seon.gate/sym blocking)
                                                                           (when (:seon.gate/own-failures blocking) ": its own contract check failed")
                                                                           (when (:seon.gate/newly-red blocking)
                                                                             (str ": newly red " (mapv :seon.test/sym (:seon.gate/newly-red blocking)))))
-                                                 :seon.error/operation `gate-entity)
+                                                 :seon.error/operation `gate/gate-entity)
                       :seon.batch/gates gated}
             :else {:seon.batch/working after :seon.batch/gates gated}))))))
 
@@ -788,36 +614,7 @@
                 [head {} []] (:seon.batch/entries batch))]
     (assoc batch :seon.batch/working working :seon.batch/program program :seon.batch/entries entries)))
 
-(defn- gate-deferred
-  "The install gate for entities whose callees were unbound when they were
-  defined (`:seon.batch/deferred`), on the batch's final working value: a
-  refusal is the defining form's facts error and withdraws the row."
-  {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/batch] :seon.batch/batch]}
-  [request batch]
-  (reduce (fn [b [i e]]
-            (let [entities (for [s (get-in e [:seon.batch/change :seon.batch/deferred])
-                             :let [row (get-in b [:seon.batch/program :entities s])]
-                             :when (and (map? row) (:seon.fn/spec row))]
-                         row)
-                  refused (first (filter :seon.gate/blocks?
-                                         (map #(gate-entity request (:seon.batch/working b) %) entities)))]
-              (if refused
-                (-> b
-                    (assoc-in [:seon.batch/entries i :seon.batch/facts-error]
-                              (assoc refused :seon.error/message (str "The install gate refused " (:seon.gate/sym refused))))
-                    (update-in [:seon.batch/program :entities] dissoc (:seon.gate/sym refused)))
-                b)))
-          batch
-          (map-indexed vector (:seon.batch/entries batch))))
-
 (declare conclude)
-
-(defn settlement-connection
-  "Where the world's run is recorded: its settlement connection (a test agent
-  records on its requester's branch), else its own connection."
-  {:malli/schema [:=> [:cat :seon.batch/world] [:maybe :seon.db/connection]]}
-  [world]
-  (or (get-in world [:seon.batch/settlement :seon.db/connection]) (:seon.db/connection world)))
 
 (defn settle
   "Commit the batch: its recording and its folded program in one transaction
@@ -828,8 +625,8 @@
   A storage failure keeps every value and answers the error."
   {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/batch] :seon.batch/commit]}
   [{world :seon.batch/world :as request} batch]
-  (let [batch (gate-deferred request batch)
-        conn (settlement-connection world)
+  (let [batch (gate/gate-deferred request batch)
+        conn (world/settlement-connection world)
         writer (:seon.db/writer world)
         head (db/db conn)
         commit! (fn [tx] (let [r (writer conn tx)]
@@ -1006,24 +803,6 @@
 ;;; Entrants
 ;;; ---------------------------------------------------------------------------
 
-(defn record-fault
-  "One diagnostic recorded as a core fault by its owner (`seon.fault/fault!`)
-  in the world's environment, attributed to the world's agent, so it is
-  delivered to whoever can act on it. Answers the receipt. A world without
-  an environment or process has nowhere to record: that is the stage's own
-  failure, one more diagnostic."
-  {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/diagnostic] :seon.fault/recorded]}
-  [{{environment :seon.env/environment process :seon.db.process/id agent-id :seon.agent/id} :seon.batch/world}
-   {stage :seon.batch/stage message :seon.error/message :as diagnostic}]
-  (when-not (and environment process)
-    (throw (ex-info "The world has no environment and process to record a fault in."
-                    {:seon.batch/diagnostic diagnostic})))
-  (fault/fault! environment (ex-info message diagnostic)
-                (cond-> {:seon.error/layer (keyword "seon.batch" (name stage))
-                         :seon.error/operation `seon.batch/evaluate-batch
-                         :seon.db.process/id process}
-                  agent-id (assoc :seon.agent/id agent-id))))
-
 (defn- sci-stages
   {:malli/schema [:=> [:cat :map] :map]}
   [{{db :seon.db/db} :seon.batch/world :as request}]
@@ -1033,7 +812,7 @@
           :seon.batch/ns-name sci.batch/current-ns
           :seon.batch/around sci.batch/around
           :seon.batch/show show
-          :seon.batch/fault record-fault
+          :seon.batch/fault world/record-fault
           :seon.batch/start-ns 'user
           :seon.batch/mode :code
           :seon.sci.batch/delta (schema/begin-registration-delta (db/carried-projection db))}
@@ -1074,14 +853,7 @@
   [request]
   (sci-stages (merge (dissoc request :seon.batch/settle :seon.batch/derive)
                      {:seon.batch/evaluate (fn [{world :seon.batch/world :as req} form working]
-                                             (with-world world #(sci.batch/evaluate req form working)))})))
-
-(defn acquire-request
-  "Acquisition of stored definitions: their source read as code and evaluated, no
-  observation, derivation or recording (the facts already exist)."
-  {:malli/schema [:=> [:cat :map] :seon.batch/request]}
-  [request]
-  (sci-stages (merge request {:seon.batch/read-next sci.batch/read-code :seon.batch/show nil})))
+                                             (world/with-world world #(sci.batch/evaluate req form working)))})))
 
 (defn- jvm-read-next
   "One host `read+string` at the live `*ns*` after `forgive/skip-to`."
@@ -1138,7 +910,7 @@
           :seon.batch/around (fn [{n :seon.batch/start-ns} body]
                                (binding [*ns* (create-ns n)] (refer-clojure) (body)))
           :seon.batch/show jvm-show
-          :seon.batch/fault record-fault
+          :seon.batch/fault world/record-fault
           :seon.batch/settle settle
           :seon.batch/conclude conclude
           :seon.batch/start-ns 'user}
@@ -1162,5 +934,5 @@
           :seon.batch/evaluate (fn [_ _ _] (body))
           :seon.batch/ns-name (fn [_] 'user)
           :seon.batch/settle settle
-          :seon.batch/fault record-fault}
+          :seon.batch/fault world/record-fault}
          request))
