@@ -198,3 +198,30 @@ diff); its change is a patch.
   1. `bin/test-check default --ns seon.render.web-test` (two-tabs expected green)
   2. `bin/test-check default --ns seon.render.web-context-test`
   3. `bin/test-check default --ns seon.oversight-test`
+
+## f667d9ef4, 2049dcf3f: the cause of unrelated-adoption, and stale expectations
+
+- **Why unrelated-adoption stayed red.** The diagnostic (2049dcf3f, tests-0627h) showed the status call at basis
+  536871018 still `current? true` at 536871019.
+  - `seon.cluster.status/snapshot` read "some cluster row". A forked branch (every fixture) holds its parent's
+    cluster row too, so status observed the default cluster, not `web-test`.
+  - The commit-id write to `web-test`'s row was therefore correctly irrelevant to it. The freshness check is right:
+    probed live, a speculative commit-id write on the observed row gives `false`.
+  - **Fix:** the caller's context environment names the cluster, as `seon.oversight/context-cluster-name` does.
+- **entity-pairs, stale since M5 958bf0ed6 (partial maps are not entities; task 135d92ea1308).**
+  - Live probe: a pulled root row selects `render-identity-ai/html`, and `{:seon.agent/id "root"}` selects the floor.
+  - The tests now build complete agent rows with the canonical `agent-tx` and a pull.
+  - The ownership assertions now say a partial map is not owned.
+  - The test for "an error nobody declared" strips the schema that `render/ambiguity` now declares (M3 3cf5ff927).
+- **web-test `declared-units`:** now expects `:seon.agent/admission-closed-tx` (8e3a6315a).
+- **Not addressed; owners named:**
+  - entity-pairs `function-entity-pair-is-selected-through-the-issue-walk`: a nested function renders at distance 0
+    (s2 de1724492 semantics), so the expected full source is stale or s2 regressed. This needs the s2 owner's call.
+  - `namespace-page-renders-one-full-namespace…`: "Public functions: None" for a namespace with functions.
+  - `a-declared-database-input-is-supplied…`: the viewer's `probe-view` is never selected. Triage suspects perf-boot.
+  - `value-test` lazy-throws: stale since 958bf0ed6; the file belongs to eval-feedback.
+- **The test-runner reds (Ctx `#object`; 96 k gate log): no floor change.**
+  - `#object[sci.impl.opts.Ctx]` follows the host-object rule. Walking records as maps would print `(seon.db/db)` as
+    18.7 KB of `datahike.db.DB` internals (measured).
+  - The runner renders expected and actual with a full budget each (about 48 k characters each).
+  - Both fixes belong to runner/runner-test (shrink-test).
