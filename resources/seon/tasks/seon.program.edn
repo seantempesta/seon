@@ -16,4 +16,8 @@
              :kind :function
              :intent "An agent defn on a branch takes 1.7 s p50 and allocates 1.57 GB JVM-wide with 182,000 armed calls per form (10 x (inc 1) on the same branch: 168 ms, 160 MB, 6,700 calls). The top counts are whole-projection walks: seon.program/source-family? 38,000 per defn (shapes-in and the families classification filter every key of :seon.schema.projection/forms, ~3,500, on each call), seon.schema.internal/reference-id 32,000, entity-maps 28,000, schema.datahike/compiled-storage 12,000, storable-attribute-in? 9,300. The family set and shapes are functions of the projection alone; derive them once per projection (the projection's own cache seam) and find which caller rebuilds per defn."
              :must-read #{seon.program/shapes-in seon.schema.internal/entity-maps}
-             :evidence #{"docs/research/agent-platform/landing/contract-cost-opus-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/contract-cost-opus-2026-09-26.md"}}
+ #:seon.task{:name "row-vocabulary-sweep"
+             :kind :namespace
+             :intent "Owner 2026-09-27: speak in Datahike terms. 'row' (program row, schema row, config row, row-tx, source-rows, namespace-rows, schema-row, task-row; ~3,400 occurrences, ~100 function names in src, plus skills and the data-modeling guide) means an entity, an entity map or transaction data. One scripted rename sweep across src, test, skills and docs, converting every caller in the same commit, after the one-true-REPL-path fix (same files). AGENTS.md and vocabulary.md already corrected."
+             :evidence #{"docs/seon/architecture/vocabulary.md"}}]
