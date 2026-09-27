@@ -117,3 +117,32 @@ Slice 2 design for Astra: docs/research/agent-platform/shrink-eval-slice2-design
 defaults, projection content, graph inputs), an `overridden-row?` branch-law fix, and conversion of every consumer
 (`loaded-basis`, `record-refusals-once!`, listener retirement, retention tests) in one slice. I will write that design
 before editing. Slice 3 follows it.
+
+## 6. Slice 2a: shared loaded base (option A), commit e522324c2
+
+- **Measured before choosing.** In a 217 s bounded test window, 18 of 30 derivations (60%) had an empty function
+  delta (design doc §7, bd1512d85).
+- **Built.**
+  - A value whose functions (digest, admission, privacy) and projection construction inputs equal the loaded
+    program's, and which only adds agent namespaces and agent tests, receives a fork of one base per
+    `[store, loaded commit]` (`seon.cache` `::loaded-base`). Its additions are installed on the fork.
+  - Every other value derives whole, as before.
+  - `install-acquired-row` and `acquired-namespace-row` were extracted from `acquire-program!`, so both paths
+    install rows the same way.
+- **Proof.** Run on an isolated member branch of default (pid 85741), with the new functions loaded in a scratch
+  namespace (removed afterwards) and not over default's Vars:
+  - two fixture branches each adding an agent namespace share one base (the same object);
+  - each fork holds only its own additions (11 added namespaces), and evaluation works;
+  - cost per branch: delta read 33-62 ms plus receive 4 ms, against a warm whole derivation of 102 ms. The
+    loaded base is derived once, in 286 ms.
+- **Baseline for the first-defn probe.** `one-commit-defn-probe` on fresh branch `shrink-eval-oc-before` (now
+  retired), measured before the change during concurrent root test runs: first contracted defn 1,075 ms; later
+  ones 595 and 516 ms. The "after" number needs a restart onto e522324c2 and the same probe.
+- **Size.** +221/−54. The deletion slice 2b is **not done**, because it would cost time on every form:
+  - without the revision basis, `acquired-database?` has to read the program population on every new commit;
+  - measured on default, the function query alone is 12 ms per new commit (3 ms on the same value), about
+    15-20 ms per form with the namespace and test reads;
+  - today it costs 0.06-3.6 ms;
+  - deleting the machinery (≈ −150) therefore trades lines for per-form latency. That is root's call.
+- **Leftover.** The probe left `:seon.sci.eval/loaded-population` and `::loaded-base` entries in pid 85741's
+  process cache. They are released on restart.
