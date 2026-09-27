@@ -21,7 +21,9 @@
    (fn [_connection]
      (let [projection (schema/handed-projection)]
        (doseq [optional? [false true]]
-         (let [definition [:and :seon.error/base
+         ;; an identity-bearing entity declares its partition (8a069b5e4), so
+         ;; the upsert-identity rule is the one that refuses
+         (let [definition [:and {:seon.program/partition :seon.data} :seon.error/base
                            [:map [:seon.turn/id {:optional optional?} :seon.turn/id]]]
                refusal (try
                          (schema/projection-with-schema
@@ -427,7 +429,7 @@
          :seon.schema/form
          (pr-str
           [:map
-           (merge {:seon.db/attributes true} renderers)
+           (merge {:seon.db/attributes true :seon.program/partition :seon.data} renderers)
            [attribute attribute]])})
        (support/transacted! connection [{attribute "plan-1"}])
        (let [raw-entity
