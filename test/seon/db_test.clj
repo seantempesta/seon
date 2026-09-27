@@ -2008,8 +2008,9 @@
      (let [head (db/db connection)
            content-key (@#'db/arity-content-key head)
            seeded? (cache/has? @@#'db/arity-base-cache content-key)
-           edges (@#'db/call-edges d/q head)
-           bounds (@#'db/declared-arity-bounds d/q head)
+           ;; The writer's own questions read arities through their cells.
+           edges (@#'db/call-edges @#'db/storage-q head)
+           bounds (@#'db/declared-arity-bounds @#'db/storage-q head)
            built (merge (@#'db/arity-comparison edges bounds)
                         {::db/edge-set edges ::db/bounds bounds
                          ::db/by-caller (update-vals (group-by first edges) set)

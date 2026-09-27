@@ -15,7 +15,9 @@
                      ::id [:string {:seon.db/identity true}]
                      ::value :int
                      ::extra :string
-                     ::children [:vector {:seon.db/component true
+                     ;; A set: these owned-value cases read member datoms on the
+                     ;; parent; a vector's members live in cells (seon.db.vector.edn).
+                     ::children [:set {:seon.db/component true
                                           :seon.db/component-schema ::child} :seon.db/ref]
                      ::root [:map {:seon.db/attributes true :seon.program/partition :seon.data}
                              [::id ::id] [::children {:optional true} ::children]]
@@ -145,18 +147,24 @@
             source (:e (first (d/datoms database :avet :seon.fn/sym 'seon.db/basis-t)))
             facts (fn [entity] (remove #(or (= :seon.fn/sym (:a %)) (get-in schema [(:a %) :db/isComponent]))
                                        (d/datoms database :eavt entity)))
+            ;; Arities are a vector: each lives in a cell the function owns.
+            source-arity (d/q '[:find ?arity . :in $ ?f :where [?f :seon.db.vector/cells ?c] [?c :seon.fn/arities ?arity]]
+                              database source)
             staged (d/with database (mapv (fn [datom] [:db/add "arity" (:a datom) (:v datom)])
-                                          (facts (:v (first (d/datoms database :eavt source :seon.fn/arities))))))
+                                          (facts source-arity)))
             arity (get (:tempids staged) "arity")
             report (d/with (:db-after staged)
                            (into [[:db/add :db/current-tx :seon.fn/sym `a-transaction-entity-root-reaches-the-arity-gate]
-                                  [:db/add :db/current-tx :seon.fn/arities arity]]
+                                  [:db/add :db/current-tx :seon.db.vector/cells "cell"]
+                                  {:db/id "cell" :seon.db.vector/position 0 :seon.fn/arities arity}]
                                  (map (fn [datom] [:db/add :db/current-tx (:a datom) (:v datom)]))
                                  (facts source)))
-            transaction (get (:tempids report) :db/current-tx)]
+            transaction (get (:tempids report) :db/current-tx)
+            cell (get (:tempids report) "cell")]
         (is (some? projection))
+        (is (some? source-arity))
         (is (every? #(= transaction (:e %))
-                    (remove #(= :db/txInstant (:a %)) (:tx-data report)))
+                    (remove #(or (= :db/txInstant (:a %)) (= cell (:e %))) (:tx-data report)))
             (pr-str (:tx-data report)))
         (let [changed (:seon.db/changed-identity-attributes
                        (@#'seon.db/write-owned-values-error

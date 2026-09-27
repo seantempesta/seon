@@ -714,8 +714,21 @@
                      :seon.fn.arity/arguments
                      [{:seon.fn.argument/rest? false}]}]
                    (:seon.fn/arities redefined)))
-            (is (every? #(empty? (db/datoms @connection :eavt %))
-                        old-components))))))))
+            ;; A vector keeps an element equal by value (vector-storage design
+            ;; V2): the one-argument arity survives as itself; every other old
+            ;; component is retracted with its cell.
+            (let [components (fn [arities]
+                               (into #{} (mapcat (fn [arity]
+                                                   (into [(:db/id arity)]
+                                                         (mapcat #(vector (:db/id %) (get-in % [:seon.fn.argument/binding :db/id])))
+                                                         (:seon.fn.arity/arguments arity))))
+                                     arities))
+                  kept (components (:seon.fn/arities
+                                    (db/pull @connection '[{:seon.fn/arities [:db/id {:seon.fn.arity/arguments [:db/id {:seon.fn.argument/binding [:db/id]}]}]}]
+                                             [:seon.fn/sym function-symbol])))
+                  removed (remove kept old-components)]
+              (is (= 5 (count removed)) "the two-argument arity, its arguments and bindings")
+              (is (every? #(empty? (db/datoms @connection :eavt %)) removed)))))))))
 
 (deftest runtime-deletion-refuses-surviving-callers-without-changing-the-definition
   (test-support/with-database
