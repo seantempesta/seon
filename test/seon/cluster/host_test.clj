@@ -345,7 +345,10 @@
                                            "(defn run-square \"Square x.\" {:malli/schema [:=> [:cat [:int {:min -1000 :max 1000}]] :int]} [x] (* x x x))\n"
                                            "(run-square 4)"))]
         (is (= "#'my.agents.host-probe/run-square" (first shown)) (pr-str shown))
-        (is (re-find #"install refused" (str (nth shown 2))) "the gate ran the earlier test and refused the break")
+        ;; A refused form shows its small error map (737fe0a5d): the refusal
+        ;; is the install gate's by its member, not by a face's wording.
+        (is (re-find #":seon.test.accretion/install\?" (str (nth shown 2)))
+            "the gate ran the earlier test and refused the break")
         (is (= "16" (last shown)) "the first body stays installed within the run")
         (is (= ["16"] (hosted-run! hosted "(run-square 4)")) "and after it settles")))))
 
