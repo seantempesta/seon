@@ -124,31 +124,9 @@
 
  :arity-plans [:vector :seon.call-preparation/arity-plan],
 
- ;; One call shape: which arity runs, which slots are inserted at their
- ;; recorded indexes, and which required argument-map entries are filled.
- :call-shape
- [:map
-  [:seon.fn.arity/order :seon.fn.arity/order]
-  [:seon.call-preparation/inserts :seon.call-preparation/insertions]
-  [:seon.call-preparation/entries :seon.call-preparation/slots]],
-
- ;; A declared arity and a derived shorter shape landing on ONE supplied
- ;; count. The collision is decided at call time by the leading omitted
- ;; slot's own declared value schema — ruling 2's `db?`/`connection?`
- ;; disambiguation — so ruling #41's leave-off-the-database positional
- ;; shortcut survives through the general planner instead of a second
- ;; per-function implementation. `supplied` is the declared arity taken when
- ;; the first argument satisfies that schema; `omitted` is the derived shape.
- :dispatch
- [:map
-  [:seon.call-preparation/key :seon.call-preparation/key]
-  [:seon.call-preparation/supplied :seon.call-preparation/call-shape]
-  [:seon.call-preparation/omitted :seon.call-preparation/call-shape]],
-
  ;; One entry per supplied-argument count the plan answers for. An exact
  ;; full-arity call carries no inserts; a derived shorter shape carries the
- ;; slots to insert at their recorded indexes; a collision that a value can
- ;; settle carries a `dispatch`; a structurally ambiguous count carries
+ ;; slots to insert at their recorded indexes; a structurally ambiguous count carries
  ;; `:seon.call-preparation/ambiguous? true` plus its candidate omitted-index
  ;; sets and never guesses by arity order.
  :preparation
@@ -161,9 +139,6 @@
   [:seon.call-preparation/entries
    {:optional true}
    :seon.call-preparation/slots]
-  [:seon.call-preparation/dispatch
-   {:optional true}
-   :seon.call-preparation/dispatch]
   [:seon.call-preparation/candidates
    {:optional true}
    :seon.call-preparation/candidates]],
