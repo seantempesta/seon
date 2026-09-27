@@ -17,8 +17,7 @@
             [seon.note :as note]
             [seon.render.ns :as render.ns]
             [seon.render.hiccup :as hiccup]
-            [seon.test-support :as support]
-            [seon.schema :as schema]))
+            [seon.test-support :as support]))
 
 (defn- golden [key]
   (get (edn/read-string (slurp (io/resource "seon/fixtures/html_views_ai.edn"))) key))
@@ -42,7 +41,8 @@
                    :my.plan/steps [{:my.plan.item/id "first" :my.plan.item/title "Prepare"}
                                    {:my.plan.item/id "second" :my.plan.item/title "Ship"
                                     :my.plan.item/done-when "The page reads clearly"
-                                    :my.plan.item/needs #{[:my.plan.item/id "first"]}}]}
+                                    ;; needs are prerequisite ids, not refs (71c6d1fb6)
+                                    :my.plan.item/needs #{"first"}}]}
                   @connection connection "alice")
       (let [unit {:seon.agent/id "alice" :seon.db/db @connection}
             step (plan/item {:my.plan.item/id "first" :seon.db/db @connection})]
@@ -61,12 +61,15 @@
   (support/with-database
     (fn [connection]
       (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "html-views"})
-      (support/transacted! connection [{:seon.agent/id "alice"
-                                        :seon.agent/settings {:seon.config.eval/time-limit-ms 10000}}])
+      (support/transacted! connection (support/agent-tx @connection "alice"))
+      ;; An override is written by the agent's own writer onto the settings
+      ;; component its creation made; unset dials are listed, not omitted (ed3f44225).
+      (is (= 10000 (:seon.config.eval/time-limit-ms
+                    (agent/settings! {:seon.config.eval/time-limit-ms 10000} connection "alice"))))
       (let [unit {:seon.db/db @connection :seon.agent/id "alice"}
             html (agent/render-settings-html unit)
             printed (hiccup/->string html)]
-        (readable! html ["override" "10 s" "defaults (" "unset settings omitted"])
+        (readable! html ["override" "10 s" "defaults (" "Unset settings ("])
         (is (= 1 (count (re-seq #"<table" printed))))
         (is (not (str/includes? printed "Not set")))
         (is (not (str/includes? printed "settings!")))
@@ -136,8 +139,10 @@
 (deftest fault-pairs-preserve-ai
   (support/with-database
     (fn [connection]
-      (let [fault { :seon.error/message "Connection lost"}]
-        (readable! (error/render-html fault) ["failed" "Connection lost"])
+      (let [fault {:seon.error/operation 'example/connect :seon.error/message "Connection lost"}]
+        ;; The kicker names the fault's operation; `:seon.error/kind` (once
+        ;; `:example/failed`, shown as "failed") was retired in bc8152438.
+        (readable! (error/render-html fault) ["example/connect" "Connection lost"])
         (readable! (error/render-faults-html [fault] @connection) ["Faults (1)" "Connection lost"])
         (is (= (golden :fault) (error/render-ai fault)))
         (is (= (golden :faults) (error/render-faults-ai {:seon.render/value [fault]})))
@@ -159,8 +164,10 @@
     (fn [connection]
       (let [report {:seon.maintenance/entries []}]
         (readable! (maintenance/render-report-html report @connection) ["No maintenance tasks are recorded."])
+        ;; An entry's function is the qualified symbol the report reads from
+        ;; its task row (`:seon.fn/sym`, retyped from a string in 0e8f7d323).
         (readable! (maintenance/render-report-html {:seon.maintenance/entries
-                     [{:seon.schedule.task/id "collect" :seon.fn/sym "seon.maintenance/collect"}]} @connection)
+                     [{:seon.schedule.task/id "collect" :seon.fn/sym 'seon.maintenance/collect}]} @connection)
                    ["collect" "not run"])
         (is (= (golden :maintenance) (maintenance/render-report-ai report @connection)))))))
 
@@ -181,29 +188,31 @@
   (support/with-database
     (fn [connection]
       (let [report (db/transact! connection [{:my.plan.item/id "first" :my.plan.item/title "Prepare"}])
-            refusal {:seon.db/transaction-refused true :seon.error/message "Duplicate identity"}
+            ;; The writer's own refusal: a step without its required title.
+            refusal (db/transact! connection [{:my.plan.item/id "refused"}])
             identity {:db-name :fixture :t 42 :datahike/commit-id #uuid "00000000-0000-0000-0000-000000000042"}
             shown-report {:db-before identity :db-after identity :tx-data [] :tempids {} :tx-meta {}}]
         (readable! (db/render-transaction-html report) ["Committed transaction" "Prepare" "Changes"])
-        (readable! (db/render-rejection-html refusal) ["Duplicate identity"])
+        (readable! (db/render-rejection-html refusal)
+                   ["seon.db/transact!" "Supply :my.plan.item/title with a string."])
         (is (= (golden :transaction) (db/render-transaction-ai shown-report)))
-        (is (= (golden :rejection) (db/render-rejection-ai refusal)))))))
+        (is (str/includes? (db/render-rejection-ai refusal)
+                           "Supply :my.plan.item/title with a string."))))))
 
 (deftest settings-display-follows-declarations-without-name-based-units
+  ;; WANTED (ed3f44225): each dial declares its own label, divisor and unit,
+  ;; and the settings view reads only those declarations from the database's
+  ;; projection. A dial declaring a unit shows it; one declaring none shows
+  ;; its bare value. The central display map this test once patched is gone.
   (support/with-database
-    (fn [_connection]
-      (let [forms (schema/declaration-population)
-            display #:seon.config{:display-label "Elapsed" :display-divisor 1000 :display-unit "s"}
-            forms (update-in forms [:seon.config/settings 1 :seon.config/display]
-                             assoc :example/elapsed display :example/count-ms display)]
-        (schema/call-with-forms
-         forms
-         (fn []
-           (let [html (hiccup/->string
-                       (agent/render-settings-html
-                        {:seon.render/value {:example/elapsed 1500 :example/count-ms 1500
-                                             :example/raw-ms 1000}}))]
-             (is (= 2 (count (re-seq #"1\.5 s" html))))
-             (is (str/includes? html ":example/raw-ms"))
-             (is (str/includes? html "1,000"))
-             (is (not (str/includes? html "1 s"))))))))))
+    (fn [connection]
+      (support/transacted! connection (support/agent-tx @connection "alice"))
+      (is (= 1500 (:seon.config.eval/time-limit-ms
+                   (agent/settings! {:seon.config.eval/time-limit-ms 1500
+                                     :seon.config.ai.retry/maximum-retries 1000}
+                                    connection "alice"))))
+      (let [html (hiccup/->string
+                  (agent/render-settings-html {:seon.db/db @connection :seon.agent/id "alice"}))]
+        (is (str/includes? html "1.5 s"))
+        (is (str/includes? html "1,000"))
+        (is (not (str/includes? html "1,000 s")))))))
