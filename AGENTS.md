@@ -184,7 +184,10 @@ root.
   arm time and fills omitted inputs at call time, never from the parse (a call's target is known only when it runs).
   Any input, required or optional, whose declared schema is a member of the evaluation's world (database, connection,
   writer, agent, task, profile, call sink, SCI context) comes from that evaluation's own world, never a global or
-  another world. Other omitted optional inputs stay absent. A function whose meaning needs a world member to be absent
+  another world; this includes world-member keys missing from a map argument whose schema declares them. Supply runs
+  before input validation, so a forgotten world member never fails the call, and it only fills what is missing: a
+  value the caller passes, such as another branch's database, is never overwritten. Other omitted optional inputs stay
+  absent. A function whose meaning needs a world member to be absent
   (no custody) declares a different schema name. A missing required member refuses by name. A call already matching a
   declared arity is never prefixed; caller arguments always win; structural resemblance is not identity.
   See the [data guide](docs/seon/architecture/data-modeling-guide.md).
