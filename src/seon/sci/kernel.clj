@@ -755,9 +755,21 @@
             own-link (fn [link]
                        (cond-> (dissoc link :seon.error/data)
                          (= (:seon.error/message link) (:seon.error/message existing))
-                         (dissoc :seon.error/message)))]
+                         (dissoc :seon.error/message)))
+            uncarried? (not-every? (set links) (:seon.error/chain existing))]
         (cond-> (located existing)
-          (seq links)
+          ;; A refusal whose own chain holds links the throwable does not
+          ;; carry (a rejection it records, never a Throwable cause) keeps that
+          ;; chain whole after the links wrapping it; the carrier link is the
+          ;; refusal itself. Replacing it dropped the rejection's message and
+          ;; data (instrument's minimal refusal).
+          uncarried?
+          (assoc :seon.error/chain
+                 (let [outer (error.refusal/without-links links #(own? (:seon.error/data %)))
+                       shift (fn [link k] (cond-> link (find link k) (update k + (count outer))))]
+                   (into outer (map #(-> % (shift :seon.error/suppressed-by) (shift :seon.error/cause-of)))
+                         (:seon.error/chain existing))))
+          (and (seq links) (not uncarried?))
           (assoc :seon.error/chain (mapv #(if (own? (:seon.error/data %)) (own-link %) %) links))
           (not (string? (:seon.error/message existing)))
           (assoc :seon.error/message

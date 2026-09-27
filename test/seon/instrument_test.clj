@@ -69,24 +69,15 @@
                                                         (mi/-f->original @candidate) caps policy)
                          policy))
 
-(deftest an-invalid-core-error-mode-is-an-evidence-complete-value
-  ;; `apply!` IS THE ARM. Boot calls it on a JVM whose contracts are not
-  ;; installed yet, and that is the only state in which its own typed refusal
-  ;; is reachable: once the contracts are armed, `:seon.instrument/request`
-  ;; refuses a bad dial first, at the same crossing, naming the same
-  ;; function. So the subject is reproduced in boot's state rather than in
-  ;; one no caller is ever in; `preserving-instrumentation-state` puts this
-  ;; worker's wrappers back afterwards.
-  (instrument/remove!)
-  (let [result ((mi/-f->original instrument/apply!)
-                {})]
-    (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/registration-error) result))
-    (is ((schema/projection-validator (schema/handed-projection)
-                                     :seon.instrument/registration-error) result)))
-  ;; and armed, the contract owns the same refusal at the same crossing
+(deftest an-invalid-apply-request-is-refused-at-its-crossing
+  ;; The core-error mode this test once refused is deleted (7c40396b3, M1 0b:
+  ;; the :panic/:record dial carriers), so `{}` is a valid request and the
+  ;; unarmed typed refusal it reached is gone; the missing-projection
+  ;; registration error keeps its own regression below. Armed, the request
+  ;; contract refuses an invalid dial at the crossing, naming `apply!`.
   (instrument/apply! {})
   (let [refusal (test-support/refusal-data
-                 #(instrument/apply! {}))]
+                 #(instrument/apply! {:seon.config.error/max-evidence-bytes 0}))]
     (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) refusal))
     (is (= 'seon.instrument/apply!
            (:seon.error/operation refusal)))))
@@ -931,7 +922,9 @@
            candidate (intern namespace-name 'content-keyed identity)
            arm! #(instrument/apply! {:seon.schema/projection %})]
        (alter-meta! candidate assoc :malli/schema [:=> [:cat request-key] :map])
-       (is (not (identical? first-projection equal-projection)))
+       ;; equal inputs answer the one built projection (39960bb15, seon.cache
+       ;; since 92b22cbf1), so equal content is one wrapper by construction
+       (is (identical? first-projection equal-projection))
        (arm! first-projection)
        (let [armed @candidate]
          (arm! equal-projection)
@@ -1305,7 +1298,8 @@
           [[#'admit/semantic-value :seon.schema/value]
            [#'error/refusal [:or :nil :map :seon.error/base]]
            [#'error/latest-fact [:or :map :seon.error/base]]
-           [#'kernel/failure-value :seon.error/base]]]
+           ;; 36a3714b4 split the kernel's error schemas
+           [#'kernel/failure-value [:or :seon.sci.kernel/execution-error :seon.sci.kernel/error]]]]
     (is (= expected (last (:malli/schema (meta candidate)))) (str candidate))))
 
 (deftest the-work-launcher-api-is-collected-without-an-allowlist
