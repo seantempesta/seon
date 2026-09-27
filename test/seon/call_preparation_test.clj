@@ -105,13 +105,9 @@
   database)
 
 (defn probe-shortcut
-  "The `pull` shape: a declared arity whose count collides with the shorter
-  shape another arity derives.
-
-  Two supplied arguments could mean either `[database label]` — the
-  declared two-arity, database explicit — or `[label label]` with the
-  three-arity's leading database elided. Ruling #41's shortcut survives
-  because the leading slot's own value schema decides."
+  "The `pull` shape: a declared arity whose first input is another schema,
+  colliding at its count with the shape another arity derives by eliding its
+  leading database. The declared arity is matched in full, never prefixed."
   {:malli/schema
    [:function
     [:=> [:cat [:or :seon.db/database-value :string] :string] :keyword]
@@ -122,20 +118,21 @@
    (if (db/database-value? database) :supplied-database :wrong-value)))
 
 (defn probe-leading-database
-  "Ruling #41's shortcut: a declared arity whose own first input is the
-  supplied database slot, colliding with the longer arity's derived shape.
+  "The `projection-from-database` shape: `[database]` and `[database x]`.
 
-  Two supplied arguments are either `[database label]` — explicit — or
-  `[label label]` with the three-arity's leading database elided; the first
-  argument's value decides."
+  A one-argument call matches the declared one-arity, so it runs that arity
+  or is refused by its contract; it is never read as the two-arity with its
+  leading database supplied."
   {:malli/schema
    [:function
-    [:=> [:cat :seon.db/database-value :string] :keyword]
-    [:=> [:cat :seon.db/database-value :string :string] :keyword]]}
-  ([database _label]
-   (if (db/database-value? database) :explicit-database :wrong-value))
-  ([database _first _second]
-   (if (db/database-value? database) :supplied-database :wrong-value)))
+    [:=> [:cat :seon.db/database-value] :keyword]
+    [:=> [:cat :seon.db/database-value :string] :keyword]]}
+  ([_database]
+   (swap! entered inc)
+   :one-arity)
+  ([_database _label]
+   (swap! entered inc)
+   :two-arity))
 
 (defn probe-connection-name
   "The identity of the connection this call was supplied.
@@ -849,35 +846,40 @@
                   (set (:seon.call-preparation/candidates refusal))))
            (is (zero? @entered) "an ambiguous call never enters the body")))))))
 
-(deftest the-leave-off-the-database-shortcut-survives-the-general-planner
-  (testing "ruling #41's positional shortcut: decided by the first argument's
-            value only when the colliding declared arity's own first input is
-            the supplied slot"
-    (test-support/with-database
-     (fn [connection]
-       (test-support/transacted! connection database-rows)
-       (let [ctx (probe-ctx connection connection)]
-         (is (= :supplied-database (probe ctx "probe-leading-database \"a\" \"b\""))
-             "two non-database arguments mean the three-arity with its
-              leading database elided")
-         (is (= :explicit-database
-                (armed-eval
-                 ctx
-                 (str "(seon.call-preparation-test/probe-leading-database "
-                      "(seon.call-preparation-test/probe-current-database)"
-                      " \"b\")")))
-             "an explicit database value at the same count keeps the DECLARED
-              two-arity — the caller always wins")
-         (is (= :supplied-database
-                (armed-eval
-                 ctx
-                 (str "(seon.call-preparation-test/probe-leading-database "
-                      "(seon.call-preparation-test/probe-current-database)"
-                      " \"a\" \"b\")")))
-             "and the exact declared three-arity is untouched")
-         (is (= :two-labels (probe ctx "probe-shortcut \"a\" \"b\""))
-             "a declared arity whose first input is another schema is matched
-              in full, never prefixed"))))))
+(deftest a-call-matching-a-declared-arity-is-never-prefixed
+  ;; WANTED (AGENTS.md "Supply defaults by declared schema name", 0b134d2f2):
+  ;; a call already matching a declared arity runs that arity and its
+  ;; contract judges the arguments. The retired value dispatch read a
+  ;; non-database first argument as the longer arity with the database
+  ;; supplied, so `(schema/projection-from-database poisoned)` returned a
+  ;; whole projection instead of refusing the caller's value.
+  (test-support/with-database
+   (fn [connection]
+     (test-support/transacted! connection database-rows)
+     (let [ctx (probe-ctx connection connection)]
+       (testing "one non-database argument is refused by the one-arity's contract"
+         (reset! entered 0)
+         (let [refusal (test-support/refusal-data
+                        #(probe ctx "probe-leading-database \"a\""))]
+           (is (= :input (:seon.instrument/check refusal)))
+           (is (= 'seon.call-preparation-test/probe-leading-database
+                  (:seon.error/operation refusal)))
+           (is (= ["a"] (:seon.error/offending refusal))
+               "the caller's argument reached the contract unprefixed")
+           (is (zero? @entered) "the body never ran")))
+       (is (= :one-arity
+              (armed-eval ctx (str "(seon.call-preparation-test/probe-leading-database "
+                                   "(seon.call-preparation-test/probe-current-database))")))
+           "an explicit database runs the declared one-arity")
+       (is (= :one-arity (probe ctx "probe-leading-database"))
+           "a call matching no declared arity is completed by the supplied database")
+       (is (= :two-arity
+              (armed-eval ctx (str "(seon.call-preparation-test/probe-leading-database "
+                                   "(seon.call-preparation-test/probe-current-database) \"b\")")))
+           "the declared two-arity runs unchanged")
+       (is (= :two-labels (probe ctx "probe-shortcut \"a\" \"b\""))
+           "a declared arity whose first input is another schema is matched in
+            full, never prefixed")))))
 
 (deftest an-unavailable-supplier-refuses-before-the-body
   (testing "the unavailable face: a flat value naming the target, the key and

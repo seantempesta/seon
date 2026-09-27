@@ -515,57 +515,21 @@
                 (:seon.call-preparation/inserts candidate)))
         candidates))
 
-(defn- dispatchable
-  "The predicate dispatch for one declared arity colliding with one derived
-  shape at the same supplied count, or nil when the collision cannot be
-  decided from the first argument.
-
-  This is ruling 2's `db?`/`connection?` disambiguation, and the predicate
-  is not a hand-written one: it is the row's OWN declared value schema,
-  compiled once per acquisition into `:seon.call-preparation/validators`.
-  A first argument that satisfies the omitted slot's value schema was
-  supplied by the caller, so the DECLARED arity runs unchanged; anything
-  else means the caller wrote the shorter shape and the slot is filled.
-
-  Only a LEADING omitted slot is decidable — the ruling says \"the
-  predicate on the first argument\" — and only when the declared arity's
-  own first argument is that same slot (`exact-leading-key`): then the first
-  argument tells which shape the caller wrote. A declared arity whose first
-  argument is something else (a request map) is simply matched in full, and
-  every other collision falls through to the declared arity, which always
-  wins."
-  [exact derived exact-leading-key]
-  (let [leading (first (:seon.call-preparation/inserts derived))]
-    (when (and (:seon.call-preparation/key leading)
-               (zero? (long (:seon.fn.argument/index leading)))
-               (= exact-leading-key (:seon.call-preparation/key leading)))
-      {:seon.call-preparation/key (:seon.call-preparation/key leading)
-       :seon.call-preparation/supplied exact
-       :seon.call-preparation/omitted derived})))
-
 (defn- resolve-count
   "One supplied-argument count's preparation, or its refusal.
 
-  A hand-declared arity always wins: a call whose count matches one
-  declared arity invokes it unchanged, and only its argument-map entries
-  are filled. Each fixed arity derives AT MOST ONE shorter shape — the
-  arity minus ALL its suppliable slots (ruling 2's all-or-nothing model,
-  superseding the r2 draft's omitted-subset combinatorics). When a
-  declared arity and a derived shape land on the same count, the leading
-  slot's own value schema decides at call time; when two derived shapes
-  land on one count, the plan refuses rather than guessing by arity
-  order."
-  [exact derived exact-leading-key]
+  A declared arity always wins: a call whose count matches one declared
+  arity invokes it unchanged, and only its argument-map entries are filled;
+  an argument outside that arity's contract is refused by the contract, never
+  reinterpreted as a shorter shape. Each fixed arity derives AT MOST ONE
+  shorter shape — the arity minus ALL its suppliable slots (ruling 2's
+  all-or-nothing model). When two derived shapes land on one count, the plan
+  refuses rather than guessing by arity order."
+  [exact derived]
   (cond
     (> (count exact) 1)
     {:seon.call-preparation/ambiguous? true
      :seon.call-preparation/candidates (candidate-indexes exact)}
-
-    (and (= 1 (count exact)) (= 1 (count derived)))
-    (if-let [dispatch (dispatchable (first exact) (first derived) exact-leading-key)]
-      {:seon.call-preparation/ambiguous? false
-       :seon.call-preparation/dispatch dispatch}
-      (first exact))
 
     (= 1 (count exact)) (first exact)
 
@@ -659,14 +623,6 @@
                                (:seon.call-preparation/entries arity)}))
                     {}
                     fixed)
-            ;; The supplied-default key of each declared arity's first
-            ;; argument, when that argument is a suppliable slot.
-            exact-leading-by-count
-            (into {} (keep (fn [arity]
-                             (when-let [slot (first (filter #(zero? (long (:seon.fn.argument/index %)))
-                                                            (:seon.call-preparation/slots arity)))]
-                               [(:seon.fn.arity/argument-count arity) (:seon.call-preparation/key slot)])))
-                  fixed)
             ;; ONE derived shape per fixed arity: the arity minus ALL its
             ;; suppliable slots. No middle-omission combinatorics — a
             ;; Partial omissions are decided from the actual argument values
@@ -693,8 +649,7 @@
                           (when-let [answer
                                      (resolve-count
                                       (get exact-by-count supplied)
-                                      (get derived-by-count supplied)
-                                      (get exact-leading-by-count supplied))]
+                                      (get derived-by-count supplied))]
                             [supplied answer])))
                   (into (set (keys exact-by-count))
                         (keys derived-by-count)))
@@ -899,21 +854,6 @@
 ;;; The consumer seam
 ;;; ---------------------------------------------------------------------------
 
-(defn- decided
-  "Resolve a predicate dispatch against the call's actual first argument.
-
-  Ruling 2's disambiguation, evaluated at call time because it depends on
-  a value: the leading omitted slot's OWN declared value schema decides
-  whether the caller supplied that value or wrote the shorter shape."
-  [current answer arguments]
-  (if-let [dispatch (:seon.call-preparation/dispatch answer)]
-    (let [valid? (get (:seon.call-preparation/validators current)
-                      (:seon.call-preparation/key dispatch))]
-      (if (and valid? (valid? (nth arguments 0 nil)))
-        (:seon.call-preparation/supplied dispatch)
-        (:seon.call-preparation/omitted dispatch)))
-    answer))
-
 (defn- partial-insertions
   "Keep at most two paths per [declared position, supplied count].
 
@@ -991,10 +931,8 @@
     arguments
     (let [sym (:seon.fn/sym plan-value)
           supplied (count arguments)
-          answer (or (some-> (get (:seon.call-preparation/by-supplied-count
-                                   plan-value)
-                                  supplied)
-                             (as-> found (decided current found arguments)))
+          answer (or (get (:seon.call-preparation/by-supplied-count plan-value)
+                          supplied)
                      (partial-preparation plan-value arguments))]
       (cond
         (nil? answer) arguments
