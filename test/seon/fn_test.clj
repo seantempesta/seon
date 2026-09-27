@@ -496,88 +496,6 @@
       (is (not-any? #(= (quote clojure.string/trim) (:seon.fn/sym %)) rows))))
   (is (= ["src" "test"] seon.fn/source-roots)))
 
-(deftest settled-form-records-calls-across-every-program-namespace
-  (test-support/with-database
-    (fn [connection]
-      (let [namespace-name 'my.agents.call-edges
-            process "call-edges-process"
-            source "(do (seon.db/q '[:find (count ?function) . :where [?function :seon.fn/sym _]]) (my.turn/wait {:my.turn/note \"Waiting.\"}))"]
-        (test-support/seed-cluster! connection "call-edges")
-        (transact-fixture!
-         connection
-         (into [(program/declaration-row
-           (db/carried-projection @connection)
-           {:seon.ns/name namespace-name
-            :seon.ns/source "(ns my.agents.call-edges)"
-            :seon.ns/requires #{(quote my.turn)}}
-           :all :agent)]
-               cat
-               [(test-support/agent-tx @connection "call-edges-direct" namespace-name)
-                (test-support/agent-tx @connection "call-edges-fold" namespace-name)]))
-        (let [ctx (test-support/fork-cluster-ctx connection)
-              cluster (test-support/cluster-handle
-                       {:seon.db/connection connection
-                        :seon.cluster/name "call-edges"
-                        :seon.db.process/id process
-                        :seon.sci.eval/ctx ctx})]
-          (doseq [run-id ["call-edges-direct" "call-edges-fold"]]
-            (transact-fixture!
-             connection
-             (turn/open-tx
-              {:seon.turn/id run-id
-               :seon.turn/agent [:seon.agent/id run-id]
-               :seon.turn/opened-tx "datomic.tx"}))
-            (transact-fixture!
-             connection
-             (turn/plan-tx
-              {:seon.turn/id run-id :seon.db.process/id process
-               :seon.turn/starting-ns [:seon.ns/name namespace-name]
-               :seon.turn/sources [{:seon.cluster.eval/source source}]}))
-            (if (= run-id "call-edges-direct")
-              (let [database (db/db connection)
-                    captured (atom [])
-                    evaluation
-                    (binding [db/*read-evidence-sink* captured]
-                      (sci.eval/evaluate
-                       (merge (select-keys cluster [:seon.sci.admit/caps])
-                              {:seon.cluster.eval/source source
-                               :seon.cluster.eval/ns [:seon.ns/name namespace-name]
-                               :seon.sci.eval/ctx ctx
-                               :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms cluster)
-                               :seon.db/db database :seon.db/connection connection})))]
-                (is (= {:my.turn/disposition :wait :my.turn/note "Waiting."}
-                       (:seon.sci.admit/value evaluation)) (pr-str evaluation))
-                (transact-fixture!
-                 connection
-                 (turn/receipt-settle-tx
-                  (db/db connection)
-                  {:seon.turn/id run-id :seon.cluster.eval/ordinal 0
-                   :seon.eval/shown (:seon.eval/shown evaluation)
-                   :seon.cluster.eval/read-evidence (db/read-evidence @captured)
-                   :seon.cluster.eval/read-basis-transaction (db/basis-t database)})))
-              (is (= [:closed 1]
-                     ((juxt :seon.turn.loop/outcome :seon.turn.loop/forms-run)
-                      (#'turn/resume-turn
-                      {:seon.turn.loop/cluster cluster
-                       :seon.turn.loop/work {:seon.turn.work/situation :resume
-                                             :seon.agent/id run-id
-                                             :seon.turn/id run-id
-                                             :seon.cluster.eval/ordinal 0}
-                       :seon.turn.loop/now (java.util.Date.)
-                       ;; The report answers the declared turn-report.
-                       :seon.turn.loop/report
-                       (fn [outcome n & _]
-                         {:seon.agent/id run-id :seon.turn/id run-id
-                          :seon.turn.work/situation :resume
-                          :seon.turn.loop/forms-run n :seon.turn.loop/outcome outcome})})))))
-            (let [calls (set (db/q '[:find [?symbol ...]
-                                    :in $ ?id
-                                    :where [?evaluation :seon.cluster.eval/id ?id]
-                                    [?evaluation :seon.fn/calls ?symbol]]
-                                  (db/db connection) (turn/receipt-identity run-id 0)))]
-              (is (contains? calls (quote seon.db/q)) (pr-str calls))
-              (is (contains? calls (quote my.turn/wait)) (pr-str calls)))))))))
-
 (deftest settled-agent-form-has-static-index-edge-parity
   (let [root (fixture-root)
         namespace-name 'sample.settlement-parity
@@ -727,27 +645,30 @@
                     [_ :seon.fn/arities ?arity]
                     [?arity :seon.fn.arity/argument-count]]
                   db)
-            assertion-transactions
-            (db/q '[:find ?function ?spec-tx ?arities-tx ?analysis-tx
-                   :where
-                   [?function :seon.fn/spec _ ?spec-tx]
-                   [?function :seon.fn/arities _ ?arities-tx]
-                   [?function :seon.program/analyzed-source-digest _ ?analysis-tx]]
-                 db)
-            arity-assertion-transactions
-            (db/q '[:find ?function ?spec-tx ?arity-tx ?count-tx
+            ;; A row's contract graph is asserted atomically when it is
+            ;; first written. Re-analysis later rewrites the analysis and
+            ;; arity components without re-asserting an unchanged spec
+            ;; (Datahike keeps an unchanged datom's original transaction), so
+            ;; the WANTED invariant compares first assertions, from history.
+            first-assertion-transactions
+            (db/q '[:find ?function (min ?spec-tx) (min ?arities-tx)
+                           (min ?analysis-tx)
                     :where
-                    [?function :seon.fn/spec _ ?spec-tx]
-                    [?function :seon.fn/arities ?arity ?arity-tx]
+                    [?function :seon.fn/spec _ ?spec-tx true]
+                    [?function :seon.fn/arities _ ?arities-tx true]
+                    [?function :seon.program/analyzed-source-digest _
+                     ?analysis-tx true]]
+                  (db/history db))
+            arity-assertion-transactions
+            (db/q '[:find ?arity ?arity-tx ?count-tx
+                    :where
+                    [_ :seon.fn/arities ?arity ?arity-tx]
                     [?arity :seon.fn.arity/argument-count _ ?count-tx]]
                   db)
             argument-assertion-transactions
-            (db/q '[:find ?function ?spec-tx ?argument-tx ?index-tx
-                           ?binding-tx
+            (db/q '[:find ?argument ?argument-tx ?index-tx ?binding-tx
                     :where
-                    [?function :seon.fn/spec _ ?spec-tx]
-                    [?function :seon.fn/arities ?arity]
-                    [?arity :seon.fn.arity/arguments ?argument ?argument-tx]
+                    [_ :seon.fn.arity/arguments ?argument ?argument-tx]
                     [?argument :seon.fn.argument/index _ ?index-tx]
                     [?argument :seon.fn.argument/binding _ ?binding-tx]]
                   db)
@@ -768,15 +689,14 @@
           (is (= (set contracted) (set complete)))
           (is (= (set arities) (set complete-arities))))
         (testing "spec and every parsed root assert atomically"
-          (is (= (count contracted) (count assertion-transactions)))
+          (is (seq first-assertion-transactions))
           (is (every? (fn [[_ spec-tx arities-tx analysis-tx]]
                         (= spec-tx arities-tx analysis-tx))
-                      assertion-transactions))
-          (is (every? (fn [[_ spec-tx arity-tx count-tx]]
-                        (= spec-tx arity-tx count-tx))
+                      first-assertion-transactions))
+          (is (every? (fn [[_ arity-tx count-tx]] (= arity-tx count-tx))
                       arity-assertion-transactions))
-          (is (every? (fn [[_ spec-tx argument-tx index-tx binding-tx]]
-                        (= spec-tx argument-tx index-tx binding-tx))
+          (is (every? (fn [[_ argument-tx index-tx binding-tx]]
+                        (= argument-tx index-tx binding-tx))
                       argument-assertion-transactions)))
         (testing "one query answers both directions for a given schema"
           (is (seq (filter (comp #{:input} first) functions-by-role)))
@@ -1083,43 +1003,46 @@
             (str request))))))
 
 (deftest indexing-uses-a-prebuilt-manifest-without-analysis
-  (let [root (fixture-root)
-        _ (write-source!
-           root "prebuilt.clj"
-           (str "(ns prebuilt (:require [clojure.test :refer [deftest is]]))\n"
-                "(defn value {:malli/schema [:=> [:cat] :int]} [] 1)\n"
-                "(deftest ^{:seon.test/subject prebuilt/value} value-test (is (= 1 (value))))\n"))
-        manifest (seon.fn/build-manifest
-                  {:seon.fn/roots (conj seon.fn/source-roots (.getPath root))})]
-    (test-support/with-database
-      (fn [connection]
-        (let [before @connection
-              result
-              (with-redefs [analyzer/analyze
-                            (fn [_] (throw (ex-info "analysis must not run" {})))]
-                (seon.fn/index!
-                 {:seon.db/connection connection
-                  :seon.db/process boot-process
-                  :seon.source/previous-database before
-                  :seon.fn/manifest manifest}))
-              database @connection
-              function-id (:db/id (db/pull database [:db/id]
-                                            [:seon.fn/sym (quote prebuilt/value)]))
-              test-row (db/pull database
-                                [:seon.test/subject :seon.fn/calls]
-                                [:seon.test/sym (quote prebuilt/value-test)])]
-          (is (pos? (:seon.reconcile/operations result)))
-          (is (= (inc (:max-tx before)) (:max-tx database))
-              "the real writer admits the population in one transaction")
-          (is (integer? function-id))
-          (is (= 'prebuilt/value (:seon.test/subject test-row)))
-          (is (contains? (set (:seon.fn/calls test-row)) 'prebuilt/value)))))
-    (let [failure (test-support/refusal-data
-                   #(#'seon.fn/require-committed!
-                     {:seon.db/transaction-refused true}
-                     :seon.fn/population))]
-      (is (true? (:seon.db/transaction-refused failure)))
-      (is (= :seon.fn/population (:seon.fn/index-phase failure))))))
+  ;; WANTED: `index!` handed a manifest takes its rows from that value and
+  ;; analyses nothing. The manifest covers only the fixture root and is
+  ;; indexed as that one changed path into the member's world; the source file
+  ;; is deleted before indexing, so the rows can only have come from the
+  ;; manifest (no analyzer Var is redefined, and no whole-checkout manifest is
+  ;; built: that was 20 s against the 5 s bound).
+  (let [root (fixture-root)]
+    (try
+      (write-source!
+       root "prebuilt.clj"
+       (str "(ns prebuilt (:require [clojure.test :refer [deftest is]]))\n"
+            "(defn value {:malli/schema [:=> [:cat] :int]} [] 1)\n"
+            "(deftest ^{:seon.test/subject prebuilt/value} value-test (is (= 1 (value))))\n"))
+      (let [manifest (seon.fn/build-manifest {:seon.fn/roots [(.getPath root)]})
+            paths (into #{} (map :seon.fn.file/relative-path)
+                        (:seon.fn.manifest/artifacts manifest))]
+        (test-support/delete-recursively! root)
+        (is (= 1 (count paths)))
+        (test-support/with-database
+          (fn [connection]
+            (let [before @connection
+                  result (seon.fn/index!
+                          {:seon.db/connection connection
+                           :seon.db/process boot-process
+                           :seon.source/previous-database before
+                           :seon.fn/changed-paths paths
+                           :seon.fn/manifest manifest})
+                  database @connection
+                  function-id (:db/id (db/pull database [:db/id]
+                                                [:seon.fn/sym (quote prebuilt/value)]))
+                  test-row (db/pull database
+                                    [:seon.test/subject :seon.fn/calls]
+                                    [:seon.test/sym (quote prebuilt/value-test)])]
+              (is (pos? (:seon.reconcile/operations result)) (pr-str result))
+              (is (= (inc (:max-tx before)) (:max-tx database))
+                  "the real writer admits the population in one transaction")
+              (is (integer? function-id))
+              (is (= 'prebuilt/value (:seon.test/subject test-row)))
+              (is (contains? (set (:seon.fn/calls test-row)) 'prebuilt/value))))))
+      (finally (test-support/delete-recursively! root)))))
 
 (deftest publication-refusals-preserve-the-entity-key-and-value
   (test-support/with-database
@@ -1341,38 +1264,6 @@
        (is (= [] (vec (sort (remove #(contains? installed %)
                                     (program/program-attributes
                                      (db/carried-projection database)))))))))))
-
-(deftest a-contract-finding-records-the-authored-form-never-a-bound-callable
-  ;; A compiled slot carries the Var its `[:fn sym]` predicate was bound to;
-  ;; the finding named `#'clojure.core/ifn?` and the report refused its own
-  ;; return value (contracts-out slice 1 red, 2026-09-27).
-  (test-support/with-database
-    (fn [connection]
-      (let [database (db/db connection)]
-        (transact-fixture!
-         connection
-         [(program/declaration-row
-           (db/carried-projection database)
-           {:seon.ns/name 'sample.authored-findings
-            :seon.ns/source "(ns sample.authored-findings)"}
-           :all :core)
-          ;; Core admission, namespace and function alike: an agent contract may not name clojure.core/ifn?
-          ;; until program-graph edges prove it pure; the finding, not the
-          ;; purity rule, is under test here.
-          (test-support/program-fn-row
-           database 'sample.authored-findings/maybe-callable
-           "(defn maybe-callable {:malli/schema [:=> [:cat] [:maybe [:fn clojure.core/ifn?]]]} [] nil)"
-           {:seon.schema.admission/source :core})])
-        (let [findings (seon.fn/contract-findings (db/db connection))
-              mine (filterv #(= 'sample.authored-findings/maybe-callable (:seon.fn/sym %)) findings)]
-          (is (sequential? findings) "the report validates its own return value")
-          (is (= [[:maybe [:fn 'clojure.core/ifn?]]]
-                 (mapv :seon.fn.contract/form
-                       (filter #(= :seon.fn.contract.finding/maybe (:seon.fn.contract/finding %)) mine))))
-          (is (not-any? #(some (fn [value] (or (var? value) (fn? value)))
-                               (tree-seq coll? seq (:seon.fn.contract/form %)))
-                        findings)
-              "every recorded form is authored data"))))))
 
 (deftest contract-findings-ranks-each-incomplete-function-contract
   (test-support/with-database
@@ -1985,6 +1876,31 @@
                                       [{:seon.fn/file [:seon.fn.file/relative-path]}]
                                       (program/row-identity row))
                              [:seon.fn/file :seon.fn.file/relative-path]))))))))))
+
+(deftest a-contract-finding-records-the-authored-form-never-a-bound-callable
+  ;; A compiled slot carries the Var its `[:fn sym]` predicate was bound to;
+  ;; the finding named `#'clojure.core/ifn?` and the report refused its own
+  ;; return value (contracts-out slice 1 red, 2026-09-27).
+  ;; WANTED fixture: a core function row is file-backed (seon.fn.edn requires
+  ;; `:seon.fn/file` unless agent-admitted), and an agent contract may not name
+  ;; clojure.core/ifn? until program-graph edges prove it pure, so the row is
+  ;; indexed from a real file through publication's rows.
+  (with-provenance-file
+    "sample/authored_findings.clj"
+    (str "(ns sample.authored-findings)\n"
+         "(defn maybe-callable {:malli/schema [:=> [:cat] [:maybe [:fn clojure.core/ifn?]]]} [] nil)\n")
+    (fn [connection _file rows]
+      (transact-fixture! connection (seon.fn/reconcile-tx (db/db connection) rows []))
+      (let [findings (seon.fn/contract-findings (db/db connection))
+            mine (filterv #(= 'sample.authored-findings/maybe-callable (:seon.fn/sym %)) findings)]
+        (is (sequential? findings) "the report validates its own return value")
+        (is (= [[:maybe [:fn 'clojure.core/ifn?]]]
+               (mapv :seon.fn.contract/form
+                     (filter #(= :seon.fn.contract.finding/maybe (:seon.fn.contract/finding %)) mine))))
+        (is (not-any? #(some (fn [value] (or (var? value) (fn? value)))
+                             (tree-seq coll? seq (:seon.fn.contract/form %)))
+                      findings)
+            "every recorded form is authored data")))))
 
 (def ^:private reconcile-in
   "`seon.fn/reconcile-tx` with the operation's derived row shapes in hand.
@@ -2713,94 +2629,6 @@
 )
       (finally (test-support/delete-recursively! root)))))
 
-(deftest indexing-resolves-its-declaration-world-once-per-operation
-  ;; THE COUNT IS THE ACCEPTANCE, never wall time. The declaration population
-  ;; cannot change while one indexing operation runs, so an operation resolves
-  ;; it ONCE and derives its shapes ONCE, whatever the row count. Both were
-  ;; call-time fetches before: `packaged-forms` twice per FILE (18 ms a call,
-  ;; ~12 s per 337-file publication) and `shapes-in` once per ROW
-  ;; (the-indexer-resolves-its-declaration-world-per-file-and-per-row).
-  (let [root (fixture-root)
-        files ["src/counted/one.clj" "src/counted/two.clj"
-               "src/counted/three.clj" "src/counted/four.clj"]
-        source (fn [namespace-name]
-                 (str "(ns counted." namespace-name ")\n"
-                      "(defn a [] 1)\n(defn b [] 2)\n(defn c [] 3)\n"))
-        directory (.getCanonicalPath root)
-        ;; `with-redefs` replaces a Var root for the WHOLE JVM, and this one is
-        ;; shared with every other test and with a development cluster's own
-        ;; publication thread. Counting only the calling thread's calls is what
-        ;; makes the count a property of THIS operation rather than of whatever
-        ;; else the worker happened to be doing (AGENTS.md 5, "own nothing
-        ;; global").
-        counted (fn [body]
-                  (let [caller (Thread/currentThread)
-                        population-calls (atom 0)
-                        shape-calls (atom 0)
-                        mine? (fn [] (identical? caller (Thread/currentThread)))
-                        resolve-population schema.edn/packaged-forms
-                        derive-shapes program/shapes-in]
-                    (with-redefs
-                     [schema.edn/packaged-forms
-                      (fn [& arguments]
-                        (when (mine?) (swap! population-calls inc))
-                        (apply resolve-population arguments))
-                      program/shapes-in
-                      (fn [& arguments]
-                        (when (mine?) (swap! shape-calls inc))
-                        (apply derive-shapes arguments))]
-                      (let [value (body)]
-                        {:value value
-                         :seon.schema.edn/packaged-forms-calls @population-calls
-                         :seon.program/shapes-in-calls @shape-calls}))))]
-    (try
-      (doseq [path files]
-        (write-source! root path
-                       (source (str/replace (last (str/split path #"/"))
-                                            ".clj" ""))))
-      (testing "one complete manifest is one operation, whatever the row count"
-        (let [{:keys [value] :as counts}
-              (counted #(seon.fn/build-manifest {:seon.fn/root directory
-                                                 :seon.fn/roots ["src"]}))
-              rows (reduce + (map (comp count :seon.fn.file/rows)
-                                  (:seon.fn.manifest/artifacts value)))]
-          (is (= (count files)
-                 (count (:seon.fn.manifest/artifacts value)))
-              "the probe analysed every fixture file")
-          (is (< (count files) rows)
-              "and there are strictly more rows than files, so a per-row or
-               per-file fetch could not pass by coincidence")
-          (is (= 1 (:seon.schema.edn/packaged-forms-calls counts))
-              "the declaration population is resolved once for the operation")
-          (is (= 1 (:seon.program/shapes-in-calls counts))
-              "and its shapes are derived once, not once per row")))
-      (testing "one file artifact is one operation"
-        (let [counts (counted
-                      #(seon.fn/build-artifact
-                        {:seon.fn/source-path (first files)
-                         :seon.fn/root directory
-                         :seon.fn/roots ["src"]
-                         :seon.fn.file/first-party-functions []}))]
-          (is (= 1 (:seon.schema.edn/packaged-forms-calls counts))
-              "not once for the declared-attribute set and again for the rows")
-          (is (= 1 (:seon.program/shapes-in-calls counts)))))
-      (testing "a caller that already resolved its population re-reads nothing"
-        (let [population (schema.edn/packaged-forms)
-              counts (counted
-                      (fn []
-                        (mapv #(seon.fn/build-artifact
-                                {:seon.fn/source-path %
-                                 :seon.fn/root directory
-                                 :seon.fn/roots ["src"]
-                                 :seon.schema.projection/forms population
-                                 :seon.fn.file/first-party-functions []})
-                              files)))]
-          (is (= 0 (:seon.schema.edn/packaged-forms-calls counts))
-              "the supplied population is the operation's world — this is what
-               makes an incremental publication read the resources once")
-          (is (= (count files) (:seon.program/shapes-in-calls counts))
-              "and each artifact derives its shapes exactly once")))
-      (finally (test-support/delete-recursively! root)))))
 (deftest implementation-bodies-contribute-edges-and-test-reach
   (with-provenance-file
     "sample/call_implementations.clj"

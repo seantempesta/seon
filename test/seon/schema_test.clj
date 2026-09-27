@@ -1276,8 +1276,9 @@
        (is (seq (seon.db/q
                  '[:find [?caller-symbol ...]
                    :where
-                   [?callee :seon.fn/sym seon.schema/predicate-functions-in]
-                   [?caller :seon.fn/calls ?callee]
+                   ;; Call edges are symbols (`:seon.program/edge-symbol`,
+                   ;; 0e8f7d323), never refs to a callee entity.
+                   [?caller :seon.fn/calls seon.schema/predicate-functions-in]
                    [?caller :seon.fn/sym ?caller-symbol]]
                  @connection))
            "the derivation has callers: an empty answer would be the check
