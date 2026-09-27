@@ -1,0 +1,4 @@
+[#:seon.task{:name "unresolved-sender-logs-unbounded"
+             :kind :function
+             :intent "Rendering a message whose sender lookup ref does not resolve ([:seon.agent/id \"nobody\"]) makes Datahike log an unbounded :error line on every render. AGENTS: a log line printing a value outside the floor is a defect. Resolve the sender as data (a typed unknown) without the logging lookup, or bound the line (fix-html-views 52fb24e1c)."
+             :evidence #{"docs/research/agent-platform/red-triage-3-2026-09-27.md"}}]
