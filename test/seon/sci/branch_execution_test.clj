@@ -6,7 +6,6 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.fn :as functions]
-            [seon.id :as id]
             [seon.schema :as schema]
             [seon.sci.eval :as eval]
             [seon.sci.eval-test]
@@ -40,19 +39,43 @@
     row))
 
 (defn- on-branch
-  "Use the canonical fixture's store and one captured commit."
-  {:malli/schema [:=> [:cat :seon.db/connection :seon.db/database-value :keyword [:fn ifn?]] :nil]}
-  [connection captured branch body]
+  "Use the canonical fixture's store and one captured commit. The branch's
+  context environment names `cluster-name`: a world holding several clusters
+  names none by itself (`seon.sci.eval/projection-state`, 6db5b2451)."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.db/database-value :seon.boot/cluster-name
+                       :keyword [:fn ifn?]] :nil]}
+  [connection captured cluster-name branch body]
   (d/branch! connection (d/commit-id captured) branch)
   (try
     (let [child (d/connect (assoc (:config captured) :branch branch))]
       (try
         (db/carry-connection-projection-state!
-          child (eval/projection-state @child (db/carried-projection captured)))
+          child (eval/projection-state @child (db/carried-projection captured) cluster-name))
         (db/call-with-custody {} #(body child))
         nil
         (finally (d/release child))))
     (finally (d/delete-branch! connection branch))))
+
+(defn- agent-revision-tx
+  "An agent's change to each stored declaration in `symbols`: its doc revised,
+  admitted as `:agent` and digested by the canonical `support/revision`. Only an
+  agent-authored row overrides the loaded program (`overridden-row?`, 8cf62cd13);
+  the writer refuses a forged digest (79b6d9abd)."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :qualified-symbol]]
+                  :seon.store/transaction-data]}
+  [database symbols]
+  (mapv #(support/revision database [:seon.fn/sym %]
+                           {:seon.fn/doc (str "Changed " %) :seon.schema.admission/source :agent})
+        symbols))
+
+(defn- refusal-of
+  "The data of the refusal calling `sym` in `ctx` throws, else nil."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :qualified-symbol] [:maybe :map]]}
+  [ctx sym]
+  (try (sci/eval-string* ctx (str "(" sym ")")) nil
+       (catch Exception failure
+         (some #(when (:seon.sci.eval/refused-function (ex-data %)) (ex-data %))
+               (take-while some? (iterate ex-cause failure))))))
 
 (defn- measured
   {:malli/schema [:=> [:cat [:fn ifn?]] :map]}
@@ -83,9 +106,9 @@
        (is (some? (:seon.program/definition-digest leaf-row)))
        (is (identical? @(find-var caller) @(sci/resolve live caller))
            "the unchanged caller begins as the actual compiled JVM root")
-       (on-branch connection captured :realities-proof-a
+       (on-branch connection captured "realities-proof" :realities-proof-a
         (fn [a]
-          (on-branch connection captured :realities-proof-b
+          (on-branch connection captured "realities-proof" :realities-proof-b
            (fn [b]
              (let [a-ctx (eval/fork-cluster-ctx live (db/db a) a)
                    b-ctx (eval/fork-cluster-ctx live (db/db b) b)
@@ -151,14 +174,18 @@
    (fn [connection]
      (db/call-with-custody {:seon.db/connection connection}
       (fn []
-       (let [live (support/fork-cluster-ctx connection)
+       ;; A test world inherits no agent (fe5dcc072): the note's agent is
+       ;; created before acquisition, so its namespace row is in the program.
+       (let [_ (support/transacted! connection
+                 (support/agent-tx (db/db connection) "program-revision-note-holder"))
+             live (support/fork-cluster-ctx connection)
              before (db/db connection)
              acquisition (eval/acquire! {:seon.sci.eval/ctx live :seon.db/db before})
              environment @(:env live)
-             ;; A declared data-partition row: a note the fixture's root agent holds.
+             ;; A declared data-partition row: a note the test's agent holds.
              _ (support/transacted! connection
                  [{:my.note/id "program-revision-probe"
-                   :my.note/agent [:seon.agent/id "root"]
+                   :my.note/agent [:seon.agent/id "program-revision-note-holder"]
                    :my.note/content "A commit that writes no program row."}])
              data (db/db connection)
              reused (measured #(eval/acquire! {:seon.sci.eval/ctx live :seon.db/db data}))]
@@ -222,11 +249,20 @@
                      'clojure.core/deftype 'clojure.core/defrecord}
                    (:seon.fn/defined-by indexed)))
              "the form head alone would not have refused it")
+         ;; WANTED since be96a64ba: a row acquired from the database installs a
+         ;; root that refuses by name when called (only an agent's evaluation
+         ;; keeps the returned refusal), so the rest of the program still runs.
          (let [row (declared! connection subject
                      "(defn ^{:malli/schema [:=> [:cat :string] :string]} bounded-text [text] text)")
-               refused (eval/install-row! {:seon.sci.eval/ctx live
-                                           :seon.db/db (db/db connection)
-                                           :seon.program/row row})]
+               installed (eval/install-row! {:seon.sci.eval/ctx live
+                                             :seon.db/db (db/db connection)
+                                             :seon.program/row row})
+               refused (refusal-of live subject)]
+           (is (= :agent (:seon.schema.admission/source
+                          (db/pull (db/db connection) [:seon.schema.admission/source] [:seon.fn/sym subject])))
+               "the declaration writer admits the override as the agent's own change")
+           (is (= :unavailable (:seon.sci.eval/load-state installed)) (pr-str installed))
+           (is (string? (get-in installed [:seon.sci.eval/load-result :seon.error/message])))
            (is (= subject (:seon.sci.eval/refused-function refused)))
            (is ((schema/projection-validator
                  (db/carried-projection (db/db connection))
@@ -271,7 +307,9 @@
      :interpreted (set (:seon.sci.eval/interpreted snapshot))
      :interpreted-count (:seon.sci.eval/interpreted-count acquired)
      :refused (into #{} (map :seon.sci.eval/refused-function)
-                    (:seon.test/acquisition-refusals acquired))}))
+                    (:seon.test/acquisition-refusals acquired))
+     :unavailable (into #{} (keep #(when (= :unavailable (:seon.sci.eval/load-state %)) (:seon.fn/sym %)))
+                        (:seon.sci.eval/load-results acquired))}))
 
 (deftest ^{:seon.test/long "Four complete SCI acquisitions of the canonical fixture program (one per loaded commit and branch) plus two fixture writes and two branches."
            :seon.test/long-ms 12000}
@@ -281,6 +319,7 @@
      (db/call-with-custody {:seon.db/connection connection}
       (fn []
        (let [subject 'seon.render.value/bounded-text
+             cluster-name (:seon.cluster/name (support/execution-handle connection))
              before (db/db connection)
              record-entity (db/q '[:find ?e . :where [?e :seon.source/commit-id]] before)
              ctx (eval/cluster-ctx before connection
@@ -288,21 +327,24 @@
                                    {:seon.sci.eval/loaded-connection connection})
              first-acquire (measured #(eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db before}))
              baseline (acquisition-view ctx)
-             _ (support/transacted! connection
-                 [[:db/add [:seon.fn/sym subject] :seon.program/definition-digest
-                   (id/digest 64 ["m9-adoption" (str subject)])]])
+             _ (support/transacted! connection (agent-revision-tx before [subject]))
              edited (db/db connection)
              edited-commit (db/commit-id edited)
              edited-acquire (measured #(eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db edited}))
              unadopted (acquisition-view ctx)
+             unadopted-call (refusal-of ctx subject)
              _ (support/transacted! connection
                  [[:db/add record-entity :seon.source/commit-id edited-commit]])
              adopted-db (db/db connection)]
          (is (true? (:seon.fn/host-bound? (db/pull before '[*] [:seon.fn/sym subject])))
              "the subject is a compiled declaration SCI cannot interpret")
          (is (= #{} (:refused baseline)) "the fixture's own program interprets nothing it refuses")
-         (is (contains? (:refused unadopted) subject)
-             "before adoption the changed host-bound row differs from the loaded program and refuses by name")
+         ;; WANTED since be96a64ba: a host-bound row acquired from the database
+         ;; refuses by name when called, never the acquisition.
+         (is (= #{} (:refused unadopted)) "the changed row does not refuse the acquisition")
+         (is (contains? (:unavailable unadopted) subject))
+         (is (= subject (:seon.sci.eval/refused-function unadopted-call))
+             "before adoption the agent's changed host-bound row differs from the loaded program and refuses by name when called")
          (is (not (eval/acquired-database? ctx adopted-db))
              "a moved adoption record alone makes the acquisition stale")
          (let [adopted-acquire (measured #(eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db adopted-db}))
@@ -319,7 +361,7 @@
                "the adopted row runs compiled")
            (is (<= (:interpreted-count adopted) (:interpreted-count baseline)))
            (is (= #{} (:refused adopted)) "the adopted row is compiled, so nothing refuses")
-           (on-branch connection adopted-db :m9-adoption-isolated
+           (on-branch connection adopted-db cluster-name :m9-adoption-isolated
             (fn [child]
               (let [{fork :value ms :ms}
                     (measured #(eval/fork-cluster-ctx
@@ -329,17 +371,21 @@
                 (is (= (select-keys adopted [:loaded :interpreted :interpreted-count :refused])
                        (acquisition-view fork))
                     "an isolated branch at the head compares against the cluster's record"))))
-           (on-branch connection before :m9-adoption-stable
+           (on-branch connection before cluster-name :m9-adoption-stable
             (fn [child]
               (let [{fork :value ms :ms}
                     (measured #(eval/fork-cluster-ctx
                                 ctx (db/db child) child
                                 (eval/projection-state (db/db child) (db/carried-projection (db/db child)))))]
                 (println "M9-ADOPTION-STABLE-MS" ms)
+                ;; WANTED since 8cf62cd13: only an agent-authored row overrides.
+                ;; A branch opened before the adoption holds the file row the
+                ;; loaded program moved past, so it runs the compiled Var.
                 (let [stable (acquisition-view fork)]
                   (is (= edited-commit (:loaded stable)))
-                  (is (contains? (:refused stable) subject)
-                      "a branch opened before the adoption keeps its own row, which refuses by name"))))))))))))
+                  (is (not (contains? (:interpreted stable) subject)))
+                  (is (= #{} (:refused stable))
+                      "a branch behind the adoption is not the branch's own change and refuses nothing"))))))))))))
 
 (deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program with two changed rows whose closures reach four declarations."
            :seon.test/long-ms 8000}
@@ -357,19 +403,10 @@
              ctx (eval/cluster-ctx before connection
                                    (eval/projection-state before (db/carried-projection before))
                                    {:seon.sci.eval/loaded-connection connection})
-             _ (support/transacted! connection
-                 (mapv (fn [sym]
-                         [:db/add [:seon.fn/sym sym] :seon.program/definition-digest
-                          (id/digest 64 ["unoverridden-host-bound" (str sym)])])
-                       [changed unloaded-changed]))
+             _ (support/transacted! connection (agent-revision-tx before [changed unloaded-changed]))
              edited (db/db connection)
              acquired (measured #(eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db edited}))
-             view (acquisition-view ctx)
-             refusal-of (fn [sym]
-                          (try (sci/eval-string* ctx (str "(" sym ")")) nil
-                               (catch Exception failure
-                                 (some #(:seon.sci.eval/refused-function (ex-data %))
-                                       (take-while some? (iterate ex-cause failure))))))]
+             view (acquisition-view ctx)]
          (println "UNOVERRIDDEN-HOST-BOUND-MS" (:ms acquired) (:interpreted-count view))
          (is (false? (host-bound? changed)) "the changed helper interprets")
          (is (host-bound? caller) "the caller's proxy is host-bound")
@@ -380,7 +417,7 @@
          (is (every? (:interpreted view) [changed caller unloaded-changed unloaded])
              "each changed row's closure reaches its host-bound caller")
          (is (= #{} (:refused view)) "no host-bound declaration without a compiled Var to override refuses the acquisition")
-         (is (= caller (refusal-of caller)) "an unchanged caller of a changed definition refuses by name when called")))))))
+         (is (= caller (:seon.sci.eval/refused-function (refusal-of ctx caller))) "an unchanged caller of a changed definition refuses by name when called")))))))
 
 (deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program interpreting the reverse closure (77 declarations) of one changed hiccup helper; measured 1,426 ms."
            :seon.test/long-ms 12000}
@@ -394,9 +431,7 @@
              ctx (eval/cluster-ctx before connection
                                    (eval/projection-state before (db/carried-projection before))
                                    {:seon.sci.eval/loaded-connection connection})
-             _ (support/transacted! connection
-                 [[:db/add [:seon.fn/sym changed] :seon.program/definition-digest
-                   (id/digest 64 ["caller-host-bindings" (str changed)])]])
+             _ (support/transacted! connection (agent-revision-tx before [changed]))
              acquired (measured #(eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)}))
              view (acquisition-view ctx)
              ;; derive-page reads the private def stream-strip-id, serve! and
@@ -439,11 +474,8 @@
              ctx (eval/cluster-ctx before connection
                                    (eval/projection-state before (db/carried-projection before))
                                    {:seon.sci.eval/loaded-connection connection})
-             ;; A digested change, so each row differs from its compiled Var.
-             _ (support/transacted! connection
-                 (mapv (fn [sym]
-                         (support/revision before [:seon.fn/sym sym] {:seon.fn/doc (str "Changed " sym)}))
-                       changed))
+             ;; The agent's digested change, so each row overrides its compiled Var.
+             _ (support/transacted! connection (agent-revision-tx before changed))
              acquired (measured #(eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)}))]
          (is (= (zipmap changed (repeat :interpreted))
                 (into {} (keep (fn [{sym :seon.fn/sym state :seon.sci.eval/load-state}]
