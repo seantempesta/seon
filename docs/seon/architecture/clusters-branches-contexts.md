@@ -7,24 +7,24 @@ status: ruled 2026-09-22 (owner); implementation in the agent-platform plan, tra
 
 Ruled by the owner on 2026-09-22 in dialogue with the orchestrator. The plan
 ([README §4 row 1.3d, §7](../../prds/agent-platform/plan/README.md)) implements it;
-the three data packs of that day ([program rows](../../research/agent-platform/program-rows-data-pack-2026-09-22.md),
-[host-bound rows](../../research/agent-platform/host-bound-rows-data-pack-2026-09-22.md),
+the three data packs of that day ([program entities](../../research/agent-platform/program-rows-data-pack-2026-09-22.md),
+[host-bound entities](../../research/agent-platform/host-bound-rows-data-pack-2026-09-22.md),
 [merge and write-back](../../research/agent-platform/merge-and-write-back-data-pack-2026-09-22.md))
 supply the facts each operation reads.
 
 ## Vocabulary — Datahike's and Clojure's words
 
 - **Cluster**: a named Datahike branch plus the agents working on it. Its head is the
-  shared context; the cluster row holds the pointer we advance.
+  shared context; the cluster entity holds the pointer we advance.
 - **Branch**: a private line of commits off a cluster's head (`d/branch!`): a roster
   write, no copy, no environment. Not a git worktree; git worktrees are not used.
-- **Context**: the SCI world acquired from a database value's program rows.
-- **Program rows**: functions, tests, schemas, namespaces, render pairs, contracts,
+- **Context**: the SCI world acquired from a database value's program entities.
+- **Program entities**: functions, tests, schemas, namespaces, render pairs, contracts,
   their analysis facts and the test results tied to them (runs and members keyed by the
   definition digests they exercised; owner 2026-09-23) — the shared thing that survives.
   Everything else (turns, evaluations, messages, errors, tasks, evaluation results) is
   data: disposable, never merged.
-- **Merge**: program rows from a branch onto a cluster's head, through the gate.
+- **Merge**: program entities from a branch onto a cluster's head, through the gate.
 - Retired words: "reload" as a system to start, "refork", "environment", "worktree".
   A reload is `require :reload` of changed namespaces and their dependents, nothing more.
 
@@ -36,12 +36,12 @@ supply the facts each operation reads.
    acquisition reads it) and the LOADED NAMESPACES (`require`'s output — the compiled
    functions that execute). Default's data can be dropped for a fresh default. It is the
    one reality that runs compiled: a JVM holds one set of Vars.
-2. **Every other reality interprets its differences.** A branch whose program rows
-   differ from the compiled head interprets the overridden rows and their affected
+2. **Every other reality interprets its differences.** A branch whose program entities
+   differ from the compiled head interprets the overridden entities and their affected
    callers in its own context (B2 §2a); everything else binds the compiled Var.
-3. **Host-bound rows change only through the files.** A declaration SCI cannot
+3. **Host-bound entities change only through the files.** A declaration SCI cannot
    interpret (host-defining forms: `deftype`, `defrecord`, `defprotocol`,
-   `definterface`, `gen-class`, `proxy`, `extend` onto host classes, and rows that
+   `definterface`, `gen-class`, `proxy`, `extend` onto host classes, and entities that
    construct such types) is a computed per-declaration fact from analysis, never a
    namespace roster. An override of one is refused by name.
 4. **An agent's mode is one attribute: its branch.** Live: the attribute points at
@@ -57,7 +57,7 @@ supply the facts each operation reads.
 6. **A test is an isolated agent that lives for one body**: branch off a captured
    commit, fork the context onto it, run under custody, unlink the branch. The same
    three functions as an isolated agent; the runner is never a second mechanism.
-7. **Merge is program rows only, git-like.** Non-conflicting rows land on an
+7. **Merge is program entities only, git-like.** Non-conflicting entities land on an
    intermediate branch; conflicts stay for the agent to fix there, so the problem
    shrinks; the combined program is tested in a context forked from that branch. The
    gate is green reaching tests plus contracts; a named accept (root or the owner)

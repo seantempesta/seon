@@ -16,12 +16,12 @@ The replacement uses one acquired base SCI
 `ctx` per cluster, persistent per-agent contexts receiving base diffs,
 host-Var instrumentation under the
 core-error dial, and
-interpreted-function contract wrapping at the one program row installation
+interpreted-function contract wrapping at the one program entity installation
 seam. The current owners are `src/seon/instrument.clj` and
 `src/seon/sci/eval.clj`.
 
 Re-evaluating a host `defn` requires `seon.instrument/apply!` because Malli's
-wrapper is replaced with the Var root. Runtime program row publication wraps
+wrapper is replaced with the Var root. Runtime program entity publication wraps
 interpreted functions from their committed contract as it installs them into
 the acquired base cluster `ctx`; agent contexts receive that base diff.
 The [turn PRD §14](../../../prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md)

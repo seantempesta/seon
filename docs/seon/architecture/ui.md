@@ -75,7 +75,7 @@ many-to-many, independent of an agent's current REPL namespace. Assignment comes
 from tasks, so responsibility does not imply a separate dispatcher.
 
 An agent view exposes its record, tasks, messages and ordered evaluations through
-the same facts. No fixed-size pull is claimed to contain every related row.
+the same facts. No fixed-size pull is claimed to contain every related entity.
 Task completion, unavailable test evidence, budget exhaustion and stopped/failed
 graphs are visible states, not disappearing sections interpreted as success.
 Error presentation composes the base and domain schema blocks, preserving declared

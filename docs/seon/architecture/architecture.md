@@ -86,7 +86,7 @@ imports participate. Location, authorship, branch identity and unrelated file by
 do not. Transitive dependencies and external input evidence remain separate.
 A1, B2, B4, C1 and D1 consume this exact identity, without their own digest recipe.
 
-The digest of the latest database row is not evidence of the callable installed in
+The digest of the latest database entity is not evidence of the callable installed in
 a JVM or SCI context. Installation carries the identity of the actual callable
 and its contract/dependencies. Missing identity is unknown and cannot justify
 reuse. Namespace and macro changes can alter a declaration's meaning without
@@ -137,7 +137,7 @@ on raw, materialized, temporal and forked values before reconstruction fallbacks
 are removed. Temporal values use their origin's schema interpretation.
 
 Compilation counts alone do not establish incremental cost. Copying a registry,
-walking all contracts or reconstructing whole rows can still scale with the
+walking all contracts or reconstructing whole entities can still scale with the
 program. Malli `fast-registry` copies into a HashMap; retaining compiled nodes does
 not make that copy free. Measure visited, copied and compiled work separately.
 
@@ -288,7 +288,7 @@ Branch creation alone is not this lifecycle proof.
 
 An explicit merge captures basis B, candidate C and shared H. Canonical net changes
 compare B1 definition digests. Equal final content is unchanged; competing changes
-to one identity become a structural conflict task assigned to root. Complete rows
+to one identity become a structural conflict task assigned to root. Complete entities
 normalize through the program owner; branch-local numeric ids cannot cross as if
 they were identities.
 

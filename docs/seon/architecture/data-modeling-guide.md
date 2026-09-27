@@ -65,14 +65,14 @@ reason to silently call the entity open or delete the only terminal observation.
 A function with surviving named referrers cannot be retracted until those referrers
 are repaired in the same transaction's final database. Call/reference values remain
 readable after target deletion, enabling a complete refusal and unresolved-name
-query. Never mint a target row to hide an unresolved name. Fresh publication with
+query. Never mint a target entity to hide an unresolved name. Fresh publication with
 no previous identity reports unresolved names; removing a prior identity has no
 special exemption. Include changed callers/tests as well as changed callees in
 validation so a new edge cannot escape merely because its target did not change.
 
 **Existing implementation:** calls/references and test reach already use symbol
 values; they are not pending ref-to-value migrations. Canonical arities store no
-schema rows: contract schemas are read from the projection's compiled Malli
+schema entities: contract schemas are read from the projection's compiled Malli
 registry (`seon.call-preparation/contract-arities`); the old AST family is not a
 current model.
 **Grounding:** `reference-code/datahike/src/datahike/db/transaction.cljc:440-484`
@@ -99,7 +99,7 @@ Document the selected behavior on each relationship. There is no separate deleti
 policy property. Required presence is not a native foreign-key constraint: Datahike
 accepts numeric refs without proving the target has datoms. A domain requiring a live
 target checks it through the final writer's complete value. Coordinated deletion of
-both entities is legitimate; an empty retracted row need not validate as a survivor.
+both entities is legitimate; an empty retracted entity need not validate as a survivor.
 
 Do not infer health from fewer join results. A dangling ref may disappear from a
 Datalog join or selected pull, return an id-only map under wildcard pull, or yield
@@ -127,10 +127,10 @@ retraction cascades into them. Datahike does not itself enforce exclusive owners
 Seon's writer validates the entire owning value and the relation's declared
 `:seon.db/component-schema`. A child-only edit or unlink finds owners in both before
 and after databases. Cycles, multiple owners, missing children and exhausted node
-bounds refuse. A nonempty identity-less row without an owning root refuses.
+bounds refuse. A nonempty identity-less entity without an owning root refuses.
 
 This complete component validation already exists. It is not a future repair for
-an old inventory of unselected rows. A2 may narrow discovery using indexed facts,
+an old inventory of unselected entities. A2 may narrow discovery using indexed facts,
 but must preserve the whole guarantee, including cascaded/swept changes and attempted
 idempotent writes. Wildcard pull is not a completeness proof; current validation
 builds complete EAVT owning values under the declared bound.
@@ -286,7 +286,7 @@ transacts the result; nothing else writes Datahike schema. Probe (JVM, default,
 | `[:or …]` whose members share one native type | that type (`:122-127`) | e.g. `[:or [:= :a] [:= :b]]` is a keyword |
 | `[:or …]` of mixed or non-scalar members (maps, vectors, symbol-or-string, symbol-or-hiccup) | `:db.type/string` holding canonical EDN (`:128-129`); encoded at the transaction seam (`encode-transaction-in`, `:506-523`) and decoded, validated and canonical-checked on read (`decode-attribute-value-in`, `:559-575`) | A heterogeneous value has no native Datahike type; the codec keeps the logical value whole. Two-keyword many-values are split into `:db/add`s so Datahike does not read them as a lookup ref (`explicit-value-members`, `:440-468`) |
 | `[:map {:seon.db/attributes true} …]` (an entity schema) | no attribute of its own; each entry's attribute is selected for installation (`:229-240`) | The entity schema describes the entity; it stamps no kind. Required entries must be storable (`src/seon/schema/internal.cljc:290-299`) |
-| entity-schema properties: `:seon.program/partition`, `:seon.render/ai`, `:seon.render/html`, `:seon.render/form`, `:seon.render/units`, `:seon.db/component-schema`, … | each qualified property whose own declaration is storable is installed (`:244-249`) and written onto the schema's own entity (identity `:seon.schema/key`) beside `:seon.schema/form` (`storable-properties-in`, `:268-287`; `canonical-schema-rows`, `src/seon/schema.clj:3689-3716`) | The schema declaration is itself an entity, so the program graph can query which schemas are program (`:seon.program/partition :seon.program`, read at `src/seon/program.cljc:50-56`) and which render pair each declares. Readers of the live program read the same properties from the compiled projection (`internal/entity-properties`, `src/seon/schema/internal.cljc:122`) |
+| entity-schema properties: `:seon.program/partition`, `:seon.render/ai`, `:seon.render/html`, `:seon.render/form`, `:seon.render/units`, `:seon.db/component-schema`, … | each qualified property whose own declaration is storable is installed (`:244-249`) and written onto the schema's own entity (identity `:seon.schema/key`) beside `:seon.schema/form` (`storable-properties-in`, `:268-287`; `canonical-schema-entities`, `src/seon/schema.clj:3689-3716`) | The schema declaration is itself an entity, so the program graph can query which schemas are program (`:seon.program/partition :seon.program`, read at `src/seon/program.cljc:50-56`) and which render pair each declares. Readers of the live program read the same properties from the compiled projection (`internal/entity-properties`, `src/seon/schema/internal.cljc:122`) |
 
 ### Open questions (accidental or contradicting mappings)
 
