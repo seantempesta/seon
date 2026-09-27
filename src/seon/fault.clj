@@ -77,7 +77,9 @@
     holds the cluster branch open, it writes twice: once on the origin, once on
     the cluster branch naming the origin, so the record outlives the branch's
     retirement. A cluster this process does not run (a fixture's name) gets no
-    copy.
+    copy, and neither does a fault whose agent has no row naming its branch:
+    it is recorded only on the connection's own branch (a test member's world
+    records there, never on the cluster it was forked from).
   - An unreadable agent branch records on the connection's own branch; the
     fault is not lost.
   - `outcome` is the first write that did not commit, even if the second did.
@@ -184,8 +186,13 @@
                    (when (db/database-value? (:db-after result))
                      (delivered-to result (:seon.error/signature prepared-fact)))]))
               home (cluster.branch/cluster-branch cluster-name)
-              ;; no copy when this process runs no such cluster (a fixture's name)
-              copy? (and (not= home origin) (or (= home here) (some? (db/branch-connection db home))))
+              ;; The copy is the record of an AGENT's branch, kept past that
+              ;; branch's retirement: a fault no agent row places on a branch
+              ;; stays where it happened (a test member's world names its
+              ;; cluster but is not one of its agents' branches). No copy when
+              ;; this process runs no such cluster (a fixture's name).
+              copy? (and (keyword? agent-branch) (not= home origin)
+                         (or (= home here) (some? (db/branch-connection db home))))
               [[outcome occurrence recipients] :as outcomes] (mapv commit-on (cond-> [origin] copy? (conj home)))]
           [fact (or (some #(when (not= :seon.flow/committed %) %) (map first outcomes)) outcome)
            occurrence recipients])

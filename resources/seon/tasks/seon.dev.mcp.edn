@@ -15,4 +15,9 @@
              :kind :function
              :intent "An MCP eval_clj SCI run on a branch intermittently answers :seon.dev.mcp/events [] although the evaluation settled and its shown text is saved (branch merge-cut1-opus 2026-09-26: evals fea1a8955086 shown a task-edges value, 4d2fab4f0f7d shown \"3\", and a refused my.test/check). Silence is read as nothing; the saved observation must be delivered."
              :must-read #{seon.dev.mcp/failure}
-             :evidence #{"docs/research/agent-platform/landing/merge-cut1-opus-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/merge-cut1-opus-2026-09-26.md"}}
+ #:seon.task{:name "a-live-io-prepl-session-has-no-idle-bound"
+             :kind :function
+             :intent "Every eval_clj session_id opens an io-prepl session (a socket in the one shared bridge, a thread in the JVM) that lives until an error, a timeout or its JVM's replacement. Sessions whose JVM is gone are now released when runtime_status lists them; a finished lane's session on the live JVM is not, because a caller's going away is invisible to the shared bridge. Declare an idle limit as a cluster config dial, enforced by the owner that observes idleness (the JVM's prepl server), and answer a released named session with its declared :session-lost."
+             :must-read #{seon.dev.mcp/execute-clj-eval}
+             :evidence #{"docs/research/agent-platform/landing/stability-opus-2026-09-27.md"}}]

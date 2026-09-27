@@ -259,3 +259,39 @@
       (finally
         (store/release-branch! cluster)
         (registry/retire-branch! {:seon.store/store store :seon.store/branch home})))))
+
+(deftest a-fault-no-agent-row-places-stays-on-its-own-branch
+  ;; A test member's world names its cluster (`default` on the development
+  ;; JVM) and that cluster's branch is open in the process, but the world is
+  ;; not one of the cluster's agents' branches: its fault is recorded there
+  ;; only, never copied onto the cluster (seon.turn-test's fired-bound fault
+  ;; was copied onto default ten times on 2026-09-26).
+  (let [cluster-name (str "fault-member-" (random-uuid))
+        home (cluster.branch/cluster-branch cluster-name)
+        branches-seen (fn [connection since]
+                        (mapv :seon.error.occurrence/branch (error/occurred-since (db/db connection) since)))]
+    (test-support/with-database
+     (fn [attempt]
+       (let [origin (get-in (db/db attempt) [:config :branch])
+             store (:seon.store/store (test-support/execution-handle attempt))]
+         (test-support/apply-config! attempt cluster-name {})
+         (test-support/transacted! attempt (test-support/agents-tx @attempt ["root"]))
+         (registry/branch! {:seon.store/store store :seon.store/branch home
+                            :seon.cluster.registry/from (db/commit-id (db/db attempt))})
+         (let [cluster (db/carry-connection-projection-state!
+                        (store/open-branch! store home)
+                        (:seon.sci.eval/projection-state (meta attempt)))]
+           (try
+             (let [since (db/basis-t (db/db attempt))
+                   receipt (fault/fault! (env/environment
+                                          {:seon.boot/cluster-name cluster-name
+                                           :seon.db/connection attempt
+                                           :seon.sci.admit/caps (config/result-caps config/defaults)})
+                                         (nested-failure)
+                                         (assoc context :seon.agent/id "no-row"))]
+               (is (true? (:seon.fault/committed? receipt)) (pr-str receipt))
+               (is (= [#{origin}] (branches-seen attempt since)) "recorded where it happened")
+               (is (= [] (branches-seen cluster since)) "and not copied onto the cluster"))
+             (finally
+               (store/release-branch! cluster)
+               (registry/retire-branch! {:seon.store/store store :seon.store/branch home})))))))))

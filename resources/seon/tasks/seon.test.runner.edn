@@ -9,4 +9,9 @@
              :kind :namespace
              :intent ":seon.test.failure/expected and :actual are declared :string and :seon.test/failure-message is a stored string read in nine places (test.clj, issue.clj, render/test.clj, test/accretion.clj, problems.clj, sci/eval.clj), so report-value, message-text and failure-message cannot retire (R10). Store native operands (A/B key retirement) and convert the readers."
              :must-read #{seon.test.runner/record-tx}
-             :evidence #{"docs/research/agent-platform/landing/delete-r8-r6-r10-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/delete-r8-r6-r10-2026-09-26.md"}}
+ #:seon.task{:name "a-rerun-failure-report-conflicts-and-faults-the-request"
+             :kind :function
+             :intent "Root's central test runs on default recorded seven :seon.test/report-conflict refusals of record-tx as core faults (four signatures, 2026-09-26 23:04Z to 2026-09-27 01:56Z): a failing test whose captured report has the same identity (test, failure identity, reported position) as a stored one but different facts is refused, and the whole completion write becomes a fault instead of the test's red. A re-reported failure is evidence of the same claim, never a conflict: either its differing facts belong in the identity or they are not stored on the report."
+             :must-read #{seon.test.runner/record-tx seon.test.runner/report-row}
+             :evidence #{"docs/research/agent-platform/landing/stability-opus-2026-09-27.md"}}]
