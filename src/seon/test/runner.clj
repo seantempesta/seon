@@ -108,7 +108,10 @@
   distinct cause.
 
   Ordinary values keep the profile: they are the ones that can be a whole
-  database value."
+  database value. The unit's required database is the one `options` hands
+  (recording, outside any body's custody) or the runner's own custody."
+  {:malli/schema [:=> [:cat [:map [:seon.db/db {:optional true} :seon.db/database-value]] :seon.schema/value]
+                  :string]}
   [options reported-value]
   (if (instance? Throwable reported-value)
     (value/floor reported-value)
@@ -117,9 +120,8 @@
               :seon.render.value/root 'seon.test.runner/assertion
               :seon.render/profile (or (:seon.render/profile options)
                                        (:seon.render/profile (report-options)))}
-       ;; The runner's own custody, when the body has one: the unit's
-       ;; required database, handed where no evaluation world supplies it.
-       db/*conn* (assoc :seon.db/db (db/db db/*conn*))))))
+       (:seon.db/db options) (assoc :seon.db/db (:seon.db/db options))
+       (and (not (:seon.db/db options)) db/*conn*) (assoc :seon.db/db (db/db db/*conn*))))))
 
 (defn- message-text
   "An assertion's `is` message as shown in the gate log. A string within the
@@ -1248,6 +1250,25 @@
    (db/pull database [:db/id :seon.db.process/id
                      :seon.db.process/pid :seon.db.process/start-instant] worker)))
 
+(defn- thrown-artifact
+  "The stored text of a thrown actual: its one error value
+  (`seon.error.refusal/diagnostic`), admitted under `caps`, as the value
+  artifact `seon.render.value/read-artifact` and `artifact-value` read back,
+  as fault evidence is (`seon.error/prepare`). Over the bound it is the
+  artifact of the missing marker. The admission's own emitted text
+  (`:seon.sci.admit/edn`) was stored here: its print-node tree, which no
+  artifact reader accepted (blob d64d79ce…, 2026-09-27)."
+  {:malli/schema [:=> [:cat :seon.error/throwable :seon.sci.admit/caps] :string]}
+  [thrown caps]
+  (value/artifact-edn
+   (value/artifact
+    (admit/admit-value {:seon.sci.admit/value
+                        (seon.error.refusal/diagnostic
+                         (java.util.Date.) :seon.test/execution `failure-report
+                         {:seon.error/throwable thrown})
+                        :seon.sci.admit/interrupt-fn (constantly nil)
+                        :seon.sci.admit/caps caps}))))
+
 (defn- prepare-failures!
   [connection database completion]
   (let [run (:seon.test.run/provenance completion)
@@ -1282,15 +1303,7 @@
               [:seon.config.eval.result/max-bytes :seon.config.eval.result/max-source])
         whole-actual
         (fn [failure thrown]
-          (let [admitted (admit/admit {:seon.sci.admit/value
-                                       (seon.error.refusal/diagnostic
-                                        (java.util.Date.) :seon.test/execution `failure-report
-                                        {:seon.error/throwable thrown})
-                                       :seon.sci.admit/interrupt-fn (constantly nil)
-                                       :seon.sci.admit/caps admission-caps})
-                write (blob/stage! connection
-                                   (or (:seon.sci.admit/edn admitted)
-                                       (admit/canonical-edn (admit/missing-marker admitted))))]
+          (let [write (blob/stage! connection (thrown-artifact thrown admission-caps))]
             (vswap! staged conj write)
             (-> failure
                 (with-meta nil)
@@ -1311,7 +1324,7 @@
                                   [{:seon.test.failure/type (:type event)
                                     :seon.test.failure/message (:message event)
                                     :seon.test/failure-identity
-                                    (failure-identity {} (symbol test-symbol) event)}])))
+                                    (failure-identity {:seon.db/db tested} (symbol test-symbol) event)}])))
                   [_ failures]
                   (reduce
                     (fn [[ordinals failures] report]

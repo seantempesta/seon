@@ -888,16 +888,19 @@
        (fn [entries saved]
          (let [lookup [:seon.cluster.eval/id (:seon.cluster.eval/id saved)]
                ;; `:t` is the read's basis (kept below), not an attribute of
-               ;; the receipt entity; without it the entity's owner and pair apply.
+               ;; the receipt entity; without it the entity's owner and pair
+               ;; apply, for this AI render and for every later face of the
+               ;; entry (the outline's HTML fell to the floor with it).
+               receipt (dissoc saved :t)
                rendered (render/render-call
-                         (assoc request :seon.render/value (dissoc saved :t)
+                         (assoc request :seon.render/value receipt
                                         :seon.render/output :seon.render/ai
                                         :seon.render.call/id [lookup]))]
            (if (:seon.render/refused-member rendered)
              (reduced (vary-meta (assoc rendered :seon.render/refused-member :seon.render.history/entries) assoc :seon.error/declared-schema :seon.render/request-error))
              (conj entries
                    {:seon.render.history/call-id [lookup]
-                    :seon.render/value saved
+                    :seon.render/value receipt
                     :seon.render.history/subject lookup
                     :seon.render.history/basis-transaction (:t saved)
                     :seon.render.history/bytes (or rendered "")}))))

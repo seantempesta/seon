@@ -499,7 +499,7 @@
    [:=> [:cat :seon.problems/missing-model] :seon.render/hiccup]}
   [entry]
   (row "model" (:seon.config.ai/model entry)
-       "problem" "no registry row"))
+       "problem" "no registry entity"))
 
 (defn missing-model-ai
   "Steering for a configured model absent from the registry."

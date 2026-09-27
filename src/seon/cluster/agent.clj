@@ -1065,6 +1065,12 @@
   ([handle agent-id options]
    (let [parent-roster (:seon.agent/routing handle)
          parent (:seon.db/connection handle)
+         ;; A released execution claims nothing, refused by name before its
+         ;; released connection is read (Datahike refuses that read as
+         ;; "Connection has been released.", which named no roster).
+         _ (when (some-> parent-roster deref :seon.agent/released?)
+             (throw (ex-info "This execution's roster is released; acquire through a live one."
+                             {::refused ::roster-released :seon.agent/id agent-id})))
          database (db/db parent)
          ;; The handle carries its world: the branch its connection holds is live.
          live-branch (get-in database [:config :branch])

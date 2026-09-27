@@ -509,7 +509,10 @@
                                        :seon.task/proved :seon.task/run-id :seon.task/program]) ...]
                       :where [?p :seon.task/merge ?handle] [?t :seon.task/id ?handle] (not [?t :seon.task/outcome])]
                     database)]
-    (if (db/read-refusal? found) found (vec (sort-by :seon.task/proposal found)))))
+    ;; a pulled cardinality-many value is a vector; :seon.task/proved is a set
+    (if (db/read-refusal? found)
+      found
+      (mapv #(update % :seon.task/proved set) (sort-by :seon.task/proposal found)))))
 
 (defn- cluster-custody
   "Nil when `context` holds its cluster's own branch, the custody that merges
