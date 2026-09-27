@@ -5,4 +5,8 @@
              :must-read #{seon.sci.eval/auto-check-candidate seon.test.accretion/auto-check}
              :evidence #{"docs/research/agent-platform/dogfood-author-opus-2026-09-26.md"
                          "docs/research/agent-platform/landing/fix-dogfood-api-2026-09-26.md"
-                         "docs/seon/issues/an-agents-auto-check-of-a-writing-function-commits-generated-entities-to-its-branch.md"}}]
+                         "docs/seon/issues/an-agents-auto-check-of-a-writing-function-commits-generated-entities-to-its-branch.md"}}
+ #:seon.task{:name "generated-input-gate-refuses-valid-code"
+             :kind :function
+             :intent "F8: the install gate's generated-input test refuses valid code (a declared forward call; a :pre narrower than the contract) and the reply omits the failing input (test/accretion.clj ~384-405). A refusal names its offending generated input as data; forward declarations and narrower preconditions are not contract violations."
+             :evidence #{"docs/research/agent-platform/valid-clojure-corpus-probe-2026-09-27.md"}}]

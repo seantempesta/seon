@@ -29,7 +29,7 @@ root.
 - **The path is total.** It always returns the evaluated value. A later stage's failure (gate, renderer, recording,
   classification) is attached beside the value as a diagnostic and recorded as a fault; it never replaces, blocks or
   wedges the value.
-- **Agents change the program in REPL terms**: `defn` inside the target namespace or by its fully qualified name,
+- **Agents change the program in REPL terms**: `defn` inside the target namespace (after `in-ns`), as in Clojure,
   `my.program/ns-unmap!` and `my.program/remove-ns!` to delete. Files are the write-back of accepted entities, not the
   working medium. Product agents use declared evaluation, adoption and test requests, never shell self-modification.
 

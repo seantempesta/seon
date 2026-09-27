@@ -194,4 +194,16 @@
              :kind :function
              :intent "An agent-REPL defn of seon.render.value/datum through MCP sci mode on a branch was refused at entry with {:seon.error/member :seon.test.accretion/install? :expected true}. Judge whether the gate refusing this revision is intended (the tests reaching datum fail on the revised body) or a false refusal; if intended, the refusal names the failing tests as data."
              :must-read #{seon.sci.eval/gate-function-install}
-             :evidence #{"docs/research/agent-platform/landing/whole-acquisition-refusal-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/whole-acquisition-refusal-2026-09-27.md"}}
+ #:seon.task{:name "copied-jvm-import-hides-sci-import"
+             :kind :function
+             :intent "F1: defrecord, deftype and import fail in agent namespaces because the JVM import macro is copied into the SCI context (sci/eval.clj ~2370-2400) and shadows SCI's own import special form (sci analyzer.cljc:1843, records.cljc:474, deftype.cljc:663); plain SCI runs them. Stop copying SCI's special-form names into namespaces (11 corpus items)."
+             :evidence #{"docs/research/agent-platform/valid-clojure-corpus-probe-2026-09-27.md"}}
+ #:seon.task{:name "non-defn-definitions-store-no-entity"
+             :kind :function
+             :intent "F11: defmacro, defmulti, defprotocol and defonce evaluate but silently store no program entity (15 corpus items); only defn/def are recorded. Every definition SCI interns is observed and recorded (the eval-path redesign's invariant: SCI is the authority for what was defined)."
+             :evidence #{"docs/research/agent-platform/valid-clojure-corpus-probe-2026-09-27.md"}}
+ #:seon.task{:name "defmacro-in-let-loses-its-location"
+             :kind :function
+             :intent "F3: defmacro inside let/when is refused as unindexed because SCI's defmacro expansion drops the form's source location (sci fns.cljc ~363-399; eval.clj ~627-673); the exact-span join the eval-path redesign relies on needs locations preserved through SCI's macro expansion (fork change)."
+             :evidence #{"docs/research/agent-platform/valid-clojure-corpus-probe-2026-09-27.md"}}]
