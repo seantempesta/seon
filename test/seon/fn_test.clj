@@ -659,6 +659,14 @@
                     [?function :seon.program/analyzed-source-digest _
                      ?analysis-tx true]]
                   (db/history db))
+            ;; The vector switch (S10) moved every stored member into a cell
+            ;; once, in one transaction: membership read through cells begins
+            ;; there for anything published before it (owner ruling, 2026-09-27:
+            ;; store data is disposable, the move is one-time).
+            migration-tx
+            (db/q '[:find (min ?tx) . :where [_ :seon.db.vector/present _ ?tx true]] (db/history db))
+            at-assertion-or-switch? (fn [membership-tx asserted-tx]
+                                      (or (= membership-tx asserted-tx) (= membership-tx migration-tx)))
             arity-assertion-transactions
             (db/q '[:find ?arity ?arity-tx ?count-tx
                     :where
@@ -695,12 +703,12 @@
           ;; arities together later (seon.turn/previous-ending-namespace,
           ;; 85b459845 then c83911c82), after its first analysis.
           (is (every? (fn [[_ spec-tx arities-tx analysis-tx]]
-                        (and (= spec-tx arities-tx) (<= analysis-tx spec-tx)))
+                        (and (at-assertion-or-switch? arities-tx spec-tx) (<= analysis-tx spec-tx)))
                       first-assertion-transactions))
-          (is (every? (fn [[_ arity-tx count-tx]] (= arity-tx count-tx))
+          (is (every? (fn [[_ arity-tx count-tx]] (at-assertion-or-switch? arity-tx count-tx))
                       arity-assertion-transactions))
           (is (every? (fn [[_ argument-tx index-tx binding-tx]]
-                        (= argument-tx index-tx binding-tx))
+                        (and (= index-tx binding-tx) (at-assertion-or-switch? argument-tx index-tx)))
                       argument-assertion-transactions)))
         (testing "one query answers both directions for a given schema"
           (is (seq (filter (comp #{:input} first) functions-by-role)))
