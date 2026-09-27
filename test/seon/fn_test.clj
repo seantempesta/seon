@@ -2344,10 +2344,12 @@
         (is (contains? (:seon.fn/writes before) :seon.ns/name))
         (test-support/transacted! connection (seon.fn/reconcile-tx (db/db connection) rows []))
         (spit file narrowed)
-        (let [artifact (seon.fn/build-artifact
-                         {:seon.fn/source-path (.getCanonicalPath file)
-                          :seon.fn.file/first-party-functions []})
-              desired (:seon.fn.file/rows artifact)
+        ;; Re-indexed through publication's rows against the member's world
+        ;; (checkout analysis cache, database first-party set), never a hand
+        ;; first-party list.
+        (let [desired (seon.fn/rows
+                       {:seon.fn/roots [(.getPath (.getParentFile (.getParentFile file)))]
+                        :seon.source/previous-database (db/db connection)})
               after (some #(when (= target (:seon.fn/sym %)) %) desired)]
           (is (not (contains? (:seon.fn/writes after) :seon.ns/name)))
           (test-support/transacted!
@@ -2458,7 +2460,11 @@
                     "(defn- helper [] (write! nil))\n")
         file (write-source! root "indexed/sample.clj" source)
         path (.getCanonicalPath file)
-        analysis (analyzer/analyze {::analyzer/paths [path]})
+        ;; The analysis publication runs: it reads the checkout's clj-kondo
+        ;; cache, so seon.db is analyzed rather than unknown (a9449b7c3).
+        analysis (analyzer/analyze {::analyzer/paths [path]
+                                    ::analyzer/cache-root
+                                    (str (io/file analyzer/config-directory ".cache"))})
         contexts (#'seon.fn/source-contexts [file])
         first-party (#'seon.fn/first-party-function-symbols analysis)
         emitted (get (#'seon.fn/analysis-rows-by-file
@@ -2466,10 +2472,7 @@
                       (schema/handed-projection)
                       (schema/handed-projection))
                      path)
-        artifact (seon.fn/build-artifact
-                  {:seon.fn/source-path (.getPath file)
-                   :seon.fn.file/first-party-functions []})
-        kept (:seon.fn.file/rows artifact)
+        kept (seon.fn/rows {:seon.fn/roots [(.getPath root)]})
         attributes (fn [rows] (into #{} (mapcat keys) rows))
         emitted-attributes (attributes emitted)
         kept-attributes (attributes kept)]
@@ -2652,11 +2655,14 @@
       (let [forms (assoc (schema.edn/packaged-forms)
                          :sample.call-declarations/rendered
                          [:map {:seon.render/ai (symbol "sample.call-declarations" "render-target")}])
-            artifact (seon.fn/build-artifact
-                      {:seon.fn/source-path (.getPath file)
-                       :seon.fn.file/first-party-functions []
-                       :seon.schema.projection/forms forms})
-            rows (:seon.fn.file/rows artifact)]
+            ;; WANTED world: publication's own rows (`seon.fn/rows`), whose
+            ;; analysis reads the checkout's clj-kondo cache and whose
+            ;; first-party set is the member database's program rows, never a
+            ;; hand list (an empty one made seon.effect unanalyzed, a9449b7c3).
+            rows (seon.fn/rows
+                  {:seon.fn/roots [(.getPath (.getParentFile (.getParentFile file)))]
+                   :seon.schema/projection (schema/build-projection forms)
+                   :seon.source/previous-database (db/db connection)})]
         (test-support/transacted! connection (seon.fn/reconcile-tx (db/db connection) rows []))
         (let [database @connection
               owner (:db/id (db/pull database [:db/id]
