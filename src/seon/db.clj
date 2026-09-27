@@ -4502,6 +4502,33 @@
              :seon.error/expected :seon.fn/prepared-arities
              :seon.error/offending mismatches}))))))))
 
+(defn- written-declaration-identities
+  "The schema keys and function symbols whose declaration datoms this report
+  asserted or retracted, named as the final value holds them: `[keys symbols]`.
+  An identity the write removed has no final name here; the writer's render
+  target check owns a removed renderer."
+  {:malli/schema [:=> [:cat :seon.db/transaction-report]
+                  [:tuple [:set :keyword] [:set :qualified-symbol]]]}
+  [report]
+  (let [after (:db-after report)
+        name-of (fn [entity attribute]
+                  (when (get (dbi/-schema after) attribute)
+                    (:v (first (d/datoms after :eavt entity attribute)))))]
+    (reduce (fn [[schema-keys function-symbols] {entity :e attribute :a}]
+              (case attribute
+                (:seon.schema/key :seon.schema/form)
+                [(if-let [k (name-of entity :seon.schema/key)] (conj schema-keys k) schema-keys)
+                 function-symbols]
+                (:seon.fn/sym :seon.fn/spec)
+                [schema-keys
+                 (if-let [f (name-of entity :seon.fn/sym)] (conj function-symbols f) function-symbols)]
+                :seon.schema.admission/source
+                [(if-let [k (name-of entity :seon.schema/key)] (conj schema-keys k) schema-keys)
+                 (if-let [f (name-of entity :seon.fn/sym)] (conj function-symbols f) function-symbols)]
+                [schema-keys function-symbols]))
+            [#{} #{}]
+            (:tx-data report))))
+
 (defn- validate-write-report
   "Datahike's final-report validator (`validate-report`,
   datahike/db/transaction.cljc:1224-1234): the refusal of the database this
@@ -4510,12 +4537,22 @@
   judged by the population it installs, never the one it replaces; any other
   write's final value reuses its basis's projection (`carried-projection`).
   A value holding no declaration rows is judged by the construction
-  projection `prepared` the write was prepared with."
+  projection `prepared` the write was prepared with.
+
+  Deriving a projection re-admits nothing (reading history must open it), so
+  the declarations this report changed are admitted here, by the projection
+  it leaves (`schema/admit-declarations!`): completeness and renderer
+  coherence judge writes, never reads."
   {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/transaction-report]
                   [:or :nil :seon.db/error-result]]}
   [prepared report]
   (let [database (:db-after report)
-        projection (if (declares-program? database) (carried-projection database) prepared)]
+        declared? (declares-program? database)
+        projection (if declared? (carried-projection database) prepared)]
+    (when declared?
+      (let [[schema-keys function-symbols] (written-declaration-identities report)]
+        (when (or (seq schema-keys) (seq function-symbols))
+          (schema/admit-declarations! projection schema-keys function-symbols))))
     (schema/call-with-projection projection
       (fn []
         (let [attribute :seon.config.db/validation-node-limit

@@ -1195,7 +1195,10 @@
                          connection
                          ;; Declaration rows refer to their file row, so the file rows
                          ;; are admitted with them exactly as publication admits them.
-                         (into (mapv #(dissoc % :seon.fn/keywords :seon.fn/calls)
+                         ;; Calls stay: they name the aliases a declaration's digest
+                         ;; resolves through (seon.program/definition-digest), so a
+                         ;; row without them is another definition to the writer.
+                         (into (mapv #(dissoc % :seon.fn/keywords)
                                      (filter #(and (or (:seon.fn.file/relative-path %) (:seon.ns/name %)
                                                        (:seon.fn/sym %) (:seon.test/sym %))
                                                    ;; The stub `seon.error` only resolves the alias; the
