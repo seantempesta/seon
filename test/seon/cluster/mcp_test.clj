@@ -163,31 +163,41 @@
         "SCI results retain their live objects, not serialized result blobs")))
 
 (deftest ordinary-mcp-results-always-use-the-explicit-mcp-profile
-  (let [cluster-name "mcp-unconditional-fit-test"
-        ;; A budget the 116 rows exceed, so members of nested rows are cut
-        ;; too; at the default budget 32 whole rows fit (13,506 characters).
-        effective (assoc config/defaults
-                         :seon.config.eval.result/blob-threshold 1000000
-                         :seon.config.render.agent/token-budget 1000)
-        text (apply str (repeat 36 \x))
-        result (projected cluster-name effective (observed-query-shape))
-        face (:seon.dev.mcp/value result)
-        rendered (pr-str face)
-        elisions (filter #(and (map? %) (:seon.print/omitted %))
-                         (tree-seq coll? seq face))]
-    (is (str/includes? rendered (pr-str text))
-        "the observed 36-character strings remain readable")
-    (is (str/includes? rendered ":seon.render.profile/mcp")
-        "the below-blob-threshold result still carries the MCP fit profile")
-    (is (some #(= [] (:seon.render.data/path %)) elisions)
-        "collection elisions retain their coordinates")
-    (is (some #(seq (:seon.render.data/path %)) elisions)
-        "nested map-member elisions retain their coordinates too")
-    (is (every? #(and (pos-int? (:seon.print/omitted %))
-                     (string? (:seon.print/requery-refusal %))) elisions)
-        "a cut without a stored artifact names why it cannot be requeried")
-    (is (false? (:seon.dev.mcp/windowed? result))
-        "presentation fitting does not invent a durable artifact")))
+  ;; A result below the blob threshold is still fitted by the MCP profile's
+  ;; budget. Since 36609fc3e each cut is its one text (`print/elided-text`),
+  ;; never a node naming its profile, path and refusal: WANTED is a root cut
+  ;; counting the rows not shown, cuts inside shown rows, and no cut naming a
+  ;; continuation, because nothing was stored. The render unit's database
+  ;; (required since 93144cb71) is the custody's here: this cluster has no
+  ;; instance, so no connection hands one.
+  (support/with-database
+   (fn [_connection]
+     (let [cluster-name "mcp-unconditional-fit-test"
+           ;; A budget the 116 rows exceed, so members of nested rows are cut
+           ;; too; at the default budget 32 whole rows fit (13,506 characters).
+           effective (assoc config/defaults
+                            :seon.config.eval.result/blob-threshold 1000000
+                            :seon.config.render.agent/token-budget 1000)
+           rows (observed-query-shape)
+           text (apply str (repeat 36 \x))
+           result (projected cluster-name effective rows)
+           face (:seon.dev.mcp/value result)
+           cut? #(and (string? %) (str/starts-with? % "…"))
+           root-cut (peek face)]
+       (is (not (contains? result :seon.render.value/diagnostics))
+           "the value is projected, not printed plainly beside a refusal")
+       (is (str/includes? (pr-str face) (pr-str text))
+           "the observed 36-character strings remain readable")
+       (is (cut? root-cut) "the rows not shown are one root cut")
+       (is (and (cut? root-cut)
+                (= (count rows) (+ (dec (count face)) (parse-long (subs root-cut 1)))))
+           "the root cut counts exactly the rows not shown")
+       (is (some #(and (map? %) (some cut? (tree-seq coll? seq %))) face)
+           "members of shown rows are cut too")
+       (is (every? #(re-matches #"…\+?\d+" %) (filter cut? (tree-seq coll? seq face)))
+           "a cut without a stored artifact names no continuation")
+       (is (false? (:seon.dev.mcp/windowed? result))
+           "presentation fitting does not invent a durable artifact")))))
 
 (deftest sci-artifact-size-ignores-evaluation-envelope-bulk
   (let [cluster-name "mcp-small-sci-value-test"
