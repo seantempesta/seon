@@ -852,7 +852,7 @@
       (let [projection (or (db/carried-projection (db/db connection))
                            (schema/projection-from-database (db/db connection)))
             refusal (db/projection-fallback 'seon.config/effective)
-            result (#'config/effective-in refusal "default" projection)]
+            result (#'config/effective-in refusal "default" projection (#'config/declared-projection))]
         (is (identical? refusal result))
         (is (= :seon.schema/projection (:seon.schema/expected-value result)))
         (is (not (contains? result :seon.config/missing-effective)))))))
