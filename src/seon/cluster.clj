@@ -2568,7 +2568,11 @@
   the commit its last adoption loaded (`sci.eval/loaded-identity`); before any
   adoption, the published head read through the files launch loaded
   (`launched-analyzer`); after an adoption that failed mid-reload, a digest no
-  seal matches. Nil before any publication."
+  seal matches. The adopted commit belongs to the store it was adopted from; in
+  a store that does not hold it (a fixture's root, where `source/database`
+  refuses `:seon.cluster.source/source-absent`) the loaded program is named by
+  that commit, a digest stable until the JVM adopts again. Nil before any
+  publication."
   {:malli/schema [:=> [:cat :seon.store/store]
                   [:maybe [:map [:seon.source/analyzer-digest :seon.source/analyzer-digest]
                            [::launched-analyzer {:optional true} :seon.source/relative-file-digests]]]]}
@@ -2578,11 +2582,22 @@
     (if (and (seq loaded) (not adopted))
       {:seon.source/analyzer-digest (id/digest 64 [::unknown (str (:seon.error/message loaded))])}
       (when-let [commit-id (or adopted (:seon.source/commit-id (source/current store)))]
-        (let [database (source/database store commit-id)]
-          (try (if adopted
-                 {:seon.source/analyzer-digest (analyzer-digest database)}
-                 (launched-analyzer database launched-source-digests))
-               (finally (d/release-materialized-db database))))))))
+        (let [answer (try {::database (source/database store commit-id)}
+                          (catch clojure.lang.ExceptionInfo refusal
+                            ;; The adopted commit is another store's (a
+                            ;; fixture's root): name the loaded program by it.
+                            (if (and adopted
+                                     (= :seon.cluster.source/source-absent
+                                        (:seon.cluster.source/refused (ex-data refusal))))
+                              {:seon.source/analyzer-digest
+                               (id/digest 64 [::adopted-elsewhere (str adopted)])}
+                              (throw refusal))))]
+          (if-let [database (::database answer)]
+            (try (if adopted
+                   {:seon.source/analyzer-digest (analyzer-digest database)}
+                   (launched-analyzer database launched-source-digests))
+                 (finally (d/release-materialized-db database)))
+            answer))))))
 
 (defn published-program
   "The definition digests and program namespaces of the published `commit-id`.

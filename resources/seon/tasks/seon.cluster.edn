@@ -62,4 +62,10 @@
              :kind :function
              :intent "In JVM mode for a cluster with no connection (before the store layer is up, or a cluster name this JVM does not host), mcp-project has no database for render.value/prepare, whose unit requires :seon.db/db; the refusal is attached and the value falls back to plain printing with the MCP profile's budget unapplied. AGENTS: nothing prints unbounded. The fallback prints through the floor's bounded path (bounded-text), never plain Clojure printing of the whole value (fix-c, 4c2ac5774)."
              :must-read #{seon.cluster/mcp-project seon.render.value/prepare}
-             :evidence #{"docs/research/agent-platform/red-triage-3-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/red-triage-3-2026-09-27.md"}}
+ #:seon.task{:id "e4f90fb37e0c"
+             :name "incremental-publication-test-redefines-process-wide-vars"
+             :kind :function
+             :intent "seon.incremental-publication-test/non-program-inputs-have-their-own-publication-owner points publication at a fixture checkout with with-redefs-fn over clojure.java.io/resource and seon.cluster/publication-roots. Both are Var roots, so every thread of the shared JVM (default's agents, other test members) reads the fixture's schemas and roots while it runs. Give refresh-source! a source seam (publication roots and the schema resource directory passed as values) so the test hands its checkout, or declare the test isolated until then."
+             :must-read #{seon.cluster/refresh-source! seon.cluster/publication-roots}
+             :evidence #{"test/seon/incremental_publication_test.clj"}}]
