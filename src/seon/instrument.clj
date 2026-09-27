@@ -114,27 +114,59 @@
   ;; the reader at the checker instead of the caller.
   ["malli." "clojure." "java." "jdk." "sun."])
 
-(defn- caller-frame
-  "The first stack frame that is neither the contract machinery nor the host.
+(def ^:private preparing-wrapper-class-prefix
+  ;; The prepared call is a closure `call-preparation/preparing` returns and
+  ;; `compiled-wrapper` installs around the contract, so its frame sits
+  ;; between every prepared call's caller and the refusal. Every refusal of a
+  ;; contract declaring a supplied default named it (`call_preparation.clj:1033`,
+  ;; measured on `seon.problems/open-faults` 2026-09-27). The class prefix is
+  ;; derived from the Var, so a rename moves it; the rest of call-preparation
+  ;; stays a possible caller.
+  (let [{namespace-object :ns var-name :name} (meta #'call-preparation/preparing)]
+    (str (clojure.lang.Compiler/munge (str (ns-name namespace-object)))
+         "$" (clojure.lang.Compiler/munge (str var-name)) "$")))
 
-  A refusal must name the member AND the frame that supplied it. With
-  contracts armed, malli's instrumented wrapper sits between the caller and
-  the refusal, so the nearest outside frame is `malli.core` and a reader
-  following it lands in a dependency."
+(defn- caller-frame
+  "The caller of the refused call: its function and source location.
+
+  The first stack frame that is neither the contract machinery (this
+  namespace, the prepared-call closure, Malli's wrapper) nor the host. Named
+  as `ns/fn (file:line)`; an anonymous function or `eval` frame is named by
+  its namespace alone. A frame in SCI's interpreter means the call came from
+  interpreted code, whose location is SCI's own call stack, not a JVM frame:
+  that is nil here, and the evaluation boundary reports SCI's stack."
   {:malli/schema [:=> [:cat] [:or :nil :string]]}
   []
-  (some (fn [^StackTraceElement frame]
-          (let [demunged (clojure.lang.Compiler/demunge (.getClassName frame))
-                separator (.indexOf demunged "/")
-                frame-ns (if (neg? separator)
-                           demunged
-                           (subs demunged 0 separator))]
-            (when-not (or (= frame-ns "seon.instrument")
-                          (some #(.startsWith ^String frame-ns ^String %)
-                                non-caller-namespace-prefixes))
-              (str frame-ns " (" (.getFileName frame)
-                   ":" (.getLineNumber frame) ")"))))
-        (.getStackTrace (Thread/currentThread))))
+  (let [compiler-named? (fn [^String frame-fn prefix]
+                          ;; `fn--123` and `eval123`: names the compiler made up.
+                          (and (.startsWith frame-fn prefix)
+                               (< (count prefix) (count frame-fn))
+                               (every? #(Character/isDigit ^char %)
+                                       (subs frame-fn (count prefix)))))]
+    (reduce (fn [_ ^StackTraceElement frame]
+              (let [class-name (.getClassName frame)
+                    [^String frame-ns ^String frame-fn]
+                    (.split (clojure.lang.Compiler/demunge class-name) "/")]
+                (cond
+                  (or (= frame-ns "seon.instrument")
+                      (.startsWith class-name ^String preparing-wrapper-class-prefix)
+                      (some #(.startsWith frame-ns ^String %)
+                            non-caller-namespace-prefixes))
+                  nil
+
+                  (.startsWith frame-ns "sci.")
+                  (reduced nil)
+
+                  :else
+                  (reduced
+                   (str (if (and frame-fn
+                                 (not (compiler-named? frame-fn "fn--"))
+                                 (not (compiler-named? frame-fn "eval")))
+                          (str frame-ns "/" frame-fn)
+                          frame-ns)
+                        " (" (.getFileName frame) ":" (.getLineNumber frame) ")")))))
+            nil
+            (.getStackTrace (Thread/currentThread)))))
 
 (defn- problem-path
   "One Malli problem's path INTO THE ARGUMENT, as ordinary data.
@@ -268,16 +300,75 @@
                     " is supplied by the runtime but is missing. Report the call-preparation fault; do not pass it.")
                (str entry-key " is supplied by the runtime; do not pass it. Remove it from the request map.")))
 
-      lookup-ref?
-      (cond-> (assoc description :seon.error/actual-description "a lookup-ref vector")
-        expects-string?
-        (assoc :seon.error/fix
-               (str (if (string? (second value))
-                      "Pass the string id (the second element of the lookup-ref vector) at "
-                      "Pass a string id at ")
-                    (pr-str (:seon.error/path description)) ".")))
+      ;; Only where a string id is expected is a keyword-headed pair read as
+      ;; a lookup ref: `[:=> [:cat :int]]` returned where a Malli form was
+      ;; expected was described as "a lookup-ref vector" (2026-09-27).
+      (and lookup-ref? expects-string?)
+      (assoc description
+             :seon.error/actual-description "a lookup-ref vector"
+             :seon.error/fix
+             (str (if (string? (second value))
+                    "Pass the string id (the second element of the lookup-ref vector) at "
+                    "Pass a string id at ")
+                  (pr-str (:seon.error/path description)) "."))
 
       :else description)))
+
+(defn- schema-name
+  "The registry name of the deepest named schema on `schema-path` inside
+  `offended`, or nil.
+
+  Malli's explanation dereferences a named schema before it reports the
+  problem, so the problem's own `:schema` is the definition (a `[:fn ...]`
+  predicate), never the name the contract was written with.
+  `malli.util/get-in` (`reference-code/malli/src/malli/util.cljc:342`) walks
+  the same child keys `m/explain` reports as `:path`, and a named child's form
+  is its registry keyword."
+  {:malli/schema [:=> [:cat :seon.instrument/compiled-schema
+                       [:vector :seon.schema/value]]
+                  [:or :nil :qualified-keyword]]}
+  [offended schema-path]
+  (some (fn [depth]
+          (let [form (some-> (mu/get-in offended (subvec schema-path 0 depth)) m/form)]
+            (when (qualified-keyword? form) form)))
+        (range (count schema-path) -1 -1)))
+
+(defn- attributed-problem
+  "Name the expectation by the contract's own schema name and give the fix
+  its subject: the caller for an argument, the function for its return.
+
+  Malli's declared `:error/message` is both the expectation and, for a
+  predicate, the fix (`seon.error/explain-problem`), so the sentence read
+  \"expected must be X ... Fix: must be X\"; a return value's fix read
+  \"Supply a vector at []\", addressed to nobody."
+  {:malli/schema [:=> [:cat :seon.error/problem-description
+                       [:or :nil :qualified-keyword]
+                       [:enum :input :output :guard]
+                       :qualified-symbol :boolean]
+                  :seon.error/problem-description]}
+  [description named arm function-symbol keyed?]
+  (let [{:seon.error/keys [expected-description fix argument path]} description
+        expectation (if (and named (not keyed?))
+                      (str named " (" expected-description ")")
+                      expected-description)
+        at (when (seq path) (str " at " (pr-str path)))]
+    (cond-> (assoc description :seon.error/expected-description expectation)
+      (and named (not keyed?)) (assoc :seon.error/expected named)
+      (and (= :input arm) (= fix expected-description))
+      (assoc :seon.error/fix (str "Pass " (or named expected-description)
+                                  " as " argument at "."))
+      (= :output arm)
+      (assoc :seon.error/fix (str "Change " function-symbol " to return "
+                                  (or named expected-description) at ".")))))
+
+(defn- definition-location
+  "Where the loaded function is defined, as `file:line`, or nil."
+  {:malli/schema [:=> [:cat :qualified-symbol] [:or :nil :string]]}
+  [function-symbol]
+  (when (find-ns (symbol (namespace function-symbol)))
+    (let [{:keys [file line]} (some-> (find-var function-symbol) meta)]
+      (when (and (string? file) line)
+        (str file ":" line)))))
 
 (defn- violation
   "Retain the actual offending values with every world in them referenced
@@ -323,7 +414,22 @@
              [{:seon.error/argument "argument count"
                :seon.error/path []
                :seon.error/expected arglists
-               :seon.error/expected-description "the declared arglists"
+               :seon.error/expected-description
+               (str "a declared argument count ("
+                    (->> (:arities data)
+                         ;; One arity reports its bounds; several report
+                         ;; their counts and `:varargs` (malli core.cljc:2301).
+                         (map (fn [declared]
+                                (if (map? declared)
+                                  (let [{low :min high :max} declared]
+                                    (cond (= low high) (str low)
+                                          high (str low "-" high)
+                                          :else (str low " or more")))
+                                  (if (= :varargs declared) "variadic" (str declared)))))
+                         sort
+                         (interpose ", ")
+                         (apply str))
+                    ")")
                :seon.error/offending (:arity data)
                ;; PROSE ONLY: `seon.error/problem-sentence` prints the
                ;; offending value after this description. Carrying the count
@@ -340,23 +446,34 @@
                                 (first (nth (m/children offended) position nil))))
                       binding (when (and (= :input arm) (integer? position))
                                 (nth arglist position nil))
+                      ;; `_database` is the binding's unused-marker, not its name.
+                      bound-name (when (symbol? binding)
+                                   (let [written (name binding)
+                                         unmarked (if (.startsWith written "_") (subs written 1) written)]
+                                     (when-not (= "" unmarked) unmarked)))
                       argument (case arm
-                                 :output "return value"
+                                 :output "the return value"
                                  :guard "arguments and return value"
-                                 (str (or label (when (and (symbol? binding) (not= '_ binding)) binding)
-                                          (str "argument " position " (0-based)"))))]
+                                 (str "argument " position
+                                      (when-let [argument-name (or (some-> label name) bound-name)]
+                                        (str " `" argument-name "`"))))
+                      supplied? (and (= 2 (count (:in problem)))
+                                     (contains? supplied-entries (vec (:in problem))))]
                   (cond-> (assoc
-                   (actionable-problem
-                    (error/explain-problem
-                    {:seon.error/problem problem
-                     :seon.error/path (problem-path kind problem)
-                     :seon.error/parent
-                     (when (and (= :input arm) (seq (:in problem)))
-                       (get-in (vec arguments) (pop (vec (:in problem)))))
-                     :seon.error/argument argument})
-                    problem
-                    (and (= 2 (count (:in problem)))
-                         (contains? supplied-entries (vec (:in problem)))))
+                   (attributed-problem
+                    (actionable-problem
+                     (error/explain-problem
+                      {:seon.error/problem problem
+                       :seon.error/path (problem-path kind problem)
+                       :seon.error/parent
+                       (when (and (= :input arm) (seq (:in problem)))
+                         (get-in (vec arguments) (pop (vec (:in problem)))))
+                       :seon.error/argument argument})
+                     problem
+                     supplied?)
+                    (schema-name offended (vec (:path problem)))
+                    arm function-symbol
+                    (or supplied? (= :malli.core/missing-key (:type problem))))
                    :seon.error/schema-path (vec (:path problem)))
                     (= :guard arm)
                     (assoc :seon.error/input arguments
@@ -389,6 +506,11 @@
                (error/scalar-text (:seon.error/offending first-problem)))
               (when (qualified-keyword? expected)
                 (str " Contract: " expected "."))
+              (when (= :output arm)
+                (str " " function-symbol
+                     (when-let [location (definition-location function-symbol)]
+                       (str " (" location ")"))
+                     " returned it."))
               (when caller (str " Called from " caller ".")))
          :seon.error/expected expected
          :seon.error/offending offending

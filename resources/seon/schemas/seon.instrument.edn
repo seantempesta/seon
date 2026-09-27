@@ -5,6 +5,10 @@
                    [:seon.instrument/instrumented
                     :seon.instrument/instrumented]],
                   :args :string,
+                  :compiled-schema
+                  [:fn {:error/message "must be a compiled Malli schema"
+                        :gen/gen seon.error/compiled-schema-generator}
+                   malli.core/schema?],
                   ;; The value at the violation's own path, bounded by the
                   ;; fault family's evidence bound. `:args` is what the ARM
                   ;; checked (the whole argument vector or returned value) and

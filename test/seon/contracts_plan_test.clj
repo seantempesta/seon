@@ -28,7 +28,7 @@
             message (:seon.error/message refusal "")]
         (is ((schema/projection-validator (schema/handed-projection)
                                           :seon.instrument/contract-error) refusal))
-        (doseq [fragment ["refused argument 0 (0-based) at []" "expected a vector" "got a lazy sequence" "Fix: Convert the sequence with vec"]]
+        (doseq [fragment ["refused argument 0" "expected a vector" "got a lazy sequence" "Fix: Convert the sequence with vec"]]
           (is (str/includes? message fragment) message))
         (is (str/includes? (:seon.eval/shown saved) "Convert the sequence with vec") (:seon.eval/shown saved))
         (is (not (find refusal :seon.error/doc)) "printing never enriches the refusal"))

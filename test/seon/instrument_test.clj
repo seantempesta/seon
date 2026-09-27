@@ -48,6 +48,7 @@
             [seon.fs :as fs]
             [seon.instrument :as instrument]
             [seon.print :as print]
+            [seon.problems :as problems]
             [seon.repl :as repl]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
@@ -319,7 +320,8 @@
        (is (= :seon.error/fact
               (:seon.error/expected data))
            "a cluster re-arm retains the JVM wrapper's bounded evidence policy")
-       (is (str/includes? (ex-message failure) "refused fact at []: expected a map, got a string"))))
+       (is (str/includes? (ex-message failure) "refused argument 0 `fact`"))
+       (is (str/includes? (ex-message failure) "expected :seon.error/fact (a map), got a string"))))
 
 (deftest projection-gates-inspect-the-complete-candidate-population
   ;; boot armed the projection builders; the test re-arms nothing
@@ -580,7 +582,7 @@
        (is (env/environment? environment) (pr-str environment))
        (let [diagnostic (ex-data failure)]
          (is (str/includes? (error/render-ai diagnostic)
-                            (str function-symbol " refused argument count at []:")))
+                            (str function-symbol " refused argument count")))
          (is (str/includes? (error/render-ai diagnostic) "([entities])"))
          (is (str/includes? (error/render-ai diagnostic) "0")))))))
 
@@ -1474,6 +1476,41 @@
     (is (str/starts-with? caller "seon.instrument-test "))
     (is (str/includes? (:seon.error/message refusal) caller))
     (is (str/includes? (error/render-ai refusal) caller))))
+
+(deftest a-prepared-call-refusal-names-its-caller-and-the-contract-name
+  ;; Boot armed `seon.problems/open-faults` with its supplied-default plan, so
+  ;; the call passes through `call-preparation/preparing`'s closure. Every
+  ;; such refusal named that closure ("Called from seon.call-preparation
+  ;; (call_preparation.clj:1033)"), read "expected must be ... Fix: must be"
+  ;; and named the argument `_database` (instrumentation-opus, 2026-09-27).
+  (let [refusal (test-support/refusal-data #(problems/open-faults nil []))
+        caller (:seon.instrument/caller refusal)
+        message (:seon.error/message refusal)]
+    (is (= :seon.fn.arity/input (:seon.error/member refusal)) (pr-str refusal))
+    (is (str/starts-with? caller "seon.instrument-test") caller)
+    (is (not (str/includes? message "call_preparation")) message)
+    (is (str/includes? message "argument 0 `database`") message)
+    (is (str/includes? message "expected :seon.db/database-value (must be") message)
+    (is (not (str/includes? message "Fix: must be")) message)
+    (is (= :seon.db/database-value
+           (:seon.error/expected (first (:seon.error/problems refusal)))))))
+
+(deftest an-output-refusal-names-the-function-that-returned-it
+  ;; Malli validates the output of every arity it wraps (core.cljc:2229-2240);
+  ;; the refusal's subject is the body, never the caller.
+  (test-support/with-database
+   (fn [connection]
+     (let [wrapped (#'instrument/compiled-wrapper
+                    (schema/handed-projection) 'seon.problems/open-faults
+                    (:malli/schema (meta #'problems/open-faults))
+                    (fn [_ _] :not-a-vector) (config/result-caps config/defaults)
+                    {:seon.config.error/max-evidence-bytes 8192})
+           refusal (test-support/refusal-data #(wrapped (db/db connection) []))
+           message (:seon.error/message refusal)]
+       (is (= :seon.fn.arity/output (:seon.error/member refusal)) (pr-str refusal))
+       (is (str/includes? message "refused the return value") message)
+       (is (str/includes? message "Fix: Change seon.problems/open-faults to return") message)
+       (is (str/includes? message "seon.problems/open-faults (seon/problems.clj:") message)))))
 
 (deftest host-diagnostics-use-the-loaded-vars-arglists
   (test-support/with-database
