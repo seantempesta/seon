@@ -13,6 +13,7 @@
   infinite conversation is the failure mode this rung introduces, and
   the one thing that must be proven dead."
   (:require [clojure.core.async :as async]
+            [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.set :as set]
@@ -91,32 +92,39 @@
                  :seon.message/to
                  [:seon.agent/id "bob"]})))))))
 
-(deftest message-ai-source-evaluates-through-the-agent-database
+(deftest message-ai-is-data-from-the-viewing-agent-side
+  ;; Design §9/§5c.4: the recipient is offered the acknowledgement as data,
+  ;; the sender sees whether it was received. The render reads the value it
+  ;; was handed, so a reply renders the message its write returned even when
+  ;; the unit's database predates that write.
   (with-database
     (fn [connection]
-      (config/apply! {:seon.db/connection connection
-                     :seon.boot/cluster-name "message-test"})
-      (test-support/transacted!
-                   connection
-                   [{:seon.message/id "message-1" :seon.message/from [:seon.agent/id "alice"] :seon.message/to [:seon.agent/id "bob"] :seon.message/content "hello"}])
-      (let [source (message/render-ai {:seon.message/id "message-1"})
-            planned (turn/planned-sources source 'my.agents.alice 4096)
-            evaluated
-            (sci.eval/evaluate
-             {:seon.cluster.eval/source
-              (:seon.cluster.eval/source (first planned))
-              :seon.cluster.eval/ns [:seon.ns/name 'my.agents.alice]
-              :seon.db/db @connection
-              :seon.db/connection connection
-              :seon.agent/id "alice"
-              :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection "message-test")
-              :seon.sci.admit/caps
-              (config/result-caps (test-support/effective-config))
-              :seon.sci.eval/time-limit-ms 5000})]
-        (is (= 1 (count planned)))
-        (is (= (message/read "message-1" @connection)
-               (:seon.sci.admit/value evaluated)))
-        (is (nil? (:seon.cluster.eval/error evaluated)))))))
+      (let [before @connection
+            message {:seon.message/id "message-1" :seon.message/from [:seon.agent/id "alice"]
+                     :seon.message/to [:seon.agent/id "bob"] :seon.message/content "hello"}
+            view (fn [unit] (edn/read-string (message/render-ai unit)))]
+        (is (= {:seon.message/id "message-1" :seon.message/to "bob" :seon.message/content "hello"
+                :seon.message/received? false}
+               (view (assoc message :seon.db/db before :seon.agent/id "alice")))
+            "the sender, before the write reached its database")
+        (test-support/transacted! connection [message])
+        (is (= {:seon.message/id "message-1" :seon.message/from "alice"
+                :seon.message/content "hello"
+                :seon.render/operations ['(my.message/received! "message-1")]}
+               (dissoc (view (assoc message :seon.db/db @connection :seon.agent/id "bob"))
+                       :seon.message/at))
+            "the recipient is offered the acknowledgement")
+        (let [acknowledged (message/received! "message-1" connection "bob")
+              tx (get-in acknowledged [:seon.message/received-tx :db/id])]
+          (is (int? tx) (pr-str acknowledged))
+          (is (= tx (:seon.message/received-tx
+                     (view (assoc acknowledged :seon.db/db @connection :seon.agent/id "bob"))))
+              "the acknowledgement's reply shows its transaction")
+          (is (true? (:seon.message/received?
+                      (view (assoc message :seon.db/db @connection :seon.agent/id "alice"))))
+              "the sender sees it received")
+          (is (= acknowledged (message/received! "message-1" connection "bob"))
+              "acknowledging again is inert"))))))
 
 (deftest inbox-has-one-request-map-arity-and-supplied-defaults
   (with-database
@@ -202,9 +210,18 @@
             messages (db/pull-many database '[*]
                                    (mapv :db/id reverse-value))
             rendered (message/render-inbox-html messages database)]
-        (is (= (str/join "\n\n"
-                             (map message/render-ai (sort-by :seon.message/id messages)))
-               (message/render-inbox-ai messages)))
+        (let [inbox (edn/read-string (message/render-inbox-ai messages database))]
+          (is (= ["inbox/1" "inbox/2"] (mapv :seon.message/id (:seon.message/unread inbox)))
+              "the unread, oldest first, as the recipient sees them")
+          (is (= [['(my.message/received! "inbox/1")] ['(my.message/received! "inbox/2")]]
+                 (mapv :seon.render/operations (:seon.message/unread inbox))))
+          (is (= 0 (:seon.message/received inbox))))
+        (message/received! "inbox/1" connection "bob")
+        (let [inbox (edn/read-string
+                     (message/render-inbox-ai (db/pull-many @connection '[*] (mapv :db/id reverse-value))
+                                              @connection))]
+          (is (= ["inbox/2"] (mapv :seon.message/id (:seon.message/unread inbox))))
+          (is (= 1 (:seon.message/received inbox)) "an acknowledged message leaves the unread"))
         (is (not (str/includes? (pr-str rendered)
                                 "my.message/send")))
         (is (= [:section {:class "seon-family-entry seon-message-inbox"}

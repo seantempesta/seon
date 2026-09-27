@@ -925,6 +925,23 @@
       result
       (changed-item (:db-after result) agent-id item-id))))
 
+(defn objective!
+  "Set this agent's plan objective and return the plan.
+
+  The plan is created when the agent has none, upserted by its
+  `:my.plan/agent` identity. Steps and the current step are unchanged."
+  {:malli/schema [:=> [:cat :my.plan/objective :seon.db/connection :seon.agent/id]
+                  [:or :my.plan/component-view :seon.db/error-result :my.plan/agent-not-found-error
+                   :seon.plan/refusal]]}
+  [objective connection agent-id]
+  (let [result (transact-plan! connection agent-id
+                               [{:db/id "plan" :my.plan/agent [:seon.agent/id agent-id]
+                                 :my.plan/objective objective}
+                                [:db/add [:seon.agent/id agent-id] :seon.agent/plan "plan"]])]
+    (if (or (db/read-refusal? result) (:seon.db.write.attempt/request-id result))
+      result
+      (plan {:seon.db/db (:db-after result) :seon.agent/id agent-id}))))
+
 (defn- update-step-call
   [database agent-id changes]
   (let [item-id (:my.plan.item/id changes)

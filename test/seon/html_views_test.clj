@@ -86,14 +86,15 @@
             unit (assoc entity :seon.db/db @connection)]
         (readable! (message/render-html unit) ["Hello\nagain" "unread" "alice" "bob" "title="])
         (readable! (message/render-inbox-html [entity] @connection) ["Messages (1)" "unread"])
-        (is (= (golden :message) (message/render-ai unit)))
-        (is (= (golden :inbox) (message/render-inbox-ai [entity])))
-        (support/transacted! connection [{:seon.turn/id "handled-message" :seon.turn/agent [:seon.agent/id "alice"]
-                                          :seon.turn/opened-tx "datomic.tx"
-                                          :seon.turn/closed-tx "datomic.tx"
-                                          :seon.turn/handled #{[:seon.message/id "hello"]}}])
+        (is (= {:seon.message/id "hello" :seon.message/from "bob" :seon.message/to "alice"
+                :seon.message/content "Hello\nagain" :seon.message/received? false}
+               (dissoc (edn/read-string (message/render-ai unit)) :seon.message/at)))
+        (is (= [['(my.message/received! "hello")]]
+               (mapv :seon.render/operations
+                     (:seon.message/unread (edn/read-string (message/render-inbox-ai [entity] @connection))))))
+        (message/received! "hello" connection "alice")
         (readable! (message/render-html (assoc (db/pull @connection '[*] [:seon.message/id "hello"])
-                                              :seon.db/db @connection)) ["handled"])))))
+                                              :seon.db/db @connection)) ["received"])))))
 
 (deftest note-pairs-link-titles-and-preserve-ai
   (support/with-database

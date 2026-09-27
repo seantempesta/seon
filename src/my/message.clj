@@ -1,14 +1,15 @@
 (ns ^{:seon.ns/context-relevant? true} my.message
   "The inter-agent message protocol, with optional request-map calls; call preparation supplies my database and identity."
   (:refer-clojure :exclude [read send])
-  (:require [seon.cluster.message :as message]
-            [seon.db :as db]))
+  (:require [seon.cluster.message :as message]))
 
 (defn inbox
-  "Read messages in my inbox, oldest first.
+  "Read my unread messages, oldest first.
 
-  Returns a vector of {:my.message/id string :my.message/content string
-  :my.message/at instant}, with :my.message/from when the sender is known.
+  Unread means addressed to me without :seon.message/received-tx;
+  my.message/received! acknowledges one. Returns a vector of
+  {:my.message/id string :my.message/content string :my.message/at instant},
+  with :my.message/from when the sender is known.
   Pass :seon.db/since to select messages newer than a transaction basis.
 
   Example:
@@ -42,20 +43,7 @@
   {:malli/schema [:=> [:cat :seon.message/id :seon.db/connection :seon.agent/id]
                   [:or :seon.message/message :seon.error/value]]}
   [message-id connection agent-id]
-  (let [acknowledged (fn [database]
-                       (let [message (message/read message-id database)]
-                         (if (:seon.message/id message)
-                           (merge message (db/pull database [:seon.message/received-tx]
-                                                   [:seon.message/id message-id]))
-                           message)))
-        before (acknowledged (db/db connection))]
-    (if (or (not (:seon.message/id before)) (:seon.message/received-tx before))
-      before
-      (let [result (db/transact! connection
-                                 {:tx-data [[:db/add [:seon.message/id message-id]
-                                             :seon.message/received-tx "datomic.tx"]]
-                                  :tx-meta {:seon.db/user [:seon.agent/id agent-id]}})]
-        (if (:db-after result) (acknowledged (:db-after result)) result)))))
+  (message/received! message-id connection agent-id))
 
 (defn send
   "Send a message now and return the written message with its identity.

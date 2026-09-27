@@ -10,8 +10,7 @@
   (my.plan/add! {:my.plan.item/id \"verify-total\"
                  :my.plan.item/title \"Verify the total\"
                  :my.plan.item/done-when \"I have read the computed total.\"})"
-  (:require [seon.db :as db]
-            [seon.plan :as plan]))
+  (:require [seon.plan :as plan]))
 
 (defn plan
   "Read my objective, ordered steps, current item, and derived work sets.
@@ -112,14 +111,7 @@
   {:malli/schema [:=> [:cat :my.plan/objective :seon.db/connection :seon.agent/id]
                   [:or :my.plan/component-view :seon.error/value]]}
   [objective connection agent-id]
-  (let [result (db/transact! connection
-                             {:tx-data [{:db/id "plan" :my.plan/agent [:seon.agent/id agent-id]
-                                         :my.plan/objective objective}
-                                        [:db/add [:seon.agent/id agent-id] :seon.agent/plan "plan"]]
-                              :tx-meta {:seon.db/user [:seon.agent/id agent-id]}})]
-    (if (:db-after result)
-      (plan/plan {:seon.db/db (:db-after result) :seon.agent/id agent-id})
-      result)))
+  (plan/objective! objective connection agent-id))
 
 (defn add!
   "Add a plan step and return the saved step with its derived state.

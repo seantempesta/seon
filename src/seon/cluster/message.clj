@@ -2,7 +2,6 @@
   "Durable messages with permanent routing and settlement claims."
   (:refer-clojure :exclude [read send])
   (:require [seon.db :as db]
-            [seon.repl :as repl]
             [seon.id :as id]
             [clojure.string :as str]
             [seon.render.route :as route]
@@ -341,13 +340,66 @@
                to-ref (str " to unresolved recipient " (pr-str to-ref)))
              ": " content))))))
 
+(defn- received-tx
+  "The acknowledging transaction of one message: the value's own fact, else the
+  database's, else nil (unread)."
+  {:malli/schema [:=> [:cat [:maybe :seon.db/database-value] :map] [:maybe :int]]}
+  [database message]
+  (let [held (:seon.message/received-tx message)
+        stored (when (and (nil? held) database (:seon.message/id message))
+                 (db/q '[:find ?tx . :in $ ?id
+                         :where [?message :seon.message/id ?id]
+                                [?message :seon.message/received-tx ?tx]]
+                       database (:seon.message/id message)))]
+    (cond
+      (map? held) (:db/id held)
+      (int? held) held
+      (int? stored) stored)))
+
+(defn message-view
+  "One message as tight data seen by `viewer`, from the value it was handed.
+
+  The recipient sees who sent it, and either its acknowledging transaction or
+  the operation that acknowledges it; the sender sees whom it went to and
+  whether it was received; anyone else sees both endpoints and receipt."
+  {:malli/schema [:=> [:cat [:maybe :seon.db/database-value] [:maybe :seon.agent/id] :map] :map]}
+  [database viewer message]
+  (let [id (:seon.message/id message)
+        endpoint (fn [attribute]
+                   (when-let [reference (get message attribute)]
+                     (or (agent-reference-id database reference) reference)))
+        from (endpoint :seon.message/from)
+        to (endpoint :seon.message/to)
+        tx (received-tx database message)
+        recipient? (and viewer (= viewer to))
+        at (message-instant database message)
+        cause (some-> (:seon.message/caused-by message)
+                      (as-> c (if (map? c) (:seon.message/id c) (second c))))
+        entries (cond-> [[:seon.message/id id]]
+                  (and from (not= viewer from)) (conj [:seon.message/from from])
+                  (and to (not recipient?)) (conj [:seon.message/to to])
+                  at (conj [:seon.message/at at])
+                  true (conj [:seon.message/content (:seon.message/content message)])
+                  (:seon.message/about message) (conj [:seon.message/about (:seon.message/about message)])
+                  (:seon.message/assignment message) (conj [:seon.message/assignment (:seon.message/assignment message)])
+                  (:my.message/reason message) (conj [:my.message/reason (:my.message/reason message)])
+                  cause (conj [:seon.message/caused-by cause])
+                  (and recipient? tx) (conj [:seon.message/received-tx tx])
+                  (and recipient? (not tx)) (conj [:seon.render/operations
+                                                   [(list 'my.message/received! id)]])
+                  (not recipient?) (conj [:seon.message/received? (some? tx)]))]
+    (apply array-map (apply concat entries))))
+
 (defn render-ai
-  "Read this message as data, including its sender, time, and content."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.render/source]]}
+  "Show this message as data from the viewing agent's side.
+
+  Its recipient is offered `(my.message/received! id)` until it acknowledges;
+  its sender sees whether it was received. Renders the value it was handed,
+  so a reply shows the message its write returned."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
   [unit]
-  (when-let [id (get unit :seon.message/id)]
-    (str ";; I should read this message and decide how to respond.\n"
-         (pr-str (list 'my.message/read {:my.message/id id})))))
+  (when (get unit :seon.message/id)
+    (pr-str (message-view (get unit :seon.db/db) (get unit :seon.agent/id) unit))))
 
 (defn render-html
   "`:seon.render/html` — one message, with the same facts as its AI twin."
@@ -396,12 +448,9 @@
           [:p {:class "seon-message-content" :style {:white-space "pre-wrap"}} content]
           (let [stored (when (and database (:seon.message/id unit))
                          (db/pull database [:db/id] [:seon.message/id (:seon.message/id unit)]))
-                handled? (when (:db/id stored)
-                           (db/q '[:find ?turn . :in $ ?message
-                                   :where [?turn :seon.turn/handled ?message]]
-                                 database (:db/id stored)))]
-            [:p {:class (str "seon-message-state " (if handled? "is-handled" "is-unread"))}
-             "● " (cond handled? "handled"
+                received? (some? (received-tx database unit))]
+            [:p {:class (str "seon-message-state " (if received? "is-received" "is-unread"))}
+             "● " (cond received? "received"
                         stored "unread"
                         :else "status unavailable")])]
           (or about caused-by-ref)
@@ -430,27 +479,29 @@
 ;;; supplies acquired message maps. Both input alternatives are declared.
 ;;; ---------------------------------------------------------------------------
 
-(defn render-inbox-ai
-  "Read each acquired message once through its entity's AI pair."
-  {:malli/schema [:=> [:cat [:or :seon.message/to :seon.message/inbox-unit]] :seon.render/source]}
-  [recipient-or-inbox]
-  (if (and (sequential? recipient-or-inbox)
-           (every? map? recipient-or-inbox))
-    (str/join "\n\n"
-              (keep render-ai
-                    (sort-by :seon.message/id recipient-or-inbox)))
-    (str ";; I should follow incoming messages with a reverse-ref pull on myself.\n"
-         (repl/source-text
-          (list 'seon.db/pull
-                      (list 'quote
-                            '[{:seon.message/_to
-                               [:seon.message/id :seon.message/content
-                                {:seon.message/from [:seon.agent/id]}]}])
-                      recipient-or-inbox)))))
-
 (defn- message-order [database message]
   [(if-let [instant (message-instant database message)] (.getTime ^java.util.Date instant) 0)
    (:seon.message/id message)])
+
+(defn render-inbox-ai
+  "Show an inbox as data: unread messages oldest first, and the received count.
+
+  The unread are the recipient's to acknowledge, each offering
+  `(my.message/received! id)`. A walk from one message hands its single
+  recipient reference, shown as that reference."
+  {:malli/schema [:=> [:cat [:or :seon.message/to :seon.message/inbox-unit] :seon.db/database-value]
+                  :string]}
+  [recipient-or-inbox database]
+  (if (and (sequential? recipient-or-inbox)
+           (every? map? recipient-or-inbox))
+    (let [ordered (sort-by #(message-order database %) recipient-or-inbox)
+          views (map #(message-view database
+                                    (agent-reference-id database (:seon.message/to %)) %)
+                     ordered)
+          received? #(or (contains? % :seon.message/received-tx) (:seon.message/received? %))]
+      (pr-str #:seon.message{:unread (vec (remove received? views))
+                             :received (count (filter received? views))}))
+    (pr-str (or (identity-reference database recipient-or-inbox) recipient-or-inbox))))
 
 (defn inbox-html
   "Render every message addressed to one agent, oldest first.
@@ -503,6 +554,7 @@
     {:seon.message/caused-by [:seon.message/id]}
     :seon.message/about
     :seon.message/assignment
+    :seon.message/received-tx
     :my.message/reason])
 
 (defn- endpoint-id
@@ -550,7 +602,7 @@
   (db/q '[:find [?message ...]
           :in $ $current ?recipient
           :where [?message :seon.message/to ?recipient]
-                 (not [$current _ :seon.turn/handled ?message])]
+                 (not [$current ?message :seon.message/received-tx _])]
         database current recipient))
 
 (defn- inbox*
@@ -611,6 +663,36 @@
        :seon.error/operation 'seon.cluster.message/read
        :seon.error/message (str "There is no message named " (pr-str message-id) ".")
        :seon.error/data {:seon.message/id message-id}})))
+
+(defn- received-call
+  "Acknowledge `message-id` in this transaction unless it already is."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.message/id] :seon.db/tx-data]}
+  [database message-id]
+  (let [acknowledged (db/q '[:find ?tx . :in $ ?id
+                             :where [?message :seon.message/id ?id]
+                                    [?message :seon.message/received-tx ?tx]]
+                           database message-id)]
+    (cond
+      ;; A refused read is not "unacknowledged": the transaction refuses.
+      (db/read-refusal? acknowledged) (throw (ex-info (:seon.error/message acknowledged) acknowledged))
+      acknowledged []
+      :else [[:db/add [:seon.message/id message-id] :seon.message/received-tx "datomic.tx"]])))
+
+(defn received!
+  "Acknowledge a message and return it with :seon.message/received-tx.
+
+  The writer decides: acknowledging an acknowledged message is inert. A
+  missing identity returns `read`'s not-found error."
+  {:malli/schema [:=> [:cat :seon.message/id :seon.db/connection :seon.agent/id]
+                  [:or :seon.message/message :seon.error/value]]}
+  [message-id connection agent-id]
+  (let [message (read message-id (db/db connection))]
+    (if (or (not (:seon.message/id message)) (:seon.message/received-tx message))
+      message
+      (let [result (db/transact! connection
+                                 {:tx-data [[:db.fn/call #'received-call message-id]]
+                                  :tx-meta {:seon.db/user [:seon.agent/id agent-id]}})]
+        (if (:db-after result) (read message-id (:db-after result)) result)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The value constructors
