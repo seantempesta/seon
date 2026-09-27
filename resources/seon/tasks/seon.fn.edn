@@ -73,12 +73,6 @@
              :intent "seon.fn/report-identities over one publication's 5,227 datoms took 1,312 ms per call on default (x2 = 2,623 ms; seon.db/with-declarations x15 2,669 ms, pull-many 1,300 ms), and publication, caller selection and adoption (source/changed-identities) each call it. Its work should follow the changed entities, read once per report."
              :must-read #{seon.fn/report-identities}
              :evidence #{"docs/research/agent-platform/landing/perf-boot-opus-2026-09-26.md"}}
- #:seon.task{:id "3452b9f07046"
-             :name "synthetic-source-rows-drop-their-contract"
-             :kind :function
-             :intent "seon.fn/source-rows (the runtime path seon.test-support/program-fn-row uses) returns a synthetic (defn p {:malli/schema [:=> [:cat :seon.source/published] :boolean]} ...) with no :seon.fn/spec and no arities, although seon.fn.analyzer/analyze reports the :malli/schema meta for that stdin form. So seon.cluster.publication-delta-test/schema-referrers-are-selected-for-arming-without-a-namespace-reload is red: its fixture has no input-refs to select. It is the same before and after 46ad08a41 (scratch copies of both on default, 2026-09-26). File publication keeps specs: 2,356 of 5,390 functions have one."
-             :must-read #{seon.fn/source-rows seon.fn/var-row}
-             :evidence #{"docs/research/agent-platform/landing/perf-boot-opus-2026-09-26.md"}}
  #:seon.task{:name "fn-test-redefines-vars"
              :kind :namespace
              :intent "AGENTS forbids with-redefs over any Var, yet test/seon/fn_test.clj still redefines Vars in about ten passing tests (~169, 195, 885, 896, 925, 1463, 1503, 1577, 2019, 2031; with-redefs-fn ~1744, 3055). A redefinition is JVM-global: a concurrent member or agent calls the substitute. Replace each with an injected world or explicit argument value, as 238c868e0 did for the two red ones."

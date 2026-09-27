@@ -1539,7 +1539,8 @@
   edge as it is in the file. Prelude declarations resolve calls but never
   become submitted rows. A submitted form has no file; each row's
   `:seon.fn/form-span` is the analyzer's exact byte span within `source`,
-  transient provenance a caller drops before storing the row."
+  transient provenance a caller drops before storing the row. A contracted
+  function carries its parsed `:seon.fn/arities`, as a file row does."
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/database-value :seon.program/shapes
@@ -1585,6 +1586,16 @@
     (into []
           (comp
            (filter #(or (:seon.fn/sym %) (:seon.test/sym %)))
+           ;; The contract's parsed arities join the row before its digest, as
+           ;; `add-contract-facts` does for file publication.
+           (map #(program/with-contract-facts
+                  {:seon.program/row %
+                   :seon.program/compile-options (:seon.schema.projection/compile-options projection)
+                   :seon.program/predicate-functions (schema/predicate-functions-in projection)
+                   :seon.program/schema-keys (set (keys (:seon.schema.projection/forms projection)))
+                   :seon.program/reader-aliases
+                   (into {} (map (juxt :seon.ns.alias/local :seon.ns.alias/target-ns))
+                         (:seon.ns/aliases namespace-row))}))
            ;; The one digest owner: the namespace's own facts, never the
            ;; analysis `ns` form widened by interpreter refers.
            (map #(assoc % :seon.program/definition-digest
