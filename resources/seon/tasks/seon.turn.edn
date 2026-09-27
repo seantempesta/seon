@@ -70,4 +70,9 @@
              :kind :function
              :intent "seon.turn/system-turn derives an opening's run id from a count of the agent's runs on its own connection read, so competing openers agree on one id and the writer admits one. Under reply-when-applied (B) an agent's answered run may not be committed yet, so an opening started inside that window can compute an id that collides with it; the writer refuses loudly (no corruption), but the opening fails. submit-source! was fixed by generating ids (5151be7ad); openings need a collision-free identity that still lets competing openers converge (e.g. derive the id from the triggering fact's identity, not a count)."
              :must-read #{seon.turn/system-turn}
-             :evidence #{"docs/research/agent-platform/landing/one-commit-a-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/one-commit-a-2026-09-26.md"}}
+ #:seon.task{:name "a-gate-exception-refuses-the-whole-run"
+             :kind :function
+             :intent "An exception inside the install gate escapes as a phase failure (turn.clj ~3551-3567), lands on ordinal 0 and leaves every other ordinal nil: the whole run is refused instead of its one form, violating the total REPL path. The failing form gets its diagnostic beside its value; the others keep theirs (probe-i, cc91a1e62)."
+             :must-read #{seon.turn/evaluate-sources}
+             :evidence #{"docs/research/agent-platform/landing/program-test-candidate-projection-2026-09-27.md"}}]

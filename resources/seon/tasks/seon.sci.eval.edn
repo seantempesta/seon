@@ -174,4 +174,14 @@
              :kind :function
              :intent "An evaluation's value is interned under its result handle by shown-result, again by seon.turn/evaluate-sources (commented ONE BIND SITE), and through the ::bind-result! callable seon.error carries. The print stage, which needs the handle, is the one bind."
              :must-read #{seon.sci.eval/shown-result seon.sci.eval/bind-result! seon.turn/evaluate-sources}
-             :evidence #{"docs/research/agent-platform/eval-path-audit-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/eval-path-audit-2026-09-26.md"}}
+ #:seon.task{:name "gate-copy-lacks-the-runs-earlier-rows"
+             :kind :function
+             :intent "The install gate's disposable copy branches from the run's basis commit, because a speculative value reports its basis as its id, so it lacks the rows earlier forms of the same run wrote. A gate test that writes a fact under an attribute declared earlier in the run is refused. Predates 47d9d4419 (found by probe-i, cc91a1e62)."
+             :must-read #{seon.sci.eval/disposable-copy}
+             :evidence #{"docs/research/agent-platform/landing/program-test-candidate-projection-2026-09-27.md"}}
+ #:seon.task{:name "a-refused-run-leaves-its-program-in-the-context"
+             :kind :function
+             :intent "After a refused run the agent's SCI context still carries that run's uncommitted program and projection until the next run replaces them; bounded but a stale world between runs (probe-i, cc91a1e62)."
+             :must-read #{seon.sci.eval/fork-cluster-ctx}
+             :evidence #{"docs/research/agent-platform/landing/program-test-candidate-projection-2026-09-27.md"}}]

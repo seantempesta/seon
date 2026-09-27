@@ -21,4 +21,9 @@
              :kind :function
              :intent "When realizing a lazy seq throws while the floor prints it, prepare's retry prints the same seq again; Clojure 1.12.5 leaves a LazySeq empty after its body throws, so the agent sees () beside the diagnostic, a wrong value. The diagnostic also names the renderer when the floor itself failed, and it is a ;; comment line, not data. Show the realized prefix and the failure as data (probed by fix-a-floor-opus, c32b272f9)."
              :must-read #{seon.render.value/prepare}
+             :evidence #{"docs/research/agent-platform/red-triage-3-2026-09-27.md"}}
+ #:seon.task{:name "an-uncut-string-node-carries-no-total"
+             :kind :function
+             :intent "The floor's tree gives collection nodes :seon.render.data/total always but string nodes only when cut, so a consumer cannot tell an uncut string page's end; mcp-get-value (999fb0450) now derives it from the page's shape. Give the uncut :string node its total at the producer, then delete that special case in seon.cluster/mcp-get-value."
+             :must-read #{seon.render.value/tree seon.cluster/mcp-get-value}
              :evidence #{"docs/research/agent-platform/red-triage-3-2026-09-27.md"}}]
