@@ -129,7 +129,7 @@ root.
 - **The program is entities**: functions, tests, schemas, namespaces, render pairs, contracts, analysis and test
   evidence keyed by exercised definition digests. Turns, evaluations, messages, errors, tasks and live results are
   data and never merge as program; declare that partition on entity schemas, not in a hand list. Default's program
-  rows and loaded namespaces derive from files. A JVM has one set of compiled Vars; other branches interpret
+  entities and loaded namespaces derive from files. A JVM has one set of compiled Vars; other branches interpret
   differing entities and their affected callers in SCI and bind compiled Vars for the rest. Compute host-bound status
   per declaration, never from a namespace roster; refuse an unsupported override by name instead of running other
   code.
