@@ -96,5 +96,5 @@
              :evidence #{"docs/research/agent-platform/repl-session-entity-design-2026-09-27.md"}}
  #:seon.task{:name "a-refused-multi-form-settlement-returns-nothing"
              :kind :function
-             :intent "A 22-form run on hosted agent mcp/design-1 had its settlement refused (fault recorded on design-1, turn 59962, never delivered); the caller got {:run ce27ba34bd16 :err nil :committed? false :forms 0} after 35 s: no error, no values, no events. Total-path violation, same class as a318b2d38. Deliver the refusal as a diagnostic beside every evaluated value."
-             :evidence #{"docs/research/agent-platform/repl-session-entity-design-2026-09-27.md"}}]
+             :intent "The settlement of a refused multi-form run is recorded correctly (settle-batch-refusal! commits every receipt with its value, the refusal as its error and the fault), but seon.cluster.agent/evaluate-source! (agent.clj ~806-818) answers an opened run with only {:seon.turn/id :seon.db/db :seon.db/durable}, dropping :seon.turn.loop/refusal and the error outcome; direct callers get no error (the MCP bridge reads run-observation). Keep the refusal and outcome in the answer beside the run id (register-anywhere diagnosis db8937e8d)."
+             :evidence #{"docs/research/agent-platform/landing/register-anywhere-diagnosis-2026-09-27.md"}}]
