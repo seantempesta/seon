@@ -2584,19 +2584,19 @@
   ;; agent context from the acquired base, without the unrestored private layer.
   (test-support/with-database
    (fn [connection]
+     ;; The request names its agent: `:seon.agent/id` is a required input, and
+     ;; under the test's arm a missing one is a refusal value, not a context.
      (let [database (db/db connection)
            base (test-support/fork-cluster-ctx connection)
-           agent-ctx (:seon.sci.eval/ctx (eval/fork-for-turn {:seon.sci.eval/ctx base
-                                                             :seon.db/db database}))
+           request {:seon.sci.eval/ctx base :seon.db/db database :seon.agent/id "unavailable"}
+           agent-ctx (:seon.sci.eval/ctx (eval/fork-for-turn request))
            _ (sci/eval-string* agent-ctx "(def kept 7)")
-           carried (eval/fork-for-turn {:seon.sci.eval/ctx base :seon.db/db database
-                                        :seon.sci.eval/agent-ctx agent-ctx})]
+           carried (eval/fork-for-turn (assoc request :seon.sci.eval/agent-ctx agent-ctx))]
        (is (= :preserved-in-memory (:seon.sci.eval/private-state carried)))
        (is (= 7 (sci/eval-string* agent-ctx "kept")))
        (swap! (:env agent-ctx) assoc :seon.sci.eval/unavailable-execution
               {:seon.error/message "unrestored"})
-       (let [next-run (eval/fork-for-turn {:seon.sci.eval/ctx base :seon.db/db database
-                                           :seon.sci.eval/agent-ctx agent-ctx})]
+       (let [next-run (eval/fork-for-turn (assoc request :seon.sci.eval/agent-ctx agent-ctx))]
          (is (identical? (:env agent-ctx) (:env (:seon.sci.eval/ctx next-run)))
              "the agent's retained handle is the one regenerated")
          (is (= :absent (:seon.sci.eval/private-state next-run)))
