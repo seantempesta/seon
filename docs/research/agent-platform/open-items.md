@@ -177,8 +177,25 @@ Sequence:
        queries with ms and tokens;
      - repl-dogfood-2026-09-27.md (running): one real change entirely through the REPL, MCP versus agent turn, measured
        against the file workflow.
-  d. **ONE core rewrite** in the spec's step order (Opus implements, Astra reviews the diff at the REPL), then the
-     entity-vocabulary renames inside those files.
+  d. **ONE core rewrite: GO (owner 2026-09-27: "push and get it done right").** The spec lane implements its own
+     prototype in the 14 steps; per step it lints and compiles from an archive, re-runs the proof map and commits with
+     --only; root batches restarts and focused tests. Astra reviews each step's diff at the REPL. The entity-vocabulary
+     renames inside those files come after.
+     Rev 3 5205cd9b2 has 63/63 proofs. Now being added:
+     - the world value;
+     - the §12 projection-cache fix (option B);
+     - the dogfood blockers: the gate runs reaching tests as test agents and judges the change, not absolute results
+       (ruling), gate evidence goes in the reply, and auto-check covers only the changed definitions;
+     - turn overhead: 5–9 s per agent turn against 13–112 ms through MCP;
+     - four MCP-versus-agent gaps.
+  e. Beside it:
+     - test agents: design 38e5a6d47 and prototype 33e878596, 13/13 proofs; Astra is re-reviewing; it lands after spec
+       step S12;
+     - test seams (JVM-global test state; one writer key :seon.db/writer, e999fdd1b);
+     - reaching-test feedback under 50 ms (test-feedback-perf);
+     - boot per-file keyed publication: the analyzer seal is one stamp that re-analyzes all 827 files; owner: "why are
+       we throwing away the cache";
+     - r6 red triage.
   Open corpus classes the rewrite must close: F1 copied JVM import hides SCI's (defrecord/deftype/import), F3 defmacro in
   let loses location (SCI fork), F4 two defns per form, F5 nested register!, F8 generated-input gate refuses valid code,
   F10 ns-unmap! within a run, F11 non-defn definitions store no entity, F12 cost (0.7–1.1 s per contracted defn).
