@@ -282,7 +282,7 @@
              :notification [:enum :final],
              :signature [:string {:min 64 :max 64 :seon.db/identity true :seon.program/row-schema :seon.error/error}],
              :frame [:tuple :symbol :symbol :string :int],
-             :frames [:vector {:min 1 :description "A throwable's own first-party (seon.*/my.*) complete stack frames, outermost first."} :seon.error/frame],
+             :frames [:vector {:min 1 :description "A throwable's own complete stack frames in code an agent or Seon wrote (seon.error.refusal/first-party-frame?), outermost first."} :seon.error/frame],
              :link
              [:map
               {:description "One throwable of a cause chain, as Throwable->map reads it: its class, message, ex-data and first-party frames."}
