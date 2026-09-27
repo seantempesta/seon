@@ -901,6 +901,24 @@
        :else (str "Supply " expected " at " (pr-str (vec path)) "."))}
       check (assoc :seon.error/input (first (:smallest check))))))
 
+(defn- problem-parts
+  "The refusal sentence's parts in order: prose strings, and the expected and
+  offending values as the caller rendered them (text for AI, hiccup nodes for
+  HTML), nil omitting that part. `problem-sentence` joins them as text; the
+  HTML face places the same parts as nodes, so a value's cut stays structure."
+  {:malli/schema
+   [:=> [:cat [:or :symbol :string] :map :seon.render/hiccup :seon.render/hiccup]
+    [:vector :seon.render/hiccup]]}
+  [operation
+   {:seon.error/keys [path argument expected-description actual-description fix]}
+   expected offending]
+  (cond-> [(str operation " refused " argument " at " (pr-str path)
+                ": expected " expected-description)]
+    (some? expected) (conj " (" expected ")")
+    true (conj (str ", got " actual-description))
+    (some? offending) (conj " " offending)
+    true (conj (str ". Fix: " fix))))
+
 (defn problem-sentence
   "THE ONE refusal sentence for one problem: who refused what, where, the
   expectation, the offending value, and the fix.
@@ -917,15 +935,8 @@
   {:malli/schema
    [:=> [:cat [:or :symbol :string] :map [:maybe :string] [:maybe :string]]
     [:string {:min 1}]]}
-  [operation
-   {:seon.error/keys [path argument expected-description actual-description fix]}
-   expected-text offending-text]
-  (str operation " refused " argument " at " (pr-str path)
-       ": expected " expected-description
-       (when expected-text (str " (" expected-text ")"))
-       ", got " actual-description
-       (when offending-text (str " " offending-text))
-       ". Fix: " fix))
+  [operation problem expected-text offending-text]
+  (apply str (problem-parts operation problem expected-text offending-text)))
 
 (defn scalar-text
   "The printed form of a value that prints itself, or nil.
@@ -941,9 +952,11 @@
   (when (or (number? value) (keyword? value) (symbol? value) (boolean? value))
     (pr-str value)))
 
-(defn- refusal-value-text
+(defn- refusal-value-shown
+  "One refusal value through the floor, in the unit's output face: laid-out
+  text for AI, the floor's hiccup (its cuts as elision nodes) for HTML."
   {:malli/schema [:=> [:cat :seon.error/source :seon.error/source [:or :nil :seon.render.data/path]]
-                  :string]}
+                  :seon.render/hiccup]}
   [unit value path]
   (let [root (or (:seon.repl/handle unit) (:seon.render.value/root unit))
         profile (:seon.render/profile unit)
@@ -958,9 +971,12 @@
                     :seon.render.value/options {:seon.render.value/structural? true})
              (update :seon.render.call/id
                      #(or % [:seon.error/offending])))
-         (get unit :seon.render/output :seon.render/ai))]
-    (if (string? (:seon.render.value/text projection))
-      (:seon.render.value/text projection)
+         (get unit :seon.render/output :seon.render/ai))
+        face (if (= :seon.render/html (:seon.render/output unit))
+               :seon.render.value/html
+               :seon.render.value/text)]
+    (if-some [shown (get projection face)]
+      shown
       (str "<value rendering unavailable: " (:seon.error/message projection) ">"))))
 
 (defn- reader-correction
@@ -1093,8 +1109,10 @@
       :else data)))
 
 (defn- refusal-text
+  "The refusal's sentences in the unit's output face: one text for AI, one
+  element of problem nodes for HTML, or nil when the value is no refusal."
   {:malli/schema [:=> [:cat :seon.error/source :seon.error/source :seon.error/source]
-                  [:or :nil :string]]}
+                  :seon.render/hiccup]}
   [unit fact data]
   (let [stored-problems? (seq (:seon.error/problems fact))
         data (refusal-data unit fact (when (map? data) data))
@@ -1110,27 +1128,37 @@
                           (str "Documentation lookup unavailable: " (:seon.error/message doc))
                           (when (string? doc)
                             (not-empty (:example (@sci-eval-docstring-parts doc))))))))]
-    (if (and operation (seq problems))
-      (str/join
-       "\n"
-       (map-indexed
-        (fn [index {:seon.error/keys [expected offending input result-contract]
-                    :as problem}]
-          (let [location (when stored-problems?
-                           [:seon.error/problems index])]
-          (str (problem-sentence
-                operation problem
-                (refusal-value-text unit expected (when location (conj location :seon.error/expected)))
-                (refusal-value-text unit offending (when location (conj location :seon.error/offending))))
-               (when (find problem :seon.error/input)
-                 (str " Input: " (refusal-value-text unit input nil) "."))
-               (when result-contract
-                 (str " Result contract: " (refusal-value-text unit result-contract nil) "."))
-               (when (and (zero? index) (:seon.instrument/caller data))
-                 (str " Called from " (:seon.instrument/caller data) "."))
-               (when example (str " Example: " example)))))
-        problems))
-      nil)))
+    (when (and operation (seq problems))
+      (let [html? (= :seon.render/html (:seon.render/output unit))
+            sentences
+            (map-indexed
+             (fn [index {:seon.error/keys [expected offending input result-contract]
+                         :as problem}]
+               (let [location [:seon.error/problems index]
+                     ;; Each shown value is its own member of the unit, so
+                     ;; its HTML node has its own element id.
+                     shown (fn [member member-value]
+                             (refusal-value-shown
+                              (assoc unit :seon.render.call/id
+                                     (into (vec (some-> (:seon.render.call/id unit) vector))
+                                           (conj location member)))
+                              member-value (when stored-problems? (conj location member))))]
+                 (cond-> (problem-parts operation problem
+                                        (shown :seon.error/expected expected)
+                                        (shown :seon.error/offending offending))
+                   (find problem :seon.error/input)
+                   (conj " Input: " (shown :seon.error/input input) ".")
+                   result-contract
+                   (conj " Result contract: " (shown :seon.error/result-contract result-contract) ".")
+                   (and (zero? index) (:seon.instrument/caller data))
+                   (conj (str " Called from " (:seon.instrument/caller data) "."))
+                   example (conj (str " Example: " example)))))
+             problems)]
+        (if html?
+          (into [:div {:class "seon-error-message"}]
+                (map #(into [:div {:class "seon-error-problem"}] %))
+                sentences)
+          (str/join "\n" (map #(apply str %) sentences)))))))
 
 (defn instrumentation-prose
   "`:seon.render/ai` — detailed steering for a validation failure."
@@ -1146,7 +1174,7 @@
         ;; live value's members are values the floor printer bounds here.
         member-text (fn [data-key fact-key]
                       (if-some [entry (find data data-key)]
-                        (refusal-value-text error-value (val entry) nil)
+                        (refusal-value-shown error-value (val entry) nil)
                         (get fact fact-key)))]
     (or (refusal-text error-value fact data)
         ;; A declared refusal prints its own message and members.
@@ -1947,10 +1975,9 @@
     (into
      [:article {:class "seon-family-entry seon-error-entry"}
       [:p {:class "seon-kicker"} (some-> (:seon.error/operation value) str)]
-      [:h3 {:class "seon-error-message"}
-       (or (refusal-text (assoc unit :seon.render/output :seon.render/html)
-                         value (:seon.error/data value))
-           (:seon.error/message value))]]
+      (or (refusal-text (assoc unit :seon.render/output :seon.render/html)
+                        value (:seon.error/data value))
+          [:h3 {:class "seon-error-message"} (:seon.error/message value)])]
      (concat
       (when-let [at (:seon.error/at value)]
         (let [instant (str (if (instance? java.util.Date at)

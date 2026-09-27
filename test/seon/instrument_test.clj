@@ -1084,11 +1084,20 @@
 
 (defn- masked-registry
   "`projection` whose registry answers `replacement` for `schema-key` (nil:
-  absent), without the compiled holder that would answer from the old one."
+  absent), without the compiled holder that would answer from the old one.
+
+  The declaration forms are masked with the registry: a projection whose forms
+  still declare a key its registry cannot resolve is no projection a writer
+  builds, and walking it fails before the case under test (`violation`
+  references its worlds under this projection since 09fe1d064, and
+  `seon.schema/identity-only-descriptors-in` read `(m/properties nil)` for the
+  masked key: `:malli.core/invalid-schema`, not the missing declaration)."
   [projection schema-key replacement]
   (let [registry (:seon.schema.projection/registry projection)]
     (-> projection
         (dissoc :seon.schema.projection/compiled)
+        (update :seon.schema.projection/forms
+                #(if replacement (assoc % schema-key (m/form replacement)) (dissoc % schema-key)))
         (assoc :seon.schema.projection/registry
                (reify mr/Registry
                  (-schema [_ candidate]
