@@ -2009,15 +2009,36 @@
            content-key (@#'db/arity-content-key head)
            seeded? (cache/has? @@#'db/arity-base-cache content-key)
            ;; The writer's own questions read arities through their cells.
-           edges (@#'db/call-edges @#'db/storage-q head)
-           bounds (@#'db/declared-arity-bounds @#'db/storage-q head)
+           storage-q (partial @#'db/storage-q-in (db/carried-projection head))
+           edges (@#'db/call-edges storage-q head)
+           bounds (@#'db/declared-arity-bounds storage-q head)
            built (merge (@#'db/arity-comparison edges bounds)
                         {::db/edge-set edges ::db/bounds bounds
                          ::db/by-caller (update-vals (group-by first edges) set)
                          ::db/by-callee (update-vals (group-by (comp first second) edges) set)})]
        (is seeded? "the write's report seeded the head's base before any read")
        (is (contains? edges ['sample.seed/caller ['clojure.core/str 1]]))
-       (is (= built (@#'db/arity-base head)))))))
+       (is (= built (@#'db/arity-base storage-q head)))))))
+
+(deftest a-first-population-is-judged-by-the-declarations-it-installs
+  ;; CLASS: a writer read that derives its projection from a value holding no
+  ;; declaration rows. A fresh store's first program write (a first
+  ;; population, a nuke's boot) was refused "This operation requires a carried
+  ;; schema projection": the arity gate read its `:db-before`, which declares
+  ;; nothing yet, by that value's own projection (r6 triage E5).
+  (test-support/with-database
+   {:seon.test-support/fresh-store? true}
+   (fn [connection]
+     (is (nil? (db/q '[:find ?key . :where [_ :seon.schema/key ?key]] (db/db connection)))
+         "the fresh store holds no declaration rows")
+     (test-support/transacted!
+      connection
+      [(test-support/namespace-entity (db/db connection) 'sample.first)
+       (test-support/program-fn-entity (db/db connection) 'sample.first/caller "(defn caller [x] (str x))"
+                                       {:seon.fn/call-arities #{['clojure.core/str 1]}})])
+     (is (= 'sample.first/caller
+            (db/q '[:find ?sym . :where [_ :seon.fn/sym ?sym]] (db/db connection)))
+         "the first program write is admitted"))))
 
 (deftest arity-components-and-callers-are-checked-in-the-final-state
   (test-support/with-database

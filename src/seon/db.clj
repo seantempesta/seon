@@ -4101,16 +4101,20 @@
                          :else datom))))
              tx-data)))))
 
-(defn- storage-q
+(defn- storage-q-in
   "Datalog for the writer's own questions over logical attributes: `query`
-   lowered by `database`'s own declarations, then Datahike's `q`. A vector
-   attribute's pattern is membership through its cells."
-  {:malli/schema [:=> [:cat :seon.db/query :seon.db/database-value [:* :seon.schema/value]] :seon.schema/value]}
-  [query database & inputs]
-  (let [[request] (lowered-query-request (carried-projection database)
+   lowered by `projection`, then Datahike's `q`. A vector attribute's pattern
+   is membership through its cells. The writer passes the projection it judges
+   the write by, so a value holding no declaration rows yet (a first
+   population's `:db-before`) is read by the declarations being installed."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/query :seon.db/database-value [:* :seon.schema/value]]
+                  :seon.schema/value]}
+  [projection query database & inputs]
+  (let [[request] (lowered-query-request projection
                                          {:query query :args (into [database] inputs)}
                                          (query/memoized-parse-query query))]
     (apply d/q (:query request) (:args request))))
+
 
 (defn logical-missing?
   "Datalog predicate, the lowering of `[(missing? $ e a)]`: true when `e`
@@ -4223,12 +4227,14 @@
 (defn- arity-base
   "The arity gate's whole-program input for a value, memoized by the datoms it
   reads: edges, bounds, the comparison, and the edge sets indexed by caller and
-  callee so a report can replace only the ones it touched."
-  {:malli/schema [:=> [:cat :seon.db/database-value] :map]}
-  [database]
+  callee so a report can replace only the ones it touched. `query-fn` reads
+  (`storage-q-in` under the write's judging projection)."
+  {:malli/schema [:=> [:cat [:=> [:cat :seon.db/query :seon.db/database-value [:* :seon.schema/value]] :seon.schema/value]
+                       :seon.db/database-value] :map]}
+  [query-fn database]
   (let [derive (fn []
-                 (let [edges (call-edges storage-q database)
-                       bounds (declared-arity-bounds storage-q database)]
+                 (let [edges (call-edges query-fn database)
+                       bounds (declared-arity-bounds query-fn database)]
                    (merge (arity-comparison edges bounds)
                           {::edge-set edges
                            ::bounds bounds
@@ -4276,17 +4282,20 @@
   symbol this report touched are read again on `:db-after`. An edge belongs to
   its caller's symbol and a bound to its callee's, so every other edge and
   bound is unchanged. Without every read attribute installed before, the
-  final value is compared whole."
-  {:malli/schema [:=> [:cat :seon.db/transaction-report] :map]}
-  [report]
-  (let [before (:db-before report)
+  final value is compared whole. Both values are read by `projection`, the one
+  the write is judged by: a first population's `:db-before` holds no
+  declaration rows to derive one from."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/transaction-report] :map]}
+  [projection report]
+  (let [storage-q (partial storage-q-in projection)
+        before (:db-before report)
         after (:db-after report)
         tx-data (logical-datoms report)]
     (if-not (every? #(get (dbi/-schema before) %) arity-attributes)
       (let [edges (call-edges storage-q after)
             bounds (declared-arity-bounds storage-q after)]
         (assoc (arity-comparison edges bounds) ::bounds bounds))
-      (let [base (arity-base before)
+      (let [base (arity-base storage-q before)
               symbols (fn [database entities attributes]
                           (into #{}
                                 (for [entity entities attribute attributes
@@ -5092,7 +5101,7 @@
      ;; An error, message or other ordinary fact cannot change call arities.
      (when (some (::changed-identity-attributes @owned)
                  [:seon.fn/sym :seon.test/sym :seon.schema/key :seon.call-preparation/key])
-       (let [comparison (report-arity-comparison report)
+       (let [comparison (report-arity-comparison projection report)
              result (arity-verdict database projection report comparison)
              mismatches (:seon.fn/arity-mismatches result)]
          (if-not mismatches
