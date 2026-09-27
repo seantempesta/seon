@@ -1704,9 +1704,11 @@
   {:malli/schema [:=> [:cat :seon.store/store :seon.store/branch :seon.cluster/name :seon.source/commit-id]
                   [:maybe :seon.source/commit-id]]}
   [store branch cluster base]
-  (when-let [head (registry/branch-commit-id {:seon.store/store store :seon.store/branch branch})]
+  (let [head (registry/branch-commit-id {:seon.store/store store :seon.store/branch branch})]
+    ;; No checkpoint branch yet is no checkpoint; the registry names it.
     ;; The raw commit value: deriving its projection costs ~110 ms, the read 9 ms.
-    (when-let [database (source/commit-database store head)]
+    (when-let [database (when-not (:seon.cluster.registry/branch-missing head)
+                          (source/commit-database store head))]
       (when (= base (db/q '[:find ?commit . :in $ ?name
                             :where [?c :seon.cluster/name ?name] [?c :seon.source/commit-id ?commit]]
                           database cluster))

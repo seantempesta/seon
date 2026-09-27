@@ -546,6 +546,17 @@
 (deftest refusals-name-their-rule
   (with-source-store
     (fn [opened]
+      (testing "an absent branch has no commit id: a declared error names store and branch"
+        (is (uuid? (registry/branch-commit-id {:seon.store/store opened
+                                               :seon.store/branch source-branch})))
+        (let [missing (registry/branch-commit-id {:seon.store/store opened
+                                                  :seon.store/branch :no-such-branch})]
+          ;; The armed output contract validates the declared error's shape.
+          (is (true? (:seon.cluster.registry/branch-missing missing)) (pr-str missing))
+          (is (inst? (:seon.error/at missing)))
+          (is (= [(:seon.store/dir opened) :no-such-branch]
+                 [(:seon.store/dir missing) (:seon.store/branch missing)]))
+          (is (= 'seon.cluster.registry/branch-commit-id (:seon.error/operation missing)))))
       (testing "a cluster refuses an unavailable source commit"
         (is (= :seon.cluster.registry/source-absent
                (:seon.cluster.registry/rule

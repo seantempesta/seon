@@ -65,6 +65,7 @@
             [datahike.api :as d]
             [seon.cluster.branch :as cluster.branch]
             [seon.db :as db]
+            [seon.error.refusal :as error.refusal]
             [seon.config :as config]
             [seon.schema :as schema]
             [datahike.connections :as connections]
@@ -131,12 +132,24 @@
   (k/get konserve key nil {:sync? true}))
 
 (defn branch-commit-id
-  "The commit ID currently named by a branch, or nil when absent."
+  "The commit ID currently named by a branch. A branch the store does not
+  hold answers `:seon.cluster.registry/branch-missing-error`, naming the store
+  and the branch, so no caller mistakes absence for a commit.
+
+  Example:
+  (branch-commit-id {:seon.store/store store :seon.store/branch :current-src})"
   {:malli/schema [:=> [:cat :seon.cluster.registry/branch-commit-request]
-                  [:maybe :seon.source/commit-id]]}
+                  [:or :seon.source/commit-id :seon.cluster.registry/branch-missing-error]]}
   [{:keys [:seon.store/store :seon.store/branch]}]
-  (get-in (head-record (konserve-store store) branch)
-          [:meta :datahike/commit-id]))
+  (or (get-in (head-record (konserve-store store) branch)
+              [:meta :datahike/commit-id])
+      (error.refusal/diagnostic
+       (java.util.Date.) :seon.store/branch 'seon.cluster.registry/branch-commit-id
+       {:seon.error/message (str "The store at " (:seon.store/dir store)
+                                 " holds no branch " branch ".")
+        ::branch-missing true
+        :seon.store/dir (:seon.store/dir store)
+        :seon.store/branch branch})))
 
 (defn head-guard-tx
   "Transaction data that refuses, inside the writer, unless `branch` still
@@ -317,8 +330,10 @@
     source-commit :seon.source/commit-id
     projection :seon.schema/projection}]
   (let [branch (cluster-branch cluster-name)
-        current-commit (branch-commit-id {:seon.store/store store
-                                          :seon.store/branch branch})]
+        ;; A branch the store does not hold yet is created: no expected head.
+        current-commit (let [head (branch-commit-id {:seon.store/store store
+                                                     :seon.store/branch branch})]
+                         (when-not (::branch-missing head) head))]
     (when (branch-connected? store branch)
       (refuse! ::cluster-connected
                (str "branch " branch " still has a connection in this process")
@@ -497,10 +512,8 @@
    (fn [branch]
      (let [commit-id (branch-commit-id {:seon.store/store store
                                         :seon.store/branch branch})]
-       (when-not commit-id
-         (throw
-          (ex-info "A roster branch has no readable head commit ID."
-                   {:seon.store/branch branch :seon.cluster.registry/branch-head-absent true})))
+       (when (:seon.error/at commit-id)
+         (throw (ex-info (:seon.error/message commit-id) commit-id)))
        {:seon.store/branch branch
         :seon.source/commit-id commit-id}))
    (sort-by str branches)))
