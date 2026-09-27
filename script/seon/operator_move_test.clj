@@ -42,6 +42,34 @@
             "the recorded pins are byte-identical to git's own stage listing"))
       (finally (fs/delete-tree base)))))
 
+(deftest an-archived-gitlink-holds-its-pins-bytes-not-the-checkouts
+  ;; WANTED: a commit archive's submodule is its pin's bytes whatever revision
+  ;; the checkout is at, nested initialized gitlinks included; a checkout link
+  ;; ran a moved datahike beside classes of the old pin (two Datom classes).
+  (let [root (fs/create-temp-dir {:prefix "seon-move-pinned"})
+        repository (operator/repository-root)
+        git (fn [directory & argv]
+              (let [child (.start (doto (ProcessBuilder. ^java.util.List (into ["git" "-C" (str directory)] argv))
+                                    (.redirectErrorStream true)))
+                    out (future (slurp (.getInputStream child)))]
+                (is (.waitFor child 10000 TimeUnit/MILLISECONDS) (str argv " exits within 10 s"))
+                (str/trim (deref out 10000 ""))))
+        datahike (fs/path repository "reference-code" "datahike")
+        older (git datahike "rev-parse" "HEAD~1")
+        babashka-pin (some #(when (= "reference-code/babashka" (:path %)) (:pin %))
+                           (#'operator/gitlinks repository "HEAD"))]
+    (try
+      (is (not= older (git datahike "rev-parse" "HEAD")) "the pin differs from the checkout")
+      (let [pinned (#'operator/pinned-checkout! (str root) repository "reference-code/datahike" older)]
+        (is (= (git datahike "show" (str older ":deps.edn"))
+               (str/trim (slurp (str (fs/path pinned "deps.edn")))))
+            "the archived pin holds the pin's bytes")
+        (is (str/starts-with? pinned (str (fs/real-path root))) "never the checkout"))
+      (let [pinned (#'operator/pinned-checkout! (str root) repository "reference-code/babashka" babashka-pin)]
+        (is (fs/exists? (fs/path pinned "fs" "deps.edn"))
+            "an initialized nested gitlink (babashka/fs, a :local/root) is extracted at its pin"))
+      (finally (fs/delete-tree root)))))
+
 (deftest a-move-keeps-the-store-and-links-every-shared-cache
   (let [base (fs/create-temp-dir {:prefix "seon-move-share"})
         repository (fs/path base "checkout")
