@@ -4,6 +4,7 @@
   One regression per behaviour class: a host call is counted on return and on
   throw without changing either; an SCI installation owns its own cell; a
   same-definition re-arm keeps its cell and a new definition gets a new one;
+  a re-entry through the same wrapper is inside one outermost call;
   the reads rank and list over-second maxima; an operation's explanation names
   the definitions whose counters grew. No nanosecond assertion: timings are
   measured at the REPL (landing note), never asserted here."
@@ -123,6 +124,36 @@
     (is (= [2 1] (mapv (comp :seon.profile/calls profile/observation cell-of) [one other])))
     (is (= {:seon.profile/scope :seon.profile/context :seon.profile/digest digest-a}
            (select-keys (cell-of one) [:seon.profile/scope :seon.profile/digest])))))
+
+(deftest a-re-entry-through-the-same-wrapper-is-inside-one-outermost-call
+  ;; One arity calling another, and recursion, through the armed callable: the
+  ;; profiler counted each re-entry (refresh-source! showed x3 for one call).
+  (let [projection (schema/handed-projection)
+        caps (config/result-caps (test-support/effective-config))
+        ;; The body re-enters through the armed callable, which exists only
+        ;; after wrapping: one write, before the first call.
+        self (volatile! nil)
+        failure (ex-info "bottom" {::probe true})
+        armed (instrument/wrap-interpreted
+               'my.agents.profiled/arities
+               "[:function [:=> [:cat :int] :int] [:=> [:cat :int :int] :int]]"
+               projection caps
+               (fn ([n] (@self n 0))
+                 ([n acc] (cond (neg? n) (throw failure)
+                                (zero? n) acc
+                                :else (@self (dec n) (inc acc)))))
+               {:seon.program/definition-digest digest-a})
+        _ (vreset! self armed)
+        calls #(select-keys (profile/observation (cell-of armed))
+                            [:seon.profile/calls :seon.profile/throws])]
+    (is (= 3 (armed 3)))
+    (is (= {:seon.profile/calls 1 :seon.profile/throws 0} (calls))
+        "one outermost entry through two arities and three recursions")
+    (is (identical? failure (try (armed -1) (catch Throwable thrown thrown))))
+    (is (= {:seon.profile/calls 2 :seon.profile/throws 1} (calls)))
+    (is (= 2 (armed 2 0)))
+    (is (= {:seon.profile/calls 3 :seon.profile/throws 1} (calls))
+        "a throw leaves the thread outside the cell, so the next entry counts")))
 
 (deftest reads-rank-by-total-and-maximum-and-list-maxima-over-one-second
   (let [fast (profile/cell {:seon.profile/sym 'probe/fast :seon.profile/scope :seon.profile/host})

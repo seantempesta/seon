@@ -14,7 +14,14 @@
   Reads are approximate under concurrent calls.
 
   Times are inclusive wall time: a caller's total contains its callees' and its
-  waits. Totals cannot be subtracted into self time."
+  waits. Totals cannot be subtracted into self time.
+
+  A call is one outermost entry per thread: a call that re-enters the same
+  cell on its thread (one arity of a multi-arity function calling another
+  through the armed Var, or recursion through it) is inside that entry's time
+  and is not counted again. Counting each re-entry inflated calls and totals
+  (`seon.cluster/refresh-source!` showed x3 and three inclusive totals for one
+  call)."
   (:require [seon.schema.edn :as schema.edn])
   (:import [java.util Collections IdentityHashMap WeakHashMap]
            [java.util.concurrent.atomic LongAccumulator LongAdder]
@@ -35,6 +42,12 @@
   {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
   [value]
   (instance? LongAdder value))
+
+(defn thread-local?
+  "True for a JDK ThreadLocal."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (instance? ThreadLocal value))
 
 (defn accumulator?
   "True for a JDK LongAccumulator."
@@ -65,7 +78,8 @@
                        {:seon.profile/call-counter (LongAdder.)
                         :seon.profile/total-counter (LongAdder.)
                         :seon.profile/max-counter (LongAccumulator. longest 0)
-                        :seon.profile/throw-counter (LongAdder.)})]
+                        :seon.profile/throw-counter (LongAdder.)
+                        :seon.profile/entered (ThreadLocal.)})]
     (.add ^java.util.Set live created)
     created))
 
@@ -101,29 +115,38 @@
          ~(with-meta '__profile-max {:tag 'java.util.concurrent.atomic.LongAccumulator})
          (:seon.profile/max-counter cell#)
          ~(with-meta '__profile-throws {:tag 'java.util.concurrent.atomic.LongAdder})
-         (:seon.profile/throw-counter cell#)]
+         (:seon.profile/throw-counter cell#)
+         ~(with-meta '__profile-entered {:tag 'java.lang.ThreadLocal})
+         (:seon.profile/entered cell#)]
      ~@body))
 
 (defmacro timed
-  "Evaluate `body` inside `with-cell`, counting its completion and elapsed time.
+  "Evaluate `body` inside `with-cell`, counting its completion and elapsed time
+  once per outermost entry on this thread.
 
-  A throw is counted as a completed call and a throw, then rethrown unchanged."
+  A re-entry of the same cell on the thread already inside it runs `body`
+  uncounted: its time is inside the outer entry's. A throw is counted as a
+  completed call and a throw, then rethrown unchanged."
   [& body]
-  `(let [started# (System/nanoTime)]
-     (try
-       (let [value# (do ~@body)
-             elapsed# (- (System/nanoTime) started#)]
-         (.increment ~'__profile-calls)
-         (.add ~'__profile-total elapsed#)
-         (.accumulate ~'__profile-max elapsed#)
-         value#)
-       (catch Throwable failure#
-         (let [elapsed# (- (System/nanoTime) started#)]
+  `(if (.get ~'__profile-entered)
+     (do ~@body)
+     (let [started# (System/nanoTime)]
+       (.set ~'__profile-entered Boolean/TRUE)
+       (try
+         (let [value# (do ~@body)
+               elapsed# (- (System/nanoTime) started#)]
            (.increment ~'__profile-calls)
            (.add ~'__profile-total elapsed#)
            (.accumulate ~'__profile-max elapsed#)
-           (.increment ~'__profile-throws))
-         (throw failure#)))))
+           value#)
+         (catch Throwable failure#
+           (let [elapsed# (- (System/nanoTime) started#)]
+             (.increment ~'__profile-calls)
+             (.add ~'__profile-total elapsed#)
+             (.accumulate ~'__profile-max elapsed#)
+             (.increment ~'__profile-throws))
+           (throw failure#))
+         (finally (.set ~'__profile-entered nil))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Reads — pure over the cells; nothing here resets a counter

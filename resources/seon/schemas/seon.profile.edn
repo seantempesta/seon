@@ -20,6 +20,9 @@
  :seon.profile/total-counter :seon.profile/adder
  :seon.profile/max-counter :seon.profile/accumulator
  :seon.profile/throw-counter :seon.profile/adder
+ :seon.profile/entered [:fn {:error/message "must be a java.lang.ThreadLocal"
+                             :description "Set on a thread while it is inside this cell's outermost call; a re-entry on that thread is not counted again."}
+                        seon.profile/thread-local?]
  :seon.profile/cell
  [:map
   [:seon.profile/sym :seon.profile/sym]
@@ -29,8 +32,9 @@
   [:seon.profile/call-counter :seon.profile/call-counter]
   [:seon.profile/total-counter :seon.profile/total-counter]
   [:seon.profile/max-counter :seon.profile/max-counter]
-  [:seon.profile/throw-counter :seon.profile/throw-counter]]
- :seon.profile/calls [:int {:min 0 :description "Completed calls: returns and throws both count."}]
+  [:seon.profile/throw-counter :seon.profile/throw-counter]
+  [:seon.profile/entered :seon.profile/entered]]
+ :seon.profile/calls [:int {:min 0 :description "Completed outermost calls per thread (a re-entry through the same wrapper is inside its caller's): returns and throws both count."}]
  :seon.profile/total-ms [:int {:min 0 :description "Inclusive wall milliseconds."}]
  :seon.profile/mean-us [:int {:min 0}]
  :seon.profile/max-ms [:int {:min 0 :description "Lifetime maximum of one call, inclusive."}]
