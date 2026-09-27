@@ -2557,6 +2557,27 @@
    :seon.schema/predicate-functions (predicate-functions-in projection)
    :seon.schema/validate-render-contracts? true})
 
+(defn- replacement-base
+  "`projection` when it carries every index a replacement reads, else the
+   complete projection of its own population.
+
+   A declaration projection ([[declaration-projection]]) holds forms and
+   registry only: replacing over it read a nil contract map and no reverse
+   edges, so dependents stayed compiled against the old definition and the
+   shape catalog held only the changed keys. The complete base is read, not
+   admitted (the declaration projection never judged admission or renderer
+   coherence either), and the build is process-cached by its population, so
+   it costs one build per distinct base."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [projection]
+  (if (incremental-base? projection)
+    projection
+    (build-projection (:seon.schema.projection/forms projection)
+                      (get projection :seon.schema.projection/function-contracts {})
+                      (assoc (population-options projection)
+                             :seon.schema/admission? false
+                             :seon.schema/validate-render-contracts? false))))
+
 (defn- projection-with-declarations
   "The projection of `forms` and `function-contracts`, derived from `projection`
    by recompiling only what changed.
@@ -2588,7 +2609,8 @@
          artifact-exports #{}
          pure-predicate-symbols #{}
          predicate-functions {}}}]
-  (let [old-forms (:seon.schema.projection/forms projection)
+  (let [projection (replacement-base projection)
+        old-forms (:seon.schema.projection/forms projection)
         old-contracts (:seon.schema.projection/function-contracts projection)
         old-registry (:seon.schema.projection/registry projection)
         [changed-keys removed-keys] (declaration-changes old-forms forms)

@@ -229,21 +229,32 @@
       (into [(first form) properties] (rest form))
       [form properties])))
 
+(def ^:private core-admission {:seon.schema.admission/source :core})
+
+(defn- admitted
+  "The fixture projection with each `[key form]` admitted in order through
+   `projection-with-schema`, the choke point `register!` admits through; the
+   fixture's population stays fixed, so its complete base is built once."
+  [declarations]
+  (reduce (fn [projection [k form]]
+            (schema/projection-with-schema projection k form core-admission))
+          (fixture-projection)
+          declarations))
+
 (defn- declarations
   [{:keys [base properties]}]
-  (let [direct (carry-properties base properties)]
-    (schema/register! ::direct direct)
-    (schema/register! ::wrapped [:and properties base])
-    (schema/register! ::alias-base direct)
-    (schema/register! ::alias-middle ::alias-base)
-    (schema/register! ::aliased ::alias-middle)
-    (let [projection (fixture-projection)]
-      (mapv #(dissoc (schema.datahike/malli->datahike-attr-in projection %)
-                     :db/ident)
-            [::direct ::wrapped ::aliased]))))
+  (let [direct (carry-properties base properties)
+        projection (admitted [[::direct direct]
+                              [::wrapped [:and properties base]]
+                              [::alias-base direct]
+                              [::alias-middle ::alias-base]
+                              [::aliased ::alias-middle]])]
+    (mapv #(dissoc (schema.datahike/malli->datahike-attr-in projection %)
+                   :db/ident)
+          [::direct ::wrapped ::aliased])))
 
-(deftest ^{:seon.test/long "Eighty generated storage cases each admit direct, wrapped and aliased declarations against the canonical population."
-           :seon.test/long-ms 25000}
+(deftest ^{:seon.test/long "Eighty generated cases each admit a five-declaration chain through projection-with-schema: measured 4,163 ms for eighty chains in a fresh snapshot JVM and ~560 ms warm on default (7 ms per chain), 2026-09-27."
+           :seon.test/long-ms 10000}
   supported-ast-wrappers-and-aliases-have-one-declaration
   (support/assert-check!
    (tc/quick-check
@@ -267,11 +278,28 @@
            [1 :db.type/long]
            [1.0 :db.type/double]]]
     (testing (pr-str literal)
-      (schema/register! ::literal [:= literal])
       (is (= expected
              (:db/valueType
               (schema.datahike/malli->datahike-attr-in
-               (fixture-projection) ::literal)))))))
+               (admitted [[::literal [:= literal]]]) ::literal)))))))
+
+(deftest registration-admits-over-a-handed-declaration-projection
+  ;; CLASS: a replacement over an incomplete base. A declaration projection
+  ;; holds forms and registry only; `register!` admitting over it read a nil
+  ;; contract map (`declaration-changes` refused argument 0 `before`) and
+  ;; would have kept dependents compiled against the replaced definition.
+  (let [delta (schema/begin-registration-delta (fixture-projection))]
+    (is (= ::literal
+           (schema/call-with-registration-delta
+            delta core-admission #(schema/register! ::literal [:= true]))))
+    (is (= [:= true] (schema/registration-delta-form delta ::literal))))
+  (let [projection (admitted [[::base-shape :string]
+                              [::referrer [:vector ::base-shape]]
+                              [::base-shape :int]])]
+    (is (= :db.type/long
+           (:db/valueType
+            (schema.datahike/malli->datahike-attr-in projection ::referrer)))
+        "a dependent recompiles against the replaced definition")))
 
 (deftest schema-entity-properties-lift-only-when-their-declarations-are-storable
   (let [forms {:seon.config/dial :boolean
@@ -303,33 +331,26 @@
            (schema.datahike/storable-properties-in projection ::present)))))
 
 (deftest compiled-storage-navigation-reuses-retained-roots
+  ;; Navigation reads the projection's retained compiled roots: every lookup
+  ;; answers the same compiled object, so selecting and deriving the storable
+  ;; attributes again compiles nothing new and answers the same declarations.
   (support/with-database
    (fn [_connection]
      (let [projection (schema/handed-projection)
+           registry (:seon.schema.projection/registry projection)
            select-attributes #(#'schema.datahike/compiled-attribute-selection projection)
            attributes (::schema.datahike/attributes (select-attributes))
            derive-native #(mapv (partial schema.datahike/malli->datahike-attr-in projection) attributes)
-           expected (derive-native)
-           schema-fn m/schema
-           fast-registry mr/fast-registry
-           counts (atom {:compiles 0 :registries 0 :copied-entries 0})]
+           expected (derive-native)]
        (is (seq attributes))
        (is (= (count attributes) (count expected)))
-       (with-redefs [m/schema (fn counted-schema
-                               ([value] (counted-schema value nil))
-                               ([value options]
-                                (when-not (m/schema? value)
-                                  (swap! counts update :compiles inc))
-                                (schema-fn value options)))
-                     mr/fast-registry (fn [entries]
-                                        (swap! counts #(-> % (update :registries inc)
-                                                           (update :copied-entries + (count entries))))
-                                        (fast-registry entries))]
-         (dotimes [_ 3]
-           (is (true? (= attributes (::schema.datahike/attributes (select-attributes)))))
-           (is (true? (= expected (derive-native))))))
-       (println "BRIDGE-STEP2-NAVIGATION" (count attributes) @counts)
-       (is (= {:compiles 0 :registries 0 :copied-entries 0} @counts))))))
+       (is (= [] (into []
+                       (remove #(identical? (mr/schema registry %) (mr/schema registry %)))
+                       (keys (:seon.schema.projection/forms projection))))
+           "every declaration's root is one retained compiled object")
+       (dotimes [_ 3]
+         (is (= attributes (::schema.datahike/attributes (select-attributes))))
+         (is (= expected (derive-native))))))))
 
 (def ^:private refused-form-generator
   (gen/elements
@@ -344,9 +365,8 @@
     40
     (prop/for-all [{:keys [form]} refused-form-generator]
       (let [data (try
-                   (schema/register! ::refused form)
                    (schema.datahike/malli->datahike-attr-in
-                    (fixture-projection) ::refused)
+                    (admitted [[::refused form]]) ::refused)
                    support/committed
                    (catch clojure.lang.ExceptionInfo error
                      (ex-data error)))]
