@@ -1,45 +1,144 @@
 (ns seon.error.refusal
   "Diagnostic construction and cause-chain reading for error boundaries. An
-  error holds references, never copies: every world in it is referenced here.")
+  error holds references, never copies: every world in it is referenced here."
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]))
 
-(def ^:private machinery-namespace-prefixes
-  ;; DERIVED FROM WHAT THESE FRAMES ARE, exactly as
-  ;; `seon.instrument/caller-frame` derives its own: the host, the
-  ;; language, the contract library, core.async's dispatch, the fault
-  ;; machinery and the operator's prepl wire are what CAUGHT the failure. None of them is a place to go
-  ;; and edit, and naming one routes the fault to the steward of the
-  ;; checker instead of the steward of the code that broke.
-  ["clojure." "java." "jdk." "sun." "malli." "seon.error" "seon.instrument"
-   "seon.operator."])
+(defn- machinery-namespace?
+  "Whether `frame-ns` is Seon's own fault machinery or the operator's prepl
+  wire: they CATCH a failure, and naming one routes the fault to the steward
+  of the checker instead of the steward of the code that broke. Named
+  exactly, so `seon.error.refusal-test` is not machinery. Dependencies and
+  the host are recognized from the classpath (`authored-namespace?`)."
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [^String frame-ns]
+  (or (contains? #{"seon.error" "seon.error.refusal" "seon.instrument"} frame-ns)
+      (.startsWith frame-ns "seon.operator.")))
 
-(def ^:private first-party-namespace-prefixes
-  ;; The program's own namespaces: the ones an agent can open and edit.
-  ["seon." "my."])
+(def ^:private basis
+  ;; The Clojure CLI's record of this process's classpath, read once: a
+  ;; `:classpath` entry carrying `:lib-name` is a dependency's. Nil where
+  ;; the process has no basis (the operator under babashka).
+  (delay (when-let [path (System/getProperty "clojure.basis")]
+           (try (edn/read-string (slurp path)) (catch Exception _ nil)))))
 
-(defn frame-function
-  "The function a stack frame's class belongs to, as `ns/name`, or nil.
+(def ^:private library-roots
+  (delay (into []
+               (keep (fn [[root {:keys [lib-name]}]]
+                       (when lib-name (.getCanonicalPath (java.io.File. ^String root)))))
+               (:classpath @basis))))
 
-  Demunged Clojure frames read `ns/fn`, `ns/fn--1234` for a compiled
+(defn- library-url?
+  "Whether a classpath resource, by its URL text, is a dependency's: in a
+  jar or the JDK's image, or a file under a `:lib-name` root of the basis."
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [^String url]
+  (or (not (.startsWith url "file:"))
+      (let [file (.getCanonicalPath (java.io.File. (java.net.URI. url)))]
+        (boolean (some #(.startsWith file (str % java.io.File/separator))
+                       @library-roots)))))
+
+(defonce ^:private cache-seam
+  ;; `seon.cache` holds Caffeine, which the operator under babashka lacks: the
+  ;; one cache is reached only in a process with a basis.
+  (delay (when @basis (requiring-resolve 'seon.cache/lookup))))
+
+(declare classify-namespace)
+
+(defn- authored-namespace?
+  "Whether frames of `frame-ns` are authored (`classify-namespace`), derived
+  once per namespace in the central cache: the classpath does not change
+  under a running process, and each classification reads it (tens of
+  microseconds; a 177-frame stack cost 35 ms unshared)."
+  {:malli/schema [:=> [:cat :string :symbol] :boolean]}
+  [frame-ns class-name]
+  (if-let [lookup @cache-seam]
+    (lookup ::authored-namespace frame-ns (constantly 64)
+            #(classify-namespace frame-ns class-name))
+    (classify-namespace frame-ns class-name)))
+
+(defn- classify-namespace
+  "Whether frames of `frame-ns` (one of whose classes is `class-name`) are
+  code an agent or Seon wrote, decided from the classpath, never a name:
+  its source is a file outside every library root of the basis; or it has
+  no source and is loaded — defined at a REPL or by `eval`, as `user` is; or
+  it is neither loaded nor a class the classpath holds (the JDK's and a
+  dependency's inner classes, `clojure.lang.Compiler$FnExpr`, are). Without
+  a basis no sourceless namespace can be told from the host's own, so none
+  is authored."
+  {:malli/schema [:=> [:cat :string :symbol] :boolean]}
+  [^String frame-ns class-name]
+  (let [path (-> frame-ns (.replace \- \_) (.replace \. \/))]
+    (if-let [source (or (io/resource (str path ".clj")) (io/resource (str path ".cljc")))]
+      (not (library-url? (str source)))
+      (boolean
+       (and @basis
+            (or (find-ns (symbol frame-ns))
+                (not (io/resource (str (.replace (str class-name) \. \/) ".class")))))))))
+
+(defn- frame-site
+  "`[namespace function]` of a demunged Clojure frame class, or nil for a
+  host class. Demunged frames read `ns/fn`, `ns/fn--1234` for a compiled
   arity and `ns/outer/fn` for a closure, so the function is the first two
-  segments with the compiler's suffix dropped. A class that demunges to no
-  `/` is a host class and is not a function at all; a frame in the
-  language, host, contract or fault machinery is where a failure was
-  caught, not where it happened, and names nothing."
-  {:malli/schema [:=> [:cat :symbol] [:or :nil :qualified-symbol]]}
+  segments with the compiler's suffix dropped."
+  {:malli/schema [:=> [:cat :symbol] [:or :nil [:tuple :string :string]]]}
   [class-name]
   (let [demunged (clojure.lang.Compiler/demunge (str class-name))
         separator (.indexOf demunged "/")]
     (when (pos? separator)
-      (let [frame-ns (subs demunged 0 separator)
-            simple (subs demunged (inc separator))
+      (let [simple (subs demunged (inc separator))
             nested (.indexOf simple "/")
             simple (if (neg? nested) simple (subs simple 0 nested))
-            suffix (.indexOf simple "--")
-            simple (if (neg? suffix) simple (subs simple 0 suffix))]
-        (when (and (seq simple)
-                   (not (some #(.startsWith ^String frame-ns ^String %)
-                              machinery-namespace-prefixes)))
-          (symbol frame-ns simple))))))
+            suffix (.indexOf simple "--")]
+        [(subs demunged 0 separator) (if (neg? suffix) simple (subs simple 0 suffix))]))))
+
+(defn- authored-prefixes
+  "The namespace parts of `frames`' classes (munged, before the first `$`)
+  whose namespace is authored and outside the fault machinery. A stack
+  repeats a few namespaces across a hundred frames, so each distinct part is
+  demunged and classified once; a host class has no `$` part and none."
+  {:malli/schema [:=> [:cat [:sequential [:cat :symbol [:* [:or :symbol :string :int]]]]]
+                  [:set :string]]}
+  [frames]
+  (into #{}
+        (keep (fn [[^String prefix class-name]]
+                (let [frame-ns (clojure.lang.Compiler/demunge prefix)]
+                  (when (and (not (machinery-namespace? frame-ns))
+                             (authored-namespace? frame-ns class-name))
+                    prefix))))
+        ;; one representative class per prefix
+        (into {} (keep (fn [[class-name]]
+                         (let [text (str class-name) cut (.indexOf text "$")]
+                           (when (pos? cut) [(subs text 0 cut) class-name]))))
+              (rseq (vec frames)))))
+
+(defn- first-party-in
+  "The frames of `frames` whose class's namespace part is in `authored`."
+  {:malli/schema [:=> [:cat [:set :string] [:vector [:cat :symbol [:* [:or :symbol :string :int]]]]]
+                  [:vector [:cat :symbol [:* [:or :symbol :string :int]]]]]}
+  [authored frames]
+  (filterv (fn [[class-name]]
+             (let [text (str class-name) cut (.indexOf text "$")]
+               (and (pos? cut) (contains? authored (subs text 0 cut)))))
+           frames))
+
+(defn frame-function
+  "The function a stack frame's class belongs to, as `ns/name`, or nil.
+
+  Only a frame in authored code names one (`authored-namespace?`): a frame
+  in a dependency, the host or the fault machinery is where a failure was
+  caught, not where it happened. The name must be a Var that exists, so a
+  compiler-generated class of a loaded namespace (`user$eval479`, a
+  `reify`) names nothing."
+  {:malli/schema [:=> [:cat :symbol] [:or :nil :qualified-symbol]]}
+  [class-name]
+  (when-let [[frame-ns simple] (when (seq (first-party-in (authored-prefixes [[class-name]])
+                                                                  [[class-name]]))
+                                  (frame-site class-name))]
+    (when (and (seq simple)
+               (or (not (find-ns (symbol frame-ns)))
+                   (find-var (symbol frame-ns simple))))
+      (symbol frame-ns simple))))
 
 (defn- stack-frames
   "`throwable`'s own complete stack frames as `[class method file line]`;
@@ -54,14 +153,12 @@
         (.getStackTrace throwable)))
 
 (defn first-party-frame?
-  "Whether a frame belongs to a first-party function (`seon.*`/`my.*`,
-  outside the fault machinery)."
+  "Whether a frame is in code an agent or Seon wrote (`authored-namespace?`),
+  outside the fault machinery: an evaluated form's `user$eval…` frame is one,
+  a dependency's or the host's is not."
   {:malli/schema [:=> [:cat :seon.error/frame] :boolean]}
-  [[class-name]]
-  (boolean
-   (when-let [function (frame-function class-name)]
-     (some #(.startsWith ^String (namespace function) ^String %)
-           first-party-namespace-prefixes))))
+  [frame]
+  (boolean (seq (first-party-in (authored-prefixes [frame]) [frame]))))
 
 (defn- cause-links
   "`throwable` and its causes, outermost to root, each once: a cause cycle
@@ -75,14 +172,19 @@
       found)))
 
 (defn root-frame
-  "The first complete stack frame of the ROOT cause, where the failure
-  happened. The outermost throwable's frame is where it was wrapped: a
-  wrapper's frame names the catch site, never the code that broke."
+  "The first frame an agent can act on: the first first-party frame of the
+  ROOT cause, where the failure happened, else of each enclosing link in turn
+  outward. A dependency's innermost frame (`clojure.string$replace` under an
+  agent's call) is where it broke but nothing to edit; with no first-party
+  frame anywhere (a form refused at compile) there is no frame, and the
+  chain's own data (a compile error's source and line) is the location."
   {:malli/schema [:=> [:cat [:or :nil :seon.error/throwable]]
                   [:or :nil :seon.error/frame]]}
   [throwable]
   (when throwable
-    (first (stack-frames (peek (cause-links throwable))))))
+    (let [stacks (mapv stack-frames (rseq (cause-links throwable)))
+          authored (authored-prefixes (into [] cat stacks))]
+      (some #(first (first-party-in authored %)) stacks))))
 
 ;;; WORLDS ARE REFERENCED, NEVER COPIED (owner 2026-09-26). Which values are
 ;;; worlds is the registry's answer, not a class roster: every schema declared
@@ -123,9 +225,11 @@
       ;; roster printed every context's projection: 2 GB, default's OOM of
       ;; 2026-09-26. Named, never entered, as value admission names it
       ;; (`seon.sci.admit`, "reference types ... named, never entered").
+      ;; The name is a STRING: as a symbol it printed `#object[...]`, a tag
+      ;; no reader accepts, so a stored error holding a place never read back.
       (and (instance? clojure.lang.IDeref value) (not (var? value)))
-      (symbol (str "#object[" (.getName (class value)) " 0x"
-                   (Integer/toHexString (System/identityHashCode value)) "]"))
+      (str "#object[" (.getName (class value)) " 0x"
+           (Integer/toHexString (System/identityHashCode value)) "]")
       (record? value) value
       (or (map? value) (vector? value))
       (reduce-kv (fn [held k v]
@@ -146,7 +250,7 @@
   fingerprint, an environment or SCI context the references it holds. Maps,
   vectors and sets are entered; records, sequences and other objects are
   not. A place (atom, delay, promise: any deref-able but a Var) becomes the
-  symbol `#object[Class 0xhash]`, since printing it copies its state. Without
+  string `#object[Class 0xhash]`, since printing it copies its state. Without
   a projection no world is recognized; places are still named."
   {:malli/schema [:=> [:cat [:maybe :map]
                        [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Error evidence is arbitrary producer data; only registry-declared worlds inside it are replaced.", :gen/elements [nil false 0 "" :k [] {}]}]]
@@ -154,22 +258,29 @@
   [projection value]
   (referenced (identity-projector projection) value))
 
-(defn- first-party-frames
-  "`throwable`'s first-party frames: where a core fault happened and the
-  call path that reached it."
-  {:malli/schema [:=> [:cat :seon.error/throwable] [:vector :seon.error/frame]]}
-  [throwable]
-  (filterv first-party-frame? (stack-frames throwable)))
-
 (defn- link
+  "One throwable as a flat link, its complete frames held under `::frames`
+  until the chain keeps only the first-party ones."
   [project ^Throwable throwable relation]
-  (let [frames (first-party-frames throwable)
-        message (ex-message throwable)
+  (let [message (ex-message throwable)
         data (ex-data throwable)]
-    (cond-> (merge {:seon.error/throwable-class (.getName (class throwable))} relation)
+    (cond-> (merge {:seon.error/throwable-class (.getName (class throwable))
+                    ::frames (stack-frames throwable)}
+                   relation)
       (seq message) (assoc :seon.error/message message)
-      data (assoc :seon.error/data (referenced project data))
-      (seq frames) (assoc :seon.error/frames frames))))
+      data (assoc :seon.error/data (referenced project data)))))
+
+(defn- first-party-links
+  "`links` with each link's frames narrowed to its first-party ones (a link
+  with none keeps no frames), every namespace classified once for the chain."
+  {:malli/schema [:=> [:cat [:vector :map]] :seon.error/chain]}
+  [links]
+  (let [authored (authored-prefixes (into [] (mapcat ::frames) links))]
+    (mapv (fn [entry]
+            (let [frames (first-party-in authored (::frames entry))]
+              (cond-> (dissoc entry ::frames)
+                (seq frames) (assoc :seon.error/frames frames))))
+          links)))
 
 (defn chain
   "The whole cause chain as FLAT links: first the primary chain, outermost to
@@ -205,7 +316,7 @@
                                 s (.getSuppressed t)]
                             [s {:seon.error/suppressed-by (+ start i)}])]
            (recur (into (subvec pending 1) suppressed) (into seen own) links))
-         links)))))
+         (first-party-links links))))))
 
 (defn without-links
   "`links` (a `chain`) without the links `drop?` selects, every remaining
@@ -247,9 +358,10 @@
         observation (references projection (dissoc observation :seon.error/throwable))]
   (if throwable
     (let [links (chain throwable projection)
-          frame (root-frame throwable)
-          root-message (:seon.error/message
-                        (nth links (dec (count (cause-links throwable)))))]
+          primary (subvec links 0 (count (cause-links throwable)))
+          ;; `root-frame`, read from the links' own first-party frames
+          frame (some #(first (:seon.error/frames %)) (rseq primary))
+          root-message (:seon.error/message (peek primary))]
       (cond-> (assoc observation
                      :seon.error/exception-class (symbol (.getName (class throwable)))
                      :seon.error/chain links)

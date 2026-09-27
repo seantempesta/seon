@@ -1,7 +1,8 @@
 (ns seon.error.refusal-test
   "Cause-chain readers preserve producer errors and ordinary exception data.
   Their error-handling contracts use the base; each producer owns its named output."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [malli.instrument :as mi]
             [seon.config :as config]
             [my.program :as program]
@@ -100,13 +101,12 @@
                   :seon.error/cause [:seon.error/id "recorded-cause"]
                   :x/member {:x/detail "retained"}}
            returned (construct (assoc value :seon.error/throwable failure))]]
-       (is (= (assoc value :seon.error/frame '[example.Failure run "failure.clj" 42]
-                          :seon.error/exception-class 'java.lang.Exception
+       (is (= (assoc value :seon.error/exception-class 'java.lang.Exception
                           :seon.error/message "specific cause"
                           :seon.error/chain [{:seon.error/throwable-class "java.lang.Exception"
                                               :seon.error/message "specific cause"}])
               returned)
-           "A host frame is the frame, but it is not a first-party frame of the link.")
+           "A host class's frame is nothing an agent can edit: no frame, and none on the link.")
        (.setStackTrace failure (make-array StackTraceElement 0))
        (is (= (assoc value :seon.error/exception-class 'java.lang.Exception
                      :seon.error/message "specific cause"
@@ -130,14 +130,18 @@
 
 (def ^:private wrapped
   ;; The census F0 shape: a wrapper ex-info around the ex-info that broke.
+  ;; Frames name loaded namespaces, since first party is read from where each
+  ;; namespace's source is: this test's own and `my.program`'s are authored,
+  ;; `clojure.core`'s is in the Clojure jar, `seon.error` is fault machinery.
   (delay
    (let [root (framed (ex-info "Keyword cannot be cast to Number" {:seon.probe/leaf 1})
                       [["clojure.lang.Numbers" "ops" "Numbers.java" 1095]
-                       ["seon.probe$inner" "invokeStatic" "probe.clj" 4]
+                       ["clojure.core$inc" "invokeStatic" "core.clj" 929]
+                       ["seon.error.refusal_test$inner" "invokeStatic" "refusal_test.clj" 4]
                        ["seon.error$prepare" "invokeStatic" "error.clj" 9]])]
      (framed (ex-info "wrapper" {:seon.probe/outer 2} root)
-             [["seon.probe$outer" "invokeStatic" "probe.clj" 5]
-              ["my.work$run" "invoke" "work.clj" 7]]))))
+             [["seon.error.refusal_test$outer" "invokeStatic" "refusal_test.clj" 5]
+              ["my.program$run" "invoke" "program.clj" 7]]))))
 
 (def ^:private observation
   {:seon.error/at (java.util.Date. 0)
@@ -148,18 +152,18 @@
   (doseq [construct constructors
           :let [returned (construct (assoc observation :seon.error/throwable @wrapped))]]
     (is (= (assoc observation
-                  :seon.error/frame '[clojure.lang.Numbers ops "Numbers.java" 1095]
+                  :seon.error/frame '[seon.error.refusal_test$inner invokeStatic "refusal_test.clj" 4]
                   :seon.error/exception-class 'clojure.lang.ExceptionInfo
                   :seon.error/message "Keyword cannot be cast to Number"
                   :seon.error/chain [{:seon.error/throwable-class "clojure.lang.ExceptionInfo"
              :seon.error/message "wrapper"
              :seon.error/data {:seon.probe/outer 2}
-             :seon.error/frames '[[seon.probe$outer invokeStatic "probe.clj" 5]
-                                  [my.work$run invoke "work.clj" 7]]}
+             :seon.error/frames '[[seon.error.refusal_test$outer invokeStatic "refusal_test.clj" 5]
+                                  [my.program$run invoke "program.clj" 7]]}
             {:seon.error/throwable-class "clojure.lang.ExceptionInfo"
              :seon.error/message "Keyword cannot be cast to Number"
              :seon.error/data {:seon.probe/leaf 1}
-             :seon.error/frames '[[seon.probe$inner invokeStatic "probe.clj" 4]]}])
+             :seon.error/frames '[[seon.error.refusal_test$inner invokeStatic "refusal_test.clj" 4]]}])
            returned)
         "Every link keeps class, message, ex-data and only its first-party frames.")
     (is (= "Keyword cannot be cast to Number" (:seon.error/message returned))
@@ -169,12 +173,43 @@
         "The chain validates as the declared base member.")))
 
 (deftest the-frame-comes-from-the-root-cause
-  (is (= '[clojure.lang.Numbers ops "Numbers.java" 1095]
+  (is (= '[seon.error.refusal_test$inner invokeStatic "refusal_test.clj" 4]
          (:seon.error/frame (error.refusal/diagnostic
                              (assoc observation :seon.error/throwable @wrapped))))
-      "The wrapper's frame is the catch site; the root's is where it broke.")
-  (is (= '[clojure.lang.Numbers ops "Numbers.java" 1095]
+      "The wrapper's frame is the catch site; the root's first-party frame is where it broke.")
+  (is (= '[seon.error.refusal_test$inner invokeStatic "refusal_test.clj" 4]
          (error.refusal/root-frame @wrapped))))
+
+(defn probe-var
+  "A Var for `frame-function` to name."
+  {:malli/schema [:=> [:cat] :nil]}
+  [])
+
+(deftest the-frame-is-the-first-one-the-caller-wrote
+  ;; printer-fixes-opus 2026-09-27: `(clojure.string/replace nil ...)` in an
+  ;; eval_clj form reported `[clojure.string$replace ...]`, and a form evaluated
+  ;; in `user` was never first party. A dependency's frame is where it broke,
+  ;; not anything to edit; the caller's form is.
+  (testing "a form evaluated in a namespace with no source file"
+    (let [failure (try (binding [*ns* (the-ns 'user)]
+                         (eval '(clojure.string/replace nil "a" "b")))
+                       (catch Throwable t t))
+          frame (error.refusal/root-frame failure)]
+      (is (instance? NullPointerException failure))
+      (is (= "clojure.string$replace" (.getClassName ^StackTraceElement (first (.getStackTrace ^Throwable failure))))
+          "the innermost frame is the dependency's")
+      (is (str/starts-with? (str (first frame)) "user$eval") (pr-str frame))
+      (is (error.refusal/first-party-frame? frame))))
+  (testing "a dependency, the host and the fault machinery are not first party"
+    (doseq [frame '[[clojure.string$replace invokeStatic "string.clj" 101]
+                    [malli.core$_fail_BANG_ invokeStatic "core.cljc" 138]
+                    [clojure.lang.Util runtimeException "Util.java" 221]
+                    [seon.error.refusal$chain invokeStatic "refusal.clj" 1]]]
+      (is (not (error.refusal/first-party-frame? frame)) (pr-str frame))))
+  (testing "a first-party frame names its function only when its Var exists"
+    (is (= 'seon.error.refusal-test/probe-var
+           (error.refusal/frame-function 'seon.error.refusal_test$probe_var)))
+    (is (nil? (error.refusal/frame-function 'user$eval479$fn__480)))))
 
 (deftest ^{:seon/tasks #{"4c559398c4be"}} a-cleanup-failure-survives-beside-the-primary
   (let [primary (ex-info "primary" {:seon.probe/step :work} (ex-info "root" {:seon.probe/step :leaf}))
@@ -280,8 +315,9 @@
     (is (printed-bytes error 16384) "the error prints in kilobytes")
     (is (= #'error.refusal/diagnostic (get-in error [:seon.error/offending :seon.probe/var]))
         "a Var is its name already and stays")
-    (is (every? symbol? (map (:seon.error/offending error) [:seon.agent/routing :seon.probe/memo]))
-        "each place is its #object name")))
+    (is (every? #(str/starts-with? % "#object[")
+                (map (:seon.error/offending error) [:seon.agent/routing :seon.probe/memo]))
+        "each place is its #object name, as a string a reader reads back")))
 
 (deftest constructor-output-keeps-the-producing-contract
   (let [projection (-> (schema/handed-projection)
