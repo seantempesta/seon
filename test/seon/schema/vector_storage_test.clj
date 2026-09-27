@@ -393,6 +393,14 @@
          (let [[a' _ c'] (element-ids c [:seon.vector-test.p/id "r"] :seon.vector-test.p/kids)]
            (is (= [a cc] [a' c']))
            (is (empty? (d/datoms @c :eavt b)) "the replaced component is destroyed with its cell"))))
+     (testing "a component map named only by a tempid (a writer's row) is matched by its value"
+       (let [before (element-ids c p :seon.vector-test.p/kids)
+             report (tx! c [{:seon.vector-test.p/id "p"
+                             :seon.vector-test.p/kids [{:db/id "a-row" :seon.vector-test.k/name "A"
+                                                        :seon.vector-test.k/args [{:db/id "a-arg" :seon.vector-test.a/name "1"}]}
+                                                       {:db/id "b-row" :seon.vector-test.k/name "B"}]}])]
+         (is (zero? (effective report)))
+         (is (= before (element-ids c p :seon.vector-test.p/kids)))))
      (testing "equal independent maps stay two entities"
        (tx! c [{:seon.vector-test.p/id "two" :seon.vector-test.p/kids [{:seon.vector-test.k/name "x"} {:seon.vector-test.k/name "x"}]}])
        (is (= 2 (count (distinct (element-ids c [:seon.vector-test.p/id "two"] :seon.vector-test.p/kids))))))

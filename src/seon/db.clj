@@ -4676,19 +4676,20 @@
 
 (defn- element-key
   "What makes a desired element the same element as a stored one: the entity
-   for a peer or a component named by id, the logical value otherwise; nil
-   when it can only be new (a tempid)."
+   for a peer or a component named by an existing id, the logical value for a
+   component map otherwise (a tempid names nothing stored); nil when it can
+   only be new (a peer tempid)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection [:enum :component :peer :scalar]
                        :seon.schema/value]
                   [:or :nil [:tuple [:enum :id :value] :seon.schema/value]]]}
   [database projection kind element]
-  (let [named (if (map? element) (:db/id element) element)]
+  (let [named (if (map? element) (:db/id element) element)
+        existing? (and (some? named) (not (string? named)) (not (and (number? named) (neg? named))))]
     (cond
       (= :scalar kind) [:value element]
-      (and (some? named) (not (string? named)) (not (and (number? named) (neg? named))))
-      (some->> (db.utils/entid database named) (vector :id))
-      (and (= :component kind) (map? element) (nil? named))
-      [:value (desired-component database projection element)]
+      existing? (some->> (db.utils/entid database named) (vector :id))
+      ;; A component map named only by a tempid (a writer's row) is its value.
+      (and (= :component kind) (map? element)) [:value (desired-component database projection element)]
       :else nil)))
 
 (defn- stored-keys
