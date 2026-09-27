@@ -1870,9 +1870,11 @@
   (let [db (get unit :seon.db/db)
         id (get unit ::id)]
     (when id
-      (let [opened (:db/txInstant (db/pull db [:db/txInstant]
-                                                     (let [ref (get unit ::opened-tx)]
-                                                       (if (map? ref) (:db/id ref) ref))))
+      (let [;; A unit naming no opened transaction (a partial run map) says
+            ;; nothing about when it opened; pulling nil is a refused read.
+            opened-ref (let [ref (get unit ::opened-tx)] (if (map? ref) (:db/id ref) ref))
+            opened (when (and db opened-ref)
+                     (:db/txInstant (db/pull db [:db/txInstant] opened-ref)))
             receipts (when db (run-receipts db (:db/id unit)))
             cut (when db (interrupted-warning receipts))
             never-started
