@@ -61,7 +61,8 @@
             [seon.test-support :as support]
             [seon.turn :as turn]
             [starfederation.datastar.clojure.api :as datastar]
-            [seon.program :as program])
+            [seon.program :as program]
+            [sci.core :as sci])
   (:import [java.util.concurrent CompletableFuture CountDownLatch]
            [java.net BindException URI URLEncoder]
            [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers
@@ -1550,45 +1551,63 @@ handle))}}
   ;; made `reconnect-is-repaint` and its wire twin red at random.
   ;;
   ;; The construction is deterministic rather than hopeful: the pass is
-  ;; HELD inside its own serialization while a newer fact commits, so
-  ;; the stale publication is guaranteed to be what arrives first.
+  ;; HELD inside its own derivation while a newer fact commits, so the
+  ;; stale publication is guaranteed to be what arrives first.
+  ;;
+  ;; THE HOLD IS AGENT CODE IN THIS MEMBER'S OWN WORLD, not a redefinition:
+  ;; the viewing agent's namespace (my.agents.root) gets a render function
+  ;; for its namespace entity that blocks, on the first derivation of the
+  ;; superseded source, on a promise defined beside it in the same SCI
+  ;; context the render proc renders in. The test reaches that promise by
+  ;; evaluating in the same context; the branch and its context die with
+  ;; the member.
   (with-server
-    (fn [connection server _context]
-      ;; one tab already watching, so a commit always costs a real pass
-      (let [watching (open-feed server (str "/feed/" agent-id))]
-        (try
-          (read-complete-paint! watching connection)
-          (let [entered (CountDownLatch. 1)
-                holding (CountDownLatch. 1)
-                first-pass (atom true)
-                walk render.walk/neighborhood]
-            (with-redefs [render.walk/neighborhood
-                          (fn [request]
-                            (when (compare-and-set! first-pass true false)
-                              (.countDown entered)
-                              (support/await-event! holding ::held-pass-released))
-                            (walk request))]
-              (support/transacted! connection
-                                   [{:seon.ns/name 'my.agents.root
-                                     :seon.ns/source
-                                     "(ns my.agents.root)\n(def superseded true)"}])
-              (support/await-event! entered [:pass-held-mid-derivation])
-              ;; the held pass can no longer describe the facts
-              (support/transacted! connection
-                                   [{:seon.ns/name 'my.agents.root
-                                     :seon.ns/source
-                                     "(ns my.agents.root)\n(def connected true)"}])
-              (let [fresh (open-feed server (str "/feed/" agent-id))]
-                (try
-                  (.countDown holding)
-                  (let [paint (read-complete-paint! fresh connection)]
-                    (is (str/includes? paint "def connected true")
-                        "the initial paint is derived at or after the basis
-                         this tab connected at")
-                    (is (not (str/includes? paint "def superseded true"))
-                        "the in-flight pass that published first was refused"))
-                  (finally (.close fresh))))))
-          (finally (.close watching)))))))
+    (fn [connection server context]
+      (let [ctx (:ctx context)
+            source (str "(defn ns-view {:malli/schema [:=> [:cat [:map [:seon.ns/name :seon.ns/name] [:seon.ns/source :string]]] :seon.render/hiccup]} [unit] "
+                        "(when (and (clojure.string/includes? (:seon.ns/source unit) \"superseded\") (compare-and-set! hold-first? true false)) "
+                        "(deliver pass-entered true) (deref pass-released 20000 nil)) "
+                        "[:pre (:seon.ns/source unit)])")
+            in-root #(sci/binding [sci/ns (sci/create-ns 'my.agents.root)] (sci/eval-form ctx %))]
+        (in-root '(do (def hold-first? (atom true))
+                      (def pass-entered (promise))
+                      (def pass-released (promise))))
+        ;; the renderer is a program row (the namespace stage selects the
+        ;; viewer's public contracted functions from the acquired program)
+        ;; and the same form in this context, closing over the promises
+        (support/transacted! connection
+                             [(support/program-fn-row (db/db connection) 'my.agents.root/ns-view source)])
+        (sci.eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
+                            :seon.schema/projection (sci.kernel/context-projection ctx)})
+        (in-root (edn/read-string source))
+        ;; one tab already watching, so a commit always costs a real pass
+        (let [watching (open-feed server (str "/feed/" agent-id))]
+          (try
+            (read-complete-paint! watching connection)
+            (support/transacted! connection
+                                 [{:seon.ns/name 'my.agents.root
+                                   :seon.ns/source
+                                   "(ns my.agents.root)\n(def superseded true)"}])
+            (is (true? (deref (in-root 'pass-entered) (* 1000 support/event-backstop-seconds) nil))
+                "the pass deriving the superseded source is held in its renderer")
+            ;; the held pass can no longer describe the facts
+            (support/transacted! connection
+                                 [{:seon.ns/name 'my.agents.root
+                                   :seon.ns/source
+                                   "(ns my.agents.root)\n(def connected true)"}])
+            (let [fresh (open-feed server (str "/feed/" agent-id))]
+              (try
+                (in-root '(deliver pass-released true))
+                (let [paint (read-complete-paint! fresh connection)]
+                  (is (str/includes? paint "def connected true")
+                      "the initial paint is derived at or after the basis
+                       this tab connected at")
+                  (is (not (str/includes? paint "def superseded true"))
+                      "the in-flight pass that published first was refused"))
+                (finally (.close fresh))))
+            (finally
+              (in-root '(deliver pass-released true))
+              (.close watching))))))))
 
 ;;; 4. reconnect-is-repaint-wire-test — seed 2026072824
 
