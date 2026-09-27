@@ -85,4 +85,12 @@
              :kind :function
              :intent "Probed on disposable branch p0-probe 2026-09-27: the run \"(do (in-ns 'p0.nested) 1) (+ 1 2)\" writes the second form's :seon.cluster.eval/ns as the lookup ref [:seon.ns/name p0.nested], but namespace-rows (turn.clj ~619) creates rows only for namespaces segmentation saw (top-level in-ns), so the settlement transaction is refused ('Nothing found for entity id', logged unbounded twice by Datahike) and the caller gets 'The awaited channel closed before completion' with no run id, no values, no events. Total-path violation. Every namespace an evaluation actually ran in or ended in is upserted as {:seon.ns/name sym} in the same settlement transaction (the owner's session-entity plan P2a, docs/research/agent-platform/repl-session-entity-design-2026-09-27.md problem 3)."
              :must-read #{seon.turn/evaluate-sources}
+             :evidence #{"docs/research/agent-platform/repl-session-entity-design-2026-09-27.md"}}
+ #:seon.task{:name "history-acquisition-decodes-stored-read-plans"
+             :kind :function
+             :intent "Loading an agent's history (seon.eval/of-agent for the prompt, seon.turn/latest-evaluations for each system turn's refresh) takes 1.5-1.8 s for root's 117 evaluations versus 3 ms for a raw pull: seon.db/pull decodes stored :datahike.read/dependency-plan strings (17.6 M chars, up to 1.5 MB each, mostly generated reads such as seon.error/for-agent) that no render shows. Context cost must follow what is shown; store bounded plans and pull none for display (data-model plan slice P1)."
+             :evidence #{"docs/research/agent-platform/repl-session-entity-design-2026-09-27.md"}}
+ #:seon.task{:name "compaction-erases-no-history-form-text"
+             :kind :function
+             :intent "Form :seon.cluster.eval/source, comment, output, diagnostics and the turn's reply are declared :db/noHistory, so retracting a form at compaction erases its text permanently, contradicting the owner's ruling that compaction deletes nothing (history answers what was dropped). These attributes are write-once; remove the no-history flag before compaction retracts forms (data-model plan)."
              :evidence #{"docs/research/agent-platform/repl-session-entity-design-2026-09-27.md"}}]
