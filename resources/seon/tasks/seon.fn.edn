@@ -73,12 +73,6 @@
              :intent "seon.fn/report-identities over one publication's 5,227 datoms took 1,312 ms per call on default (x2 = 2,623 ms; seon.db/with-declarations x15 2,669 ms, pull-many 1,300 ms), and publication, caller selection and adoption (source/changed-identities) each call it. Its work should follow the changed entities, read once per report."
              :must-read #{seon.fn/report-identities}
              :evidence #{"docs/research/agent-platform/landing/perf-boot-opus-2026-09-26.md"}}
- #:seon.task{:id "3452b9f07046"
-             :name "synthetic-source-rows-drop-their-contract"
-             :kind :function
-             :intent "seon.test-support/program-row finalizes a synthetic function row with seon.fn/source-rows' analysis alone, so a contracted fixture keeps :seon.fn/spec but has no :seon.fn/arities and no input refs; seon.cluster.publication-delta-test/schema-referrers-are-selected-for-arming-without-a-namespace-reload is red. The facts belong to the finalizer, under the projection the definition is admitted in: an agent run's context projection holds schemas the run registered before settlement, which the run database's carried projection lacks (a contract naming one refuses :malli.core/invalid-schema there). seon.fn/contract-facts-row is that one finalizer (sci.eval/definition-row uses it); tmp/fix-source-row-contract-opus/program-row-contract-facts.patch applies it in program-row. Settled when that patch lands and the named test passes."
-             :must-read #{seon.fn/contract-facts-row seon.test-support/program-row}
-             :evidence #{"docs/research/agent-platform/landing/perf-boot-opus-2026-09-26.md"}}
  #:seon.task{:name "fn-test-redefines-vars"
              :kind :namespace
              :intent "AGENTS forbids with-redefs over any Var, yet test/seon/fn_test.clj still redefines Vars in about ten passing tests (~169, 195, 885, 896, 925, 1463, 1503, 1577, 2019, 2031; with-redefs-fn ~1744, 3055). A redefinition is JVM-global: a concurrent member or agent calls the substitute. Replace each with an injected world or explicit argument value, as 238c868e0 did for the two red ones."
