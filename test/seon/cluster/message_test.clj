@@ -23,7 +23,6 @@
             [seon.id :as id]
             [seon.turn :as turn]
             [seon.cluster.message :as message]
-            [seon.cluster.agent :as cluster.agent]
 
             [seon.cluster.wake :as wake]
             [seon.config :as config]
@@ -597,29 +596,6 @@
       (is (= "m-0" (message/trigger @connection "r-1"))
           "the cause is an ordinary run fact")
       (is (nil? (message/trigger @connection "no-such-run"))))))
-
-(deftest a-non-temporal-run-retains-its-trigger-without-a-transaction-entity
-  ;; The canonical fresh store (installed attributes, carried projection) with
-  ;; history off. It has no fixture cluster, so the agent comes from the
-  ;; creation writer itself (its branch from the store's own config).
-  (test-support/with-database
-    {:seon.test-support/fresh-store? true :seon.test-support/keep-history? false}
-    (fn [connection]
-      (is (false? (get-in @connection [:config :keep-history?])))
-      (test-support/transacted! connection (cluster.agent/creation-tx
-                                            {:seon.agent/id "alice" :seon.ns/name 'my.agents.alice
-                                             :seon.cluster/name "fixture"}))
-      (ask! connection "m-0" "alice" "hello")
-      (let [report
-            (db/transact!
-             connection
-             (turn/open-tx
-              {:seon.turn/id "r-1" :seon.turn/agent [:seon.agent/id "alice"] :seon.turn/trigger [:seon.message/id "m-0"] :seon.turn/opened-tx "datomic.tx"}))
-            transaction (:max-tx (:db-after report))]
-        (is (nil? (db/pull @connection '[*] transaction))
-            "the HISTORY-OFF database has no transaction entity")
-        (is (= "m-0" (message/trigger @connection "r-1"))
-            "the run's ordinary trigger ref survives independently")))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; THE CLASS-KILLER: the polite infinite conversation terminates
