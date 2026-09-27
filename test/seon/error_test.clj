@@ -96,16 +96,19 @@
                                                :seon.config.error/recurrence-limit 100}))
             _ (test-support/seed-cluster! connection "error-graph")
             _ (is (:db-after (db/transact! connection
-                                          (into (test-support/agents-tx @connection ["error-graph-a" "error-graph-b" "error-graph-steward"])
-                                            [(program/declaration-row
-                                              (db/carried-projection @connection)
-                                              {:seon.ns/name 'my.error-graph :seon.ns/source "(ns my.error-graph)"
-                                               :seon.ns/steward [:seon.agent/id "error-graph-steward"]}
-                                              :all :agent)
-                                             (test-support/program-fn-row
-                                              (db/db connection) 'my.error-graph/raise
-                                              "(defn raise [] nil)")
-                                             {:seon.turn/id "error-graph-turn" :seon.turn/agent [:seon.agent/id "error-graph-a"] :seon.turn/opened-tx "datomic.tx"}]))))
+                                          ;; The steward is written by its writer (`steward-call`, through
+                                          ;; the steward agent's creation), never on the declaration row,
+                                          ;; which does not own it (seon.ns.edn `:seon.program/written-by`).
+                                          (-> (test-support/agents-tx @connection ["error-graph-a" "error-graph-b"])
+                                              (into [(program/declaration-row
+                                                      (db/carried-projection @connection)
+                                                      {:seon.ns/name 'my.error-graph :seon.ns/source "(ns my.error-graph)"}
+                                                      :all :agent)
+                                                     (test-support/program-fn-row
+                                                      (db/db connection) 'my.error-graph/raise
+                                                      "(defn raise [] nil)")
+                                                     {:seon.turn/id "error-graph-turn" :seon.turn/agent [:seon.agent/id "error-graph-a"] :seon.turn/opened-tx "datomic.tx"}])
+                                              (into (test-support/agent-tx @connection "error-graph-steward" 'my.error-graph))))))
             a (error/recording (db/db connection) (request "error-graph-a" "error-graph-process-1" at))
             b (error/recording (db/db connection) (request "error-graph-b" "error-graph-process-1" at))
             read-error #(db/pull (db/db connection)
@@ -152,8 +155,6 @@
                                "not scanned")))
           (is (str/includes? (pr-str (#'seon.render.transcript/fault-problems database "error-graph-steward" [])) "occurrences: 6"))
           (is (str/includes? (error/render-ai row) "Occurrences: 6"))
-          (is (str/includes? (pr-str (error/render-html row)) "Resolution unknown")
-              "without a database the resolution cannot be derived")
           (is (str/includes? (pr-str (error/render-html {:seon.db/db database :seon.render/value row})) "Open"))
           (is (= '(seon.error/for-agent (seon.db/db) "error-graph-steward") read-form))
           (let [observed (error/for-agent database "error-graph-steward")]
@@ -162,6 +163,9 @@
           (is (= 1 (:seon.render.transcript/count (first (#'seon.render.transcript/fault-problems database "error-graph-steward" [])))))
           (is (:db-after (db/transact! connection [[:db/add (:seon.error/ref a) :seon.error/resolved-tx "datomic.tx"]])))
           (is (str/includes? (pr-str (error/render-html {:seon.db/db (db/db connection) :seon.render/value (read-error)})) "Resolved"))
+          ;; A render always has a database (`:seon.render/unit` requires it): one
+          ;; omitted is supplied from this body's own branch as it is now.
+          (is (str/includes? (pr-str (error/render-html (read-error))) "Resolved"))
           (is ((schema/projection-validator (schema/handed-projection) :seon.error/fact) (:seon.error/fact (first (#'seon.problems/error-signatures (db/db connection)))))))
         (let [flat (error/recording (db/db connection)
                                   (commit-request {:seon.error/message "flat error", :seon.error/operation (quote seon.id/valid?)} {}))]
@@ -197,7 +201,30 @@
         (is (:seon.error/capped? (error/latest-fact (first errors))))
         (is (str/includes? (error/render-ai (first errors)) "capped evidence message")
             (error/render-ai (first errors)))
-        (is (= [] (error/for-agent database "root")))))))
+        ;; An unstewarded fault is delivered to its escalation owner: the
+        ;; writer notifies root, so root's faults hold exactly this one.
+        (is (= #{(second (:seon.error/ref recorded))}
+               (set (map :seon.error/signature (error/for-agent database "root")))))))))
+
+(deftest a-body-on-its-own-branch-is-supplied-that-branchs-database
+  ;; Defect 4 (red-triage-3): a body that makes its own world and omits
+  ;; `:seon.db/db` is supplied the custody in force at the call, never the
+  ;; member's database as of the body's start. A renderer whose unit requires
+  ;; the database, called without it, sees this branch's latest write.
+  (with-db
+    (fn [connection]
+      (let [recorded (error/recording (db/db connection)
+                                      (commit-request (ex-info "own branch" {})
+                                                      {:seon.agent/id "agent-3"
+                                                       :seon.error/process "own-branch"}))
+            _ (test-support/transacted! connection (:seon.db/tx-data recorded))
+            _ (test-support/transacted! connection [[:db/add (:seon.error/ref recorded)
+                                                     :seon.error/resolved-tx "datomic.tx"]])
+            row (db/pull (db/db connection) '[*] (:seon.error/ref recorded))]
+        (is (= (:max-tx (db/db connection))
+               (:max-tx (:seon.db/db (instrument/calling-environment)))))
+        (is (str/includes? (pr-str (error/render-html row)) "Resolved")
+            (pr-str (error/render-html row)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Fixtures — the three families, plus arbitrary observed values
@@ -1264,8 +1291,10 @@
              (is (= (:seon.error/operation source) (:seon.error/operation latest)))
              (is (= (:seon.instrument/declared-arities occurrence)
                     (:seon.instrument/declared-arities latest)))
-             (is (= (:seon.agent/error-agent-id source)
-                    (:seon.agent/error-agent-id latest))))
+             ;; Only the declared schema's members persist: `:seon.turn/error`
+             ;; declares `:seon.turn/error-turn-id`, not `:seon.agent/error-agent-id`.
+             (is (= (:seon.turn/error-turn-id source)
+                    (:seon.turn/error-turn-id latest))))
            (is (some #(= (:db/id occurrence) (:db/id %)) (:seon.error/occurrences root)))
            ;; Record the acquisition question without asserting that a stored
            ;; entity validator is a pull-result validator.

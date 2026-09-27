@@ -217,20 +217,6 @@
                                                       :seon.cluster.eval/ordinal 0})
        :seon.sci.eval/ctx ctx :seon.effect/counter (atom -1)})))
 
-(defn- member-world
-  "The member's context as its JVM test body's world: its environment scoped
-  to the member's database at the body's start, as `seon.sci.eval/evaluate`
-  scopes each form's, so the body's calls are supplied that database exactly
-  as an agent's are."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx [:maybe :seon.db/connection]] :seon.sci.eval/ctx]}
-  [ctx connection]
-  (let [environment (env/of ctx)
-        scoped (when (and connection (env/environment? environment))
-                 (env/scope environment {:seon.db/db (db/db connection)}))]
-    (if (env/environment? scoped)
-      (env/carry-state ctx (env/environment-state scoped))
-      ctx)))
-
 (defn- bounded-result
   "Observe the body thread's exit under the request bound; cancellation is not exit.
 
@@ -286,10 +272,13 @@
                               ;; contexts, which another arm on this thread would
                               ;; refuse), under the custody of its member branch only,
                               ;; as its member's agent: its calls receive their
-                              ;; supplied defaults from the member's world.
+                              ;; supplied defaults from the member's world, the
+                              ;; database from the custody in force at each call
+                              ;; (`seon.instrument/calling-environment`), so a body
+                              ;; that switches custody (a fixture branch) is
+                              ;; supplied its own branch, never a start-of-body value.
                               (binding [*member* member
-                                        kernel/*host-world* (member-world (:seon.sci.eval/ctx custody)
-                                                                          (:seon.db/connection custody))]
+                                        kernel/*host-world* (:seon.sci.eval/ctx custody)]
                                 (runner/run-var! test-var (select-keys member [:seon.db/connection])))
                               ;; The SCI arm interrupts interpreted bodies at the
                               ;; declared per-test bound; `duration-failures` fails
