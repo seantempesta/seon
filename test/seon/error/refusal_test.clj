@@ -206,6 +206,12 @@
                     [clojure.lang.Util runtimeException "Util.java" 221]
                     [seon.error.refusal$chain invokeStatic "refusal.clj" 1]]]
       (is (not (error.refusal/first-party-frame? frame)) (pr-str frame))))
+  (testing "the prepared-call closure is contract machinery, not the caller"
+    (let [failure (framed (ex-info "refused" {})
+                          [["seon.call_preparation$preparing$fn__6652" "doInvoke" "call_preparation.clj" 1033]
+                           ["seon.error.refusal_test$caller" "invoke" "refusal_test.clj" 9]])]
+      (is (= '[seon.error.refusal_test$caller invoke "refusal_test.clj" 9]
+             (error.refusal/root-frame failure)))))
   (testing "a first-party frame names its function only when its Var exists"
     (is (= 'seon.error.refusal-test/probe-var
            (error.refusal/frame-function 'seon.error.refusal_test$probe_var)))

@@ -77,7 +77,7 @@
                          :seon.error/offending 42
                          :seon.error/data {:seon.error/member :selector}}
             shown (error/render-ai (assoc unit :seon.render/value diagnostic))]
-        (doseq [fragment ["seon.db/pull refused :selector at []: expected a string"
+        (doseq [fragment ["seon.db/pull refused :selector: expected a string"
                           "got an integer 42" "Fix:" "Example:"]]
           (is (str/includes? shown fragment) shown))
         (is (not (str/includes? shown "seon.error/data")) shown)

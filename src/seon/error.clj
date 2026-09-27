@@ -909,7 +909,7 @@
       :string (bounded "a string" "length") :int (bounded "an integer" nil)
       :double (bounded "a double" nil) :boolean "a boolean" :keyword "a keyword"
       :qualified-keyword "a namespaced keyword" :symbol "a symbol"
-      :qualified-symbol "a namespaced symbol" :nil "nil"
+      :qualified-symbol "a namespaced symbol" :nil "nil" :uuid "a UUID"
       :tuple (str "a tuple with " (count (m/children check)) " entries")
       :enum (str "either " (str/join " or " (map pr-str (m/children check))))
       :and (or declared-message (str/join " and " (children)))
@@ -986,7 +986,8 @@
        "Convert the sequence with vec before calling the function."
        (= :fn schema-type) message
        checked-output "Return a value satisfying the declared result contract for the shown input."
-       :else (str "Supply " expected " at " (pr-str (vec path)) "."))}
+       :else (str "Supply " expected
+                  (when (seq path) (str " at " (pr-str (vec path)))) "."))}
       check (assoc :seon.error/input (first (:smallest check))))))
 
 (defn- problem-parts
@@ -1000,7 +1001,10 @@
   [operation
    {:seon.error/keys [path argument expected-description actual-description fix]}
    expected offending]
-  (cond-> [(str operation " refused " argument " at " (pr-str path)
+  ;; An empty path is the whole argument, which `argument` already names:
+  ;; " at []" told the reader nothing (instrumentation-opus, 2026-09-27).
+  (cond-> [(str operation " refused " argument
+                (when (seq path) (str " at " (pr-str path)))
                 ": expected " expected-description)]
     (some? expected) (conj " (" expected ")")
     true (conj (str ", got " actual-description))

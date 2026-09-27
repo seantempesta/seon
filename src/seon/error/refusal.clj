@@ -112,15 +112,32 @@
                            (when (pos? cut) [(subs text 0 cut) class-name]))))
               (rseq (vec frames)))))
 
+(defn- prepared-call-prefix
+  "The class prefix of the prepared-call closure `seon.call-preparation/preparing`
+  installs around every contract that declares a supplied default: contract
+  machinery whose frame sits between each such caller and the refusal
+  (`call_preparation.clj:1033`), the rule `seon.instrument/caller-frame`
+  applies. Derived from the Var, so a rename moves it; nil where the
+  namespace is not loaded."
+  {:malli/schema [:=> [:cat] [:or :nil :string]]}
+  []
+  (when-let [preparing (some-> (find-ns 'seon.call-preparation) (ns-resolve 'preparing))]
+    (let [{namespace-object :ns var-name :name} (meta preparing)]
+      (str (clojure.lang.Compiler/munge (str (ns-name namespace-object)))
+           "$" (clojure.lang.Compiler/munge (str var-name)) "$"))))
+
 (defn- first-party-in
-  "The frames of `frames` whose class's namespace part is in `authored`."
+  "The frames of `frames` whose class's namespace part is in `authored`,
+  less the prepared-call closure (`prepared-call-prefix`)."
   {:malli/schema [:=> [:cat [:set :string] [:vector [:cat :symbol [:* [:or :symbol :string :int]]]]]
                   [:vector [:cat :symbol [:* [:or :symbol :string :int]]]]]}
   [authored frames]
-  (filterv (fn [[class-name]]
-             (let [text (str class-name) cut (.indexOf text "$")]
-               (and (pos? cut) (contains? authored (subs text 0 cut)))))
-           frames))
+  (let [^String wrapper (prepared-call-prefix)]
+    (filterv (fn [[class-name]]
+               (let [text (str class-name) cut (.indexOf text "$")]
+                 (and (pos? cut) (contains? authored (subs text 0 cut))
+                      (not (and wrapper (.startsWith text wrapper))))))
+             frames)))
 
 (defn frame-function
   "The function a stack frame's class belongs to, as `ns/name`, or nil.
