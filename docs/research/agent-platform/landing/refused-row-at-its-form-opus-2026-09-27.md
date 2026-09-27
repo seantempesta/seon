@@ -2,10 +2,59 @@
 type: design
 lane: one-commit-a-opus (audit cut row 2, outcome classification)
 date: 2026-09-27
-status: revision 3, after Astra REVISE rounds 1 (ac4e6c50b) and 2 (2bf319f21); awaiting round 3
+status: implemented after Astra round 3 ACCEPT-AFTER-FIXES (12bd62a72); db.clj hunks as a patch for root; tests for root; RESET NEEDED
 ---
 
 # A refused deletion names the one form that proposed it, or says why none
+
+## Implementation (round 3 corrections applied)
+
+**Files and sizes.**
+
+| Location | Change | Net lines |
+| --- | --- | --- |
+| `tmp/one-commit-a/db-deletion-refusal-identity.patch` (db.clj, shrink-db's file) | typed `:seon.program/identity` per break, producer stamp `:seon.program/deletion-refused-error`, `write-observation` carries `:seon.db.write/validator-schema` | +17 |
+| `src/seon/turn.clj` | `deletion-proposals`, `proposal-text`, `settle-batch-refusal!` merge and receipt text | +71 |
+| schemas `seon.turn.edn`, `seon.db.write.edn`, `seon.program.edn` | declarations | +27 |
+| `test/seon/cluster/host_test.clj`, `test/seon/fault_test.clj` | regressions and fixture | +150 |
+
+Nothing is deleted. The source total goes over the estimate: the round-3 corrections and the full contracts
+account for the difference.
+
+**Round 3 corrections.**
+- **A1, named-schema validation.** `deletion-proposals` validates the raw refusal against the schema that
+  `:seon.db.write/validator-schema` names, through `schema/valid-candidate-value?`.
+  - An unknown schema answers `:unknown-validator-schema`.
+  - Failing evidence answers `:invalid-deletion-evidence`.
+  - Both keep the canonical refusal, closure and restoration.
+- **C1, storable association.**
+  - `:seon.turn/deletion-proposals` is the declared value.
+  - It is stored as `:seon.turn/deletion-proposals-edn`, a declared optional storable string member of
+    `:seon.db.write/error`, following the precedent of `:seon.test.accretion/report-edn`.
+  - The recorder selects it onto the occurrence, and `:seon.error.occurrence/turn` scopes the ordinals.
+  - `:seon.db.write/validator-schema` is stored the same way.
+  - The registry search found `:seon.error/refused-schema`, which means the schema a declaration failed
+    against. That is not this meaning, so a distinct name is used.
+- **Nonzero ordinals.** The boundary regression evaluates real rows through `turn/evaluate-sources` with an
+  explicit first ordinal (5, 7, 9, 13) and asserts those ordinals.
+
+**REPL evidence** (default, 2026-09-27).
+- Metadata survives from Datahike's `validate-report` refusal through `seon.error.refusal/refusal`. This was
+  shown with an in-memory Datahike database and a validator returning a metadata-tagged map.
+- The snapshot projection (HEAD + this diff + patch):
+  - declares the three keys;
+  - accepts a proposals value;
+  - refuses deletion evidence without a typed identity;
+  - reports both new attributes as storable.
+- A scratch copy of the association over real `program/deletion-row` rows gave these results:
+  - a single deletion is associated at ordinal 6, and its two referrers form one proposal;
+  - `:declared-in-run`, `:several-deletions`, `:no-deleting-form`, `:unknown-validator-schema` and
+    `:invalid-deletion-evidence` each come out as expected;
+  - a missing or non-deletion validator schema gives nil.
+- Static checks on a `git archive` snapshot with the patch applied: clj-kondo over src, script and test found
+  0 errors, and `seon.contracts-compile-test/check` over `turn.clj` and `db.clj` found 0 findings.
+- **Not proven:** the end-to-end writer, recorder and receipt path. That needs the patch and the schemas
+  published, so root proves it after the restart.
 
 Round 2 resolved two things, and both stay as they are:
 

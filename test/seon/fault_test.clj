@@ -129,6 +129,7 @@
                                    [:seon.error.occurrence/id (:seon.error.occurrence/id receipt)])))
            kept-out (occurrence :seon.program/deletion-refused-error
                                  {:seon.program/referrers [{:seon.program/subject 'my.fault/f
+                                                            :seon.program/identity [:seon.fn/sym 'my.fault/f]
                                                             :seon.program/relation :seon.fn/calls
                                                             :seon.program/referrer {:seon.fn/sym 'my.fault/f}
                                                             :db/id 1}]})

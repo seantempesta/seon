@@ -11,8 +11,13 @@
   [:map
    [:seon.db.write.attempt/request-id :seon.db.write.attempt/request-id]
    [:seon.error/basis :seon.error/basis]
+   [:seon.db.write/validator-schema {:optional true} :seon.db.write/validator-schema]
+   [:seon.turn/deletion-proposals-edn {:optional true} :seon.turn/deletion-proposals-edn]
    [:seon.error/data
     [:map [:seon.db.write.attempt/transaction :seon.db.write.attempt/transaction]]]]]
+
+ :seon.db.write/validator-schema
+ [:qualified-keyword {:description "The declared schema of the final validator's own refusal (e.g. :seon.program/deletion-refused-error), carried beside the generic write-attempt identity; the raw value also satisfies it."}]
 
  :seon.db.write/attempt
  [:and
@@ -27,5 +32,7 @@
  [:map
   {:seon.db/attributes true}
   [:seon.db.write/attempt :seon.db.write/attempt]
-  [:seon.error/basis :seon.error/basis]]]
+  [:seon.error/basis :seon.error/basis]
+  [:seon.db.write/validator-schema {:optional true} :seon.db.write/validator-schema]
+  [:seon.turn/deletion-proposals-edn {:optional true} :seon.turn/deletion-proposals-edn]]]
 }

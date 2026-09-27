@@ -173,6 +173,7 @@
  [:vector {:min 1}
   [:map
    [:seon.program/subject :seon.program/subject]
+   [:seon.program/identity :seon.program/identity]
    [:seon.program/relation :qualified-keyword]
    [:seon.program/referrer [:map-of :qualified-keyword :seon.schema/value]]
    [:db/id :int]]]

@@ -3,6 +3,8 @@
   contracts and Flow: its runs land on its branch, siblings stay independent,
   an ordinary message wakes it, and retirement closes admission at the writer."
   (:require [clojure.core.async :as async]
+            [clojure.edn]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
@@ -73,18 +75,40 @@
   [hosted f]
   (db/call-with-custody {:seon.db/connection (get-in hosted [:seon.turn.loop/cluster :seon.db/connection])} f))
 
-(defn- hosted-run!
-  "One ordinary run of the hosted agent: its evaluations' shown text, in order,
-  or the refusal the submission answered."
+(defn- hosted-run-receipts
+  "One ordinary run of the hosted agent: its settled receipts in order under
+  its run id, or the refusal the submission answered."
   [hosted source]
   (let [custody (select-keys hosted [:seon.turn.loop/cluster :seon.agent/routing :seon.agent/id])
         result (as-host hosted
                  #(agent/evaluate-source! (assoc custody :seon.agent/segmenter 'seon.cluster.reply/code-sources
                                                  :seon.cluster.reply/text source)))]
     (if-let [run-id (:seon.turn/id result)]
-      (mapv #(or (:seon.eval/shown %) (:seon.cluster.eval/error %))
-            (drive/run-receipts @(get-in hosted [:seon.turn.loop/cluster :seon.db/connection]) [run-id]))
+      {:seon.turn/id run-id
+       :receipts (drive/run-receipts @(get-in hosted [:seon.turn.loop/cluster :seon.db/connection]) [run-id])}
       result)))
+
+(defn- hosted-run!
+  "One ordinary run of the hosted agent: its evaluations' shown text, in order,
+  or the refusal the submission answered."
+  [hosted source]
+  (let [result (hosted-run-receipts hosted source)]
+    (if-let [receipts (:receipts result)]
+      (mapv #(or (:seon.eval/shown %) (:seon.cluster.eval/error %)) receipts)
+      result)))
+
+(defn- recorded-proposals
+  "The deletion proposals the refused write's error occurrence for `run-id`
+  recorded, read back from the database, with its validator schema."
+  [database run-id]
+  (let [[edn validator] (db/q '[:find [?edn ?validator]
+                                :in $ ?run-id
+                                :where [?run :seon.turn/id ?run-id]
+                                [?occurrence :seon.error.occurrence/turn ?run]
+                                [?occurrence :seon.turn/deletion-proposals-edn ?edn]
+                                [?occurrence :seon.db.write/validator-schema ?validator]]
+                              database run-id)]
+    {:proposals (some-> edn clojure.edn/read-string) :validator validator}))
 
 (defn- branch-db
   "The current value of `branch`, read through a fresh acquisition released
@@ -412,16 +436,127 @@
 (deftest a-refused-settlement-is-its-forms-refusal-and-the-run-closes
   ;; Before, one refused declaration replaced every form's shown text with the
   ;; refusal; a refusal for a value the receipt could not store left the run open.
+  ;; Each form keeps its value (the deletion returned nil) and its own body
+  ;; error; the deletion the writer named is associated, as recorded data, with
+  ;; the one evaluation whose settled row proposed it.
   (with-host-world {}
     (fn [{:keys [handle branch!]}]
-      (let [hosted (host-on! handle (branch!) "mcp/refused")]
+      (let [hosted (host-on! handle (branch!) "mcp/refused")
+            connection (get-in hosted [:seon.turn.loop/cluster :seon.db/connection])
+            helper (symbol (str host-ns) "refused-helper")]
         (hosted-run! hosted "(defn refused-helper \"Add one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
         (hosted-run! hosted "(defn refused-caller \"Call the helper.\" {:malli/schema [:=> [:cat :int] :int]} [x] (refused-helper x))")
-        (let [shown (hosted-run! hosted "(+ 1 2)\n(ns-unmap 'my.agents.host-probe 'refused-helper)\n(+ 3 4)")]
-          (is (= "3" (first shown)) (pr-str shown))
-          (is (re-find #"surviving referrers" (str (second shown))) "the refusal is the deleting form's")
-          (is (= "7" (last shown)) "the other forms keep their own results"))
-        (is (= ["2"] (hosted-run! hosted "(refused-caller 1)")) "the run closed and the next run is admitted")))))
+        (let [{run-id :seon.turn/id receipts :receipts}
+              (hosted-run-receipts hosted "(+ 1 2)\n(ns-unmap 'my.agents.host-probe 'refused-helper)\n(+ 3 4)\n(/ 1 0)")
+              errors (mapv (comp str :seon.cluster.eval/error) receipts)
+              {:keys [proposals validator]} (recorded-proposals @connection run-id)]
+          (is (= [0 1 2 3] (mapv :seon.cluster.eval/ordinal receipts)) (pr-str receipts))
+          (is (= ["3" "nil" "7"] (subvec (mapv :seon.eval/shown receipts) 0 3)) "every form keeps the value it evaluated")
+          (is (str/includes? (nth errors 1) (str "Evaluation 1 proposed deleting " helper))
+              (nth errors 1))
+          (is (str/includes? (nth errors 1) "refused-caller") "the surviving referrer is named")
+          (is (every? #(and (str/includes? % "this run's settlement was refused") (not (str/includes? % "proposed")))
+                      (map errors [0 2]))
+              (pr-str errors))
+          (is (str/includes? (nth errors 3) "Divide by zero") "a form's own body error stays its error")
+          (testing "the association is the refused write's recorded data"
+            (is (= :seon.program/deletion-refused-error validator))
+            (is (= [{:seon.program/identity [:seon.fn/sym helper] :seon.cluster.eval/ordinal 1}]
+                   (mapv #(dissoc % :seon.program/referrers) proposals))
+                (pr-str proposals))
+            (is (= [{:seon.fn/sym (symbol (str host-ns) "refused-caller")}]
+                   (mapv :seon.program/referrer (:seon.program/referrers (first proposals)))))))
+        (is (some? (db/pull @connection [:seon.fn/sym] [:seon.fn/sym helper])) "nothing of the refused run settled")
+        (is (= ["2"] (hosted-run! hosted "(refused-caller 1)")) "the run closed and SCI still holds the helper")))))
+
+(deftest a-refused-deletion-is-associated-only-with-the-one-evaluation-proposing-it
+  ;; An association, never a cause: the writer names broken final relations,
+  ;; so a deletion is associated only when exactly one settled row deletes the
+  ;; named identity and none declares it; otherwise the reason is named.
+  (with-host-world {}
+    (fn [{:keys [handle branch!]}]
+      (let [agent-id "mcp/proposals"
+            hosted (host-on! handle (branch!) agent-id)
+            cluster (:seon.turn.loop/cluster hosted)
+            connection (:seon.db/connection cluster)
+            named #(symbol (str host-ns) %)
+            fn-source (fn [n body] (str "(defn " n " \"Doc.\" {:malli/schema [:=> [:cat :int] :int]} [x] " body ")"))
+            unmap #(str "(ns-unmap '" host-ns " '" % ")")
+            proposals-of #(#'turn/deletion-proposals (db/carried-projection (db/db connection)) %1 %2)
+            without-referrers (fn [proposals] (mapv #(dissoc % :seon.program/referrers) proposals))]
+        (doseq [source [(fn-source "h" "(inc x)") (fn-source "k" "(dec x)")
+                        (fn-source "c1" "(h x)") (fn-source "c2" "(h x)") (fn-source "ck" "(k x)")]]
+          (is (= 1 (count (hosted-run! hosted source)))))
+        (testing "a partial repair: h's callers go with it, k's caller survives; only k is named"
+          (let [{run-id :seon.turn/id receipts :receipts}
+                (hosted-run-receipts hosted (str/join "\n" [(unmap "h") (unmap "c1") (unmap "c2") (unmap "k")]))
+                {:keys [proposals]} (recorded-proposals @connection run-id)]
+            (is (= [{:seon.program/identity [:seon.fn/sym (named "k")] :seon.cluster.eval/ordinal 3}]
+                   (without-referrers proposals))
+                (pr-str proposals))
+            (is (str/includes? (str (:seon.cluster.eval/error (nth receipts 3))) "Evaluation 3 proposed deleting"))
+            (is (not-any? #(str/includes? (str (:seon.cluster.eval/error %)) "proposed") (take 3 receipts))
+                "a repaired deletion is never associated")))
+        (let [refusal (as-host hosted #(db/transact! connection [[:db/retractEntity [:seon.fn/sym (named "h")]]
+                                                                 [:db/retractEntity [:seon.fn/sym (named "k")]]]))
+              max-source (:seon.config.eval.result/max-source (config/result-caps (config/effective (db/db connection) cluster-name)))
+              evaluate (fn [first-ordinal sources]
+                         (as-host hosted
+                           #(mapv (fn [{ordinal :seon.cluster.eval/ordinal evaluation :seon.sci.eval/evaluation}]
+                                    {:seon.turn.loop/cluster cluster :seon.turn.loop/now (java.util.Date.)
+                                     :seon.agent/id agent-id :seon.turn/id "proposal-boundary"
+                                     :seon.cluster.eval/ordinal ordinal :seon.sci.eval/evaluation evaluation})
+                                  (turn/evaluate-sources
+                                   {:seon.turn.loop/cluster cluster :seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
+                                    :seon.agent/id agent-id :seon.cluster.eval/ordinal first-ordinal :seon.ns/name host-ns
+                                    :seon.cluster.reply/sources (turn/planned-sources (str/join "\n" sources) host-ns max-source)}))))]
+          (testing "the writer's refusal declares itself and types each removed identity"
+            (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
+            (is (some? (:seon.error/basis refusal)))
+            (is (= :seon.db.write/validation-refusal (:seon.error/declared-schema (meta refusal))))
+            (is (= :seon.program/deletion-refused-error (:seon.db.write/validator-schema refusal)))
+            (is (= #{[:seon.fn/sym (named "h")] [:seon.fn/sym (named "k")]}
+                   (set (map :seon.program/identity (:seon.program/referrers refusal))))))
+          ;; The refusal is a value: the program may move on before the
+          ;; association is judged over rows evaluated below.
+          (testing "a complete repair in one run commits: neither the helper nor its callers remain"
+            (let [shown (hosted-run! hosted (str/join "\n" [(unmap "h") (unmap "c1") (unmap "c2")]))]
+              (is (= ["nil" "nil" "nil"] shown) (pr-str shown))
+              (is (every? #(nil? (db/pull @connection [:db/id] [:seon.fn/sym (named %)])) ["h" "c1" "c2"]))))
+          (evaluate 0 [(fn-source "h" "(inc x)")])
+          (let [unmapped (evaluate 5 [(unmap "h")])]
+            (is (= [5] (mapv :seon.cluster.eval/ordinal unmapped)) "the run's evaluation ordinals, not from zero")
+            (is (= [[:seon.fn/sym (named "h")] [:seon.test/sym (named "h")]]
+                   (get-in (first unmapped) [:seon.sci.eval/evaluation :seon.program/row :seon.program/delete-identities]))
+                "the settled row deletes both typed identities; only the one the writer names is associated")
+            (let [proposals (proposals-of refusal unmapped)]
+              (is (= [{:seon.program/identity [:seon.fn/sym (named "h")] :seon.cluster.eval/ordinal 5}
+                      {:seon.program/identity [:seon.fn/sym (named "k")] :seon.turn/unattributed :no-deleting-form}]
+                     (without-referrers proposals)))
+              (is (= #{{:seon.fn/sym (named "c1")} {:seon.fn/sym (named "c2")}}
+                     (set (map :seon.program/referrer (:seon.program/referrers (first proposals)))))
+                  "two referrers of one identity are one proposal"))
+            (testing "evidence that is not a supported deletion refusal associates nothing, or says why"
+              (is (nil? (proposals-of (dissoc refusal :seon.db.write/validator-schema) unmapped)))
+              (is (nil? (proposals-of (assoc refusal :seon.db.write/validator-schema :seon.db.write/validation-refusal) unmapped)))
+              (is (= [{:seon.turn/unattributed :unknown-validator-schema}]
+                     (proposals-of (assoc refusal :seon.db.write/validator-schema :my.nowhere/schema) unmapped)))
+              (is (= [{:seon.turn/unattributed :invalid-deletion-evidence}]
+                     (proposals-of (dissoc refusal :seon.program/referrers) unmapped)))
+              (let [other (as-host hosted #(db/transact! connection [[:db/retract [:seon.agent/id agent-id] :seon.agent/id agent-id]]))]
+                (is (string? (:seon.db.write.attempt/request-id other)) (pr-str other))
+                (is (nil? (proposals-of other unmapped)) "another refusal family is associated with no form"))))
+          (testing "repeated changes to one identity are never associated"
+            (is (= :declared-in-run
+                   (:seon.turn/unattributed (first (proposals-of refusal (evaluate 7 [(fn-source "h" "(inc x)") (unmap "h")]))))))
+            (is (= :several-deletions
+                   (:seon.turn/unattributed
+                    (first (proposals-of refusal (evaluate 9 [(fn-source "h" "(inc x)") (unmap "h")
+                                                              (fn-source "h" "(inc x)") (unmap "h")])))))))
+          (testing "a form declaring and removing in one is judged by the row that reached settlement"
+            (let [both (evaluate 13 [(str "(do " (fn-source "h" "(inc x)") " " (unmap "h") ")")])]
+              (is (not-any? #(= 13 (:seon.cluster.eval/ordinal %)) (proposals-of refusal both))
+                  (pr-str (get-in (first both) [:seon.sci.eval/evaluation :seon.program/row]))))))))))
 
 (deftest a-branch-behind-the-loaded-program-runs-the-loaded-definitions
   ;; Before, every file-derived row a branch held at another digest than the

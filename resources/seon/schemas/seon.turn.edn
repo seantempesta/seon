@@ -243,4 +243,23 @@
 
  :seon.turn/error-turn-id
  [:string {:min 1}]
+
+ ; A refused run settlement's association of a deletion the writer named with
+ ; the one form whose settled row proposed it (seon.turn/deletion-proposals).
+ ; It is an association, never a cause; ambiguity names its reason instead.
+ :seon.turn/unattributed
+ [:enum {:description "Why no single form is associated: several rows delete the identity, a row in the run declares it, no settled row deletes it, the named refusal schema is not in the projection, or the claimed deletion evidence does not validate against it."}
+  :several-deletions :declared-in-run :no-deleting-form :unknown-validator-schema :invalid-deletion-evidence]
+ :seon.turn/deletion-proposal
+ [:or
+  [:map
+   [:seon.program/identity :seon.program/identity]
+   [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
+   [:seon.program/referrers :seon.program/referrers]]
+  [:map
+   [:seon.program/identity {:optional true} :seon.program/identity]
+   [:seon.turn/unattributed :seon.turn/unattributed]]]
+ :seon.turn/deletion-proposals [:vector {:min 1} :seon.turn/deletion-proposal]
+ :seon.turn/deletion-proposals-edn
+ [:string {:min 1 :description "The printed :seon.turn/deletion-proposals value stored on the refused write's error occurrence; the run reference scopes its ordinals."}]
 }

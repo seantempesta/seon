@@ -3946,6 +3946,63 @@
                         :seon.turn/closed-tx "datomic.tx"}))]])
             (:seon.db/tx-data recording)])}))
 
+(defn- deletion-proposals
+  "The deletions a refused run settlement's writer named, each associated with
+  the one evaluation whose settled row proposed it, else with why none is.
+
+  AN ASSOCIATION, NEVER A CAUSE. The writer reports broken final relations
+  (removed identity, surviving referrer), not which operation removed what,
+  so an identity is associated only when exactly one settled row deletes it
+  and no settled row declares it; otherwise its reason is named. Only the
+  producer's declared deletion refusal (`:seon.db.write/validator-schema`) is
+  read, after the raw refusal validates against that named schema; another
+  refusal family associates nothing (nil). Pure over values in hand: no
+  replay, no writer trial, O(named referrers + row identities)."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.error/value
+                       [:vector :seon.turn.loop/settle-evaluation-request]]
+                  [:maybe :seon.turn/deletion-proposals]]}
+  [projection refusal requests]
+  (let [named (:seon.db.write/validator-schema refusal)]
+    (cond
+      (nil? named) nil
+      (nil? (find (:seon.schema.projection/forms projection) named))
+      [{:seon.turn/unattributed :unknown-validator-schema}]
+      (not= :seon.program/deletion-refused-error named) nil
+      (not (schema/valid-candidate-value? projection named refusal))
+      [{:seon.turn/unattributed :invalid-deletion-evidence}]
+      :else
+      (let [rows (keep (fn [{ordinal :seon.cluster.eval/ordinal evaluation :seon.sci.eval/evaluation}]
+                         (some->> (:seon.program/row evaluation) (vector ordinal)))
+                       requests)
+            deleting (reduce (fn [deleting [ordinal row]]
+                               (reduce #(update %1 %2 (fnil conj (sorted-set)) ordinal)
+                                       deleting (:seon.program/delete-identities row)))
+                             {} rows)
+            declared (into #{} (keep (comp program/row-identity second)) rows)]
+        (->> (group-by :seon.program/identity (:seon.program/referrers refusal))
+             (sort-by (comp pr-str key))
+             (mapv (fn [[identity referrers]]
+                     (let [ordinals (get deleting identity)]
+                       (cond
+                         (< 1 (count ordinals)) {:seon.program/identity identity :seon.turn/unattributed :several-deletions}
+                         (contains? declared identity) {:seon.program/identity identity :seon.turn/unattributed :declared-in-run}
+                         (seq ordinals) {:seon.program/identity identity :seon.cluster.eval/ordinal (first ordinals)
+                                         :seon.program/referrers (vec referrers)}
+                         :else {:seon.program/identity identity :seon.turn/unattributed :no-deleting-form})))))))))
+
+(defn- proposal-text
+  "One sentence per proposal, rendered from the association value."
+  {:malli/schema [:=> [:cat :seon.turn/deletion-proposal] :string]}
+  [{identity :seon.program/identity ordinal :seon.cluster.eval/ordinal
+    referrers :seon.program/referrers reason :seon.turn/unattributed}]
+  (if ordinal
+    (str "Evaluation " ordinal " proposed deleting " (pr-str (second identity))
+         ", which the final program still references from "
+         (str/join ", " (map #(pr-str (:seon.program/referrer %)) referrers)) ".")
+    (str "No single evaluation is associated"
+         (when identity (str " with deleting " (pr-str (second identity))))
+         ": " (name reason) ".")))
+
 (defn- settle-batch-refusal!
   "Settle every begun ordinal after the atomic turn settlement is refused."
   {:malli/schema
@@ -3963,6 +4020,15 @@
          run-id :seon.turn/id}
         (first requests)
         process (:seon.db.process/id cluster)
+        proposals (deletion-proposals (db/carried-projection (db/db connection)) refusal requests)
+        ;; the association is recorded on the refused write's error occurrence
+        ;; (printed whole, as its declared -edn member), and the receipts'
+        ;; text is rendered from that same value
+        refusal (cond-> refusal
+                  proposals (assoc :seon.turn/deletion-proposals-edn
+                                   (binding [*print-length* nil *print-level* nil] (pr-str proposals))))
+        associated (group-by :seon.cluster.eval/ordinal (filter :seon.cluster.eval/ordinal proposals))
+        unassociated (str/join " " (map proposal-text (remove :seon.cluster.eval/ordinal proposals)))
         recording (error/recording cluster (db/db connection)
                             (:seon.error/declared-schema (meta refusal))
                             refusal now
@@ -3992,7 +4058,11 @@
                                                :seon.eval/shown :seon.cluster.eval/error])]
              (if (:seon.cluster.eval/error settled)
                settled
-               (assoc settled :seon.cluster.eval/error unpublished
+               (assoc settled
+                      :seon.cluster.eval/error
+                      (str/join " " (remove str/blank?
+                                            (concat (map proposal-text (get associated (:seon.cluster.eval/ordinal settled)))
+                                                    [unpublished unassociated])))
                       :seon.cluster.eval/diagnostics diagnostics))))
          prepared)
         transaction
