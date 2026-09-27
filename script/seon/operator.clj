@@ -742,9 +742,8 @@
 ;;; Nuclear rebuild (plan §7 "Schema change and reset", owner 2026-09-23):
 ;;; delete the store and rebuild from COMMITTED inputs only, so no in-flight
 ;;; working-tree hunk can break it. The program is a `git archive` of HEAD,
-;;; content-keyed by commit under <root>/data/source/<sha>; each gitlink is the
-;;; checked-out submodule when that checkout is clean at its pin, else an
-;;; archive of the pin. The replacement JVM is launched with that directory as
+;;; content-keyed by commit under <root>/data/source/<sha>; each gitlink is an
+;;; archive of its pin, never the moving checkout. The replacement JVM is launched with that directory as
 ;;; its classpath source. A failed attempt's JVM is terminated by exact identity,
 ;;; so no JVM survives with a deleted store; one retry covers a transient loss
 ;;; (a racing start winning the replacement gap); a second failure returns both
@@ -806,44 +805,6 @@
              {:seon.operator/repository repository :seon.operator/enclosing-repository top}))
     repository))
 
-(defn- leading-fields
-  "The first `n` space-separated fields of `line` and the rest of it."
-  {:malli/schema [:=> [:cat :string [:int {:min 1}]] [:vector :string]]}
-  [line n]
-  (loop [fields [] at 0]
-    (let [space (str/index-of line " " at)]
-      (if (and space (< (count fields) n))
-        (recur (conj fields (subs line at space)) (inc space))
-        (conj fields (subs line at))))))
-
-(defn- checkout-pins
-  "Each gitlink of the repository's index as {path pin}, and the paths whose
-  checkout is not that pin with unmodified tracked bytes. One `git status`
-  answers for every submodule (porcelain v2 `S<c><m><u>`: `c` names a checkout
-  commit other than the index pin, `m` modified tracked content); untracked
-  build products are ignored, as a clean checkout carries them."
-  {:malli/schema [:=> [:cat :string]
-                  [:map [:seon.operator/index-pins [:map-of :string :string]]
-                   [:seon.operator/unclean [:set :string]]]]}
-  [repository]
-  (let [staged (command! ["git" "ls-files" "--stage" "--" "reference-code"] repository 30000)
-        status (command! ["git" "status" "--porcelain=v2" "--untracked-files=no"
-                          "--ignore-submodules=untracked" "--" "reference-code"]
-                         repository 30000)]
-    {:seon.operator/index-pins
-     (into {} (keep (fn [line]
-                      (let [tab (str/index-of line "\t")]
-                        (when (and tab (str/starts-with? line "160000 "))
-                          [(subs line (inc tab)) (subs line 7 47)]))))
-           (str/split-lines staged))
-     :seon.operator/unclean
-     (into #{} (keep (fn [line]
-                       (let [[kind _ submodule _ _ _ _ _ path] (leading-fields line 8)]
-                         (when (and (= "1" kind) (str/starts-with? submodule "S")
-                                    (or (= \C (nth submodule 1)) (= \M (nth submodule 2))))
-                           path))))
-           (str/split-lines status))}))
-
 (defn- unprepared-build-products?
   "Whether the dependency at `directory` declares tools.deps preparation
   (`:deps/prep-lib`) whose `:ensure` output is not yet present."
@@ -855,12 +816,26 @@
 
 (def ^:private pinned-directory
   "Where a root keeps each gitlink pin archived once (its bytes and prepared
-  build products), for every commit archive whose checkout is not at that pin."
+  build products), shared by every commit archive naming that pin."
   "data/source/pins")
+
+(defn- extract-pinned!
+  "Extract `checkout` at `pin` into `destination`, then each nested gitlink of
+  that pin whose checkout is initialized, at its nested pin (e.g.
+  `reference-code/babashka/fs`, a `:local/root` of `deps.edn`); `git archive`
+  leaves a gitlink an empty directory."
+  {:malli/schema [:=> [:cat :string :string :string] :nil]}
+  [checkout pin destination]
+  (extract-archive! checkout pin destination)
+  (doseq [{nested :path nested-pin :pin} (gitlinks checkout pin)
+          :when (.exists (io/file checkout nested ".git"))]
+    (extract-pinned! (str (io/file checkout nested)) nested-pin (str (io/file destination nested)))))
 
 (defn- pinned-checkout!
   "The directory holding `path` at `pin`, archived from its checkout once:
-  staged, then atomically moved (its existence is completion)."
+  staged, then atomically moved (its existence is completion). Never the
+  checkout itself: a checkout moves, and an archive linking it would run
+  another commit's bytes beside classes keyed on this commit's pins."
   {:malli/schema [:=> [:cat :string :string :string :string] :string]}
   [root repository path pin]
   (let [target (io/file root pinned-directory (str/replace path "/" "-") pin)]
@@ -868,7 +843,7 @@
       (let [staging (io/file (.getParentFile target)
                              (str pin ".staging-" (.pid (java.lang.ProcessHandle/current))))]
         (fs/delete-tree staging)
-        (extract-archive! (str (io/file repository path)) pin staging)
+        (extract-pinned! (str (io/file repository path)) pin (str staging))
         (fs/move staging target {:atomic-move true})))
     (.getCanonicalPath target)))
 
@@ -882,10 +857,12 @@
 
 (defn committed-source!
   "A commit's program (HEAD by default) as a directory of committed bytes,
-  built once per commit. Each gitlink is the checked-out submodule when it is
-  at the commit's pin with unmodified tracked bytes, else a link to that pin
-  archived once per root (`pinned-checkout!`); tools.deps prepares an
-  archived pin only while its declared `:deps/prep-lib` output is absent."
+  built once per commit. Each gitlink links its pin archived once per root
+  (`pinned-checkout!`), so the classpath is a function of the commit (a
+  checkout-linked archive resumed after the checkout moved ran new datahike
+  source beside dependency classes keyed on and compiled from the old pin:
+  two `datahike.datom.Datom` classes); tools.deps prepares a pin only while
+  its declared `:deps/prep-lib` output is absent."
   {:malli/schema [:function
                   [:=> [:cat :string] :map]
                   [:=> [:cat :string :string] :map]]}
@@ -900,31 +877,16 @@
        :seon.operator/source-built? false}
       (let [staging (io/file parent (str sha ".staging-" (.pid (java.lang.ProcessHandle/current))))
             _ (fs/delete-tree staging)
-            ;; The submodule census runs beside the tree's extraction.
-            census (future (checkout-pins repository))
-            ;; The census is read on every exit; its failure is suppressed onto extraction's.
-            _ (try (extract-archive! repository sha staging)
-                   (catch Throwable primary
-                     (try @census (catch Throwable late (.addSuppressed primary late)))
-                     (throw primary)))
-            {:seon.operator/keys [index-pins unclean]} @census
+            _ (extract-archive! repository sha staging)
             submodules
             (mapv (fn [{:keys [path pin]}]
-                    (let [checkout (io/file repository path)
-                          clean? (and (.isDirectory checkout) (= pin (get index-pins path))
-                                      (not (contains? unclean path)))
-                          placed (io/file staging path)]
+                    (let [placed (io/file staging path)
+                          pinned (pinned-checkout! root repository path pin)]
                       (fs/delete-tree placed)
-                      (if clean?
-                        (do (io/make-parents placed)
-                            (fs/create-sym-link placed (.getCanonicalFile checkout))
-                            {:path path :pin pin :placed :linked})
-                        (let [pinned (pinned-checkout! root repository path pin)]
-                          (io/make-parents placed)
-                          (fs/create-sym-link placed pinned)
-                          {:path path :pin pin :placed :archived
-                           :index-pin (get index-pins path)
-                           :prepared? (unprepared-build-products? pinned)}))))
+                      (io/make-parents placed)
+                      (fs/create-sym-link placed pinned)
+                      {:path path :pin pin :pinned pinned
+                       :prepared? (unprepared-build-products? pinned)}))
                   (gitlinks repository sha))
             ;; An archived pin that declares preparation lacks its build
             ;; products until tools.deps prepares them (e.g. http-kit's and
