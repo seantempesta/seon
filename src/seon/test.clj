@@ -2229,8 +2229,7 @@
   are excluded in a JVM operating the development checkout, with the platform
   command. `:seon.test/passed?` is true only when every obligation has green
   evidence: exclusions, pending and unfinished members are unfulfilled."
-  {:seon/tasks #{"eb0fdb7e0ffd"}
-   :malli/schema [:=> [:cat :seon.test/request]
+  {:malli/schema [:=> [:cat :seon.test/request]
                   [:or :seon.test/run-result :seon.test/selection-error :seon.test/unknown-error
                    :seon.test/admission-error :seon.test.run/unavailable-error
                    :seon.config/error :seon.db.write/error :seon.db/transaction-refused-error
