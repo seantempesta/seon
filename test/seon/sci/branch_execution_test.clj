@@ -455,3 +455,23 @@
                             (map :seon.error/message
                                  (:seon.test/acquisition-refusals (eval/acquired-program ctx)))))
              (pr-str {:ms (:ms acquired)}))))))))
+
+(deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program after one analyzed declaration."
+           :seon.test/long-ms 8000}
+  a-fork-taken-after-a-program-row-commit-holds-that-row
+  ;; The executing handle acquired its program before the row was committed;
+  ;; a fork onto the later value must hold the later value's program.
+  (support/with-database
+   (fn [connection]
+     (db/call-with-custody {:seon.db/connection connection}
+      (fn []
+        (declared! connection 'seon.sci.eval-test/fork-after-commit-probe
+                   "(defn ^{:malli/schema [:=> [:cat] :int]} fork-after-commit-probe [] 7)")
+        (let [database (db/db connection)
+              ctx (support/fork-cluster-ctx connection)]
+          (is (eval/acquired-database? ctx database)
+              "the fork's acquired program is the value it was forked onto")
+          (is (contains? (:functions @(:seon.sci.kernel/program-snapshot ctx))
+                         'seon.sci.eval-test/fork-after-commit-probe)
+              "the row committed after the base's acquisition is in the fork's program")
+          (is (= 7 (sci/eval-string* ctx "(seon.sci.eval-test/fork-after-commit-probe)")))))))))

@@ -3715,7 +3715,9 @@
   Program Vars remain copy-on-write through SCI's generation-aware `fork`;
   connection custody, schema projection, and supplied-default state are
   reconstructed from the receiving branch and therefore cannot leak between
-  sibling clusters."
+  sibling clusters. A fork of an acquired base acquires the supplied value's
+  program, so rows committed after the base was acquired are present; an
+  unacquired base stays lazy."
   {:malli/schema
    [:function
     [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value
@@ -3782,6 +3784,12 @@
         ctx (db/pull db '[*] [:seon.fn/sym function-symbol]) projection db))
      (when connection
        (watch-program-identity! connection))
+     ;; A fork of an acquired program holds the program of the value it is
+     ;; forked onto: rows committed after the base was acquired are acquired
+     ;; here (`acquire!` answers at once when the program is equal). An
+     ;; unacquired base stays lazy.
+     (when (::acquisition @(::kernel/program-snapshot ctx))
+       (acquire! {:seon.sci.eval/ctx ctx :seon.db/db db}))
      ctx)))
 
 (defn- declared-row
