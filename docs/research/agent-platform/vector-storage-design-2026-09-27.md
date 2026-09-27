@@ -365,6 +365,8 @@ Probe hygiene: every store was created and deleted inside its probe (`finally`);
 1. **Datahike fork: each `:db.fn/call` costs O(effective datoms so far)** (§5.2). Any Seon transaction with many
    function calls is quadratic. Owner: the datahike fork (`speculative-cache-context` could be maintained
    incrementally). Needs a task entry (this lane edits no `resources/`).
+   Implementation (lane vector-impl-opus, 2026-09-27) keeps one batched call per transaction
+   (`schema.datahike/batched-vector-requests`); the fork is not changed. Open against the fork.
 2. **The two-keyword lookup-ref trap fires for sets too** (`#{:p/id :t/id}` under a card-many keyword attribute is
    read as one value and refused, "Bad entity value"). Rev 1's deletion of `explicit-value-members` was wrong; it stays.
 3. **Datahike's writer logs every refused transaction at error level** (`:datahike/write-error … validation
