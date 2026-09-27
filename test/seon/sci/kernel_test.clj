@@ -137,7 +137,10 @@
              (take 2 (str/split-lines source))) source)
       (is (= [(:seon.sci.eval/stacktrace divide)] results) source)
       (is (str/includes? source (str "(:seon.error/chain " handle ")")) "the whole chain is one read away")
-      (is (not (str/includes? source "seon.sci.eval")) "no evaluator frame is shown")
+      ;; The author's location is read as `(:seon.sci.eval/stacktrace handle)`;
+      ;; an evaluator frame would print as its class or file.
+      (is (not-any? #(str/includes? source %) ["seon.sci.eval$" "sci/eval.clj" "sci.impl."])
+          "no evaluator frame is shown")
       (is (<= tokens 200) source))
     (testing "an ex-info's data is shown per cause"
       (let [source (kernel/render-ai {:seon.render/value thrown :seon.repl/handle handle})]
@@ -147,7 +150,10 @@
                   (str/split-lines (kernel/render-ai {:seon.render/value divide})))))))
 
 (deftest a-contract-refusals-pair-shows-operation-expected-offending-fix-and-location
-  (let [ctx (eval/build-base-ctx (schema/handed-projection))
+  ;; A program function resolves in an acquired agent context (a bare
+  ;; interpreter holds no program namespaces): the member's, forked.
+  (let [ctx (test-support/fork-cluster-ctx
+             (:seon.db/connection (test-support/execution-handle nil)))
         handle 'result/e2
         refusal (failure ctx "(seon.error.refusal/frame-function \"x\")")
         source (error/render-contract-ai {:seon.render/value refusal :seon.repl/handle handle})

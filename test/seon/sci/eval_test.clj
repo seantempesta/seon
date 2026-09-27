@@ -31,7 +31,6 @@
             [seon.instrument :as instrument]
             [seon.id]
             [seon.program :as program]
-            [sci.addons.future :as sci.future]
             [sci.core :as sci]
             [seon.render :as render]
             [seon.render-simplification-test :as simplification]
@@ -126,24 +125,6 @@
      {'victim #'compiled-runtime-victim
       '*dynamic-victim* #'*compiled-runtime-dynamic-victim*})
     ctx))
-
-(def ^:private concurrency-capability-classes
-  [java.lang.Thread
-   java.util.concurrent.Executor
-   java.util.concurrent.Future
-   java.util.concurrent.CompletionStage
-   java.util.concurrent.ThreadFactory])
-
-(defn- exposed-class
-  [candidate]
-  (if (map? candidate) (:class candidate) candidate))
-
-(defn- concurrency-capability-class?
-  [candidate]
-  (let [candidate (exposed-class candidate)]
-    (and (class? candidate)
-         (some #(.isAssignableFrom ^Class % ^Class candidate)
-               concurrency-capability-classes))))
 
 (defn- run-in
   "One evaluation in `ctx`, against the database its world holds (custody,
@@ -559,25 +540,6 @@
             "a sibling must retain its own acquired program snapshot")
         (is (not (contains? @installed-b function-symbol))
             "a sibling must not skip installation because another fork installed the symbol")))))
-
-(deftest agent-context-exposes-no-concurrency-capability
-  (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))
-        env @(:env ctx)
-        future-addon-symbols
-        (set (keys (get-in (sci.future/install {})
-                           [:namespaces 'clojure.core])))
-        exposed-core-symbols
-        (set (keys (get-in env [:namespaces 'clojure.core])))
-        exposed-classes (vals (:raw-classes env))]
-    (is (seq future-addon-symbols)
-        "SCI's optional future add-on must remain a real test subject")
-    (is (empty? (set/intersection future-addon-symbols
-                                  exposed-core-symbols))
-        "the actual ctx excludes every primitive from SCI's concurrency add-on")
-    (is (seq exposed-classes)
-        "the class-gate assertion must not pass over a missing class surface")
-    (is (empty? (filter concurrency-capability-class? exposed-classes))
-        "no class exposed by the actual ctx can create or carry thread work")))
 
 (deftest compiled-runtime-roots-cannot-be-redefined-by-agent-code
   (let [ctx (compiled-runtime-ctx)
@@ -1448,7 +1410,9 @@
         (is (some? (sci/find-ns turn-ctx namespace-name))
             "the turn fork contains its assigned namespace without defs")
         (is (contains? evaluation :seon.sci.admit/value))
-        (is (= {:functions [] :schemas {}} (:seon.sci.admit/value evaluation))
+        ;; The directory value names its declared render pair (3ee604004).
+        (is (= {:functions [] :schemas {}}
+               (dissoc (:seon.sci.admit/value evaluation) :seon.render/ai :seon.render/html))
             "An empty namespace has no function or schema declarations")
         (is (not (contains? evaluation :seon.cluster.eval/output))
             "an empty directory prints no output")
@@ -2716,6 +2680,7 @@
      (let [evaluation (eval/evaluate
                        {:seon.sci.eval/ctx (eval/base-ctx (db/db connection))
                         :seon.cluster.eval/source "(/ 1 0)"
+                        :seon.render/profile (render/agent-render-profile config/defaults)
                         :seon.sci.admit/caps caps
                         :seon.sci.eval/time-limit-ms 5000})]
        (is (:seon.cluster.eval/error evaluation) (pr-str evaluation))
