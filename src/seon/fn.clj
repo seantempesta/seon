@@ -3708,7 +3708,7 @@
     [:=> [:cat :seon.db/transaction-report]
      [:or :seon.reconcile/adopt-identities :seon.db/invalid-read-error]]
     [:=> [:cat :seon.db/database-value :seon.db/database-value
-          [:vector :seon.db/transaction-report-datom]]
+          [:vector [:or :seon.db/transaction-report-datom :map]]]
      [:or :seon.reconcile/adopt-identities :seon.db/invalid-read-error]]]}
   ([{before :db-before after :db-after :as report}]
    ;; Logical datoms: a vector element changed in a cell names its owner.

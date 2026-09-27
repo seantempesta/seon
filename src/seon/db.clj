@@ -4002,7 +4002,8 @@
 (defn logical-datoms
   "`report`'s datoms as logical facts about the entities an agent reads: an
    element datom `[cell a v]` reads `[parent a v]`; a cell's position change
-   reads an assertion of its element on the parent, carrying
+   reads an assertion of its element on the parent (a map with the datom's
+   fields), carrying
    `:seon.db.vector/position` (a new cell's position is its element's own
    datom); the bridge's own links and presence drop.
    A report whose value stores no vectors in cells answers its `:tx-data`.
@@ -4011,8 +4012,9 @@
    O(tx-data), one AVET seek per touched cell (13 ms for a 2000-parent report
    in the prototype)."
   {:malli/schema [:function
-                  [:=> [:cat :seon.db/transaction-report] [:sequential :map]]
-                  [:=> [:cat :seon.schema/projection :seon.db/transaction-report] [:sequential :map]]]}
+                  [:=> [:cat :seon.db/transaction-report] [:sequential [:or :seon.db/transaction-report-datom :map]]]
+                  [:=> [:cat :seon.schema/projection :seon.db/transaction-report]
+                   [:sequential [:or :seon.db/transaction-report-datom :map]]]]}
   ([report] (logical-datoms (carried-projection (:db-after report)) report))
   ([projection {before :db-before after :db-after tx-data :tx-data}]
    (if-not (contains? (:seon.schema.projection/forms projection) :seon.db.vector/cells)
@@ -4563,18 +4565,22 @@
 
 (defn- write-attribute-plans
   "The write plan for every attribute installed in `database`, a function
-  of the projection and that installed schema."
+  of the projection and that installed schema. Datahike's schema also maps
+  each attribute entity's id to its ident (`893 :some/attr`); datoms name
+  attributes by ident, so only ident keys have plans."
   {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/database-value]
-                  [:map-of [:or :keyword :int] :map]]}
+                  [:map-of :keyword :map]]}
   [projection database]
   (schema/projection-cache-value
    projection [::write-attribute-plans (dbi/-schema database)]
    #(into {}
-          (map (fn [[attribute installed]]
+          (comp
+           (filter (comp keyword? key))
+           (map (fn [[attribute installed]]
                  [attribute (write-attribute-plan
                              projection attribute
                              (= :db.cardinality/many
-                                (:db/cardinality installed)))]))
+                                (:db/cardinality installed)))])))
           (merge datahike.schema/implicit-schema-spec
                  (dbi/-schema database)))))
 

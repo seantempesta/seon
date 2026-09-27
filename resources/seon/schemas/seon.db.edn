@@ -338,4 +338,7 @@
  :seon.db/owned-value-refusal
  [:enum :seon.db/component-cycle :seon.db/missing-component-schema
   :seon.db/multiple-component-owners :seon.db/missing-component
-  :seon.db/unowned-entity :seon.db/validation-node-limit :seon.db/missing-validation-bound]}
+  :seon.db/unowned-entity :seon.db/validation-node-limit :seon.db/missing-validation-bound
+  ;; a stored vector's cells (seon.db/cell-vectors, write-entity-value)
+  :seon.db/vector-element-swept :seon.db/vector-cell-ambiguous :seon.db/vector-positions
+  :seon.db/vector-cells-without-presence :seon.db/vector-member-outside-cell]}
