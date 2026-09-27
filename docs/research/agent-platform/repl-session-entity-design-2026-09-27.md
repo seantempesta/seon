@@ -1,6 +1,6 @@
 ---
 type: research
-status: data-model plan, eighth revision (canonical assembly path and deletions §5d; settlement-moved edge dropped as a schema kind §4) (one context assembly, many views §5d; sample-load diagnosis §19; tight-data render philosophy) — addresses Astra review e80bf7c0d (REVISE, 12 findings) and owner rulings of 2026-09-27 (declared reverse attachments, acknowledgement, relevance tiers, no home namespace, session render, distributed rendering, every modeling kind in the sample); for re-review, then the owner; no source changed
+status: data-model plan, ninth revision (demo story: renders prototyped on design-1 and measured §5c, per-fact consumers §11, sample state §17, findings §19e, evidence demo-story-2026-09-27.md) (canonical assembly path and deletions §5d; settlement-moved edge dropped as a schema kind §4) (one context assembly, many views §5d; sample-load diagnosis §19; tight-data render philosophy) — addresses Astra review e80bf7c0d (REVISE, 12 findings) and owner rulings of 2026-09-27 (declared reverse attachments, acknowledgement, relevance tiers, no home namespace, session render, distributed rendering, every modeling kind in the sample); for re-review, then the owner; no source changed
 created: 2026-09-27
 branch: refactor/agent-platform
 source-pin: d7d185a7e (checkout); live default pid 22787, commit 6ab93d43, basis 536879662
@@ -255,7 +255,11 @@ fingerprint:
 - every declared reverse attachment from its `:seon.render/units`;
 - a component nests its target kind's selector;
 - a peer ref selects only the target's identity attributes, so `oversees` stays shallow until requested (review
-  finding 6);
+  finding 6). A `:seon.db/ref` names no target kind, so the prototype must list all 48 installed identity
+  attributes in every peer subpattern (a 68,632-character selector for the agent); declaring the target on the
+  ref is demo-story question D1. A declared peer unit (the task) is expanded one level by the composer through
+  its own render; an undeclared peer (a message's sender) stays its identity value (`"root"`), which is what
+  stops the walk's leak across peers (verified on design-1: root contributes no node to demo's context);
 - a many-valued attachment or component set is fetched ordered before any window is cut. Turns are ordered by
   `:seon.turn/ordinal` and evaluations by `:seon.cluster.eval/ordinal`; the window is the last *n* in that order,
   never target eid order (today's cut is by eid, `walk.clj:1029`, `:1064-1068`).
@@ -330,7 +334,10 @@ There is no central context builder.
    how they can be manipulated. So:
    - A task's refs render as tight data: each namespace and function as its name, a one-line meaning (the
      docstring's first sentence) and, for a function, its contract shape, for example
-     `{:seon.fn/sym seon.repl/response :seon.fn/meaning "The reply map for one evaluation." :seon.fn/contract [:=> [:cat :seon.repl/emission] :string]}`.
+     `#:seon.fn{:sym seon.repl/response :meaning "The reply: exactly one `#:seon.repl{…}` map that reads back as data." :contract [:=> [:cat :seon.repl/emission] [:maybe :string]]}`
+     (the prototype's real output on design-1; the contract is `:seon.fn/spec` read as data, the meaning the
+     docstring's first sentence). The tight contract drops inputs call preparation supplies by schema name
+     (`seon.repl/frame` is called `(frame)`, not with its declared db and agent id; demo-story D11).
    - Full `doc` and source stay one request away: `(doc f)`, or resolving the symbol.
    - **Operations on this data.** A render may include the functions that operate on the value, found by a
      **query**, not a stored relation: public toolkit functions whose arity declares the value's schema key or
@@ -338,14 +345,24 @@ There is no central context builder.
      - That attribute is a component of the function (via `:seon.fn/arities`) holding a set of qualified schema
        keywords with `:seon.db/index true` (`resources/seon/schemas/seon.fn.arity.edn:3`), so the query is an AVET
        seek.
-     - Measured on default: 3,415 input-ref values; one query takes 0.4-5 ms. Restricting it to the cluster
-       toolkit namespaces (`:seon.cluster/toolkit`, 13) gives `:seon.agent/id` → `my.agent/branch`,
-       `my.issue/add!`, `my.issue/tests!`, `my.program/propose-merge!`, and `:my.plan/request` → the ten `my.plan`
-       readers.
-     - Gap found: **no toolkit function declares a `:seon.message/*` key** (`:seon.message/message` and
-       `:seon.message/id` both return `[]`), and none declares `:seon.task/handle`, `:seon.ns/name` or
-       `:seon.fn/sym`. An operation is discoverable only if its contract names the entity's keys. The
-       acknowledgement function must take `[:cat :seon.message/id]`.
+     - Measured on default: 3,415 input-ref values; the bare AVET seek takes 0.4-5 ms, and joined to public
+       function symbols 10.7-22.9 ms per key on design-1 (demo-story §4).
+     - **Input refs name request schemas, not the entity's keys.** `my.message/read` declares
+       `:my.message/read-request`, whose member `:my.message/id` is an alias of `:seon.message/id`; the direct
+       query for `:seon.message/id` therefore finds nothing. And a key call preparation **supplies** by schema
+       name (`:seon.agent/id`, `:seon.db/db`) is not a subject: indexing it made `my.agent/branch`,
+       `my.issue/add!`… look like operations on agents, and `:my.plan/request` (a generic `{db, agent}` request)
+       made ten readers, `my.agent/*` and `my.note/notes` among them, look like plan operations.
+     - **The query, corrected and prototyped** (`tmp/demo-story/renders.clj` `operations-index`): over public
+       toolkit arities, follow each input ref into its map members and each member through its alias chain,
+       exclude supplied-by-name inputs, and index the reached keys; a value's operations are the entries for its
+       kind and the keys it holds. Where every required non-supplied member resolves to a key the value holds,
+       the render offers a ready call. On demo: a message → `(my.message/read #:my.message{:id "demo-msg-2"})`;
+       plan, settings and task → none. The index costs ~16 ms per projection and belongs in `seon.cache`.
+     - Gaps it exposes (demo-story F7): `my.agent/settings!` declares only `{connection, agent id}` while taking
+       dial keys; `:my.plan/objective` has no toolkit writer (only `seon.plan/plan!`); the acknowledgement
+       function does not exist and must take `[:cat :seon.message/id]` (or a request whose member aliases it).
+       An operation is discoverable only if its contract names what it takes.
    - A render may still **read the database** (a declared input, supplied by schema name) or return a form that
      reaches past the tree when it needs more context. The norm is to render the data it was handed.
 4. **Perspective.** The viewing agent is a declared input of every render:
@@ -386,18 +403,27 @@ never editing a central builder.
 
 #### Renders for the sample
 
-Estimated tokens (chars/4); seon.repl measured on default.
+**Prototyped and run on design-1** (lane demo-story-opus): `tmp/demo-story/renders.clj`, pure functions of one
+database value. The story, the per-fact consumer table and the measurements are in
+[demo-story-2026-09-27.md](demo-story-2026-09-27.md). Tokens are chars/4 of the **real output**.
 
-| Entity / kind | Render (where declared) | Returns | Tokens |
+| Entity / kind | Render (where it should live) | Returns (real output, abbreviated) | Tokens |
 |---|---|---|---|
-| agent `demo` | `:seon.agent/agent` pair (schema default) | an identity map (id, branch, current ns); each attachment delegated to its own render | ~40 + parts |
-| task `demo0task001` | `:seon.task/task` pair (schema default) | `{:seon.task/id … :seon.task/intent … :seon.task/namespace {:seon.ns/name seon.repl :seon.ns/meaning "…" :seon.ns/functions 30} :seon.task/function {:seon.fn/sym seon.repl/response :seon.fn/meaning "…" :seon.fn/contract […]}}` | ~120 |
-| namespace `seon.repl` (on request, or as the session namespace) | `:seon.ns/ns` pair (default) | names, one-line meanings and contract shapes of its 30 definitions (declared `:seon.fn/_ns`); full `dir` on request | ~900 tight, est. (full `dir` 2,726 measured) |
-| function `seon.repl/response` (on request) | `:seon.fn` pair (default) | name, meaning, contract, operations; `(doc f)` and source on request | ~40 (full doc ~65) |
-| inbox | the `:seon.message/_to` attachment pair on the agent schema | unread messages as data, each with its operations (`my.message/received!` once its contract names `:seon.message/id`) | ~30 (1 unread) |
-| settings | `:seon.agent/settings` attribute pair (`seon.agent/render-settings-ai`) | the shown dials + override set | ~90 |
-| session transcript | `:seon.agent.session/session` pair (new, default) | turns by ordinal, evaluations by ordinal: `ns=> source` + saved shown text | ~150 for demo's 5 evaluations |
-| root oversight | `:seon.agent/oversees` attribute pair (new, default) | one summary map per overseen agent | ~30 per agent |
+| agent `demo` | `:seon.agent/agent` pair | `{:seon.agent/id "demo" :seon.agent/branch … :seon.agent.session/ns demo.work}`; every attachment is its own node. Perspective: another viewer also reads `:seon.agent/admission :closed` | 35 (41 for root) |
+| task `demo0task001` | `:seon.task/task` pair | `#:seon.task{:id … :intent … :namespace #:seon.ns{:name seon.repl :meaning "The ONE generator of REPL bytes: …" :public-count 16} :function #:seon.fn{:sym seon.repl/response :meaning "The reply: exactly one …" :contract [:=> [:cat :seon.repl/emission] [:maybe :string]]}}` | 120 |
+| namespace `seon.repl` as the session's namespace half | `:seon.ns/ns` pair | name, meaning, and its **16 public** definitions (30 with private) as sym + meaning + contract | 858 (full `dir` 2,726) |
+| namespace `demo.work` (after the `in-ns`) | `:seon.ns/ns` pair | `#:seon.ns{:name demo.work :functions []}` (its `def` is private SCI state, not a program entity) | 22 |
+| function `seon.repl/response` (mention) | `:seon.fn/fn` pair, brief | sym + meaning + contract; `(doc f)` and source on request | ~45 |
+| plan | `:my.plan/entity` pair (drop the attribute's duplicate, demo-story D6) | `#:my.plan{:objective "…"}`; no operation (no toolkit writer takes the objective) | 39 |
+| settings | `:seon.config/agent-settings` pair (drop the attribute's duplicate) | `{:seon.config/base "default" :seon.config.ai/model "deepseek-flash"}`; effective dials on request | 35 |
+| inbox | the `:seon.message/to` attribute pair, for the reverse `_to` | to the recipient: `#:seon.message{:unread [<msg>] :received 1}`, unread = no `received-tx`, oldest first; to the sender: every message with `:received?` | 87 (1 unread); 97 for root |
+| session transcript | `:seon.agent.session/session` pair (new) | turns by ordinal, evaluations by ordinal: `; comment`, `ns=> source`, saved shown text | 99 for demo's 5 evaluations |
+| root oversight | `:seon.agent/oversees` attribute pair (new) | `[#:seon.agent{:id "demo" :branch :design-sample :admission :closed}]` | ~30 per agent |
+
+The derived keys these outputs use (`:seon.fn/meaning`, `:seon.ns/public-count`, `:seon.message/unread`,
+`:seon.message/received`, `:seon.message/received?`, `:seon.message/at`, `:seon.agent/admission`,
+`:seon.render/operations`) are declared nowhere yet (demo-story D3). Each printed entry is
+`(render lookup)` followed by the data, a proposed generic requery whose evaluation is the render (D2).
 
 Every row above is a **global default**: the schema's declared pair. Where a namespace override changes the view:
 
@@ -409,8 +435,10 @@ Every row above is a **global default**: the schema's declared pair. Where a nam
 
 An inline `:seon.render/ai` on one message (a producer's special notice) wins over all of them.
 
-- **demo's whole opening context:** about 40 + 120 + 900 (session namespace, tight, est.) + 30 + 90 ≈ 1,200 tokens,
-  then the transcript. The full `dir`/`doc` are requests, not defaults.
+- **demo's whole context, measured:** at its opening (session in `seon.repl`) 1,174 tokens of attachment
+  renders, 858 of them the namespace half, then the 99-token transcript: 1,274. Now (session in `demo.work`)
+  339 + 99 = 438. Today's debug walk at N=3 shows ≈3,668 tokens across 89 nodes. The full `dir`/`doc` are
+  requests, not defaults. Warm assembly 3.5-26 ms; cold 80 ms, of which projection acquisition 58-61 ms.
 - **root's opening:** its identity, plan, settings, faults, schedules and one line per overseen agent.
 
 **What in today's code fights this** (file:line; the graph code is being changed by another lane, so these are at
@@ -821,6 +849,12 @@ K keep · M move · D delete · N new.
 | `:seon.schedule.fire/agent` | K | `schedule.clj:389` | wake router; the firing's recipient, an immutable observation (§4) |
 | `:seon.context.capture/*` | K (prompt text → P7) | `context.clj:359` | calibration (`seon.ai.tokens/characters`); contributions read by `transcript.clj:701-703`, produced by `context.clj:340-355`, tested by `context_capture_test.clj:7` |
 | `seon.context/selection`, `append-tx`, `compact-tx` | **D** (functions only) | `context.clj:76-256` | none outside the file. The contribution schema and its `evaluations` member stay: captures produce and read them (review finding 9) |
+| `:seon.cluster.eval/author` | K → **Q** (demo-story D8) | `turn.clj:524`, `:669`, `:888`, `:1593` | `latest-evaluations` system filter (`:2047`), agent-written query (`:3673`), `:5168`. The data-modeling skill forbids this stamp; one of them is wrong. Recommended: derive "system" at the turn (no provider attempt) and delete it in P7 |
+| `:seon.turn/reply-size` | K, both meanings stated | the reply writer | calibration (value) and wake answering (presence and its tx: `turn.clj:480`, `:3018`, `:3138`) (demo-story D9) |
+| `:seon.message/received-tx` consumers today | — | — | **none**: the inbox HTML derives unread from `:seon.turn/handled` (`cluster/message.clj:410-418`). P4's inbox render is its first consumer |
+| render pairs on `:seon.agent/plan` and `:seon.agent/settings` (attribute) | **D** (properties) | schema resources | duplicates of the `:my.plan/entity` and `:seon.config/agent-settings` pairs (demo-story D6) |
+| `:seon.error/of-steward` | **Q** (demo-story D7) | none: a ref attribute no writer stores (`seon.error.edn:238-246`) | exists to carry a render pair into the agent's units |
+| render-output keys `:seon.fn/meaning`, `:seon.ns/public-count`, `:seon.message/unread`, `/received`, `/received?`, `/at`, `:seon.agent/admission`, `:seon.render/operations` | **N** (non-attribute declarations) | the P4 renders | the agent reading its context; each render's output contract (demo-story D3) |
 
 ## 12. Modeling choices against the skills; documentation corrections
 
@@ -984,6 +1018,14 @@ ref". Confirm.
 
 Q5 (schedules) is closed: they stay a declared attachment, as the review agrees.
 
+**Q8-Q10, from rendering the sample** (priced in [demo-story-2026-09-27.md](demo-story-2026-09-27.md) §6):
+- **Q8 (D1).** Declare a ref's target kind (`:seon.db/target`), so selectors stop at one identity and the writer
+  checks target existence. *Recommended*; ~40 attributes by one sweep, ~20 writer lines.
+- **Q9 (D2).** A render returns tight data, printed as the result of one generic requery `(render lookup)` whose
+  evaluation is the render. *Recommended*; ~15 lines plus an output contract per kind.
+- **Q10 (D5).** The transcript is the whole context: the opening is turn 0's system evaluations, later changes
+  are appended; nothing renders live above it. *Recommended*; the refresh records each entry's node.
+
 ## 17. The sample for the design review
 
 `tmp/data-model-sample/sample.edn` holds three parts:
@@ -1003,6 +1045,14 @@ The demo record contains:
 - `root :seon.agent/oversees demo`.
 
 The demo agent's admission is closed, so no turn can run for it.
+
+**State of the loaded sample (demo-story, 2026-09-27).** The branch holds `[demo :seon.agent/branch :design-sample]`:
+the correction below (§19c) was made to `sample.edn` after the load and never applied to the branch. The
+transcript's shown texts are hand-written (`(dir seon.repl)` shows 2 of 16 public functions; `(doc
+seon.repl/response)` shows a docstring that is not the stored one), and turn 0 holds the pre-design opening
+(`(help)`, `(dir seon.repl)`) where the design's opening is the attachments' renders. The acknowledgement of
+`demo-msg-1` is in the load transaction, not in a turn. The story, told from these entities with the prototype
+renders, is [demo-story-2026-09-27.md](demo-story-2026-09-27.md) §2.
 
 **Every modeling kind, as the view shows it:**
 
@@ -1145,6 +1195,17 @@ and drops every value (§19a, 459 on default).
 - Everything else matches the design, including the one change that triggered §19a: redefining
   `:seon.cluster.eval/receipt` is exactly the P3 change the design needs.
 - `load.clj` now states the two blockers at its top and is not run.
+
+### 19e. Findings from rendering the sample (demo-story)
+
+Root's ten page observations all hold; each is verified with file:line in
+[demo-story-2026-09-27.md](demo-story-2026-09-27.md) §1. Twelve system findings with proposed task entries are
+its §5 (F1-F12): the unrepaired branch fact; branch views needing a writer connection where
+`datahike.versioning/branch-as-db` suffices (2.6 ms, same head); MCP elisions larger than what they elide; error
+frames naming only the dependency's frame; the page showing root's prompt for demo; the failing turn render;
+under-declared toolkit contracts that hide operations; the fabricated sample transcript; this document's own
+unverified quotes (corrected in §5c); the author-stamp contradiction with the data-modeling skill; and duplicate
+render pairs. Eleven data-model questions with priced options are its §6 (D1-D11).
 
 ### 19d. Schemas are not namespaces
 
