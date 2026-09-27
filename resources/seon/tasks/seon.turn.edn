@@ -97,4 +97,8 @@
  #:seon.task{:name "a-refused-multi-form-settlement-returns-nothing"
              :kind :function
              :intent "The settlement of a refused multi-form run is recorded correctly (settle-batch-refusal! commits every receipt with its value, the refusal as its error and the fault), but seon.cluster.agent/evaluate-source! (agent.clj ~806-818) answers an opened run with only {:seon.turn/id :seon.db/db :seon.db/durable}, dropping :seon.turn.loop/refusal and the error outcome; direct callers get no error (the MCP bridge reads run-observation). Keep the refusal and outcome in the answer beside the run id (register-anywhere diagnosis db8937e8d)."
+             :evidence #{"docs/research/agent-platform/landing/register-anywhere-diagnosis-2026-09-27.md"}}
+ #:seon.task{:name "schema-redeclaration-revalidates-unchanged-attributes"
+             :kind :function
+             :intent "Re-declaring an entity schema marks every one of its attributes affected (turn.clj ~1128-1133), so adoption re-validates all stored values of attributes whose declaration did not change; the work grows with history (a receipt re-declaration touches 43 attributes, 2,063 datoms, ~168K chars). Pass only attributes whose form changed; cost follows the change (fix-adoption-vector, bd3d35b19)."
              :evidence #{"docs/research/agent-platform/landing/register-anywhere-diagnosis-2026-09-27.md"}}]
