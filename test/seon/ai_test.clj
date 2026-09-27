@@ -40,6 +40,13 @@
 
 
 
+(defn- with-test-key
+  "`request` resolving its credential variable to a test key in its own
+  environment: nothing is exported and no Var is redefined."
+  {:malli/schema [:=> [:cat [:map [:seon.ai/api-key-variable :seon.ai/api-key-variable]]] :map]}
+  [request]
+  (assoc request :seon.ai/environment {(:seon.ai/api-key-variable request) "test-key"}))
+
 (def ^:private json-number-generator
   (gen/one-of
    [gen/small-integer
@@ -198,12 +205,11 @@
                         :seon.config.ai/no-auth true))
         target (:seon.ai/primary targets)
         outcome
-        (with-redefs-fn
-          {#'seon.ai/send-request
-           (fn [request-data]
-             (swap! requests conj request-data)
-             {:seon.ai/text "local reply"})}
-          #(ai/complete (seon.schema/handed-projection) (assoc target :seon.ai/prompt "hello")))]
+        (ai/complete (seon.schema/handed-projection)
+                     (assoc target :seon.ai/prompt "hello"
+                            :seon.ai/send! (fn [request-data]
+                                             (swap! requests conj request-data)
+                                             {:seon.ai/text "local reply"})))]
     (is (= true (:seon.config.ai/no-auth target))
         "assembly carries the descriptor's declared authentication state")
     (is (not (contains? target :seon.ai/api-key-variable))
@@ -336,12 +342,11 @@
                                 missing-variable)))
             requests (atom [])
             outcome
-            (with-redefs-fn
-              {#'seon.ai/send-request
-               (fn [request]
-                 (swap! requests conj request)
-                 {:seon.ai/text "must not happen"})}
-              #(ai/complete (seon.schema/handed-projection) (assoc target :seon.ai/prompt "hello")))]
+            (ai/complete (seon.schema/handed-projection)
+                         (assoc target :seon.ai/prompt "hello"
+                                :seon.ai/send! (fn [request]
+                                                 (swap! requests conj request)
+                                                 {:seon.ai/text "must not happen"})))]
         (is (= missing-variable (:seon.ai/api-key-variable target)))
         (is ((schema/projection-validator (schema/handed-projection) :seon.ai/no-credential-error) outcome))
         (is (empty? @requests)
@@ -719,10 +724,9 @@
 (deftest an-extra-body-conflict-refuses-before-the-http-leaf
   (let [sent (atom 0)
         outcome
-        (with-redefs-fn
-          {#'seon.ai/send-request (fn [_] (swap! sent inc))}
-          #(ai/complete (seon.schema/handed-projection) (assoc base :seon.ai/extra-body-edn
-                   "{\"authorization\" \"leak\"}")))]
+        (ai/complete (seon.schema/handed-projection)
+                     (assoc base :seon.ai/extra-body-edn "{\"authorization\" \"leak\"}"
+                            :seon.ai/send! (fn [_] (swap! sent inc))))]
     (is ((schema/projection-validator (schema/handed-projection) :seon.ai/extra-body-conflict-error) outcome))
     (is (zero? @sent))))
 
@@ -997,12 +1001,10 @@
 (deftest a-missing-credential-is-loud-in-the-value
   (let [requests (atom [])
         outcome
-        (with-redefs-fn
-          {#'seon.ai/send-request
-           (fn [request]
-             (swap! requests conj request)
-             {:seon.ai/text "must not happen"})}
-          #(ai/complete (seon.schema/handed-projection) base))]
+        (ai/complete (seon.schema/handed-projection)
+                     (assoc base :seon.ai/send! (fn [request]
+                                                  (swap! requests conj request)
+                                                  {:seon.ai/text "must not happen"})))]
     (is (= :seon.ai/request (:seon.error/layer outcome)))
     (is ((schema/projection-validator (schema/handed-projection) :seon.ai/no-credential-error) outcome))
     (is (re-find #"SEON_AI_TEST_KEY_ABSENT" (:seon.error/message outcome))
@@ -1016,12 +1018,10 @@
                     (dissoc :seon.ai/api-key-variable)
                     (assoc :seon.config.ai/no-auth true))
         outcome
-        (with-redefs-fn
-          {#'seon.ai/send-request
-           (fn [request-data]
-             (swap! requests conj request-data)
-             {:seon.ai/text "local reply"})}
-          #(ai/complete (seon.schema/handed-projection) request))]
+        (ai/complete (seon.schema/handed-projection)
+                     (assoc request :seon.ai/send! (fn [request-data]
+                                                     (swap! requests conj request-data)
+                                                     {:seon.ai/text "local reply"})))]
     (is (= "local reply" (:seon.ai/text outcome)))
     (is (int? (:seon.ai.model/last-latency-ms outcome)))
     (is (= 1 (count @requests)))
@@ -1032,8 +1032,7 @@
 (deftest transport-failure-is-an-ordinary-value
   ;; port 1 answers nothing; the credential is present so the call is
   ;; genuinely attempted
-  (let [outcome (with-redefs [ai/credential (constantly "test-key")]
-                  (ai/complete (seon.schema/handed-projection) base))]
+  (let [outcome (ai/complete (seon.schema/handed-projection) (with-test-key base))]
     (is (= :seon.ai/request (:seon.error/layer outcome)))
     (is (or (contains? outcome :seon.ai/transport-failure)
             (contains? outcome :seon.ai/timeout)))))
@@ -1042,11 +1041,10 @@
   ;; 10.255.255.1 is unroutable: the connection hangs rather than
   ;; refusing, which is the genuinely unobservable case the deadline
   ;; exists for
-  (let [outcome (with-redefs [ai/credential (constantly "test-key")]
-                  (ai/complete (seon.schema/handed-projection) (assoc base
-                                      :seon.ai/endpoint
-                                      "http://10.255.255.1:8080/v1"
-                                      :seon.ai/timeout-ms 300)))]
+  (let [outcome (ai/complete (seon.schema/handed-projection)
+                            (with-test-key (assoc base
+                                                  :seon.ai/endpoint "http://10.255.255.1:8080/v1"
+                                                  :seon.ai/timeout-ms 300)))]
     (is (= :seon.ai/request (:seon.error/layer outcome)))
     (is (or (contains? outcome :seon.ai/transport-failure)
             (contains? outcome :seon.ai/timeout)))
@@ -1056,9 +1054,9 @@
 (deftest one-attempt-means-one-attempt
   ;; nothing retries a paid call — the count is the contract
   (let [calls (atom 0)]
-    (with-redefs [ai/credential (constantly "test-key")
-                  ai/request-body (fn [_projection _request] (swap! calls inc) {})]
-      (ai/complete (seon.schema/handed-projection) base))
+    (ai/complete (seon.schema/handed-projection)
+                 (assoc (with-test-key base)
+                        :seon.ai/send! (fn [_] (swap! calls inc) {:seon.ai/text "one reply"})))
     (is (= 1 @calls) "exactly one request was built, and so one was made")))
 
 ;;; ---------------------------------------------------------------------------
@@ -1211,8 +1209,8 @@
 (deftest a-provider-that-hangs-up-mid-body-settles-what-it-already-sent
   (let [server (start-stub!)]
     (try
-      (let [completion (with-redefs [ai/credential (constantly "test-key")]
-                         (ai/complete (seon.schema/handed-projection) (stub-request server "/truncate")))
+      (let [completion (ai/complete (seon.schema/handed-projection)
+                                    (with-test-key (stub-request server "/truncate")))
             truncation (:seon.ai/truncation completion)]
         (is (= "(+ 1 2) (+ 3" (:seon.ai/text completion))
             "a run built from this settles forms instead of closing with zero")
@@ -1230,12 +1228,12 @@
   ;; is the shape that must not degrade
   (let [server (start-stub!)]
     (try
-      (let [outcomes (with-redefs [ai/credential (constantly "test-key")]
-                       (mapv deref
-                             (mapv (fn [_]
-                                     (future
-                                       (ai/complete (seon.schema/handed-projection) (stub-request server "/stream"))))
-                                   (range 6))))]
+      (let [outcomes (mapv deref
+                           (mapv (fn [_]
+                                   (future
+                                     (ai/complete (seon.schema/handed-projection)
+                                                  (with-test-key (stub-request server "/stream")))))
+                                 (range 6)))]
         (is (= 6 (count (filter #(= "(+ 1 2)" (:seon.ai/text %)) outcomes)))
             (str "every concurrent stream completed: "
                  (pr-str (mapv #(or (:seon.error/message %) :ok) outcomes)))))
@@ -1250,13 +1248,13 @@
                     :seon.config.ai.backup/endpoint
                     "https://backup.example.invalid/v1/chat/completions"))
             failure
-            (with-redefs [ai/credential (constantly "test-key")]
-              (ai/complete (seon.schema/handed-projection) (assoc primary
-                      :seon.ai/endpoint
-                      (str "http://127.0.0.1:"
-                           (.getPort (.getAddress server))
-                           "/payment-required")
-                      :seon.ai/prompt "hello")))
+            (ai/complete (seon.schema/handed-projection)
+                         (with-test-key (assoc primary
+                                               :seon.ai/endpoint
+                                               (str "http://127.0.0.1:"
+                                                    (.getPort (.getAddress server))
+                                                    "/payment-required")
+                                               :seon.ai/prompt "hello")))
             action
             (ai/disposition
              {:seon.error/value failure :seon.ai/backup? true})

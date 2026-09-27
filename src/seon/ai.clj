@@ -1044,8 +1044,8 @@
   THE one place the environment is read, and the reason a credential
   never becomes a datom: the database carries the variable's NAME, this
   reads its value at the leaf, and nothing in between ever holds it.
-  Its own function so a test can supply a key without a network and
-  without exporting anything."
+  A request carrying `:seon.ai/environment` resolves the name there
+  instead, so a test supplies a key without exporting anything."
   {:malli/schema [:=> [:cat :seon.ai/api-key-variable] [:maybe :string]]}
   [variable]
   ;; a nil name is our own configuration mistake, and errors-as-values
@@ -1512,13 +1512,26 @@
   - `::stream-truncated` — 2xx whose stream ended before ANY assistant
     text arrived. A stream that ends early after some text arrived is
     NOT an error: it returns the ordinary completion carrying a
-    `:seon.ai/truncation` fact, so the turn keeps what was paid for."
+    `:seon.ai/truncation` fact, so the turn keeps what was paid for.
+
+  The request may carry `:seon.ai/send!`, the HTTP leaf (the JDK leaf when
+  absent), and `:seon.ai/environment`, the names-to-values map its
+  credential variable resolves in (the process environment when absent)."
   {:malli/schema [:=> [:cat :seon.schema/projection :seon.ai/request] :seon.ai/completion]}
   [projection {:keys [:seon.ai/api-key-variable]
     no-auth :seon.config.ai/no-auth
+    ;; The HTTP leaf and the environment credential names resolve in, as
+    ;; values: a caller supplies a local leaf or a test key without
+    ;; redefining a Var or exporting a variable.
+    send! :seon.ai/send!
+    environment :seon.ai/environment
+    :or {send! send-request}
     :as request}]
   (let [body (request-body projection request)
-        api-key (when-not no-auth (credential api-key-variable))]
+        api-key (when-not no-auth
+                  (if environment
+                    (get environment api-key-variable)
+                    (credential api-key-variable)))]
     (cond
       (or (contains? body :seon.ai/extra-body-edn)
           (contains? body :seon.ai/protected-keys))
@@ -1527,7 +1540,7 @@
       (or no-auth api-key)
       (let [started (System/nanoTime)
             request-data (http-request-data request api-key body)
-            result (send-request request-data)]
+            result (send! request-data)]
         (assoc result
                :seon.ai.model/last-latency-ms
                (long (/ (- (System/nanoTime) started) 1000000))))

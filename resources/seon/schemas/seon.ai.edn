@@ -197,7 +197,9 @@
             [:seon.ai/prompt :seon.ai/prompt]
             [:seon.ai/timeout-ms :seon.ai/timeout-ms]
             [:seon.ai/stream? {:optional true} :seon.ai/stream?]
-            [:seon.ai/sink {:optional true} :seon.ai/sink]]
+            [:seon.ai/sink {:optional true} :seon.ai/sink]
+            [:seon.ai/send! {:optional true} :seon.ai/send!]
+            [:seon.ai/environment {:optional true} :seon.ai/environment]]
            [:map
             [:seon.ai/endpoint :seon.ai/endpoint]
             [:seon.ai/model :seon.ai/model]
@@ -225,8 +227,14 @@
             [:seon.ai/prompt :seon.ai/prompt]
             [:seon.ai/timeout-ms :seon.ai/timeout-ms]
             [:seon.ai/stream? {:optional true} :seon.ai/stream?]
-            [:seon.ai/sink {:optional true} :seon.ai/sink]]],
+            [:seon.ai/sink {:optional true} :seon.ai/sink]
+            [:seon.ai/send! {:optional true} :seon.ai/send!]
+            [:seon.ai/environment {:optional true} :seon.ai/environment]]],
           :request-failure :seon.ai/http-status,
+          :send! [:=> {:description "The HTTP leaf complete sends one request's data through: the endpoint, timeout, stream flag, headers, serialized body and optional sink, to its completion or error. seon.ai's JDK leaf when absent."}
+                  [:cat :map] :seon.ai/http-completion],
+          :environment [:map-of {:description "The environment credential variable names resolve in, names to values; the process environment when absent. Never stored: only the name is data."}
+                        :string :string],
           :stream-truncated-error
           [:and {:seon.db/attributes true,
             :seon.render/ai seon.error/render-ai,
