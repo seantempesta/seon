@@ -710,7 +710,7 @@
         "the AI projection stops at the profile's child bound")
     ;; One cut face (one-render-path §3e): the shown members, then `…N`
     ;; counting what was omitted of the 40 that were there.
-    (is (str/includes? ai "[100 101 102 …37]") ai)
+    (is (str/includes? ai "[100 101 102 …37 (drop 3 (get-in result/eaudit [:seon.error/problems 0 :seon.error/offending]))]") ai)
     (is (str/includes? ai "(get-in result/eaudit [:seon.error/problems 0 :seon.error/offending])")
         "and it hands back the form that requeries the leaf it elided")
     (is (= [] (remove #(str/includes? html (str %)) member))

@@ -129,6 +129,7 @@
             [seon.instrument :as instrument]
             [seon.program :as program]
             [seon.render :as render]
+            [seon.ai.tokens :as tokens]
             [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
@@ -4073,14 +4074,31 @@
         shown (if (contains? projection :seon.render.value/root-description) projection
                   (or (:seon.render.value/value-text projection)
                       (render.value/render-ai-data projection)))
-        failures (into failures (:seon.render.value/diagnostics projection))]
+        failures (into failures (:seon.render.value/diagnostics projection))
+        shown (if (string? shown) shown (pr-str shown))]
+    ;; THE VALUE'S SIZE IS RECORDED BESIDE ITS SHOWN TEXT: the whole value's
+    ;; estimated tokens from the floor's own cut counts (never a second print),
+    ;; the shown tokens, how many cuts it made, and an explicit
+    ;; `seon.print/full` opt-in. Queryable; shown only past a declared bound.
     (cond-> {:seon.sci.admit/value value
-             :seon.eval/shown (if (string? shown) shown (pr-str shown))}
+             :seon.eval/shown shown
+             :seon.eval/shown-tokens (tokens/estimate shown)}
+      (int? (:seon.render.value/whole-characters projection))
+      (assoc :seon.eval/value-tokens
+             (tokens/estimate-of-characters (:seon.render.value/whole-characters projection)))
+      (int? (:seon.render.value/elisions projection))
+      (assoc :seon.eval/elisions (:seon.render.value/elisions projection))
+      (:seon.render.value/full? projection) (assoc :seon.eval/full true)
       (:seon.render.call/selected-producer projection)
       (assoc :seon.eval/renderer (:seon.render.call/selected-producer projection))
       (seq failures)
       (assoc :seon.cluster.eval/diagnostics (floor-text request (mapv flat-diagnostic failures)))
       record (assoc :seon.sci.admit/record record))))
+
+(def ^:private value-size-keys
+  "The shown value's recorded size, carried from `shown-result` to the
+  evaluation and settled onto its receipt."
+  [:seon.eval/value-tokens :seon.eval/shown-tokens :seon.eval/elisions :seon.eval/full])
 
 (defn- success-evaluation
   [{admitted :seon.sci.eval/admitted
@@ -4116,6 +4134,7 @@
     ;; Allocation is the kernel's measurement, kept instead of dropped.
     :always (assoc :seon.eval/duration-ms duration-ms)
     (pos? acquisition-ms) (assoc :seon.eval/acquisition-ms acquisition-ms)
+    :always (merge (select-keys admitted value-size-keys))
     (pos? (get-in admitted [:seon.sci.admit/record :seon.eval/allocated-bytes] -1))
     (assoc :seon.eval/allocated-bytes
            (get-in admitted [:seon.sci.admit/record :seon.eval/allocated-bytes]))
@@ -4152,6 +4171,7 @@
                    (:seon.eval/shown admitted))
             (:seon.cluster.eval/diagnostics admitted)
             (assoc :seon.cluster.eval/diagnostics (:seon.cluster.eval/diagnostics admitted)))
+    :always (merge (select-keys admitted value-size-keys))
     ;; The same one spelling on the failing path.
     (int? (:seon.eval/duration-ms record))
     (assoc :seon.eval/duration-ms (:seon.eval/duration-ms record))

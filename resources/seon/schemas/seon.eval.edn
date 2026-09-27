@@ -36,6 +36,10 @@
             :acquisition-ms [:int {:min 0 :seon.wake/context-inert true :description "Milliseconds of Seon's own SCI program acquisition inside one evaluation's arm, excluded from :seon.eval/duration-ms (the agent's reply time) and recorded beside it."}],
             :fn-entries [:and {:seon.wake/context-inert true} :int],
             :allocated-bytes [:and {:seon.wake/context-inert true} :int],
+            :value-tokens [:int {:min 0 :seon.wake/context-inert true :description "Estimated tokens of the evaluation's whole value, from the floor's cut counts (seon.render.value/whole-characters), never a second print. Past :seon.config.eval/bounds the reply says LARGE VALUE."}],
+            :shown-tokens [:int {:min 0 :seon.wake/context-inert true :description "Estimated tokens of the evaluation's shown text."}],
+            :elisions [:int {:min 0 :seon.wake/context-inert true :description "How many cuts the floor made showing the evaluation's value; the data that says whether the token budget elides too often."}],
+            :full [:boolean {:seon.wake/context-inert true :description "The evaluation opted into printing its value whole (seon.print/full)."}],
             :outcome [:enum {:seon.wake/context-inert true} :ok :time :error],
             :shown
             [:string

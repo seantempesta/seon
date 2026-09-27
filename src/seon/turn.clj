@@ -166,6 +166,9 @@
       (assoc :seon.eval/acquisition-ms (:seon.eval/acquisition-ms evaluation))
       (int? (:seon.eval/allocated-bytes evaluation))
       (assoc :seon.eval/allocated-bytes (:seon.eval/allocated-bytes evaluation))
+      ;; The shown value's size (whole estimate, shown, cuts, full opt-in).
+      :always (merge (select-keys evaluation [:seon.eval/value-tokens :seon.eval/shown-tokens
+                                              :seon.eval/elisions :seon.eval/full]))
       ;; A FORM'S OWN `set!` OF *print-length* / *print-level*. Captured
       ;; while sci's binding is still installed (`sci/eval.clj` print-options
       ;; volatile), it is what the response must print the value under.

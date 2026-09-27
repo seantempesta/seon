@@ -78,8 +78,7 @@
           (:seon.db/invalid-read effective)
           (:seon.schema/expected-value effective))
     effective
-    (cond->
-     {:seon.render.profile/id :seon.render.profile/agent
+    {:seon.render.profile/id :seon.render.profile/agent
       :seon.render.profile/token-budget
       (:seon.config.render.agent/token-budget effective)
       :seon.render.profile/max-depth
@@ -87,12 +86,7 @@
       :seon.render.profile/max-children
       (:seon.config.render.agent/max-children effective)
       :seon.render.profile/composition
-      (:seon.config.render.agent/composition effective)}
-      ;; The provenance ceiling (the floor's selection); absent before a store
-      ;; adopts the dial, and then fit uses its declared default.
-      (:seon.print/rendered-token-ceiling effective)
-      (assoc :seon.print/rendered-token-ceiling
-             (:seon.print/rendered-token-ceiling effective)))))
+      (:seon.config.render.agent/composition effective)}))
 
 (def ^:private default-agent-profile
   (delay (agent-render-profile config/defaults)))

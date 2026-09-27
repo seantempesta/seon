@@ -125,6 +125,10 @@
                          :seon.schema.admission/reason "The printed value is any evaluated or replacing value."
                          :gen/elements [nil false 0 "" :k [] {}]}]]
                  [:seon.eval/shown :seon.eval/shown]
+                 [:seon.eval/shown-tokens {:optional true} :seon.eval/shown-tokens]
+                 [:seon.eval/value-tokens {:optional true} :seon.eval/value-tokens]
+                 [:seon.eval/elisions {:optional true} :seon.eval/elisions]
+                 [:seon.eval/full {:optional true} :seon.eval/full]
                  [:seon.eval/renderer {:optional true} :seon.eval/renderer]
                  [:seon.cluster.eval/diagnostics {:optional true} :seon.cluster.eval/diagnostics]
                  [:seon.sci.admit/record {:optional true} :seon.sci.admit/record]],

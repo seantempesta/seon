@@ -57,6 +57,10 @@
                       :seon.eval/duration-ms]
                      [:seon.eval/acquisition-ms {:optional true} :seon.eval/acquisition-ms]
                      [:seon.eval/allocated-bytes {:optional true} :seon.eval/allocated-bytes]
+                     [:seon.eval/value-tokens {:optional true} :seon.eval/value-tokens]
+                     [:seon.eval/shown-tokens {:optional true} :seon.eval/shown-tokens]
+                     [:seon.eval/elisions {:optional true} :seon.eval/elisions]
+                     [:seon.eval/full {:optional true} :seon.eval/full]
                      [:seon.print/length
                       {:optional true}
                       :seon.print/length]

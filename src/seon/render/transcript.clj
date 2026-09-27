@@ -289,6 +289,8 @@
      ::comment (:seon.cluster.eval/comment receipt)
      ::duration-ms (:seon.eval/duration-ms receipt)
      ::allocated-bytes (:seon.eval/allocated-bytes receipt)
+     ::value-tokens (:seon.eval/value-tokens receipt)
+     ::shown-tokens (:seon.eval/shown-tokens receipt)
      ::print-length (:seon.print/length receipt)
      ::print-level (:seon.print/level receipt)
      ::ending-ns (:seon.sci.eval/ending-ns receipt)
@@ -492,6 +494,8 @@
                                    (::duration-ms entry))
       (::allocated-bytes entry) (assoc :seon.eval/allocated-bytes
                                        (::allocated-bytes entry))
+      (::value-tokens entry) (assoc :seon.eval/value-tokens (::value-tokens entry))
+      (::shown-tokens entry) (assoc :seon.eval/shown-tokens (::shown-tokens entry))
       (::branch-errors-text entry) (assoc :seon.repl/errors
                                           (::branch-errors-text entry)))))
 
