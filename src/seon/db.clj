@@ -3641,6 +3641,21 @@
                                         (schema.datahike/value-schema form)
                                         (mr/schema (:seon.schema.projection/registry projection) attribute))))}))))
 
+(defn- cell-rows
+  "`cells` as rows `{::cell ::position ::members}`: every datom a cell holds
+   beside its position is a member, so a value whose declarations do not yet
+   name the cells (the publication writes them after the attributes) reads
+   them alike. One EAVT seek per cell."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :seon.db/entity-id]]
+                  [:vector [:map [::cell :seon.db/entity-id] [::position [:or :nil :int]] [::members [:vector :seon.db/transaction-report-datom]]]]]}
+  [database cells]
+  (mapv (fn [cell]
+          (let [cell-datoms (d/datoms database :eavt cell)]
+            {::cell cell
+             ::position (some #(when (= :seon.db.vector/position (:a %)) (:v %)) cell-datoms)
+             ::members (filterv #(not= :seon.db.vector/position (:a %)) cell-datoms)}))
+        cells))
+
 (defn- cell-vectors
   "The logical vectors of `parent`, read from its `cells` and `present`
    attributes: each present attribute's elements in position order, `[]` when
@@ -3652,16 +3667,8 @@
                        [:or :nil :seon.instrument/callable] [:or :nil :seon.instrument/callable]]
                   [:map-of :qualified-keyword [:vector :seon.schema/value]]]}
   [database plan parent cells present visit-child refuse!]
-  (let [rows (mapv (fn [cell]
-                     (when visit-child (visit-child cell))
-                     (let [cell-datoms (d/datoms database :eavt cell)]
-                       {::cell cell
-                        ::position (some #(when (= :seon.db.vector/position (:a %)) (:v %)) cell-datoms)
-                        ;; Whatever a cell holds beside its position is its element, so a
-                        ;; value whose declarations do not yet name the cells (the
-                        ;; publication writes them after the attributes) reads them alike.
-                        ::members (filterv #(not= :seon.db.vector/position (:a %)) cell-datoms)}))
-                   cells)
+  (when visit-child (run! visit-child cells))
+  (let [rows (cell-rows database cells)
         by-attribute (group-by #(:a (first (::members %))) (filter #(= 1 (count (::members %))) rows))]
     (when refuse!
       (when-let [[cause data]
@@ -4054,17 +4061,13 @@
         (d/datoms database :avet attribute value)))
 
 (defn logical-datoms
-  "`report`'s datoms as logical facts about the entities an agent reads: an
-   element datom `[cell a v]` reads `[parent a v]`; a cell's position change
-   reads an assertion of its element on the parent (a map with the datom's
-   fields), carrying
-   `:seon.db.vector/position` (a new cell's position is its element's own
-   datom); the bridge's own links and presence drop.
-   A report whose value stores no vectors in cells answers its `:tx-data`.
+  "`report`'s datoms as facts about the entities an agent reads: `[cell a v]`
+   reads `[parent a v]`; a moved cell reads its element asserted on the parent
+   with `:seon.db.vector/position`; bridge links and presence drop.
 
    # Costs
-   O(tx-data), one AVET seek per touched cell (13 ms for a 2000-parent report
-   in the prototype)."
+   O(tx-data), one AVET seek per touched cell (unarmed prototype: 13 ms for a
+   2000-parent report)."
   {:malli/schema [:function
                   [:=> [:cat :seon.db/transaction-report] [:sequential [:or :seon.db/transaction-report-datom :map]]]
                   [:=> [:cat :seon.schema/projection :seon.db/transaction-report]
@@ -4665,28 +4668,6 @@
 ;;; runs on the in-transaction value, so an upserted parent resolves. Its
 ;;; output is logical transaction data the encoder encodes in turn.
 
-(defn- cells-of
-  "Every cell of `parent` holding attribute `attribute`, sorted by position:
-   [{::cell c ::position p ::value v}]. One EAVT seek per cell of `parent`."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/entity-id :qualified-keyword]
-                  [:vector [:map [::cell :seon.db/entity-id] [::position [:or :nil :int]] [::value :seon.schema/value]]]]}
-  [database parent attribute]
-  (->> (d/datoms database :eavt parent :seon.db.vector/cells)
-       (keep (fn [link]
-               (let [cell-datoms (d/datoms database :eavt (:v link))
-                     value (some #(when (= attribute (:a %)) (:v %)) cell-datoms)]
-                 (when (some? value)
-                   {::cell (:v link)
-                    ::position (some #(when (= :seon.db.vector/position (:a %)) (:v %)) cell-datoms)
-                    ::value value}))))
-       (sort-by ::position)
-       vec))
-
-(defn- vector-present?
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/entity-id :qualified-keyword] :boolean]}
-  [database parent attribute]
-  (boolean (first (d/datoms database :eavt parent :seon.db.vector/present attribute))))
-
 (defn- element-kind
   "How a vector attribute's element is stored: `:component`, `:peer` or `:scalar`."
   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword] [:enum :component :peer :scalar]]}
@@ -4696,158 +4677,157 @@
           (= :db.type/ref (:db/valueType installed)) :peer
           :else :scalar)))
 
-(defn- stored-component
-  "Component `entity-id` as a logical value to compare by: its attributes,
-   nested components as values, peers as entity ids, no `:db/id`."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection :seon.db/entity-id] :map]}
-  [database projection entity-id]
-  (let [plans (write-attribute-plans projection database)]
-    (letfn [(value-of [entity-id]
-              (into {}
-                    (map (fn [[a v]]
-                           [a (if (= :component (element-kind database a))
-                                (if (coll? v) (into (empty v) (map value-of) v) (value-of v))
-                                v)]))
-                    (write-entity-value database projection plans entity-id)))]
-      (value-of entity-id))))
-
-(defn- desired-component
-  "A submitted component map as [[stored-component]] would read it after the
-   write: refs resolved to entity ids, collections in their declared shape."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection :map] :map]}
-  [database projection component]
+(defn- comparable-component
+  "A component as the value it is matched by, stored (an entity id or lookup
+   ref) or submitted (a map): its attributes without `:db/id`, nested
+   components as values, peers as entity ids, collections in their declared
+   shape."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection :map :seon.schema/value] :map]}
+  [database projection plans component]
   (into {}
         (keep (fn [[a v]]
                 (when (not= :db/id a)
-                  (let [many? (db.utils/multival? database a)
-                        one (fn [x]
+                  (let [one (fn [x]
                               (case (element-kind database a)
-                                :component (if (map? x)
-                                             (desired-component database projection x)
-                                             (stored-component database projection (db.utils/entid database x)))
-                                :peer (if (map? x) (db.utils/entid database (:db/id x)) (db.utils/entid database x))
+                                :component (comparable-component database projection plans x)
+                                :peer (db.utils/entid database (if (map? x) (:db/id x) x))
                                 :scalar x))]
-                    [a (if many?
+                    [a (if (db.utils/multival? database a)
                          (schema.datahike/logical-collection projection a (map one (if (coll? v) v [v])))
                          (one v))]))))
-        component))
+        (if (map? component)
+          component
+          (write-entity-value database projection plans (db.utils/entid database component)))))
 
 (defn- element-key
   "What makes a desired element the same element as a stored one: the entity
    for a peer or a component named by an existing id, the logical value for a
-   component map otherwise (a tempid names nothing stored); nil when it can
-   only be new (a peer tempid)."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection [:enum :component :peer :scalar]
+   scalar or a component map named by no stored id; nil when it can only be
+   new (a peer tempid)."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:enum :component :peer :scalar] [:=> [:cat :seon.schema/value] :map]
                        :seon.schema/value]
                   [:or :nil [:tuple [:enum :id :value] :seon.schema/value]]]}
-  [database projection kind element]
-  (let [named (if (map? element) (:db/id element) element)
-        existing? (and (some? named) (not (string? named)) (not (and (number? named) (neg? named))))]
+  [database kind comparable element]
+  (let [named (if (map? element) (:db/id element) element)]
     (cond
       (= :scalar kind) [:value element]
-      existing? (some->> (db.utils/entid database named) (vector :id))
-      ;; A component map named only by a tempid (a writer's row) is its value.
-      (and (= :component kind) (map? element)) [:value (desired-component database projection element)]
+      (and (some? named) (not (string? named)) (not (and (number? named) (neg? named))))
+      (some->> (db.utils/entid database named) (vector :id))
+      (and (= :component kind) (map? element)) [:value (comparable element)]
       :else nil)))
 
-(defn- stored-keys
-  "Every key a stored element answers to."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection [:enum :component :peer :scalar]
-                       :seon.schema/value]
-                  [:vector [:tuple [:enum :id :value] :seon.schema/value]]]}
-  [database projection kind value]
-  (case kind
-    :scalar [[:value value]]
-    :peer [[:id value]]
-    :component [[:id value] [:value (stored-component database projection value)]]))
+(defn- matched-cells
+  "Desired position -> the stored cell it keeps: first every element whose key
+   has a cell at its own position, then each remaining element, in order, the
+   first unused cell of its key. Linear in cells plus elements."
+  {:malli/schema [:=> [:cat [:vector [:or :nil [:tuple [:enum :id :value] :seon.schema/value]]]
+                       [:sequential [:tuple [:tuple [:enum :id :value] :seon.schema/value] :map]]]
+                  [:map-of :int :map]]}
+  [wanted keyed]
+  (let [exact (into {} (map (fn [[k cell]] [[k (::position cell)] cell])) keyed)
+        first-pass (into {} (keep-indexed (fn [i k] (when-let [cell (and k (get exact [k i]))] [i cell]))) wanted)]
+    (first
+     (reduce (fn [[matched queues used] [i k]]
+               (if (or (nil? k) (contains? matched i))
+                 [matched queues used]
+                 (let [queue (drop-while #(used (::cell %)) (get queues k))]
+                   (if-let [cell (first queue)]
+                     [(assoc matched i cell) (assoc queues k (rest queue)) (conj used (::cell cell))]
+                     [matched (assoc queues k queue) used]))))
+             [first-pass
+              (reduce (fn [queues [k cell]] (update queues k (fnil conj []) cell)) {} keyed)
+              (into #{} (map ::cell) (vals first-pass))]
+             (map-indexed vector wanted)))))
 
 (defn- vector-diff
   "Operations bringing `parent`'s vector `attribute` from its stored cells
-   `old` to `desired` (nil = absent), keeping the identity of every retained
-   element: a retained element keeps its cell and only its position moves; an
-   unmatched cell is retracted, destroying a removed component and nothing
-   else; an unmatched element gets a new cell."
+   `old` (rows in position order with `::value`) to `desired` (nil = absent),
+   keeping the identity of every retained element: a retained element keeps
+   its cell and only its position moves; an unmatched cell is retracted,
+   destroying a removed component and nothing else; an unmatched element gets
+   a new cell. A stored component's value is read only when a desired
+   component is matched by value."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection :seon.db/entity-id :qualified-keyword
-                       [:vector :map] [:or :nil [:vector :seon.schema/value]]]
+                       [:vector :map] :boolean [:or :nil [:vector :seon.schema/value]]]
                   :seon.store/transaction-data]}
-  [database projection parent attribute old desired]
+  [database projection parent attribute old present? desired]
   (let [kind (element-kind database attribute)
-        present? (vector-present? database parent attribute)
-        by-key (reduce (fn [index cell]
-                         (reduce #(update %1 %2 (fnil conj []) cell) index
-                                 (stored-keys database projection kind (::value cell))))
-                       {} old)
-        [operations used]
-        (reduce
-         (fn [[operations used] [position element]]
-           (let [k (element-key database projection kind element)
-                 candidates (remove #(used (::cell %)) (get by-key k))
-                 same (or (first (filter #(= position (::position %)) candidates)) (first candidates))]
-             (if (and k same)
-               [(cond-> operations
-                  (not= position (::position same))
-                  (conj [:db/add (::cell same) :seon.db.vector/position position])
-                  ;; A retained component named by id may carry changed attributes.
-                  (and (map? element) (= :id (first k)) (> (count element) 1))
-                  (conj (assoc element :db/id (second k))))
-                (conj used (::cell same))]
-               (let [cell (str "seon.db.vector/" (id/id))
-                     named? (and (map? element) (some? (:db/id element)) (not (string? (:db/id element))))]
-                 [(cond-> (conj operations
-                                {:db/id cell :seon.db.vector/position position
-                                 attribute [(if named? (db.utils/entid database (:db/id element)) element)]}
-                                [:db/add parent :seon.db.vector/cells cell])
-                    (and named? (> (count element) 1)) (conj element))
-                  used]))))
-         [[] #{}] (map-indexed vector desired))]
-    (cond-> (into operations
+        plans (delay (write-attribute-plans projection database))
+        comparable #(comparable-component database projection @plans %)
+        wanted (mapv #(element-key database kind comparable %) desired)
+        by-value? (and (= :component kind) (some #(= :value (first %)) wanted))
+        keyed (for [{value ::value :as cell} old
+                    k (case kind
+                        :scalar [[:value value]]
+                        :peer [[:id value]]
+                        :component (cond-> [[:id value]] by-value? (conj [:value (comparable value)])))]
+                [k cell])
+        matched (matched-cells wanted keyed)
+        used (into #{} (map ::cell) (vals matched))]
+    (cond-> (into (into []
+                        (mapcat (fn [[position element]]
+                                  (if-let [same (get matched position)]
+                                    (cond-> []
+                                      (not= position (::position same))
+                                      (conj [:db/add (::cell same) :seon.db.vector/position position])
+                                      ;; A retained component named by id may carry changed attributes.
+                                      (and (map? element) (= :id (first (nth wanted position))) (> (count element) 1))
+                                      (conj (assoc element :db/id (::value same))))
+                                    (let [cell (str "seon.db.vector/" (id/id))
+                                          named? (and (map? element) (some? (:db/id element)) (not (string? (:db/id element))))]
+                                      (cond-> [{:db/id cell :seon.db.vector/position position
+                                                attribute [(if named? (db.utils/entid database (:db/id element)) element)]}
+                                               [:db/add parent :seon.db.vector/cells cell]]
+                                        (and named? (> (count element) 1)) (conj element))))))
+                        (map-indexed vector desired))
                   (comp (remove #(used (::cell %))) (map #(vector :db/retractEntity (::cell %))))
                   old)
       (and (some? desired) (not present?)) (conj [:db/add parent :seon.db.vector/present attribute])
       (and (nil? desired) present?) (conj [:db/retract parent :seon.db.vector/present attribute]))))
 
 (defn- vectors-tx
-  "Transaction function: apply every vector request of one transaction
-   (`:seon.schema.datahike/vector-request`). Requests on one [entity attribute]
-   fold in order (`:assert` replaces, `:add` appends, `:retract` removes every
-   occurrence, `:clear` makes it absent), then one [[vector-diff]] per vector.
-   Cells a sweep emptied on a requested parent are retracted with them.
+  "Transaction function: apply every vector request of one transaction.
+   Requests on one [entity attribute] fold in order (`:assert` replaces, `:add`
+   appends, `:retract` removes every occurrence, `:clear` makes it absent),
+   then one [[vector-diff]] per vector. Cells a sweep emptied on a requested
+   parent are retracted with them.
 
    # Costs
-   Per vector: O(cells of its parent) EAVT seeks, an O(n log n) sort and O(n)
-   matching; a component matched by value reads each old component whole."
+   Per parent: one EAVT seek per cell, read once for all its vectors; per
+   vector an O(n log n) sort and linear matching."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection :seon.schema.datahike/vector-requests]
                   :seon.store/transaction-data]}
   [database projection requests]
-  (let [resolved (mapv (fn [[handle attribute operation argument]]
-                         [(or (db.utils/entid database handle)
-                              (throw (ex-info (str "The entity whose vector " attribute " is written does not exist.")
-                                              {::vector-parent-absent handle ::attribute attribute})))
-                          attribute operation argument])
-                       requests)
-        vectors (distinct (map (fn [[parent attribute]] [parent attribute]) resolved))
-        by-vector (group-by (fn [[parent attribute]] [parent attribute]) resolved)]
-    (into (vec (for [parent (distinct (map first vectors))
-                     link (d/datoms database :eavt parent :seon.db.vector/cells)
-                     :when (not-any? #(schema.datahike/vector-attribute-in? projection (:a %))
-                                     (d/datoms database :eavt (:v link)))]
-                 [:db/retractEntity (:v link)]))
-          (mapcat
-           (fn [[parent attribute]]
-             (let [kind (element-kind database attribute)
-                   old (cells-of database parent attribute)
-                   resolved-element (fn [x] (if (and (not= :scalar kind) (not (map? x))) (db.utils/entid database x) x))
-                   desired (reduce (fn [current [_ _ operation argument]]
-                                     (case operation
-                                       :assert argument
-                                       :add (conj (or current []) argument)
-                                       :retract (let [k (resolved-element argument)]
-                                                  (filterv #(not= k (resolved-element %)) current))
-                                       :clear nil))
-                                   (when (vector-present? database parent attribute) (mapv ::value old))
-                                   (get by-vector [parent attribute]))]
-               (vector-diff database projection parent attribute old (some-> desired vec)))))
-          vectors)))
+  (into []
+        (mapcat
+         (fn [[parent parent-requests]]
+           (let [rows (cell-rows database (mapv :v (d/datoms database :eavt parent :seon.db.vector/cells)))
+                 present (into #{} (map :v) (d/datoms database :eavt parent :seon.db.vector/present))]
+             (into (mapv #(vector :db/retractEntity (::cell %)) (filter (comp empty? ::members) rows))
+                   (mapcat
+                    (fn [[attribute vector-requests]]
+                      (let [kind (element-kind database attribute)
+                            old (into [] (comp (filter #(= attribute (:a (first (::members %)))))
+                                               (map #(assoc % ::value (:v (first (::members %))))))
+                                      (sort-by ::position rows))
+                            resolved (fn [x] (if (and (not= :scalar kind) (not (map? x))) (db.utils/entid database x) x))
+                            desired (reduce (fn [current [_ _ operation argument]]
+                                              (case operation
+                                                :assert argument
+                                                :add (conj (or current []) argument)
+                                                :retract (filterv #(not= (resolved argument) (resolved %)) current)
+                                                :clear nil))
+                                            (when (present attribute) (mapv ::value old))
+                                            vector-requests)]
+                        (vector-diff database projection parent attribute old (contains? present attribute) (some-> desired vec))))
+                   (group-by second parent-requests)))))
+         (group-by first
+                   (mapv (fn [[handle attribute operation argument]]
+                           [(or (db.utils/entid database handle)
+                                (throw (ex-info (str "The entity whose vector " attribute " is written does not exist.")
+                                                {::vector-parent-absent handle ::attribute attribute})))
+                            attribute operation argument])
+                         requests)))))
 
 (defn stored-collection
   "`values` of cardinality-many `attribute` as `database` stores them: a vector
@@ -4870,15 +4850,11 @@
     (write-entity-value database projection (write-attribute-plans projection database) entity-id)))
 
 (defn vector-migration-tx
-  "Transaction data moving every element stored directly on a parent (the
-   cardinality-many storage before cells) into cells, in datom order, with
-   presence: `[:db/retract p a v]` (no cascade, so component elements keep
-   their identity) and one parent map of cells per vector. Nothing until all
-   three bridge attributes (cells, position, present) are installed in `database`, or when every
-   element already lives in a cell: running it again yields nothing. The
-   operations are physical, marked encoded for the codec.
-   Datom order is the order `declaration-value` read before, so every stored
-   definition digest stays valid through the move.
+  "Encoded transaction data moving every member stored directly on a parent
+   into cells with presence, in datom order (the order digests were computed
+   over): `[:db/retract p a v]`, which does not cascade, so components keep
+   their identity. Empty until all three bridge attributes are installed, and
+   when every member already lives in a cell.
 
    # Costs
    One AEVT range per installed vector-shaped attribute of `projection`, one
@@ -4911,10 +4887,8 @@
             (keys installed))))))
 
 (defn- declared-collections
-  "`entity-map`, a row read datom by datom, with each attribute of `many` in its
-   declared collection and its stored vectors restored from the cells read as
-   components (`{:seon.db.vector/position i a [element]}`): each attribute
-   named in `:seon.db.vector/present` in position order."
+  "`entity-map`, read datom by datom, with each attribute of `many` in its
+   declared collection and each present vector restored from its cell maps."
   {:malli/schema [:=> [:cat :seon.schema/projection :map [:set :keyword]] :map]}
   [projection entity-map many]
   (let [cells (:seon.db.vector/cells entity-map)
