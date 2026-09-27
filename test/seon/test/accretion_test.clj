@@ -212,9 +212,10 @@
                                                   (accretion/gate-report
                                                    {:seon.fn/sym 'fixture.candidate/target
                                                     :seon.test.accretion/results results})))]
-            ;; Shown through its declared teaching face, orientation first,
-            ;; never the raw map a value budget may cut before it.
-            (is (= 'seon.test.accretion/render-ai (:seon.eval/renderer refused)) (pr-str refused))
+            ;; Shown as data (owner 2026-09-27): the refusal map itself,
+            ;; orientation included, never a prose face.
+            (is (nil? (:seon.eval/renderer refused)) (pr-str refused))
+            (is (map? (read-string (:seon.eval/shown refused))) (:seon.eval/shown refused))
             (is (re-find #"install refused" (:seon.eval/shown refused)) (:seon.eval/shown refused)))
           (is (identical? held (sci/resolve parent 'fixture.candidate/target)))
           (is (= 1 (sci/eval-string* parent "(fixture.candidate/target 1)"))))))))

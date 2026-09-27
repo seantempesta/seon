@@ -4550,11 +4550,14 @@
                            throwable record)
                         arity-message
                         (assoc :seon.error/message arity-message))
-                ;; The agent's failure is its whole flat error; its declared
-                ;; pair selects what shows, like any value's: a refusal's own
-                ;; declaration, else its producer's return.
+                ;; The agent's failure is its whole flat error, shown AS DATA
+                ;; (owner 2026-09-27: "return data, not comments"): the floor
+                ;; prints the error map structurally, message, class, location
+                ;; and cause chain, bounded like any value, never a prose face.
                 admitted (shown-result value (assoc request :seon.render.call/function
-                                                    'seon.sci.kernel/failure-value)
+                                                    'seon.sci.kernel/failure-value
+                                                    :seon.render.value/options
+                                                    {:seon.render.value/structural? true})
                                        record)]
           (failed-evaluation
            (cond-> {:seon.sci.eval/output-prefix (unadmitted-notice definitions)
@@ -4900,7 +4903,9 @@
   (when-let [unavailable ((:seon.sci.eval/restore evaluation) nil (ex-info (:seon.error/message refusal) refusal))]
     (throw (ex-info (:seon.error/message unavailable) unavailable)))
   (merge (dissoc evaluation :seon.program/row :seon.sci.eval/bindings :seon.eval/renderer)
-         (shown-result refusal request
+         ;; A refusal is shown as data, like the agent's own failure.
+         (shown-result refusal (assoc request :seon.render.value/options
+                                      {:seon.render.value/structural? true})
                        (assoc (:seon.sci.admit/record evaluation)
                               :seon.eval/outcome :error))))
 

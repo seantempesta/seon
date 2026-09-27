@@ -3926,7 +3926,7 @@
                     (:seon.eval/shown (final-shown cluster database agent-id [value] structural)))
              (not evaluated?)
              (assoc :seon.eval/shown
-                    (:seon.eval/shown (final-shown cluster database agent-id value))))))]
+                    (:seon.eval/shown (final-shown cluster database agent-id value structural))))))]
     {:seon.error/value value
      :seon.blob/staged-writes (:seon.blob/staged-writes recording)
      :seon.db/tx-data
@@ -5077,7 +5077,8 @@
                   ;; owner renders it, and its render reads stay the form's.
                   (merge unrun (binding [db/*read-evidence-sink* captured]
                                  (sci.eval/shown-result (:seon.sci.admit/value unrun)
-                                                        request
+                                                        (assoc request :seon.render.value/options
+                                                               {:seon.render.value/structural? true})
                                                         (:seon.sci.admit/record unrun)))))
                 evaluation)
               evaluation
