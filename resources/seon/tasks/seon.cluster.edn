@@ -62,4 +62,9 @@
              :kind :function
              :intent "In JVM mode for a cluster with no connection (before the store layer is up, or a cluster name this JVM does not host), mcp-project has no database for render.value/prepare, whose unit requires :seon.db/db; the refusal is attached and the value falls back to plain printing with the MCP profile's budget unapplied. AGENTS: nothing prints unbounded. The fallback prints through the floor's bounded path (bounded-text), never plain Clojure printing of the whole value (fix-c, 4c2ac5774)."
              :must-read #{seon.cluster/mcp-project seon.render.value/prepare}
-             :evidence #{"docs/research/agent-platform/red-triage-3-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/red-triage-3-2026-09-27.md"}}
+ #:seon.task{:name "boot-reanalyzes-everything-when-an-analyzer-file-changes-bytes-only"
+             :kind :function
+             :intent "launched-analyzer substitutes a changed analyzer-reach FILE digest for its definitions' digests, so any byte edit in the 14 reach files (fn.clj, db.clj, schema.clj, ...) makes full-source-refresh! classify :all at boot. The 590475a4d boot (fn.clj edited by b3f1a7ae7) republished all 824 inputs (store->branch 26.9 s, ready 29.7 s) and stored the SAME analyzer digest fb7d8a4a as its parent: no reached definition changed. Analyze the changed paths first, derive published-analyzer-digest over stored rows overridden by theirs, and go :all only if it differs; selected analysis of the same 24 inputs was 1.7 s against 9.1 s for :all (warm, armed)."
+             :must-read #{seon.cluster/full-source-refresh! seon.cluster/launched-analyzer seon.cluster/published-analyzer-digest}
+             :evidence #{"docs/research/agent-platform/landing/boot-ready-regression-2026-09-27.md"}}]
