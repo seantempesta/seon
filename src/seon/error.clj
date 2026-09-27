@@ -211,7 +211,9 @@
                                                   :else member))]
                                   [attribute (if (and (= :db.cardinality/many (:db/cardinality declaration))
                                                       (coll? observed))
-                                               (into #{} (map convert) observed)
+                                               (if (schema.datahike/vector-attribute-in? projection attribute)
+                                                 (mapv convert observed)
+                                                 (into #{} (map convert) observed))
                                                (convert observed))]))))
                       value)))]
       (restore observation)))

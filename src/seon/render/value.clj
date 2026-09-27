@@ -182,8 +182,9 @@
   "Restore a pulled entity to its transaction shape.
 
   With a database value, installed Datahike value type and cardinality are the
-  authority: refs become entity ids, cardinality-many values become sets, and
-  scalar EDN vectors remain vectors. The one-argument arity preserves the
+  authority: refs become entity ids, cardinality-many values become sets (a
+  vector stored in cells stays an ordered vector), and scalar EDN vectors
+  remain vectors. The one-argument arity preserves the
   established shape-only behavior for callers without database custody.
 
   This data conversion returns the supplied entity's attributes. A stored
@@ -220,11 +221,11 @@
                    (cond
                      (= :db.type/ref valueType)
                      (if (= :db.cardinality/many cardinality)
-                       (into #{} (map ref-id) value)
+                       (db/stored-collection database attribute (map ref-id value))
                        (ref-id value))
 
                      (= :db.cardinality/many cardinality)
-                     (set value)
+                     (db/stored-collection database attribute value)
 
                      :else value)])))
          (dissoc entity :db/id))))

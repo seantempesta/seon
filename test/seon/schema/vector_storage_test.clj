@@ -561,3 +561,29 @@
            (is (contains? (seon.fn/report-identities reorder) [:seon.vector-test.p/id "p"]))))
        (testing "a transaction's rendering counts logical facts on the parent"
          (is (re-find #"on 1 entities" (db/render-transaction-ai report))))))))
+
+;;; ---------------------------------------------------------------------------
+;;; S9: comparisons see order where storage keeps it
+;;; ---------------------------------------------------------------------------
+
+(deftest comparisons-see-order-only-where-storage-keeps-it
+  (with-vector-world
+   (fn [c]
+     (tx! c [{:seon.vector-test.p/id "p" :seon.vector-test.p/items ["b" "a" "b"] :seon.vector-test.p/tags [:x/y]}])
+     (testing "a vector stored in cells compares in order; a set as a set"
+       (is (= ["b" "a" "b"] (db/stored-collection @c :seon.vector-test.p/items ["b" "a" "b"])))
+       (is (not= (db/stored-collection @c :seon.vector-test.p/items ["a" "b"])
+                 (db/stored-collection @c :seon.vector-test.p/items ["b" "a"])))
+       (is (= #{:x/y} (db/stored-collection @c :seon.vector-test.p/tags [:x/y :x/y]))))
+     (testing "an entity's stored values read its vectors whole, without bridge keys"
+       (let [stored (db/stored-entity @c (:db/id (db/pull @c [:db/id] p)))]
+         (is (= ["b" "a" "b"] (:seon.vector-test.p/items stored)))
+         (is (not-any? #(= "seon.db.vector" (namespace %)) (keys stored)))))))
+  (testing "without cells, a vector attribute's order is not stored, so it compares as a set"
+    (support/with-database
+     {:seon.test-support/extra-schema
+      (schema.datahike/malli->datahike-schema-in
+       (vector-projection (schema/handed-projection) subject-forms) (stored-attributes subject-forms))}
+     (fn [c]
+       (support/transacted! c (support/schema-entities @c subject-forms))
+       (is (= #{"a" "b"} (db/stored-collection @c :seon.vector-test.p/items ["b" "a" "b"])))))))

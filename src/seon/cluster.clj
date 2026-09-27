@@ -1435,11 +1435,13 @@
   an order it chooses, so a declaration's ordered value never equals its own
   stored reading. Such a value therefore compares as a set; every other value
   compares as it stands. The INSTALLED schema decides which — never the
-  attribute's name."
-  [installed-schema attribute value]
+  attribute's name. A vector stored in cells keeps its order: a reordered
+  vector is a change."
+  {:malli/schema [:=> [:cat :seon.db/database-value :keyword :seon.schema/value] :seon.schema/value]}
+  [database attribute value]
   (if (= :db.cardinality/many
-         (get-in installed-schema [attribute :db/cardinality]))
-    (if (coll? value) (set value) #{value})
+         (get-in (:schema database) [attribute :db/cardinality]))
+    (db/stored-collection database attribute (if (coll? value) value [value]))
     value))
 
 (defn- schema-entity-converged?
@@ -1448,18 +1450,21 @@
   Compares under the store's own semantics for each attribute, so a
   cardinality-many value read back in a different order is convergence, not a
   change to re-transact on every branch open."
-  [installed-schema desired current]
+  {:malli/schema [:=> [:cat :seon.db/database-value :map [:or :nil :map]] :boolean]}
+  [database desired current]
   (letfn [(comparable [entity]
             (into {}
                   (map (fn [[attribute value]]
                          [attribute
                           (store-comparable-value
-                           installed-schema attribute value)]))
+                           database attribute value)]))
                   entity))]
     (= (comparable desired)
        (comparable (select-keys current (keys desired))))))
 
 (defn- schema-entity-changes
+  "The canonical schema rows of `projection` that `db` does not already hold as written."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection] [:vector :map]]}
   [db projection]
   (into
    []
@@ -1482,7 +1487,7 @@
                              [attribute (as-schema-lookup-refs value)]
                              [attribute value])))
                     pulled))]
-        (when-not (schema-entity-converged? (:schema db) desired current)
+        (when-not (schema-entity-converged? db desired current)
           desired))))
    (schema/canonical-schema-entities projection (:seon.schema.projection/forms projection))))
 

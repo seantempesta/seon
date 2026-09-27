@@ -3536,7 +3536,11 @@
          :seon.fn/index-keyword-operations keyword-operations}))))
 
 (defn- normalized-index-entity
-  "Compare stored refs by identity and anonymous components by their values."
+  "Compare stored refs by identity and anonymous components by their values;
+  a many value as its database stores it (`seon.db/stored-collection`)."
+  {:malli/schema [:=> [:cat :map :seon.db/database-value [:or :nil :map] [:or [:sequential :keyword] [:set :keyword]]
+                       :seon.instrument/callable]
+                  [:or :nil :map]]}
   [entity-shapes database entity-map identity-attributes entity]
   (let [entity-identity
         (fn [entity-map]
@@ -3544,16 +3548,18 @@
                   (when-let [entry (find entity-map attribute)]
                     [attribute (val entry)]))
                 identity-attributes))]
-    (letfn [(normalize-many [values]
-              (reduce (fn [result value]
-                        (let [normalized (normalize-value value)]
-                          (if (and (map? normalized)
-                                   (contains? normalized :seon.error/at)
-                                   (contains? normalized :seon.error/layer)
-                                   (contains? normalized :seon.error/operation))
-                            (reduced normalized)
-                            (conj result normalized))))
-                      #{} values))
+    (letfn [(normalize-many [attribute values]
+              (let [normalized
+                    (reduce (fn [result value]
+                              (let [normalized (normalize-value value)]
+                                (if (and (map? normalized)
+                                         (contains? normalized :seon.error/at)
+                                         (contains? normalized :seon.error/layer)
+                                         (contains? normalized :seon.error/operation))
+                                  (reduced normalized)
+                                  (conj result normalized))))
+                            [] values)]
+                (if (map? normalized) normalized (db/stored-collection database attribute normalized))))
             (normalize-map [entity-map]
               (if (and (map? entity-map)
                        (contains? entity-map :seon.error/at)
@@ -3568,7 +3574,7 @@
                            (if (= :db.cardinality/many
                                   (get-in (:schema database)
                                           [attribute :db/cardinality]))
-                             (normalize-many value)
+                             (normalize-many attribute value)
                              (normalize-value value))]
                        (if (and (map? normalized)
                                 (contains? normalized :seon.error/at)
@@ -3821,7 +3827,7 @@
                            (if (= :db.cardinality/many
                                   (get-in (:schema database)
                                           [attribute :db/cardinality]))
-                             (loop [pending (seq value) values #{}]
+                             (loop [pending (seq value) values []]
                                (if-let [member (first pending)]
                                  (let [portable-member (reference member)]
                                    (if (and (map? portable-member)
@@ -3831,12 +3837,12 @@
                                      portable-member
                                      (recur (next pending)
                                             (conj values portable-member))))
-                                 values))
+                                 (db/stored-collection database attribute values)))
                              (reference value))
                            (if (= :db.cardinality/many
                                   (get-in (:schema database)
                                           [attribute :db/cardinality]))
-                             (set value)
+                             (db/stored-collection database attribute value)
                              value))]
                      (if (and (map? portable)
                               (contains? portable :seon.error/at)

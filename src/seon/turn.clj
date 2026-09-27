@@ -1181,9 +1181,12 @@
     :else value))
 
 (defn- declared-value
+  "One attribute's value as its declaration compares: a many value in order
+   when it is a vector stored in cells, else as a set."
+  {:malli/schema [:=> [:cat :seon.db/database-value :keyword :seon.schema/value] :seon.schema/value]}
   [db attribute value]
   (if (cardinality-many? db attribute)
-    (into #{} (map #(declared-one db attribute %)) (or value []))
+    (db/stored-collection db attribute (map #(declared-one db attribute %) (or value [])))
     (declared-one db attribute value)))
 
 (defn- declared-map

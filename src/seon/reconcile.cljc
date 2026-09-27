@@ -190,9 +190,13 @@
     :else value))
 
 (defn- normalize-value
+  "One attribute's value compared as `db` stores it: a many value in order when
+   it is a vector stored in cells, else as a set."
+  {:malli/schema [:=> [:cat :seon.db/database-value :keyword :seon.instrument/callable :seon.schema/value]
+                  :seon.schema/value]}
   [db attr normalize-one value]
   (if (cardinality-many? db attr)
-    (into #{} (map normalize-one) (or value []))
+    (seon.db/stored-collection db attr (map normalize-one (or value [])))
     (normalize-one value)))
 
 (defn- current-entity-map
@@ -243,12 +247,16 @@
       desired)))
 
 (defn- canonical-desired-entity
+  "`entity` without the empty many values storage cannot hold: an empty
+   vector stored in cells is present, so it stays."
+  {:malli/schema [:=> [:cat :seon.db/database-value :map] :map]}
   [db entity]
   (into {}
         (remove
          (fn [[attr value]]
            (and (cardinality-many? db attr)
-                (empty? value))))
+                (empty? value)
+                (not (vector? (seon.db/stored-collection db attr []))))))
         entity))
 
 (defn- entity-exact-tx

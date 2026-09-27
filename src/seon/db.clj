@@ -4787,6 +4787,26 @@
                (vector-diff database projection parent attribute old (some-> desired vec)))))
           vectors)))
 
+(defn stored-collection
+  "`values` of cardinality-many `attribute` as `database` stores them: a vector
+   in order when the attribute is stored in cells, otherwise a set (order and
+   duplicates are not stored, so they must not count as a change)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :keyword [:or [:sequential :seon.schema/value] [:set :seon.schema/value]]]
+                  [:or [:vector :seon.schema/value] [:set :seon.schema/value]]]}
+  [database attribute values]
+  (if (schema.datahike/vector-attribute-in? (carried-projection database) attribute)
+    (vec values)
+    (set values)))
+
+(defn stored-entity
+  "`entity-id`'s attributes in `database` as values: refs and components as
+   entity ids, EDN slots decoded, each cardinality-many value in its declared
+   collection and each stored vector read from its cells in order."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/entity-id] [:map-of :keyword :seon.schema/value]]}
+  [database entity-id]
+  (let [projection (carried-projection database)]
+    (write-entity-value database projection (write-attribute-plans projection database) entity-id)))
+
 (defn- declared-collections
   "`entity-map`, a row read datom by datom, with each attribute of `many` in its
    declared collection and its stored vectors restored from the cells read as

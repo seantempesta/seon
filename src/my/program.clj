@@ -352,16 +352,11 @@
                            :seon.program/message "The proposed contract has not run through the candidate test gate; these referrers are suspects, not proven contract violations."})))))))
 
 (defn- entity-facts
+  "`entity`'s attributes at `database` (`seon.db/stored-entity`): refs remain
+   entity ids, and a stored vector reads whole, in order, from its cells."
   {:malli/schema [:=> [:cat :seon.db/database-value :int] :seon.program/definition]}
   [database entity]
-  (reduce (fn [entity-map {:keys [a v]}]
-            (if (= :db.cardinality/many (get-in (db/schema-database database) [:schema a :db/cardinality]))
-              (update entity-map a (fnil conj #{}) v)
-              (assoc entity-map a v)))
-          {} (let [result (db/datoms database :eavt entity)]
- (if (:seon.db/invalid-read result)
-
- (throw (ex-info (:seon.error/message result) result)) result))))
+  (db/stored-entity database entity))
 
 (defn history
   "Read source events and their definition facts and transaction provenance.
