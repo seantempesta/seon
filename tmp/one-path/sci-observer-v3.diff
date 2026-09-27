@@ -1,0 +1,476 @@
+diff --git a/src/sci/impl/analyzer.cljc b/src/sci/impl/analyzer.cljc
+index d5529740..9869a3b5 100644
+--- a/src/sci/impl/analyzer.cljc
++++ b/src/sci/impl/analyzer.cljc
+@@ -872,9 +872,21 @@
+               m (if m-needs-eval?
+                   (analyze ctx m)
+                   (->constant m))
+-              file @utils/current-file]
++              file @utils/current-file
++              ;; The source occurrence this def runs as: the def form itself
++              ;; when the reader made it (an argument a macro passed through
++              ;; keeps its own location), else the innermost macro call whose
++              ;; expansion produced it.
++              origin #?(:clj (if (and expr-loc? (not (identical? expr utils/*expansion-root*)))
++                               {:line (:line expr-loc) :column (:column expr-loc)
++                                :end-line (:end-row expr-loc) :end-column (:end-col expr-loc)}
++                               (or utils/*expansion-call*
++                                   (let [loc utils/*top-level-location*]
++                                     {:line (:line loc) :column (:column loc)
++                                      :end-line (:end-row loc) :end-column (:end-col loc)})))
++                        :default nil)]
+           (sci.impl.types/->Node
+-           (eval/eval-def ctx bindings var-name init m file)
++           (eval/eval-def ctx bindings var-name init m file origin)
+            nil))))))
+ 
+ #_(defn analyze-defn [ctx [op fn-name & body :as expr]]
+@@ -2098,12 +2110,25 @@
+                                 v (if (seq? v)
+                                     (with-meta v (merge m (meta v)))
+                                     v)
++                                #?@(:clj [_ (when-some [observe sci.lang/*expansion-observer*]
++                                              (observe expr v))
++                                          call (if (:line m)
++                                                 {:line (:line m) :column (:column m)
++                                                  :end-line (:end-row m) :end-column (:end-col m)
++                                                  :expanded-by (first expr)}
++                                                 (some-> utils/*expansion-call* (assoc :expanded-by (first expr))))])
+                                 expanded (cond (:sci.impl/macroexpanding ctx) v
+                                                (and top-level? (seq? v) (= 'do (first v)))
+                                                ;; hand back control to eval-form for
+                                                ;; interleaved analysis and eval
+-                                               (t/->EvalForm v)
+-                                               :else (analyze ctx v top-level?))]
++                                               (t/->EvalForm #?(:clj (vary-meta v assoc :sci.impl/expansion-call call)
++                                                                :default v))
++                                               :else #?(:clj (binding [utils/*expansion-call* call
++                                                                       ;; the root took the call's location:
++                                                                       ;; it was not read from source
++                                                                       utils/*expansion-root* v]
++                                                               (analyze ctx v top-level?))
++                                                        :default (analyze ctx v top-level?)))]
+                             expanded)
+                           (let [rest-forms #?(:cljd (desugar-named-args (rest expr))
+                                               :default (rest expr))]
+diff --git a/src/sci/impl/deftype.cljc b/src/sci/impl/deftype.cljc
+index d4621afb..5f6edb83 100644
+--- a/src/sci/impl/deftype.cljc
++++ b/src/sci/impl/deftype.cljc
+@@ -433,7 +433,7 @@
+                     ~rec-type ~protocol-name ~method-impls)])
+                (let [protocol-var (:var protocol)
+                      _ (when protocol-var
+-                         (vars/alter-var-root protocol-var update :satisfies
++                         (#?(:clj (fn [v & args] (binding [sci.lang/*write-kind* :extend] (apply vars/alter-var-root v args))) :default vars/alter-var-root) protocol-var update :satisfies
+                                               (fnil conj #{}) (str rec-type)))
+                      protocol-ns (:ns protocol)
+                      pns (cond protocol-ns (str (types/getName protocol-ns))
+@@ -519,7 +519,7 @@
+                                    resolved-impls)
+                    _ (doseq [protocol protocols]
+                        (when-let [protocol-var (:var protocol)]
+-                         (vars/alter-var-root protocol-var update :satisfies
++                         (#?(:clj (fn [v & args] (binding [sci.lang/*write-kind* :extend] (apply vars/alter-var-root v args))) :default vars/alter-var-root) protocol-var update :satisfies
+                                               (fnil conj #{}) (symbol (str rec-type)))))
+                    deftype-fn-result (when (and (seq interfaces) deftype-fn)
+                                       (deftype-fn {:interfaces interfaces}))
+@@ -616,7 +616,7 @@
+                                 ~rec-type ~protocol-name ~method-impls))])
+                           (let [protocol-var (:var protocol)
+                                 _ (when protocol-var
+-                                    (vars/alter-var-root protocol-var update :satisfies
++                                    (#?(:clj (fn [v & args] (binding [sci.lang/*write-kind* :extend] (apply vars/alter-var-root v args))) :default vars/alter-var-root) protocol-var update :satisfies
+                                                          (fnil conj #{}) (symbol (str rec-type))))
+                                 protocol-ns (:ns protocol)
+                                 pns (cond protocol-ns (str (types/getName protocol-ns))
+diff --git a/src/sci/impl/evaluator.cljc b/src/sci/impl/evaluator.cljc
+index 3493a231..7444173c 100644
+--- a/src/sci/impl/evaluator.cljc
++++ b/src/sci/impl/evaluator.cljc
+@@ -23,7 +23,7 @@
+      syntax-quote})
+ 
+ (defn eval-def
+-  [ctx bindings var-name init m file]
++  [ctx bindings var-name init m file origin]
+   (let [init (types/eval init ctx bindings)
+         m (types/eval m ctx bindings)
+         m (assoc m :name var-name :file file)
+@@ -44,15 +44,19 @@
+                        (lang/->Var @prev var-name m false false nil (:ns m))
+ 
+                        :else prev)
+-                v (do (when-not (identical? utils/var-unbound init)
+-                        (vars/bindRoot prev init))
+-                      (utils/reset-meta!* prev m)
+-                      prev)
+-                the-current-ns (assoc the-current-ns var-name v)]
++                the-current-ns (assoc the-current-ns var-name prev)]
+             (assoc-in env [:namespaces cnn] the-current-ns)))
+-        env (swap! (:env ctx) assoc-in-env)]
++        ;; The swap only publishes the Var: it may retry, so the root write
++        ;; (observed once) happens after it, on the published Var.
++        env (swap! (:env ctx) assoc-in-env)
++        v (get (get (get env :namespaces) cnn) var-name)]
++    (utils/reset-meta!* v (utils/generation-meta env m))
++    (when-not (identical? utils/var-unbound init)
++      #?(:clj (binding [lang/*def-origin* origin]
++                (vars/bindRoot v init))
++         :default (vars/bindRoot v init)))
+     ;; return var
+-    (get (get (get env :namespaces) cnn) var-name)))
++    v))
+ 
+ #?(:cljd
+    (defmacro resolve-symbol [bindings sym]
+diff --git a/src/sci/impl/interpreter.cljc b/src/sci/impl/interpreter.cljc
+index f17b9901..82ef0de7 100644
+--- a/src/sci/impl/interpreter.cljc
++++ b/src/sci/impl/interpreter.cljc
+@@ -34,13 +34,18 @@
+       (if (seq? form)
+         (if (= 'do (first form))
+           (ana/with-top-level-loc true (meta form)
+-            (loop [exprs (rest form)
+-                   ret nil]
+-              (if (seq exprs)
+-                (recur
+-                 (rest exprs)
+-                 (eval-form* ctx (first exprs)))
+-                ret)))
++            (#?(:clj (fn [f] (if-some [call (:sci.impl/expansion-call (meta form))]
++                               (binding [utils/*expansion-call* call] (f))
++                               (f)))
++                :default (fn [f] (f)))
++             (fn []
++               (loop [exprs (rest form)
++                      ret nil]
++                 (if (seq exprs)
++                   (recur
++                    (rest exprs)
++                    (eval-form* ctx (first exprs)))
++                   ret)))))
+           (let [;; take care of invocation array for let
+                 upper-sym (gensym)
+                 cb (volatile! {upper-sym {0 {:syms {}}}})
+diff --git a/src/sci/impl/namespaces.cljc b/src/sci/impl/namespaces.cljc
+index 59f22011..f18eaef7 100644
+--- a/src/sci/impl/namespaces.cljc
++++ b/src/sci/impl/namespaces.cljc
+@@ -585,6 +585,8 @@
+                                   ;; nil marks the imported class as unmapped
+                                   (update the-ns-map :imports assoc sym nil)
+                                   :else the-ns-map)))))))
++  #?(:clj (when-some [observe sci.lang/*write-observer*]
++            (observe {:op :unmap :ns (sci-ns-name* (store/get-ctx) sci-ns) :sym sym})))
+   nil)
+ 
+ (defn sci-ns-unalias [sci-ns sym]
+@@ -605,6 +607,8 @@
+   (let [ctx (store/get-ctx)
+         env (:env ctx)]
+     (swap! env update :namespaces dissoc sym)
++    #?(:clj (when-some [observe sci.lang/*write-observer*]
++              (observe {:op :remove-ns :ns sym})))
+     nil))
+ 
+ (defn sci-intern
+@@ -634,6 +638,8 @@
+          (let [var-name (symbol (str ns-name) (str var-sym))
+                new-var (sci.impl.utils/new-var var-name val var-meta)]
+            (swap! env assoc-in [:namespaces ns-name var-sym] new-var)
++           #?(:clj (when-some [observe sci.lang/*write-observer*]
++                     (observe {:op :bind :var new-var :root val :origin nil :kind :root})))
+            new-var)))))
+ 
+ (defn sci-bound?
+@@ -1028,6 +1034,7 @@
+   {:obj (sci.lang/->Namespace 'sci.impl.protocols nil)
+    :private true
+    #?@(:cljs ['-extend-native! sci.impl.protocols/-extend-native!])
++   '-extend-satisfies! sci.impl.protocols/-extend-satisfies!
+    'type->str sci.impl.protocols/type->str})
+ 
+ ;;;; REPL vars
+diff --git a/src/sci/impl/protocols.cljc b/src/sci/impl/protocols.cljc
+index 81803cc3..cd19a9fa 100644
+--- a/src/sci/impl/protocols.cljc
++++ b/src/sci/impl/protocols.cljc
+@@ -14,6 +14,7 @@
+    [sci.impl.multimethods :as mms]
+    [sci.impl.types :as types]
+    [sci.impl.utils :as utils]
++   [sci.impl.vars :as vars]
+    #?(:cljd [sci.lang :as lang] :default [sci.lang])))
+ 
+ #?(:cljs
+@@ -107,11 +108,13 @@
+                                                                 ~(list 'var fq-protocol-name) " found for: "
+                                                                 (clojure.core/protocol-type-impl x#)))))))))]
+                       `(do
+-                         ~@impls
+-                         (clojure.core/alter-var-root (var ~protocol-name)
+-                                                    update :methods conj ~method-name))))
++                         ~@impls)))
+                   signatures
+                   )
++           ;; The protocol's methods are part of its one definition: a final
++           ;; def (not a later root write), so its origin is the declaration's.
++           (def ~(with-meta protocol-name {:doc docstring})
++             (update ~protocol-name :methods into [~@(map first signatures)]))
+            ~(list 'quote protocol-name))]
+     expansion))
+ 
+@@ -142,6 +145,15 @@
+         meths))
+ 
+ ;; TODO: apply patches for default override for records
++(defn -extend-satisfies!
++  "Record that `type-str` satisfies the protocol held by `protocol-var`: an
++  extension's bookkeeping write, observed as :kind :extend."
++  [protocol-var type-str]
++  (let [ctx (store/get-ctx)]
++    (#?(:clj (fn [f] (binding [sci.lang/*write-kind* :extend] (f))) :default (fn [f] (f)))
++     #(utils/bind-root! ctx protocol-var
++                        (update (vars/getRawRoot protocol-var) :satisfies (fnil conj #{}) type-str)))))
++
+ (defn extend [atype & proto+mmaps]
+   (doseq [[proto mmap] (partition 2 proto+mmaps)]
+     (if (native-protocol? proto)
+@@ -277,9 +289,8 @@
+                         `(sci.impl.protocols/-extend-native!
+                           ~type ~protocol-name ~(native-method-impls meths))
+                         `(do
+-                           (clojure.core/alter-var-root
+-                            (var ~protocol-name) update :satisfies (fnil conj #{})
+-                            (type->str ~type))
++                           (sci.impl.protocols/-extend-satisfies!
++                            (var ~protocol-name) (type->str ~type))
+                            ~@(process-methods ctx type meths pns extend-via-metadata)))))
+                   impls))]
+     expansion))
+@@ -302,9 +313,8 @@
+                         pns (str (types/getName protocol-ns))
+                         extend-via-metadata (:extend-via-metadata proto-data)]
+                     `(do
+-                       (clojure.core/alter-var-root
+-                        (var ~proto) update :satisfies (fnil conj #{})
+-                        (type->str ~atype))
++                       (sci.impl.protocols/-extend-satisfies!
++                        (var ~proto) (type->str ~atype))
+                        ~@(process-methods ctx atype meths pns extend-via-metadata))))))
+             proto+meths))))
+ 
+diff --git a/src/sci/impl/records.cljc b/src/sci/impl/records.cljc
+index a0ebac13..77245fc2 100644
+--- a/src/sci/impl/records.cljc
++++ b/src/sci/impl/records.cljc
+@@ -448,7 +448,7 @@
+          :implements ~(with-meta interfaces {:record true
+                                              :method-counts method-counts})
+          ~@methods)
+-       (defn ~constructor-fn-sym
++       (defn ~(with-meta constructor-fn-sym {:sci.impl/member-of (list 'quote factory-fn-sym)})
+          (~fields
+           (~constructor-fn-sym ~@fields nil nil))
+          ([~@fields meta# ext#]
+diff --git a/src/sci/impl/utils.cljc b/src/sci/impl/utils.cljc
+index 6a8ae861..5ed4da0b 100644
+--- a/src/sci/impl/utils.cljc
++++ b/src/sci/impl/utils.cljc
+@@ -353,6 +353,13 @@
+    (let [meta (assoc meta :name (unqualify-symbol name))]
+      (lang/->Var init-val name meta false nil nil (:ns meta)))))
+ 
++#?(:clj (def ^:dynamic *expansion-call*
++          "The innermost macro call whose expansion is being analyzed: its
++          source span and operator, or nil." nil))
++#?(:clj (def ^:dynamic *expansion-root*
++          "The form that innermost macro call expanded to, which carries the
++          call's location though it was not read from source." nil))
++
+ (defn next-generation []
+   (gensym "sci-generation-"))
+ 
+diff --git a/src/sci/lang.cljc b/src/sci/lang.cljc
+index 76a66a24..46e550e8 100644
+--- a/src/sci/lang.cljc
++++ b/src/sci/lang.cljc
+@@ -68,6 +68,20 @@
+                  watches)))
+   ref)
+ 
++#?(:clj (def ^:dynamic *write-observer*
++          "Execution-scoped observer of each completed root write and removal:
++          a fn of one event map, or nil. Called once per write, after the root
++          is set and before the Var's watches."
++          nil))
++#?(:clj (def ^:dynamic *def-origin*
++          "The executing def's source occurrence while it binds its root." nil))
++#?(:clj (def ^:dynamic *write-kind*
++          "The kind of the root write in progress: nil for a definition or
++          rebinding, :extend for a protocol extension's bookkeeping write." nil))
++#?(:clj (def ^:dynamic *expansion-observer*
++          "Execution-scoped observer of macro expansions: a fn of the call
++          form and its expansion, or nil." nil))
++
+ (deftype ^{:doc "Representation of a SCI var, created e.g. with `(defn foo [])`
+     The fields of this type are implementation detail and should not be accessed
+     directly."}
+@@ -98,6 +112,9 @@
+     (let [old-root (.-root this)]
+       (vars/with-writeable-var this meta
+         (vars/bumping-set! root v))
++      #?(:clj (when-some [observe *write-observer*]
++                (observe {:op :bind :var this :root v :origin *def-origin*
++                          :kind (or *write-kind* :root)})))
+       (notify-watches this watches old-root v))
+     ;; this is the return value for alter-var-root which should be the only place calling bindRoot directly
+     v)
+diff --git a/test/sci/write_observer_test.clj b/test/sci/write_observer_test.clj
+new file mode 100644
+index 00000000..9216cc1a
+--- /dev/null
++++ b/test/sci/write_observer_test.clj
+@@ -0,0 +1,139 @@
++(ns sci.write-observer-test
++  "The execution-scoped producer observers: every completed root write once,
++  outside retries and before watches, with its source occurrence."
++  (:require [clojure.test :refer [deftest is testing]]
++            [sci.core :as sci]
++            [sci.lang]))
++
++(defn- observed
++  "Evaluate `src` in `ctx` (read with end locations) under one write observer;
++  answer [value events]."
++  [ctx src]
++  (let [events (atom [])
++        rdr (sci/source-reader src)
++        value (binding [sci.lang/*write-observer*
++                        (fn [e] (swap! events conj
++                                       (cond-> (dissoc e :var)
++                                         (:var e) (assoc :sym (let [m (meta (:var e))]
++                                                                (when (:name m)
++                                                                  (symbol (str (:ns m)) (str (:name m)))))
++                                                         :v (:var e)))))]
++                (loop [ret nil]
++                  (let [f (sci/parse-next ctx rdr {:end-location true})]
++                    (if (= ::sci/eof f) ret (recur (sci/eval-form ctx f))))))]
++    [value @events]))
++
++(defn- binds [events] (filterv #(= :bind (:op %)) events))
++
++(deftest every-root-write-is-observed-once
++  (let [ctx (sci/init {})]
++    (sci/eval-string* ctx "(def f 1)")
++    (let [[v es] (observed ctx "(def f 2)\n(intern 'user 'f 3)\n(alter-var-root #'f inc)\nf")]
++      (is (= 4 v))
++      (is (= [2 3 4] (mapv :root (binds es))))
++      (is (= [{:line 1 :column 1 :end-line 1 :end-column 10} nil nil] (mapv :origin (binds es))))))
++  (testing "intern of a new Var, defonce twice, declare"
++    (let [[_ es] (observed (sci/init {}) "(intern 'user 'g 5)\n(defonce o 1)\n(defonce o 2)\n(declare d)")]
++      (is (= '[user/g user/o] (mapv :sym (binds es))))))
++  (testing "nested eval"
++    (let [[v es] (observed (sci/init {}) "(do (eval '(def h 1)) h)")]
++      (is (= 1 v))
++      (is (= '[user/h] (mapv :sym (binds es))))))
++  (testing "unmap and remove-ns are events"
++    (let [[_ es] (observed (sci/init {}) "(def u 1)\n(ns-unmap *ns* 'u)\n(create-ns 'gone)\n(remove-ns 'gone)")]
++      (is (= [:bind :unmap :remove-ns] (mapv :op es)))))
++  (testing "letfn's local Vars are written but belong to no namespace"
++    (let [[v es] (observed (sci/init {}) "(letfn [(a [] 1)] (a))")]
++      (is (= 1 v))
++      (is (seq (binds es)))
++      (is (every? #(nil? (:ns (meta (:v %)))) (binds es))))))
++
++(deftest the-observed-var-is-the-published-var
++  (testing "an inherited redefinition: one event, on the Var the fork resolves"
++    (let [base (sci/init {})
++          _ (sci/eval-string* base "(def f (fn [] 1))")
++          ctx (sci/fork base)
++          seen (atom [])]
++      (binding [sci.lang/*write-observer*
++                (fn [e]
++                  (when (= :bind (:op e))
++                    (let [v (:var e)]
++                      (swap! seen conj {:same-var? (identical? v (sci/resolve ctx 'user/f))
++                                        :observed ((:root e))})
++                      (binding [sci.lang/*write-observer* nil]
++                        (sci/bind-root! ctx v (let [f (:root e)] (fn [] (+ 10 (f)))))))))]
++        (is (= 12 (sci/eval-string* ctx "(def f (fn [] 2)) (f)"))))
++      (is (= [{:same-var? true :observed 2}] @seen))
++      (is (= 1 (sci/eval-string* base "(f)")))))
++  (testing "a callback that defines does not repeat the outer write"
++    (let [ctx (sci/init {}) seen (atom []) once (atom false)]
++      (binding [sci.lang/*write-observer*
++                (fn [e]
++                  (swap! seen conj (str (:name (meta (:var e)))))
++                  (when (compare-and-set! once false true)
++                    (binding [sci.lang/*write-observer* nil]
++                      (sci/eval-string* ctx "(def nested 9)"))))]
++        (sci/eval-string* ctx "(def outer 1)"))
++      (is (= ["outer"] @seen))
++      (is (= 9 (sci/eval-string* ctx "nested")))))
++  (testing "a failing watch cannot hide a completed write"
++    (let [ctx (sci/init {}) seen (atom [])]
++      (sci/eval-string* ctx "(def w 1) (add-watch #'w :bad (fn [& _] (throw (ex-info \"watch failed\" {}))))")
++      (is (= "watch failed"
++             (binding [sci.lang/*write-observer* #(swap! seen conj (select-keys % [:op :root]))]
++               (try (sci/eval-string* ctx "(alter-var-root #'w inc)")
++                    (catch Throwable t (ex-message t))))))
++      (is (= 2 (sci/eval-string* ctx "w")))
++      (is (= [{:op :bind :root 2}] @seen))))
++  (testing "a fork's write to an inherited Var leaves the base unchanged"
++    (let [base (sci/init {})
++          _ (sci/eval-string* base "(def k 1)")
++          fork (sci/fork base)
++          [v es] (observed fork "(alter-var-root #'k inc)\nk")]
++      (is (= 2 v))
++      (is (= '[user/k] (mapv :sym (binds es))))
++      (is (= 1 (sci/eval-string* base "k"))))))
++
++(deftest a-definition-carries-its-source-occurrence
++  (testing "a literal def is its own occurrence"
++    (let [[_ es] (observed (sci/init {}) "(def a 1)")]
++      (is (= [{:line 1 :column 1 :end-line 1 :end-column 10}] (mapv :origin es)))))
++  (testing "a macro's single def is the macro call's occurrence, not authored"
++    (let [[v es] (observed (sci/init {}) "(defmacro single [] (list 'def 'made 7))\n(single)\nmade")]
++      (is (= 7 v))
++      (is (= {:line 2 :column 1 :end-line 2 :end-column 9 :expanded-by 'single}
++             (:origin (last (binds es)))))))
++  (testing "defs generated inside a let by an agent macro"
++    (let [[_ es] (observed (sci/init {}) "(defmacro pair [] `(do (def ~'px 1) (def ~'py 2)))\n(let [z 0]\n  (pair))")]
++      (is (= [{:line 3 :column 3 :end-line 3 :end-column 9 :expanded-by 'pair}
++              {:line 3 :column 3 :end-line 3 :end-column 9 :expanded-by 'pair}]
++             (mapv :origin (rest (binds es)))))))
++  (testing "a top-level do expansion keeps its call"
++    (let [[_ es] (observed (sci/init {}) "(defmacro two [] `(do (def ~'ta 1) (def ~'tb 2)))\n(two)")]
++      (is (= [{:line 2 :column 1 :end-line 2 :end-column 6 :expanded-by 'two}
++              {:line 2 :column 1 :end-line 2 :end-column 6 :expanded-by 'two}]
++             (mapv :origin (rest (binds es)))))))
++  (testing "a def a macro passes through (let, when, a wrapper) keeps its own span"
++    (let [[_ es] (observed (sci/init {}) "(defmacro wrap [& b] `(do ~@b))\n(let [u 0] (def lv 1))\n(when true (def wv 1))\n(wrap (def mv 1))")]
++      (is (= [{:line 2 :column 12 :end-line 2 :end-column 22}
++              {:line 3 :column 12 :end-line 3 :end-column 22}
++              {:line 4 :column 7 :end-line 4 :end-column 17}]
++             (mapv :origin (rest (binds es)))))))
++  (testing "defn is the call it was written as"
++    (let [[_ es] (observed (sci/init {}) "(let [k 1]\n  (defn nd [x] (+ k x)))")]
++      (is (= {:line 2 :column 3 :end-line 2 :end-column 24 :expanded-by 'defn}
++             (:origin (first (binds es))))))))
++
++(deftest extensions-and-members-are-marked-at-their-producer
++  (let [[_ es] (observed (sci/init {}) "(defprotocol P (pm [x]))\n(extend-protocol P String (pm [x] 1))\n(defrecord R [a] P (pm [_] a))")
++        by-sym (group-by :sym (binds es))]
++    (testing "the protocol is one definition; extensions are :extend writes"
++      (is (= [:root :root :extend :extend] (mapv :kind (get by-sym 'user/P))))
++      (is (= 1 (count (:methods (:root (second (get by-sym 'user/P))))))))
++    (testing "the record constructor helper names its member"
++      (is (= '->R (some #(:sci.impl/member-of (meta (:v %))) (binds es))))))
++  (testing "the expansion observer sees each macro call once"
++    (let [seen (atom [])]
++      (binding [sci.lang/*expansion-observer* (fn [call exp] (swap! seen conj [(first call) exp]))]
++        (sci/eval-string "(defmacro single [] (list 'def 'made 7)) (single)"))
++      (is (= '(def made 7) (some (fn [[op exp]] (when (= 'single op) exp)) @seen))))))

@@ -1,0 +1,21 @@
+{"src/seon/sci/eval.clj"
+ ["row" "removed-program-identities" "same-intern-value?" "program-value?" "held-intern" "program-definitions"
+  "source-offset" "program-change" "row-backed?" "removed-interns" "var-step" "program-restoration"
+  "apply-restoration!" "execution-unavailable" "restore-or-unavailable!" "context-capture" "context-restoration"
+  "unindexed-change" "multiple-declarations" "program-identity-name" "analyzed-rows" "definition-row"
+  "admit-program-change!" "unadmitted-definitions" "top-level-do?" "top-level-evaluation" "bindings" "one-event"
+  "declared-row" "unmap-row" "install-candidate-function!" "accept-candidate!" "refuse-install"
+  "candidate-test-result" "run-candidate-test!" "disposable-copy" "evaluate-candidate"]
+ "src/seon/sci/reader.cljc"
+ ["alias-binding" "refer-binding" "require-bindings" "libspec-pair" "conformed" "require-pairs" "namespace-info"
+  "quoted-symbol" "quoted-value" "literal-require-bindings" "function-declaration" "test-declaration"
+  "resolved-operation" "schema-declaration" "schema-unregister" "namespace-unmap" "declaration-facts"
+  "namespace-changing-mention?" "next-reading-context"]
+ "src/seon/turn.clj"
+ ["settlement-form" "analyze-settlement" "settled-value" "with-settled" "gate-function-install"
+  "namespace-rows" "evaluated-namespaces" "read-source" "clean-source?" "repairable-delimiter-error?"
+  "repaired-span" "repair-source" "repair-sources" "planned-sources" "preview-sources"]
+ "src/seon/cluster/reply.clj"
+ ["prose-line" "refused" "parsed-events" "standalone-token?" "form-start" "strip-prompt-markers"
+  "structured-code-indexes" "code-event-indexes" "comment-source" "plan-sources" "prose-read-failure"
+  "code-line?" "readable-code-suffix" "top-level-failure?" "comment-prose-failure" "sources" "code-sources"]}

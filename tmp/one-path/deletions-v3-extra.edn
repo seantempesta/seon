@@ -1,0 +1,3 @@
+{"src/seon/sci/eval.clj" ["native-mutation"]
+ "src/my/program.clj" ["native-call-refusal"]
+ "src/seon/turn.clj" ["schema-attribute-change-tx" "affected-schema-attributes" "restore-evaluations!" "source-events" "evaluable-source?" "evaluate-sources"]}

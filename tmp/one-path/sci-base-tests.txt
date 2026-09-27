@@ -1,0 +1,942 @@
+
+Running tests in #{"test"}
+
+Testing sci.array-test
+=== Integer-Type-test
+
+
+Testing sci.core-protocols-test
+=== instance-test
+
+=== swap-test
+
+=== iatom2-test
+
+=== multi-arity-swap-test
+
+=== deref-test
+
+
+Testing sci.core-test
+=== source-fn-test
+
+=== copy-var-private-test
+
+=== eval-file-meta-test
+
+=== tagged-literal-test
+
+=== var-name-test
+
+=== add-to-clojure-core-test
+
+=== eval-string+-test
+
+=== type-hint-fn-test
+
+=== fork-interpreted-root-mutations-are-copy-on-write-test
+
+=== ns-resolve-test
+
+=== clojure-version-test
+
+=== threading-macro-test
+
+=== comment-test
+
+=== assert-test
+
+=== areduce-test
+
+=== syntax-errors
+
+=== cond-test
+
+=== more-than-twenty-args-test
+
+=== ctx-test
+
+=== macroexpand-1-test
+
+=== instance?-test
+
+=== recursion-test
+
+=== empty-coll-identical-test
+
+=== to-array-2d-test
+
+=== call-quoted-symbol-test
+
+=== variable-can-have-macro-or-var-name
+
+=== closure-test
+
+=== time-test
+
+=== top-level-test
+
+=== function-results-dont-have-metadata
+
+
+FAIL in (function-results-dont-have-metadata) (core_test.cljc:1335)
+expected: (nil? (eval* "(meta (fn []))"))
+  actual: (not (nil? #:sci.impl{:root-data #:sci.root{:form (fn* ([])), :captures []}}))
+
+FAIL in (function-results-dont-have-metadata) (core_test.cljc:1336)
+expected: (nil? (eval* "(meta (fn ([]) ([_])))"))
+  actual: (not (nil? #:sci.impl{:root-data #:sci.root{:form (fn* ([]) ([_])), :captures []}}))
+=== type-hint-let-pops-after-nest-test
+
+=== error-location-test
+
+
+FAIL in (error-location-test) (core_test.cljc:559)
+expected: (sci.test-utils/submap? {:type :sci/error, :line 1, :column 15, :message #"Wrong number of args \(1\) passed to: user/foo"} (try (eval* "(defn foo []) (foo 1)") (catch clojure.lang.ExceptionInfo ex (let [d (ex-data ex)] d))))
+  actual: (not (sci.test-utils/submap? {:type :sci/error, :line 1, :column 15, :message #"Wrong number of args \(1\) passed to: user/foo"} {:type :sci/error, :line 1, :column 15, :message "Wrong number of args (1) passed to: function of arity 0", :sci.impl/callstack #object[clojure.lang.Volatile 0x1653ae9d {:status :ready, :val (#sci.impl.utils.StackFrame{:line 1, :column 15, :end-line nil, :end-column nil, :ns #object[sci.lang.Namespace 0x460dc324 "user"], :file nil, :f-meta {:arglists ([]), :line 1, :column 1, :ns #object[sci.lang.Namespace 0x460dc324 "user"], :name foo, :file nil}, :special false} #sci.impl.utils.StackFrame{:line 1, :column 15, :end-line nil, :end-column nil, :ns #object[sci.lang.Namespace 0x460dc324 "user"], :file nil, :f-meta {:arglists ([]), :line 1, :column 1, :ns #object[sci.lang.Namespace 0x460dc324 "user"], :name foo, :file nil}, :special false})}], :file nil}))
+
+FAIL in (error-location-test) (core_test.cljc:567)
+expected: (sci.test-utils/submap? {:type :sci/error, :line 1, :column 21, :message #"Wrong number of args \(0\) passed to: user/foo"} (try (eval* "(defn foo [x & xs]) (foo)") (catch clojure.lang.ExceptionInfo ex (let [d (ex-data ex)] d))))
+  actual: (not (sci.test-utils/submap? {:type :sci/error, :line 1, :column 21, :message #"Wrong number of args \(0\) passed to: user/foo"} {:type :sci/error, :line 1, :column 21, :message "Wrong number of args (0) passed to: function of arity 1", :sci.impl/callstack #object[clojure.lang.Volatile 0x72c2d699 {:status :ready, :val (#sci.impl.utils.StackFrame{:line 1, :column 21, :end-line nil, :end-column nil, :ns #object[sci.lang.Namespace 0x460dc324 "user"], :file nil, :f-meta {:arglists ([x & xs]), :line 1, :column 1, :ns #object[sci.lang.Namespace 0x460dc324 "user"], :name foo, :file nil}, :special false} #sci.impl.utils.StackFrame{:line 1, :column 21, :end-line nil, :end-column nil, :ns #object[sci.lang.Namespace 0x460dc324 "user"], :file nil, :f-meta {:arglists ([x & xs]), :line 1, :column 1, :ns #object[sci.lang.Namespace 0x460dc324 "user"], :name foo, :file nil}, :special false})}], :file nil}))
+=== metadata-on-var-test
+
+=== sandbox-print-method-test
+
+=== let-test
+
+=== array-based-map-test
+
+=== var-without-configured-namespace-test
+
+=== resolve-test
+
+=== bound-test
+
+=== aclone-test
+
+=== copy-var-copy-meta-from-test
+
+=== clojure-1-11-core-functions-test
+
+=== memfn-test
+
+=== pre-post-conditions-test
+
+=== syntax-quote-test
+
+=== permission-test
+
+=== disable-arity-checks-test
+
+=== override-ns-test
+
+=== type-hint-letfn-test
+
+=== defn--test
+
+=== defmacro-test
+
+=== lazy-seq-macroexpand-test
+
+=== resolve-unquote
+
+=== amap-test
+
+=== vswap-test
+
+=== built-in-vars-are-read-only-test
+
+=== atom-with-meta-test
+
+=== reader-conditionals
+
+=== copy-ns-test
+
+=== condp-test
+
+=== type-hint-shadowed-def-test
+
+=== copy-var-test
+
+=== rand-test
+
+=== dotimes-test
+
+=== macro-val-error-test
+
+=== core-delay-test
+
+=== defn-kwargs-test
+
+=== meta-on-syntax-quote-test
+
+=== readers-test
+
+=== merge-opts-with-new-vars-test
+
+=== case-test
+
+=== data-readers-test
+
+=== copy-var-with-redefs-inlined-name-clash-test
+
+=== idempotent-eval-test
+
+=== declare-test
+
+=== recur-test
+
+=== copy-ns-default-meta-test
+
+=== defonce-test
+
+=== root-writes-mark-a-var-rebound-until-it-is-redefined-test
+
+=== self-ref-test
+
+=== letfn-test
+
+=== compatibility-test
+
+=== macroexpand-test
+
+=== loop-test
+
+=== var->sym-test
+
+=== macro-test
+
+=== destructure-test
+
+=== fork-copy-on-write-test
+
+=== core-resolve-test
+
+=== type-hint-catch-test
+
+=== reload-all-test
+
+=== macroexpand-call-test
+
+=== merge-opts-test
+
+=== while-test
+
+=== fn-literal-test
+
+=== type-hint-let-test
+
+=== fork-writes-through-an-inherited-handle-compose-test
+
+=== fn-on-meta-test
+
+=== issue-977-test
+
+=== reload-test
+
+=== api-resolve-test
+
+=== ex-message-test
+
+=== def-location-test
+
+=== compiled-var-metadata-is-read-only-from-sci-test
+
+=== type-test
+
+=== fn-test
+
+=== defn-test
+
+=== meta-test
+
+=== var-isnt-fn
+
+=== dynamic-meta-def-test
+
+=== macros-can-be-used-with-apply-test
+
+=== trampoline-test
+
+=== try-catch-test
+
+=== throw-test
+
+=== vars-born-in-a-fork-are-owned-by-it-test
+
+=== exception-without-message-location-test
+
+=== sci-error-test
+
+=== doseq-test
+
+=== alter-meta!-test
+
+=== read-string-eval-test
+
+=== sci-error-multiple-catches-test
+
+=== whens-test
+
+=== independent-contexts-have-no-shared-writable-stock-vars
+
+=== regex-test
+
+=== symbol-on-var-test
+
+=== intern-test
+
+=== could-not-resolve-symbol-test3
+
+=== unsupported-option-test
+
+=== ifs-test
+
+=== ns-aliases-test
+
+=== copy-var*-test
+
+=== var-sym-test
+
+=== fork-metadata-writes-are-copy-on-write-test
+
+=== GH-54-recursive-function-test
+
+=== merge-opts-preserves-features-test
+
+=== try-catch-finally-throw-test
+
+=== do-and-or-test
+
+=== conditional-var-test
+
+=== def-test
+
+=== for-test
+
+=== core-test
+
+=== eval-colls-once
+
+=== load-fn-test
+
+=== clojure-walk-test
+
+
+Testing sci.defrecords-and-deftype-test
+=== deftype-fn-test
+
+=== ns-with-special-chars-test
+
+=== ifn-on-defrecord-test
+
+=== dissoc-test
+
+=== instance-test
+
+=== satisfies-IRecord-test
+
+=== import-test
+
+=== re-eval-deftype-test
+
+=== deftype-macroexpand-1-produces-deftype*-test
+
+=== syntax-quote-test
+
+=== deftype*-uses-flat-methods-not-metadata-test
+
+=== to-string-test
+
+=== destructuring-protocol-fn-test
+
+=== deftype-macroexpand-constructor-visible-test
+
+=== extends?-test
+
+=== protocol-test
+
+=== field-access-test
+
+=== multiple-functions-test
+
+=== roundtrip-test
+
+=== syntax-quote-type-produces-dotted-form-test
+
+=== map-constructor-nil-test
+
+=== constructor-self-reference-test
+
+=== with-meta-preserves-type-test
+
+=== print-method-test
+
+=== constructor-metadata-test
+
+=== deftype-via-defcache-like-macro-test
+
+=== constructor-test
+
+=== shadow-record-field-protocol-fn-test
+
+=== derive-test
+
+=== record?-test
+
+=== equiv-test
+
+=== type-test
+
+=== repr-test
+
+=== use-does-not-bring-constructor-test
+
+=== deftype-macro-expanding-to-deftype-test
+
+=== deftype-test
+
+=== deftype-resolve-test
+
+=== ns-map-includes-types-test
+
+
+Testing sci.error-test
+=== inherited-ex-data-is-encapsulated
+
+=== thread-test
+
+=== analysis-error-test
+
+=== let-like-binding-arity-test
+
+=== stacktrace-test
+
+=== destructure-test
+
+=== loop-error-location-test
+
+=== arity-error-test
+
+
+FAIL in (arity-error-test) (error_test.cljc:94)
+The name of the correct function is reported
+expected: (thrown-with-msg? clojure.lang.ExceptionInfo #"Wrong number of args \(0\) passed to: foo/echo-msg" (eval-string "\n(ns foo)\n\n(defn echo-msg [msg]\n  msg)\n\n(ns bar (:require foo))\n\n(defn main []\n  (foo/echo-msg))  ;; called with the wrong arity\n\n(main)"))
+  actual: #error {
+ :cause "Wrong number of args (0) passed to: sci.impl.fns/fun/arity-1--4636"
+ :via
+ [{:type clojure.lang.ExceptionInfo
+   :message "Wrong number of args (0) passed to: function of arity 1"
+   :data {:type :sci/error, :line 10, :column 3, :message "Wrong number of args (0) passed to: function of arity 1", :sci.impl/callstack #object[clojure.lang.Volatile 0x79aac496 {:status :ready, :val (#sci.impl.utils.StackFrame{:line 12, :column 1, :end-line nil, :end-column nil, :ns #object[sci.lang.Namespace 0x5a6e1f51 "bar"], :file nil, :f-meta {:arglists ([]), :line 9, :column 1, :ns #object[sci.lang.Namespace 0x5a6e1f51 "bar"], :name main, :file nil}, :special false} #sci.impl.utils.StackFrame{:line 12, :column 1, :end-line nil, :end-column nil, :ns #object[sci.lang.Namespace 0x5a6e1f51 "bar"], :file nil, :f-meta {:arglists ([]), :line 9, :column 1, :ns #object[sci.lang.Namespace 0x5a6e1f51 "bar"], :name main, :file nil}, :special false} #sci.impl.utils.StackFrame{:line 10, :column 3, :end-line nil, :end-column nil, :ns #object[sci.lang.Namespace 0x5a6e1f51 "bar"], :file nil, :f-meta {:arglists ([msg]), :line 4, :column 1, :ns #object[sci.lang.Namespace 0x5c2424a0 "foo"], :name echo-msg, :file nil}, :special false})}], :file nil}
+   :at [sci.impl.utils$rethrow_with_location_of_node invokeStatic "utils.cljc" 180]}
+  {:type clojure.lang.ArityException
+   :message "Wrong number of args (0) passed to: sci.impl.fns/fun/arity-1--4636"
+   :at [clojure.lang.AFn throwArity "AFn.java" 429]}]
+ :trace
+ [[clojure.lang.AFn throwArity "AFn.java" 429]
+  [clojure.lang.AFn invoke "AFn.java" 28]
+  [clojure.lang.AFn applyToHelper "AFn.java" 152]
+  [clojure.lang.AFn applyTo "AFn.java" 144]
+  [clojure.lang.AFunction$1 doInvoke "AFunction.java" 31]
+  [clojure.lang.RestFn invoke "RestFn.java" 397]
+  [sci.lang.Var invoke "lang.cljc" 215]
+  [sci.impl.analyzer$return_call$reify__5812 eval "analyzer.cljc" 1782]
+  [sci.impl.fns$fun$arity_0__4632 invoke "fns.cljc" 129]
+  [clojure.lang.AFn applyToHelper "AFn.java" 152]
+  [clojure.lang.AFn applyTo "AFn.java" 144]
+  [clojure.lang.AFunction$1 doInvoke "AFunction.java" 31]
+  [clojure.lang.RestFn invoke "RestFn.java" 397]
+  [sci.lang.Var invoke "lang.cljc" 215]
+  [sci.impl.analyzer$return_call$reify__5812 eval "analyzer.cljc" 1782]
+  [sci.impl.interpreter$eval_form_STAR_ invokeStatic "interpreter.cljc" 60]
+  [sci.impl.interpreter$eval_form_STAR_ invoke "interpreter.cljc" 29]
+  [sci.impl.interpreter$eval_form invokeStatic "interpreter.cljc" 83]
+  [sci.impl.interpreter$eval_form invoke "interpreter.cljc" 80]
+  [sci.impl.interpreter$eval_string_STAR_ invokeStatic "interpreter.cljc" 108]
+  [sci.impl.interpreter$eval_string_STAR_ invoke "interpreter.cljc" 89]
+  [sci.impl.interpreter$eval_string_STAR_ invokeStatic "interpreter.cljc" 91]
+  [sci.impl.interpreter$eval_string_STAR_ invoke "interpreter.cljc" 89]
+  [sci.impl.interpreter$eval_string invokeStatic "interpreter.cljc" 115]
+  [sci.impl.interpreter$eval_string invoke "interpreter.cljc" 111]
+  [sci.core$eval_string invokeStatic "core.cljc" 318]
+  [sci.core$eval_string invoke "core.cljc" 278]
+  [sci.core$eval_string invokeStatic "core.cljc" 316]
+  [sci.core$eval_string invoke "core.cljc" 278]
+  [sci.error_test$fn__12030 invokeStatic "error_test.cljc" 97]
+  [sci.error_test$fn__12030 invoke "error_test.cljc" 92]
+  [clojure.test$test_var$fn__9761 invoke "test.clj" 717]
+  [clojure.test$test_var invokeStatic "test.clj" 717]
+  [clojure.test$test_var invoke "test.clj" 708]
+  [clojure.test$test_vars$fn__9787$fn__9792 invoke "test.clj" 735]
+  [clojure.test$default_fixture invokeStatic "test.clj" 687]
+  [clojure.test$default_fixture invoke "test.clj" 683]
+  [clojure.test$test_vars$fn__9787 invoke "test.clj" 735]
+  [clojure.test$default_fixture invokeStatic "test.clj" 687]
+  [clojure.test$default_fixture invoke "test.clj" 683]
+  [clojure.test$test_vars invokeStatic "test.clj" 731]
+  [clojure.test$test_all_vars invokeStatic "test.clj" 737]
+  [clojure.test$test_ns invokeStatic "test.clj" 758]
+  [clojure.test$test_ns invoke "test.clj" 743]
+  [clojure.core$map$fn__5884 invoke "core.clj" 2759]
+  [clojure.lang.LazySeq sval "LazySeq.java" 42]
+  [clojure.lang.LazySeq seq "LazySeq.java" 51]
+  [clojure.lang.Cons next "Cons.java" 39]
+  [clojure.lang.RT next "RT.java" 713]
+  [clojure.core$next__5403 invokeStatic "core.clj" 64]
+  [clojure.core$reduce1 invokeStatic "core.clj" 946]
+  [clojure.core$reduce1 invokeStatic "core.clj" 936]
+  [clojure.core$merge_with invokeStatic "core.clj" 3063]
+  [clojure.core$merge_with doInvoke "core.clj" 3055]
+  [clojure.lang.RestFn applyTo "RestFn.java" 139]
+  [clojure.core$apply invokeStatic "core.clj" 669]
+  [clojure.test$run_tests invokeStatic "test.clj" 768]
+  [clojure.test$run_tests doInvoke "test.clj" 768]
+  [clojure.lang.RestFn applyTo "RestFn.java" 137]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [cognitect.test_runner$test invokeStatic "test_runner.clj" 74]
+  [cognitect.test_runner$test invoke "test_runner.clj" 62]
+  [cognitect.test_runner$_main invokeStatic "test_runner.clj" 127]
+  [cognitect.test_runner$_main doInvoke "test_runner.clj" 115]
+  [clojure.lang.RestFn applyTo "RestFn.java" 137]
+  [clojure.lang.Var applyTo "Var.java" 705]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.main$main_opt invokeStatic "main.clj" 514]
+  [clojure.main$main_opt invoke "main.clj" 510]
+  [clojure.main$main invokeStatic "main.clj" 664]
+  [clojure.main$main doInvoke "main.clj" 616]
+  [clojure.lang.RestFn applyTo "RestFn.java" 137]
+  [clojure.lang.Var applyTo "Var.java" 705]
+  [clojure.main main "main.java" 40]]}
+=== implicit-do-error-test
+
+=== preserve-exception-type-in-threads-test
+
+=== arity-error-hof-test
+
+=== macroexpansion-with-unresolved-symbol-has-location-test
+
+=== try-finally-test
+
+
+Testing sci.hierarchies-test
+=== underive-test
+
+=== hierarchy-lookups-work-for-sci-deftype
+
+=== ancestors-test
+
+=== parents-test
+
+=== hierarchy-lookups-work-transitively-for-sci-types
+
+=== hierarchy-lookups-work-for-sci-defrecord
+
+=== derive-test
+
+=== descendants-test
+
+
+Testing sci.impl.analyzer-test
+=== analyze-constant-test
+
+
+Testing sci.impl.binding-array-refactor-test
+=== areduce-test
+
+=== order-of-arguments-test
+
+=== shadowed-let-binding-test
+
+=== top-level-non-seq-test
+
+=== multi-arity-test
+
+=== multi-arity-self-call-test
+
+=== varargs-test
+
+=== enclosing-array-test
+
+=== self-returning-fn-test
+
+
+Testing sci.impl.vars-test
+=== unqualify-symbol-test
+
+
+Testing sci.interop-test
+=== static-methods
+
+=== exception-data
+
+=== static-fields-control-test
+
+=== instance-method-overrides-test
+
+=== instance-methods
+
+=== clojure-1_12-array-test
+
+=== host-interop-observer-test
+
+=== import-test
+
+=== clojure-parity-tests
+
+=== built-in-call-observer-runtime-ctx-test
+
+=== built-in-call-observer-test
+
+=== static-fields
+
+=== string-type-hint-sandbox-bypass-test
+
+=== issue-987-deftype-munged-fields-test
+
+=== syntax-test
+
+=== constructor-test
+
+=== type-hint-test
+
+=== clojure-1_12-interop-test
+
+=== instance-method-config-cache-test
+
+=== instance-fields
+
+
+Testing sci.interrupt-fn-test
+=== host-seq-producers-test
+
+=== merge-opts-preserves-interrupt-fn-test
+
+=== interrupt-forge-resistant-test
+
+=== no-interrupt-fn-test
+
+=== loop-forms-test
+
+=== fork-preserves-interrupt-fn-test
+
+=== clojure-core-arity-parity-test
+
+=== normal-completion-under-budget-test
+
+=== clojure-core-without-interrupt-fn-test
+
+=== direct-recursion-no-recur-test
+
+=== host-materializers-test
+
+=== mutual-recursion-test
+
+=== interrupt-not-maskable-by-finally-test
+
+=== regex-redos-test
+
+=== arbitrary-exception-test
+
+=== interrupt-uncatchable-test
+
+
+Testing sci.io-test
+=== with-sci-out-str-test
+
+=== print-test
+
+=== print-dup-test
+
+=== flush-on-newline-test
+
+=== print-level-test
+
+=== print-meta-test
+
+=== with-out-str-test
+
+=== with-in-str-test
+
+=== print-readably-test
+
+=== print-namespace-maps-test
+
+=== print-length-test
+
+=== with-sci-in-str-test
+
+
+Testing sci.multimethods-test
+=== default-test
+
+=== defmethod-test
+
+=== prefer-method-test
+
+=== multi-arity-test
+
+=== remove-method-test
+
+
+Testing sci.namespaces-test
+=== effective-namespace-bindings-distinguish-load-from-as-alias-test
+
+=== ns-refers-test
+
+=== misc-namespace-test
+
+=== autoresolve-test
+
+=== ns-form-test
+
+=== effective-namespace-bindings-require-installed-import-target-test
+
+=== as-alias-test
+
+=== in-ns-test
+
+=== refer-test
+
+=== loaded-libs-test
+
+=== namespace-doc
+
+=== effective-namespace-bindings-require-installed-refer-target-test
+
+=== ns-metadata-test
+
+=== ns-unalias-test
+
+=== cyclic-load-test
+
+=== ns-publics-test
+
+=== use-test
+
+=== namespace-state-roundtrip-preserves-complete-resolver-state-test
+
+=== exposed-vals-test
+
+=== macroexpand-eval-test
+
+=== ns-imports-test
+
+=== nested-libspecs-test
+
+=== ns-map-test
+
+=== ns-name-test
+
+=== remove-ns-test
+
+=== find-ns-test
+
+=== no-cljs-var-resolve-in-clj-test
+
+=== require-test
+
+=== no-crash-test
+
+=== refer-clojure-exclude
+
+=== vars-partitioned-by-namespace-test
+
+=== issue-1011
+
+=== ns-unmap-test
+
+=== var-root-data-roundtrip-installs-without-reexecuting-wrapper-test
+
+=== namespace-interns-exclude-resolver-structure-test
+
+=== recycle-namespace-objects
+
+=== self-require-test
+
+=== effective-namespace-bindings-test
+
+=== ns-syntax-test
+
+=== docstrings-test
+
+=== find-var-test
+
+
+Testing sci.parse-test
+=== parse-test
+
+=== parse-string-test
+
+=== parse+string-test
+
+
+Testing sci.pprint-test
+=== print-var
+
+=== pprint-simple-dispatch-test
+
+=== pprint-default-impl-test
+
+=== print-namespace-maps-test
+
+
+Testing sci.protocols-test
+=== fallback-on-reified-object-test
+
+=== instance-test
+
+=== return-value-test
+
+=== sigs-test
+
+=== import-test
+
+=== extend-via-metadata-test
+
+=== fallback-on-record
+
+=== satisfies-test
+
+=== protocol-test
+
+=== satisfies-default
+
+=== fn-docstring-test
+
+=== reify-test
+
+=== protocol-satisfies-nil-and-boolean-test
+
+=== extends-test
+
+=== marker-protocol-test
+
+=== multi-arity-test
+
+=== satisfies-host-protocol
+
+=== IRecord-extension-test
+
+=== order-test
+
+=== docstring-test
+
+=== issue-975-protocol-meta
+
+
+Testing sci.proxy-test
+=== proxy-super-Object-test
+
+=== APersistentMap-proxy-test
+
+=== proxy-super-APersistentMap-test
+
+=== update-proxy-test
+
+=== proxy-mappings-test
+
+
+Testing sci.read-test
+=== read-cond-preserve-test
+
+=== platform-feature
+
+=== read-string-test
+
+=== tag-fallback-test
+
+=== suppress-read-test
+
+=== readder-resolver-test
+
+=== read-eof-value-test
+
+=== read-eval-test
+
+=== read-test
+
+=== read-with-pushback-reader
+
+
+Testing sci.reify-test
+=== reify-protocols-with-matching-method-names
+
+=== reify-test
+
+=== reify-multiple-protocols
+
+=== reify-with-matching-method-names
+
+=== reify-mixed-protocol-class-test
+
+=== reify-form-from-macro-test
+
+
+Testing sci.repl-test
+=== repl-dir-test
+
+=== repl-apropos-test
+
+=== repl-find-doc-test
+
+=== repl-pst-test
+
+=== repl-doc-test
+
+
+Testing sci.vars-test
+=== with-bindings-api-test
+
+=== macro-val-test
+
+=== binding-syntax-test
+
+=== with-redefs-test
+
+=== redefine-var-test
+
+=== add-watch-test
+
+=== thread-binds
+
+=== unbound-call-test
+
+=== def-within-binding-test
+
+=== pmap-test
+
+=== ctx-unrestricted-var-mutation-test
+
+=== var-call-test
+
+=== dynamic-var-test
+
+=== thread-bound?-test
+
+=== binding-conveyor-test
+
+=== binding-api-test
+
+=== const-test
+
+=== with-local-vars-test
+
+=== pmap-api-test
+
+=== def-returns-var-test
+
+=== var-get-set-test
+
+=== alter-var-root-test
+
+=== bound-fn-test
+
+=== promise-test
+
+=== with-bindings-test
+
+
+Ran 393 tests containing 1485 assertions.
+5 failures, 0 errors.
+exit 1
