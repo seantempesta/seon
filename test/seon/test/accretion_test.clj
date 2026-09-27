@@ -54,6 +54,9 @@
         rendered (accretion/render-ai refusal)]
     (is (= "Gate: 5 tests · 0 passed · 5 failed · auto-check 7/25 · install refused"
            (:seon.test.accretion/orientation report)))
+    (is (= :seon.test.accretion/install-refused-error
+           (:seon.error/declared-schema (meta refusal)))
+        "the producer declares the identity its renderer pair is declared on")
     (is (= 6
            (reduce + (map (comp count :seon.test.accretion/failures)
                           (:seon.test.accretion/failure-groups report))))
@@ -204,11 +207,15 @@
                                      "(fixture.candidate/target 1)")))
           (is (= 2 (sci/eval-string* parent "(fixture.candidate/target 1)"))))
         (testing "a refused install restores the evaluating context"
-          (sci.eval/refuse-install wrapped evaluation
-                                   (accretion/install-refusal
-                                    (accretion/gate-report
-                                     {:seon.fn/sym 'fixture.candidate/target
-                                      :seon.test.accretion/results results})))
+          (let [refused (sci.eval/refuse-install wrapped evaluation
+                                                 (accretion/install-refusal
+                                                  (accretion/gate-report
+                                                   {:seon.fn/sym 'fixture.candidate/target
+                                                    :seon.test.accretion/results results})))]
+            ;; Shown through its declared teaching face, orientation first,
+            ;; never the raw map a value budget may cut before it.
+            (is (= 'seon.test.accretion/render-ai (:seon.eval/renderer refused)) (pr-str refused))
+            (is (re-find #"install refused" (:seon.eval/shown refused)) (:seon.eval/shown refused)))
           (is (identical? held (sci/resolve parent 'fixture.candidate/target)))
           (is (= 1 (sci/eval-string* parent "(fixture.candidate/target 1)"))))))))
 

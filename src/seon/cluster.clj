@@ -660,8 +660,13 @@
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.dev.mcp/runtime-status]}
   [unit]
   (let [observation (:seon.render/value unit)
+        ;; THE FACE FITS THE VALUE BUDGET BY SELECTING LESS (owner 2026-09-27):
+        ;; at the 1,000-token agent budget five fault rows and five
+        ;; over-second lines beside the cache counters came to 1,107 tokens,
+        ;; and the MCP reply fell to a blob handle. Three of each family; the
+        ;; whole value is one read away.
         top (fn [entries select-entry total]
-              (let [shown (mapv select-entry (take 5 entries))]
+              (let [shown (mapv select-entry (take 3 entries))]
                 (cond-> {:seon.dev.mcp/count total :seon.dev.mcp/top shown}
                   (< (count shown) total) (assoc :seon.dev.mcp/omitted (- total (count shown))))))
         failure #(select-keys % [:seon.error/operation :seon.error/layer])
@@ -698,7 +703,7 @@
       (assoc :seon.dev.mcp/program-unavailable (failure (:seon.dev.mcp/program-unavailable observation)))
       (:seon.dev.mcp/profile observation)
       (assoc :seon.profile/over-second-lines
-             (get-in observation [:seon.dev.mcp/profile :seon.profile/over-second-lines])))))
+             (vec (take 3 (get-in observation [:seon.dev.mcp/profile :seon.profile/over-second-lines])))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Pure resolution — defaults are THE defaults document for this layer

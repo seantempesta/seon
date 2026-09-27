@@ -671,7 +671,10 @@
                 ;; The observation's declared AI face, the one `bin/seon status` prints.
                 ((requiring-resolve 'seon.cluster/runtime-observation-ai)
                  {:seon.render/value
-                  ((requiring-resolve 'seon.cluster/mcp-runtime-observation) ~cluster)})))
+                  ((requiring-resolve 'seon.cluster/mcp-runtime-observation) ~cluster)
+                  ;; A render unit carries the database it renders against.
+                  :seon.db/db ((requiring-resolve 'seon.db/db)
+                               ((requiring-resolve 'seon.cluster.boot/connection) ~cluster))})))
             default-timeout-ms))]
       (or (:seon.dev.mcp/value projected) projected))
     (catch Throwable throwable

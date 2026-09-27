@@ -390,12 +390,18 @@
       check (assoc :seon.test.accretion/auto-check check))))
 
 (defn install-refusal
-  "The attribute-shaped error value for one refused function install."
+  "The attribute-shaped error value for one refused function install.
+
+  The producer declares the value's identity (`:seon.error/declared-schema`
+  metadata), so the renderer chain selects its declared pair, the teaching
+  face that leads with the orientation line, instead of the floor printing
+  the raw map (which a 1,000-token budget cuts before \"install refused\")."
   {:malli/schema
    [:=> [:cat :seon.test.accretion/gate-report]
     :seon.test.accretion/install-refused-error]}
   [report]
   (let [message "Fix the contract or the function and re-evaluate the defn."]
+    (vary-meta
     (merge (seon.error.refusal/diagnostic (java.util.Date.) :seon.test.accretion/install `install-refusal
             {:seon.error/message message
              :seon.error/member :seon.test.accretion/install?
@@ -409,7 +415,8 @@
                         [:seon.test.accretion/arguments
                          :seon.test.accretion/expected
                          :seon.test.accretion/actual])
-           {})))
+           {})
+    assoc :seon.error/declared-schema :seon.test.accretion/install-refused-error)))
 
 (defn- render-failure
   [failure]

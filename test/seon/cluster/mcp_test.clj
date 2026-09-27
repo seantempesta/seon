@@ -315,11 +315,13 @@
              (is (= :seon.dev.mcp/runtime-observation
                     (last (:malli/schema (meta #'cluster/mcp-runtime-observation)))))
              (is (= (count shown) (:seon.dev.mcp/count status-faults)))
-             (is (= 5 (count (:seon.dev.mcp/top status-faults))))
-             (is (= (- (count shown) 5) (:seon.dev.mcp/omitted status-faults)))
+             (is (= 3 (count (:seon.dev.mcp/top status-faults))))
+             (is (= (- (count shown) 3) (:seon.dev.mcp/omitted status-faults)))
              (is (not-any? :seon.error/message (:seon.dev.mcp/top status-faults))
                  "a fault is named by operation, never by its unbounded message")
-             (is (< (count (pr-str (dissoc status :seon.profile/over-second-lines))) 4096))))
+             ;; It fits the 1,000-token agent budget (~3,200 characters) whole,
+             ;; so the MCP reply is the face, never a blob handle.
+             (is (< (count (pr-str status)) 3200))))
          (finally (swap! running-instances dissoc cluster-name)))))))
 
 (deftest ^{:seon.test/fixture-observation
