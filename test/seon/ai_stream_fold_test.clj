@@ -370,18 +370,23 @@
               (is (some? (:seon.ai.attempt/error attempt))
                   "the provider error and attempt committed together")))))))))
 
-(deftest ^{:seon.test/fixture-observation "Reasoning crosses the inline threshold into store-global blobs, whose isolation an ordinary branch cannot provide."
-           :seon.test/long "Acquire an isolated file-backed canonical store and settle provider reasoning across the inline/blob boundary."
-           :seon.test/long-ms 90000}
-  settled-reasoning-reuses-the-eval-result-inline-blob-split
+(deftest settled-reasoning-reuses-the-eval-result-inline-blob-split
+  ;; An ordinary fixture branch: agent creation needs the declaration rows a
+  ;; real cluster holds (a fresh store has none), and the blob assertion is a
+  ;; content-addressed digest, which a shared blob store answers identically.
+  ;; The threshold is the cluster's own dial, set through the config writer.
   (support/with-database
-    {::support/fresh-store? true}
     (fn [connection]
+      (support/apply-config! connection
+                             (:seon.cluster/name (support/execution-handle connection))
+                             {:seon.config.eval.result/blob-threshold 65536})
       (support/transacted! connection
                          (into (support/agent-tx @connection "reasoning-agent")
-                           [{:seon.config.eval.result/blob-threshold 65536}
-                          
-                            {:seon.turn/id "reasoning-run" :seon.turn/agent [:seon.agent/id "reasoning-agent"] :seon.turn/opened-tx "datomic.tx"}]))
+                           [{:seon.turn/id "reasoning-run" :seon.turn/agent [:seon.agent/id "reasoning-agent"] :seon.turn/opened-tx "datomic.tx"}]))
+      (is (= [65536] (db/q '[:find [?threshold ...]
+                             :where [_ :seon.config.eval.result/blob-threshold ?threshold]]
+                           @connection))
+          "record-attempt! reads the one configured threshold")
       (let [inline-reasoning "private reasoning"
             large (apply str (repeat 65537 "x"))
             cluster {:seon.db/connection connection
