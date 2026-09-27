@@ -388,8 +388,13 @@
                   [:declared [domain 1] nil true]]]
            (let [name (symbol (str "sci-declared-schema-" (clojure.core/name mode) "-" (clojure.core/name label)))
                  qualified (symbol "user" (str name))
+                 ;; WANTED since 9dd373901: a fixture row carries its contract's
+                 ;; arity facts, which refuse source arities the contract does not
+                 ;; declare, as an agent's defn is refused; so the source declares
+                 ;; exactly the contract's two arities.
                  source (str "(defn ^{:malli/schema " (pr-str contract) "} " name
-                             " [value & extras] (swap! calls inc) value)")
+                             " ([value] (swap! calls inc) value)"
+                             " ([value _extra] (swap! calls inc) value))")
                  row (test-support/program-fn-row database qualified source)
                  _ (sci/eval-string* ctx source)
                  _ (#'sci.eval/install-function-contract! ctx row projection database)

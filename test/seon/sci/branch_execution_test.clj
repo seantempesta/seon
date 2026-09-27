@@ -252,8 +252,13 @@
          ;; WANTED since be96a64ba: a row acquired from the database installs a
          ;; root that refuses by name when called (only an agent's evaluation
          ;; keeps the returned refusal), so the rest of the program still runs.
+         ;; WANTED since 9dd373901: the override carries its contract's arity
+         ;; facts, and the writer refuses one that drops an arity callers use
+         ;; (`bounded-text` is called with two arguments), so it keeps both.
          (let [row (declared! connection subject
-                     "(defn ^{:malli/schema [:=> [:cat :string] :string]} bounded-text [text] text)")
+                     (str "(defn ^{:malli/schema [:function [:=> [:cat :string] :string]"
+                          " [:=> [:cat :string :int] :string]]}"
+                          " bounded-text ([text] text) ([text _limit] text))"))
                installed (eval/install-row! {:seon.sci.eval/ctx live
                                              :seon.db/db (db/db connection)
                                              :seon.program/row row})
