@@ -25,4 +25,8 @@
              :kind :function
              :intent "Rendering read :seon.error/operation as the function that returned the error and appended a false contract finding to every agent exception. Fixed 5d353149b and b51fbb71d; the producer's declared identity now selects the renderer (M3)."
              :must-read #{seon.render/declared-producers}
-             :evidence #{"docs/research/agent-platform/landing/agent-path-2-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/agent-path-2-2026-09-26.md"}}
+ #:seon.task{:name "face-vocabulary-remains-in-code"
+             :kind :namespace
+             :intent "Owner 2026-09-27: there are no \"faces\", just render functions and data. About 215 occurrences of face remain in src/seon and resources/seon/schemas (e.g. :seon.print/face as a print-node classification, render.clj face-valid?, {:face rendered}). Rename per docs/research/agent-platform/face-concept-audit-2026-09-26.md (it names each rename: :seon.print/face is a print-node kind; the AI/HTML selector is the consumer or attachment key) in one scripted sweep across src, schemas and tests, converting every reader in the same commit; AGENTS.md is already clean (494c8b200)."
+             :evidence #{"docs/research/agent-platform/face-concept-audit-2026-09-26.md"}}]
