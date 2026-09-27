@@ -9,4 +9,8 @@
              :kind :function
              :intent "An error holds references, never copies (owner 2026-09-26: \"not the entire database\"): a database, connection, projection, environment or SCI context in an error's members or any cause link's ex-data is its registry-declared identity, and an over-bound value is its size. Measured before: three real refusals each printed over 20 MB (a projection prints over 2 GB)."
              :must-read #{seon.error.refusal/references seon.error.refusal/diagnostic seon.error.refusal/chain}
-             :evidence #{"docs/research/agent-platform/landing/err-refs-sweep-opus-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/err-refs-sweep-opus-2026-09-26.md"}}
+ #:seon.task{:name "refusal-offending-arguments-held-by-reference"
+             :kind :function
+             :intent "An invalid-input refusal carries the offending arguments as values in its ex-data (:seon.error/offending [unit]); anything that prints or stores the diagnostic can realize them — a test failure pr-str'd an endless lazy seq and OOM'd default on 2026-09-27 (fixed at the runner in b703e5ae9 by storing through admission's bound, which still realizes up to 8 MiB). Hold offending arguments by reference (result handle / blob digest / bounded admitted value) at the producer so no consumer can realize more than what is shown."
+             :evidence #{"docs/research/agent-platform/landing/large-value-feedback-opus-2026-09-27.md"}}]
