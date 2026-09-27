@@ -1097,6 +1097,28 @@
       (is (not-any? #(= [0] (:seon.render.data/path %)) (tree-cuts (value/prepare capped)))
           "a string whose rest is shorter than its cut is shown whole"))))
 
+(deftest a-tuple-wider-than-its-line-stays-within-the-charge
+  ;; value-hygiene 2026-09-27: MCP replies showed "The floor's saved text
+  ;; exceeded its charge." A tuple is one leaf to the allocator, but fipp fills
+  ;; its members, so a tuple past the line broke without being charged:
+  ;; `{... :p-keys (:k/long :k/long) ...}` laid out 4 characters over, a vector
+  ;; of three objects 1 over. The floor is total: no value fails on its charge.
+  (let [wide #(assoc (unit %) :seon.render/profile
+                     (assoc probe-profile :seon.render.profile/composition :multiline
+                            :seon.render.profile/max-children 8 :seon.render.profile/max-depth 6))
+        diagnostics #(:seon.render.value/diagnostics (value/prepare (wide %)))
+        tuple (gen/one-of [(gen/vector gen/keyword-ns 1 4) (gen/list gen/keyword-ns)])
+        values (gen/recursive-gen
+                (fn [inner] (gen/one-of [(gen/vector inner 0 6) (gen/map gen/keyword-ns inner {:max-elements 5})]))
+                (gen/one-of [gen/keyword-ns gen/small-integer (gen/return nil) tuple]))
+        observed (tc/quick-check 200 (prop/for-all [v values] (empty? (diagnostics v))) :seed 20260927)]
+    (is (empty? (diagnostics {:p-has false
+                              :p-keys (list :seon.config.db/validation-node-limit
+                                            :seon.schema.projection/compile-options)
+                              :h-has false :fc-type nil})))
+    (is (empty? (diagnostics [(atom 1) identity (Object.)])))
+    (is (:pass? observed) (pr-str (:shrunk observed)))))
+
 (deftest vars-and-namespaces-print-by-name
   ;; As clojure.main prints them: #'ns/name and #namespace[name], from their
   ;; final fields, in either world (dogfood cycle 3).

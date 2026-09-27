@@ -713,8 +713,17 @@
   [node]
   (if (< (:depth node) nest-cap) (if (= ::print/set (:face node)) 2 1) 0))
 
+(defn- tuple?
+  "True for a leaf admitted whole as a tuple (`tuple-node`): fipp still lays
+  its members out as a group, so it breaks like a collection."
+  {:malli/schema [:=> [:cat :map] :boolean]}
+  [node]
+  (and (= :leaf (:kind node)) (some? (::print/items (:node node)))))
+
 (defn- extras
-  "Width fipp's line breaks add to a broken node."
+  "Width fipp's line breaks add to a broken node. A broken tuple fills
+  (`seon.print` lays an all-scalar sequence out member by member), so charging
+  every separator as a break bounds what it adds."
   {:malli/schema [:=> [:cat :map] :int]}
   [node]
   (if-not (:broken? node)
@@ -722,6 +731,8 @@
     (case (:kind node)
       (:map :coll) (* (+ (:indent node) (nest node)) (max 0 (dec (+ (:n node) (if (more? node) 1 0)))))
       :entry (+ (:indent node) (if (< (:depth node) nest-cap) 2 0))
+      :leaf (* (+ (:indent node) (if (< (:depth node) nest-cap) 1 0))
+               (max 0 (dec (count (::print/items (:node node))))))
       0)))
 
 (defn- start-column
@@ -739,7 +750,7 @@
   {:malli/schema [:=> [:cat :map :map :int] :boolean]}
   [nodes node width]
   (and (pos? width)
-       (contains? #{:map :coll :entry} (:kind node))
+       (or (contains? #{:map :coll :entry} (:kind node)) (tuple? node))
        (let [parent (get nodes (:parent node))]
          (and (or (nil? parent) (boolean (:broken? parent)))
               (> (:flat node) (- width (start-column nodes node)))))))
@@ -1336,8 +1347,15 @@
                                                      :seon.render.value/structural?] true)
                                      output)
                  line (diagnostic-line path failure 0)]
-             (if-not (:seon.render.value/text projection)
-               (plain-projection (:seon.render/value unit) failure path)
+             ;; A structural projection carries diagnostics only when the
+             ;; floor itself failed (it runs no declared render): print plain
+             ;; text once, with the floor's own distinct failures recorded.
+             (if (or (not (:seon.render.value/text projection))
+                     (seq (:seon.render.value/diagnostics projection)))
+               (update (plain-projection (:seon.render/value unit) failure path)
+                       :seon.render.value/diagnostics into
+                       (remove #(= (ex-message %) (ex-message failure)))
+                       (:seon.render.value/diagnostics projection))
                (-> projection
                    (assoc :seon.render.value/value-text
                           (or (:seon.render.value/value-text projection)
