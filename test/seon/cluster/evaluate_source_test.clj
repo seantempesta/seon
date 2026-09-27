@@ -119,6 +119,40 @@
               (is (some? (:seon.db/db result)) (pr-str (dissoc result :seon.db/db)))
               (is (re-find #"surviving referrers" (str (:seon.cluster.eval/error (first observed))))
                   (pr-str (mapv #(select-keys % [:seon.cluster.eval/ordinal :seon.cluster.eval/error]) observed)))))
+          (testing "a refused multi-form settlement answers its refusal beside every evaluated value (task a-refused-multi-form-settlement-returns-nothing)"
+            ;; WANTED: the direct caller of an opened run keeps the refusal;
+            ;; each form's value and the refusal's diagnostic are its receipts.
+            (let [result (code (str "(+ 1 2)\n(ns-unmap 'my.agents." agent-id " 'refused-helper)\n(+ 3 4)"))
+                  receipts (drive/run-receipts (:seon.db/db result) [(:seon.turn/id result)])]
+              (is (:seon.error/message (:seon.turn.loop/refusal result)) (pr-str (dissoc result :seon.db/db)))
+              (is (= ["3" "nil" "7"] (mapv :seon.eval/shown receipts)) (pr-str receipts))
+              (is (every? :seon.cluster.eval/diagnostics receipts) "the refusal is delivered beside each value")))
+          (testing "a nested in-ns settles: both values return and the namespace SCI moved into exists (task a318b2d38)"
+            (let [target (symbol (str "my.agents." agent-id ".nested"))
+                  result (code (str "(do (in-ns '" target ") 1)\n(+ 1 2)"))]
+              (is (= ["1" "3"] (shown connection result)))
+              (is (some? (:db/id (db/pull (:seon.db/db result) [:db/id] [:seon.ns/name target]))))))
+          (testing "nothing after evaluation realizes more of a value than its bounded print (task d1efccd3ab7e)"
+            ;; WANTED: the value's one walk is the print inside the arm. A
+            ;; post-evaluation walk realized all 200,000 elements here, and
+            ;; `(range)` killed default (landing oom-63809).
+            (code "(def realized (atom 0))\n(map (fn [x] (swap! realized inc) x) (range 200000))")
+            (let [realized (parse-long (first (shown connection (code "@realized"))))]
+              (is (< realized 1000) (str realized " elements realized after the print"))
+              ;; The infinite case only once the finite one proves no later walk.
+              (when (< realized 1000)
+                (let [old-gen #(transduce (comp (filter (fn [pool] (str/includes? (.getName ^java.lang.management.MemoryPoolMXBean pool) "Old Gen")))
+                                                (map (fn [pool] (.getUsed (.getUsage ^java.lang.management.MemoryPoolMXBean pool)))))
+                                          + (java.lang.management.ManagementFactory/getMemoryPoolMXBeans))
+                      before (old-gen)
+                      shown-values (shown connection (code "(range)\n(map inc (range))"))]
+                  (is (= 2 (count shown-values)))
+                  (is (every? #(< (count %) 4000) shown-values) (pr-str shown-values))
+                  (is (< (- (old-gen) before) (* 256 1024 1024)) "old gen stays flat")))))
+          (testing "an unbound Var's value is a value, as in Clojure: nothing walks the result to classify it"
+            (let [result (code "(declare unbound-probe)\n{:u unbound-probe}")]
+              (is (not-any? :seon.cluster.eval/error
+                            (drive/run-receipts (:seon.db/db result) [(:seon.turn/id result)])))))
           (testing "a form's own durable write opens its run first, so its provenance names a written evaluation"
             ;; Under one commit per form the run's rows were written only at
             ;; settlement, and every write a form made refused "Nothing found

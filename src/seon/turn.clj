@@ -91,17 +91,6 @@
       staged (assoc ::reply-blob (:seon.blob/digest staged))
       (nil? staged) (assoc ::reply text))))
 
-(defn unbound-value?
-  "True when a live result contains SCI's unbound value."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
-                         :seon.schema.admission/reason "SCI admission inspects arbitrary result values for nested unbound markers, including scalars and nil; no candidate shape can be required before this inspection."
-                         :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
-  [value]
-  (boolean
-   (some (fn [node]
-           (instance? sci.impl.vars.SciUnbound node))
-         (tree-seq coll? seq value))))
-
 (defn evaluation-facts
   "Project a completed evaluation into its existing settlement facts."
   {:malli/schema [:=> [:cat :seon.turn/evaluation-facts-request]
@@ -110,9 +99,9 @@
            :seon.cluster.eval/ordinal :seon.sci.eval/evaluation
            :seon.problems/form-problem :my.turn/value]
     settlement-evaluation :seon.turn.loop/settlement-evaluation}]
-  ;; AN UNBOUND RESULT IS RED AT ITS PRODUCER. Only the live value can show
-  ;; SCI's unbound marker; its shown text (`#object[...]`) is not EDN, so a
-  ;; reader of the stored receipt could never recover it.
+  ;; NOTHING AFTER EVALUATION WALKS THE LIVE VALUE (task d1efccd3ab7e): the
+  ;; value's only walk is the bounded print inside the evaluation's arm. An
+  ;; unbound Var's value is a value, as in Clojure, shown `#object[...]`.
   (let [error (or (:seon.cluster.eval/error evaluation)
                   (:seon.cluster.eval/error form-problem)
                   ;; A refused install settles its refusal as the value
@@ -120,9 +109,7 @@
                   ;; says the outcome is an error: the stored error is that
                   ;; refusal's shown text, so every reader sees a refusal.
                   (when (= :error (get-in evaluation [:seon.sci.admit/record :seon.eval/outcome]))
-                    (:seon.eval/shown evaluation))
-                  (when (unbound-value? (:seon.sci.admit/value evaluation))
-                    "The admitted result contains an unbound var."))]
+                    (:seon.eval/shown evaluation)))]
     (cond-> {:seon.turn/id id
              :seon.cluster.eval/ordinal ordinal}
       (:seon.eval/origin settlement-evaluation)
@@ -636,6 +623,23 @@
                             :db/id (str "namespace:" namespace-name)))))
         (cons {:seon.ns/name starting-namespace} sources)))
 
+(defn- evaluated-namespaces
+  "One identity-only upsert per namespace the evaluations actually ran in or
+  ended in, as SCI observed them, never as segmentation predicted: a nested
+  `in-ns` moves the next form into a namespace no plan named (task a318b2d38).
+  Placed before the evaluations that reference them, so each lookup ref
+  resolves in the same transaction; an existing namespace is unchanged."
+  {:malli/schema [:=> [:cat [:sequential :map]]
+                  [:vector [:map [:seon.ns/name :seon.ns/name]]]]}
+  [evaluations]
+  (into []
+        (comp (mapcat (fn [{namespace-ref :seon.cluster.eval/ns ending :seon.sci.eval/ending-ns}]
+                        [(when (vector? namespace-ref) (second namespace-ref)) ending]))
+              (filter symbol?)
+              (distinct)
+              (map (fn [namespace-name] {:seon.ns/name namespace-name})))
+        evaluations))
+
 (defn- source-rows
   "The shared namespace rows and the ordered evaluation entities of one plan.
 
@@ -1081,9 +1085,10 @@
   {:malli/schema
    [:=> [:cat [:vector :seon.cluster.eval/settle-request]] :seon.store/transaction-data]}
   [requests]
-  (if (some :seon.program/row requests)
-    (into [] (mapcat receipt-settle-tx) requests)
-    [[:db.fn/call #'receipt-settle-batch-call requests]]))
+  (into (evaluated-namespaces requests)
+        (if (some :seon.program/row requests)
+          (mapcat receipt-settle-tx requests)
+          [[:db.fn/call #'receipt-settle-batch-call requests]])))
 
 (defn- affected-schema-attributes
   "Database attributes derived by the affected schema forms."
@@ -1593,7 +1598,7 @@
         expected {::recorded-run (recorded-run run)
                   ::evaluations (mapv recorded-evaluation prepared-evaluations)}
         namespaces
-        (namespace-rows database starting-namespace sources
+        (namespace-rows database starting-namespace (evaluated-namespaces evaluations)
                         (keep :seon.program/row evaluations))]
     (when-not agent-eid
       (refuse! `record-evaluated-call ::no-such-agent request))

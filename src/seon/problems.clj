@@ -213,11 +213,9 @@
                [?form :seon.cluster.eval/run ?run]
                [?form :seon.cluster.eval/ordinal ?ordinal]]
              db id ordinal)
-        admitted (:seon.sci.admit/value evaluation)
         ordinary-error (:seon.cluster.eval/error evaluation)
         interrupted? (boolean (:seon.cluster.eval/interrupted-at evaluation))
-        unbound? (turn/unbound-value? admitted)
-        red? (or ordinary-error interrupted? unbound?)
+        red? (or ordinary-error interrupted?)
         scoped? (turn/planner-scoped-attempt? db id)
         artifact? (and red?
                        (turn/resume-artifact? db id ordinal interrupted?))]
@@ -231,10 +229,7 @@
                    [?run :seon.turn/agent ?author]
                    [?author :seon.agent/id ?author-id]]
                  db (:db/id form))
-            error (or ordinary-error
-                      (when unbound?
-                        "The admitted result contains an unbound var.")
-                      "The evaluation was interrupted.")]
+            error (or ordinary-error "The evaluation was interrupted.")]
         {:seon.problems/id (turn/problem-id id ordinal)
          :seon.cluster.eval/id (turn/problem-id id ordinal)
          :seon.turn/id id

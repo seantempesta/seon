@@ -1281,9 +1281,9 @@
     (is (some? (:seon.sci.admit/value bare)))
     (is (string? (:seon.eval/shown bare)))
     (is (some? (:unbound admitted)))
-    (is (turn/unbound-value? admitted))
-    (is (nil? (:seon.cluster.eval/error bare))
-        "sci produced a value; E2-PRIME, not the evaluator, classifies it red")))
+    ;; WANTED (task d1efccd3ab7e): an unbound Var's value is a value, as in
+    ;; Clojure; nothing walks the live result after evaluation to call it red.
+    (is (nil? (:seon.cluster.eval/error bare)) "sci produced a value")))
 
 (deftest ^{:seon/tasks #{"0ae6b217abdd"}} a-failed-evaluation-shows-its-whole-error-as-data
   ;; Audit P1: the saved shown text IS the flat error, printed by the floor:

@@ -810,8 +810,12 @@
                                      basis run-id)))))
               (assoc (:seon.turn.loop/refusal answer) :seon.agent/refused-source-agent agent-id)
 
+              ;; A run that opened keeps what its settlement said: a refused
+              ;; settlement's values are its receipts on the basis, and the
+              ;; refusal is answered beside them, never dropped.
               (:seon.turn.loop/outcome answer)
               (cond-> {:seon.turn/id run-id}
+                (:seon.turn.loop/refusal answer) (assoc :seon.turn.loop/refusal (:seon.turn.loop/refusal answer))
                 (:seon.turn.loop/basis answer) (assoc :seon.db/db (:seon.turn.loop/basis answer))
                 ;; answered when applied: durability follows; a caller that
                 ;; needs the committed connection derefs it (`virtual-turn!`)
