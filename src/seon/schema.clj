@@ -393,7 +393,24 @@
    projection derived by changing forms would otherwise carry its parent's
    compiled answers for definitions it no longer has. It needs no key,
    because its key is the value it hangs on. It starts empty: a function's
-   arities derive on first use from the registry (`function-arities-in`)."
+   arities derive on first use from the registry (`function-arities-in`).
+
+   ## Costs
+
+   Measured on default's carried projection, 2026-09-27: 3,898 entries, each
+   keyed by one declaration (2,563 write-attribute plans, 1,262 write
+   validators, 73 others), so it is bounded by the projection's declarations
+   and dies with it. A hit costs 47 ns unarmed, 240 ns armed; the same entry
+   as a `seon.cache` kind cost 1,171 ns armed, and its key would pin what the
+   key names (a compiled schema pins its whole registry) past the
+   projection's life.
+
+   ## Known issues
+
+   `seon.db/write-validator` stores a second plain validator here, contrary
+   to this contract: Malli already caches it on the compiled schema
+   (`malli.core/validator`, `-cached`), 1,262 of the 3,898 entries
+   (tmp/value-hygiene-opus/db-write-validator.patch)."
   [projection]
   (assoc projection
          :seon.config.db/validation-node-limit

@@ -1,0 +1,42 @@
+--- a/src/seon/db.clj	2026-09-27 14:26:21.567039912 -0600
++++ b/src/seon/db.clj	2026-09-27 14:26:21.582601615 -0600
+@@ -3384,12 +3384,6 @@
+               by-identity)))
+         {} forms)))))
+ 
+-(defn- write-validator
+-  [projection compiled]
+-  (schema/projection-cache-value
+-   projection [::write-validator compiled]
+-   #(m/validator compiled)))
+-
+ (defn- invalid-write
+   {:malli/schema [:=> [:cat :seon.schema/projection :qualified-keyword :seon.schema/value :seon.schema/value [:sequential :seon.schema/value] :seon.schema/value :seon.schema/value :seon.schema/value] :seon.error/base]}
+   [_projection attribute compiled value path entity-form cause candidates]
+@@ -3505,7 +3499,7 @@
+             ;; Dependency-owned schema attributes have no authored Malli form;
+             ;; Datahike continues to validate and classify those declarations.
+             (when (and authored
+-                       (not ((write-validator projection form)
++                       (not ((m/validator form)
+                              (write-value database projection attribute value single?))))
+               (invalid-write projection attribute form value path entity-form
+                              ::invalid-value nil)))))))
+@@ -3584,7 +3578,7 @@
+                     identity)]
+        {::decode decode
+         ::validate (when authored
+-                     (write-validator projection
++                     (m/validator
+                                       (if many?
+                                         (schema.datahike/value-schema form)
+                                         (mr/schema (:seon.schema.projection/registry projection) attribute))))}))))
+@@ -3707,7 +3701,7 @@
+       (some
+        (fn [schema-key]
+          (when-not
+-          ((write-validator projection (mr/schema (:seon.schema.projection/registry projection) schema-key)) entity-map)
++          ((m/validator (mr/schema (:seon.schema.projection/registry projection) schema-key)) entity-map)
+            (let [explain (schema/projection-cache-value
+                           projection [::write-explainer schema-key]
+                           #(schema/projection-explainer projection schema-key))
