@@ -2203,14 +2203,19 @@
                                        (merge (when database (stored-derivation-schema-keys database declared))
                                               (derivation-schema-keys declared analyzed))
                                        derivation-inputs)
+                ;; A store that has not installed the key attribute (the first
+                ;; publication after it was declared) holds no keys: every input
+                ;; is stale, and this publication installs the attribute with the
+                ;; keys it writes. An unreadable key is no key either: the input
+                ;; re-derives, and the refusal travels with the result.
+                held-keys (when (and database (contains? (:schema database) :seon.fn.file/derivation-digest))
+                            (db/q '[:find ?path ?key
+                                    :where [?file :seon.fn.file/relative-path ?path]
+                                           [?file :seon.fn.file/derivation-digest ?key]]
+                                  database))
+                key-refusal (when (map? held-keys) held-keys)
                 stale (when (and database (empty? rederive))
-                        (let [held (db/q '[:find ?path ?key
-                                           :where [?file :seon.fn.file/relative-path ?path]
-                                                  [?file :seon.fn.file/derivation-digest ?key]]
-                                         database)
-                              _ (when (map? held)
-                                  (refused! "Stored derivation keys could not be read." held))
-                              stored-keys (into {} held)]
+                        (let [stored-keys (if key-refusal {} (into {} held-keys))]
                           (into #{} (filter #(and (not (contains? selected %))
                                                   (not= (get stored-keys %) (get keyed %))))
                                 derivation-inputs)))
@@ -2254,7 +2259,8 @@
                             published (assoc :seon.source/expected-commit-id
                                              (:seon.source/commit-id published))))]
               (report-source-progress! "branch publication complete")
-              result)))
+              (cond-> result
+                key-refusal (assoc :seon.source/derivation-key-refusal key-refusal)))))
           (finally (when database (d/release-materialized-db database))))))))
       (finally (when committed (d/release-materialized-db committed))))))
 
