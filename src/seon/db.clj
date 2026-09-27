@@ -4345,21 +4345,27 @@
   ([database identity-attrs entity-id]
    (declaration-value (carried-projection database) database identity-attrs entity-id))
   ([projection database identity-attrs entity-id]
+   ;; Components recurse through a local function with the plans read once:
+   ;; one armed call per declaration, where each component cost another
+   ;; (15,797 calls for 4,166 declarations in a 306-file publication).
    (let [plans (write-attribute-plans projection database)
-         [entity-map many]
-         (reduce (fn [[entity-map many] {:keys [a v]}]
-                   (let [installed (get (dbi/-schema database) a)
-                         v (cond (not= :db.type/ref (:db/valueType installed)) v
-                                 (:db/isComponent installed)
-                                 (declaration-value projection database identity-attrs v)
-                                 :else (or (some #(some->> (first (d/datoms database :eavt v %)) :v (vector %))
-                                                 identity-attrs)
-                                           v))]
-                     (if (= :db.cardinality/many (:db/cardinality installed))
-                       [(update entity-map a (fnil conj []) v) (conj many a)]
-                       [(assoc entity-map a v) many])))
-                 [{} #{}] (d/datoms database :eavt entity-id))]
-     (reduce (fn [entity-map a] (update entity-map a (or (::normalize-many (get plans a)) set))) entity-map many))))
+         installed-schema (dbi/-schema database)]
+     (letfn [(value-of [entity-id]
+               (let [[entity-map many]
+                     (reduce (fn [[entity-map many] {:keys [a v]}]
+                               (let [installed (get installed-schema a)
+                                     v (cond (not= :db.type/ref (:db/valueType installed)) v
+                                             (:db/isComponent installed) (value-of v)
+                                             :else (or (some #(some->> (first (d/datoms database :eavt v %)) :v (vector %))
+                                                             identity-attrs)
+                                                       v))]
+                                 (if (= :db.cardinality/many (:db/cardinality installed))
+                                   [(update entity-map a (fnil conj []) v) (conj many a)]
+                                   [(assoc entity-map a v) many])))
+                             [{} #{}] (d/datoms database :eavt entity-id))]
+                 (reduce (fn [entity-map a] (update entity-map a (or (::normalize-many (get plans a)) set)))
+                         entity-map many)))]
+       (value-of entity-id)))))
 
 (defn definition-digest-of
   "The definition digest the writer admits for function or test `row`:
