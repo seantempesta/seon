@@ -83,15 +83,16 @@
          ;; Owner ruling 2026-09-17 (decision 9, option 1): asking about one
          ;; attribute never silently answers about the entity, so every
          ;; uncurated attribute is visibly generic and therefore findable.
-         ;; `:seon.message/to` is declared with no render pair while the
-         ;; message entity map declares `message-form`.
+         ;; `:seon.message/content` declares no render pair while the
+         ;; message entity map declares `message-form`; `:seon.message/to`
+         ;; declares `inbox-form` (the block above).
          (is (= 'seon.render/render-form
-                (selected message :seon.message/to)))
+                (selected message :seon.message/content)))
          (is (= '(seon.db/pull (quote [*]) [:seon.message/id "history-message"])
                 (render/render-form-value
                  (assoc (render-request database ctx message)
                         :seon.render.walk/attribute
-                        :seon.message/to)))))
+                        :seon.message/content)))))
        (testing "the entity floor uses the projection's declared identity"
          (let [agent-entity (db/pull database '[*]
                                      [:seon.agent/id "history-agent"])
