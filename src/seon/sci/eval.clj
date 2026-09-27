@@ -1856,7 +1856,17 @@
                                 (or (:seon.instrument/registration-observation refusal)
                                     (:seon.config/error-key refusal)))
                           (throw failure))
-                        (interpretation-failure function-symbol failure)))))]
+                        (interpretation-failure function-symbol failure)))))
+              ;; An unchanged core row SCI cannot interpret (a same-namespace
+              ;; deftype constructor named by its short class name) is not
+              ;; the branch's change: like the host-bound case above it
+              ;; refuses by name when called, carrying its whole cause,
+              ;; instead of refusing the acquisition and so every later form.
+              failed (when (and (map? result) (not refusal) (not evaluated-row?)
+                                (= :core admission))
+                       result)
+              result (if failed (install-refusing-root! ctx function-symbol failed) result)
+              refusal (or refusal failed)]
           (if (map? result)
             (do (sci/eval-form ctx (list 'ns-unmap (list 'quote namespace-name)
                                        (list 'quote (symbol (name function-symbol)))))

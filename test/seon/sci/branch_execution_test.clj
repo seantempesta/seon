@@ -421,7 +421,14 @@
          (is (every? (:interpreted view) [changed caller unloaded-changed unloaded])
              "each changed row's closure reaches its host-bound caller")
          (is (= #{} (:refused view)) "no host-bound declaration without a compiled Var to override refuses the acquisition")
-         (is (= caller (:seon.sci.eval/refused-function (refusal-of ctx caller))) "an unchanged caller of a changed definition refuses by name when called")))))))
+         (is (= caller (:seon.sci.eval/refused-function (refusal-of ctx caller))) "an unchanged caller of a changed definition refuses by name when called")
+         ;; graph-definition is in datum's closure, not host-bound, and
+         ;; constructs its namespace's deftype by its short class name, which
+         ;; no namespace import fact names: an unchanged core row SCI cannot
+         ;; interpret refuses by name when called, never the acquisition.
+         (is (= 'seon.cluster.agent/graph-definition
+                (:seon.sci.eval/refused-function (refusal-of ctx 'seon.cluster.agent/graph-definition)))
+             "an unchanged core row that fails to interpret refuses by name when called")))))))
 
 (deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program interpreting the reverse closure (77 declarations) of one changed hiccup helper; measured 1,426 ms."
            :seon.test/long-ms 12000}
