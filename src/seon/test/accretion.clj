@@ -415,7 +415,11 @@
    [:=> [:cat :seon.test.accretion/gate-report]
     :seon.test.accretion/install-refused-error]}
   [report]
-  (let [message "Fix the contract or the function and re-evaluate the defn."]
+  ;; The message orients by itself: a reply shows the small error map
+  ;; (`seon.error/reply-value`, 737fe0a5d), never the declared pair's
+  ;; orientation line, so the message names what was refused.
+  (let [message (str "Function install refused for " (:seon.fn/sym report)
+                     ": its gate failed. Fix the contract or the function and re-evaluate the defn.")]
     (vary-meta
     (merge (seon.error.refusal/diagnostic (java.util.Date.) :seon.test.accretion/install `install-refusal
             {:seon.error/message message

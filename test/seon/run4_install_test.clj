@@ -72,7 +72,8 @@
              (is (= [[]] (:seon.test.accretion/arguments result)))
              (is (string? (:seon.test.accretion/expected result)))
              (is (contains? result :seon.test.accretion/actual))
-             (is (= "Fix the contract or the function and re-evaluate the defn."
+             (is (= (str "Function install refused for " (:seon.test.accretion/function-sym result)
+                         ": its gate failed. Fix the contract or the function and re-evaluate the defn.")
                     (:seon.error/message result)))
              (is (str/includes? (:seon.eval/shown definition) "Fix the contract"))
              (is (str/blank? (:seon.cluster.eval/output definition)))
