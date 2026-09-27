@@ -4,6 +4,7 @@
               :display-divisor [:int {:min 1}],
               :display-unit :string,
               :dial :boolean,
+              :default-document [:map {:description "The shipped default document: every dial's decision and the initialization entities. seon.config reads it from config/default.edn when absent; a caller hands another in its place without redefining a Var."}],
               :optional :boolean,
               :per-agent :boolean,
               :apply-request
@@ -15,6 +16,9 @@
                [:seon.config/environment
                 {:optional true}
                 :seon.config/manifest]
+               [:seon.config/default-document
+                {:optional true}
+                :seon.config/default-document]
                [:seon.boot/cluster-name
                 :seon.boot/cluster-name]],
               :cluster [:string {:min 1, :seon.db/identity true :seon.program/row-schema :seon.config/entity}],
@@ -29,6 +33,9 @@
                [:seon.config/environment
                 {:optional true}
                 :seon.config/manifest]
+               [:seon.config/default-document
+                {:optional true}
+                :seon.config/default-document]
                [:seon.boot/cluster-name
                 :seon.boot/cluster-name]],
               :compiled

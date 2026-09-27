@@ -379,12 +379,16 @@
   (schema/declaration-projection (schema.edn/packaged-forms)))
 
 (defn default-population
-  "Read and admit the shipped initialization entity entities."
-  {:malli/schema [:=> [:cat] [:vector :map]]}
-  []
-  (let [projection (declared-projection)]
-    (:seon.config/initialization
-     (admitted-default-document projection (default-document)))))
+  "Read and admit the shipped initialization entity entities, or those of the
+  default `document` handed in its place."
+  {:malli/schema [:function
+                  [:=> [:cat] [:vector :map]]
+                  [:=> [:cat :seon.config/default-document] [:vector :map]]]}
+  ([] (default-population (default-document)))
+  ([document]
+   (let [projection (declared-projection)]
+     (:seon.config/initialization
+      (admitted-default-document projection document)))))
 
 (defn- validate-default-decisions
   [projection document]
@@ -559,7 +563,7 @@
          ::key :seon.boot/cluster-name
          :seon.error/expected "a value for each required configuration key"} assoc :seon.error/declared-schema :seon.config/error)
        nil))
-    (let [document (default-document)
+    (let [document (or (:seon.config/default-document request) (default-document))
           projection (declared-projection)
           initialization (admit-initialization projection (get document initialization-key []))
           compiled (compile-settings projection document request)
@@ -847,7 +851,8 @@
      (apply-compiled!
       connection
       (compile-manifest
-       (cond-> (select-keys request [:seon.config/environment :seon.boot/cluster-name])
+       (cond-> (select-keys request [:seon.config/environment :seon.boot/cluster-name
+                                     :seon.config/default-document])
          (or (seq held) (:seon.config/manifest request))
          (assoc :seon.config/manifest (merge held (:seon.config/manifest request))))))))
   ([request path]

@@ -104,24 +104,6 @@
                            [:seon.config/cluster "flag-test"])]
           (is (= {:seon.config/cluster "flag-test"} entity)))))))
 
-(defn- with-default-document
-  [document body]
-  (let [resource io/resource
-        directory (io/file "tmp/config-test-initialization")
-        packaged-file (io/file directory "default.edn")]
-    (.mkdirs directory)
-    (spit packaged-file (str (pr-str document) "\n"))
-    (try
-      (with-redefs [io/resource
-                    (fn [path]
-                      (if (= config/default-manifest-path path)
-                        (-> packaged-file .toURI .toURL)
-                        (resource path)))]
-        (body))
-      (finally
-        (.delete packaged-file)
-        (.delete directory)))))
-
 (deftest config-loads-the-packaged-population-in-a-fresh-jvm
   ;; The child is a fresh JVM on THIS member's classpath, started in its
   ;; working directory: the committed archive the JVM runs (`user.dir` is
@@ -177,9 +159,7 @@
   (let [base (edn/read-string (slurp config/default-manifest-path))
         entity {:seon.db.process/id "config-population-admission-test"}]
     (testing "a declared entity with exactly one declared identity is admitted"
-      (with-default-document
-        (assoc base config/initialization-key [entity])
-        #(is (= [entity] (config/default-population)))))
+      (is (= [entity] (config/default-population (assoc base config/initialization-key [entity])))))
     (testing "the reserved entry is not a sparse overlay dial"
       (let [data
             (test-support/refusal-data
@@ -219,9 +199,8 @@
               nil]]]
       (testing label
         (let [data
-              (with-default-document
-                (assoc base config/initialization-key population)
-                #(test-support/refusal-data config/default-population))]
+              (test-support/refusal-data
+               #(config/default-population (assoc base config/initialization-key population)))]
           (is (= expected-rule (::config/rule data)))
           (when expected-key
             (is (= expected-key (::config/key data)))))))))
@@ -232,27 +211,25 @@
         document
         (assoc base config/initialization-key
                [{:seon.db.process/id process-id}])]
-    (with-default-document
-      document
-      #(test-support/with-database
-         (fn [connection]
-           (let [first-result
-                 (config/apply! {:seon.boot/cluster-name "default" :seon.db/connection connection})
-                 committed-basis (:max-tx @connection)
-                 second-result
-                 (config/apply! {:seon.boot/cluster-name "default" :seon.db/connection connection})]
-             (is (false? (:seon.reconcile/converged? first-result)))
-             (is (= process-id
-                    (db/q
-                     '[:find ?id .
-                       :in $ ?id
-                       :where [_ :seon.db.process/id ?id]]
-                     @connection
-                     process-id)))
-             (is (true? (:seon.reconcile/converged? second-result)))
-             (is (zero? (:seon.reconcile/operations second-result)))
-             (is (= committed-basis (:max-tx @connection))
-                 "an identical config and population write no transaction")))))))
+    (test-support/with-database
+      (fn [connection]
+        (let [request {:seon.boot/cluster-name "default" :seon.db/connection connection
+                       :seon.config/default-document document}
+              first-result (config/apply! request)
+              committed-basis (:max-tx @connection)
+              second-result (config/apply! request)]
+          (is (false? (:seon.reconcile/converged? first-result)))
+          (is (= process-id
+                 (db/q
+                  '[:find ?id .
+                    :in $ ?id
+                    :where [_ :seon.db.process/id ?id]]
+                  @connection
+                  process-id)))
+          (is (true? (:seon.reconcile/converged? second-result)))
+          (is (zero? (:seon.reconcile/operations second-result)))
+          (is (= committed-basis (:max-tx @connection))
+              "an identical config and population write no transaction"))))))
 
 (deftest config-writer-submits-only-the-fact-difference
   (test-support/with-database
