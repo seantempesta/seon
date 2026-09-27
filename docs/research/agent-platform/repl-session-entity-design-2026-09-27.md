@@ -1,6 +1,6 @@
 ---
 type: research
-status: data-model plan, third revision after owner rulings R1–R6 and the modeling review (2026-09-27); for Astra review, then the owner; no source changed
+status: data-model plan, fourth revision (components all the way down; P0 incremental validation and P1 bounded read evidence as prerequisites) after owner rulings R1–R6 and the modeling review (2026-09-27); for Astra review, then the owner; no source changed
 created: 2026-09-27
 branch: refactor/agent-platform
 source-pin: d7d185a7e (checkout); live default pid 22787, commit 6ab93d43, basis 536879662
@@ -36,7 +36,7 @@ render functions.
 |---|---|---|
 | `:seon.agent/runtime` → `:seon.agent/sci` holding only the current namespace | **`:seon.agent/session`**. It holds the current namespace and the forward, ordered list of its turns. | R1 puts the turns under the session. A SCI world holds no turns, so "sci" would no longer be true. The vocabulary survey (b0c5d4a89 §4.1) recommends `session`, which is nREPL's name for exactly this state. |
 | History by the reverse of `:seon.turn/agent`; delete `:seon.runtime/turns` | **Forward edge `:seon.agent.session/turns`** (ordered by `:seon.turn/ordinal`). `:seon.turn/agent` is deleted. | R1: attach forward from the parent, one direction. |
-| Turns as components (R1's literal wording) | **Turns are forward peer refs from the session. Forms are components of their turn.** | §3 measures what full component ownership costs. Every write in an agent's tree would re-validate its whole history: 1.8 s on root today, and it grows until it hits the validation bound. Owner's choice among priced options (Q1). |
+| (second revision) Turns as forward peer refs, to avoid the validation cost | **Components all the way down: session ⊃ turns ⊃ forms**, which is the shape the story wants (R1). Two of our own defects become prerequisite slices so the model does not bend around them. | §3: the cost measured in the second revision comes from (1) the writer re-validating the whole owning value on any write, and (2) forms storing unbounded read plans. P0 (incremental owned-value validation) and P1 (bounded read evidence) fix those. Peer-ref turns remain only as the fallback if P0 cannot keep the guarantee (Q1). |
 | Each evaluation keeps a `:seon.cluster.eval/ns` **ref** | **`:seon.cluster.eval/namespace`, a symbol value** (new key) | Statement versus token (data-modeling skill lines 40-70). "This form ran in `x`" is an observation that must survive `x`'s deletion. The session's current namespace stays a ref. |
 | Inbox left implicit | Messages stay peer entities with `from`/`to`. The inbox is a **declared attachment**, rendered as one node. | R5 (§9) |
 | Compaction retracts evaluations | Compaction retracts chosen forms and appends a system turn with new forms, in one transaction. Attachments are untouched. `:seon.db/no-history?` is removed from write-once form text. | R3 (§8). Today four form-text attributes are declared no-history, so compaction erases their text permanently. |
@@ -68,7 +68,7 @@ all at level 1, unordered, ~124 edges; runtime → the same 61 turns again; eval
 ```
 root                                                   level 1: one node per attachment (9)
 ├─ session ─── ns → my.agents.root                     component (one, ongoing)
-│    └─ turns 1 … 61   (ordered by :seon.turn/ordinal)  level 2: forward, in order
+│    └─ turns 1 … 61   (ordered by :seon.turn/ordinal)  level 2: components, in order
 │         └─ forms 0 … n  (ordered by ordinal)          level 3: components of their turn
 ├─ plan                                                component
 ├─ settings ── base → config "default"                 component overlay + required ref
@@ -97,7 +97,8 @@ reverse" (`src/seon/render/walk.clj:1033-1081`), which is what draws the star.
 
 ;; the session (identity-less component; its owner is the agent's forward edge)
 #:seon.agent.session{:ns    [:and {:description "The namespace the REPL is in: SCI's *ns* after the last settled form, or where a request moved it."} :seon.db/ref]
-                     :turns [:set {:description "The session's turns, in :seon.turn/ordinal order. Forward peer refs (Q1)."} :seon.db/ref]
+                     :turns [:set {:seon.db/component true :seon.db/component-schema :seon.turn/turn
+                                   :description "The session's turns, in :seon.turn/ordinal order (components; Q1)."} :seon.db/ref]
                      :session [:map {:seon.db/attributes true :seon.render/ai … :seon.render/html …}
                                [:seon.agent.session/ns {:optional true} :seon.agent.session/ns]
                                [:seon.agent.session/turns {:optional true} :seon.agent.session/turns]]}
@@ -133,22 +134,110 @@ Measured with `seon.db/with`, read-only (§14 probe 12):
 | one field on the evaluation holding the 1.5 MB evidence plan | that evaluation + evidence | 137–193 ms |
 | every one of root's 117 evaluations touched once | all evaluation trees | 1,795–1,932 ms |
 
-The last row is what a single turn's settlement would cost if forms were components of turns and turns
-were components of the session. Every write anywhere in root's tree (a plan step, a settings change, the session's
-namespace) would re-validate every form's tree. That costs about 1.8 s today, grows with history, and refuses the
-write once the node bound is reached. That breaks "cost follows changed inputs" (AGENTS "Make cost follow changed
-inputs").
+The rising rows are not a property of the model. They come from two defects of ours, and the model should not
+bend around them (root and owner, 2026-09-27).
+
+**Defect 1: the writer validates owned size, not the change.** Validation proceeds in three steps:
+1. Seeds are every entity in the report's attempted and effective datoms, plus the targets of component datoms
+   (`src/seon/db.clj:3663-3665`).
+2. `owning-ancestors` walks each seed up to its roots, before and after (`:3652-3662`).
+3. The reduce at `:3674-3722` expands **each root's entire component tree** and re-reads and re-validates every
+   row in it (`row` at `:3588-3597`, `write-entity-value` `:3479`).
+
+So a one-field turn write on root expands agent, plan, settings, runtime, 61 turns and their attempts: 369 maps,
+7.6 ms. That grows linearly (114 ms at 2,061 turns) and refuses at `:seon.config.db/validation-node-limit`
+(250,000). This violates AGENTS "Make cost follow changed inputs".
+
+The whole expansion buys nothing that the ref schema needs:
+- `:seon.db/ref` accepts an entity id as well as a nested map (`resources/seon/schemas/seon.db.edn:40`), so a
+  parent row validates with its children as ids.
+- Each child is validated separately against its relation's `:seon.db/component-schema` (the second `some` at
+  `:3754-3770`).
+- An unchanged sibling's validity cannot change unless its datoms or the projection change.
+
+**Defect 2: forms store unbounded read plans.** A form's read evidence stores a `:datahike.read/dependency-plan`
+whose `:seon.db/read-index-patterns` list one pattern per matched entity (`db.clj:678`, `:760-853`). The generated
+read `(seon.error/for-agent …)` therefore stores 1.5 MB per evaluation (17.6 M characters over 451 plans on
+default). No render shows it, yet every validation and every history load decodes it: 137–193 ms for one form,
+1.8 s for 117, and 1.5–1.8 s to load root's history.
+
+With both fixed, the story's shape is affordable: **components all the way down**. P0 and P1 become prerequisites
+of the shape change P3 (§12).
+
+### P0: incremental owned-value validation (prerequisite)
+
+**Where.** `write-owned-values-error`, `src/seon/db.clj:3540-3760`: replace the root expansion (`:3674-3722`) and
+keep owner discovery (`owners-of :3621-3651`, `owning-ancestors :3652-3662`).
+
+**The rule.** Let **C** be the entities this transaction changed:
+- the `:e` of every attempted or effective datom, including cascaded and swept retractions, which Datahike writes
+  into `:tx-data` (`db/transaction.cljc:814-820`);
+- the `:v` of every component datom added or retracted.
+
+Then:
+1. **Validate every changed row.** Each nonempty row in C is validated after the transaction against:
+   - its identity schemas, when it is a root (`write-entity-error :3502`);
+   - otherwise its owning relation's `:seon.db/component-schema`, where the owner is found after.
+   Children are validated as refs (ids), not expanded.
+2. **Owner invariants for the changed entities only**, both before and after, as the guide §4 requires:
+   - at most one owner after (`::multiple-component-owners`);
+   - no cycle along the owner chain from each changed entity (the chain walk already visits it; a revisit is
+     `::component-cycle`);
+   - a nonempty identity-less row in C with no owner after is `::unowned-entity`;
+   - a component edge in C pointing at an empty row is `::missing-component`;
+   - a changed child whose row became empty re-validates its before-owner's row, because the owner may require
+     it (the required-key refusal of guide §3 row 3).
+3. **The bound counts work done.** `charge!` charges the changed rows, their owner-chain hops and their direct
+   child edges, not whole trees. `::validation-node-limit` then bounds the transaction's size, not the owner's
+   history.
+4. **Unchanged.** The arity gate's changed-roots walk (`:3724-3752`) already walks ancestors, not trees. The
+   final-report hook and the attempted-datom rule (datahike skill lines 276-281) are unchanged.
+
+**Proof obligations** (Astra reviews these before code):
+- **(a) A parent's validity is independent of its children's content.** Every component attribute's form is
+  `:seon.db/ref` or a collection of it, so no entity schema reads a child's attributes. Enforce this where the
+  projection is compiled (`schema.clj`, beside `assert-entity-partition! :1517`): a component attribute whose form
+  is anything else refuses. Only then is skipping unchanged children sound.
+- **(b) Every entity whose final value differs is in C.** That includes cascades (`retract-components`
+  `db/transaction.cljc:832-836`), incoming-ref sweeps (`:1003-1015`) and upsert merges. Datahike emits each as a
+  datom, so C is complete by construction; a regression per path proves it.
+- **(c) An unchanged row validated at its own write stays valid** while the projection is unchanged. A
+  transaction that changes the projection (schema adoption) validates every entity whose schema changed, as
+  adoption already does through `attribute-change-tx` (`schema-attribute-change-tx turn.clj:1097`, `seon.cluster/attribute-change-tx`).
+- **(d) Before and after owner discovery is kept** for unlinks and moves (guide §4: "A child-only edit or unlink
+  finds owners in both before and after databases").
+
+**Cost and target.** About +40/−60 lines in `db.clj`, plus the (a) assertion in `schema.clj` (~10 lines).
+Measured targets for R8:
+- a one-field turn write ≈ a one-entity write (the message row: 2.6–3.9 ms today), independent of history;
+- at 61 and 2,061 turns, within 20% of each other;
+- a whole turn settlement ≈ that turn's forms, not the session.
+
+### P1: bounded read evidence (prerequisite)
+
+**Where.** `seon.db/read-evidence` (`db.clj:928`) and pattern capture (`:760-853`).
+
+**The rule.**
+- A stored plan keeps at most K entity-level patterns per source. Past K it widens them to attribute-level
+  patterns (drop `:seon.db/pattern-entity`).
+- Widening is conservative: the currency check (`read-evidence-current?`, `db.clj:~1100-1160`) then reports
+  "changed" more often, never less, so refresh may re-run a read but never misses a change.
+- K is a declared dial; the design review picks it.
+- History and refresh readers stop pulling plans they do not use (`eval.clj:18-20` default selector;
+  `latest-evaluations turn.clj:2054-2056`).
+
+**Targets:**
+- the largest stored plan is bounded (on root, from 1.5 MB to kilobytes);
+- `seon.eval/of-agent` on root drops from 1.55–1.82 s to the selector-only 0.41 ms order;
+- validating one form drops from 137 ms to about a message write.
+
+### Options, re-priced
 
 | Option | Guarantee | Cost | Sacrifice |
 |---|---|---|---|
-| **A. Everything a component** (R1 literally: agent ⊃ session ⊃ turns ⊃ forms) | pull expands the whole story; deleting the agent cascades history | 1.8 s per write on root today, O(history), refusal at the bound; unusable without D | — |
-| **B (recommended). The session is a component of the agent; `session → turns` is a forward peer ref; forms are components of their turn** | forward story and graph; a write validates only what it owns (a turn write validates its forms; a session write validates agent + plan + settings + session) | ~+10 lines over A; per-write validation bounded by one turn | deleting an agent does not cascade its turns. Agents are archived, never deleted (`seon.agent/archive!`), and R3 keeps history, so no reader needs that cascade. Pulls must name `:seon.agent.session/turns` in a selector to expand turns; the render does |
-| C. Turns point back to the session (today's direction, renamed) | bounded | ~0 | a reverse edge; the graph needs grouping again; contradicts R1 |
-| D. Make the validator incremental: re-validate only changed entities and their owner chain, and reuse siblings whose datoms and projection did not change | keeps A's shape | `src/seon/db.clj`, ~+40 lines, a new proof that the complete-value guarantee survives | a correctness-critical writer change; defers the choice |
-
-Recommendation: **B now**. D stays open if the owner wants A's cascade later. Forms stay components of their turn
-because a turn owns its forms' lifecycle (compaction retracts them, §8) and a turn's form count is small. The read
-evidence under each form is the expensive part (137 ms for one form), which P1 bounds.
+| **A (recommended). Components all the way down (agent ⊃ session ⊃ turns ⊃ forms), after P0 and P1** | pull and cascade tell the whole story; deleting an agent retracts its history (kept in history); validation follows the change | P0 ~+50/−60 lines in `db.clj`/`schema.clj` and its proof; P1 in `db.clj` | a correctness-critical writer change lands first. Pull expansion is whole-tree: any pull of an agent without a selector expands its history, so readers use selectors, and the pull work bound (`pull_api.cljc` `charge-work!`) reports an elision past it |
+| B (fallback). Session a component; session → turns forward peer refs; forms components of turns | bounded validation without P0 | ~+10 lines over A | no cascade from agent to turns; the story has one peer edge. Use only if P0's proof obligation (a) or (b) fails in review |
+| C. Turns point back to the session | bounded | ~0 | reverse edge; the star returns; contradicts R1 |
 
 Data-modeling skill line 179 (and data-oriented skill lines 66-70) say "History, unanswered wakes, and routed
 faults remain queries". Under R1 that is **stale for history**: history becomes a forward walk from the agent. It
@@ -165,7 +254,7 @@ data-modeling skill lines 40-70.
 |---|---|---|---|---|---|
 | agent → session | component | statement | — | cascades the session | the session is part of the agent's value (skill lines 97-99) |
 | session → current ns (`:seon.agent.session/ns`) | optional peer ref, **moved by settlement** | statement: the agent is in `x` | sweeps; the next turn starts at home | — | a living relation the next turn acts on; the settlement writes its successor each turn (guide §3 row 5) |
-| session → turns | optional peer ref, cardinality-many, ordered by `:seon.turn/ordinal` | statement | sweeps the edge | turns remain as identified rows | §3 option B; ordinals are how cardinality-many carries order (skill lines 91-92; datahike skill lines 329-330) |
+| session → turns | component, cardinality-many, ordered by `:seon.turn/ordinal` | statement | — (retracting a turn removes it from the session) | cascades turns, their forms and evidence | the session's turns are part of its value (R1); ordinals carry order (skill lines 91-92; datahike skill lines 329-330). Needs P0 (§3) |
 | turn → forms | component | statement | — | cascades forms and their evidence | owned; compaction retracts forms |
 | form → evidence | component | statement | — | cascades | owned |
 | turn → attempts | component | statement | — | cascades | unchanged |
@@ -218,7 +307,7 @@ Legend:
 | `:seon.config/base` | **N** | `creation-tx` | `seon.ai/agent-settings` (§7) |
 | `:seon.agent/runtime` | **M** → `:seon.agent/session` | `creation-tx :237` | — |
 | `:seon.runtime/agent` | **D** | `creation-tx :237`; `turn.clj:466, 1622` | none but upsert: a back-ref |
-| `:seon.runtime/turns` | **M** → `:seon.agent.session/turns` (forward, non-component) | `turn.clj:465-467, 1622-1623` | `eval.clj:49`, `cluster/status.clj:137-142`, `cluster/agent.clj:335-342`, `render/web.clj:3211`, `render/transcript.clj:1149, 2431`, `turn.clj:575, 2059` |
+| `:seon.runtime/turns` | **M** → `:seon.agent.session/turns` (component, ordered) | `turn.clj:465-467, 1622-1623` | `eval.clj:49`, `cluster/status.clj:137-142`, `cluster/agent.clj:335-342`, `render/web.clj:3211`, `render/transcript.clj:1149, 2431`, `turn.clj:575, 2059` |
 | `:seon.runtime/trigger` | **D** | `open-call turn.clj:468` | only the runtime render (`transcript.clj:1040-1060`), which re-sends a copy of the newest turn's trigger (~240 tokens a turn) |
 | `:seon.runtime/listens` | **M** → `:seon.agent/listens` (component) | `issue.clj:1468` | wake routing `cluster/wake.clj:427-429`; issue budget `issue.clj:1456`. 0 datoms on default |
 | `:seon.agent.session/ns` | **N** | settlement; a move request's open (§8) | every turn start; the namespace half of context; the `ns=>` prompt |
@@ -405,7 +494,7 @@ runs).
 |---|---|---|
 | session, plan, settings, forms, evidence as components; cascade and pull expansion | data-modeling skill lines 30, 97-99; datahike skill lines 380-391; guide §4 (lines 122-143) | yes |
 | no back-ref identities on components; derive the parent from the forward edge | datahike skill lines 383-384 and 392-400; guide line 137 | yes. **Conflicts with turn PRD §18c** ("Components the agent writes to carry an identity derived from the owner … `:seon.runtime/agent`"). The plan follows the skill; writers use transaction functions |
-| turns as forward peer refs, not components | data-modeling skill lines 97-99 ("shared, independently identified values stay behind ordinary refs"); guide §4; §3 measurements | yes (turns carry `:seon.turn/id` and are referenced by occurrences and captures) |
+| turns as components of the session | data-modeling skill lines 97-99 ("Choose components when children belong to one parent's value"); guide §4 | yes: a turn belongs to one session. Other entities (occurrences, captures) reference it by ordinary ref, which the skill allows for identified owned rows. Affordable only with P0; the guide §4 guarantee is kept by P0's proof obligations |
 | order by ordinal on members | data-modeling skill lines 91-92; datahike skill lines 329-330; guide §6 (lines 176-177) | yes |
 | identity-less session component | datahike skill lines 88-90 (unowned identity-less rows refuse; owned ones validate by component schema); `schema.clj:1517-1537` requires a partition only for identity-bearing schemas | yes |
 | form namespace, renderer as values | data-modeling skill lines 40-70, 33 | yes; supersedes "lookup refs everywhere" |
@@ -490,9 +579,10 @@ same commit as their writer conversions.
 
 | # | Slice | Owner files | Tests | Adoption / RESET |
 |---|---|---|---|---|
-| P1 | Read evidence off the history path; bounded plans (own design + review) | `src/seon/db.clj`, `src/seon/eval.clj`, `src/seon/turn.clj` | eval, turn, read-evidence currency; clock row for `of-agent` (1.55–1.82 s today) | none |
+| **P0** | **Incremental owned-value validation (prerequisite, §3)**: validate changed rows and owner invariants only; the (a) component-form assertion | `src/seon/db.clj` (`write-owned-values-error :3540-3770`), `src/seon/schema.clj` (beside `:1517`) | `seon.db` write-admission and component tests (cascade, sweep, unlink, move, multiple owners, cycle, unowned row, missing child, adoption); R8 | none |
+| **P1** | **Bounded read evidence (prerequisite, §3)**: at most K entity patterns per source, widened past K; history and refresh selectors drop plans | `src/seon/db.clj` (`:760-853`, `read-evidence :928`), `src/seon/eval.clj`, `src/seon/turn.clj` | read-evidence currency and refresh tests; clock rows for `of-agent` (1.55–1.82 s today) and one-form validation (137 ms) | none; existing large plans stay until the P3 reset |
 | P2 | Session namespace and form namespace: `:seon.agent.session/ns` on today's runtime component; `:seon.cluster.eval/namespace` symbol; delete the plan-time ns guess, `starting-ns`, stored `ending-ns`, `previous-ending-namespace`, `fold-namespace`, the submit-path lookup; the move-namespace request key; system turns and segmentation start at the session; remove `no-history?` from form text | `seon.runtime.edn`, `seon.cluster.eval.edn`, `seon.turn.edn`, `seon.agent.edn`, `turn.clj`, `cluster/agent.clj`, `repl.clj`, `render/transcript.clj`, `bootstrap.clj`, `issue.clj`, `cluster.clj`, `fn.clj` (eval-ns readers `:1226-1308`); ~20 test files | R1–R4, R6 | accretion + retirement; no reset |
-| P3 | The shape: rename runtime → `:seon.agent/session`; forward `turns` with `:seon.turn/ordinal`; `:seon.turn/forms` component; delete `:seon.turn/agent`, `:seon.cluster.eval/run`, `:seon.runtime/trigger`, `/agent`; move listens; rename `render-run-ai/html` → `render-turn-ai/html`; scripted sweep of 47 + 72 source mentions and ~120 test files | `seon.runtime.edn` (retired), `seon.agent.edn`, `seon.turn.edn`, `seon.cluster.eval.edn`, `turn.clj`, `eval.clj`, `cluster/status.clj`, `cluster/agent.clj`, `cluster/wake.clj`, `cluster/message.clj`, `issue.clj`, `problems.clj`, `repl.clj`, `prompt.clj`, `fault.clj`, `oversight.clj`, `test.clj`, `render/web.clj`, `render/transcript.clj`, `context.clj`, tests | turn, transcript, status, wake, message, web debug; R8, R9 | **RESET NEEDED**: existing turns carry only the retired reverse edge. Data is disposable; no migration |
+| P3 | The shape (after P0 and P1): rename runtime → `:seon.agent/session`; `turns` as components with `:seon.turn/ordinal`; `:seon.turn/forms` component; delete `:seon.turn/agent`, `:seon.cluster.eval/run`, `:seon.runtime/trigger`, `/agent`; move listens; rename `render-run-ai/html` → `render-turn-ai/html`; scripted sweep of 47 + 72 source mentions and ~120 test files | `seon.runtime.edn` (retired), `seon.agent.edn`, `seon.turn.edn`, `seon.cluster.eval.edn`, `turn.clj`, `eval.clj`, `cluster/status.clj`, `cluster/agent.clj`, `cluster/wake.clj`, `cluster/message.clj`, `issue.clj`, `problems.clj`, `repl.clj`, `prompt.clj`, `fault.clj`, `oversight.clj`, `test.clj`, `render/web.clj`, `render/transcript.clj`, `context.clj`, tests | turn, transcript, status, wake, message, web debug; R8, R9 | **RESET NEEDED**: existing turns carry only the retired reverse edge. Data is disposable; no migration |
 | P4 | Graph and renders: `walk/graph` follows forward attributes and declared attachments only, each reverse collection one node; the namespace half reads the session; the attachment renders (§6); inbox restricted to unanswered | `render/walk.clj`, `render/transcript.clj`, `cluster/message.clj`, `cluster/agent.clj` (agent render), `seon.agent.edn` units | R5, R7; debug-page graph screenshot = §1 | none |
 | P5 | Settings link and render (§7) | `seon.config.edn`, `seon.config.*.edn`, `ai.clj`, `cluster/prompt.clj`, `agent.clj`, `cluster/agent.clj`, the A-list owner files | config, prompt, message, plan, issue, blob; R10 | **RESET NEEDED** (existing overlays lack `base`); batch with P3 |
 | P6 | Root oversight: `:seon.agent/oversees` and the summary render | `seon.agent.edn`, `cluster/host.clj`, `issue.clj`, `cluster.clj`, `cluster/agent.clj` | R11 | covered by the P3/P5 reset |
@@ -500,16 +590,21 @@ same commit as their writer conversions.
 | P8 | Dead context selection | `context.clj`, `seon.context.contribution.edn` | context | retirement |
 
 **Order.**
-1. P2 first: it fixes the confirmed data loss of a318b2d38.
-2. P3 + P5 + P6 land together behind one RESET, batched by root.
-3. P4 follows.
-4. P1 runs in parallel once reviewed, after P2 releases `turn.clj`.
+1. P2 first: it fixes the confirmed data loss of a318b2d38 and needs neither prerequisite.
+2. P0 and P1 in parallel with P2's review: they own different code in `db.clj`, so they land serially in that file.
+   They are prerequisites of P3. P1's `turn.clj` selector change waits for P2 to release that file.
+3. P3 + P5 + P6 land together behind one RESET, batched by root, only after P0's R8 and P1's clock rows pass.
+4. P4 follows.
 5. P7 and P8 come last.
+6. If P0's review finds proof obligation (a) or (b) cannot hold, P3 lands option B instead (§3 table); nothing
+   else in the plan changes.
 
 **Sizes** (production, approximate):
 
 | Slice | Lines |
 |---|---|
+| P0 | +50/−60 |
+| P1 | +30/−10 (design review sets K) |
 | P2 | +50/−150 |
 | P3 | +60/−90 (mostly scripted query rewrites) |
 | P4 | +40/−40 |
@@ -522,9 +617,14 @@ P3's test sweep is the largest cost: ~120 files naming `:seon.turn/agent` or `:s
 scripted rewrite, then lint, load and hand-fix.
 
 **Risks.**
-- **Pull expansion.** Any wildcard pull of an agent now expands session → turns only if `turns` is a component.
-  Under option B it is not, so `[*]` on an agent stays small. A selector that names `:seon.agent.session/turns`
-  without a sub-selector returns `{:db/id n}` per turn (datahike skill lines 217-225).
+- **P0 is the most correctness-critical change in the plan.** It narrows what the final writer re-checks. Its
+  proof obligations (§3) and one regression per refusal class (cascade, sweep, unlink, move, multiple owners,
+  cycle, unowned row, missing child, schema adoption) must pass before P3 relies on it.
+- **Pull expansion.** With turns as components, pulling an agent with a wildcard, or naming a component attribute
+  without a sub-selector, expands its whole history: `pull_api.cljc:346-351`, datahike skill lines 217-225. No
+  production reader pulls an agent with a wildcard today (searched src and script). The render and the graph name
+  sub-selectors. A wildcard pull by an agent at the REPL is bounded by the pull work charge
+  (`pull_api.cljc` `charge-work!`), and the floor reports the elision.
 - **Ordinal writes.** The ordinal is computed inside the open writer (a count of the session's turns); concurrent
   opens are already serialized by the one-open-turn fence (`open-call :448-458`).
 - **Opening bytes** change once (turn PRD §16a).
@@ -545,8 +645,10 @@ scripted rewrite, then lint, load and hand-fix.
   earlier forms still print `probe.b=>` (value, not ref).
 - **R7 no flat star.** The graph of an agent with 50 turns, 30 messages and 3 schedules has one level-1 node per
   attachment, and the turns at level 2 are in ordinal order.
-- **R8 bounded validation.** A settlement write on an agent with 2,000 turns validates in time independent of the
-  turn count (compare 61 and 2,061 turns within a declared bound).
+- **R8 bounded validation (P0).** With turns as components, a one-field turn write costs about a one-entity write
+  (2.6–3.9 ms on today's default). Its time at 61 and 2,061 turns is within 20%. It still refuses each class the
+  guide §4 lists: multiple owners, cycle, unowned identity-less row, missing child, and an owner whose required
+  child was retracted.
 - **R9 compaction.** One transaction retracts chosen forms and appends a system turn; plan, settings, messages and
   session namespace are unchanged; the retracted forms' source is readable `as-of` before it.
 - **R10 settings.** Switching the model with `settings!` changes the next request; `config/apply!` changes an
@@ -556,12 +658,15 @@ scripted rewrite, then lint, load and hand-fix.
 ## 14. Owner questions (few, priced)
 
 **Q1. Turns under the session.**
-- (a) *Recommended*: forward peer refs, ordered, with forms as components of the turn. ~+10 lines; bounded
-  validation. Deleting an agent does not cascade its turns (agents are archived, not deleted).
-- (b) All components: pull and cascade tell the whole story. Validation is O(history): 1.8 s per write on root
-  today, refusing at 250,000 nodes, unless (c).
-- (c) (b) plus an incremental validator in `seon.db`. ~+40 lines in the most correctness-critical writer, with a
-  new guarantee proof.
+- (a) *Recommended*: components all the way down (session ⊃ turns ⊃ forms), after prerequisites P0 (incremental
+  validation, ~+50/−60 lines in `db.clj` and `schema.clj`, with four proof obligations) and P1 (bounded read
+  evidence).
+  - Validation then follows the change: target ≈ 3 ms per turn write, independent of history.
+  - Pull and cascade tell the whole story.
+- (b) Fallback: turns as forward peer refs, forms components of the turn. ~+10 lines; bounded without P0; no
+  cascade from agent to turns. Taken only if P0's review fails.
+- (c) Components without P0: rejected. Every write re-validates the owner's whole history (7.6 ms for 61 empty
+  turns, 114 ms for 2,061, 1.8 s once 117 forms are owned), refusing at 250,000 nodes.
 
 **Q2. Form namespace as a value.**
 - (a) *Recommended*: a `:seon.cluster.eval/namespace` symbol; history survives namespace deletion. This reverses
