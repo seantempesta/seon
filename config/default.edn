@@ -12,12 +12,6 @@
  :seon.config.db/write-time-limit-ms 600000
  :seon.config.db/validation-node-limit 250000
 
- ; Unit: queued compute submissions.
- ; Provenance: core.async.flow alpha3 uses a fixed buffer of 10 per channel;
- ; the scheduling testbed preserved it because a full channel parks the
- ; submitter and loses no work.
- :seon.config.flow.compute/queue-depth 10
-
  ; This symbolic decision is resolved by the manifest compiler to the machine's
  ; available processors — because a shipped literal is only ever right
  ; on the machine that shipped it. A manifest may override with an
@@ -153,14 +147,6 @@
  ; contract cases in their candidate context before installation. The seed
  ; rides the terminal receipt, so every failure is exactly reproducible.
  :seon.config.test/auto-check-cases 25
-
- ; THE ONE BEYOND-CLOSURE ADMISSION BUDGET for generated-opening membership:
- ; whole-entry content admitted past the explained closure, priced in
- ; estimated tokens (seon.ai.tokens/estimate). Ruled at exactly 1024 by the
- ; evolving-session implementation PRD (generation-state slice); T3 intent
- ; membership admits ready plan items' :about subjects through this same
- ; gate — deliberately no second dial.
- :seon.config.bootstrap/beyond-closure-token-budget 1024
 
  ; EVERY TURN AND ORDERLY AGENT STOP WAIT ON THE TURN'S OWN COMPLETION EVENTS.
  ; This is the loud last-resort bound when the permit, completion, or

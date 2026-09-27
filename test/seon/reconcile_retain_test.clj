@@ -14,7 +14,7 @@
    (fn [connection]
      (support/seed-cluster! connection "retain-a")
      (support/seed-cluster! connection "retain-b")
-     (support/seed-cluster! connection "retain-a" {:seon.config.flow.compute/queue-depth 17})
+     (support/seed-cluster! connection "retain-a" {:seon.config.flow.io/queue-depth 17})
      (let [database (db/db connection)
            configs (set (db/q '[:find [?name ...] :where [_ :seon.config/cluster ?name]] database))
            owned (set (db/q '[:find [?name ...]

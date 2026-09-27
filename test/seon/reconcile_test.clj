@@ -77,7 +77,7 @@
    (config/compile-manifest
     {:seon.boot/cluster-name cluster
      :seon.config/manifest
-     {:seon.config.flow.compute/queue-depth queue-depth
+     {:seon.config.flow.io/queue-depth queue-depth
       :seon.config.flow.compute/concurrency 18}})))
 
 (deftest fixture-provenance-is-real-transaction-metadata
@@ -91,7 +91,7 @@
               '[:find ?process-id .
                 :where
                 [?entity :seon.config/cluster "provenance-proof"]
-                [?entity :seon.config.flow.compute/queue-depth _ ?tx]
+                [?entity :seon.config.flow.io/queue-depth _ ?tx]
                 [?tx :seon.db/process ?process]
                 [?process :seon.db.process/id ?process-id]]
               @connection))))))
@@ -165,15 +165,15 @@
         (transact-as! connection
                       unmanaged-process
                       [{:db/id [:seon.config/cluster "drifted"]
-                        :seon.config.flow.compute/queue-depth 99}])
+                        :seon.config.flow.io/queue-depth 99}])
         (is (= 99
-               (:seon.config.flow.compute/queue-depth
+               (:seon.config.flow.io/queue-depth
                 (db/pull @connection
                         '[*]
                         [:seon.config/cluster "drifted"]))))
         (reconcile/reconcile! connection (request desired))
         (is (= 10
-               (:seon.config.flow.compute/queue-depth
+               (:seon.config.flow.io/queue-depth
                 (db/pull @connection
                         '[*]
                         [:seon.config/cluster "drifted"]))))))))
