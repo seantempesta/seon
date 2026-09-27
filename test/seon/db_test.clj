@@ -7,6 +7,7 @@
             [datahike.api :as d]
             [datahike.core :as datahike]
             [datahike.db]
+            [datahike.db.utils :as db.utils]
             [datahike.pull-api :as pull-api]
             [datahike.store :as datahike.store]
             [datahike.tools :as datahike.tools]
@@ -2019,6 +2020,21 @@
        (is seeded? "the write's report seeded the head's base before any read")
        (is (contains? edges ['sample.seed/caller ['clojure.core/str 1]]))
        (is (= built (@#'db/arity-base storage-q head)))))))
+
+;; CLASS: a silent empty from an index the attribute does not have. Datahike
+;; answers an AVET read of an unindexed attribute with no datoms, which every
+;; reader takes for "no such fact" (a test's members would read as never run).
+(deftest an-avet-read-of-an-unindexed-attribute-refuses
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)]
+       (is (false? (db.utils/indexing? database :seon.fn/keywords))
+           "the subject attribute is installed without an index")
+       (let [answer (db/datoms database :avet :seon.fn/keywords :seon.fn/sym)]
+         (is (map? answer) "the read answers an error value, not an empty seq")
+         (is (:seon.error/at answer)))
+       (is (vector? (db/datoms database :avet :seon.fn/calls 'clojure.core/str))
+           "an indexed attribute still answers its datoms")))))
 
 (deftest a-first-population-is-judged-by-the-declarations-it-installs
   ;; CLASS: a writer read that derives its projection from a value holding no
