@@ -557,7 +557,7 @@
            (= (meta left) (meta right))
            (= left right))))
 
-(declare missing-contract install-function-contract!)
+(declare missing-contract install-function-contract! interpretation-error)
 
 (defn- program-value?
   "Whether a definition's root makes it a program declaration: a function or
@@ -1346,6 +1346,12 @@
   (when-let [spec-edn (:seon.fn/spec committed)]
     (let [function-symbol (:seon.fn/sym committed)
           sci-var (sci/resolve ctx function-symbol)
+          ;; Arming wraps the Var's root: a context without the Var refuses
+          ;; by name, never dereferences nil.
+          _ (when-not sci-var
+              (let [refusal (interpretation-error
+                             function-symbol "this context holds no Var to arm its contract on.")]
+                (throw (ex-info (:seon.error/message refusal) refusal))))
           {:keys [:seon.sci.admit/caps
                   :seon.config.error/max-evidence-bytes]}
           (instrumentation-config db)
@@ -3803,10 +3809,15 @@
      ;; A fork of an acquired program holds the program of the value it is
      ;; forked onto: rows committed after the base was acquired are acquired
      ;; here (`acquire!` answers at once when the program is equal). An
-     ;; unacquired base stays lazy.
+     ;; unacquired base stays lazy. A fork onto the commit the base's value
+     ;; is based on already holds that program: a run's working value is
+     ;; uncommitted over it (`seon.turn/with-settled`), and re-acquiring the
+     ;; commit would drop the run's earlier declarations from a gate's copy.
      ;; Only a database that cannot store the acquisition's refusal records
      ;; refuses the fork; the refusals themselves are recorded values.
-     (when (::acquisition @(::kernel/program-snapshot ctx))
+     (when (let [snapshot @(::kernel/program-snapshot ctx)]
+             (and (::acquisition snapshot)
+                  (not= (db/commit-id db) (db/commit-id (:seon.db/db snapshot)))))
        (when-let [failure (::acquisition-recording-error
                            (acquire! {:seon.sci.eval/ctx ctx :seon.db/db db}))]
          (throw (ex-info "Program acquisition could not record its refusals."

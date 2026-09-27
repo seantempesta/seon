@@ -349,6 +349,22 @@
         (is (= "16" (last shown)) "the first body stays installed within the run")
         (is (= ["16"] (hosted-run! hosted "(run-square 4)")) "and after it settles")))))
 
+(deftest a-run-gates-a-definition-on-its-earlier-schema
+  ;; Before, the gate's disposable copy re-acquired the run's basis commit
+  ;; (47d9d4419): the run's uncommitted `register!` was dropped from the copy's
+  ;; projection and arming `run-v` refused the whole run by that schema's name.
+  (with-host-world {}
+    (fn [{:keys [handle branch!]}]
+      (let [hosted (host-on! handle (branch!) "mcp/one-run-schema")
+            {receipts :receipts :as result}
+            (hosted-run-receipts hosted (str "(seon.schema/register! :probe.run/v [:int {:min -8 :max 8}])\n"
+                                             "(defn run-v \"Identity on v.\" {:malli/schema [:=> [:cat :probe.run/v] :int]} [x] x)\n"
+                                             "(run-v 3)"))]
+        (is (= 3 (count receipts)) (pr-str result))
+        (is (not-any? :seon.cluster.eval/error receipts)
+            (pr-str (mapv :seon.cluster.eval/error receipts)))
+        (is (= "3" (:seon.eval/shown (last receipts))))))))
+
 (deftest ^{:seon.test/long "One nested seon.test/run (checkpoint world + one member); 60 s is merge-test's measured bound for one nested run."
            :seon.test/long-ms 60000}
   an-agents-check-runs-the-tests-reaching-its-change

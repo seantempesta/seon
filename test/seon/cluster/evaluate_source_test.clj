@@ -143,7 +143,11 @@
               (is (:seon.turn/id result) (pr-str result))
               (is (= 1 (count (drive/run-receipts (:seon.db/db result) [(:seon.turn/id result)]))))))
           (testing "the run is written in the one transaction that settles it; submission commits nothing"
-            (let [before (db/db connection)
+            ;; The reply is answered when its settlement is applied; its
+            ;; durability follows (8cedbee81), so the connection may not yet
+            ;; hold the previous run. The basis before is the previous reply's
+            ;; own applied value, one commit behind this run's.
+            (let [before (:seon.db/db (code "(+ 1 1)"))
                   result (code "(+ 1 2)")
                   ;; the reply's own value: the settlement applied, one past the basis before
                   after (:seon.db/db result)
