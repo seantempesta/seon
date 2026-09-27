@@ -58,7 +58,9 @@
   (fn [connection]
    (let [key :turn-schema-cache/value
          schema-form [:int {:seon.db/index true}]
-         form (pr-str schema-form)
+         ;; The writer stores a declaration's canonical printing, without
+         ;; namespace maps, whatever the runner binds.
+         form (binding [*print-namespace-maps* false] (pr-str schema-form))
          observed (atom nil)
          before (seon.db/db connection)
          _ (seon.schema/projection-from-database before (seon.db/carried-projection before))
@@ -87,8 +89,8 @@
     (is (= form (:seon.test/form @observed)))
     (is (= schema-form (:seon.test/projected-form @observed)))
     (is (nil? (:seon.test/cache-identity @observed)))
-    (is (= {:seon.schema/key key}
-           (seon.db/pull after [:seon.schema/key :seon.schema/form] [:seon.schema/key key])))
+    ;; Deletion retracts the whole declaration entity (row-tx, a95f8dee0).
+    (is (nil? (seon.db/pull after [:seon.schema/key :seon.schema/form] [:seon.schema/key key])))
     (is (not (contains? (:schema after) key)))
     (is (map? forms))
     (is (not (contains? forms key)))))))
