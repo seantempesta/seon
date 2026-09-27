@@ -10,6 +10,7 @@
             [datahike.api :as d]
             [datahike.constants :as const]
             [seon.db :as db]
+            [seon.fn :as seon.fn]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.test-support :as support]))
@@ -535,3 +536,28 @@
              "since: a changed element is a new cell; a moved one changes only its position")
          (is (= #{[t2 true]}
                 (db/q '[:find ?x ?added :in $ ?e :where [?e :seon.vector-test.p/peers ?x _ ?added]] changes e))))))))
+
+;;; ---------------------------------------------------------------------------
+;;; S8: reports read as logical facts
+;;; ---------------------------------------------------------------------------
+
+(deftest reports-name-the-vector-owner
+  (with-vector-world
+   (fn [c]
+     (tx! c [{:seon.vector-test.p/id "p" :seon.vector-test.p/items ["a" "b"]}])
+     (let [e (:db/id (db/pull @c [:db/id] p))
+           report (tx! c [{:seon.vector-test.p/id "p" :seon.vector-test.p/items ["b" "a" "c"]}])
+           logical (remove #(<= (long const/tx0) (long (:e %))) (db/logical-datoms report))]
+       (testing "element and position datoms read on the parent; bridge links drop"
+         (is (seq logical))
+         (is (every? #(= e (:e %)) logical))
+         (is (every? #(= :seon.vector-test.p/items (:a %)) logical))
+         (is (= #{["c" true]} (into #{} (comp (remove :seon.db.vector/position) (map (juxt :v :added))) logical)))
+         (is (= #{["b" 0] ["a" 1]} (into #{} (comp (filter :seon.db.vector/position) (map (juxt :v :seon.db.vector/position))) logical))))
+       (testing "a reorder-only write names its owner's identity"
+         (let [reorder (tx! c [{:seon.vector-test.p/id "p" :seon.vector-test.p/items ["c" "b" "a"]}])]
+           (is (not-any? #(= :seon.vector-test.p/items (:a %)) (remove #(<= (long const/tx0) (long (:e %))) (:tx-data reorder)))
+               "the stored report holds only position datoms")
+           (is (contains? (seon.fn/report-identities reorder) [:seon.vector-test.p/id "p"]))))
+       (testing "a transaction's rendering counts logical facts on the parent"
+         (is (re-find #"on 1 entities" (db/render-transaction-ai report))))))))

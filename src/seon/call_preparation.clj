@@ -494,10 +494,12 @@
   {:malli/schema
    [:=> [:cat :seon.db/transaction-report :seon.schema/projection]
     [:or :seon.call-preparation/snapshot :seon.db/error-result]]}
-  [{before :db-before after :db-after tx-data :tx-data} projection]
+  [{before :db-before after :db-after :as report} projection]
   (let [attributes @snapshot-read-attributes]
+    ;; Logical datoms: a vector element moved or replaced in its cell reads
+    ;; as its own attribute, so a reorder-only write derives afresh.
     (if (or (= :all attributes)
-            (some (comp attributes :a) tx-data))
+            (some (comp attributes :a) (db/logical-datoms report)))
       (snapshot after projection)
       (let [held (snapshot before projection)]
         (if (db/read-refusal? held)

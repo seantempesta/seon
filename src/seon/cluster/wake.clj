@@ -507,7 +507,9 @@
            arming (arming-attributes (:db-after report))
            published-interest (some-> interest deref)
            render? (volatile! (= :all published-interest))]
-         (doseq [datom (:tx-data report)]
+         ;; Logical datoms: a vector attribute's element lives in a cell; a
+         ;; listen on it matches its owner, on append and on reorder.
+         (doseq [datom (db/logical-datoms report)]
            (let [attribute (:a datom)]
              (when (and (not @render?)
                         (contains? published-interest attribute))

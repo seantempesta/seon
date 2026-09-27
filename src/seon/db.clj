@@ -3974,6 +3974,83 @@
       (catch clojure.lang.ExceptionInfo exception
         (if-let [refusal (::owned-refusal (ex-data exception))] refusal (throw exception))))))
 
+;;; ---------------------------------------------------------------------------
+;;; Vectors in reports: logical facts for every first-party report reader
+;;; ---------------------------------------------------------------------------
+
+(defn- cell-owner
+  "The parent that owns cell `cell` in `database`, or nil."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/entity-id] [:or :nil :seon.db/entity-id]]}
+  [database cell]
+  (when (get (dbi/-schema database) :seon.db.vector/cells)
+    (:e (first (d/datoms database :avet :seon.db.vector/cells cell)))))
+
+(defn- attribute-holders
+  "The entities whose `attribute` holds `value`: through the cell holding it
+   when the attribute is stored in cells, else directly."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword :seon.schema/value] [:vector :seon.db/entity-id]]}
+  [database attribute value]
+  (into []
+        (keep (fn [datom]
+                (if (and (get (dbi/-schema database) :seon.db.vector/position)
+                         (first (d/datoms database :eavt (:e datom) :seon.db.vector/position)))
+                  (cell-owner database (:e datom))
+                  (:e datom))))
+        (d/datoms database :avet attribute value)))
+
+(defn logical-datoms
+  "`report`'s datoms as logical facts about the entities an agent reads: an
+   element datom `[cell a v]` reads `[parent a v]`; a cell's position change
+   reads an assertion of its element on the parent, carrying
+   `:seon.db.vector/position` (a new cell's position is its element's own
+   datom); the bridge's own links and presence drop.
+   A report whose value stores no vectors in cells answers its `:tx-data`.
+
+   # Costs
+   O(tx-data), one AVET seek per touched cell (13 ms for a 2000-parent report
+   in the prototype)."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.db/transaction-report] [:sequential :map]]
+                  [:=> [:cat :seon.schema/projection :seon.db/transaction-report] [:sequential :map]]]}
+  ([report] (logical-datoms (carried-projection (:db-after report)) report))
+  ([projection {before :db-before after :db-after tx-data :tx-data}]
+   (if-not (contains? (:seon.schema.projection/forms projection) :seon.db.vector/cells)
+     tx-data
+     (let [owner #(or (cell-owner after %) (cell-owner before %))
+           ;; A cell whose element this report wrote is new: its element datom says it all.
+           written (into #{} (comp (filter #(schema.datahike/vector-attribute-in? projection (:a %))) (map :e)) tx-data)
+           element (fn [cell]
+                     (some #(when (schema.datahike/vector-attribute-in? projection (:a %)) %)
+                           (concat (d/datoms after :eavt cell) (d/datoms before :eavt cell))))]
+       (into []
+             (keep (fn [datom]
+                     (let [attribute (:a datom)]
+                       (cond
+                         (schema.datahike/vector-attribute-in? projection attribute)
+                         {:e (owner (:e datom)) :a attribute :v (:v datom) :tx (:tx datom) :added (:added datom)}
+
+                         (and (= :seon.db.vector/position attribute) (:added datom) (not (written (:e datom))))
+                         (when-let [held (element (:e datom))]
+                           {:e (owner (:e datom)) :a (:a held) :v (:v held) :tx (:tx datom) :added true
+                            :seon.db.vector/position (:v datom)})
+
+                         (= "seon.db.vector" (namespace attribute)) nil
+                         :else datom))))
+             tx-data)))))
+
+(defn- storage-q
+  "Datalog for the writer's own questions over logical attributes: `query`
+   lowered by `database`'s own declarations, then Datahike's `q`. A vector
+   attribute's pattern is membership through its cells."
+  {:malli/schema [:=> [:cat :seon.db/query :seon.db/database-value [:* :seon.schema/value]] :seon.schema/value]}
+  [query database & inputs]
+  (let [projection (carried-projection database)
+        arguments (into [database] inputs)]
+    (if (schema.datahike/vector-query? projection query)
+      (let [{lowered :query lowered-arguments :args} (schema.datahike/lower-query projection query arguments)]
+        (apply d/q lowered lowered-arguments))
+      (apply d/q query arguments))))
+
 (defn- declared-arity-bounds
   {:malli/schema [:=> [:cat [:=> [:cat :seon.db/query :seon.db/database-value] [:or :seon.schema/value :seon.db/error-result]] :seon.db/database-value] [:or [:map-of :qualified-symbol [:set [:map [:seon.fn.arity/min :int] [:seon.fn.arity/max {:optional true} :int]]]] :seon.db/error-result]]}
   [query-fn database]
@@ -4079,8 +4156,8 @@
   {:malli/schema [:=> [:cat :seon.db/database-value] :map]}
   [database]
   (let [derive (fn []
-                 (let [edges (call-edges d/q database)
-                       bounds (declared-arity-bounds d/q database)]
+                 (let [edges (call-edges storage-q database)
+                       bounds (declared-arity-bounds storage-q database)]
                    (merge (arity-comparison edges bounds)
                           {::edge-set edges
                            ::bounds bounds
@@ -4133,10 +4210,10 @@
   [report]
   (let [before (:db-before report)
         after (:db-after report)
-        tx-data (:tx-data report)]
+        tx-data (logical-datoms report)]
     (if-not (every? #(get (dbi/-schema before) %) arity-attributes)
-      (let [edges (call-edges d/q after)
-            bounds (declared-arity-bounds d/q after)]
+      (let [edges (call-edges storage-q after)
+            bounds (declared-arity-bounds storage-q after)]
         (assoc (arity-comparison edges bounds) ::bounds bounds))
       (let [base (arity-base before)
               symbols (fn [database entities attributes]
@@ -4150,8 +4227,8 @@
                 arity-owners (into #{}
                                    (for [arity (touched #{:seon.fn.arity/min :seon.fn.arity/max})
                                          database [before after]
-                                         datom (dbi/search database [nil :seon.fn/arities arity])]
-                                     (:e datom)))
+                                         owner (attribute-holders database :seon.fn/arities arity)]
+                                     owner))
                 callees (into (touched #{:seon.fn/arities :seon.fn/sym}) arity-owners)
                 caller-symbols (into (symbols before callers [:seon.fn/sym :seon.test/sym])
                                      (symbols after callers [:seon.fn/sym :seon.test/sym]))
@@ -4163,7 +4240,7 @@
                                               (mapcat (::by-callee base) callee-symbols)))
                     after-callers
                     (when (seq caller-symbols)
-                      (call-edges d/q after caller-symbols))
+                      (call-edges storage-q after caller-symbols))
                     after-bounds
                     (when (seq callee-symbols)
                       (reduce
@@ -4172,7 +4249,7 @@
                                  (cond-> {:seon.fn.arity/min minimum}
                                    (nat-int? maximum) (assoc :seon.fn.arity/max maximum))))
                        {}
-                       (d/q '[:find ?function-symbol ?minimum ?maximum
+                       (storage-q '[:find ?function-symbol ?minimum ?maximum
                               :in $ [?function-symbol ...]
                               :where
                               [?function :seon.fn/sym ?function-symbol]
@@ -4281,7 +4358,7 @@
                   [:or :seon.fn/arity-mismatch-report :seon.db/error-result]]}
   [database projection report {candidates ::candidates bounds ::bounds checked ::checked edges ::edges}]
   (let [candidates (vec candidates)]
-    (arity-mismatch-report d/q database
+    (arity-mismatch-report storage-q database
                            (when (seq candidates) (@call-preparation-report-snapshot report projection))
                            bounds candidates checked edges)))
 
@@ -4400,7 +4477,7 @@
                                       [(:a fact) (:v fact)])))
                             (mapcat #(d/datoms database :eavt %)
                                     (cons (:e datom)
-                                          (map :e (d/datoms database :avet :seon.fn/arities (:e datom))))))
+                                          (attribute-holders database :seon.fn/arities (:e datom)))))
                       :db/id (:e datom)}))))
               removed)]
     (when (seq breaks)
@@ -4827,7 +4904,7 @@
                                     [family (set (:seon.program/owned-attributes (get shapes family)))])))
                        [:seon.fn/sym :seon.test/sym])
         touched (reduce (fn [result {:keys [e a]}] (update result e (fnil conj #{}) a))
-                        (sorted-map) (:tx-data report))
+                        (sorted-map) (logical-datoms projection report))
         ;; One namespace entity per namespace in the report, not per entity.
         namespace-of (memoize #(declaration-value projection database identity-attrs %))]
     (some (fn [[entity-id attributes]]
@@ -5364,8 +5441,8 @@
   {:malli/schema
    [:=> [:cat :seon.db/transaction-report] [:string {:min 1}]]}
   [unit]
-  (let [{database :db-after before :db-before transaction-data :tx-data}
-        (rendered-value unit)
+  (let [{database :db-after before :db-before :as report} (rendered-value unit)
+        transaction-data (if (database-value? database) (logical-datoms report) (:tx-data report))
         facts (remove #(= (:e %) (:tx %)) transaction-data)
         entities (sort (distinct (map :e facts)))
         identities (when (and (seq entities) (database-value? database))
@@ -5404,9 +5481,8 @@
   {:malli/schema
    [:=> [:cat :seon.db/transaction-report] :seon.render/hiccup]}
   [unit]
-  (let [{database :db-after
-         transaction-data :tx-data}
-        (rendered-value unit)
+  (let [{database :db-after :as report} (rendered-value unit)
+        transaction-data (if (database-value? database) (logical-datoms report) (:tx-data report))
         datom-count (count transaction-data)
         identity-value (if (database-value? database)
                          (database-value-identity database) database)]

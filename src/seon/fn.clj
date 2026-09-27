@@ -2735,8 +2735,9 @@
   four changed schema keys had selected 241 of the program's files, 10.7 s
   warm and most of a 47 s boot publication)."
   {:malli/schema [:=> [:cat :seon.db/transaction-report] [:set :string]]}
-  [{database :db-after before :db-before datoms :tx-data}]
-  (let [changed (into #{} (comp (filter #(signature-attributes (:a %))) (map :e)) datoms)]
+  [{database :db-after before :db-before :as report}]
+  ;; Logical datoms: an arity moved or replaced in a cell reads on its function.
+  (let [changed (into #{} (comp (filter #(signature-attributes (:a %))) (map :e)) (db/logical-datoms report))]
     (if (empty? changed)
       #{}
       (let [read! #(if (map? %) (throw (ex-info "Publication could not read changed signatures." %)) %)
@@ -3709,8 +3710,9 @@
     [:=> [:cat :seon.db/database-value :seon.db/database-value
           [:vector :seon.db/transaction-report-datom]]
      [:or :seon.reconcile/adopt-identities :seon.db/invalid-read-error]]]}
-  ([{before :db-before after :db-after datoms :tx-data}]
-   (report-identities before after datoms))
+  ([{before :db-before after :db-after :as report}]
+   ;; Logical datoms: a vector element changed in a cell names its owner.
+   (report-identities before after (vec (db/logical-datoms report))))
   ([before after datoms]
   (let [entities (into #{} (map :e) datoms)
         identities (fn [database]
