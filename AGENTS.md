@@ -41,7 +41,8 @@ root.
   measured, large performance win. Optimize for the common path, not the rare failure recovery already handles.
 - **Take things apart.** Give each part one role and one reason to change; separate braided concerns.
 - **Be patient at the REPL.** State the problem, knowns and unknowns; inspect real values and call the owner until
-  you can predict the result. Refuting a cause is progress.
+  you can predict the result. Refuting a cause is progress. An estimated cost or a suspected cause is a hypothesis
+  until measured on real data: profile before ranking work, and check a surprising observation is not the test's own.
 - **Read the dependency first.** Datahike owns transactions, branches and history; Malli owns compiled schemas and
   contracts; SCI owns contexts; core.async owns graphs; konserve owns storage and reclamation. Compose their
   mechanisms instead of copying them; use a highly regarded library for tricky parts.
@@ -85,8 +86,8 @@ root.
    Research existing libraries before writing a replacement. A change's added lines are justified by the duplicate
    paths it deletes in the same cut, named with line counts. More than about 100 added lines without matching
    deletions is presumed wrong: stop before writing and report the smaller alternative. Net deletion does not excuse
-   new machinery. If a fix, cleanup or replacement grows code, justify to the owner before integration what it adds,
-   why nothing smaller works and what it lets go later.
+   new machinery; code that still grows is justified to the owner before integration: what it adds, why nothing
+   smaller works, what it lets go later.
 4. **Review before implementation.** Opus writes every first-pass design and implements; Astra, an outside model
    trained on a different distribution, reviews every design and diff and audits existing code for simplicity,
    dependency use, correctness and these laws. Root rules on every finding and hands the implementer the reviewed
@@ -97,12 +98,16 @@ root.
    offer exactly three priced options: simplest viable constraint first, recommendation marked, each with guarantee,
    cost and sacrifice.
 5. **Change one loadable slice.** Edit the owner in place: no second registry, renderer, runner, retry, cache or
-   version-two namespace. Convert every caller and retire the old path in the same slice; HEAD must load. Script
-   mechanical sweeps once across the full set, then lint, load and hand-fix exceptions. Designs and plans may grow
-   but are revised in place — integrate corrections into their owning sections, never a parallel spec or appended
-   ruling log. Correct false current claims in the same commit; keep dated audits and evidence outside plans.
+   version-two namespace. A moved, renamed or deleted function converts every caller in the same commit — tests,
+   quoted symbols, error operations and schema references included — and retires the old path. Script mechanical
+   sweeps once across the full set, then lint, load and hand-fix exceptions. HEAD must boot: before committing, lint
+   `src script test` with `--cache false` and compile touched contracts, schema and configuration resources with
+   their consumers (shipped defaults included) from a `git archive` of HEAD plus the diff, with zero findings.
+   Designs and plans are revised in place — corrections go into their owning sections, never a parallel spec or
+   appended ruling log. Correct false current claims in the same commit; keep dated audits and evidence outside plans.
 6. **Prove the installed change.** Verify publication, adoption, reload and arming, then repeat the probe. A shell
-   edit or disabled hook proves none of these. Prove schema changes incrementally on a branch of a live store;
+   edit or disabled hook proves none of these; neither does restarting to find out. Prove at the REPL and statically
+   first; root batches one restart for many landings. Prove schema changes incrementally on a branch of a live store;
    inability to adopt is a publication defect, never a reason to boot from zero. Observe browser paint separately.
 7. **Report honestly.** Broken things first, then evidence, changed paths, commit, sizes, net source/test lines,
    timings, memory and verification limits in the landing note. Unavailable evidence is not a pass. Commit
@@ -118,7 +123,9 @@ root.
 - **Boot and configuration.** Boot opens the REPL before store acquisition, then builds process → store → facts →
   flow, publishing readiness at each layer. One process root holds the store's lifetime lock; Datahike serializes
   transactions. Bootstrap selects paths and binds; running configuration is database facts; secrets are
-  environment-variable names. `seon.config/defaults` is a compiled constant, not a cluster's configuration.
+  environment-variable names. `seon.config/defaults` is a compiled constant, not a cluster's configuration. Boot
+  reads each dial from the configuration it applied, never the store's pre-adoption value, so a new dial exists at
+  its first read.
 - **The program is rows**: functions, tests, schemas, namespaces, render pairs, contracts, analysis and test
   evidence keyed by exercised definition digests. Turns, evaluations, messages, errors, tasks and live results are
   data and never merge as program; declare that partition on entity schemas, not in a hand list. Default's program
@@ -167,17 +174,20 @@ root.
 - **Decide at the authority.** Derive at the writer or supply its decision; validate a pre-read's basis there if it
   could change. Mirrors are derived, drift-checked or explicitly historical, never silently current state.
 - **Declare facts at their producer.** Search the registry before adding a key. Use fully namespaced keys, one
-  schema per identity and `seon.id`; no name guessing, text parsing or invented entity kinds. Production regex needs
+  schema per identity and `seon.id`; identities are minted by their owner (a task's handle by ingestion), never
+  hand-typed; no name guessing, text parsing or invented entity kinds. Production regex needs
   owner permission (ordinary `rg` searches do not). Enums describe real bounded states or dependency grammar.
 - **Preserve native values.** Absence is no key, never stored nil; symbols stay Datahike symbols, not strings
   converted at each reader. Prefer `find` or `get` with a sentinel; `contains?` tests vector indices and also finds
   nil-valued map keys.
 - **Validate final owning values.** Include swept refs and identity-less components; refuse missing children,
-  cycles, multiple owners and exhausted bounds. Retraction deletes; history answers what existed. Required refs
+  cycles, multiple owners and exhausted bounds. Admission and completeness rules judge writes; reading committed
+  rows never re-applies them. Retraction deletes; history answers what existed, as it was written. Required refs
   refuse invalidating deletion, optional refs may sweep, components cascade. Repair surviving declaration references
   in the same transaction or refuse; never invent placeholder functions or tests.
-- **Separate storage from observation.** Store a value when it must outlive its subject. Derive pulled shapes from
-  entity schemas and selectors; never silently truncate pulls. Require each function's and test's analysis digest:
+- **Separate storage from observation.** Store a value when it must outlive its subject. Derive pulled shapes and
+  attribute lists from entity schemas and selectors: a hand list beside a schema silently drops the next key. Never
+  silently truncate pulls. Require each function's and test's analysis digest:
   an empty cardinality-many is not proof of work.
 - **Use the database owner.** Direct `datahike.api` calls belong only in `seon.db`, store/registry, classified
   branch-custody owners and system listeners; keep `my.*` thin. Put provenance on transactions, derive write bounds
@@ -207,7 +217,8 @@ root.
   their exact error alternatives; no general error predicate, copied union or discriminator stamp (a contract alone
   does not prove a body's error union — that needs its producer, checker and regression). The producer
   declares identity; nothing downstream guesses it. Errors hold references, never copies: a database is its commit
-  id or basis, a transaction its id, a context its agent and branch, a large value one blob digest. Catch only
+  id or basis, a transaction its id, a context its agent and branch, a large value one blob digest, a place (atom,
+  delay, promise) its class and identity, never its contents. Catch only
   declared cases or resurface the whole cause; missing evidence is a typed unknown, never nil, a default or
   message-only success. There is one way to build, store and show an error; delete every other wrapper, stringifier,
   cursor or copy.
@@ -220,17 +231,17 @@ root.
   topology changes rebuild graphs. No central scheduler or dispatcher. Listen before deriving work; channels carry
   only rederivable or replaceable data and buffers express that loss policy. Durable recovery payloads belong in
   facts or blobs.
-- **Bound admission and await actual exit.** Every execution surface declares its bound and names the missing
-  terminal event when it fires. Timeout or cancellation is not termination: retain ownership and resources and
-  prevent overlap until exit. SCI interrupts interpreted code, not arbitrary host calls; keep isolation where
-  termination cannot be guaranteed.
+- **Bound admission and await actual exit.** Every execution surface declares its bound and names the missing terminal
+  event when it fires. Timeout or cancellation is not termination: retain ownership and resources and prevent overlap
+  of that same work until exit, while unrelated work proceeds. SCI interrupts interpreted code, not arbitrary host
+  calls; keep isolation where termination cannot be guaranteed.
 - **Recover facts, not execution.** Close interrupted runs and mark unfinished evaluations; never resume interrupted
-  execution or serialize private objects or live results. A run's settlement (every form the run parsed and evaluated, in one transaction) returns once
-  applied in order; its durability follows through the database owner's one fire-and-forget write, kept only while
-  measurably faster. A crash may lose the newest such runs; recovery closes them and the agent redoes the work — do
-  not represent the in-between state. Everything with consequences beyond the form (merges, write-back, tasks,
-  config, schema adoption, boot and publication records, faults, branch lifecycle, deliveries) is durable before its
-  caller is answered.
+  execution or serialize private objects or live results. A run's settlement (every form the run parsed and evaluated,
+  in one transaction) returns once applied in order; its durability follows through the database owner's one
+  fire-and-forget write, kept only while measurably faster. A crash may lose the newest such runs; recovery closes
+  them and the agent redoes the work — do not represent the in-between state. Everything with consequences beyond the
+  form (merges, write-back, tasks, config, schema adoption, boot and publication records, faults, branch lifecycle,
+  deliveries) is durable before its caller is answered.
 - **Derive wakes and completion.** Use listened datoms and a qualifying ordinary reply's basis; openings and
   system-only turns answer nothing. Handling is separate, a message subject is literal, `:seon.message/from` marks
   inside wakes. Before a turn, refresh each distinct changed read from the latest evidence and append it; never
@@ -245,52 +256,56 @@ root.
   (budget, shape, laziness, cycles, references), never a schema-specific branch, and plain Clojure printing is its
   fallback. Pulling unused data is waste, showing an agent irrelevant data costs more on every turn, and re-touching
   cached data costs more than leaving it: invest in the render function.
-- **Choose the render function per consumer (AI or HTML); the first match wins**: the value's own `:seon.render/ai` or `:seon.render/html`
-  key (the master override: a renderer symbol, an inline function or rendered data); a render function whose
-  contract fits the value, defined in the viewing agent's namespace; the schema's declared pair; the floor. Whether a render
-  function serves AI or HTML is its attachment key where attached, else its declared output schema, never a separate fact; like
-  any function, its omitted declared inputs are supplied by schema name.
-- **Return data, not comments.** What comes back to an agent is data whenever possible: a reply is one map whose
-  keys carry the value, its handle, its timing, its errors and its findings; comment lines are confusing next to data
-  and agents repeat them. **An AI render returns REPL entries** (forms; `;;` only for prose that has no data form); the
-  one REPL path evaluates each form read-only
-  in the viewing agent's SCI world and prints form and result as the transcript the agent reads, so every line is
-  runnable. Rendering is lazy: a render is evaluated (and recorded) when a context that shows it is built, cached by
-  the value's content digest, so only what is shown is rendered and nothing twice; the context an agent receives is
-  always fully evaluated. An agent never sees a render form without its result; only a render that genuinely fails
-  falls back to the floor's value with one diagnostic. Curated namespaces render as `(require '[ns :as alias])` then their `dir`/`doc` with contracts. An HTML
-  render returns hiccup. Components and declared queries render in their own blocks; failed rendering gives a
-  diagnostic; error base and satisfied schema renderers compose. An attribute request stays an attribute request.
-- **Apply presentation limits once.** The floor printer holds the one budget and spreads it across the value's
-  shape; nothing else clips. Printing is rendering with two consumers on one pipeline: AI agents through MCP and
-  humans through the browser share the same selection, node tree and cut retrieval; only the final output (text or hiccup) differs.
-  Save exact shown text, select whole prompt units, never clip HTML or historical units again. Keep query-work
-  bounds and deadlines separate; elisions name bound, count, path and requery, with floor hits counted. Derive
-  missing profiles at entry or refuse explicitly. Build minimal infrastructure. Report ugly output, and state the size of anything an agent
-  sees in estimated tokens, never bytes or characters.
+- **Choose the render function per consumer (AI or HTML); the first match wins**: the value's own `:seon.render/ai` or
+  `:seon.render/html` key (the master override: a renderer symbol, an inline function or rendered data); a render
+  function whose contract fits the value, defined in the viewing agent's namespace; the schema's declared pair; the
+  floor. Whether a render function serves AI or HTML is its attachment key where attached, else its declared output
+  schema, never a separate fact; like any function, its omitted declared inputs are supplied by schema name.
+- **Return data, not comments.** What comes back to an agent is data whenever possible: a reply is one map whose keys
+  carry the value, its handle, its timing, its errors and its findings; comment lines are confusing next to data and
+  agents repeat them. **An AI render returns REPL entries** (forms; `;;` only for prose that has no data form); the
+  one REPL path evaluates each form read-only in the viewing agent's SCI world and prints form and result as the
+  transcript the agent reads, so every line is runnable. Rendering is lazy: a render is evaluated (and recorded) when
+  a context that shows it is built, cached by the value's content digest, so only what is shown is rendered and
+  nothing twice; the context an agent receives is always fully evaluated. An agent never sees a render form without
+  its result; only a render that genuinely fails falls back to the floor's value with one diagnostic. Curated
+  namespaces render as `(require '[ns :as alias])` then their `dir`/`doc` with contracts. An HTML render returns
+  hiccup. Components and declared queries render in their own blocks; failed rendering gives a diagnostic; error base
+  and satisfied schema renderers compose. An attribute request stays an attribute request.
+- **Apply presentation limits once.** The floor printer holds the one budget and spreads it across the value's shape;
+  nothing else clips, and nothing prints unbounded: a log line, exception message, test report or HTTP error that
+  prints a value outside the floor is a defect. Printing is rendering with two consumers on one pipeline: AI agents
+  through MCP and humans through the browser share the same selection, node tree and cut retrieval; only the final
+  output (text or hiccup) differs. Save exact shown text, select whole prompt units, never clip HTML or historical
+  units again. Keep query-work bounds and deadlines separate; elisions name bound, count, path and requery, with floor
+  hits counted. Derive missing profiles at entry or refuse explicitly. Build minimal infrastructure. Report ugly
+  output, and state the size of anything an agent sees in estimated tokens, never bytes or characters.
 
 ## Proof and performance
 
 - **Test the real system with injected worlds.** Plain `deftest` or contracted test functions declaring their
-  inputs, the same for humans and agents. Build worlds through canonical writers and helpers, surface every refusal,
-  prepare once, share reads and branch writes from a captured commit. Use real SCI, armed contracts and fixed render
-  profiles; substitute only external effects, as explicit values. No hand-built rows, bespoke fixture machinery or
-  Var redefinitions.
-- **Run tests as agents run.** Fork the context onto the test branch, inject custody, run one body, unlink. Call the
-  agent's owners, never a test-side copy. Ordinary work uses the main JVM; only platform/bootstrap, declared
-  destructive and host-bound work gets isolated JVMs. If an edit cannot reach the main JVM, report the precise gap.
-  No JVM-global test state or restoring reloaded roots; preserve instrumentation; never `alter-var-root`,
-  `with-redefs`, `load-file` or `intern` over default's Vars. Stop graphs before retracting their facts; release
-  resources even if setup or cleanup fails.
+  inputs, the same for humans and agents. The harness prepares worlds once through canonical writers and helpers —
+  every fixture write carries what the writer checks, digests included — surfaces every refusal, shares reads and
+  branches writes from a captured commit. Use real SCI, armed contracts and fixed render profiles; substitute only
+  external effects, as explicit values. No hand-built rows, bespoke fixture machinery or Var redefinitions. Tests are
+  deterministic: generated inputs are bounded so every seed passes.
+- **Run tests as agents run.** Fork the context onto the test branch, inject custody, run the body in its member's
+  context, unlink. Call the agent's owners, never a test-side copy. Ordinary work uses the main JVM; only
+  platform/bootstrap, declared destructive and host-bound work gets isolated JVMs. If an edit cannot reach the main
+  JVM, report the precise gap. No JVM-global test state (loaded program identity included) or restoring reloaded
+  roots; preserve instrumentation; never `alter-var-root`, `with-redefs`, `load-file` or `intern` over any Var. Stop
+  graphs before retracting their facts; release resources even if setup or cleanup fails.
 - **Require current positive proof.** Select tests by current dependencies and each member's actual tested program
   and input evidence; past observed reach is diagnostic. Unknown or red cannot reuse green. Record completion even
   with no armed calls; a recording failure is not success. Keep one regression per behavior class, and destructive
   isolation until proven confined.
-- **Use focused verification.** Within a cut run focused installed requests; at completion root runs
-  platform/affected integration and the bulk tier once, not per edit. For each red: delete tests of deleted
-  machinery, update retired assumptions or fix the surviving owner; replacement behavior tests land with the cut;
-  never wholesale-triage reds. Gate inputs are `seon.test.cache/input-roots`: documentation never publishes or
-  widens gates; fix a tool that does so before proceeding. HEAD must load and the named probe answer.
+- **Use focused verification, run centrally.** Test worlds contend for one JVM, so root runs one focused list of
+  installed requests per batched restart and returns each red to its owner; at completion root runs platform/affected
+  integration and the bulk tier once, not per edit. Classify each red from stored runs by the commit that changed its
+  behavior, then delete tests of deleted machinery, update retired assumptions or fix the surviving owner; replacement
+  behavior tests land with the cut; never wholesale-triage reds. Gate inputs are `seon.test.cache/input-roots`:
+  documentation never publishes or widens gates; fix a tool that does so before proceeding. HEAD must load and the
+  named probe answer.
 - **Make bounds honest.** Tests fail beyond their declared bound, default five seconds; a longer bound carries the
   measured operation and reason beside the number. Distinguish acquisition from warm execution; priming never
   excuses a timeout. The [testing skill](.agents/skills/clojure-testing/SKILL.md) names installed enforcement.
@@ -311,36 +326,37 @@ root.
   serialization; cite the seam first. Reads, renders, probes and evaluations never invalidate derived state; count
   misses and recompute only reached invalid inputs.
 - **One central cache, bounded and configured.** Every Seon cache is a kind in `seon.cache` (Caffeine), keyed by
-  content so nothing is invalidated, weighed at insert and bounded by one configured byte budget; dependencies and external
-  tools keep their own caches where correct (Datahike's, clj-kondo's) under configured dials; no `memoize` or atom holds derived state. Link shared caches
-  into every root, snapshot and run. A cached SCI context is worth only the evaluation cost it saves: evict it rather
-  than grow.
+  content so nothing is invalidated, weighed at insert and bounded by one configured byte budget; dependencies and
+  external tools keep their own caches where correct (Datahike's, clj-kondo's) under configured dials; no `memoize` or
+  atom holds derived state. Link shared caches into every root, snapshot and run. A cached SCI context is worth only
+  the evaluation cost it saves: evict it rather than grow.
 
 ## Operating and collaborating
 
 - **Operate through `bin/seon`.** Use its installed help for start/status/open/init/config apply/stop/down/reset/
   nuke, never deleted internals. Every JVM runs a committed archive, never the working tree: `start` launches HEAD;
   `start --head` replaces a live root with HEAD, retaining store and caches; a dependency-class miss is filled before
-  the old JVM stops, and our own classes are cached as boot loads them, so a miss never lengthens downtime. Reset unlinks and forks from program rows, retaining caches. Nuke replaces one JVM, holds the
-  sibling store lock through deletion of the store and all derived caches and the rebuild and boot from committed
-  inputs, reports full failures and falls back to the newest booting commit rather than refusing recovery. A
-  competing start that wins the replacement gap is never killed or deleted by the loser. Destructive drills and
-  signals need a root and a verified `(pid, start-instant)`.
+  the old JVM stops, and our own classes are cached as boot loads them, so a miss never lengthens downtime. Reset
+  unlinks and forks from program rows, retaining caches. Nuke replaces one JVM, holds the sibling store lock through
+  deletion of the store and all derived caches and the rebuild and boot from committed inputs, reports full failures
+  and falls back to the newest booting commit rather than refusing recovery. A competing start that wins the
+  replacement gap is never killed or deleted by the loser. Destructive drills and signals need a root and a verified
+  `(pid, start-instant)`.
 - **Keep the development REPL available.** Assigned agents never stop or reset default: report **RESET NEEDED**.
   Root preserves evidence, batches recovery, reconnects and verifies; disposable data and private state may not be
   reconstructible. Root coordinates shared exhaust and integration. Publish schema resources and consumers together;
   pause hooks during source cuts and record pause and resumption.
 - **One file, one owner.** A file has one owner at a time, no shared hunks. Root checks
-  `tmp/orchestrator/file-ownership.md` before every launch or follow-up; work needing a held file goes to its owner
-  or waits; agents request new ownership without editing the ledger. At each check-in root launches all ready
+  `tmp/orchestrator/file-ownership.md` before every launch or follow-up; a change to a held file goes to its owner
+  as a patch or waits; agents request new ownership without editing the ledger. At each check-in root launches all ready
   file-disjoint work or names its dependency or collision, with no artificial lane, JVM-slot or prober cap, and
   addresses oversized functions and files with shrink assignments.
 - **Stay inside the assignment.** Work within its stop boundary; never resume, message or edit another agent's
   session or files. Do not nest delegation in bounded assignments, sandbox assigned work or overlap your own probe
-  or test JVMs. Foreign breakage does not stop independent work: run one `seon.test/run` request on your branch via
-  `bin/test-check [--root ROOT] CLUSTER --ns <namespace>` (or `--test NS/TEST`, `--changed NS/SYM`, or MCP). Agents
-  never run `bin/test` gates; root owns cold and platform proof. If the shared tree cannot load, prove HEAD plus
-  your diff in a `git archive` snapshot with shared caches linked and name the foreign boundary.
+  or test JVMs. Foreign breakage does not stop independent work. Assigned agents start no test requests or
+  `bin/test` gates: they name the focused tests their slice needs, and root runs them centrally and owns cold and
+  platform proof. If the shared tree cannot load, prove HEAD plus your diff in a `git archive` snapshot with shared
+  caches linked and name the foreign boundary.
 - **Use Git without touching others' work.** No `git add -A`, `reset --hard`, `stash` or shared-file restore. Commit
   coherent slices with `git commit --only -- <owned paths>` and report released paths so root updates the ledger.
   Never push, merge or open a pull request beyond explicit owner authorization. No git worktrees without the owner's
@@ -352,7 +368,8 @@ root.
 - **Trust analysis only when current.** Treat unresolved dependency or protocol Vars in clj-kondo as stale cache
   until disproven: repopulate it at the loaded JVM's REPL with `(seon.fn.analyzer/analyze-dependencies!)`, which
   lints that JVM's classpath minus the checkout's own roots (about 6 s warm; `seon.fn/dependency-analysis-command`).
-  Never change correct code to satisfy stale analysis.
+  Never change correct code to satisfy stale analysis, and never write the shared cache a booting JVM reads.
 - **Clean up what you own.** Remove owned shells and disposable roots before reporting, but preserve uncertain
   resources and unresolved evidence. Inspect actual live holders, never a self-matching process search; roots
-  younger than the oldest live test launcher are not sweepable. Recursive deletion never follows symlinks.
+  younger than the oldest live test launcher are not sweepable. Recursive deletion stays inside your own disposable
+  root and never follows symlinks.
