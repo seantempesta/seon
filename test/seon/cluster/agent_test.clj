@@ -192,6 +192,40 @@
                                (* 1000 test-support/event-backstop-seconds)}
                               overlay)})))
 
+(defn- start-armer!
+  "The cluster's armer graph on its own executor, as `seon.cluster.host` starts
+  it, so `stop-armer!` joins it at that executor's termination."
+  [ctx armer-handle routing]
+  (seon.flow/start-graph!
+   {:seon.flow/projection-state (:seon.sci.eval/projection-state ctx)
+    :seon.flow/graph-definition
+    {:procs {:seon.agent/armer
+             ;; the production seam: its loop failures are recorded by the
+             ;; proc's own fault port
+             {:proc (seon.flow/var-process
+                     #'agent/armer-step :io
+                     {:seon.env/environment @test-environment
+                      :seon.turn.loop/cluster armer-handle
+                      :seon.agent/routing routing})}}
+     :conns []}}))
+
+(defn- stop-armer!
+  "Stop the armer and join it: `flow/stop` is a command, and the graph's exit
+  is its executor's termination (`seon.flow/join-graph!`). No proc publishes a
+  completion event on stop since 4b6834f7d."
+  [armer operation]
+  (flow/stop (:seon.flow/graph armer))
+  (is (nil? (seon.flow/join-graph!
+             {:seon.flow/executor (:seon.flow/executor armer)
+              :seon.await/bound
+              {:seon.await/config-attribute :seon.config.agent/turn-completion-backstop-ms
+               :seon.await/config-value 5000
+               :seon.await/deadline-nanos (+ (System/nanoTime) (* 5000 1000000))}
+              :seon.await/diagnostic {:seon.error/layer ::armer
+                                      :seon.error/operation operation
+                                      :seon.error/expected ::armer-exited}}))
+      "the armer graph exits within its bound"))
+
 (defn- armory
   "The attempt's routing entry with a test fault channel already joined."
   [connection]
@@ -489,7 +523,6 @@
     (fn [connection ctx]
       (let [routing (armory connection)
             armer-channel (async/chan (async/sliding-buffer 1))
-            armer-completion (async/promise-chan)
             ;; A HANDLE IS THE STORED EVALUATION'S OWN ENTITY ID, which does
             ;; not exist when this source is authored: an agent names an
             ;; earlier value from the handle its context showed it, never from
@@ -503,22 +536,10 @@
                                   {:seon.config.run/max-episode-runs 100})])
         (let [cluster-handle
               (assoc (handle connection ctx "source-submission")
-                     :seon.cluster.wake/channel armer-channel
-                     :seon.turn.loop/completion armer-completion)
-              armer-graph
-              (flow/create-flow
-               {:procs
-                {:seon.agent/armer
-                 {:proc (flow/process #'agent/armer-step {:workload :io})
-                  :args {:seon.turn.loop/cluster cluster-handle
-                         :seon.agent/routing routing}}}
-                :conns []
-                :io-exec (cluster/projection-executor
-                          (:seon.sci.eval/projection-state ctx))})]
+                     :seon.cluster.wake/channel armer-channel)]
           (is (nil? (agent/armed routing "source-agent"))
               "the source agent is unarmed before the armer starts")
-          (flow/start armer-graph)
-          (flow/resume armer-graph)
+          (let [armer (start-armer! ctx cluster-handle routing)]
           (try
             (let [events (database-events connection)]
               (try
@@ -604,10 +625,9 @@
                 (finally
                   (stop-database-events! connection events))))
             (finally
-              (flow/stop armer-graph)
-              (test-support/await-event! armer-completion ::armer-stopped)
+              (stop-armer! armer `system-source-submission-uses-the-ordinary-durable-run)
               (disarm-all! routing)
-              (async/close! armer-channel)))
+              (async/close! armer-channel))))
           (test-support/transacted!
                        connection
                        (turn/open-tx {:seon.turn/id "already-open" :seon.turn/agent [:seon.agent/id "source-agent"] :seon.turn/opened-tx "datomic.tx"}))
@@ -656,9 +676,13 @@
                      #(and (= 1 (turn/episode-runs % "prompt-refusal-cap"))
                            (empty? (open-runs %))))]
                 (is (empty? @requests))
+                ;; the refusal is recorded once under the phase that caught
+                ;; it; `:seon.cluster.prompt/refused` is a refusal-map member,
+                ;; never a stored attribute (19827d2b0)
                 (is (= 1 (db/q '[:find (count ?error) . :where
-                                  [?error :seon.error/id]
-                                  [?error :seon.cluster.prompt/refused :seon.cluster.prompt/missing-input]]
+                                  [?error :seon.error/declared-schema :seon.turn.loop/phase-failed-error]
+                                  [?error :seon.error/occurrences ?occurrence]
+                                  [?occurrence :seon.error.occurrence/message "Prompt rendering refused."]]
                                 database)))
                 (is (seq (turn/unanswered-triggers database "prompt-refusal-cap"))
                     "a refused prompt has not observed the wake")
@@ -1241,6 +1265,14 @@
             timeout-ms 100
             completion (async/chan 1)
             backstop-state (atom nil)
+            ;; the cluster's config row exists before its handle reads
+            ;; `config/effective` of that cluster (4d163db4b)
+            _ (test-support/transacted!
+               connection
+               [{:seon.agent/id agent-id :seon.agent/branch (live-branch connection)}
+                (config-row
+                 "quiescent-failed-transform"
+                 {:seon.config.agent/turn-completion-backstop-ms timeout-ms})])
             cluster (assoc (handle connection ctx "quiescent-failed-transform")
                            ;; the bound records its fault in this world
                            :seon.env/environment
@@ -1249,12 +1281,6 @@
                            :seon.agent/turn-backstop-state backstop-state
                            :seon.config.agent/turn-completion-backstop-ms
                            timeout-ms)]
-        (test-support/transacted!
-                     connection
-                     [{:seon.agent/id agent-id :seon.agent/branch (live-branch connection)}
-                      (config-row
-                       "quiescent-failed-transform"
-                       {:seon.config.agent/turn-completion-backstop-ms timeout-ms})])
         (async/>!! completion ::ready)
         (let [escaped
               (with-redefs [
@@ -1342,19 +1368,29 @@
                      #(some? (:seon.turn/closed-tx
                               (db/pull % [:seon.turn/closed-tx]
                                        [:seon.turn/id run-id]))))
-                    diagnostic
-                    (db/q '[:find (pull ?error [*]) .
+                    ;; the error entity keeps the site and its declared
+                    ;; schema; the declared schema's distinguishing members
+                    ;; (`phase-failed`, `failed-step`) are stored on the
+                    ;; occurrence (`seon.error/commit-call`)
+                    [declared-schema occurrence]
+                    (db/q '[:find [?declared (pull ?occurrence [*])]
                             :where
                             [?error :seon.error/occurrences ?occurrence]
+                            [?error :seon.error/declared-schema ?declared]
                             [?occurrence :seon.error.occurrence/message "install gate broke mid-opening"]]
                           database)
                     evaluation (db/pull database '[*]
                                         [:seon.cluster.eval/id
                                          (turn/receipt-identity run-id 0)])]
-                (is (some? diagnostic))
-                (is (true? (:seon.turn.loop/phase-failed diagnostic)))
+                (is (= :seon.turn.loop/phase-failed-error declared-schema))
+                (is (true? (:seon.turn.loop/phase-failed occurrence)))
                 (is (some? evaluation))
-                (is (true? (:seon.turn.loop/phase-failed (edn/read-string (:seon.eval/shown evaluation))))
+                ;; the shown refusal is the small reply map
+                ;; (`seon.error/reply-value`, 737fe0a5d): its message, not
+                ;; the declared members, which stay on the stored error
+                (is (= "install gate broke mid-opening"
+                       (:seon.cluster.eval/error evaluation)
+                       (:seon.error/message (edn/read-string (:seon.eval/shown evaluation))))
                     "turn PRD section 15 retains the shown refusal on the started evaluation")
                 (is (some? (:seon.turn/closed-tx
                             (db/pull database [:seon.turn/closed-tx]
@@ -1365,31 +1401,44 @@
             (stop-database-events! connection events)
             (disarm-all! routing)))))))
 
-(deftest a-refused-core-row-is-recorded-and-every-agent-still-arms
+(deftest a-changed-core-row-refuses-by-name-and-every-agent-still-arms
   ;; Owner ruling 2026-09-23 (AGENTS.md error policy): a core row the program
-  ;; cannot install is a recorded core fault, never a throw out of arm!.
-  ;; acquire-context! threw "Program acquisition refused." and stopped every
-  ;; agent after it. The changed host-bound row is M9's refusal recipe.
+  ;; cannot install never throws out of arm!. acquire-context! threw
+  ;; "Program acquisition refused." and stopped every agent after it. The
+  ;; changed host-bound row is admitted as `:agent`:
+  ;; only an agent-authored row overrides the loaded program (8cf62cd13).
+  ;; WANTED since be96a64ba/c4dbc48c5: that row refuses by name when called
+  ;; in each agent's context, never the acquisition, so no acquisition fault
+  ;; is recorded for it.
   (with-connection
     (fn [connection ctx]
       (let [routing (armory connection)
-            subject 'seon.render.hiccup/escape]
+            ;; the indexer marks it host-bound (its own proxy), as
+            ;; branch_execution_test's refuse-by-name regressions use it
+            subject 'seon.render.value/bounded-text
+            refusal-of (fn [agent-ctx]
+                         (try (sci/eval-string* agent-ctx (str "(" subject " \"x\")")) nil
+                              (catch Exception failure
+                                (some #(when (:seon.sci.eval/refused-function (ex-data %)) (ex-data %))
+                                      (take-while some? (iterate ex-cause failure))))))]
         (test-support/transacted! connection
                                   [(config-row "core-fault" {})
                                    (agent-row connection "fault-a")
                                    (agent-row connection "fault-b")])
         (test-support/transacted! connection
                                   [(test-support/revision @connection [:seon.fn/sym subject]
-                                                          {:seon.fn/doc "A changed host-bound row."})])
+                                                          {:seon.fn/doc "A changed host-bound row."
+                                                           :seon.schema.admission/source :agent})])
         (try
           (let [first-agent (arm-one! connection ctx routing "core-fault" "fault-a")
                 second-agent (arm-one! connection ctx routing "core-fault" "fault-b")]
             (is (some? (:seon.flow/started first-agent)) (pr-str (keys first-agent)))
             (is (some? (:seon.flow/started second-agent)) "the next agent arms too")
-            (is (seq (db/q '[:find [?error ...]
-                             :where [?error :seon.error/declared-schema :seon.sci.eval/interpretation-error]]
-                           @connection))
-                "the refusal is recorded as a fault"))
+            (doseq [entry [first-agent second-agent]]
+              (is (= subject
+                     (:seon.sci.eval/refused-function
+                      (refusal-of (get-in entry [:seon.turn.loop/cluster :seon.sci.eval/agent-ctx]))))
+                  "the changed host-bound row refuses by name when called")))
           (finally (disarm-all! routing)))))))
 
 (deftest canonical-agent-handle-supplies-declared-producer-outputs
@@ -1643,6 +1692,13 @@
     (fn [connection ctx]
       (let [original @#'seon.turn/step
             routing (armory connection)
+            ;; the cluster's config row exists before its handle reads
+            ;; `config/effective` of that cluster (4d163db4b)
+            _ (test-support/transacted!
+               connection
+               [{:seon.agent/id "reloaded" :seon.agent/branch (live-branch connection)}
+                (config-row "hot-2026072815"
+                            {:seon.config.run/max-episode-runs 100})])
             base (handle connection ctx "hot-2026072815")
             v2-ran (atom 0)
             wrap (fn [step]
@@ -1653,10 +1709,6 @@
                      ([state input message]
                       (swap! v2-ran inc)
                       (step state input message))))]
-        (test-support/transacted! connection
-                                [{:seon.agent/id "reloaded" :seon.agent/branch (live-branch connection)}
-                                 (config-row "hot-2026072815"
-                                             {:seon.config.run/max-episode-runs 100})])
         (try
           (let [entry (arm-one! connection ctx routing "hot-2026072815" "reloaded")
                 ;; the CONTROL: an identically-shaped graph whose turn
@@ -1918,24 +1970,8 @@
                 armer-channel (async/chan (async/sliding-buffer 1))
                 armer-handle (assoc (handle connection ctx "route-trial")
                                     :seon.cluster/name "route-trial"
-                                    :seon.cluster.wake/channel armer-channel
-                                    :seon.turn.loop/completion
-                                    (async/promise-chan))
-                armer-graph (flow/create-flow
-                             {:procs
-                              {:seon.agent/armer
-                               ;; the production seam: its loop failures are
-                               ;; recorded by the proc's own fault port
-                               {:proc (seon.flow/var-process
-                                       #'agent/armer-step :io
-                                       {:seon.env/environment @test-environment
-                                        :seon.turn.loop/cluster armer-handle
-                                        :seon.agent/routing routing})}}
-                              :conns []
-                              :io-exec (cluster/projection-executor
-                                        (:seon.sci.eval/projection-state ctx))})
-                _ (flow/start armer-graph)
-                _ (flow/resume armer-graph)
+                                    :seon.cluster.wake/channel armer-channel)
+                armer (start-armer! ctx armer-handle routing)
                 created (atom [])
                 message-count (atom 0)
                 agent-ids
@@ -2012,7 +2048,7 @@
                                                        (vec (keys (:seon.agent/armed @routing)))
                                                        :seon.test/created @created
                                                        :seon.test/armer
-                                                       (flow/ping-proc armer-graph :seon.agent/armer)
+                                                       (flow/ping-proc (:seon.flow/graph armer) :seon.agent/armer)
                                                        :seon.test/faults
                                                        (db/q '[:find [?m ...] :where [_ :seon.error.occurrence/message ?m]]
                                                              @connection)}
@@ -2048,9 +2084,7 @@
               (finally
                 (wake/unlisten! {:seon.cluster.wake/connection connection
                                  :seon.cluster.wake/key ::route-trial})
-                (flow/stop armer-graph)
-                (test-support/await-event! (:seon.turn.loop/completion armer-handle)
-                                          ::routing-armer-stopped)
+                (stop-armer! armer `routing-trial)
                 (disarm-all! routing)
                 (async/close! armer-channel))))))))))
 
