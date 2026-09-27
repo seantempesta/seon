@@ -24,17 +24,16 @@
             [seon.config :as config]
             [seon.print :as print]
             [seon.schema :as schema]
-            [seon.schema.edn :as schema.edn]))
+            [seon.schema.edn :as schema.edn]
+            [seon.test-support :as test-support]))
 
 (defn- resource-reads
-  "Schema resource reads performed while calling `thunk`."
+  "Schema resource reads performed while calling `thunk`, read from the
+  reader's armed counter (JVM-wide: another thread resolving the fallback
+  population counts too); no Var is redefined."
   [thunk]
-  (let [reads (atom 0)
-        read-one @#'schema.edn/read-schema-resource]
-    (with-redefs [schema.edn/read-schema-resource
-                  (fn [resource] (swap! reads inc) (read-one resource))]
-      (thunk))
-    @reads))
+  (get (second (test-support/armed-calls '#{seon.schema.edn/read-schema-resource} thunk))
+       'seon.schema.edn/read-schema-resource))
 
 (defn- one-population-reads
   "Schema resource reads of one population derivation: the value the process
@@ -87,16 +86,15 @@
 
 (deftest an-unhanded-declaration-projection-refuses-without-reading-resources
   (let [projection (schema/build-projection (schema.edn/packaged-forms))
-        reads (atom 0)
-        read-one @#'schema.edn/read-schema-resource
-        failure
-        (with-redefs [schema.edn/read-schema-resource
-                      (fn [resource] (swap! reads inc) (read-one resource))]
-          (without-handed-projection
-           #(try
-              (schema/declaration-projection)
-              nil
-              (catch clojure.lang.ExceptionInfo exception exception))))]
+        [failure calls]
+        (without-handed-projection
+         #(test-support/armed-calls
+           '#{seon.schema.edn/read-schema-resource}
+           (fn []
+             (try
+               (schema/declaration-projection)
+               nil
+               (catch clojure.lang.ExceptionInfo exception exception)))))]
     (is (some? failure))
     (is ((schema/projection-validator projection
                                       :seon.schema/validation-refusal)
@@ -108,4 +106,4 @@
     (is (str/includes?
          (get-in (ex-data failure) [:seon.error/data :seon.schema/caller])
          "seon.schema.declaration-population-test"))
-    (is (zero? @reads))))
+    (is (zero? (get calls 'seon.schema.edn/read-schema-resource)))))

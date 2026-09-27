@@ -40,14 +40,12 @@
      projection (assoc :seon.schema/projection projection))))
 
 (defn- reads-of
-  "Schema resource reads performed while calling `thunk`."
+  "Schema resource reads performed while calling `thunk`, read from the
+  reader's armed counter (JVM-wide: another thread resolving the fallback
+  population counts too); no Var is redefined."
   [thunk]
-  (let [reads (atom 0)
-        read-one @#'schema.edn/read-schema-resource]
-    (with-redefs [schema.edn/read-schema-resource
-                  (fn [resource] (swap! reads inc) (read-one resource))]
-      (thunk)
-      @reads)))
+  (get (second (test-support/armed-calls '#{seon.schema.edn/read-schema-resource} thunk))
+       'seon.schema.edn/read-schema-resource))
 
 (defn- one-population-reads
   "Reads of one population derivation: the value the process cache retains
