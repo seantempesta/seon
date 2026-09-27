@@ -13,4 +13,9 @@
              :must-read #{seon.profile/top seon.profile/explain seon.schema/call-with-projection-state}
              :evidence #{"docs/research/agent-platform/landing/perf-boot-opus-2026-09-26.md"
                          "docs/research/agent-platform/stability-sweep-2026-09-27.md"
-                         "docs/research/agent-platform/perf-audit-2026-09-27.md"}}]
+                         "docs/research/agent-platform/perf-audit-2026-09-27.md"}}
+ #:seon.task{:name "call-counters-are-jvm-wide-so-counting-tests-race"
+             :kind :function
+             :intent "Tests that count calls now read seon.profile's per-definition counters (seon.test-support/armed-counts, armed-calls) instead of redefining the Var, which no longer breaks other tests; but a LongAdder counts every thread, so a concurrent member calling the same Var (seon.sci.kernel/invoke, seon.schema/projection-from-database, seon.render/acquire-context!) makes an exact count in another test red. Tests that filtered to their own thread (config-test sparse-file-reading, config-writer, db-test d/db) or by argument (retained counts per render symbol, web-test candidate-call-ids) stay redefinitions. Done when armed calls can be observed per scope, like seon.db/*read-evidence-sink* for reads (e.g. a bound call sink the armed wrapper appends to), armed-counts reads it, and two members counting the same Var concurrently each see only their own calls."
+             :must-read #{seon.profile/begin seon.profile/explain seon.profile/cells}
+             :evidence #{"docs/research/agent-platform/test-agents-concurrency-2026-09-27.md"}}]
