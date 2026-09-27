@@ -1960,7 +1960,7 @@ handle))}}
          (let [[_ prefix omitted] (re-find #"^\"([^\"]*)\"…\+(\d+)" ai)]
            (is (pos? (count prefix)) ai)
            (is (= (count huge) (+ (count (edn/read-string (str "\"" prefix "\""))) (parse-long omitted)))))
-         (is (str/includes? ai "(seon.print/value-at ") "and one legend names the requery")
+         (is (not (str/includes? ai ";; …N")) "no legend: each cut carries its own continuation")
          (is (< (count html-string) (count huge))
              "the HTML projection is the same bounded selection")
          ;; THE STRUCTURAL HALF. A wide collection's cut is minted by
@@ -1980,12 +1980,11 @@ handle))}}
            (is (< (count wide-ai) (count (pr-str wide)))
                "a wide collection is cut for AI under the same profile")
            (let [shown (edn/read-string wide-ai)
-                 cut (peek shown)]
-             ;; `[0 1 … …N]` reads back as numbers ending in the cut symbol.
+                 cut (first (filter #(and (symbol? %) (str/starts-with? (str %) "…")) shown))]
+             ;; `[0 1 … …N (drop n source)]` reads back as numbers, the cut
+             ;; symbol and, when the value has a source, its continuation.
              (is (= (count wide)
-                    (+ (dec (count shown)) (parse-long (subs (str cut) 1))))))
-           (is (str/includes? wide-ai "(seon.print/value-at ")
-               "and one legend names the requery")
+                    (+ (count (filter number? shown)) (parse-long (subs (str cut) 1))))))
            (is (not (str/includes? wide-html ">4999<"))
                "and HTML shows the same cut collection")))))))
 

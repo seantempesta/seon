@@ -660,10 +660,11 @@
                      handle (:seon.repl/handle emission)
                      raw @(sci/resolve ctx handle)
                      shown (:seon.eval/shown entry)]
-                 ;; One cut face and one legend (one-render-path §3d): the
-                 ;; legend's form reads the retained result.
+                 ;; One cut face carrying its continuation (owner 2026-09-27):
+                 ;; the form after the cut reads the retained result.
                  (is (re-find #"\"…\+\d+" shown) "the stored shown value must actually exercise elision")
-                 (is (str/includes? shown (str "(get-in " handle " [...])")) shown)
+                 (is (str/includes? shown (str "(subs ")) shown)
+                 (is (str/includes? shown (str handle)) shown)
                  (is (= raw (sci/eval-form ctx (list 'get-in handle []))))))
              (agent/disarm! {:seon.agent/routing routing
                              :seon.agent/id "juniper"})

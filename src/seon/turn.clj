@@ -1437,6 +1437,14 @@
    :seon.cluster.eval/ns
    :seon.sci.eval/ending-ns
    :seon.eval/duration-ms
+   ;; The evaluation's recorded cost: queryable, shown only past a declared
+   ;; bound (:seon.config.eval/bounds). Missing here, settlement dropped them.
+   :seon.eval/acquisition-ms
+   :seon.eval/allocated-bytes
+   :seon.eval/value-tokens
+   :seon.eval/shown-tokens
+   :seon.eval/elisions
+   :seon.eval/full
    :seon.print/length
    :seon.print/level
    :seon.test.accretion/gate-test-count

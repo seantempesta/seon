@@ -491,15 +491,12 @@
             (is (< (count cut) (count ai))
                 "the AI projection is bounded by the render profile")
             ;; ONE CUT FACE (one-render-path §3e): the characters that fit,
-            ;; then `…+N`, and one legend naming how to read the rest. The
-            ;; cut's coordinates stay on the tree node, not in the text.
+            ;; then `…+N` and, when the value has a source, the form that
+            ;; reads the rest; no legend (owner 2026-09-27).
             (is (re-find #"\"…\+\d+" cut)
                 (str "the cut shows its prefix and counts the rest: "
                      (subs cut 0 (min 400 (count cut)))))
-            (is (str/includes? cut ";; …N = N more")
-                "and one legend says what a cut means")
-            (is (str/includes? cut "transcript-cut")
-                "carrying the identity the legend's form requeries")))
+            (is (not (str/includes? cut ";; …N")) "no legend line")))
         (assert-no-session-narration ai)))))
 
 (defn- seed-pinned-bootstrap-history!

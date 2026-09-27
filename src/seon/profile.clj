@@ -263,11 +263,10 @@
     (let [explanation (explain mark 10)]
       (update explanation :seon.profile/lines
               #(into [(str "OVER ONE SECOND (" (:seon.profile/elapsed-ms explanation)
-                           " ms): this is your defect; fix it before continuing. Likely you"
-                           " over-engineered or are redoing work a dependency or an existing"
-                           " function already does better. Find what the top call's work is"
-                           " proportional to (the whole program? the store? the call count?)"
-                           " and remove it.")]
+                           " ms). The armed definitions below grew in this JVM during the"
+                           " operation, concurrent work included, so they name where time"
+                           " went, not whose defect it is. Find what the top call's work is"
+                           " proportional to (the whole program? the store? the call count?).")]
                      (rest %))))))
 
 (defn- observation-line

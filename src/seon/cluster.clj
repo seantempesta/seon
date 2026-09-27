@@ -277,8 +277,9 @@
 (defn project-next-prepl-value!
   "Mark the next PREPL return with explicit projection and read-only intent.
   Unspecified intent conservatively announces possible runtime changes.
-  The mark also begins the evaluation's profile window: a return over one
-  second carries what the armed definitions did (`seon.profile/explain-slow`)."
+  No JVM-wide profile window rides a host evaluation: its counters include
+  every other lane's concurrent work, so they cannot say what this
+  evaluation did (task c7bc0c506aa4); the event's own `ms` is its time."
   {:malli/schema [:function
                   [:=> [:cat] :nil]
                   [:=> [:cat [:or :boolean
@@ -290,7 +291,7 @@
   ([request]
    (let [request (if (map? request) request {:seon.dev.mcp/evaluation? request})]
      (.set mcp-projection
-           (cond-> (assoc request :seon.profile/mark (profile/begin))
+           (cond-> request
              ;; Only an evaluation that may change code pays for the mark.
              (not (:seon.dev.mcp/read-only? request))
              (assoc ::loaded-code-mark (loaded-code-mark)))))
@@ -493,15 +494,11 @@
          (doseq [channel runtime-eval-channels]
            (async/offer! channel
                          :seon.render.web/runtime-eval)))
-       (let [explanation (some-> (:seon.profile/mark projection) profile/explain-slow)
-             projected (if (and projection (get projection :seon.dev.mcp/project? true))
-                         (mcp-project cluster-name bootstrap-effective value
-                                      (true? (:seon.dev.mcp/evaluation? projection)) exception?)
-                         value)]
-         (admit/canonical-edn
-          (if (and explanation (map? projected))
-            (assoc projected :seon.dev.mcp/profile explanation)
-            projected)))
+       (admit/canonical-edn
+        (if (and projection (get projection :seon.dev.mcp/project? true))
+          (mcp-project cluster-name bootstrap-effective value
+                       (true? (:seon.dev.mcp/evaluation? projection)) exception?)
+          value))
        (catch Throwable failure
          ;; Never re-enter admission or a failed producer: the Throwable floor
          ;; renders the whole bounded cause chain from the Throwable alone.

@@ -594,5 +594,5 @@
     (is (<= (tokens/estimate text) 15000) "the prose fits the profile's token budget")
     (is (pos? shown) "whole failed-test lines are shown")
     (is (= 600 (+ shown (or omitted 0))) "the elision names every omitted test")
-    (is (str/includes? text "(seon.print/value-at (seon.problems/problems (seon.db/db) {}) [...])")
-        "the legend names the requery for the full failed-test list")))
+    (is (str/includes? text "(seon.problems/problems (seon.db/db) {})")
+        "the cut's continuation reads the full failed-test list")))
