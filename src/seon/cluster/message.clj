@@ -293,7 +293,10 @@
      label]))
 
 (defn- message-instant [database message]
-  (when database
+  ;; An unstored message (no id) has no commit instant. Querying with a nil id
+  ;; is a mistyped read the owner refuses as a value (9b5eefbb7), which the
+  ;; callers would otherwise cast to a Date.
+  (when (and database (:seon.message/id message))
     (db/q '[:find ?instant . :in $ ?id
             :where [?message :seon.message/id ?id]
                    [?message :seon.message/to _ ?tx]
