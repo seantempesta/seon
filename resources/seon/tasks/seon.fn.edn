@@ -82,4 +82,9 @@
  #:seon.task{:name "fn-test-redefines-vars"
              :kind :namespace
              :intent "AGENTS forbids with-redefs over any Var, yet test/seon/fn_test.clj still redefines Vars in about ten passing tests (~169, 195, 885, 896, 925, 1463, 1503, 1577, 2019, 2031; with-redefs-fn ~1744, 3055). A redefinition is JVM-global: a concurrent member or agent calls the substitute. Replace each with an injected world or explicit argument value, as 238c868e0 did for the two red ones."
+             :evidence #{"docs/research/agent-platform/red-triage-3-2026-09-27.md"}}
+ #:seon.task{:name "build-artifact-is-a-second-indexing-path"
+             :kind :function
+             :intent "seon.fn/build-artifact is a second indexing path beside the production one. It analyzes with no cache root (seon.fn.analyzer/analyze turns the cache off outside the checkout, analyzer.clj:818-822) and takes a hand-written first-party list, while the production path seon.fn/rows and analyzed-artifacts (fn.clj:2641) read the checkout cache and derive first-party from the database's rows. It has no src caller. Its test callers (fn_test ~881, 2071, 2080, 2132, 2431, 2843; program_test 1348; reset_edges_test 188; adoption_rows_test 15; edit_test 261; test/runner_test 163) mostly pass an empty first-party list and carry the same latent 'no analysis of seon.db' refusal since a9449b7c3. Delete it and convert its callers to seon.fn/rows in the same commit."
+             :must-read #{seon.fn/build-artifact seon.fn/rows}
              :evidence #{"docs/research/agent-platform/red-triage-3-2026-09-27.md"}}]
