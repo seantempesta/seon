@@ -83,7 +83,10 @@ root.
    disposable, in scratch namespaces or branches with finite inputs. Reproduce with one small form, inspect the
    complete envelope and installed schema, call the owner, then try the smaller algorithm. On real data: parse,
    transform, validate each value against its schema, store it (disposable branch or `d/with`), pull it back and
-   compare. Record exact forms, values and timings; the edge cases found become the regressions.
+   compare. Try data models and ideas at the REPL before writing them down. Every reply is also a health check: read
+   its timing, diagnostics and faults. An error, a panic instead of an error value, a fault without a linked task, or
+   an ordinary operation over one second is a finding. Record it as a task, even when it is outside your
+   assignment. Record exact forms, values and timings; the edge cases found become the regressions.
 3. **Design the smallest composition.** Open the owning spec or landing note with one or two lines naming what
    exists, its data flow and the principal Clojure approach. State what disappears, each operation's cost and target
    complexity, the concerns separated, and the simplest alternative: dependency seam, existing function or deletion.
