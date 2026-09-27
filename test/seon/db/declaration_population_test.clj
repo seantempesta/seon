@@ -9,7 +9,6 @@
             [seon.db :as db]
             [seon.env :as env]
             [seon.schema :as schema]
-            [seon.schema.edn :as schema.edn]
             [seon.sci.admit :as admit]
             [seon.test-support :as test-support]))
 
@@ -41,8 +40,6 @@
                          :seon.ns/doc (:seon.agent/id agent-entity)]]))))]]))
            raw @connection
            database (db/carry-projection-state raw state)
-           rebuilds (atom 0)
-           resource-reads (atom 0)
            warnings (java.io.StringWriter.)
            lookup [:seon.agent/id "p1-carriage"]
            namespace-lookup [:seon.ns/name 'seon.db.carriage]]
@@ -83,12 +80,12 @@
                    :seon.sci.admit/unbounded? true
                    :seon.sci.admit/interrupt-fn (fn [])
                    :seon.schema/projection projection}))))
-       (with-redefs [schema/projection-from-database
-                     (fn [& _] (swap! rebuilds inc)
-                       (throw (ex-info "Unexpected projection construction" {})))
-                     schema.edn/read-schema-resource
-                     (fn [& _] (swap! resource-reads inc)
-                       (throw (ex-info "Unexpected resource read" {})))]
+       ;; The armed per-Var counters observe rebuilds and resource reads (the
+       ;; worker thread's included); no Var is redefined.
+       (let [[_ calls]
+             (test-support/armed-calls
+              '#{seon.schema/projection-from-database seon.schema.edn/read-schema-resource}
+              (fn []
          (testing "all read values retain the supplied projection without a thread carrier"
            (schema/call-with-projection-state
             (atom {})
@@ -144,6 +141,6 @@
              (let [result (test-support/await-event! completed ::worker-carriage some?)]
                (is (nil? (:error result)) (pr-str result))
                (is (identical? projection (:projection result)))
-               (is (identical? projection (:report-projection result))))))
-         (is (zero? @rebuilds))
-         (is (zero? @resource-reads)))))))
+               (is (identical? projection (:report-projection result))))))))]
+         (is (= {'seon.schema/projection-from-database 0 'seon.schema.edn/read-schema-resource 0} calls)
+             "no projection is reconstructed and no resource read"))))))

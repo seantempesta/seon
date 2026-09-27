@@ -245,19 +245,7 @@
                            {:db/id "component"
                             ::node-id "component"
                             ::value "before"}])
-     (let [reads (atom [])
-           pull db/pull
-           count-read (fn [operation f]
-                        (fn [& arguments]
-                          (swap! reads conj operation)
-                          (apply f arguments)))
-           acquisition
-           (with-redefs [db/q (count-read :q db/q)
-                         db/pull (count-read :pull pull)
-                         db/pull-many (count-read :pull-many db/pull-many)
-                         db/entity (count-read :entity db/entity)
-                         db/datoms (count-read :datoms db/datoms)]
-             (acquire connection))
+     (let [[acquisition reads] (support/read-operations #(acquire connection))
            selector (:seon.render.walk/selector acquisition)
            selector-values (tree-seq coll? seq selector)
            selector-map-keys (into #{}
@@ -269,9 +257,9 @@
            ;; the PULL's limit is query work; the AI boundary's own width is
            ;; the render profile's, and it is applied to the pulled values
            width (:seon.config.eval.result/max-collection caps)]
-       (is (= 2 (count (filter #{:pull} @reads)))
+       (is (= 2 (count (filter #{:pull} reads)))
            "cold acquisition pulls each distinct entity once, without recursively following cycles")
-       (is (every? #{:pull :q} @reads)
+       (is (every? #{:pull :q} reads)
            "the identity query and entity pulls are the acquisition reads")
        (is (not-any? #{'* :* "*"} selector-values)
            "the selector never widens its dependency fingerprint")
@@ -321,20 +309,13 @@
      (support/transacted! connection [{::root-id "root" ::value "one"}])
      (let [render-request (request connection)
            acquisition (walk/root-acquisition render-request)
-           reads (atom 0)
-           count-read (fn [f]
-                        (fn [& arguments]
-                          (swap! reads inc)
-                          (apply f arguments)))]
-       (with-redefs [db/pull (count-read db/pull)
-                     db/pull-many (count-read db/pull-many)
-                     db/datoms (count-read db/datoms)]
-         (walk/neighborhood
-          (assoc render-request
-                 :seon.render/output :seon.render/ai
-                 :seon.render.walk/root-acquisition acquisition))
-         (is (zero? @reads)
-             "neighborhood consumes the acquisition without discovery"))))))
+           [_ reads] (support/read-operations
+                      #(walk/neighborhood
+                        (assoc render-request
+                               :seon.render/output :seon.render/ai
+                               :seon.render.walk/root-acquisition acquisition)))]
+       (is (empty? (filter #{:pull :pull-many :index} reads))
+           "neighborhood consumes the acquisition without discovery")))))
 
 (deftest installed-identity-selects-a-stable-lookup-ref
   (support/with-database
@@ -377,18 +358,13 @@
        (let [database @connection
              retained {call-id initial-entry}
              candidates (#'web/candidate-call-ids retained database false)
-             pulls (atom 0)
-             pull db/pull
-             refreshed (with-redefs [db/pull
-                                     (fn [& arguments]
-                                       (swap! pulls inc)
-                                       (apply pull arguments))]
-                         (#'web/refresh-root
-                          (assoc render-request :seon.db/db database)
-                          retained call-id candidates))]
+             [refreshed reads] (support/read-operations
+                                #(#'web/refresh-root
+                                  (assoc render-request :seon.db/db database)
+                                  retained call-id candidates))]
          (is (empty? candidates)
              "the same attribute on an unrelated entity does not invalidate the root")
-         (is (zero? @pulls) "Datahike semantic evidence reuses the unchanged entity pull")
+         (is (not-any? #{:pull} reads) "Datahike semantic evidence reuses the unchanged entity pull")
          (is (false? (:changed? refreshed)))
          (is (identical?
               (:datahike.pull/plan

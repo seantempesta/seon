@@ -162,17 +162,16 @@
                  :where
                  [?entity :seon.config/cluster "managed-slice"]]
                @connection)
-              original-pull db/pull
-              pulled-eids (atom [])
-              tx-data
-              (with-redefs
-               [db/pull
-                (fn [& args]
-                  (swap! pulled-eids conj (last args))
-                  (apply original-pull args))]
-                (reconcile/plan @connection (request [managed])))]
+              ;; The read-evidence sink observes this thread's reads; no Var is redefined.
+              reads (atom [])
+              tx-data (binding [db/*read-evidence-sink* reads]
+                        (reconcile/plan @connection (request [managed])))
+              pulled-eids (into []
+                                (keep #(when (= :pull (get-in % [:seon.db/read-request :seon.db/read-operation]))
+                                         (peek (get-in % [:seon.db/read-request :seon.db/pull-arguments]))))
+                                @reads)]
           (is (empty? tx-data) "the managed entity is already exact")
-          (is (= [managed-eid] @pulled-eids)
+          (is (= [managed-eid] pulled-eids)
               "foreign identities are unrepresentable in the pull slice"))))))
 
 (deftest malformed-and-conflicting-identities-refuse

@@ -52,60 +52,40 @@
           (is (not (contains? (:seon.schema.projection/forms resulting) ::c))))))))
 
 (deftest committed-reads-derive-once-per-declaration-population
+  ;; A derivation builds a new projection object, so a read answering the
+  ;; identical object is a cache hit and a changed population answers a new
+  ;; one: identity observes each derivation on this thread alone, without
+  ;; redefining the deriver or clearing the JVM's shared cache.
   (support/with-database
     (fn [connection]
       (let [database (db/db connection)
             cache @(ns-resolve 'seon.db 'projection-cache)
-            derive-projection schema/load-projection
-            derivations (atom 0)
-            reads (atom 0)]
-        ;; The population is memoized under several keys (revisions, commit,
-        ;; value, content); an empty cache is the cold start this counts from.
-        (cache/seed cache {})
-        (with-redefs [schema/load-projection
-                      (fn ([value] (derive-projection value))
-                        ([value base] (swap! derivations inc) (derive-projection value base)))]
-          (let [read! (fn [value] (swap! reads inc) (db/carried-projection value))
-                first-read (read! database)]
-            (is (identical? first-read (read! database)))
-            (is (= 1 @derivations))
-            (is (= 1 (- @reads @derivations)) "one cache hit")
-            (is (identical? first-read (read! (d/history database)))
-                "a temporal view reads its origin's population")
-            (let [unrelated (:db-after (support/transacted! connection []))]
-              (is (not= (:cache-context database) (:cache-context unrelated)))
-              (is (identical? first-read (read! unrelated))
-                  "a commit touching no declaration attribute keys the same population")
-              (is (= 1 @derivations)))
-            (let [declared (:db-after (support/transacted!
-                                       connection
-                                       [(declaration-call ::cached :int)]))
-                  next-read (read! declared)]
-              (is (= 2 @derivations))
-              (is (identical? next-read (read! declared)))
-              (is (= 2 @derivations))
-              (is (contains? (:seon.schema.projection/forms next-read) ::cached))
-              (is (identical? first-read (read! database))))))
+            first-read (db/carried-projection database)]
+        (is (identical? first-read (db/carried-projection database)) "one cache hit")
+        (is (identical? first-read (db/carried-projection (d/history database)))
+            "a temporal view reads its origin's population")
+        (let [unrelated (:db-after (support/transacted! connection []))]
+          (is (not= (:cache-context database) (:cache-context unrelated)))
+          (is (identical? first-read (db/carried-projection unrelated))
+              "a commit touching no declaration attribute keys the same population"))
+        (let [declared (:db-after (support/transacted!
+                                   connection
+                                   [(declaration-call ::cached :int)]))
+              next-read (db/carried-projection declared)]
+          (is (not (identical? first-read next-read)) "a declaration derives once")
+          (is (identical? next-read (db/carried-projection declared)))
+          (is (contains? (:seon.schema.projection/forms next-read) ::cached))
+          (is (identical? first-read (db/carried-projection database))))
         (is (<= (count @cache) (:seon.db/projection-cache-size db/projection-cache-policy)))
         (is (string? (:seon.db/projection-cache-reason db/projection-cache-policy)))))))
 
 (deftest speculative-values-derive-without-committed-identity
   (support/with-database
     (fn [connection]
-      (let [cache @(ns-resolve 'seon.db 'projection-cache)
-            database (:db-after (d/with (db/db connection) []))
-            derive-projection schema/load-projection
-            derivations (atom 0)]
-        (cache/seed cache {})
+      (let [database (:db-after (d/with (db/db connection) []))]
         (is (nil? (datahike.db/committed-value-identity database)))
-        (with-redefs [schema/load-projection
-                      (fn ([value] (derive-projection value))
-                        ([value base] (swap! derivations inc) (derive-projection value base)))]
-          (let [left (db/carried-projection database)
-                right (db/carried-projection database)]
-            (is (identical? left right)
-                "a value without committed identity is memoized by its declarations")
-            (is (= 1 @derivations))))))))
+        (is (identical? (db/carried-projection database) (db/carried-projection database))
+            "a value without committed identity is memoized by its declarations")))))
 
 (defn- unrelated-write
   "A `:db.fn/call` operation writing one entity no projection derivation reads."

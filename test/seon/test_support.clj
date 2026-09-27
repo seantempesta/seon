@@ -18,6 +18,7 @@
             [seon.fn :as seon.fn]
             [seon.instrument :as instrument]
             [seon.operator.runtime :as operator.runtime]
+            [seon.profile :as profile]
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
@@ -551,6 +552,55 @@
     (if (map? result)
       result
       (set result))))
+
+(defn read-operations
+  "Run `body` with `seon.db/*read-evidence-sink*` bound and answer
+  `[result operations]`: each `seon.db` read's `:seon.db/read-operation` in
+  order (`:q`, `:pull`, `:pull-many`; `seon.db/entity` records `:pull`), or
+  `:index` for an index read such as `datoms`, whose evidence carries a plan
+  and no request. The sink is a binding, so only this thread and threads that
+  convey its bindings are observed: a concurrent test's reads never count,
+  and no Var is redefined."
+  {:malli/schema [:=> [:cat [:fn clojure.core/ifn?]]
+                  [:tuple [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                                 :seon.schema.admission/reason "The body's arbitrary result is returned unchanged."}]
+                   [:vector :keyword]]]}
+  [body]
+  (let [sink (atom [])
+        result (binding [db/*read-evidence-sink* sink] (body))]
+    [result (mapv #(get-in % [:seon.db/read-request :seon.db/read-operation] :index) @sink)]))
+
+(defn armed-calls
+  "Run `body` and answer `[result calls]`: `calls` maps each of `symbols` to
+  the calls its armed wrappers counted while `body` ran, read from
+  seon.profile's per-definition counters (`profile/cells`: the host Var's and
+  any SCI context's); no Var is redefined. A symbol with no armed cell
+  refuses, since a zero from an unarmed Var proves nothing. The counters are JVM-wide: a concurrent request calling the same
+  Var counts too, so an exact count is honest only for a Var no concurrent
+  member reaches."
+  {:malli/schema [:=> [:cat [:set :qualified-symbol] [:fn clojure.core/ifn?]]
+                  [:tuple [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                                 :seon.schema.admission/reason "The body's arbitrary result is returned unchanged."}]
+                   [:map-of :qualified-symbol :int]]]}
+  [symbols body]
+  (let [counts (fn []
+                 (reduce (fn [found cell]
+                           (let [sym (:seon.profile/sym cell)]
+                             (if (contains? symbols sym)
+                               (update found sym (fnil + 0)
+                                       (.sum ^java.util.concurrent.atomic.LongAdder (:seon.profile/call-counter cell)))
+                               found)))
+                         {} (profile/cells)))
+        before (counts)
+        missing (remove #(contains? before %) symbols)]
+    (when (seq missing)
+      (throw (ex-info (str "No armed profile cell counts " (vec missing) ": arm the Var before counting its calls.")
+                      {:seon.error/operation 'seon.test-support/armed-calls
+                       :seon.error/expected :seon.profile/cell
+                       :seon.error/offending (vec missing)})))
+    (let [result (body)
+          after (counts)]
+      [result (into {} (map (fn [sym] [sym (- (get after sym) (get before sym))])) symbols)])))
 
 (defn refusal-data
   "Return a flat error value, deepest thrown ex-data, or `committed`."
