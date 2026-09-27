@@ -9,18 +9,20 @@
 (deftest accounting-joins-runtime-turns-and-preserves-unknown-cost
   (support/with-database
    (fn [connection]
-     (let [now (java.util.Date.)
-           opened (java.util.Date. (- (inst-ms now) 20))]
+     ;; The turn's opening and closing are real transactions with chosen
+     ;; instants (a bare {:db/txInstant} entity is not a transaction and the
+     ;; writer refuses it as unowned). Opened now, after every fixture commit.
+     (let [opened (java.util.Date.)
+           now (java.util.Date. (+ (inst-ms opened) 20))]
        (let [result (db/transact! connection
-                  [{:db/id "open" :db/txInstant opened}
-                   {:db/id "close" :db/txInstant now}
+                  [{:db/id "datomic.tx" :db/txInstant opened}
                    {:seon.agent/id "metrics"
                     :seon.agent/runtime
                     {:seon.runtime/agent [:seon.agent/id "metrics"]
                      :seon.runtime/turns
                      [{:seon.turn/id "metrics-turn"
                        :seon.turn/agent [:seon.agent/id "metrics"]
-                       :seon.turn/opened-tx "open" :seon.turn/closed-tx "close"
+                       :seon.turn/opened-tx "datomic.tx"
                        :seon.turn/attempts
                        [{:seon.ai.attempt/id "metrics-attempt"
                          :seon.ai/endpoint "https://example.invalid/v1/chat/completions"
@@ -28,7 +30,11 @@
                          :seon.ai.attempt/settings-edn "{}"
                          :seon.ai.attempt/ordinal 0 :seon.ai.attempt/at now
                          :seon.ai.usage/total-tokens 17
-                         :seon.ai.attempt/usage-edn "{\"total_tokens\" 17}"}]}]}}
+                         :seon.ai.attempt/usage-edn "{\"total_tokens\" 17}"}]}]}}])]
+         (is (some? (:db-after result)) (pr-str result)))
+       (let [result (db/transact! connection
+                  [{:db/id "datomic.tx" :db/txInstant now}
+                   [:db/add [:seon.turn/id "metrics-turn"] :seon.turn/closed-tx "datomic.tx"]
                    {:seon.cluster.eval/id "metrics-eval"
                     :seon.cluster.eval/run [:seon.turn/id "metrics-turn"]
                     :seon.cluster.eval/ordinal 0 :seon.cluster.eval/at now
