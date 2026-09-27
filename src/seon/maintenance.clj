@@ -321,9 +321,9 @@
 
 (defn- operation-name
   [entry]
-  (let [function (:seon.fn/sym entry)
-        slash (.lastIndexOf ^String function "/")]
-    (if (neg? slash) function (subs function (inc slash)))))
+  ;; `:seon.fn/sym` is a qualified symbol (seon.fn.edn, retyped from a string
+  ;; in 0e8f7d323); its name is the operation a reader recognises.
+  (name (:seon.fn/sym entry)))
 
 (defn- gibibytes
   [byte-count]
