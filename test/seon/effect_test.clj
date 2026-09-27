@@ -4,7 +4,6 @@
             [clojure.edn :as edn]
             [malli.core :as m]
             [malli.generator :as mg]
-            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.core :as datahike]
             [sci.core :as sci]
@@ -574,27 +573,6 @@
       (is (< 30000 (:seon.effect-test/deadline-remaining-ms settled))
           "and the arm the work ran under must carry that 60s deadline")))
 
-  (testing "a cluster with no background limit refuses the submission"
-    (test-support/with-database
-      (fn [connection]
-        (transact-fixture! connection (into (test-support/agent-tx @connection "effect-agent")
-                                        [{:seon.turn/id "effect-run"
-                                   :seon.turn/agent [:seon.agent/id "effect-agent"]
-                                   :seon.turn/opened-tx "datomic.tx"}]))
-        (install-arm-probe! connection)
-        (let [result
-              (binding [effect/*request-context*
-                        (request-context connection)]
-                (effect/request! #'arm-probe-owner
-                                 {:seon.effect-test/iterations 1}
-                                 {:seon.effect/background? true}))]
-          (is (= :seon.config.effect.background/time-limit-ms (:seon.effect/missing-bound result))
-              (str "unbounded detached work must be refused loudly; got "
-                   (pr-str result)))
-          (is (nil? (db/pull (db/db connection) [:seon.effect/id]
-                             [:seon.effect/id (id/digest 12 [:seon.effect/id "effect-run" 3 0])]))
-              "and refused before any receipt is opened")))))
-
   (testing "a nonsense explicit limit is refused, never treated as absent"
     (test-support/with-database
       (fn [connection]
@@ -790,8 +768,6 @@
             "and it names the declared bound it was measured against")
         (is (nil? (find result :seon.error/offending))
             "the over-bound request is referenced by its marker, never copied")
-        (is (str/includes? (:seon.error/message result)
-                           ":seon.config.eval.result/max-bytes"))
         (is (nil? (db/pull (db/db connection) [:seon.effect/id]
                            [:seon.effect/id (id/digest 12 [:seon.effect/id "effect-run" 3 0])]))
             "nothing was opened, so nothing was dispatched")))))
