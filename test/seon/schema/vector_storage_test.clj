@@ -9,6 +9,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [datahike.constants :as const]
+            [datahike.query :as dq]
             [seon.db :as db]
             [seon.fn :as seon.fn]
             [seon.schema :as schema]
@@ -38,6 +39,7 @@
    [:seon.vector-test.p/pairs [:vector [:tuple :int :string]]]
    [:seon.vector-test.p/tags [:set :qualified-keyword]]
    [:seon.vector-test.p/peers [:vector :seon.db/ref]]
+   [:seon.vector-test.p/note [:or :string [:map-of :qualified-keyword :uuid]]]
    [:seon.vector-test.a/name :string]
    [:seon.vector-test.a/row [:map {:seon.db/attributes true}
                              [:seon.vector-test.a/name :seon.vector-test.a/name]]]
@@ -187,6 +189,8 @@
      (let [projection (-> (schema/handed-projection)
                           (vector-projection subject-forms)
                           (vector-projection bridge-forms))
+           physical-of #(first (schema.datahike/vector-pull projection %))
+           decoded #(schema.datahike/decode-vectors projection (second (schema.datahike/vector-pull projection %1)) %2)
            items :seon.vector-test.p/items
            kids :seon.vector-test.p/kids
            selector [[items :as :xs :limit 2] [:seon.vector-test.p/pairs :default []]
@@ -208,17 +212,20 @@
                                                 :seon.db.vector/present
                                                 {:seon.db.vector/cells [:seon.db.vector/position
                                                                         {:seon.vector-test.k/args [:seon.vector-test.a/name]}]}]}]}]
-                (schema.datahike/lower-selector projection selector))))
+                (physical-of selector))))
+       (testing "every entry of a multi-entry selector map is read (the first alone was, 2026-09-27 review)"
+         (is (= [:seon.db.vector/present
+                 {:seon.db.vector/cells [:seon.db.vector/position {kids [:seon.vector-test.k/name]} {:seon.vector-test.p/peers [:db/id]}]}]
+                (physical-of [{kids [:seon.vector-test.k/name] :seon.vector-test.p/peers [:db/id]}]))))
        (testing "decoding orders by position, applies options to the logical vector and removes bridge keys"
          (is (= {:xs ["a" "b"] :seon.vector-test.p/pairs []
                  kids [{:seon.vector-test.k/name "A" :seon.vector-test.k/args [{:seon.vector-test.a/name "1"} {:seon.vector-test.a/name "2"}]}]}
-                (schema.datahike/decode-vectors projection selector physical))))
+                (decoded selector physical))))
        (testing "the legacy list forms mean the same options"
          (is (= {items ["a" "b"] :seon.vector-test.p/pairs []}
-                (schema.datahike/decode-vectors projection '[(limit :seon.vector-test.p/items 2) (default :seon.vector-test.p/pairs [])]
-                                                physical))))
+                (decoded '[(limit :seon.vector-test.p/items 2) (default :seon.vector-test.p/pairs [])] physical))))
        (testing "a wildcard restores every present vector, empty ones included"
-         (let [decoded (schema.datahike/decode-vectors projection '[*] physical)]
+         (let [decoded (decoded '[*] physical)]
            (is (= ["a" "b" "c"] (get decoded items)))
            (is (= [] (get decoded :seon.vector-test.p/keys)))
            (is (= [{:seon.vector-test.a/name "1"} {:seon.vector-test.a/name "2"}]
@@ -226,14 +233,14 @@
            (is (not-any? #(= "seon.db.vector" (namespace %)) (keys decoded)))))
        (testing "a reverse vector attribute reads the owning parents"
          (is (= [{:seon.vector-test.p/_peers [{:seon.db.vector/_cells [:db/id]}]}]
-                (schema.datahike/lower-selector projection [:seon.vector-test.p/_peers])))
+                (physical-of [:seon.vector-test.p/_peers])))
          (is (= {:seon.vector-test.p/_peers [{:db/id 1}]}
-                (schema.datahike/decode-vectors projection [:seon.vector-test.p/_peers]
-                                                {:seon.vector-test.p/_peers [{:seon.db.vector/_cells {:db/id 1}}
-                                                                             {:seon.db.vector/_cells {:db/id 1}}]}))))
+                (decoded [:seon.vector-test.p/_peers]
+                         {:seon.vector-test.p/_peers [{:seon.db.vector/_cells {:db/id 1}}
+                                                      {:seon.db.vector/_cells {:db/id 1}}]}))))
        (testing "a selector naming no vector needs no lowering"
-         (is (not (schema.datahike/vector-selector? projection [:seon.vector-test.p/id])))
-         (is (schema.datahike/vector-selector? projection '[*])))))))
+         (is (nil? (schema.datahike/vector-pull projection [:seon.vector-test.p/id])))
+         (is (some? (schema.datahike/vector-pull projection '[*]))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; A database world: the synthetic declarations installed and stored as rows
@@ -325,6 +332,17 @@
        (is (= {:seon.vector-test.p/items []} (pulled c [:seon.vector-test.p/items] p)))
        (tx! c [[:db/retract p :seon.vector-test.p/items]])
        (is (= {:seon.vector-test.p/items :none} (pulled c [[:seon.vector-test.p/items :default :none]] p))))
+     (testing "a component vector read without a sub-selector holds logical elements (V3)"
+       (let [[kid] (:seon.vector-test.p/kids (pulled c [:seon.vector-test.p/kids] [:seon.vector-test.p/id "n"]))]
+         (is (= "k" (:seon.vector-test.k/name kid)))
+         (is (= [{:seon.vector-test.a/name "y"} {:seon.vector-test.a/name "x"} {:seon.vector-test.a/name "x"}]
+                (mapv #(dissoc % :db/id) (:seon.vector-test.k/args kid))))
+         (is (not-any? #(= "seon.db.vector" (namespace %)) (keys kid)))))
+     (testing "a data value is never read as an entity, whatever its keys (V2: it walked a UUID)"
+       (let [note {:seon.db.vector/cells #uuid "00000000-0000-0000-0000-000000000001"}]
+         (tx! c [{:seon.vector-test.p/id "d" :seon.vector-test.p/note note}])
+         (is (= note (:seon.vector-test.p/note (pulled c '[*] [:seon.vector-test.p/id "d"]))))
+         (is (= note (:seon.vector-test.p/note (db/q '[:find (pull ?e [*]) . :where [?e :seon.vector-test.p/id "d"]] @c))))))
      (testing "reasserting an unchanged vector emits nothing"
        (tx! c [{:seon.vector-test.p/id "u" :seon.vector-test.p/items ["a" "b" "a"]
                 :seon.vector-test.p/kids [{:seon.vector-test.k/name "x"} {:seon.vector-test.k/name "y"}]}])
@@ -532,6 +550,17 @@
                             database '[[(has ?e ?v) [?e :seon.vector-test.p/items ?v]]])))
          (is (= ["r"] (db/q '[:find [?id ...] :where [?e :seon.vector-test.p/id ?id] [(missing? $ ?e :seon.vector-test.p/items)]]
                             database))))
+       (testing "missing? of an input-bound entity or attribute reads presence too (review 2026-09-27)"
+         (let [id #(:db/id (db/pull database [:db/id] [:seon.vector-test.p/id %]))]
+           (is (= #{} (db/q '[:find ?e :in $ ?e ?a :where [(missing? $ ?e ?a)]] database (id "e") :seon.vector-test.p/items)))
+           (is (= #{[(id "r")]} (db/q '[:find ?e :in $ ?e ?a :where [(missing? $ ?e ?a)]] database (id "r") :seon.vector-test.p/items)))
+           (is (= #{} (db/q '[:find ?e :in $ ?e :where [(missing? $ ?e :seon.vector-test.p/items)]] database (id "e"))))
+           (is (= #{[(id "e")]} (db/q '[:find ?e :in $ ?e ?a :where [(missing? $ ?e ?a)]] database (id "e") :seon.vector-test.p/peers)))))
+       (testing "a query naming only cardinality-one attributes never derives the declarations (V5)"
+         (let [query '[:find ?entity . :in $ ?attribute :where [?entity ?attribute]]
+               ask #(#'db/may-read-vectors? (:schema database) (dq/memoized-parse-query %1) {:query %1 :args %2})]
+           (is (false? (ask query [database :seon.vector-test.p/id])))
+           (is (true? (ask query [database :seon.vector-test.p/items])))))
        (testing "get-else over a vector attribute refuses by name"
          (is (= 'get-else (:seon.db/vector-scalar-function
                            (db/q '[:find ?v :where [?e :seon.vector-test.p/id "p"] [(get-else $ ?e :seon.vector-test.p/items "none") ?v]]
@@ -542,7 +571,22 @@
                       database)))
          (is (= [{:seon.vector-test.p/items ["b" "a" "b"]}]
                 (db/q '[:find [(pull ?e ?s) ...] :in $ ?s :where [?e :seon.vector-test.p/id "p"]]
-                      database [:seon.vector-test.p/items]))))))))
+                      database [:seon.vector-test.p/items])))
+         (is (= [{:row {:seon.vector-test.p/items ["b" "a" "b"]} :id "p"}]
+                (db/q '[:find (pull ?e [:seon.vector-test.p/items]) ?id :keys row id
+                        :where [?e :seon.vector-test.p/id "p"] [?e :seon.vector-test.p/id ?id]]
+                      database))
+             "a return map decodes its pull column (it threw ClassCastException, review 2026-09-27)")
+         (is (= [{:seon.vector-test.p/items ["b" "a" "b"]}]
+                (db/q '[:find [(pull ?e sel) ...] :in $ sel :where [?e :seon.vector-test.p/id "p"]]
+                      database [:seon.vector-test.p/items]))
+             "a selector input bound without a leading ? is lowered too (V1: it broke dir, 2026-09-27)")
+         (is (= (db/pull database '[*] p)
+                (db/q '[:find (pull ?e [*]) . :where [?e :seon.vector-test.p/id "p"]] database))
+             "a query's wildcard pull reads every vector a pull reads (V4)")
+         (is (= {:seon.vector-test.p/items ["b" "a" "b"]}
+                (db/q '[:find (pull ?e [:seon.vector-test.p/items]) . :in $ ?e] database p))
+             "a query with no :where lowers its pull (the lowering refused a nil :where, 2026-09-27)"))))))
 
 (deftest datalog-over-history-is-an-exact-membership-change-view
   (with-vector-world

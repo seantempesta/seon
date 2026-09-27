@@ -11,7 +11,8 @@
             [malli.registry :as mr]
             [seon.schema :as schema]
             [seon.id :as id]
-            [seon.schema.internal :as internal]))
+            [seon.schema.internal :as internal]
+            [datalog.parser.pull :as pull-parser]))
 
 (def malli-type->datahike-type
   {:string :db.type/string
@@ -522,6 +523,17 @@
      (when-let [compiled (mr/schema (:seon.schema.projection/registry projection) attr)]
        (:seon.db/identity (::properties (compiled-storage compiled)))))))
 
+(defn- ref-attr-in?
+  "Whether `attr` stores entity references in `projection`: its pulled values
+   are entities, never data maps."
+  {:malli/schema [:=> [:cat :seon.schema/projection :keyword] :boolean]}
+  [projection attr]
+  (schema/projection-cache-value
+   projection [::ref attr]
+   #(boolean
+     (when-let [compiled (mr/schema (:seon.schema.projection/registry projection) attr)]
+       (= :db.type/ref (::value-type (compiled-storage compiled)))))))
+
 (defn- new-entity-id?
   "True for an entity id Datahike allocates in this transaction."
   {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
@@ -647,140 +659,115 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Vectors read back: logical selectors lowered, physical pulls decoded
 ;;; ---------------------------------------------------------------------------
+;;; Both sides read Datahike's own parse of the logical selector
+;;; (`datalog.parser.pull/parse-pull`): `{:wildcard? w :attrs {key options}}`,
+;;; where a reverse `:x/_a` is the key of options naming `:x/a`.
 
-(defn- selector-spec
-  "One pull selector element as {:attr :key :sub :opts}, or :wildcard. Accepts
-   keywords, `[a :as k :limit n :default d]`, the legacy `(limit a n)` and
-   `(default a d)`, and `{spec sub}`."
-  {:malli/schema [:=> [:cat :seon.schema/value]
-                  [:or [:= :wildcard]
-                   [:map [:attr :keyword] [:key :seon.schema/value]
-                    [:sub {:optional true} :seon.schema/value]
-                    [:opts {:optional true} [:map-of :keyword :seon.schema/value]]]]]}
-  [element]
-  (cond
-    (contains? #{'* "*"} element) :wildcard
-    (keyword? element) {:attr element :key element}
-    (and (seq? element) (contains? #{'limit 'default "limit" "default"} (first element)))
-    (let [[f attr argument] element]
-      {:attr attr :key attr :opts {(keyword (name f)) argument}})
-    (and (sequential? element) (keyword? (first element)))
-    (let [[attr & options] element
-          opts (apply hash-map options)]
-      {:attr attr :key (get opts :as attr) :opts opts})
-    (map? element)
-    (let [[k sub] (first element)]
-      (assoc (selector-spec k) :sub sub))
-    :else (throw (ex-info "Unsupported pull selector element." {::selector-element element}))))
+(def ^:private wildcard-spec (pull-parser/parse-pull '[*]))
+(def ^:private id-spec (pull-parser/parse-pull [:db/id]))
 
-(defn- reverse-vector-attr
-  "The vector attribute `attr` names in reverse (`:x/_a`), or nil."
-  {:malli/schema [:=> [:cat :seon.schema/projection :keyword] [:or :nil :keyword]]}
-  [projection attr]
-  (when (.startsWith (name attr) "_")
-    (let [forward (keyword (namespace attr) (subs (name attr) 1))]
-      (when (vector-attribute-in? projection forward) forward))))
+(defn- cell-attribute
+  "`:vector` when spec entry `[k options]` reads a vector attribute, `:reverse`
+   when it reads one in reverse, `:plain` otherwise."
+  {:malli/schema [:=> [:cat :seon.schema/projection [:tuple :seon.schema/value :map]] [:enum :vector :reverse :plain]]}
+  [projection [k {:keys [attr]}]]
+  (cond (not (and (keyword? attr) (vector-attribute-in? projection attr))) :plain
+        (= k attr) :vector
+        :else :reverse))
 
-(defn- sub-selector?
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
-  [sub]
-  (boolean (and (sequential? sub) (not (seq? sub)))))
+(defn- reads-cells?
+  {:malli/schema [:=> [:cat :seon.schema/projection :map] :boolean]}
+  [projection {:keys [wildcard? attrs]}]
+  (boolean (or wildcard?
+               (some (fn [[_ {:keys [subpattern]} :as entry]]
+                       (or (not= :plain (cell-attribute projection entry))
+                           (and subpattern (reads-cells? projection subpattern))))
+                     attrs))))
 
-(defn lower-selector
-  "The physical pull selector for a logical one. Every vector attribute reads
-   through one shared `{:seon.db.vector/cells [position a ...]}` plus
-   `:seon.db.vector/present`; its options (`:as :limit :default`) apply to the
-   logical vector after [[decode-vectors]], so a limit never cuts another
-   vector's cells. A reverse `:x/_a` reads the cells' owning parents."
-  {:malli/schema [:=> [:cat :seon.schema/projection :seon.schema/pull-selector] :seon.schema/pull-selector]}
+(defn- physical-selector
+  "The selector reading `spec` from storage: every vector through one shared
+   `{:seon.db.vector/cells [position a ...]}` plus presence, its options applied
+   later to the logical vector, so a limit never cuts another vector's cells."
+  {:malli/schema [:=> [:cat :seon.schema/projection :map] :seon.schema/pull-selector]}
+  [projection {:keys [wildcard? attrs]}]
+  (let [element (fn [k {:keys [subpattern] :as options}]
+                  (let [base (if-some [opts (not-empty (select-keys options [:as :limit :default]))]
+                               (into [k] cat opts)
+                               k)]
+                    (cond subpattern {base (physical-selector projection subpattern)}
+                          (contains? options :recursion) {base (or (:recursion options) '...)}
+                          :else base)))
+        {plain :plain vectors :vector reversed :reverse} (group-by #(cell-attribute projection %) attrs)]
+    (cond-> (if wildcard? ['*] [])
+      (some #(contains? (val %) :default) (concat vectors reversed)) (conj :db/id)
+      true (into (map (fn [[k options]] (element k options))) plain)
+      true (into (map (fn [[k {:keys [subpattern]}]]
+                        {k [{:seon.db.vector/_cells (physical-selector projection (or subpattern id-spec))}]}))
+                 reversed)
+      (seq vectors) (conj :seon.db.vector/present
+                          {:seon.db.vector/cells
+                           (into [:seon.db.vector/position]
+                                 (map (fn [[k options]] (element k (dissoc options :as :limit :default))))
+                                 vectors)}))))
+
+(defn vector-pull
+  "`[physical-selector logical-spec]` for pulling logical `selector` under
+   `projection`, or nil when the pull reads no cells (none declared, or no
+   vector attribute or wildcard at any depth). [[decode-vectors]] takes the spec."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.schema/pull-selector]
+                  [:or :nil [:tuple :seon.schema/pull-selector :map]]]}
   [projection selector]
-  (let [specs (map selector-spec selector)
-        wildcard? (some #{:wildcard} specs)
-        specs (remove #{:wildcard} specs)
-        lower-sub #(if (sub-selector? %) (lower-selector projection %) %)
-        vector-spec? #(vector-attribute-in? projection (:attr %))
-        reverse? #(reverse-vector-attr projection (:attr %))
-        plain (for [{:keys [attr sub opts] :as spec} specs
-                    :when (not (or (vector-spec? spec) (reverse? spec)))]
-                (let [base (if (seq opts) (into [attr] (mapcat identity) opts) attr)]
-                  (if (some? sub) {base (lower-sub sub)} base)))
-        cell (into [:seon.db.vector/position]
-                   (for [{:keys [attr sub] :as spec} specs :when (vector-spec? spec)]
-                     (if (some? sub) {attr (lower-sub sub)} attr)))
-        reversed (for [{:keys [attr sub] :as spec} specs :when (reverse? spec)]
-                  {attr [{:seon.db.vector/_cells (lower-sub (or sub [:db/id]))}]})]
-    (vec (concat (when wildcard? ['*])
-                 (when (some #(contains? (:opts %) :default) specs) [:db/id])
-                 plain
-                 reversed
-                 (when (some vector-spec? specs)
-                   [:seon.db.vector/present {:seon.db.vector/cells cell}])))))
-
-(defn vector-selector?
-  "Whether pulling `selector` under `projection` needs [[lower-selector]] and
-   [[decode-vectors]]: the projection stores vectors in cells and the selector
-   names a vector attribute, a legacy form or a wildcard at any depth."
-  {:malli/schema [:=> [:cat :seon.schema/projection :seon.schema/pull-selector] :boolean]}
-  [projection selector]
-  (and (contains? (:seon.schema.projection/forms projection) :seon.db.vector/cells)
-       (boolean (or (not= selector (lower-selector projection selector))
-                    (some #(contains? #{'* "*"} %) (tree-seq coll? seq selector))))))
+  (when (contains? (:seon.schema.projection/forms projection) :seon.db.vector/cells)
+    (let [spec (pull-parser/parse-pull selector)]
+      (when (reads-cells? projection spec)
+        [(physical-selector projection spec) spec]))))
 
 (declare decode-vectors)
 
 (defn- decode-pulled
-  "One pulled value under sub-selector `sub`: entity maps decode recursively."
-  {:malli/schema [:=> [:cat :seon.schema/projection :seon.schema/value :seon.schema/value] :seon.schema/value]}
-  [projection sub value]
-  (cond
-    (not (sub-selector? sub)) value
-    (map? value) (decode-vectors projection sub value)
-    (sequential? value) (mapv #(decode-pulled projection sub %) value)
-    :else value))
+  {:malli/schema [:=> [:cat :seon.schema/projection [:or :nil :map] :seon.schema/value] :seon.schema/value]}
+  [projection spec value]
+  (cond (nil? spec) value
+        (map? value) (decode-vectors projection spec value)
+        (sequential? value) (mapv #(decode-pulled projection spec %) value)
+        :else value))
 
 (defn decode-vectors
-  "The logical entity for `pulled`, the physical pull of
-   `(lower-selector projection selector)`: each present vector's cells grouped
-   by the one vector attribute each carries, sorted by position, elements
-   decoded; bridge keys removed; options applied to the logical vector."
-  {:malli/schema [:=> [:cat :seon.schema/projection :seon.schema/pull-selector [:or :nil :map]]
-                  [:or :nil :map]]}
-  [projection selector pulled]
+  "The logical entity for `pulled`, read by the physical selector of
+   [[vector-pull]]: each present vector's cells in position order, bridge keys
+   removed, the spec's options applied to the logical vector."
+  {:malli/schema [:=> [:cat :seon.schema/projection :map [:or :nil :map]] [:or :nil :map]]}
+  [projection {:keys [wildcard? attrs]} pulled]
   (when pulled
-    (let [specs (map selector-spec selector)
-          wildcard? (some #{:wildcard} specs)
-          specs (remove #{:wildcard} specs)
+    (let [;; A reference without a sub-selector is an entity too: an expanded
+          ;; component holds its own cells. Any other value is data, never walked.
+          nested (fn [attr spec] (or spec (when (ref-attr-in? projection attr) wildcard-spec)))
           grouped (group-by (fn [cell] (some #(when (vector-attribute-in? projection %) %) (keys cell)))
                             (:seon.db.vector/cells pulled))
           present (set (:seon.db.vector/present pulled))
-          logical (fn [attr sub]
+          logical (fn [attr spec]
                     (when (contains? present attr)
-                      (->> (get grouped attr)
-                           (sort-by :seon.db.vector/position)
-                           (mapv #(decode-pulled projection (or sub (when wildcard? '[*]))
-                                                 (first (get % attr)))))))
-          base (apply dissoc pulled :seon.db.vector/cells :seon.db.vector/present (map :key specs))
-          base (if (or wildcard? (some #(= :db/id (:attr %)) specs)) base (dissoc base :db/id))
+                      (mapv #(decode-pulled projection (nested attr spec) (first (get % attr)))
+                            (sort-by :seon.db.vector/position (get grouped attr)))))
+          base (cond-> (apply dissoc pulled :seon.db.vector/cells :seon.db.vector/present
+                              (map (fn [[k options]] (get options :as k)) attrs))
+                 (not (or wildcard? (contains? attrs :db/id))) (dissoc :db/id))
           base (if wildcard?
-                 (reduce (fn [entity attr]
-                           (if-some [value (logical attr nil)] (assoc entity attr value) entity))
-                         (into {} (map (fn [[k v]] [k (decode-pulled projection '[*] v)])) base)
+                 (reduce (fn [entity attr] (if-some [value (logical attr nil)] (assoc entity attr value) entity))
+                         (into {} (map (fn [[k v]] [k (cond->> v (coll? v) (decode-pulled projection (nested k nil)))])) base)
                          present)
                  base)]
       (reduce
-       (fn [entity {:keys [attr sub opts] out-key :key}]
-         (let [forward (reverse-vector-attr projection attr)
-               value (cond
-                       (vector-attribute-in? projection attr)
-                       (let [v (logical attr sub)]
-                         (cond->> v (and v (:limit opts)) (into [] (take (:limit opts)))))
-                       forward
-                       (let [owners (into [] (comp (keep :seon.db.vector/_cells) (distinct)) (get pulled attr))]
-                         (when (seq owners) (mapv #(decode-pulled projection (or sub [:db/id]) %) owners)))
-                       :else (decode-pulled projection sub (get pulled out-key)))
-               value (if (and (nil? value) (contains? opts :default)) (:default opts) value)]
-           (if (some? value) (assoc entity out-key value) entity)))
-       base specs))))
+       (fn [entity [k {:keys [attr subpattern limit] :as options} :as entry]]
+         (let [value (case (cell-attribute projection entry)
+                       :vector (let [v (logical attr subpattern)] (cond->> v (and v limit) (into [] (take limit))))
+                       :reverse (not-empty (into [] (comp (keep :seon.db.vector/_cells) (distinct)
+                                                          (map #(decode-pulled projection (or subpattern id-spec) %)))
+                                                 (get pulled k)))
+                       :plain (decode-pulled projection (nested attr subpattern) (get pulled (get options :as k))))
+               value (if (and (nil? value) (contains? options :default)) (:default options) value)]
+           (if (some? value) (assoc entity (get options :as k) value) entity)))
+       base attrs))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Vectors in Datalog: a pattern over a vector attribute means membership
@@ -810,12 +797,22 @@
   [form]
   (into [] (comp (filter query-variable?) (distinct)) (tree-seq coll? seq form)))
 
+(defn- vector-position?
+  "Whether attribute position `a` reads vector attributes: true when every
+   attribute it can name is one, false when none is, nil when unknown (a
+   variable no input binds, or inputs of both kinds)."
+  {:malli/schema [:=> [:cat :seon.schema/projection [:map-of :symbol [:set :seon.schema/value]] :seon.schema/value]
+                  [:or :nil :boolean]]}
+  [projection bound a]
+  (let [kinds (into #{} (map #(boolean (and (keyword? %) (vector-attribute-in? projection %))))
+                    (if (keyword? a) [a] (get bound a)))]
+    (when (= 1 (count kinds)) (first kinds))))
+
 (declare lower-clauses)
 
 (defn- lower-pattern
-  "One data pattern: through cells for a vector attribute (constant, or an
-   input bound only to vector attributes), unchanged for a non-vector one, a
-   union of both for a free or mixed attribute variable."
+  "One data pattern: through cells for a vector attribute, unchanged for a
+   non-vector one, a union of both when the attribute is unknown."
   {:malli/schema [:=> [:cat :seon.schema/projection [:map-of :symbol [:set :seon.schema/value]] [:vector :seon.schema/value]]
                   [:vector :seon.schema/value]]}
   [projection bound pattern]
@@ -823,29 +820,23 @@
         [source [e a v & tail]] (if (query-source? head) [head more] [nil pattern])
         with-source #(if source (into [source] %) %)
         cell (gensym "?vector-cell")
-        values (get bound a)
         v (if (nil? v) '_ v)]
-    (cond
-      (or (and (keyword? a) (vector-attribute-in? projection a))
-          (and (query-variable? a) (seq values)
-               (every? #(and (keyword? %) (vector-attribute-in? projection %)) values)))
-      [(with-source [e :seon.db.vector/cells cell]) (with-source (into [cell a v] tail))]
-
-      (or (not (query-variable? a))
-          (and (seq values) (not-any? #(and (keyword? %) (vector-attribute-in? projection %)) values)))
-      [pattern]
-
-      :else
-      ;; `missing?`, not `not`: Datahike inlines a scalar input into ?e, and
-      ;; a `not` with no free variable is refused ("Insufficient bindings").
-      [(apply list (concat (if source [source 'or-join] ['or-join])
-                           [(clause-variables [e a v tail])
-                            (list 'and (with-source (into [e a v] tail))
-                                  [(list `logical-attribute? a)]
-                                  [(list 'missing? (or source '$) e :seon.db.vector/position)])
-                            (list 'and (with-source [e :seon.db.vector/cells cell])
-                                  (with-source (into [cell a v] tail))
-                                  [(list `logical-attribute? a)])]))])))
+    (case (when (or (keyword? a) (query-variable? a)) (vector-position? projection bound a))
+      true [(with-source [e :seon.db.vector/cells cell]) (with-source (into [cell a v] tail))]
+      false [pattern]
+      ;; A `_` or constant non-keyword attribute is Datahike's own concern.
+      nil (if-not (query-variable? a)
+            [pattern]
+            ;; `missing?`, not `not`: Datahike inlines a scalar input into ?e, and
+            ;; a `not` with no free variable is refused ("Insufficient bindings").
+            [(apply list (concat (if source [source 'or-join] ['or-join])
+                                 [(clause-variables [e a v tail])
+                                  (list 'and (with-source (into [e a v] tail))
+                                        [(list `logical-attribute? a)]
+                                        [(list 'missing? (or source '$) e :seon.db.vector/position)])
+                                  (list 'and (with-source [e :seon.db.vector/cells cell])
+                                        (with-source (into [cell a v] tail))
+                                        [(list `logical-attribute? a)])]))]))))
 
 (defn- lower-branch
   {:malli/schema [:=> [:cat :seon.schema/projection [:map-of :symbol [:set :seon.schema/value]] :seon.schema/value]
@@ -856,20 +847,20 @@
 
 (defn- lower-clause
   "One where clause lowered; `not`/`or` become `not-join`/`or-join` over their
-   original variables, so a cell variable stays local to its branch."
+   original variables, so a cell variable stays local to its branch. `missing?`
+   of an attribute that may be a vector asks `seon.db/logical-missing?`, which
+   reads presence (an empty vector is not missing) and any other attribute alike."
   {:malli/schema [:=> [:cat :seon.schema/projection [:map-of :symbol [:set :seon.schema/value]] :seon.schema/value]
                   [:vector :seon.schema/value]]}
   [projection bound clause]
   (cond
     (and (vector? clause) (seq? (first clause)))
-    (let [[[f & arguments]] clause
-          vector-argument? #(and (keyword? %) (vector-attribute-in? projection %))]
+    (let [[[f & arguments]] clause]
       (cond
-        (and (= 'missing? f) (vector-argument? (last arguments)))
-        (let [[source e a] (if (= 3 (count arguments)) arguments (cons '$ arguments))]
-          [(list 'not [source e :seon.db.vector/present a])])
+        (and (= 'missing? f) (not (false? (vector-position? projection bound (last arguments)))))
+        [(assoc clause 0 (list* 'seon.db/logical-missing? (if (= 3 (count arguments)) arguments (cons '$ arguments))))]
 
-        (and (contains? #{'get-else 'get-some} f) (some vector-argument? arguments))
+        (and (contains? #{'get-else 'get-some} f) (some #(true? (vector-position? projection bound %)) arguments))
         (throw (ex-info (str f " reads one value; a vector attribute holds a sequence. "
                              "Pull the vector, or join its members with a data pattern.")
                         {::vector-scalar-function f ::clause clause}))
@@ -898,89 +889,27 @@
   [projection bound clauses]
   (into [] (mapcat #(lower-clause projection bound %)) clauses))
 
-(defn- query-map
-  "A vector query as its map form."
-  {:malli/schema [:=> [:cat [:or :map [:vector :seon.schema/value]]] :map]}
-  [query]
-  (if (map? query)
-    query
-    (first (reduce (fn [[out k] x] (if (keyword? x) [(assoc out x []) x] [(update out k conj x) k]))
-                   [{} nil] query))))
-
-(defn lower-query
-  "The physical Datalog request for a logical one over vector attributes:
-   `{:query q :args args :pulls {find-index logical-selector}}`, where every
-   data pattern over a vector attribute is membership through cells, every
-   `missing?` of one asks presence, rule bodies in the `%` input are lowered
-   alike, and pull selectors (literal or input-bound) are lowered before
-   execution; `:pulls` names the find elements [[decode-vectors]] must decode.
-   `get-else`/`get-some` over a vector attribute throws
-   `::vector-scalar-function`. Cell variables are numbered in order, so equal
-   queries lower to equal forms and share Datahike's query cache."
-  {:malli/schema [:=> [:cat :seon.schema/projection [:or :map [:vector :seon.schema/value]] [:vector :seon.schema/value]]
-                  [:map [:query :map] [:args [:vector :seon.schema/value]]
-                   [:pulls [:map-of :int :seon.schema/value]]]]}
-  [projection query args]
-  (let [{find-spec :find in :in where :where :as logical} (query-map query)
-        in (vec (or in '[$]))
-        position-of #(.indexOf ^java.util.List in %)
-        bound (into {}
-                    (keep (fn [[input argument]]
-                            (cond
-                              (query-variable? input) [input #{argument}]
-                              (and (vector? input) (= '... (second input)) (query-variable? (first input)))
-                              [(first input) (set argument)])))
-                    (map vector in args))
-        rules (position-of '%)
-        args (cond-> (vec args)
-               (not (neg? rules))
-               (update rules (fn [rule-set]
-                               (mapv (fn [[head & body]] (into [head] (lower-clauses projection bound body))) rule-set))))
-        pull? #(and (seq? %) (= 'pull (first %)))
-        elements (let [[f] find-spec] (if (and (vector? f) (= 1 (count find-spec))) (vec (remove #{'...} f)) (vec (remove #{'.} find-spec))))
-        pulls (into {} (keep-indexed (fn [i element]
-                                       (when (pull? element)
-                                         (let [selector (last element)]
-                                           [i (if (query-variable? selector) (get args (position-of selector)) selector)]))))
-                    elements)
-        find-spec (walk/prewalk #(if (and (pull? %) (not (query-variable? (last %))))
-                              (concat (butlast %) [(lower-selector projection (last %))])
-                              %)
-                           find-spec)
-        args (reduce (fn [args element]
-                       (if (and (pull? element) (query-variable? (last element)))
-                         (update args (position-of (last element)) #(lower-selector projection %))
-                         args))
-                     args elements)
-        lowered (assoc logical :find (vec find-spec) :in in :where (lower-clauses projection bound where))
-        cells (into [] (comp (filter #(and (symbol? %) (.startsWith (name %) "?vector-cell"))) (distinct))
-                    (tree-seq coll? seq [lowered (when-not (neg? rules) (get args rules))]))
-        numbered (zipmap cells (map #(symbol (str "?vector-cell-" %)) (range)))]
-    {:query (walk/postwalk #(get numbered % %) lowered)
-     :args (cond-> args (not (neg? rules)) (update rules #(walk/postwalk (fn [x] (get numbered x x)) %)))
-     :pulls (into {} (filter (fn [[_ selector]] (vector-selector? projection selector))) pulls)}))
-
-(defn vector-query?
-  "Whether `query` needs [[lower-query]] under `projection`: cells are declared
-   and a clause names a vector attribute, an attribute variable, `missing?`,
-   `get-else`/`get-some`, a rule input or a pull."
-  {:malli/schema [:=> [:cat :seon.schema/projection [:or :map [:vector :seon.schema/value]]] :boolean]}
-  [projection query]
-  (and (contains? (:seon.schema.projection/forms projection) :seon.db.vector/cells)
-       (let [{find-spec :find in :in where :where} (query-map query)]
-         (boolean
-          (or (some #{(symbol "%")} in)
-              (some #(and (seq? %) (= 'pull (first %))) (tree-seq coll? seq find-spec))
-              (some (fn [x] (or (and (keyword? x) (vector-attribute-in? projection x))
-                                (contains? #{'missing? 'get-else 'get-some} x)))
-                    (tree-seq coll? seq where))
-              (some (fn [clause]
-                      (some #(and (vector? %) (not (seq? (first %)))
-                                  (let [[head & more] %
-                                        [_ a] (if (query-source? head) more %)]
-                                    (query-variable? a)))
-                            (tree-seq coll? seq clause)))
-                    where))))))
+(defn lower-where
+  "`clauses` (a query's `:where`, or a rule body with no inputs) with every
+   data pattern over a vector attribute read as membership through cells.
+   `bound` maps each input variable to the values its input binds. Introduced
+   cell variables are numbered in order, avoiding the caller's own, so equal
+   queries lower to equal forms and share Datahike's query cache. Answers
+   `clauses` itself when nothing names a vector. `get-else`/`get-some` over a
+   vector attribute throws `::vector-scalar-function`."
+  {:malli/schema [:=> [:cat :seon.schema/projection [:map-of :symbol [:set :seon.schema/value]] [:sequential :seon.schema/value]]
+                  [:sequential :seon.schema/value]]}
+  [projection bound clauses]
+  (let [lowered (lower-clauses projection bound clauses)]
+    (if (= lowered clauses)
+      clauses
+      (let [used (into (set (keys bound)) (filter symbol?) (tree-seq coll? seq clauses))
+            introduced (into [] (comp (filter #(and (symbol? %) (not (used %)) (.startsWith (name %) "?vector-cell")))
+                                      (distinct))
+                             (tree-seq coll? seq lowered))]
+        (walk/postwalk-replace
+         (zipmap introduced (remove used (map #(symbol (str "?vector-cell-" %)) (range))))
+         lowered)))))
 
 (defn- explicit-value-members
   "Avoid Datahike treating two keyword members as one identity lookup ref."

@@ -4047,6 +4047,9 @@
                                      :where [?entity ?attribute]]
                                     @connection identity-attribute))
                             [:seon.ns/name :seon.fn/sym :seon.test/sym])]
+     ;; A read that could not answer is not an existing entity.
+     (when (db/read-refusal? existing)
+       (throw (ex-info "Program indexing could not read its scratch branch." existing)))
      (when (and existing (not previous-database))
        (throw (ex-info "Program indexing requires a fresh source scratch branch."
                        {::existing-program-entity existing :seon.fn/index-refused true})))

@@ -40,7 +40,7 @@
   (:import [datahike.db AsOfDB DB HistoricalDB SinceDB]
            [java.util.concurrent TimeoutException]
            [datalog.parser.type And BindColl BindTuple BindScalar Constant FindColl FindRel FindScalar
-            FindTuple Not Or Pattern Pull Variable]))
+            FindTuple Not Or Pattern Pull RulesVar Variable]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Ambient custody and optional read evidence
@@ -1020,24 +1020,22 @@
          arguments))
 
 (defn- pull-logical
-  "One pull through `operation` (a plan-with-evidence pull or pull-many) whose
-   selector may name vector attributes: the logical selector is lowered
-   (`schema.datahike/lower-selector`), the physical result decoded
-   (`decode-pull-result`, then `schema.datahike/decode-vectors`). Answers
-   `[physical-arguments response result]`, or a refusal: a vector is whole
-   only in a complete database value, never in a history or since view.
-   Used by `pull-call` and `replay-read`, so a replayed pull reads alike."
+  "One pull through `operation` (a plan-with-evidence pull or pull-many),
+   lowered and decoded when it reads vector cells (`schema.datahike/vector-pull`,
+   `decode-pull-result`, then `schema.datahike/decode-vectors`). Answers
+   `[physical-arguments response result]`, or a refusal: a vector is whole only
+   in a complete database value, never in a history or since view. Used by
+   `pull-call` and `replay-read`, so a replayed pull reads alike."
   {:malli/schema [:=> [:cat :seon.db/database-value :map :seon.schema/projection :seon.instrument/callable
                        [:vector :seon.schema/value] :keyword]
                   [:or [:tuple [:vector :seon.schema/value] :map :seon.schema/value] :seon.db/error-result]]}
   [database declarations projection operation arguments result-key]
   (let [selector (if (map? (first arguments)) (:selector (first arguments)) (first arguments))
-        lowered? (schema.datahike/vector-selector? projection selector)
-        physical (when lowered? (schema.datahike/lower-selector projection selector))
-        arguments (cond (not lowered?) arguments
+        [physical spec] (schema.datahike/vector-pull projection selector)
+        arguments (cond (nil? physical) arguments
                         (map? (first arguments)) (assoc-in arguments [0 :selector] physical)
                         :else (assoc arguments 0 physical))]
-    (if (and lowered?
+    (if (and physical
              (or (instance? HistoricalDB database) (instance? SinceDB database))
              (some #(or (= '* %) (and (map? %) (contains? % :seon.db.vector/cells))) physical))
       (vary-meta
@@ -1057,10 +1055,10 @@
             result (decode-pull-result declarations (:datahike.pull/plan response) result-key
                                        (get response result-key))]
         [arguments response
-         (cond (not lowered?) result
+         (cond (nil? spec) result
                (= :datahike.pull-many/result result-key)
-               (mapv #(schema.datahike/decode-vectors projection selector %) result)
-               :else (schema.datahike/decode-vectors projection selector result))]))))
+               (mapv #(schema.datahike/decode-vectors projection spec %) result)
+               :else (schema.datahike/decode-vectors projection spec result))]))))
 
 (declare vector-query-call)
 
@@ -2146,8 +2144,13 @@
              :args (mapv encode-binding (:qin parsed-query) (:args request))))))
 
 (defn- decode-query-field
+  {:malli/schema [:=> [:cat :map [:or :nil :keyword [:vector :keyword] [:map [:seon.db/attribute-position :int]] [:map [:seon.db/pull-spec :map]]] :seon.schema/value] :seon.schema/value]}
   [declarations attribute value]
   (cond
+    (::pull-spec attribute)
+    (schema.datahike/decode-vectors @(::read-projection declarations) (::pull-spec attribute)
+                                    (decode-attribute-maps declarations value))
+
     (and (vector? attribute) (some? value))
     (loop [[candidate & remaining] attribute]
       (let [attempt (try {::value (decode-attribute-value declarations candidate value)}
@@ -2159,9 +2162,10 @@
     :else (decode-attribute-maps declarations value)))
 
 (defn- decode-query-tuple
+  {:malli/schema [:=> [:cat :map [:vector [:or :nil :keyword [:vector :keyword] [:map [:seon.db/attribute-position :int]] [:map [:seon.db/pull-spec :map]]]] [:sequential :seon.schema/value]] [:vector :seon.schema/value]]}
   [declarations attributes tuple]
   (mapv #(decode-query-field declarations
-                               (if (map? %1) (nth tuple (::attribute-position %1)) %1) %2)
+                               (if-let [position (::attribute-position %1)] (nth tuple position) %1) %2)
         attributes tuple))
 
 (defn- query-return-map-keys
@@ -2174,6 +2178,7 @@
       [])))
 
 (defn- decode-query-return-maps
+  {:malli/schema [:=> [:cat :map :map [:vector [:or :nil :keyword [:vector :keyword] [:map [:seon.db/attribute-position :int]] [:map [:seon.db/pull-spec :map]]]] [:sequential :map]] [:vector :map]]}
   [declarations return-maps attributes result]
   (let [mapping-keys (query-return-map-keys return-maps)
         attributes-by-key (zipmap mapping-keys attributes)]
@@ -2185,8 +2190,8 @@
                  (decode-query-field
                   declarations
                   (let [attribute (get attributes-by-key mapping-key)]
-                    (if (map? attribute)
-                      (get entity-map (nth mapping-keys (::attribute-position attribute)))
+                    (if-let [position (::attribute-position attribute)]
+                      (get entity-map (nth mapping-keys position))
                       attribute)) value)))
         (empty entity-map)
         entity-map))
@@ -2195,7 +2200,8 @@
 (defn- native-query-result?
   "True when no find element can carry an encoded value or a decodable map.
    Pull, aggregate and function-bound elements keep the decoding walk."
-  {:malli/schema [:=> [:cat :map [:vector [:or :nil :keyword [:map [:seon.db/attribute-position :int]] [:vector :keyword]]]] :boolean]}
+  {:malli/schema [:=> [:cat :map [:vector [:or :nil :keyword [:map [:seon.db/attribute-position :int]] [:vector :keyword]
+                                           [:map [:seon.db/pull-spec :map]]]]] :boolean]}
   [parsed-query attributes]
   (let [bound (into #{}
                     (comp (mapcat :pattern)
@@ -2207,9 +2213,13 @@
                  (parser/find-elements (:qfind parsed-query))))))
 
 (defn- decode-query-result
-  [declarations normalized parsed-query result]
+  "`result` decoded column by column: EDN slots, and each find element in
+   `pulls` (index -> logical pull spec) to its logical vectors."
+  {:malli/schema [:=> [:cat :map :map :map :seon.schema/value [:map-of :int :map]] :seon.schema/value]}
+  [declarations normalized parsed-query result pulls]
   (let [arguments (:args normalized)
-        attributes (query-find-attributes declarations parsed-query arguments)
+        attributes (reduce-kv #(assoc %1 %2 {::pull-spec %3})
+                              (query-find-attributes declarations parsed-query arguments) pulls)
         find-clause (:qfind parsed-query)
         return-maps (:qreturnmaps parsed-query)
         decode-result
@@ -2244,42 +2254,88 @@
       (and (map? result) (contains? result :ret)) (update result :ret decode-result)
       :else (decode-result result))))
 
-(defn- decode-query-vectors
-  "`result` with each pull find element named in `pulls` decoded to logical
-   vectors (`schema.datahike/decode-vectors`)."
-  {:malli/schema [:=> [:cat :seon.schema/projection [:map-of :int :seon.schema/value] :seon.schema/value :seon.schema/value]
-                  :seon.schema/value]}
-  [projection pulls parsed-query result]
-  (let [find-clause (:qfind parsed-query)
-        decode (fn [index value]
-                 (if-let [selector (get pulls index)]
-                   (schema.datahike/decode-vectors projection selector value)
-                   value))
-        decode-result (fn [value]
-                        (cond
-                          (instance? FindRel find-clause) (into (empty value) (map #(vec (map-indexed decode %))) value)
-                          (instance? FindColl find-clause) (mapv #(decode 0 %) value)
-                          (instance? FindScalar find-clause) (decode 0 value)
-                          (instance? FindTuple find-clause) (some->> value (map-indexed decode) vec)
-                          :else value))]
-    (if (and (map? result) (contains? result :ret))
-      (update result :ret decode-result)
-      (decode-result result))))
+(defn- lowered-query-request
+  "`encoded` read through vector storage, from `parsed-query`, the parse of
+   the logical query: every data pattern over a vector attribute is membership
+   through cells (`schema.datahike/lower-where`, rule bodies alike) and every
+   pull find element, literal or input-bound, reads its physical selector.
+   Answers `[request pulls]`, `pulls` mapping each lowered find index to its
+   logical pull spec; `encoded` itself when nothing names a vector."
+  {:malli/schema [:=> [:cat :seon.schema/projection :map :seon.schema/value]
+                  [:tuple :map [:map-of :int :map]]]}
+  [projection encoded parsed-query]
+  (if-not (contains? (:seon.schema.projection/forms projection) :seon.db.vector/cells)
+    [encoded {}]
+    (let [query (let [q (:query encoded)] (if (map? q) q (parser.impl/query->map q)))
+          arguments (vec (:args encoded))
+          inputs (vec (:qin parsed-query))
+          input-position (fn [variable]
+                           (first (keep-indexed #(when (= variable (some-> %2 :variable :symbol)) %1) inputs)))
+          pulls (into {}
+                      (keep-indexed
+                       (fn [index element]
+                         (when (instance? Pull element)
+                           (let [pattern (:pattern element)
+                                 position (when (instance? Variable pattern) (input-position (:symbol pattern)))
+                                 selector (if position (nth arguments position) (:value pattern))]
+                             (when-let [[physical spec] (schema.datahike/vector-pull projection selector)]
+                               [index {::position position ::selector selector ::physical physical ::pull-spec spec}])))))
+                      (parser/find-elements (:qfind parsed-query)))
+          rules (first (keep-indexed #(when (instance? RulesVar (:variable %2)) %1) inputs))
+          rule-set (when rules (nth arguments rules))
+          lowered-rules (when rules
+                          (mapv (fn [[head & body]] (into [head] (schema.datahike/lower-where projection {} body)))
+                                rule-set))
+          where (some->> (:where query) (schema.datahike/lower-where projection (query-input-values parsed-query arguments)))]
+      (if (and (empty? pulls) (identical? where (:where query)) (= lowered-rules rule-set))
+        [encoded {}]
+        [(assoc encoded
+                :query (assoc (cond-> query where (assoc :where where))
+                              :find (walk/prewalk-replace
+                                     (into {} (keep #(when-not (::position %) [(::selector %) (::physical %)])) (vals pulls))
+                                     (:find query)))
+                :args (cond-> (reduce #(cond-> %1 (::position %2) (assoc (::position %2) (::physical %2)))
+                                      arguments (vals pulls))
+                        rules (assoc rules lowered-rules)))
+         (update-vals pulls ::pull-spec)]))))
+
+(defn- may-read-vectors?
+  "Whether a query can read vector storage, judged from the installed schema
+   alone, so a query over cardinality-one attributes never derives the
+   declarations: cells are installed and the query has a pull, rules,
+   `missing?`/`get-else`/`get-some`, or a data pattern whose attribute is
+   unknown or installed cardinality-many (as every vector attribute is)."
+  {:malli/schema [:=> [:cat :map :map :map] :boolean]}
+  [installed parsed-query encoded]
+  (boolean
+   (and (contains? installed :seon.db.vector/cells)
+        (let [bound (query-input-values parsed-query (:args encoded))]
+          (or (some #(instance? Pull %) (parser/find-elements (:qfind parsed-query)))
+              (some #(instance? RulesVar (:variable %)) (:qin parsed-query))
+              (some #{'missing? 'get-else 'get-some} (tree-seq coll? seq (:query encoded)))
+              (some (fn [pattern]
+                      (let [node (second (:pattern pattern))
+                            attributes (cond (instance? Constant node) [(:value node)]
+                                             (instance? Variable node) (get bound (:symbol node)))]
+                        (or (empty? attributes)
+                            (some #(= :db.cardinality/many (get-in installed [% :db/cardinality])) attributes))))
+                    (query-patterns parsed-query)))))))
 
 (defn- vector-query-call
-  "Run one encoded Datalog `request` whose patterns may name vector
-   attributes: lowered once (`schema.datahike/lower-query`, membership
-   through cells), executed with evidence, decoded (`decode-query-result`,
-   then pull find elements' vectors). Answers `[response result]`, or the
-   refusal of `get-else`/`get-some` over a vector attribute. `q` and
-   `replay-read` both run through it."
+  "Run one encoded Datalog `request`: lowered for vector storage once
+   ([[lowered-query-request]]), executed with evidence, decoded once
+   (`decode-query-result`). Answers `[response result]`, or the refusal of
+   `get-else`/`get-some` over a vector attribute. `q` and `replay-read` both
+   run through it."
   {:malli/schema [:=> [:cat :map :map :map :seon.schema/value]
                   [:or [:tuple :map :seon.schema/value] :seon.db/error-result]]}
   [declarations logical encoded parsed-query]
-  (let [projection (some-> (::read-projection declarations) deref)
-        lowered (when (and projection (schema.datahike/vector-query? projection (:query encoded)))
+  (let [projection (when (may-read-vectors? (::installed-schema declarations) parsed-query encoded)
+                     @(::read-projection declarations))
+        lowered (if-not projection
+                  [encoded {}]
                   (try
-                    (schema.datahike/lower-query projection (:query encoded) (vec (:args encoded)))
+                    (lowered-query-request projection encoded parsed-query)
                     (catch clojure.lang.ExceptionInfo cause
                       (if-let [f (::schema.datahike/vector-scalar-function (ex-data cause))]
                         (vary-meta
@@ -2296,11 +2352,9 @@
                         (throw cause)))))]
     (if (:seon.error/at lowered)
       lowered
-      (let [response (d/q-with-evidence (cond-> encoded lowered (assoc :query (:query lowered) :args (:args lowered))))
-            result (decode-query-result declarations logical parsed-query (:datahike.query/result response))]
-        [response (if (seq (:pulls lowered))
-                    (decode-query-vectors projection (:pulls lowered) parsed-query result)
-                    result)]))))
+      (let [[request pulls] lowered
+            response (d/q-with-evidence request)]
+        [response (decode-query-result declarations logical parsed-query (:datahike.query/result response) pulls)]))))
 
 (defn- pull-output-options
   [spec]
@@ -4050,12 +4104,20 @@
    attribute's pattern is membership through its cells."
   {:malli/schema [:=> [:cat :seon.db/query :seon.db/database-value [:* :seon.schema/value]] :seon.schema/value]}
   [query database & inputs]
-  (let [projection (carried-projection database)
-        arguments (into [database] inputs)]
-    (if (schema.datahike/vector-query? projection query)
-      (let [{lowered :query lowered-arguments :args} (schema.datahike/lower-query projection query arguments)]
-        (apply d/q lowered lowered-arguments))
-      (apply d/q query arguments))))
+  (let [[request] (lowered-query-request (carried-projection database)
+                                         {:query query :args (into [database] inputs)}
+                                         (query/memoized-parse-query query))]
+    (apply d/q (:query request) (:args request))))
+
+(defn logical-missing?
+  "Datalog predicate, the lowering of `[(missing? $ e a)]`: true when `e`
+   holds no value of `a`. A vector attribute is missing only without its
+   presence, so an empty vector is not missing."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/value :keyword] :boolean]}
+  [database entity-id attribute]
+  (and (empty? (d/datoms database :eavt entity-id attribute))
+       (or (nil? (get (dbi/-schema database) :seon.db.vector/present))
+           (empty? (d/datoms database :eavt entity-id :seon.db.vector/present attribute)))))
 
 (defn- declared-arity-bounds
   {:malli/schema [:=> [:cat [:=> [:cat :seon.db/query :seon.db/database-value] [:or :seon.schema/value :seon.db/error-result]] :seon.db/database-value] [:or [:map-of :qualified-symbol [:set [:map [:seon.fn.arity/min :int] [:seon.fn.arity/max {:optional true} :int]]]] :seon.db/error-result]]}

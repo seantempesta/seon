@@ -1363,7 +1363,7 @@
 
 (defn- failure-replacement-tx
   "Transaction data replacing one test's stored failures with `failures`."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:or :int :string] [:sequential :map] :seon.schema/value :inst]
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/ref [:sequential :map] :seon.schema/value :inst]
                   :seon.store/transaction-data]}
   [database test-entity-id failures run-ref at]
   (let [previous (when-not (string? test-entity-id)
