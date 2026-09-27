@@ -164,3 +164,26 @@ Net source lines: fault.clj +7. Datahike +39/−9, including a 21-line test. The
 - `--ns seon.test.one-request-test`: afterwards, default must show no new `recording writer refused` fault
 - Datahike fork: `datahike.test.gc-test` (all four tests) in the fork's own test runner
 - After the patches are applied: `--test seon.error-test/a-fault-site-survives-recompilation-and-moved-lines`, `--ns seon.cluster.mcp-test`, `--ns seon.dev.mcp-bridge-test`
+
+## Correction: 25dcaabb broke `-mark` (fixed in fork 7ec8af97, gitlink 2fbbd1e27)
+
+In `extend-type` I gave `-mark` two separate entries, one per arity. The second entry replaced
+the first, so every one-argument `(-mark index)` call threw `ArityException`.
+
+I measured this on scratch clones of the fork under `tmp/stability-opus/`, with
+`target/classes` copied in; without the compiled classes, the clone fails on
+`datahike.java.IEntity`. The command in each clone was
+`clojure -M:test -m kaocha.runner --focus datahike.test.gc-test --focus datahike.test.online-gc-test`.
+
+| fork revision | tests | assertions | errors | failures |
+|---|---|---|---|---|
+| 2ace4cee (baseline) | 42 | 168 | 0 | 0 |
+| 25dcaabb | 45 | 171 | 9 | 3 |
+| 7ec8af97 | 45 | 177 | 0 | 0 |
+
+All 12 reds came from 25dcaabb, and 7ec8af97 fixes them. The fix merges the two arities into
+one entry. It also moves the new test onto a file store: a memory store's connection value was
+unflushed, so `-mark` refused it.
+
+**A JVM started on seon commits 125a1dd4e through 4bbefafa1 would fail every collection mark.**
+Default was not restarted in that window.
