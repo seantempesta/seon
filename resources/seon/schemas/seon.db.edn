@@ -318,8 +318,10 @@
           ;; The one declared writer an owner takes as a value, so a caller
           ;; supplies another (a refusing or counting writer) without
           ;; redefining seon.db/transact!; absent, the owner writes through it.
+          ;; It says only HOW to write; WHERE is the connection the caller's
+          ;; custody supplies at each call.
           :writer
-          [:=> {:description "A writer with seon.db/transact!'s connection arity: connection and transaction to the writer's report or refusal. Owners default it to seon.db/transact!."}
+          [:=> {:description "How to write, never where: a function of connection and transaction with seon.db/transact!'s connection arity, answering the writer's report or refusal. It never closes over a connection; each call writes to the connection it is handed, which the caller's custody supplies (the agent's branch in its cluster). Owners default it to seon.db/transact!."}
            [:cat :seon.db/connection :seon.store/transaction]
            [:or :seon.db/transaction-report :seon.db/transaction-refused-error]]
           :transaction-outcome-unknown [:= true]
