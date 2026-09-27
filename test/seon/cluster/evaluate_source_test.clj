@@ -126,7 +126,21 @@
                   receipts (drive/run-receipts (:seon.db/db result) [(:seon.turn/id result)])]
               (is (:seon.error/message (:seon.turn.loop/refusal result)) (pr-str (dissoc result :seon.db/db)))
               (is (= ["3" "nil" "7"] (mapv :seon.eval/shown receipts)) (pr-str receipts))
-              (is (every? :seon.cluster.eval/diagnostics receipts) "the refusal is delivered beside each value")))
+              ;; `drive/run-receipts` selects no diagnostics, so the stored
+              ;; receipts are read on the settlement's own value
+              (is (= #{0 1 2} (set (db/q '[:find [?ordinal ...] :in $ ?id
+                                           :where [?run :seon.turn/id ?id] [?receipt :seon.cluster.eval/run ?run]
+                                           [?receipt :seon.cluster.eval/ordinal ?ordinal]
+                                           [?receipt :seon.cluster.eval/diagnostics _]]
+                                         (:seon.db/db result) (:seon.turn/id result))))
+                  "the refusal is delivered beside each value")))
+          (testing "an agent's refused settlements never park it: its next run settles (sweep 2026-09-27 item 2)"
+            ;; A third refused run in a row reached the write-refusal bound (3):
+            ;; the proc parked and the next ordinary run answered "awaited
+            ;; channel closed" until restart (stabfix-a, 2026-09-27).
+            (let [refused (code (str "(ns-unmap 'my.agents." agent-id " 'refused-helper)"))]
+              (is (:seon.turn.loop/refusal refused) (pr-str (dissoc refused :seon.db/db))))
+            (is (= ["3"] (shown connection (code "(+ 1 2)")))))
           (testing "a nested in-ns settles: both values return and the namespace SCI moved into exists (task a318b2d38)"
             (let [target (symbol (str "my.agents." agent-id ".nested"))
                   result (code (str "(do (in-ns '" target ") 1)\n(+ 1 2)"))]

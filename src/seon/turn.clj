@@ -3741,7 +3741,7 @@
                                     (:seon.blob/staged-writes delivery))
      :seon.db/tx-data tx-data}))
 
-(declare settle-batch-refusal!)
+(declare settle-batch-refusal! close-escaped-run!)
 
 (defn- final-namespace-digests
   "`receipts` with every function and test row digested against the namespace
@@ -3868,7 +3868,8 @@
                           [:seon.turn.loop/receipt :seon.turn.loop/terminal-request]
                           [:seon.db/tx-data :seon.store/transaction-data]
                           [:seon.blob/staged-writes [:vector :seon.blob/staged-write]]]]]
-     [:outcome :seon.db/transaction-report]
+     ;; a refused refusal settlement answers its own refusal here
+     [:outcome [:or :seon.db/transaction-report :seon.error/value]]
      [:refused-outcome {:optional true} :seon.error/value]]]}
   [cluster requests]
   (let [connection (:seon.db/connection cluster)
@@ -4077,14 +4078,17 @@
          ": " (name reason) ".")))
 
 (defn- settle-batch-refusal!
-  "Settle every begun ordinal after the atomic turn settlement is refused."
+  "Settle every begun ordinal after the atomic turn settlement is refused.
+  When this settlement is refused too, the run is closed, one core fault is
+  recorded, and the answer is the original refusal carrying that fault's
+  `:seon.fault/recorded` receipt, with the second refusal as `:outcome`."
   {:malli/schema
    [:=> [:cat :seon.turn.loop/cluster [:vector :seon.turn.loop/settle-evaluation-request]
          [:vector [:map [:seon.turn.loop/receipt :seon.turn.loop/terminal-request]]]
          :seon.error/value]
     [:map
      [:prepared [:vector [:map [:seon.turn.loop/receipt :seon.turn.loop/terminal-request]]]]
-     [:outcome :seon.db/transaction-report]
+     [:outcome [:or :seon.db/transaction-report :seon.error/value]]
      [:refused-outcome :seon.error/value]]]}
   [cluster requests prepared refusal]
   (let [connection (:seon.db/connection cluster)
@@ -4161,14 +4165,28 @@
         outcome (blob/with-publication!
                  connection (:seon.blob/staged-writes transaction)
                  #(db/transact! connection {:tx-data (:seon.db/tx-data transaction)}))]
-    (when-not (:db-after outcome)
-      (throw
-       (ex-info "Batch refusal settlement was refused."
-                {:seon.turn.loop/settlement outcome
-                 :seon.turn.loop/refused-outcome refusal})))
-    {:prepared prepared
-     :outcome outcome
-     :refused-outcome refusal}))
+    (if (:db-after outcome)
+      {:prepared prepared
+       :outcome outcome
+       :refused-outcome refusal}
+      ;; A REFUSED REFUSAL SETTLEMENT IS A VALUE ON THE REPLY, never a throw
+      ;; past it (sweep 2026-09-27 item 1: the caller saw "awaited channel
+      ;; closed"). The run closes as for any escaped terminal
+      ;; (`close-escaped-run!`), the core fault is recorded here, and the
+      ;; refusal the agent caused returns with that fault's receipt.
+      (let [failure (close-escaped-run!
+                     cluster agent-id
+                     (ex-info "Batch refusal settlement was refused."
+                              {:seon.turn.loop/settlement outcome
+                               :seon.turn.loop/refused-outcome refusal}))
+            receipt (fault/fault! (env/of cluster) failure
+                                  {:seon.error/layer :seon.turn/settlement
+                                   :seon.error/operation `settle-batch-refusal!
+                                   :seon.db.process/id process
+                                   :seon.agent/id agent-id})]
+        {:prepared prepared
+         :outcome outcome
+         :refused-outcome (assoc refusal :seon.fault/recorded receipt)}))))
 
 (defn settle!
   "The sole terminal writer for one run.
@@ -5068,7 +5086,12 @@
                   :seon.boot/cluster-name (:seon.cluster/name cluster)})
         ;; A refused profile is passed on, never carried as the turn's profile.
         _ (when (:seon.render/refused-member profile)
-            (throw (ex-info (:seon.error/message profile) profile)))]
+            (throw (ex-info (:seon.error/message profile) profile)))
+        ;; The viewing agent's namespace, derived once per turn like the
+        ;; profile and carried: read inside a form's shown result it was
+        ;; recorded as that form's read evidence (`seon.render/viewer`).
+        viewing (let [assigned (sci.eval/agent-namespace basis agent-id)]
+                  (when (symbol? assigned) assigned))]
     (loop [remaining (seq sources)
            ordinal first-ordinal
            namespace-name starting-namespace
@@ -5114,6 +5137,7 @@
                              ;; install, identity, profile and gate reads stay out.
                              :seon.db/read-evidence-sink captured)
                 handle (assoc :seon.repl/handle handle)
+                viewing (assoc :seon.render/namespace viewing)
                 ;; the run's open rides the form's first durable write
                 (:seon.turn.loop/submission cluster)
                 (assoc :seon.db/pending-open
@@ -6041,14 +6065,14 @@
          completion (:seon.turn.loop/completion cluster)
          submission (when (= :seon.agent/request input) message)
          reply (:seon.agent/reply submission)]
-     (if (:seon.turn.loop/parked state)
+     (if (and (:seon.turn.loop/parked state) (not submission))
        ;; PARKED. The declared write-refusal bound already fired and committed
-       ;; its one fault; a later wake must not resurrect the storm. Re-arming
-       ;; the agent (disarm/arm) builds a fresh proc with fresh state, which
-       ;; is the one way out — deliberately, so a park is visible until
-       ;; someone acts on the committed fault. A submission it holds is
-       ;; answered closed: its caller reads the parked fault in status.
-       (do (some-> reply async/close!) [state nil])
+       ;; its one fault; a later WAKE must not resurrect the storm. An
+       ;; explicit submission is a caller asking: it gets one attempt, whose
+       ;; refusal is answered on its reply with the park, and a committed
+       ;; write clears the park (a transient cause such as memory pressure
+       ;; must not park the agent until restart, sweep 2026-09-27 item 2).
+       [state nil]
        (if-some [turn-bound (await-turn-permit! state)]
        (let [backstop (arm-turn-completion-backstop! turn-bound)
              cluster (assoc cluster :seon.turn.loop/await-part
@@ -6121,12 +6145,17 @@
                                              :seon.ns/name (:seon.ns/name plan)}))
                                    :seon.turn.work/next next}
                                   now)
-                          _ (when reply (async/offer! reply report))
                           pending-commit (select-keys report [:seon.turn.loop/basis :seon.db/durable])
                           report (dissoc report :seon.turn.loop/basis :seon.db/durable)
                           _ (when-let [opened (:seon.turn/id report)]
                               (reset! (:seon.agent/run-id turn-bound) opened))
-                          refusal (:seon.turn.loop/refusal report)
+                          ;; A refusal whose settlement still committed (a
+                          ;; refused batch settled through its refusal arm: the
+                          ;; agent's own mistake, answered with a basis) is no
+                          ;; refused WRITE: three refused deletions parked an
+                          ;; agent until restart (stabfix-a, 2026-09-27).
+                          refusal (when-not (:seon.turn.loop/basis pending-commit)
+                                    (:seon.turn.loop/refusal report))
                           ;; THE PROC'S OWN SERIALIZING STATE, and nothing
                           ;; more: how many of this agent's turn writes were
                           ;; refused in a row. A committed write resets it.
@@ -6136,7 +6165,23 @@
                           bound (when refusal
                                   (write-refusal-bound
                                    (db/db connection) cluster agent-id))
-                          parked? (boolean (and refusal bound (>= refusals bound)))]
+                          parked? (boolean (and refusal bound (>= refusals bound)))
+                          ;; A PARKED AGENT NEVER RE-FIRES. The wake is the only
+                          ;; thing that made the refused write repeat, so the
+                          ;; bound removes exactly it — no retry, no sleep, no
+                          ;; tuned backoff. The fault is recorded once, when the
+                          ;; park begins; a submission refused while parked is
+                          ;; answered the park.
+                          park (when parked?
+                                 (if (:seon.turn.loop/parked state)
+                                   (write-refusal-error agent-id (:seon.turn/id report)
+                                                        refusal refusals bound)
+                                   (record-write-refusal-fault!
+                                    cluster agent-id (:seon.turn/id report)
+                                    refusal refusals bound)))
+                          _ (when reply
+                              (async/offer! reply (cond-> (merge report pending-commit)
+                                                    park (assoc :seon.turn.loop/refusal park))))]
                ;; Run closure is an armer wake because first-agent
                ;; supervision is derived from closed-run and root-idle facts.
                ;; The signal is disposable: the armer re-derives the complete
@@ -6150,14 +6195,6 @@
                ;; self-rewake into this agent's OWN mailbox, coalescing on
                ;; its (sliding-buffer 1): it cannot recurse, because the pass
                ;; is only re-entered after this transform returns
-                      ;; A PARKED AGENT NEVER RE-FIRES. The wake is the only
-                      ;; thing that made the refused write repeat, so the
-                      ;; bound removes exactly it — no retry, no sleep, no
-                      ;; tuned backoff.
-                      (when parked?
-                        (record-write-refusal-fault!
-                         cluster agent-id (:seon.turn/id report)
-                         refusal refusals bound))
                       ;; THE NEXT PASS DERIVES ITS OWN WORK. A pass that
                       ;; turned something rewakes once; the next pass's one
                       ;; derivation finds the rest or reports idle, after this
@@ -6173,6 +6210,7 @@
                       [(let [run-id (:seon.turn/id report)]
                          (cond-> (dissoc state :seon.turn/id
                                          :seon.turn.loop/write-refusals
+                                         :seon.turn.loop/parked
                                          :seon.turn.loop/basis :seon.db/durable)
                            ;; an applied settlement's pending commit, awaited
                            ;; by the next pass if it starts before it lands
@@ -6180,13 +6218,29 @@
                            run-id (assoc :seon.turn/id run-id)
                            (pos? refusals)
                            (assoc :seon.turn.loop/write-refusals refusals)
-                           parked?
-                           (assoc :seon.turn.loop/parked
-                                  (write-refusal-error
-                                   agent-id (:seon.turn/id report)
-                                   refusal refusals bound))))
+                           park (assoc :seon.turn.loop/parked park)))
                 ;; flow's own report channel: observation, never a dependency
                        {::flow/report [report]}])))
+         ;; WHAT ESCAPED IS ANSWERED ON THE REPLY before it closes: its error
+         ;; value (whole chain) and, when the throw already carries one, its
+         ;; fault receipt. The throw still continues to the proc's fault route.
+         (catch Throwable escaped
+           (when reply
+             (try
+               (async/offer!
+                reply
+                {:seon.agent/id (:seon.agent/id state)
+                 :seon.turn.loop/refusal
+                 (cond-> (seon.error.refusal/diagnostic
+                          {:seon.error/at (Date.)
+                           :seon.error/layer :seon.agent/agent-graph
+                           :seon.error/operation 'seon.turn/step
+                           :seon.error/throwable escaped})
+                   (fault/carried-receipt escaped)
+                   (assoc :seon.fault/recorded (fault/carried-receipt escaped)))})
+               ;; answering never replaces what escaped
+               (catch Throwable unanswered (.addSuppressed escaped unanswered))))
+           (throw escaped))
          (finally
            ;; An answered reply keeps its value; one never answered (the pass
            ;; escaped or was interrupted) closes, so its caller's await ends now.

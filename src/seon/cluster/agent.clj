@@ -512,6 +512,17 @@
    [(update state :seon.agent/deliveries inc)
     {:seon.agent/episode [:seon.agent/wake]}]))
 
+(defn- interrupted?
+  "True when `failure`'s cause chain holds an `InterruptedException`. The walk
+  stops at the first repeated link, so a cyclic chain ends."
+  {:malli/schema [:=> [:cat :seon.error/throwable] :boolean]}
+  [failure]
+  (loop [link failure seen #{}]
+    (cond
+      (or (nil? link) (contains? seen link)) false
+      (instance? InterruptedException link) true
+      :else (recur (.getCause ^Throwable link) (conj seen link)))))
+
 (defn turn-step
   "The agent graph's turn proc: `seon.turn/step`, marking its running thread.
 
@@ -546,10 +557,14 @@
          (try
            (turn/step state input message)
            ;; the declared case: this transform was interrupted by its own
-           ;; stop (`interrupt-turn!`). Interrupted execution never resumes;
+           ;; stop (`interrupt-turn!` marks the holder served), whether the
+           ;; interrupt arrives bare or wrapped (Datahike's async layer throws
+           ;; it inside an `ex-info`). Interrupted execution never resumes;
            ;; the queued stop follows, so this is no fault.
-           (catch InterruptedException _
-             [state nil])
+           (catch Throwable failure
+             (if (and (= ::interrupted (.get holder)) (interrupted? failure))
+               [state nil]
+               (throw failure)))
            (finally
              (locking holder
                (.set holder nil)
@@ -770,8 +785,9 @@
   receives it on its request port and answers on its reply port after the one
   transaction that opens, evaluates and settles it. A run the writer refuses
   to open answers its refusal. At the bound the answer is the await's
-  declared timeout carrying the run id, and a pass that ended without settling
-  closes its reply (the await's closed error); nothing replays. The run starts
+  declared timeout carrying the run id; a pass that escaped answers its error
+  value as the refusal, and one a stop ended closes its reply (the await's
+  closed error); nothing replays. The run starts
   in the requested namespace, else where the agent's previous run ended, else
   its assigned namespace; a form moves the evaluation elsewhere with `in-ns`,
   as at a REPL."
@@ -1364,9 +1380,11 @@
   (if-let [^AtomicReference holder
            (:seon.agent/turn-thread (:seon.turn.loop/cluster entry))]
     (locking holder
-      (if-let [^Thread thread (.get holder)]
-        (do (.interrupt thread) true)
-        false))
+      (let [thread (.get holder)]
+        (if (instance? Thread thread)
+          ;; the holder now shows the stop served this transform
+          (do (.set holder ::interrupted) (.interrupt ^Thread thread) true)
+          false)))
     false))
 
 (defn- open-turn!

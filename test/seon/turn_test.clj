@@ -787,11 +787,14 @@
        @stable-identities))))
 
 (deftest virtual-turns-use-the-proc-and-compaction-is-agent-scoped
-  (let [first-fork (virtual-turn-fixture)
-        refork (virtual-turn-fixture)]
-    (is (= first-fork refork)
-        "the same virtual turns on fresh canonical forks retain their turn and evaluation identities")
-    (is (= 3 (count (second first-fork))))))
+  ;; Since 5151be7ad a submission's run id is minted (`seon.id/id`), not
+  ;; counted from the caller's connection value, so two forks no longer share
+  ;; run ids; what stays is that each evaluation's identity is its run's
+  ;; (`seon.id/evaluation` of run and ordinal).
+  (let [[run-id evaluation-ids] (virtual-turn-fixture)]
+    (is (string? run-id))
+    (is (= (mapv #(id/evaluation run-id %) (range 3)) evaluation-ids)
+        "each evaluation's identity is derived from its run and ordinal")))
 
 (deftest evaluation-ai-is-only-the-repl-session
   (let [rendered
@@ -2113,10 +2116,12 @@
                              [?turn :seon.turn/handled ?message]
                              [?message :seon.message/id ?id]] database)))))))))
 
-(deftest an-unbound-result-settles-red-and-unreadable-shown-text-does-not
+(deftest a-receipt-is-red-by-its-settled-facts-never-its-shown-text
   ;; THE CLASS: red-receipt? read SCI's unbound marker back out of shown text,
-  ;; which prints as `#object[...]` and is not EDN, so the read failed to nil
-  ;; and a stored unbound receipt answered green. The settlement records it.
+  ;; which prints as `#object[...]` and is not EDN. Redness is the settled
+  ;; facts'. Since 9e61340b2 (d1efccd3ab7e) nothing walks a result after
+  ;; evaluation: an unbound Var's value is a value, as in Clojure, so it
+  ;; settles green like any other unreadable shown text.
   (support/with-database
    (fn [connection]
      (support/transacted! connection
@@ -2127,7 +2132,7 @@
                                   :seon.turn/opened-tx "datomic.tx"}]))
      (let [ctx (support/fork-cluster-ctx connection)
            configuration (support/effective-config)]
-       (doseq [[ordinal source red?] [[0 "(do (declare unbound-probe) [unbound-probe])" true]
+       (doseq [[ordinal source red?] [[0 "(do (declare unbound-probe) [unbound-probe])" false]
                                       [1 "#'clojure.core/inc" false]
                                       [2 "{:example/plain 1}" false]]]
          (support/transacted! connection
@@ -2374,3 +2379,33 @@
        (is (every? #(str/includes? (str (:seon.cluster.eval/error %)) (:seon.error/message refusal)) receipts)
            "each receipt names the refused publication")
        (is (some? (:seon.turn/closed-tx (db/pull (db/db connection) [:seon.turn/closed-tx] [:seon.turn/id run-id]))))))))
+
+(deftest a-refused-refusal-settlement-is-answered-as-a-value
+  ;; THE CLASS (stability sweep 2026-09-27 item 1, fault 317111871b50): when
+  ;; the refusal arm's own write was refused, `settle-batch-refusal!` threw
+  ;; past the reply and the caller read "awaited channel closed". WANTED: the
+  ;; refusal returns as a value carrying its recorded fault's receipt, and
+  ;; the run is closed.
+  (support/with-database
+   (fn [connection]
+     (let [run-id "refused-refusal"
+           handle (terminal-fixture connection "refused-refusal" run-id ["(+ 1 1)" "(* 3 3)"])
+           ;; the fault is recorded in the cluster's world, with root to deliver to
+           _ (cluster/seed-root-agent! connection "refused-refusal" cluster/boot-process-identity)
+           now (java.util.Date.)
+           requests [{:seon.turn.loop/cluster handle :seon.turn.loop/now now :seon.agent/id "printer"
+                      :seon.turn/id run-id :seon.cluster.eval/ordinal 0}]
+           ;; the same ordinal twice: the writer's own terminal fence refuses
+           ;; the refusal settlement (`receipt-settle-batch-call`)
+           prepared [{:seon.turn.loop/receipt {:seon.turn/id run-id :seon.cluster.eval/ordinal 0 :seon.eval/shown "2"}}
+                     {:seon.turn.loop/receipt {:seon.turn/id run-id :seon.cluster.eval/ordinal 0 :seon.eval/shown "2"}}]
+           refusal (try (#'turn/refuse! `turn/close-call :seon.turn/no-such-run {:seon.turn/id run-id})
+                        (catch clojure.lang.ExceptionInfo failure (ex-data failure)))
+           settled (#'turn/settle-batch-refusal! handle requests prepared refusal)
+           receipt (:seon.fault/recorded (:refused-outcome settled))]
+       (is (nil? (:db-after (:outcome settled))) "the refusal settlement itself was refused")
+       (is (= (:seon.error/message refusal) (:seon.error/message (:refused-outcome settled)))
+           "the caller keeps the refusal its run caused")
+       (is (true? (:seon.fault/committed? receipt)) (pr-str receipt))
+       (is (some? (:seon.turn/closed-tx (db/pull (db/db connection) [:seon.turn/closed-tx] [:seon.turn/id run-id])))
+           "the run is closed, so the agent's next run can open")))))

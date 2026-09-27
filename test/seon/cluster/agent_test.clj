@@ -926,7 +926,9 @@
                  {:seon.error/message "The prelude stand-in was released."}
                  (catch InterruptedException failure
                    (deliver interrupted (.getName (Thread/currentThread)))
-                   (throw failure))))]
+                   ;; as Datahike's async layer delivers it: wrapped in an
+                   ;; ex-info, which is still the stop's interrupt
+                   (throw (ex-info (str failure) {} failure)))))]
             (let [entry (arm-one! connection ctx routing
                                          "prelude-interrupt" agent-id)]
               (await-idle! (:seon.flow/started entry))
@@ -937,6 +939,8 @@
                prelude-entered ::interruptible-prelude-entered)
               (let [run-id (open-run-id connection agent-id)
                     _ (is (string? run-id) "the turn is open before stop")
+                    faults #(count (db/q '[:find ?e :where [?e :seon.error/id _]] @connection))
+                    faults-before (faults)
                     ;; Stopped under another branch's custody: recording the
                     ;; interruption is the graph's own write, not the caller's.
                     [result elapsed-ms]
@@ -956,6 +960,8 @@
                     "the in-flight prelude was interrupted, not awaited")
                 (is (nil? (open-run-id connection agent-id))
                     "no turn is left open")
+                (is (= faults-before (faults))
+                    "a stop's wrapped interrupt is no fault (sweep 2026-09-27 item 4)")
                 (is (some?
                      (db/q '[:find ?closed .
                              :in $ ?run-id
