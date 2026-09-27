@@ -1146,6 +1146,7 @@
         release-reasoning (java.util.concurrent.CountDownLatch. 1)
         peer-started (java.util.concurrent.CountDownLatch. 1)
         release-peer (java.util.concurrent.CountDownLatch. 1)
+        hold-entered (java.util.concurrent.CountDownLatch. 1)
         begin (fn [exchange]
                 (.add (.getResponseHeaders exchange)
                       "Content-Type" "text/event-stream")
@@ -1181,10 +1182,20 @@
                         "data: {\"choices\":[{\"delta\":{\"content\":\"\"},"
                         "\"finish_reason\":\"stop\"}]}\n\n"
                         "data: [DONE]\n\n"))))))
+    (.createContext
+     server "/hold"
+     ;; Receives the request and answers nothing until released: the caller
+     ;; stays inside `HttpClient.send`.
+     (reify com.sun.net.httpserver.HttpHandler
+       (handle [_ exchange]
+         (.countDown hold-entered)
+         (.await release-peer 5 java.util.concurrent.TimeUnit/SECONDS)
+         (.close exchange))))
     (.setExecutor server executor)
     (.start server)
     {:server server
      :executor executor
+     :hold-entered hold-entered
      :reasoning-finished reasoning-finished
      :release-reasoning release-reasoning
      :peer-started peer-started
@@ -1305,6 +1316,40 @@
             (is (= "peer survived" (:seon.ai/text peer-outcome))
                 (str "the concurrent peer remained readable: "
                      (pr-str peer-outcome))))))
+      (finally (stop-custody-stub! stub)))))
+
+(deftest a-stop-interrupt-exits-the-http-leaf-with-the-flag-set
+  ;; A stop interrupts the turn thread (`seon.cluster.agent/interrupt-turn!`)
+  ;; and interrupted execution never resumes. Caught as `Throwable`, the
+  ;; interrupt inside `HttpClient.send` became a transport-failure value and
+  ;; one inside the body read a truncated completion, and the turn went on
+  ;; (2026-09-27). Both must throw the interrupt, flag restored.
+  (let [{:keys [server hold-entered peer-started] :as stub} (start-custody-stub!)]
+    (try
+      (doseq [[path entered] [["/hold" hold-entered] ["/peer" peer-started]]]
+        (testing path
+          (let [outcome (java.util.concurrent.FutureTask.
+                         ^java.util.concurrent.Callable
+                         (fn []
+                           (try
+                             {:returned (#'seon.ai/send-request
+                                         (stub-leaf-request server path))}
+                             (catch InterruptedException stop
+                               {:stop stop
+                                :interrupted? (.isInterrupted (Thread/currentThread))}))))
+                thread (Thread. ^Runnable outcome)]
+            (.start thread)
+            (is (.await ^java.util.concurrent.CountDownLatch entered
+                        5 java.util.concurrent.TimeUnit/SECONDS)
+                "the local provider holds the exchange open")
+            (.interrupt thread)
+            (.join thread 2000)
+            (is (not (.isAlive thread)) "the leaf exits on the interrupt")
+            (let [{:keys [stop interrupted? returned]}
+                  (.get outcome 1 java.util.concurrent.TimeUnit/SECONDS)]
+              (is (instance? InterruptedException stop)
+                  (str "an interrupt is never a value: " (pr-str returned)))
+              (is (true? interrupted?) "the thread's interrupt flag is restored")))))
       (finally (stop-custody-stub! stub)))))
 
 ;;; ---------------------------------------------------------------------------

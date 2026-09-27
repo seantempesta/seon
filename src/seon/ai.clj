@@ -68,7 +68,7 @@
             [malli.core :as m]
             [malli.registry :as mr]
             [seon.schema.internal :as internal])
-  (:import [java.io BufferedReader InputStreamReader]
+  (:import [java.io BufferedReader IOException InputStreamReader]
            [java.net URI]
            [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers
             HttpResponse$BodyHandlers]
@@ -1151,6 +1151,26 @@
    (some #(.isInstance ^Class throwable-class %)
          (take-while some? (iterate ex-cause failure)))))
 
+(defn- interrupt-exit!
+  "Throw a stop's interrupt when `failure` is one; nil otherwise.
+
+  A stop interrupts the turn thread (`seon.cluster.agent/interrupt-turn!`),
+  and interrupted execution never resumes: an interrupt is not a transport
+  outcome to record and continue past. `HttpClient.send` throws it bare with
+  the flag cleared (`HttpClientImpl.java:1010-1018`, openjdk 26.0.1); an
+  interrupted body read throws `IOException` caused by it
+  (`ResponseSubscribers.java:397-403`). Either way this restores the flag and
+  throws an `InterruptedException`, the wrapped one carrying the whole chain as
+  its cause, so the turn's declared `InterruptedException` case receives it."
+  {:malli/schema [:=> [:cat :seon.error/throwable] :nil]}
+  [failure]
+  (when (caused-by? failure InterruptedException)
+    (.interrupt (Thread/currentThread))
+    (throw (if (instance? InterruptedException failure)
+             failure
+             (doto (InterruptedException. (str (ex-message failure)))
+               (.initCause failure))))))
+
 (defn- interruptible-lines
   "Lines from `reader`; a read failure ends the sequence as its last element,
   `{::read-failure throwable}`, rather than throwing.
@@ -1162,7 +1182,8 @@
   [^BufferedReader reader]
   (lazy-seq
    (let [line (try (.readLine reader)
-                   (catch Throwable read-failure
+                   (catch IOException read-failure
+                     (interrupt-exit! read-failure)
                      {::read-failure read-failure}))]
      (cond
        (map? line) (list line)
@@ -1314,7 +1335,9 @@
   (.build (HttpClient/newBuilder)))
 
 (defn- send-request
-  "Send one ordinary request map through the JDK HTTP leaf."
+  "Send one ordinary request map through the JDK HTTP leaf.
+  A transport `IOException` is a value; a stop's interrupt throws
+  (`interrupt-exit!`) with the thread's interrupt flag set."
   {:malli/schema [:=> [:cat [:map [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/timeout-ms :seon.ai/timeout-ms] [:seon.ai/stream? :boolean] [:seon.ai.http/headers [:map-of :string :string]] [:seon.ai.http/body :seon.ai.http/body] [:seon.ai/sink {:optional true} :seon.ai/sink]]] :seon.ai/http-completion]}
   [{:keys [:seon.ai/endpoint :seon.ai/timeout-ms
            :seon.ai.http/headers :seon.ai.http/body]
@@ -1386,7 +1409,10 @@
                          ::output-observed?
                          (output-observed? (:seon.error/data completion))})
                 completion))
-            (catch Throwable failure
+            ;; `json/read-str` refuses with a plain `Exception`
+            ;; (clojure.data.json); a stop's interrupt is not unreadable JSON.
+            (catch Exception failure
+              (interrupt-exit! failure)
               (vary-meta (refusal/diagnostic
               {:seon.error/at (java.util.Date.)
        :seon.error/throwable failure
@@ -1445,7 +1471,13 @@
        :seon.ai/timeout timeout-ms
        :seon.error/member :seon.ai/timeout-ms
        :seon.error/expected "a response within the request deadline"}) assoc :seon.error/declared-schema :seon.ai/timeout-error)))
-      (catch Throwable failure
+      (catch InterruptedException stop
+        (interrupt-exit! stop))
+      ;; The declared transport case: the JDK reports every exchange failure
+      ;; as an `IOException` (`HttpClientImpl.java:1019-1062`). Anything else
+      ;; is a fault of this code and propagates to the turn's boundary.
+      (catch IOException failure
+        (interrupt-exit! failure)
         (let [before-send? (transport-before-send? failure)]
           (vary-meta (seon.error.refusal/diagnostic (java.util.Date.) :seon.ai/request 'seon.ai/send-request
            {:seon.error/message (or (ex-message failure)
@@ -1468,7 +1500,8 @@
   ONE attempt. No retry, no backoff, no fallback provider. A request
   either names its credential variable or explicitly declares no-auth.
 
-  Flat `:seon.error` values, never throws:
+  Flat `:seon.error` values; the one throw is a stop's
+  `InterruptedException`, because interrupted execution never resumes:
   - `::no-credential` — the named environment variable is unset. This
     is a configuration fault, and it is loud in the value rather than
     silent in a nil;
