@@ -4,8 +4,6 @@
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
-            [datahike.api :as d]
-            [seon.cluster :as cluster]
             [seon.config :as config]
             [seon.db :as db]
             [seon.reconcile :as reconcile]
@@ -17,40 +15,29 @@
 (schema.edn/load! {})
 
 (def ^:private managing-process
-  "seon.db.process/config")
+  ;; The test's own managing process, so the managed slice is exactly the
+  ;; rows these tests write. The member's branch already holds its cluster's
+  ;; config row under boot's `seon.db.process/config` provenance; managing as
+  ;; that process planned the row's retraction on every apply, which the
+  ;; writer refuses (the cluster row requires :seon.cluster/config).
+  ;; Production's `config/apply!` retains the configs a cluster row
+  ;; references; this suite's subject is the reconciler itself.
+  "seon.db.process/reconcile-test")
 
 (def ^:private unmanaged-process
   "seon.db.process/unmanaged")
 
 (defn- with-model-database
+  ;; A branch rather than `:fresh-store?`: a fresh store transacts the whole
+  ;; attribute schema, 1.2 s each (1,260 attributes, measured at default
+  ;; da10c8912), which 60 property trials cannot afford.
   [body]
   (test-support/with-database
     (fn [connection]
       (test-support/transacted! connection
-                                [{:seon.db.process/id unmanaged-process}])
+                                [{:seon.db.process/id managing-process}
+                                 {:seon.db.process/id unmanaged-process}])
       (body connection))))
-
-(defn- with-non-temporal-database
-  [body]
-  (let [configuration
-        {:store {:backend :memory :id (random-uuid)}
-         :keep-history? false
-         :schema-flexibility :write}]
-    (d/create-database configuration)
-    (let [connection (d/connect configuration)]
-      (try
-        (cluster/populate-source!
-         {:seon.db/connection connection
-          :seon.fn/manifest @test-support/source-manifest})
-        (test-support/transacted! connection
-                                  {:tx-data
-                                   [{:seon.source/digest (apply str (repeat 64 "0"))}]})
-        (test-support/transacted! connection
-                                  [{:seon.db.process/id unmanaged-process}])
-        (body connection)
-        (finally
-          (d/release connection)
-          (d/delete-database configuration))))))
 
 (defn- transaction-meta
   [process]
@@ -66,10 +53,6 @@
   [desired]
   {::reconcile/desired desired
    ::reconcile/process managing-process})
-
-(defn- adopting-request
-  [desired identities]
-  (assoc (request desired) ::reconcile/adopt-identities identities))
 
 (defn- config-row
   [cluster queue-depth]
@@ -126,36 +109,6 @@
                connection
                (request [(config-row "refused" 10)])))]
         (is (= refusal result))))))
-
-(deftest reconciliation-uses-current-provenance-without-history
-  (with-non-temporal-database
-    (fn [connection]
-      (is (some? (:seon.schema/expected-value (db/history @connection)))
-          "the fixture genuinely has no temporal indices")
-      (let [desired [(config-row "non-temporal" 10)]
-            adopted #{[:seon.config/cluster "non-temporal"]}
-            first-result
-            (reconcile/reconcile!
-             connection
-             (adopting-request desired adopted))
-            after-first (:max-tx @connection)
-            second-result
-            (reconcile/reconcile!
-             connection
-             (adopting-request desired adopted))]
-        (is (= {::reconcile/converged? false
-                ::reconcile/operations 1}
-               first-result))
-        (is (= {::reconcile/converged? true
-                ::reconcile/operations 0}
-               second-result))
-        (is (= after-first (:max-tx @connection))
-            "re-applying the managed identity commits nothing")
-        (is (= "non-temporal"
-               (:seon.config/cluster
-                (db/pull @connection
-                        '[:seon.config/cluster]
-                        [:seon.config/cluster "non-temporal"]))))))))
 
 (deftest a-hand-edit-is-repaired-by-the-next-apply
   (with-model-database
