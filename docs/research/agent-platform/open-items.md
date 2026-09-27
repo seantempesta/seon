@@ -163,20 +163,36 @@ Sequence (owner-approved "safety now, then one core rewrite"):
   Open corpus classes the rewrite must close: F1 copied JVM import hides SCI's (defrecord/deftype/import), F3 defmacro in
   let loses location (SCI fork), F4 two defns per form, F5 nested register!, F8 generated-input gate refuses valid code,
   F10 ns-unmap! within a run, F11 non-defn definitions store no entity, F12 cost (0.7–1.1 s per contracted defn).
-**Stability and speed (owner, standing: "nothing should panic"; "nothing in the system should be slow"):**
-- Evidence: `stability-sweep-2026-09-27.md` (d8b796bc4) and `perf-audit-2026-09-27.md` (dbd4a9f98).
-- Running: stability-fix-opus (turn.clj and cluster/agent.clj). A fault goes on the reply that caused it; a parked
-  proc answers and clears; an interrupt is recognised through `ex-info`.
-- Running: fault-resolution-design-opus. A fault resolves by the operation that failed, under a declared scope; health
-  shows its task link.
-- Queued behind the vocabulary sweep's uncommitted edits:
-  - delete the per-test-request storage collection (`test.clj:2512-2528`, about −31 lines; it holds the GC permit that
-    blocks `branch!` and blob publication for up to 82 s);
-  - narrow the fork's `gc-storage!` permit to the delete step (design and review first);
-  - the health read: 580–675 ms (`deferred-agents` loops over all 121 agents);
-  - add the about 11 proposed task entries from both docs.
-- Folded into the core rewrite: settlement computed twice (the gate's `with-settled` and the writer's
-  `receipt-settle-call`, about 560 ms per defn); a slow reply names its responsible functions.
+**Stability and speed (owner, standing: "nothing should panic"; "nothing in the system should be slow";
+"prioritize correctness and perf improvements while we are designing").** State at 2026-09-27 19:40Z (default at
+4c3960692):
+- Landed today:
+  - Safety slice 9e61340b2.
+  - Vocabulary sweep 799cd62a7.
+  - Stability 9f4f43443, b7e148de6, c83911c82.
+  - Per-test GC deleted and health read 152ceb62c.
+  - Harness 4dea3b95a.
+  - Printer 46be90e36.
+  - Errors 9e051dba7..12804ce27: frames are the first code we wrote, evidence is stored as EDN, the offending-digest.
+  - Instrumentation text 2014f98b6.
+  - Publication cost 296dede99, c932dd4b4, 49ce45859.
+  - Toolkit 48cded8ba; message acknowledgement 89629b13c; debug branch read ef25df00c.
+  - Boot stamp aa545fe21.
+- Running (ledger tail):
+  - red triage of the focused batch (r3: tmp/orchestrator/tests/r3);
+  - contract-rule apply: the edit hook refuses, merge refuses, the REPL warns (warning built in the rewrite);
+  - MCP/runner evidence;
+  - boot perf 2 (request! 6.6 s, footprint 6.5 s, refresh-source! 5.2 s; target ≤10 s unchanged start);
+  - vector implementation S1–S11 (design rev 2 4c3960692; owner chose to run S11 with the rest);
+  - one-path spec revision (owner answers Q1–Q5) plus Astra's review.
+- Queued: fault resolution implementation (design ef9043b32, 10 steps, cutover list), after the red triage.
+- Evidence docs: stability-sweep, perf-audit, boot-branch-open, fault-resolution-design, contract-coverage-spec,
+  review-vector-and-fault-resolution.
+- Rulings:
+  - Contracts are added per bug at the producer, with no back-fill.
+  - The edit hook refuses uncontracted new or changed functions; the REPL warns progressively; merge refuses.
+  - Plans are REPL-proven specs whose steps execute in hours, not days.
+  - State is written down; there are no self check-in crons.
 
 **1. Supporting cuts (design done / running):** entity vocabulary sweep (running: entity-vocabulary-opus; excludes the 9
 eval-path files) + the intentional Malli→Datahike mapping section in the data-modeling guide; first-class vectors
