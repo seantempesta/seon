@@ -1414,6 +1414,9 @@ details.tool-call-details[open] .tool-preview {
 .seon-graph-summary th { font-weight: 400; color: var(--color-text-400); }
 .seon-graph-summary td:is(:nth-child(3), :nth-child(4)) { text-align: right; font-variant-numeric: tabular-nums; }
 .seon-graph-skipped-row { color: var(--color-text-500); }
+/* A node's attributes: kind and attribute stay whole; value and declared schema read left to right. */
+.seon-graph-attributes td:is(:nth-child(3), :nth-child(4)) { text-align: left; font-variant-numeric: normal; }
+.seon-graph-attributes td:is(:nth-child(1), :nth-child(2)) { white-space: nowrap; }
 /* The graph beside the nodes: the panel stays in view while the node list scrolls. */
 .seon-graph-page {
   --seon-graph-level-0: var(--color-signal); --seon-graph-level-1: var(--color-info);

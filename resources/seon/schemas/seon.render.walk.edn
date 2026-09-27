@@ -147,7 +147,10 @@
  :seon.render.walk/identity-owners [:map-of :qualified-keyword :qualified-keyword]
  :seon.render.walk/component-owners [:map-of :qualified-keyword :qualified-keyword]
  :seon.render.walk/rendered-schemas [:set :qualified-keyword]
- :seon.render.walk/structure [:map [:seon.render.walk/ref-attributes :seon.render.walk/ref-attributes] [:seon.render.walk/value-attributes :seon.render.walk/value-attributes] [:seon.render.walk/identity-owners :seon.render.walk/identity-owners] [:seon.render.walk/component-owners :seon.render.walk/component-owners] [:seon.render.walk/rendered-schemas :seon.render.walk/rendered-schemas]]
+ :seon.render.walk/required-attributes [:map-of :qualified-keyword [:set :qualified-keyword]]
+ :seon.render.walk/attachments [:map-of {:description "Per owning schema, the reverse attributes (`:ns/_name`) its `:seon.render/units` declares: the reverse edges the forward walk follows."} :qualified-keyword [:set :qualified-keyword]]
+ :seon.render.walk/forward-only? [:boolean {:description "Follow forward refs plus declared attachments only, not every ref and value edge both ways."}]
+ :seon.render.walk/structure [:map [:seon.render.walk/ref-attributes :seon.render.walk/ref-attributes] [:seon.render.walk/value-attributes :seon.render.walk/value-attributes] [:seon.render.walk/identity-owners :seon.render.walk/identity-owners] [:seon.render.walk/component-owners :seon.render.walk/component-owners] [:seon.render.walk/rendered-schemas :seon.render.walk/rendered-schemas] [:seon.render.walk/required-attributes :seon.render.walk/required-attributes] [:seon.render.walk/attachments :seon.render.walk/attachments]]
  :seon.render.walk/edge [:tuple :int :qualified-keyword :int]
  :seon.render.walk/edges [:vector :seon.render.walk/edge]
  :seon.render.walk/owning-schemas [:map-of :int [:maybe :qualified-keyword]]
@@ -166,5 +169,5 @@
  :seon.render.walk/cut [:map [:seon.render.walk/cut-bound :seon.render.walk/cut-bound] [:seon.render.walk/node-level :seon.render.walk/node-level] [:seon.render.walk/cut-count :seon.render.walk/cut-count] [:seon.render.walk/cut-source {:optional true} :seon.render.walk/cut-source] [:seon.render.walk/attribute {:optional true} :seon.render.walk/attribute] [:seon.error/value {:optional true} :seon.db/invalid-read-error]]
  :seon.render.walk/cuts [:vector :seon.render.walk/cut]
  :seon.render.walk/graph [:map [:seon.render.walk/graph-root :seon.render.walk/graph-root] [:seon.render.walk/nodes :seon.render.walk/nodes] [:seon.render.walk/edges :seon.render.walk/edges] [:seon.render.walk/skipped :seon.render.walk/skipped] [:seon.render.walk/graph-order {:optional true} :seon.render.walk/graph-order] [:seon.render.walk/back-references {:optional true} :seon.render.walk/back-references] [:seon.render.walk/cuts {:optional true} :seon.render.walk/cuts]]
- :seon.render.walk/graph-request [:map [:seon.db/db :seon.db/database-value] [:seon.render.walk/lookup :seon.render.walk/lookup] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.render/distance {:optional true} :seon.render/distance]]
+ :seon.render.walk/graph-request [:map [:seon.db/db :seon.db/database-value] [:seon.render.walk/lookup :seon.render.walk/lookup] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.render/distance {:optional true} :seon.render/distance] [:seon.render.walk/forward-only? {:optional true} :seon.render.walk/forward-only?]]
 }

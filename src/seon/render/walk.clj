@@ -920,9 +920,11 @@
    [:seon.fn.arity/input-refs :seon.schema/key true] [:seon.fn.arity/output-refs :seon.schema/key true]
    [:seon.schema/references :seon.schema/key true]])
 
-(defn- graph-structure
-  "Ref, value, identity and component attributes, their owning schemas, and
-  the owning schemas declaring an AI pair; derived once per projection."
+(defn graph-structure
+  "Ref, value, identity and component attributes, their owning schemas, the
+  owning schemas declaring an AI pair, and per owning schema its required
+  entries and the reverse attributes its `:seon.render/units` declares as
+  attachments; derived once per projection."
   {:malli/schema [:=> [:cat :seon.schema/projection] :seon.render.walk/structure]}
   [projection]
   (schema/projection-cache-value
@@ -933,12 +935,17 @@
                                (as-> s (or (internal/entity-properties s) (m/properties s))))
            owners (fn [pick owner] (into {} (comp (filter pick) (map :db/ident) (map (juxt identity owner))) declared))
            identities (owners :db/unique #(:seon.program/row-schema (properties %) %))
-           components (owners :db/isComponent #(:seon.db/component-schema (properties %) %))]
+           components (owners :db/isComponent #(:seon.db/component-schema (properties %) %))
+           entities (keep #(when-let [s (some->> % (mr/schema (:seon.schema.projection/registry projection)))]
+                             (when (internal/entity-schema? s) [% s]))
+                          (distinct (concat (vals identities) (vals components))))]
        {::ref-attributes (into [] (comp (filter (comp #{:db.type/ref} :db/valueType)) (map :db/ident)) declared)
         ::value-attributes (mapv (comp vec butlast) interim-value-edges)
         ::identity-owners identities ::component-owners components
         ::rendered-schemas (into #{} (filter #(qualified-symbol? (:seon.render/ai (properties %))))
-                                 (concat (vals identities) (vals components)))}))))
+                                 (concat (vals identities) (vals components)))
+        ::required-attributes (into {} (map (fn [[k s]] [k (into #{} (keep (fn [[a p]] (when-not (:optional p) a))) (internal/entity-entries s))])) entities)
+        ::attachments (into {} (map (fn [[k s]] [k (into #{} (filter #(str/starts-with? (name %) "_")) (:seon.render/units (internal/entity-properties s)))])) entities)}))))
 
 (defn- joined
   "The `[source attribute target]` edges each family joins from the whole
@@ -953,6 +960,8 @@
            (case family
              :forward ['[[?e ?a ?t]] '[?a ...] refs false]
              :reverse ['[[?t ?a ?e]] '[?a ...] refs true]
+             ;; Every schema's declared attachments; `level-step` keeps those its source's schema declares.
+             :attachment ['[[?t ?a ?e]] '[?a ...] (into [] (comp (mapcat val) (distinct) (map #(keyword (namespace %) (subs (name %) 1)))) (::attachments structure)) true]
              :value-forward ['[[?e ?a ?v] [?t ?i ?v]] '[[?a ?i] ...] values false]
              :value-reverse ['[[?e ?i ?v] [?t ?a ?v]] '[[?a ?i] ...] values true]
              ;; The identity VALUE is not a target: bind ?t to the holder, so every family yields `[entity attribute entity]`.
@@ -978,19 +987,25 @@
 
 (defn- level-step
   "One level's edges and owning schemas; an owned child without a pair (an
-  arity) is joined through within its owner's level. Else the refusal."
-  {:malli/schema [:=> [:cat :seon.db/database-value :map :seon.render.walk/structure [:sequential :int]]
+  arity) is joined through within its owner's level. Else the refusal.
+  `frontier-schemas` (each frontier node's owning schema) selects the forward
+  story: forward refs plus the reverse attachments the source's schema
+  declares; without it every ref and value edge is followed both ways."
+  {:malli/schema [:=> [:cat :seon.db/database-value :map :seon.render.walk/structure [:sequential :int] [:maybe :seon.render.walk/owning-schemas]]
                   [:or :seon.render.walk/level-result :seon.db/invalid-read-error]]}
-  [db bounds structure frontier]
+  [db bounds structure frontier frontier-schemas]
   (let [refused #(when (:seon.db/invalid-read %) %)
-        found (joined db bounds structure frontier [:forward :reverse :value-forward :value-reverse])
+        declared? (fn [[e a _]] (or (not frontier-schemas) (not (str/starts-with? (name a) "_"))
+                                    (contains? (get (::attachments structure) (frontier-schemas e)) a)))
+        found (joined db bounds structure frontier (if frontier-schemas [:forward :attachment] [:forward :reverse :value-forward :value-reverse]))
+        found (if (refused found) found (filterv declared? found))
         schemas (or (refused found) (owning-schemas db bounds structure found))
         owner (if (refused schemas) {}
                   (into {} (keep (fn [[e a t]] (when (and ((::component-owners structure) a)
                                                           (not ((::rendered-schemas structure) (schemas t))))
                                                  [t e])))
                         found))
-        inner (if (seq owner) (joined db bounds structure (vec (keys owner)) [:forward :value-forward]) [])
+        inner (if (seq owner) (joined db bounds structure (vec (keys owner)) (if frontier-schemas [:forward] [:forward :value-forward])) [])
         inner-schemas (if (or (refused inner) (empty? inner)) inner (owning-schemas db bounds structure inner))]
     (or (some refused [found schemas inner inner-schemas])
         {::edges (into (filterv #(not (owner (peek %))) found) (map (fn [[e a t]] [(owner e) a t])) inner)
@@ -1033,7 +1048,10 @@
 (defn graph
   "The linked graph from `lookup`, `:seon.render/distance` levels deep (default 3).
 
-  Its refs and interim value edges are followed forward and reverse.
+  With `::forward-only?` it follows forward refs and only the reverse refs an
+  owning schema declares as attachments in `:seon.render/units`: the story
+  from the root outward. Otherwise refs and interim value edges are followed
+  forward and reverse.
 
   A target is a node when its owning schema declares an AI pair; the others are
   counted by schema under `::skipped`. Each level's joins bind the whole
@@ -1055,7 +1073,8 @@
       (loop [level 0 frontier [root] edges [] skipped {} cuts []
              nodes {root {::node-level 0 ::node-schema (get (owning-schemas db bounds structure [[root nil root]]) root)}}]
         (let [step (when (and (< level (get request :seon.render/distance 3)) (seq frontier))
-                     (level-step db bounds structure frontier))
+                     (level-step db bounds structure frontier
+                                 (when (::forward-only? request) (into {} (map (juxt identity (comp ::node-schema nodes))) frontier))))
               cut (fn [bound level n & more] (apply assoc {::cut-bound bound ::node-level level ::cut-count n} more))]
           (if (or (nil? step) (:seon.db/invalid-read step))
             (finished-graph db (cond-> {::graph-root root ::nodes nodes ::edges edges ::skipped skipped}

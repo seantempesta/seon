@@ -35,6 +35,8 @@ const readModel = (script) => {
       target: requiredString(data?.target, 'edge data.target'),
       attribute: requiredString(data?.attribute, 'edge data.attribute'),
       reverse: data?.reverse === true,
+      ...(typeof data?.kind === 'string' ? { kind: data.kind } : {}),
+      ...(typeof data?.label === 'string' ? { label: data.label } : {}),
     },
   }))
   const selected = requiredString(model['seon.graph/selected'], 'seon.graph/selected')
@@ -155,6 +157,12 @@ const graphStyle = (section) => {
     },
     ...levels,
     { selector: 'edge[?reverse]', style: { 'line-style': 'dashed' } },
+    // A walk edge names its relationship kind (seon.render.web/edge-kind) and carries its attribute label.
+    { selector: 'edge[label]', style: { label: 'data(label)' } },
+    { selector: 'edge[kind = "component"]', style: { width: 3.5 } },
+    { selector: 'edge[kind = "optional"]', style: { 'line-style': 'dotted' } },
+    { selector: 'edge[kind = "reverse"]', style: { opacity: 0.45 } },
+    { selector: 'edge[kind = "value"]', style: { 'line-style': 'dotted', opacity: 0.45 } },
     {
       selector: ':selected',
       style: {
@@ -208,6 +216,7 @@ const reconcile = (cy, model, canvas, firstModel) => {
         cy.add(edge)
       } else {
         current.data('attribute', edge.data.attribute)
+        if (edge.data.label) current.data('label', edge.data.label)
       }
     }
 

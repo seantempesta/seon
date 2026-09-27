@@ -3,7 +3,7 @@
   (:require [clojure.core.async :as async]
             [clojure.data.json :as json]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is]]
+            [clojure.test :refer [deftest is testing]]
             [seon.render.web :as web]
             [seon.render.web-test :as web-test]
             [seon.sci.eval :as sci.eval]
@@ -1088,10 +1088,12 @@
      (let [service (#'web-test/service-request connection {})]
        (doseq [n (range 4)]
          (let [graph (walk/graph {:seon.db/db @connection :seon.render.walk/lookup [:seon.agent/id "root"]
-                                  :seon.render/distance n :seon.sci.admit/caps (:seon.sci.admit/caps service)})
+                                  :seon.render/distance n :seon.sci.admit/caps (:seon.sci.admit/caps service)
+                                  ;; The page walks the forward story by default: forward refs plus declared attachments.
+                                  :seon.render.walk/forward-only? true})
                order (:seon.render.walk/graph-order graph)
                level #(get-in graph [:seon.render.walk/nodes % :seon.render.walk/node-level])
-               page (#'web/graph-debug-html service "root" (str n) nil)
+               page (#'web/graph-debug-html service "root" {"n" (str n)})
                classed (fn [tree wanted] (filter #(and (vector? %) (map? (second %))
                                                       (some #{wanted} (str/split (str (:class (second %))) #" ")))
                                                 (tree-seq coll? seq tree)))
@@ -1113,4 +1115,42 @@
        (let [rooted (#'web/debug-response service 'my.agents.root "root" {:query-string "n=1&root=%5B%3Aseon.ns%2Fname%20my.agents.root%5D" :headers {}})
              malformed (#'web/debug-response service 'my.agents.root "root" {:query-string "n=1&root=nope" :headers {}})]
          (is (str/includes? (:body rooted) "seon.ns/ns") "a lookup in `root` roots the walk at that entity")
-         (is (str/includes? (:body malformed) "The root must be an EDN lookup") "a malformed root is refused by name"))))))
+         (is (str/includes? (:body malformed) "The root must be an entity id or an EDN lookup") "a malformed root is refused by name"))
+       (testing "an entity id roots the walk at any entity, not only an agent"
+         (let [ns-id (:db/id (db/pull @connection [:db/id] [:seon.ns/name 'my.agents.root]))
+               body (:body (#'web/debug-response service 'my.agents.root "root" {:query-string (str "n=1&root=" ns-id) :headers {}}))]
+           (is (str/includes? body (str "e" ns-id)) body)))
+       (testing "forward mode draws each edge's relationship kind and attribute; mode=both follows every ref both ways"
+         (let [model (fn [query] (json/read-str (second (re-find #"data-graph-model=\"\"[^>]*>(.*?)</script>"
+                                                                   (:body (#'web/debug-response service 'my.agents.root "root" {:query-string query :headers {}}))))))
+               kinds (fn [m] (set (map #(get-in % ["data" "kind"]) (get-in m ["elements" "edges"]))))
+               forward (model "n=1")
+               both (model "n=1&mode=both")]
+           (is (every? #(get-in % ["data" "label"]) (get-in forward ["elements" "edges"])) "every edge carries its attribute label")
+           (is (not-any? #{"reverse" "value"} (kinds forward)) (pr-str (kinds forward)))
+           (is (<= (count (get-in forward ["elements" "edges"])) (count (get-in both ["elements" "edges"]))))))
+       (testing "node detail groups the node's attributes with their declared schemas"
+         (is (str/includes? (hiccup/->string (#'web/graph-debug-html service "root" {"n" "0"})) "declared schema")))
+       (testing "a branch this process holds no connection to is refused by name, never read from the cluster"
+         (is (str/includes? (hiccup/->string (#'web/graph-debug-html service "root" {"n" "1" "branch" "no-such-branch"}))
+                            "no open connection to branch no-such-branch")))))))
+
+(deftest the-graph-debug-page-reads-a-named-branch-read-only
+  ;; WANTED: `branch=<name>` walks that branch's own database value and projection through the
+  ;; connection this process holds for it; the cluster's page does not see the branch's entities.
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "graph-branch")
+     (support/transacted! connection (agent/creation-tx {:seon.agent/id "root" :seon.cluster/name "graph-branch"
+                                                         :seon.ns/name 'my.agents.root}))
+     (let [service (#'web-test/service-request connection {})]
+       (support/with-database
+        (fn [design]
+          (support/seed-cluster! design "graph-branch")
+          (support/transacted! design (agent/creation-tx {:seon.agent/id "design-agent" :seon.cluster/name "graph-branch"
+                                                          :seon.ns/name 'my.agents.design}))
+          (let [branch (name (:branch (:config @design)))
+                page #(hiccup/->string (#'web/graph-debug-html service "root" (merge {"n" "1" "root" "[:seon.agent/id \"design-agent\"]"} %)))]
+            (is (str/includes? (page {"branch" branch}) "class=\"seon-graph-node\"") "the branch's agent is walked")
+            (is (str/includes? (page {"branch" branch}) (str "branch " branch)) "the header names the branch read")
+            (is (not (str/includes? (page {}) "class=\"seon-graph-node\"")) "the cluster's own value has no such agent"))))))))
