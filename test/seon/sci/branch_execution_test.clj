@@ -2,6 +2,7 @@
   (:require [clojure.test :refer [deftest is]]
             [datahike.api :as d]
             [sci.core :as sci]
+            [seon.cache]
             [seon.config :as config]
             [seon.db :as db]
             [seon.fn :as functions]
@@ -475,3 +476,28 @@
                          'seon.sci.eval-test/fork-after-commit-probe)
               "the row committed after the base's acquisition is in the fork's program")
           (is (= 7 (sci/eval-string* ctx "(seon.sci.eval-test/fork-after-commit-probe)")))))))))
+
+(deftest ^{:seon.test/long "Two whole-program definition-digest queries of the canonical fixture program plus one analyzed declaration."
+           :seon.test/long-ms 8000}
+  a-loaded-programs-digests-are-read-once-per-commit
+  (support/with-database
+   (fn [connection]
+     (db/call-with-custody {:seon.db/connection connection}
+      (fn []
+        (let [loaded-digests #'eval/loaded-digests
+              function-digests #'eval/function-digests
+              hits #(get-in (seon.cache/status) [:seon.cache/kinds :seon.sci.eval/loaded-digests :seon.cache/hits] 0)
+              before (db/db connection)
+              first-read (loaded-digests before)
+              hits-before (hits)
+              second-read (loaded-digests before)]
+          (is (= (function-digests before) first-read)
+              "the retained map is the value's own definition identities")
+          (is (identical? first-read second-read))
+          (is (< hits-before (hits)) "the second read of one commit is a hit")
+          (declared! connection 'seon.sci.eval-test/loaded-digest-probe
+                     "(defn ^{:malli/schema [:=> [:cat] :int]} loaded-digest-probe [] 1)")
+          (let [after (db/db connection)]
+            (is (contains? (loaded-digests after) 'seon.sci.eval-test/loaded-digest-probe)
+                "another commit is another key, never the first commit's map")
+            (is (not (contains? (loaded-digests before) 'seon.sci.eval-test/loaded-digest-probe))))))))))

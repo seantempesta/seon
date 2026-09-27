@@ -119,6 +119,7 @@
             [sci.interrupt :as sci.interrupt]
             [seon.call-preparation :as call-preparation]
             [seon.config :as config]
+            [seon.cache]
             [seon.db :as db]
             [seon.id :as id]
             [seon.effect :as effect]
@@ -1643,6 +1644,13 @@
                             {:seon.error/expected :seon.source/commit-id
                              :seon.error/offending commits})))))
 
+(defn- store-identity
+  "The store a database value reads, as its declared config names it: a commit
+  id names one immutable value only within its store."
+  {:malli/schema [:=> [:cat :seon.db/database-value] :map]}
+  [database]
+  (select-keys (get-in database [:config :store]) [:backend :path :id]))
+
 (defn- loaded-program
   "Materialize the source commit the JVM loaded (`loaded-commit-id` of `database`)."
   {:malli/schema [:=> [:cat :seon.db/database-value] :seon.db/database-value]}
@@ -1675,6 +1683,17 @@
                     [sym (if (seq digest) digest
                            (row-definition-digest (db/pull database '[*] [:seon.fn/sym sym])))]))
           rows)))
+
+(defn- loaded-digests
+  "`function-digests` of a loaded program, once per store and commit: every
+  acquisition compares against the same few loaded commits. `loaded` is a
+  committed value (a `loaded-program` materialization or a connection's value)."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:map-of :qualified-symbol :seon.program/definition-digest]]}
+  [loaded]
+  (seon.cache/lookup ::loaded-digests [(store-identity loaded) (db/commit-id loaded)]
+                     #(* 256 (count %))
+                     #(function-digests loaded)))
 
 (defn- overridden-row?
   "Whether `row` is this program's own change to the loaded program: a row an
@@ -2840,8 +2859,10 @@
               db))
         loaded (or (::loaded-database @(::kernel/program-snapshot ctx))
                    (loaded-program db))
-        loaded-digests (function-digests loaded)
         branch-digests (function-digests db)
+        ;; A loaded value identical to the acquired one may be uncommitted
+        ;; (`d/with`); only a distinct, committed loaded value is retained.
+        loaded-digests (if (identical? loaded db) branch-digests (loaded-digests loaded))
         ;; Only what an agent authored overrides (`overridden-row?`): a
         ;; file-derived row the loaded program moved past is not the branch's.
         authored (into #{} (keep (fn [[sym _ _ admission]] (when (agent-authored? admission) (symbol sym))))
