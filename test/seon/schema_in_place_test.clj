@@ -302,3 +302,39 @@
         (schema/call-with-projection
          tightened #(support/transacted! connection tx-data))
         (is (= #{"hello"} (values connection :schema.in-place/history)))))))
+
+(deftest a-kept-vector-many-attribute-drops-only-refused-members
+  ;; WANTED: a cardinality-many attribute stores members, not its declared
+  ;; collection, so a kept `[:vector …]` declaration validates each member
+  ;; against its element schema. Unchanged, it retracts nothing (validating
+  ;; the stored set against `[:vector …]` once retracted every value); a
+  ;; narrowed element retracts only the members it refuses.
+  (with-population
+    (fn [connection]
+      (adopt! connection)
+      (support/transacted! connection [{:db/ident :schema.in-place/tags :db/valueType :db.type/string
+                                         :db/cardinality :db.cardinality/many}])
+      (let [forms-with (fn [tags]
+                         (schema/declaration-projection
+                          (-> (merge (schema.edn/packaged-forms) fixture-forms)
+                              (assoc :schema.in-place/tags tags)
+                              (update :schema.in-place/row conj
+                                      [:schema.in-place/tags {:optional true} :schema.in-place/tags]))))
+            kept (forms-with [:vector :string])
+            narrowed (forms-with [:vector [:string {:min 3}]])
+            change (fn [projection]
+                     (seon.cluster/attribute-change-tx
+                      (db/db connection) [:schema.in-place/tags]
+                      (into {} (map (juxt :db/ident identity))
+                            (@#'seon.cluster/declared-attributes projection))
+                      projection))]
+        (schema/call-with-projection
+         kept #(support/transacted! connection [{:schema.in-place/id "a"
+                                                 :schema.in-place/tags ["h" "hello"]}]))
+        (is (= [] (change kept)))
+        (let [tx-data (change narrowed)
+              a (:db/id (db/pull (db/db connection) [:db/id] [:schema.in-place/id "a"]))]
+          (is (= [[:db/retract a :schema.in-place/tags "h"]] tx-data))
+          (schema/call-with-projection
+           narrowed #(support/transacted! connection tx-data))
+          (is (= #{"hello"} (values connection :schema.in-place/tags))))))))

@@ -1245,29 +1245,30 @@
   changes no Datahike attribute, yet current data may no longer satisfy it.
   Under the owner's schema-change ruling the problematic data is dropped:
   every current value is read in its logical form (EDN-encoded attributes are
-  decoded against `projection`) and validated with the projection's own
-  validator; a cardinality-many attribute validates each entity's whole value
-  set. Refused values are retracted by their native `[e a v]`. Work is one
-  AEVT range read of the attribute."
+  decoded against `projection`) and validated with the rule the writer applies
+  to a stored value. A cardinality-many attribute stores members, not its
+  declared collection, so each member is validated against the declaration's
+  element schema (`seon.schema.datahike/value-schema`, as the writer's
+  attribute plan does); only refused members are retracted, by their native
+  `[e a v]`. Work is one AEVT range read of the attribute.
+
+  Edge cases: a `[:vector …]` many attribute whose declaration is unchanged
+  retracts nothing (validating a set against it refused every value)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection :qualified-keyword]
                   :seon.store/transaction-data]}
   [database projection attribute]
   (if-not (contains? (:schema database) attribute)
     []
-    (let [valid? (schema/projection-validator projection attribute)
-          decode #(schema.datahike/decode-attribute-value-in projection attribute %)
-          many? (= :db.cardinality/many (get-in (:schema database) [attribute :db/cardinality]))
-          datoms (d/datoms database :aevt attribute)]
-      (if many?
-        (into []
-              (mapcat (fn [[_ entity-datoms]]
-                        (when-not (valid? (into #{} (map (comp decode :v)) entity-datoms))
-                          (map #(vector :db/retract (:e %) attribute (:v %)) entity-datoms))))
-              (group-by :e datoms))
-        (into []
-              (keep #(when-not (valid? (decode (:v %)))
-                       [:db/retract (:e %) attribute (:v %)]))
-              datoms)))))
+    (let [many? (= :db.cardinality/many (get-in (:schema database) [attribute :db/cardinality]))
+          valid? (if many?
+                   (m/validator (schema.datahike/value-schema
+                                 (mr/schema (:seon.schema.projection/registry projection) attribute)))
+                   (schema/projection-validator projection attribute))
+          decode #(schema.datahike/decode-attribute-value-in projection attribute %)]
+      (into []
+            (keep #(when-not (valid? (decode (:v %)))
+                     [:db/retract (:e %) attribute (:v %)]))
+            (d/datoms database :aevt attribute)))))
 
 (defn- declaration-changes
   "Transaction data adopting every packaged declaration difference IN PLACE on this branch.
