@@ -544,10 +544,28 @@
             ::ambient-branch ambient-branch
             ::explicit-branch explicit-branch}}))))))
 
+(def ^:private read-index-pattern-bound
+  "The most index patterns one read source keeps: the `:max` of
+  `:seon.db/read-index-patterns` (seon.db.edn), which the writer enforces."
+  128)
+
 (defn- append-read-evidence!
+  "Collect one captured read, keeping its index patterns only within the bound.
+
+  A plan references its read (sources, attributes, basis) and never copies
+  what the read returned. Patterns bound per pulled entity grow with the
+  result: root's opening `(seon.error/for-agent (seon.db/db) \"root\")` kept
+  30,729, stored as 4.5 M characters and decoded on every turn (default,
+  2026-09-27). Past the bound the read keeps its attributes and revision, the
+  evidence a read over `:all` already has: freshness replays or regenerates
+  the read and the shown-value comparison decides."
+  {:malli/schema [:=> [:cat :map] :nil]}
   [evidence]
   (when *read-evidence-sink*
-    (swap! *read-evidence-sink* conj evidence))
+    (swap! *read-evidence-sink* conj
+           (cond-> evidence
+             (< read-index-pattern-bound (count (:seon.db/read-index-patterns evidence)))
+             (dissoc :seon.db/read-index-patterns))))
   nil)
 
 (defn- append-database-evidence!

@@ -144,3 +144,30 @@
                                                :seon.message/from]])
          (is (false? (db/read-evidence-current? @connection evidence)))
          (is (= 1 (count (db/q query @connection [:seon.agent/id "juniper"])))))))))
+
+(deftest a-plan-references-its-read-and-never-copies-the-result
+  ;; Root's opening fault read kept one pattern per pulled datom: 30,729,
+  ;; stored as 4.5 M characters and decoded on every turn (2026-09-27).
+  (test-support/with-database
+   (fn [connection]
+     (test-support/transacted!
+      connection
+      (into (test-support/agents-tx @connection ["juniper"])
+            (map (fn [n] {:seon.message/id (str "m" n) :seon.message/content (str "c" n)
+                          :seon.message/to [:seon.agent/id "juniper"]}))
+            (range 80)))
+     (let [captured (atom [])
+           result (binding [db/*read-evidence-sink* captured]
+                    (db/q '[:find [(pull ?m [:seon.message/id :seon.message/content]) ...]
+                            :in $ ?recipient :where [?m :seon.message/to ?recipient]]
+                          @connection [:seon.agent/id "juniper"]))
+           evidence (db/read-evidence @captured)
+           sources (mapcat #(get-in % [:datahike.read/dependency-plan
+                                       :datahike.query.dependency/sources])
+                           evidence)]
+       (is (= 80 (count result)))
+       (is (seq sources))
+       (is (not-any? :seon.db/read-index-patterns sources) (pr-str sources))
+       (is (true? (db/read-evidence-current? @connection evidence)))
+       (test-support/transacted! connection [[:db/add [:seon.message/id "m0"] :seon.message/content "changed"]])
+       (is (false? (db/read-evidence-current? @connection evidence)))))))
