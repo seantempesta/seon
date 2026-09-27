@@ -1968,12 +1968,11 @@
                       (when (or (= reference schema-key)
                                 (= reference :seon.schema/value)
                                 ;; A render unit carries any value under
-                                ;; :seon.render/value, including scalar refs;
-                                ;; a database-reading renderer's unit too.
-                                (#{:seon.render/unit :seon.render/db-unit} reference)
+                                ;; :seon.render/value, including scalar refs.
+                                (= reference :seon.render/unit)
                                 (and (= :or (m/type input))
                                      (some #(and (m/-ref-schema? %)
-                                                 (#{:seon.render/unit :seon.render/db-unit} (m/-ref %)))
+                                                 (= :seon.render/unit (m/-ref %)))
                                            (m/children input)))
                                 (schema-accepts-schema? input declaring))
                         (m/form input)))))
