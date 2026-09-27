@@ -791,20 +791,50 @@
                                                  :seon.error/offending run-id}
                          :seon.await/port-operations [reply]})]
             (cond
-              ;; A pass whose settlement the writer refused before the run was
-              ;; opened (admission closed at retirement) wrote no run: its
-              ;; refusal is the answer, not an id that names nothing.
-              ;; (a retirement also releases the connection: no run to read)
+              ;; THE ANSWER IS THE SETTLEMENT'S OWN VALUE. The pass reports the
+              ;; database its terminal settlement left (`:seon.turn.loop/basis`);
+              ;; callers read the run there, never on a later connection value.
+              ;; A settlement the writer refused before the run opened (admission
+              ;; closed at retirement) left no run: its refusal is the answer.
               (and (:seon.turn.loop/refusal answer)
-                   (let [connection (:seon.db/connection handle)]
-                     (or (not (db/connection? connection))
+                   (let [basis (:seon.turn.loop/basis answer)]
+                     (or (nil? basis)
                          (nil? (db/q '[:find ?run . :in $ ?id :where [?run :seon.turn/id ?id]]
-                                     (db/db connection) run-id)))))
+                                     basis run-id)))))
               (assoc (:seon.turn.loop/refusal answer) :seon.agent/refused-source-agent agent-id)
 
-              (:seon.turn.loop/outcome answer) {:seon.turn/id run-id}
+              (:seon.turn.loop/outcome answer)
+              (cond-> {:seon.turn/id run-id}
+                (:seon.turn.loop/basis answer) (assoc :seon.db/db (:seon.turn.loop/basis answer)))
               (:seon.await/config-attribute answer) (assoc answer :seon.turn/id run-id)
               :else (assoc answer :seon.agent/refused-source-agent agent-id))))))))
+
+;;; LOAD-CYCLE BOUNDARIES: both namespaces require `seon.cluster`, which
+;;; requires this one. One resolution per var, realized at first use.
+(defonce ^:private transcript-history-entries
+  (delay (requiring-resolve 'seon.render.transcript/history-entries)))
+(defonce ^:private drive-run-receipts
+  (delay (requiring-resolve 'seon.eval.drive/run-receipts)))
+
+(defn run-observation
+  "The saved observation of one settled run, read on the database value its
+  settlement left (`evaluate-source!`'s `:seon.db/db`), never on a later
+  connection value: each evaluation's receipt with the response its agent's
+  next context reads (`seon.render.transcript/history-entries`: shown text,
+  output, error and its settlement window's faults). The MCP bridge answers
+  with it."
+  {:malli/schema [:=> [:cat [:map [:seon.turn/id :seon.turn/id] [:seon.db/db :seon.db/database-value]]
+                       :seon.agent/id :seon.cluster/name]
+                  [:vector :map]]}
+  [{run-id :seon.turn/id database :seon.db/db} agent-id cluster-name]
+  (let [responses (into {} (map (juxt :seon.cluster.eval/ordinal :seon.render.history/printed-value))
+                        (@transcript-history-entries
+                         {:seon.db/db database :seon.agent/id agent-id
+                          :seon.sci.admit/caps (config/result-caps (config/effective database cluster-name))
+                          :seon.render.transcript/selected-run-id run-id}))]
+    (mapv (fn [evaluation]
+            (assoc evaluation :seon.repl/response (get responses (:seon.cluster.eval/ordinal evaluation))))
+          (@drive-run-receipts database [run-id]))))
 
 (defn fenced?
   "True when this agent is QUARANTINED: armed, routed, mailbox closed.

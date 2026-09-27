@@ -220,7 +220,12 @@
                   [:seon.turn.loop/forms-run [:int {:min 0}]]
                   [:seon.turn.loop/outcome :seon.turn.loop/outcome]
                   [:seon.turn.loop/refusal {:optional true}
-                   :seon.turn.loop/refusal]],
+                   :seon.turn.loop/refusal]
+                  [:seon.turn.loop/basis {:optional true}
+                   :seon.turn.loop/basis]],
+                 ; The database value a run's terminal settlement left: its
+                 ; callers read the run's evaluations there, not on a later value.
+                 :basis :seon.db/database-value,
                  :refusal :seon.error/value,
                  :write-refusals [:int {:min 1}],
                  :parked :seon.error/value,

@@ -93,11 +93,31 @@
                                                          :seon.cluster.reply/text "1"))]
               (is (= :seon.agent/segmenter (:seon.error/member refused)) (pr-str refused))
               (is (= before (runs)))))
-          (testing "the answer's value is readable where the caller reads it: the MCP bridge reads its connection"
-            ;; Reply-when-applied (fcee85161) answered before the settlement
-            ;; committed; the bridge read the connection and returned no event
-            ;; for (inc 1) (default pid 70849, 2026-09-26). Deleted whole.
-            (is (= ["2"] (shown connection (code "(inc 1)")))))
+          (testing "the answer carries the value its settlement left; the MCP observation reads it there"
+            ;; eval-path cut 1 (audit M4, task branch-eval-answers-no-events):
+            ;; the bridge re-read the connection and could answer no events.
+            (let [observe #(agent/run-observation % agent-id cluster-name)
+                  shown-of #(mapv (fn [e] (or (:seon.eval/shown e) (:seon.cluster.eval/error e))) (observe %))
+                  value (code "(inc 1)")
+                  failed (code "(throw (ex-info \"a form's own error\" {}))")]
+              (is (some? (:seon.db/db value)) (pr-str (dissoc value :seon.db/db)))
+              (is (= ["2"] (shown-of value)) "a successful value, from the settlement's own value")
+              (is (= [0] (mapv :seon.cluster.eval/ordinal (observe value))))
+              (is (some? (:seon.cluster.eval/error (first (observe failed))))
+                  "a returned error value is its run's observation")
+              (is (string? (:seon.repl/response (first (observe failed)))))
+              (support/transacted! connection (support/agent-tx @connection (str agent-id "-later")))
+              (is (< (db/basis-t (:seon.db/db value)) (db/basis-t (db/db connection)))
+                  "a later commit moves the connection, not the reply's basis")
+              (is (= ["2"] (shown-of value)) "and the reply's observation is unchanged")))
+          (testing "a refused settlement answers its run's observation on the refusal's own value"
+            (code "(defn refused-helper \"Add one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
+            (code "(defn refused-caller \"Call.\" {:malli/schema [:=> [:cat :int] :int]} [x] (refused-helper x))")
+            (let [result (code (str "(ns-unmap '" (str "my.agents." agent-id) " 'refused-helper)"))
+                  observed (agent/run-observation result agent-id cluster-name)]
+              (is (some? (:seon.db/db result)) (pr-str (dissoc result :seon.db/db)))
+              (is (re-find #"surviving referrers" (str (:seon.cluster.eval/error (first observed))))
+                  (pr-str (mapv #(select-keys % [:seon.cluster.eval/ordinal :seon.cluster.eval/error]) observed)))))
           (testing "a form's own durable write opens its run first, so its provenance names a written evaluation"
             ;; Under one commit per form the run's rows were written only at
             ;; settlement, and every write a form made refused "Nothing found

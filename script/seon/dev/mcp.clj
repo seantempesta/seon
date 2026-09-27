@@ -436,25 +436,15 @@
                          (cond-> (assoc custody# :seon.agent/segmenter 'seon.cluster.reply/code-sources
                                         :seon.cluster.reply/text ~source)
                            '~namespace-symbol (assoc :seon.turn/starting-ns [:seon.ns/name '~namespace-symbol])))]
-            (if (or (:seon.error/at result#) (not (:seon.turn/id result#)))
+            (if (or (:seon.error/at result#) (not (:seon.db/db result#)))
               result#
               ;; Each evaluation answers with the response its agent's next
-              ;; context reads (`seon.render.transcript/history-entries`): the
-              ;; saved shown text, output, error and the new faults of its
-              ;; settlement window, the same bytes by the same function.
-              (let [database# @(:seon.db/connection (:seon.turn.loop/cluster custody#))
-                    run# (:seon.turn/id result#)
-                    responses# (into {} (map (juxt :seon.cluster.eval/ordinal :seon.render.history/printed-value))
-                                     ((requiring-resolve 'seon.render.transcript/history-entries)
-                                      {:seon.db/db database# :seon.agent/id (:seon.agent/id custody#)
-                                       :seon.sci.admit/caps ((requiring-resolve 'seon.config/result-caps)
-                                                             ((requiring-resolve 'seon.config/effective) database# ~cluster))
-                                       :seon.render.transcript/selected-run-id run#}))]
-                (assoc result# :seon.dev.mcp/evaluations
-                       (mapv (fn [evaluation#]
-                               (assoc evaluation# :seon.repl/response
-                                      (get responses# (:seon.cluster.eval/ordinal evaluation#))))
-                             ((requiring-resolve 'seon.eval.drive/run-receipts) database# [run#])))))))))))
+              ;; context reads, read on the database value the run's settlement
+              ;; left (`seon.cluster.agent/run-observation`), never on a later
+              ;; connection value.
+              (assoc (dissoc result# :seon.db/db) :seon.dev.mcp/evaluations
+                     ((requiring-resolve 'seon.cluster.agent/run-observation)
+                      result# (:seon.agent/id custody#) ~cluster)))))))))
 
 (defn- run-events
   "The prepl events of a root run: one per settled evaluation whose value is the

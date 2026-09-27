@@ -5089,6 +5089,16 @@
             nil
             (rseq (vec evaluated)))))
 
+(defn- settled
+  "`report` carrying the database value its terminal settlement left
+  (`:seon.turn.loop/basis`): the run's callers read the run there, never on a
+  later connection value."
+  {:malli/schema [:=> [:cat :seon.turn.loop/settlement :seon.turn.loop/turn-report] :seon.turn.loop/turn-report]}
+  [settlement report]
+  (cond-> report
+    (get-in settlement [:seon.turn.loop/outcome :db-after])
+    (assoc :seon.turn.loop/basis (get-in settlement [:seon.turn.loop/outcome :db-after]))))
+
 (defn- resume-turn
   "Evaluate an intent-frozen turn in memory, then settle the whole batch once."
   {:malli/schema
@@ -5123,13 +5133,12 @@
         trigger (phase #(message/trigger (db/db connection) run-id))]
     (if-let [failure (some #(when (:seon.turn.loop/phase-failed %) %)
                            [forked trigger])]
-      (do
-        (settle! {:seon.turn.loop/cluster cluster
-                  :seon.turn.loop/now now
-                  :seon.agent/id agent-id
-                  :seon.turn/id run-id
-                  :seon.error/value failure})
-        (report :error 0))
+      (settled (settle! {:seon.turn.loop/cluster cluster
+                         :seon.turn.loop/now now
+                         :seon.agent/id agent-id
+                         :seon.turn/id run-id
+                         :seon.error/value failure})
+               (report :error 0))
       (let [{ctx :seon.sci.eval/ctx} forked
             database (db/db connection)
             submission (:seon.turn.loop/submission cluster)
@@ -5174,16 +5183,15 @@
         ;; SCI evaluated it in (`seon.sci.eval/admit-program-change!`); its
         ;; row is the evaluation's, and the settlement writer re-derives it.
         (if (:seon.turn.loop/phase-failed evaluated)
-          (do
-            ;; THE REFUSAL BELONGS ON THE FORM THAT EARNED IT: `settle!`
-            ;; carries the ordinal through `refusal-terminal-data`.
-            (settle! {:seon.turn.loop/cluster cluster
-                      :seon.turn.loop/now now
-                      :seon.agent/id agent-id
-                      :seon.turn/id run-id
-                      :seon.cluster.eval/ordinal first-ordinal
-                      :seon.error/value evaluated})
-            (report :error (count evaluated)))
+          ;; THE REFUSAL BELONGS ON THE FORM THAT EARNED IT: `settle!`
+          ;; carries the ordinal through `refusal-terminal-data`.
+          (settled (settle! {:seon.turn.loop/cluster cluster
+                             :seon.turn.loop/now now
+                             :seon.agent/id agent-id
+                             :seon.turn/id run-id
+                             :seon.cluster.eval/ordinal first-ordinal
+                             :seon.error/value evaluated})
+                   (report :error (count evaluated)))
           (let [gated evaluated
                 requests
                 (mapv
@@ -5219,8 +5227,9 @@
                 prepared (:prepared settlement)
                 last-prepared (peek prepared)]
             (if-let [refusal (:refused-outcome settlement)]
-              (report :error (count gated)
-                      (or (restore-evaluations! gated refusal) refusal))
+              (assoc (report :error (count gated)
+                             (or (restore-evaluations! gated refusal) refusal))
+                     :seon.turn.loop/basis (:db-after outcome))
               (let [installations
                     (into []
                           (keep
@@ -5246,8 +5255,8 @@
                         (:seon.turn.loop/undisposed? last-prepared)
                         ;; a folded close (close-folded-call) closed it in the settlement
                         (::closed-tx (db/pull (:db-after outcome) [::closed-tx] [::id run-id])))
-                  (report :closed (count gated))
-                  (report :released (count gated)))))))))))
+                  (assoc (report :closed (count gated)) :seon.turn.loop/basis (:db-after outcome))
+                  (assoc (report :released (count gated)) :seon.turn.loop/basis (:db-after outcome)))))))))))
 (defn- close-turn
   {:malli/schema [:=> [:cat [:map
                             [:seon.turn.loop/cluster :seon.turn.loop/cluster]
@@ -5928,6 +5937,7 @@
                                    :seon.turn.work/next next}
                                   now)
                           _ (when reply (async/offer! reply report))
+                          report (dissoc report :seon.turn.loop/basis)
                           _ (when-let [opened (:seon.turn/id report)]
                               (reset! (:seon.agent/run-id turn-bound) opened))
                           refusal (:seon.turn.loop/refusal report)
