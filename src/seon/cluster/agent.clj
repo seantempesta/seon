@@ -1021,7 +1021,9 @@
                   (let [entry (get-in held path)]
                     (when (:seon.agent/released? held)
                       (throw (ex-info "This execution's roster is released; acquire through a live one."
-                                      {::refused ::roster-released :seon.agent/branch (first key)})))
+                                      {::refused ::roster-released :seon.agent/branch (first key)
+                                       :seon.error/message "This execution's roster is released; acquire through a live one."
+                                       :seon.error/expected :seon.agent/routing})))
                     (if (::acquiring entry)
                       held
                       (assoc-in held path (assoc entry ::acquiring (delay (acquire entry)))))))
@@ -1069,8 +1071,11 @@
          ;; released connection is read (Datahike refuses that read as
          ;; "Connection has been released.", which named no roster).
          _ (when (some-> parent-roster deref :seon.agent/released?)
+             ;; the released routing names itself as `arm!`'s own refusal does
              (throw (ex-info "This execution's roster is released; acquire through a live one."
-                             {::refused ::roster-released :seon.agent/id agent-id})))
+                             {::refused ::roster-released :seon.agent/id agent-id
+                              :seon.error/message "This execution's roster is released; acquire through a live one."
+                              :seon.error/expected :seon.agent/routing})))
          database (db/db parent)
          ;; The handle carries its world: the branch its connection holds is live.
          live-branch (get-in database [:config :branch])
