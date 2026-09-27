@@ -2038,39 +2038,65 @@
             (assoc sources :seon.turn/refused-system-agent agent-id)
             {:seon.turn/forms sources :seon.render.walk/units units})))))
 
-(defn- latest-evaluations [database agent-id]
-  (reduce
-   (fn [latest [basis _ evaluation]]
-     (let [source (assoc evaluation :seon.ns/name
-                         (get-in evaluation [:seon.cluster.eval/ns :seon.ns/name])
-                         :seon.turn/basis-t basis)
-           shown (repl/shown-value (:seon.eval/shown evaluation ""))
-           previous (get latest (source-key source))
-           shown (if (and previous (map? shown) (:seon.repl/changes shown)
-                          (= :system (:seon.cluster.eval/author evaluation))
-                          (not= :call (get-in evaluation [:seon.cluster.eval/run
-                                                        :seon.turn.work/situation])))
-                   (db/apply-diff (:seon.repl/shown-value previous)
-                                  (:seon.repl/changes shown))
-                   shown)
-           source (assoc source :seon.repl/shown-value shown)]
-       (assoc latest (source-key source) source)))
-   {}
-   (sort-by (juxt first second)
-            (db/q '[:find ?t ?ordinal
-                    (pull ?evaluation
-                          [* {:seon.cluster.eval/ns [:seon.ns/name]}
-                           {:seon.cluster.eval/run [:db/id :seon.turn.work/situation]}
-                           {:seon.cluster.eval/read-evidence [*]}])
-                    :in $ ?id
-                    :where [?agent :seon.agent/id ?id]
-                    [?agent :seon.agent/runtime ?runtime]
-                    [?runtime :seon.runtime/turns ?turn]
-                    [?turn :seon.turn/id _ ?t]
-                    [?evaluation :seon.cluster.eval/run ?turn]
-                    [?evaluation :seon.cluster.eval/ordinal ?ordinal]
-                    [?evaluation :seon.cluster.eval/source]]
-                  database agent-id))))
+(defn- latest-evaluations
+  "The latest evaluation of each distinct source this agent evaluated, with
+  its read evidence. Evidence is decoded for the kept evaluations only: every
+  evaluation is folded with its evidence as references, then the kept ones'
+  evidence is pulled whole. Decoding every stored plan of root's 146
+  evaluations was 3.8 s of each system turn; the kept 23 take 0.5 s, and
+  bounded plans (`seon.db/append-read-evidence!`) take the rest (default,
+  2026-09-27)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
+                  [:map-of [:tuple [:maybe :seon.ns/name] :seon.schema/value]
+                   :seon.db/pulled-entity]]}
+  [database agent-id]
+  (let [latest
+        (reduce
+         (fn [latest [basis _ evaluation]]
+           (let [source (assoc evaluation :seon.ns/name
+                               (get-in evaluation [:seon.cluster.eval/ns :seon.ns/name])
+                               :seon.turn/basis-t basis)
+                 shown (repl/shown-value (:seon.eval/shown evaluation ""))
+                 previous (get latest (source-key source))
+                 shown (if (and previous (map? shown) (:seon.repl/changes shown)
+                                (= :system (:seon.cluster.eval/author evaluation))
+                                (not= :call (get-in evaluation [:seon.cluster.eval/run
+                                                              :seon.turn.work/situation])))
+                         (db/apply-diff (:seon.repl/shown-value previous)
+                                        (:seon.repl/changes shown))
+                         shown)
+                 source (assoc source :seon.repl/shown-value shown)]
+             (assoc latest (source-key source) source)))
+         {}
+         (sort-by (juxt first second)
+                  (db/q '[:find ?t ?ordinal
+                          (pull ?evaluation
+                                [* {:seon.cluster.eval/ns [:seon.ns/name]}
+                                 {:seon.cluster.eval/run [:db/id :seon.turn.work/situation]}
+                                 {:seon.cluster.eval/read-evidence [:db/id]}])
+                          :in $ ?id
+                          :where [?agent :seon.agent/id ?id]
+                          [?agent :seon.agent/runtime ?runtime]
+                          [?runtime :seon.runtime/turns ?turn]
+                          [?turn :seon.turn/id _ ?t]
+                          [?evaluation :seon.cluster.eval/run ?turn]
+                          [?evaluation :seon.cluster.eval/ordinal ?ordinal]
+                          [?evaluation :seon.cluster.eval/source]]
+                        database agent-id)))
+        evidence (into {}
+                       (db/q '[:find ?evaluation
+                               (pull ?evaluation [{:seon.cluster.eval/read-evidence [*]}])
+                               :in $ [?evaluation ...]]
+                             database
+                             (into [] (comp (filter (comp seq :seon.cluster.eval/read-evidence))
+                                            (map :db/id))
+                                   (vals latest))))]
+    (update-vals latest
+                 (fn [evaluation]
+                   (if-let [held (get-in evidence [(:db/id evaluation)
+                                                   :seon.cluster.eval/read-evidence])]
+                     (assoc evaluation :seon.cluster.eval/read-evidence held)
+                     evaluation)))))
 
 (defn- read-only-evaluation?
   "True when a successful evaluation only read this agent's database, so a
