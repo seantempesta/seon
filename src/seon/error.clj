@@ -306,9 +306,10 @@
   deeper frames are the remainder whose size the marker reports (a link's whole
   first-party stack is kilobytes under a deep caller, and a partition over the
   bound keeps nothing). Without it an over-bound fault kept no cause at all."
-  {:malli/schema [:=> [:cat :seon.error/source [:or :nil :seon.error/throwable]]
+  {:malli/schema [:=> [:cat :seon.error/source [:or :nil :seon.error/throwable]
+                       [:or :nil :seon.error/chain]]
                   [:or :map :seon.error/base]]}
-  [source failure]
+  [source failure links]
   (let [error-value (if failure (refusal failure) source)
         candidates (merge (when (map? source) source)
                           (when (map? error-value) error-value))]
@@ -321,21 +322,47 @@
                              (cond-> (dissoc link :seon.error/data :seon.error/frames)
                                (:seon.error/frames link)
                                (assoc :seon.error/frames [(first (:seon.error/frames link))])))
-                           (error.refusal/chain failure))))))
+                           links)))))
+
+(defn- evidence-source
+  "The value a fault's evidence stores: `source` with its Throwable replaced by
+  the one error shape's cause chain (`seon.error.refusal/chain`: per link its
+  class, message, `ex-data` with worlds referenced, and first-party frames).
+  A Throwable admitted as itself was `Throwable->map`, every frame of every
+  link: fault 317111871b50 kept 107 KB of it and still read back as no value."
+  {:malli/schema [:=> [:cat :seon.error/source [:or :nil :seon.error/throwable]
+                       [:or :nil :seon.error/chain]]
+                  :seon.error/source]}
+  [source failure links]
+  (cond
+    (nil? failure) source
+    (identical? source failure) {:seon.error/chain links}
+    :else (assoc (dissoc source ::flow/ex) :seon.error/chain links)))
+
+(defn- value-edn
+  "The stored text of one admission: its semantic value as canonical EDN,
+  which `clojure.edn` reads back as the value. The admission's own emitted
+  text (`:seon.sci.admit/edn`) is its print-node tree, readable only as
+  nodes: fault evidence stored it and never read back as a value."
+  {:malli/schema [:=> [:cat :seon.sci.admit/admitted] :string]}
+  [admitted]
+  (admit/canonical-edn (:seon.sci.admit/value admitted)))
 
 (defn- bounded-error-admission
   "Admit complete evidence, retaining classifying observations on overflow."
   {:malli/schema [:=> [:cat :seon.error/source [:or :nil :seon.error/throwable] :seon.sci.admit/caps [:maybe :seon.schema/projection]]
                   :seon.sci.admit/admitted]}
   [source failure caps projection]
-  (let [request (cond-> {:seon.sci.admit/value source
+  (let [links (when failure (error.refusal/chain failure projection))
+        value (evidence-source source failure links)
+        request (cond-> {:seon.sci.admit/value value
                          :seon.sci.admit/interrupt-fn (constantly nil)
                          :seon.sci.admit/caps caps}
                   projection (assoc :seon.schema/projection projection))
         admitted (admit/admit-partitioned
-                  request (classifying-error-data source failure))]
+                  request (classifying-error-data source failure links))]
     (if (admit/missing-marker admitted)
-      (bounded-admission source caps projection)
+      (bounded-admission value caps projection)
       admitted)))
 
 (defn- bounded-text
@@ -427,7 +454,7 @@
     {:seon.error/capped? (boolean (or (::marker admitted)
                                     (:seon.sci.admit/capped? admitted)))
      :seon.error.projection/bound-bytes (:seon.config.eval.result/max-bytes caps)
-     :seon.instrument/actual (:seon.sci.admit/edn admitted)})))
+     :seon.instrument/actual (value-edn admitted)})))
 
 (defn- admitted-size
   "One value's own size, measured by the same admission that stores it.
@@ -441,7 +468,7 @@
   (let [admitted (bounded-admission value caps projection)]
     (if-some [marker (::marker admitted)]
       (:seon.sci.admit/bytes marker)
-      (utf8-size (:seon.sci.admit/edn admitted)))))
+      (utf8-size (value-edn admitted)))))
 
 (defn- fit-fact-payload
   "Bound every payload field of one fact so the WHOLE fact fits inline.
@@ -450,10 +477,12 @@
   field over that share becomes the marker. The halving repeats only because
   a field's bytes are measured on the admitted value while the fact stores it
   as an escaped string; it terminates at one byte, where every field is the
-  marker."
-  {:malli/schema [:=> [:cat :map :seon.error/source :string [:or :nil :map] [:or :nil [:tuple :qualified-keyword :seon.error/source]] :seon.sci.admit/caps [:int {:min 1}] [:maybe :seon.schema/projection]]
+  marker. The evidence is the whole value's EDN (`full-edn`) whenever that
+  fits its share: admission bounds its print-node bytes, several times the
+  value's, so an evidence of 1 KB was cut to the marker under a 1.6 KB share."
+  {:malli/schema [:=> [:cat :map :seon.error/source :string :string [:or :nil :map] [:or :nil [:tuple :qualified-keyword :seon.error/source]] :seon.sci.admit/caps [:int {:min 1}] [:maybe :seon.schema/projection]]
                   [:or :seon.error/fact :seon.error/base]]}
-  [base-fact source message-value instrument-data actual caps inline-limit projection]
+  [base-fact source full-edn message-value instrument-data actual caps inline-limit projection]
   (let [expected (or (:seon.instrument/schema instrument-data)
                      (:seon.error/expected instrument-data))
         arguments (or (:seon.instrument/args instrument-data)
@@ -462,14 +491,15 @@
         available (max 1 (- inline-limit (utf8-size (pr-str base-fact))))]
     (loop [field-limit (max 1 (quot available payload-count))]
       (let [field-caps (evidence-caps caps field-limit)
-            evidence (bounded-error-admission source (throwable source)
-                                              field-caps projection)
             fact
             (cond-> (assoc base-fact
                            :seon.error/message
                            (bounded-text message-value field-caps projection)
                            :seon.error/data-edn
-                           (:seon.sci.admit/edn evidence))
+                           (if (<= (utf8-size full-edn) field-limit)
+                             full-edn
+                             (value-edn (bounded-error-admission
+                                         source (throwable source) field-caps projection))))
               expected
               (assoc :seon.instrument/expected
                      (bounded-text expected field-caps projection))
@@ -484,18 +514,52 @@
           fact
           (recur (max 1 (quot field-limit 2))))))))
 
-(defn prepare-result
-  "Render one result's shown text, store the value ONCE, and retain its live binding.
+(defn- offending-record
+  "What a stored result keeps of an offending value: each problem's path with
+  the value at it, admitted under the fault's evidence bound (over it, the
+  missing marker naming its size), and the whole value's content digest when
+  the storage bound admits the whole. Never a copy of the whole: a contract
+  refusal whose offending request carried all of an analysis's source text
+  stored a 7.9 MB blob (publication-cost-opus, 2026-09-27). A source with no
+  problems is one problem at the value's own path, `[]`."
+  {:malli/schema [:=> [:cat :seon.error/source :seon.error/source :seon.sci.admit/caps
+                       [:int {:min 1}] [:maybe :seon.schema/projection]]
+                  [:map [:seon.error/problems
+                         [:vector [:map [:seon.error/path :seon.render.data/path]
+                                   [:seon.error/offending {:optional true} :seon.schema/value]]]]
+                   [:seon.error/offending-digest {:optional true} :seon.error/offending-digest]]]}
+  [source value caps evidence-bytes projection]
+  (let [problems (or (seq (:seon.error/problems (contract-violation-data source)))
+                     [{:seon.error/path [] :seon.error/offending value}])
+        field-caps (evidence-caps caps evidence-bytes)
+        whole (bounded-admission value caps projection)]
+    (cond-> {:seon.error/problems
+             (mapv (fn [problem]
+                     (cond-> (assoc (select-keys problem [:seon.error/argument])
+                                    :seon.error/path (vec (:seon.error/path problem)))
+                       (find problem :seon.error/offending)
+                       (assoc :seon.error/offending
+                              (:seon.sci.admit/value
+                               (bounded-admission (:seon.error/offending problem) field-caps projection)))))
+                   problems)}
+      (not (::marker whole))
+      (assoc :seon.error/offending-digest (id/id (:seon.sci.admit/value whole) 64)))))
 
-  The blob is the value's admitted artifact (the record `get_value` reads),
-  under the storage bound and with its world as references. It used to be the
-  complete HTML face rendered unbounded: a second, larger copy of the value
-  whose admission walked every object it reached. A supplied SCI context
-  carries its owner's binding operation and, absent explicit caps, the bound."
+(defn prepare-result
+  "Render one result's shown text, store a bounded record of the value, and
+  retain its live binding.
+
+  The live binding is the actual object; the shown text is the floor's, under
+  the profile. The blob is the admitted artifact of `offending-record` (the
+  record `get_value` reads): the values at the problem paths under the
+  fault's evidence bound, with worlds as references, and the whole value's
+  digest, never the whole value. A supplied SCI context carries its owner's
+  binding operation and, absent explicit caps, the bound."
   {:malli/schema
    [:=> [:cat [:map [:seon.db/connection :seon.db/connection]
                     [:seon.render/profile :seon.render.profile/profile]
                     [:seon.error/source :seon.error/source]
+                    [:seon.config.error/max-evidence-bytes [:int {:min 1}]]
                     [:seon.sci.admit/caps {:optional true} :seon.sci.admit/caps]
                     [:seon.sci.eval/ctx {:optional true}
                      [:and :seon.sci.eval/ctx
@@ -511,7 +575,10 @@
         result-id (id/id)
         handle (admit/result-handle result-id)
         ctx (:seon.sci.eval/ctx request)
+        ;; the world is passed, never taken from ambient custody: a core
+        ;; fault recorded off an agent's thread has none
         unit (assoc (select-keys request [:seon.schema/projection :seon.render/profile])
+                    :seon.db/db (db/db (:seon.db/connection request))
                     :seon.render/value value :seon.repl/handle handle
                     :seon.render.call/id handle)
         caps (or (:seon.sci.admit/caps request)
@@ -521,12 +588,11 @@
                                   {:seon.error/message "Supply :seon.sci.admit/caps or an SCI context whose environment carries them."
                                    :seon.error/member :seon.sci.admit/caps
                                    :seon.error/expected :seon.sci.admit/caps}))))
-        admitted (admit/admit-value
-                  (cond-> {:seon.sci.admit/value value
-                           :seon.sci.admit/interrupt-fn (constantly nil)
-                           :seon.sci.admit/caps caps}
-                    (:seon.schema/projection request)
-                    (assoc :seon.schema/projection (:seon.schema/projection request))))
+        projection (:seon.schema/projection request)
+        admitted (bounded-admission
+                  (offending-record source value caps
+                                    (:seon.config.error/max-evidence-bytes request) projection)
+                  caps projection)
         shown (render.value/render-ai-data (render.value/prepare unit))
         digest (blob/put! (:seon.db/connection request)
                           (render.value/artifact-edn (render.value/artifact admitted)))]
@@ -572,7 +638,7 @@
         class-name (when failure (.getName (class failure)))
         source (meaningful-source source)
         admitted (bounded-error-admission source failure caps projection)
-        full-edn (:seon.sci.admit/edn admitted)
+        full-edn (value-edn admitted)
         ;; ONE KEY, AND IT IS SUPPLIED. The fault family's own declared bound
         ;; decides how much evidence the FACT keeps; the blob threshold
         ;; decides where the complete evidence lives.
@@ -695,7 +761,7 @@
           agent-id (assoc :seon.error/agent
                           [:seon.agent/id agent-id]))
         fact (fit-fact-payload
-              base-fact source
+              base-fact source full-edn
               (message source failure) instrument-data actual caps inline-limit projection)
         fact (assoc fact :seon.error/capped?
                     ;; HONEST WHEN EVERYTHING WAS DROPPED. Comparing the two
@@ -714,7 +780,9 @@
                        (prepare-result (assoc request :seon.error/source error-value))))]
     {:seon.error/fact (merge fact result)
      :seon.error/source (merge observation result)
-     :seon.error/data-content full-edn}))
+     ;; the blob is the admission's value artifact, which
+     ;; `seon.render.value/read-artifact` and `artifact-value` read back
+     :seon.error/data-content (render.value/artifact-edn (render.value/artifact admitted))}))
 
 (defn normalize
   "Normalize one observation with a supplied projection and bounded evidence.
@@ -762,7 +830,7 @@
                   :seon.error/source]}
   [fact]
   (try
-    (admit/semantic-value (edn/read-string (:seon.error/data-edn fact)))
+    (edn/read-string (:seon.error/data-edn fact))
     ;; Stored evidence that does not read is itself a reading error;
     ;; the diagnostic carries the failure's whole cause chain and frames.
     (catch Exception failure
@@ -806,8 +874,21 @@
     (number? value) "a number"
     :else (str "an instance of " (.getName (class value)))))
 
+(defn- bound-text
+  "A schema's declared `:min`/`:max` properties as prose, or nil when it
+  declares neither. Malli reads both as the value itself for numbers and as
+  the count for strings and collections (`malli.core/-min-max-pred`)."
+  {:malli/schema [:=> [:cat :map] [:maybe :string]]}
+  [{lower :min upper :max}]
+  (cond (and (some? lower) (= lower upper)) (str "exactly " lower)
+        (and (some? lower) (some? upper)) (str "from " lower " to " upper)
+        (some? lower) (str "at least " lower)
+        (some? upper) (str "at most " upper)))
+
 (defn- schema-expectation
-  "Describe composed schemas from their children, not Malli's unknown fallback."
+  "Describe composed schemas from their children, not Malli's unknown fallback.
+  A declared bound is part of the expectation: `[:int {:min 1}]` refusing 0
+  read \"expected an integer, got an integer 0\"."
   {:malli/schema [:=> [:cat :map]
                   :string]}
   [problem]
@@ -816,11 +897,17 @@
         declared-message (me/error-message problem {:unknown false})
         children #(map (fn [child]
                          (schema-expectation (assoc problem :schema child)))
-                       (m/children check))]
+                       (m/children check))
+        bound (bound-text (or (m/properties check) {}))
+        bounded (fn [noun measure]
+                  (cond (nil? bound) noun
+                        measure (str noun " of " measure " " bound)
+                        :else (str noun " " bound)))]
     (case (m/type check)
-      :vector "a vector" :sequential "a sequence" :map "a map"
-      :set "a set" :string "a string" :int "an integer"
-      :double "a double" :boolean "a boolean" :keyword "a keyword"
+      :vector (bounded "a vector" "count") :sequential (bounded "a sequence" "count")
+      :map (bounded "a map" "count") :set (bounded "a set" "count")
+      :string (bounded "a string" "length") :int (bounded "an integer" nil)
+      :double (bounded "a double" nil) :boolean "a boolean" :keyword "a keyword"
       :qualified-keyword "a namespaced keyword" :symbol "a symbol"
       :qualified-symbol "a namespaced symbol" :nil "nil"
       :tuple (str "a tuple with " (count (m/children check)) " entries")
@@ -894,7 +981,8 @@
      :seon.error/fix
      (cond
        missing? (str "Supply " (pr-str (last path)) " with " expected ".")
-       (and (= :vector schema-type) (sequential? (:value problem)))
+       (and (= :vector schema-type) (sequential? (:value problem))
+            (not (vector? (:value problem))))
        "Convert the sequence with vec before calling the function."
        (= :fn schema-type) message
        checked-output "Return a value satisfying the declared result contract for the shown input."
@@ -1569,13 +1657,19 @@
 
   The leading identity row preserves existing transaction composition; it
   contains no occurrence state. Counts and notification decisions belong
-  exclusively to commit-call's mid-transaction database. Both entry points
-  require the producer's declared schema; the positional form carries it as
-  its third argument, before the source observation."
+  exclusively to commit-call's mid-transaction database. The producer
+  declares the schema; the positional form carries it as its third argument,
+  before the source observation.
+
+  ## Edge cases
+
+  - The positional form is total over a missing declaration: nil records the
+    source as `:seon.error/normalization-error`, so the fault is kept and its
+    undeclared producer is visible, never refused and lost."
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/database-value :seon.error/commit-tx-request] [:or :seon.error/recording :seon.db/error-result :seon.error/base]]
-    [:=> [:cat :map :seon.db/database-value :seon.error/declared-schema :seon.error/source :inst :map] [:or :seon.error/recording :seon.db/error-result :seon.error/base]]]}
+    [:=> [:cat :map :seon.db/database-value [:maybe :seon.error/declared-schema] :seon.error/source :inst :map] [:or :seon.error/recording :seon.db/error-result :seon.error/base]]]}
   ([database request]
    (let [request (assoc request :seon.schema/projection
                         (or (db/carried-projection database)
@@ -1654,7 +1748,14 @@
               (merge (select-keys cluster [:seon.sci.admit/caps :seon.config.error/recurrence-limit
                                           :seon.config.error/max-evidence-bytes :seon.config.error/escalate-to])
                      (select-keys cluster [:seon.db/connection])
-                     {:seon.error/source source :seon.error/declared-schema declared-schema :seon.error/id (id/id)
+                     ;; RECORDING IS TOTAL. A value whose producer declared no
+                     ;; schema (its metadata was lost, or a fixture built it by
+                     ;; hand) is recorded as normalized escaped data, the
+                     ;; declared schema for exactly that case, never refused:
+                     ;; a refused recording loses the fault.
+                     {:seon.error/source source
+                      :seon.error/declared-schema (or declared-schema :seon.error/normalization-error)
+                      :seon.error/id (id/id)
                       :seon.error/at at :seon.error/process (:seon.db.process/id cluster)
                       :seon.error/basis-t (db/basis-t database)}
                      attribution))))

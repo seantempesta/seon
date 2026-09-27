@@ -24,6 +24,7 @@
               [:seon.error/fix :string]],
              :run [:and #:seon.db{:index true} :seon.db/ref],
              :data-blob :seon.blob/digest,
+             :offending-digest [:string {:min 64 :max 64 :description "The SHA-256 of a stored result's whole offending value (seon.id/id of its admitted value): which value it was, without a copy of it."}],
              :result-id [:string {:min 1 :description "The result identity whose live object is bound as result/e<id>; a value token, not another entity identity."}],
              :shown :seon.eval/shown,
              :doc

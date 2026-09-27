@@ -34,7 +34,6 @@
             [seon.program :as program]
             [seon.render.transcript :as transcript]
             [sci.core :as sci.core]
-            [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
@@ -85,10 +84,6 @@
   "The stand-in evaluator, for the cases that pin an exact value."
   [_request]
   injected-evaluation)
-
-(defn- semantic-result
-  [result-edn]
-  (#'admit/semantic-value (edn/read-string result-edn)))
 
 (defn- agent-evaluations
   "Read this fixture's agent-authored evaluations in turn and ordinal order,
@@ -1988,7 +1983,8 @@
   restate this derivation (owner ruling 2026-07-28)."
   [db entity backup-configured?]
   (let [fact (durable-fact db (:db/id (:seon.ai.attempt/error entity)))
-        value (semantic-result (:seon.error/data-edn fact))]
+        ;; stored evidence is value EDN (seon.error/value-edn)
+        value (edn/read-string (:seon.error/data-edn fact))]
     (ai/disposition
      {:seon.error/value value
       :seon.ai/backup? (boolean
@@ -2091,7 +2087,7 @@
           (is (string? truncation-id)
               "the attempt ref resolves to a durable error fact")
           (is (= truncation
-                 (semantic-result (:seon.error/data-edn fact)))
+                 (edn/read-string (:seon.error/data-edn fact)))
               "the durable fact retains why and where the stream ended")
           (is (not (contains? entity :seon.ai.attempt/error))
               "partial output remains an ordinary completion, not a failure")

@@ -855,8 +855,7 @@
   may supply the small classifying facts that must remain queryable. They are
   admitted first as ordinary data beside the original missing marker. If that
   partition itself cannot fit, the honest missing answer is returned."
-  {:seon/tasks #{"57f97689b302"}
-   :malli/schema [:=> [:cat :seon.sci.admit/request :map]
+  {:malli/schema [:=> [:cat :seon.sci.admit/request :map]
                   [:or :seon.sci.admit/admitted :seon.config/error]]}
   [request priority]
   (let [admitted (admit request)]

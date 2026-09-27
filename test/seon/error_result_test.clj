@@ -8,6 +8,7 @@
             [seon.db :as db]
             [seon.error :as error]
             [seon.id :as id]
+            [seon.instrument :as instrument]
             [seon.render :as render]
             [seon.render.value :as render.value]
             [seon.render.walk :as walk]
@@ -98,9 +99,40 @@
            request (-> (request connection (observation value))
                        (assoc-in [:seon.render/profile :seon.render.profile/max-children] 2))
            {:keys [complete shown stored-value]} (verify-stored! connection request value)]
-       (is (= value stored-value) "the digest retrieves the whole value")
+       (is (= value (get-in stored-value [:seon.error/problems 0 :seon.error/offending]))
+           "a value with no problem paths is recorded whole at its own path, under the evidence bound")
+       (is (= (id/id value 64) (:seon.error/offending-digest stored-value)))
        (is (not= complete shown))
        (is (< (count shown) (count complete)))))))
+
+(deftest a-large-off-path-request-records-a-small-blob
+  ;; publication-cost-opus 2026-09-27: a contract refusal whose request carried
+  ;; all of an analysis's source text recorded a 7.9 MB blob. The live refusal
+  ;; keeps the actual object; the recording keeps the value at the problem
+  ;; path and a digest of the whole.
+  (support/with-database
+   (fn [connection]
+     (let [projection (db/carried-projection (db/db connection))
+           caps (config/result-caps config/defaults)
+           source-text (apply str (repeat 400000 "x"))
+           carrier {:error-result-test/source source-text}
+           contracted (instrument/wrap-interpreted
+                       'error-result-test/f "[:=> [:cat :map :int] :int]" projection caps (fn [_ n] n))
+           refusal (support/refusal-data #(contracted carrier "not an int"))
+           recording (error/recording (db/db connection) (request connection refusal))
+           report (support/transacted! connection (:seon.db/tx-data recording))
+           stored (error/latest-fact (db/pull (:db-after report)
+                                              (error/observation-selector projection)
+                                              (:seon.error/ref recording)))
+           content (blob/get connection (:seon.error/data-blob stored))
+           record (render.value/artifact-value (render.value/read-artifact content))]
+       (is (identical? carrier (first (:seon.error/offending refusal)))
+           "the in-memory refusal keeps the actual object")
+       (is (< (count content) 4096) (str "the recorded blob is " (count content) " characters"))
+       (is (= "not an int" (get-in record [:seon.error/problems 0 :seon.error/offending])))
+       (is (not (str/includes? content source-text)))
+       (is (= 64 (count (:seon.error/offending-digest record)))
+           "the whole offending value is identified by its digest")))))
 
 (deftest ^{:seon.test/long
            "First real SCI acquisition loads the canonical program namespaces and installs their declarations; subsequent agent forks reuse that context. The result writer retains its separate one-second assertion."

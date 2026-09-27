@@ -24,10 +24,16 @@
             [malli.registry :as mr]
             [seon.schema.datahike :as schema.datahike]
             [seon.sci.eval :as sci.eval]
-            [seon.sci.admit :as admit]
             [seon.test-support :as test-support]
             [seon.db :as db]
-            [seon.program :as program]))
+            [seon.program :as program]
+            [seon.render.value :as render.value]))
+
+(defn- blob-value
+  "The value a fault's evidence blob holds: a value artifact
+  (`seon.render.value/read-artifact`), never print-node text."
+  [content]
+  (render.value/artifact-value (render.value/read-artifact (str content))))
 
 (declare commit-request with-db)
 
@@ -423,23 +429,21 @@
   (let [prepared (error/prepare
                   (request (transform-error (ex-info "boom" {}))))
         fact (:seon.error/fact prepared)
-        read-back (#'admit/semantic-value
-                   (edn/read-string (:seon.error/data-edn fact)))
-        full-read-back (#'admit/semantic-value
-                        (edn/read-string
-                         (:seon.error/data-content prepared)))]
+        read-back (edn/read-string (:seon.error/data-edn fact))
+        full-read-back (blob-value (:seon.error/data-content prepared))]
     (testing "a value pr-str cannot survive reads back as EDN"
       (is (map? read-back)))
     (testing "disposable proc state is omitted before admission"
       (is (not (contains? read-back ::flow/state)))
       (is (not (contains? full-read-back ::flow/state))))
-    (testing "and the Throwable is the printer's bounded data projection,
-    never the live Throwable; the complete meaningful projection remains
-    available for blob retrieval even when the inline preview elides it"
-      (let [projected (get full-read-back ::flow/ex)]
-        (is (map? projected))
-        (is (= "boom" (:cause projected)))
-        (is (= {} (:data projected)))))))
+    (testing "and the Throwable is the one error shape's cause chain, never
+    the live Throwable nor its every frame; the inline value and the blob read
+    back as the same value"
+      (is (not (contains? full-read-back ::flow/ex)))
+      (is (= [{:seon.error/throwable-class "clojure.lang.ExceptionInfo"
+               :seon.error/message "boom" :seon.error/data {}}]
+             (mapv #(dissoc % :seon.error/frames) (:seon.error/chain full-read-back))))
+      (is (= read-back full-read-back)))))
 
 (deftest capping-is-honest
   ;; `capped?` is admission's own signal and means ELIDED OR TRUNCATED,
@@ -462,8 +466,7 @@
                                  :seon.config.eval.result/max-bytes]
                                 1024)))
         fact (:seon.error/fact prepared)
-        retained (#'admit/semantic-value
-                  (edn/read-string (:seon.error/data-edn fact)))]
+        retained (edn/read-string (:seon.error/data-edn fact))]
     (is (true? (:seon.error/capped? fact)))
     (is (= (select-keys source [:seon.error/layer :seon.error/operation :seon.error/member :seon.error/message])
            (select-keys retained [:seon.error/layer :seon.error/operation :seon.error/member :seon.error/message])))
@@ -480,7 +483,7 @@
         prepared (error/prepare
                   (assoc-in (request (transform-error failure))
                             [:seon.sci.admit/caps :seon.config.eval.result/max-bytes] 16384))
-        content (#'admit/semantic-value (edn/read-string (:seon.error/data-content prepared)))]
+        content (blob-value (:seon.error/data-content prepared))]
     (is (= :over-bound (get-in content [:seon.sci.admit/remainder :seon.sci.admit/reason])))
     (is (= [["clojure.lang.ExceptionInfo" "outer"] ["clojure.lang.ExceptionInfo" "middle"]
             ["java.lang.IllegalStateException" "root cause"]]
@@ -596,12 +599,12 @@
          (assoc (request {:seon.error/message "short"})
                 :seon.config.error/max-evidence-bytes inline-limit))]
     (is (<= (:seon.error/data-size fact) inline-limit))
-    (is (not= (:seon.error/data-edn fact)
-              (:seon.error/data-content prepared))
+    (is (not= (edn/read-string (:seon.error/data-edn fact))
+              (blob-value (:seon.error/data-content prepared)))
         "whole-fact fitting can shorten evidence below the size threshold")
     (is (true? (:seon.error/capped? fact)))
-    (is (= (get-in small [:seon.error/fact :seon.error/data-edn])
-           (:seon.error/data-content small))
+    (is (= (edn/read-string (get-in small [:seon.error/fact :seon.error/data-edn]))
+           (blob-value (:seon.error/data-content small)))
         "small evidence is not changed gratuitously")
     (is (false? (get-in small [:seon.error/fact :seon.error/capped?])))))
 
@@ -613,7 +616,9 @@
   (let [exploding (lazy-seq (throw (ex-info "realizing me throws" {})))
         fact (error/normalize (request {:seon.error/message "rejected", :seon.error/data {:rows exploding}}))]
     (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.error/fact) fact))
-    (is (str/includes? (:seon.error/data-edn fact) "seon.print/failed"))))
+    (is (some :seon.sci.admit/projection-error
+              (filter map? (tree-seq coll? seq (edn/read-string (:seon.error/data-edn fact)))))
+        "the realization that threw is named in the stored value")))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The three shapes lift exactly what they carry
@@ -799,6 +804,29 @@
           :seon.config.error/max-evidence-bytes evidence-bytes
           :seon.config.error/escalate-to "root"}
          extra))
+
+(deftest a-recording-without-a-declared-schema-is-kept
+  ;; root 2026-09-27: turn-test's injected write refusal carried no
+  ;; declared-schema metadata and `recording` refused it, so the fault was
+  ;; lost. The positional form records an undeclared value as normalized
+  ;; escaped data.
+  (test-support/with-database
+   (fn [connection]
+     (let [source {:seon.error/at (java.util.Date.)
+                   :seon.error/layer :seon.error-test/recording
+                   :seon.error/operation 'seon.error-test/undeclared
+                   :seon.error/message "An undeclared refusal."}
+           recording (error/recording {:seon.sci.admit/caps caps
+                                       :seon.config.error/max-evidence-bytes evidence-bytes
+                                       :seon.db.process/id process}
+                                      (db/db connection) nil source (java.util.Date.) {})
+           report (test-support/transacted! connection (:seon.db/tx-data recording))]
+       (is (= :seon.error/normalization-error
+              (get-in recording [:seon.error/fact :seon.error/declared-schema])))
+       (is (= source (select-keys (edn/read-string (get-in recording [:seon.error/fact :seon.error/data-edn]))
+                                  (keys source)))
+           "the evidence reads back as the value")
+       (is (:seon.error/signature (db/pull (:db-after report) '[*] (:seon.error/ref recording))))))))
 
 (defn- commit!
   "Commit one error and return [fact-count messages-by-recipient]."
@@ -1180,8 +1208,7 @@
                   (mapv :v (db/datoms (:db-after report) :eavt segment :seon.error.location.segment/ordinal)))
                "The recorder stores the submitted transaction as evidence; it never executes it.")
            (is (= (get-in result [:seon.error/data :seon.db.write.attempt/transaction])
-                  (admit/semantic-value
-                   (edn/read-string (get-in attempt [:seon.db.write.attempt/operations :seon.instrument/actual])))))
+                  (edn/read-string (get-in attempt [:seon.db.write.attempt/operations :seon.instrument/actual]))))
            (is (false? (get-in attempt [:seon.db.write.attempt/operations :seon.error/capped?])))
            (is (not (contains? occurrence :seon.db.write.attempt/request-id)))))))))
 
@@ -1202,11 +1229,9 @@
        (is ((schema/projection-validator projection :seon.schema/validation-refusal) raw) (pr-str raw))
        (is ((schema/projection-validator projection :seon.schema/error) (error/latest-fact root)))
        (is (= unavailable
-              (admit/semantic-value
-               (edn/read-string (get-in occurrence [:seon.schema/error-declaration :seon.instrument/actual])))))
+              (edn/read-string (get-in occurrence [:seon.schema/error-declaration :seon.instrument/actual]))))
        (is (= :seon.db/database-value
-              (admit/semantic-value
-               (edn/read-string (get-in occurrence [:seon.schema/declaration-expectation :seon.instrument/actual])))))
+              (edn/read-string (get-in occurrence [:seon.schema/declaration-expectation :seon.instrument/actual]))))
        (is (not (contains? occurrence :seon.schema/refused-value)))
        (is (= (second (:seon.error/ref recording))
               (:seon.error/signature (error/normalize (request (error/latest-fact root)
@@ -1606,7 +1631,7 @@
        (blob/with-publication! connection staged (constantly nil))
        (is (= 50000
               (count (:seon.error/offending
-                      (#'admit/semantic-value (edn/read-string (blob/get connection digest))))))
+                      (blob-value (blob/get connection digest)))))
            "the digest retrieves the whole value")))))
 
 (deftest a-fault-site-survives-recompilation-and-moved-lines

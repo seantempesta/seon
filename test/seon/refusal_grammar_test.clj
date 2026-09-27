@@ -41,6 +41,24 @@
     (is (= "a collection member that is a string"
            (:seon.error/actual-description description)))))
 
+(deftest a-bounded-schema-names-its-bound
+  ;; printer-fixes-opus 2026-09-27: `[:int {:min 1}]` refusing 0 read
+  ;; "expected an integer, got an integer 0".
+  (doseq [[schema value expected]
+          [[[:int {:min 1}] 0 "an integer at least 1"]
+           [[:double {:min 0 :max 1}] 2.0 "a double from 0 to 1"]
+           [[:string {:min 1}] "" "a string of length at least 1"]
+           [[:vector {:max 2} :int] [1 2 3] "a vector of count at most 2"]
+           [[:int {:min 2 :max 2}] 3 "an integer exactly 2"]
+           [:int "x" "an integer"]]]
+    (let [description (error/explain-problem
+                       {:seon.error/problem (first (:errors (m/explain schema value)))
+                        :seon.error/path []
+                        :seon.error/argument "argument 0"})]
+      (is (= expected (:seon.error/expected-description description)) (pr-str schema))
+      (is (not (str/includes? (:seon.error/fix description) "Convert the sequence with vec"))
+          "a vector over its bound is not told to become a vector"))))
+
 (deftest structured-refusals-share-one-actionable-rendering
   (support/with-database
     (fn [connection]
