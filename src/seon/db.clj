@@ -1062,6 +1062,8 @@
                (mapv #(schema.datahike/decode-vectors projection selector %) result)
                :else (schema.datahike/decode-vectors projection selector result))]))))
 
+(declare vector-query-call)
+
 (defn- replay-read
   "Replay one recorded read against `database`.
 
@@ -1087,13 +1089,10 @@
           ;; Evidence recorded before reads were type-checked can still hold
           ;; a mistyped value; it refuses here as the read now would.
           (or (query-value-type-error declarations query-request parsed-query)
-              (decode-query-result declarations
-                                   query-request
-                                   parsed-query
-                                   (:datahike.query/result
-                                    (d/q-with-evidence
-                                     (encode-query-request declarations
-                                                           query-request parsed-query))))))
+              (let [answer (vector-query-call declarations query-request
+                                              (encode-query-request declarations query-request parsed-query)
+                                              parsed-query)]
+                (if (vector? answer) (second answer) answer))))
 
         (:pull :pull-many)
         (let [many? (= :pull-many (:seon.db/read-operation request))
@@ -2245,6 +2244,64 @@
       (and (map? result) (contains? result :ret)) (update result :ret decode-result)
       :else (decode-result result))))
 
+(defn- decode-query-vectors
+  "`result` with each pull find element named in `pulls` decoded to logical
+   vectors (`schema.datahike/decode-vectors`)."
+  {:malli/schema [:=> [:cat :seon.schema/projection [:map-of :int :seon.schema/value] :seon.schema/value :seon.schema/value]
+                  :seon.schema/value]}
+  [projection pulls parsed-query result]
+  (let [find-clause (:qfind parsed-query)
+        decode (fn [index value]
+                 (if-let [selector (get pulls index)]
+                   (schema.datahike/decode-vectors projection selector value)
+                   value))
+        decode-result (fn [value]
+                        (cond
+                          (instance? FindRel find-clause) (into (empty value) (map #(vec (map-indexed decode %))) value)
+                          (instance? FindColl find-clause) (mapv #(decode 0 %) value)
+                          (instance? FindScalar find-clause) (decode 0 value)
+                          (instance? FindTuple find-clause) (some->> value (map-indexed decode) vec)
+                          :else value))]
+    (if (and (map? result) (contains? result :ret))
+      (update result :ret decode-result)
+      (decode-result result))))
+
+(defn- vector-query-call
+  "Run one encoded Datalog `request` whose patterns may name vector
+   attributes: lowered once (`schema.datahike/lower-query`, membership
+   through cells), executed with evidence, decoded (`decode-query-result`,
+   then pull find elements' vectors). Answers `[response result]`, or the
+   refusal of `get-else`/`get-some` over a vector attribute. `q` and
+   `replay-read` both run through it."
+  {:malli/schema [:=> [:cat :map :map :map :seon.schema/value]
+                  [:or [:tuple :map :seon.schema/value] :seon.db/error-result]]}
+  [declarations logical encoded parsed-query]
+  (let [projection (some-> (::read-projection declarations) deref)
+        lowered (when (and projection (schema.datahike/vector-query? projection (:query encoded)))
+                  (try
+                    (schema.datahike/lower-query projection (:query encoded) (vec (:args encoded)))
+                    (catch clojure.lang.ExceptionInfo cause
+                      (if-let [f (::schema.datahike/vector-scalar-function (ex-data cause))]
+                        (vary-meta
+                         (diagnostic
+                          {:seon.error/message (ex-message cause)
+                           :seon.db/vector-scalar-function f
+                           :seon.db/invalid-read true
+                           :seon.error/layer :database-read
+                           :seon.error/operation 'seon.db/q
+                           :seon.error/expected :seon.db/query
+                           :seon.error/offending (::schema.datahike/clause (ex-data cause))
+                           :seon.error/data {:seon.db/query (:query logical)}})
+                         assoc :seon.error/declared-schema :seon.db/invalid-read-error)
+                        (throw cause)))))]
+    (if (:seon.error/at lowered)
+      lowered
+      (let [response (d/q-with-evidence (cond-> encoded lowered (assoc :query (:query lowered) :args (:args lowered))))
+            result (decode-query-result declarations logical parsed-query (:datahike.query/result response))]
+        [response (if (seq (:pulls lowered))
+                    (decode-query-vectors projection (:pulls lowered) parsed-query result)
+                    result)]))))
+
 (defn- pull-output-options
   [spec]
   (into {}
@@ -2552,14 +2609,14 @@
                   :seon.db/relation-only
                   (fn [declarations]
                     (or (query-value-type-error declarations request parsed-query)
-                        (let [response (d/q-with-evidence
-                                        (encode-query-request declarations request parsed-query))
-                              result (decode-query-result
-                                      declarations
-                                      request parsed-query
-                                      (:datahike.query/result response))]
-                          (append-query-evidence! request response result)
-                          result))))))))
+                        (let [answer (vector-query-call declarations request
+                                                        (encode-query-request declarations request parsed-query)
+                                                        parsed-query)]
+                          (if-not (vector? answer)
+                            answer
+                            (let [[response result] answer]
+                              (append-query-evidence! request response result)
+                              result))))))))))
         (catch clojure.lang.ExceptionInfo cause
           (when explicit-database?
             (append-database-evidence! query-or-database :all))

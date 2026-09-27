@@ -436,3 +436,102 @@
          (is (= ["a" "b" "c"]
                 (:seon.db/offending (db/transact! c [[:db/add [:seon.vector-test.q/id "q"] :seon.vector-test.q/two "c"]])))
              "an append past the bound refuses at the final report, naming the whole logical vector"))))))
+
+;;; ---------------------------------------------------------------------------
+;;; S6: reads through seon.db
+;;; ---------------------------------------------------------------------------
+
+(deftest pulls-read-logical-vectors-at-every-basis
+  (with-vector-world
+   (fn [c]
+     (tx! c [{:seon.vector-test.p/id "p" :seon.vector-test.p/items ["a" "b"]}])
+     (let [t (db/basis-t @c)
+           captured (atom [])
+           pulled-read (binding [db/*read-evidence-sink* captured]
+                         (db/pull @c [:seon.vector-test.p/items] p))
+           evidence (db/read-evidence @captured {:seon.db/retain-read-results? true})]
+       (testing "the recorded replay request is the logical selector, and replays to the same vector"
+         (is (= {:seon.vector-test.p/items ["a" "b"]} pulled-read))
+         (is (= [[:seon.vector-test.p/items] p]
+                (get-in (first evidence) [:seon.db/read-request :seon.db/pull-arguments])))
+         (is (= pulled-read (#'db/replay-read @c (:seon.db/read-request (first evidence))))))
+       (testing "a reorder invalidates an ordered read; an unrelated write does not"
+         (tx! c [{:seon.vector-test.t/id "unrelated"}])
+         (is (true? (db/read-evidence-current? @c evidence)))
+         (tx! c [{:seon.vector-test.p/id "p" :seon.vector-test.p/items ["b" "a"]}])
+         (is (false? (db/read-evidence-current? @c evidence))))
+       (testing "as-of reads the older vector by that value's own declarations"
+         (is (= {:seon.vector-test.p/items ["a" "b"]} (db/pull (db/as-of @c t) [:seon.vector-test.p/items] p)))
+         (is (= {:seon.vector-test.p/items ["b" "a"]} (db/pull @c [:seon.vector-test.p/items] p))))
+       (testing "a history or since view refuses a vector pull by name"
+         (is (true? (:seon.db/vector-temporal-view (db/pull (db/history @c) [:seon.vector-test.p/items] p))))
+         (is (true? (:seon.db/vector-temporal-view (db/pull (db/since @c t) '[*] p)))))))))
+
+;;; ---------------------------------------------------------------------------
+;;; S7: Datalog membership
+;;; ---------------------------------------------------------------------------
+
+(deftest datalog-over-a-vector-attribute-means-membership
+  (with-vector-world
+   (fn [c]
+     (tx! c [{:seon.vector-test.p/id "p" :seon.vector-test.p/items ["b" "a" "b"] :seon.vector-test.p/keys [:seon.vector-test.k/k]}
+             {:seon.vector-test.p/id "q" :seon.vector-test.p/items ["a"]}
+             {:seon.vector-test.p/id "e" :seon.vector-test.p/items []}
+             {:seon.vector-test.p/id "r"}])
+     (let [database @c]
+       (testing "members, and owners by member (a reverse lookup)"
+         (is (= #{"a" "b"} (set (db/q '[:find [?v ...] :in $ ?id :where [?e :seon.vector-test.p/id ?id] [?e :seon.vector-test.p/items ?v]]
+                                      database "p"))))
+         (is (= #{"p" "q"} (set (db/q '[:find [?id ...] :where [?e :seon.vector-test.p/items "a"] [?e :seon.vector-test.p/id ?id]]
+                                      database)))))
+       (testing "an attribute bound by input, by collection input, or free"
+         (is (= #{["b"] ["a"]} (db/q '[:find ?v :in $ ?a :where [?e :seon.vector-test.p/id "p"] [?e ?a ?v]]
+                                     database :seon.vector-test.p/items)))
+         (is (= #{[:seon.vector-test.p/items "a"] [:seon.vector-test.p/id "q"]}
+                (db/q '[:find ?a ?v :in $ [?a ...] :where [?e :seon.vector-test.p/id "q"] [?e ?a ?v]]
+                      database [:seon.vector-test.p/items :seon.vector-test.p/id])))
+         (is (= #{[:seon.vector-test.p/id "q"] [:seon.vector-test.p/items "a"]}
+                (db/q '[:find ?a ?v :where [?e :seon.vector-test.p/id "q"] [?e ?a ?v]] database))
+             "free attributes see members, never cells, positions or presence"))
+       (testing "not, or, rules and missing? (an empty vector is not missing)"
+         (is (= #{"q" "e" "r"} (set (db/q '[:find [?id ...] :where [?e :seon.vector-test.p/id ?id] (not [?e :seon.vector-test.p/items "b"])]
+                                          database))))
+         (is (= #{"p" "r"} (set (db/q '[:find [?id ...] :where [?e :seon.vector-test.p/id ?id]
+                                        (or [?e :seon.vector-test.p/items "b"] [?e :seon.vector-test.p/id "r"])]
+                                      database))))
+         (is (= ["p"] (db/q '[:find [?id ...] :in $ % :where [?e :seon.vector-test.p/id ?id] (has ?e "b")]
+                            database '[[(has ?e ?v) [?e :seon.vector-test.p/items ?v]]])))
+         (is (= ["r"] (db/q '[:find [?id ...] :where [?e :seon.vector-test.p/id ?id] [(missing? $ ?e :seon.vector-test.p/items)]]
+                            database))))
+       (testing "get-else over a vector attribute refuses by name"
+         (is (= 'get-else (:seon.db/vector-scalar-function
+                           (db/q '[:find ?v :where [?e :seon.vector-test.p/id "p"] [(get-else $ ?e :seon.vector-test.p/items "none") ?v]]
+                                 database)))))
+       (testing "pull find elements, literal and input-bound, return whole vectors"
+         (is (= {:seon.vector-test.p/id "p" :seon.vector-test.p/items ["b" "a" "b"]}
+                (db/q '[:find (pull ?e [:seon.vector-test.p/id :seon.vector-test.p/items]) . :where [?e :seon.vector-test.p/id "p"]]
+                      database)))
+         (is (= [{:seon.vector-test.p/items ["b" "a" "b"]}]
+                (db/q '[:find [(pull ?e ?s) ...] :in $ ?s :where [?e :seon.vector-test.p/id "p"]]
+                      database [:seon.vector-test.p/items]))))))))
+
+(deftest datalog-over-history-is-an-exact-membership-change-view
+  (with-vector-world
+   (fn [c]
+     (tx! c [{:seon.vector-test.t/id "t1"} {:seon.vector-test.t/id "t2"}
+             {:seon.vector-test.p/id "p" :seon.vector-test.p/items ["a" "b"] :seon.vector-test.p/peers [[:seon.vector-test.t/id "t1"]]}])
+     (let [t (db/basis-t @c)]
+       (tx! c [{:seon.vector-test.p/id "p" :seon.vector-test.p/items ["b" "c" "b"]
+                :seon.vector-test.p/peers [[:seon.vector-test.t/id "t2"] [:seon.vector-test.t/id "t1"]]}])
+       (let [database @c
+             e (:db/id (db/pull database [:db/id] p))
+             t2 (:db/id (db/pull database [:db/id] [:seon.vector-test.t/id "t2"]))
+             changes (db/since (db/history database) t)]
+         (is (= #{["a" true] ["a" false] ["b" true] ["c" true]}
+                (db/q '[:find ?v ?added :in $ ?e :where [?e :seon.vector-test.p/items ?v _ ?added]] (db/history database) e))
+             "history: every membership assertion and retraction")
+         (is (= #{["c" true] ["a" false] ["b" true]}
+                (db/q '[:find ?v ?added :in $ ?e :where [?e :seon.vector-test.p/items ?v _ ?added]] changes e))
+             "since: a changed element is a new cell; a moved one changes only its position")
+         (is (= #{[t2 true]}
+                (db/q '[:find ?x ?added :in $ ?e :where [?e :seon.vector-test.p/peers ?x _ ?added]] changes e))))))))

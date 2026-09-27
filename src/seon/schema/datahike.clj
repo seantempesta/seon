@@ -771,6 +771,205 @@
            (if (some? value) (assoc entity out-key value) entity)))
        base specs))))
 
+;;; ---------------------------------------------------------------------------
+;;; Vectors in Datalog: a pattern over a vector attribute means membership
+;;; ---------------------------------------------------------------------------
+;;; `[?e a ?v]` binds each element of `?e`'s vector `a`, exactly as Datalog
+;;; means a cardinality-many attribute: results are relations, order and
+;;; multiplicity are a pull concern (vector-storage design §3.3).
+
+(defn logical-attribute?
+  "Datalog predicate: `attribute` is one an agent reads, not bridge storage."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [attribute]
+  (not (and (keyword? attribute) (= "seon.db.vector" (namespace attribute)))))
+
+(defn- query-variable?
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [x]
+  (boolean (and (symbol? x) (.startsWith (name x) "?"))))
+
+(defn- query-source?
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [x]
+  (boolean (and (symbol? x) (.startsWith (name x) "$"))))
+
+(defn- clause-variables
+  {:malli/schema [:=> [:cat :seon.schema/value] [:vector :symbol]]}
+  [form]
+  (into [] (comp (filter query-variable?) (distinct)) (tree-seq coll? seq form)))
+
+(declare lower-clauses)
+
+(defn- lower-pattern
+  "One data pattern: through cells for a vector attribute (constant, or an
+   input bound only to vector attributes), unchanged for a non-vector one, a
+   union of both for a free or mixed attribute variable."
+  {:malli/schema [:=> [:cat :seon.schema/projection [:map-of :symbol [:set :seon.schema/value]] [:vector :seon.schema/value]]
+                  [:vector :seon.schema/value]]}
+  [projection bound [head & more :as pattern]]
+  (let [[source [e a v & tail]] (if (query-source? head) [head more] [nil pattern])
+        with-source #(if source (into [source] %) %)
+        cell (gensym "?vector-cell")
+        values (get bound a)
+        v (if (nil? v) '_ v)]
+    (cond
+      (or (and (keyword? a) (vector-attribute-in? projection a))
+          (and (query-variable? a) (seq values)
+               (every? #(and (keyword? %) (vector-attribute-in? projection %)) values)))
+      [(with-source [e :seon.db.vector/cells cell]) (with-source (into [cell a v] tail))]
+
+      (or (not (query-variable? a))
+          (and (seq values) (not-any? #(and (keyword? %) (vector-attribute-in? projection %)) values)))
+      [pattern]
+
+      :else
+      ;; `missing?`, not `not`: Datahike inlines a scalar input into ?e, and
+      ;; a `not` with no free variable is refused ("Insufficient bindings").
+      [(apply list (concat (if source [source 'or-join] ['or-join])
+                           [(clause-variables [e a v tail])
+                            (list 'and (with-source (into [e a v] tail))
+                                  [(list `logical-attribute? a)]
+                                  [(list 'missing? (or source '$) e :seon.db.vector/position)])
+                            (list 'and (with-source [e :seon.db.vector/cells cell])
+                                  (with-source (into [cell a v] tail))
+                                  [(list `logical-attribute? a)])]))])))
+
+(defn- lower-branch
+  {:malli/schema [:=> [:cat :seon.schema/projection [:map-of :symbol [:set :seon.schema/value]] :seon.schema/value]
+                  :seon.schema/value]}
+  [projection bound clause]
+  (let [lowered (lower-clauses projection bound [clause])]
+    (if (= 1 (count lowered)) (first lowered) (list* 'and lowered))))
+
+(defn- lower-clause
+  "One where clause lowered; `not`/`or` become `not-join`/`or-join` over their
+   original variables, so a cell variable stays local to its branch."
+  {:malli/schema [:=> [:cat :seon.schema/projection [:map-of :symbol [:set :seon.schema/value]] :seon.schema/value]
+                  [:vector :seon.schema/value]]}
+  [projection bound clause]
+  (cond
+    (and (vector? clause) (seq? (first clause)))
+    (let [[[f & arguments]] clause
+          vector-argument? #(and (keyword? %) (vector-attribute-in? projection %))]
+      (cond
+        (and (= 'missing? f) (vector-argument? (last arguments)))
+        (let [[source e a] (if (= 3 (count arguments)) arguments (cons '$ arguments))]
+          [(list 'not [source e :seon.db.vector/present a])])
+
+        (and (contains? #{'get-else 'get-some} f) (some vector-argument? arguments))
+        (throw (ex-info (str f " reads one value; a vector attribute holds a sequence. "
+                             "Pull the vector, or join its members with a data pattern.")
+                        {::vector-scalar-function f ::clause clause}))
+
+        :else [clause]))
+
+    (vector? clause) (lower-pattern projection bound clause)
+
+    (seq? clause)
+    (let [[head & body] clause
+          [source operator body] (if (query-source? head) [head (first body) (rest body)] [nil head body])
+          with-source #(if source (cons source %) %)]
+      (case operator
+        not [(with-source (list* 'not-join (clause-variables body) (lower-clauses projection bound body)))]
+        not-join [(with-source (list* 'not-join (first body) (lower-clauses projection bound (rest body))))]
+        or [(with-source (list* 'or-join (clause-variables body) (map #(lower-branch projection bound %) body)))]
+        or-join [(with-source (list* 'or-join (first body) (map #(lower-branch projection bound %) (rest body))))]
+        and [(list* 'and (lower-clauses projection bound body))]
+        [clause]))
+
+    :else [clause]))
+
+(defn- lower-clauses
+  {:malli/schema [:=> [:cat :seon.schema/projection [:map-of :symbol [:set :seon.schema/value]] [:sequential :seon.schema/value]]
+                  [:vector :seon.schema/value]]}
+  [projection bound clauses]
+  (into [] (mapcat #(lower-clause projection bound %)) clauses))
+
+(defn- query-map
+  "A vector query as its map form."
+  {:malli/schema [:=> [:cat [:or :map [:vector :seon.schema/value]]] :map]}
+  [query]
+  (if (map? query)
+    query
+    (first (reduce (fn [[out k] x] (if (keyword? x) [(assoc out x []) x] [(update out k conj x) k]))
+                   [{} nil] query))))
+
+(defn lower-query
+  "The physical Datalog request for a logical one over vector attributes:
+   `{:query q :args args :pulls {find-index logical-selector}}`, where every
+   data pattern over a vector attribute is membership through cells, every
+   `missing?` of one asks presence, rule bodies in the `%` input are lowered
+   alike, and pull selectors (literal or input-bound) are lowered before
+   execution; `:pulls` names the find elements [[decode-vectors]] must decode.
+   `get-else`/`get-some` over a vector attribute throws
+   `::vector-scalar-function`. Cell variables are numbered in order, so equal
+   queries lower to equal forms and share Datahike's query cache."
+  {:malli/schema [:=> [:cat :seon.schema/projection [:or :map [:vector :seon.schema/value]] [:vector :seon.schema/value]]
+                  [:map [:query :map] [:args [:vector :seon.schema/value]]
+                   [:pulls [:map-of :int :seon.schema/value]]]]}
+  [projection query args]
+  (let [{find-spec :find in :in where :where :as logical} (query-map query)
+        in (vec (or in '[$]))
+        position-of #(.indexOf ^java.util.List in %)
+        bound (into {}
+                    (keep (fn [[input argument]]
+                            (cond
+                              (query-variable? input) [input #{argument}]
+                              (and (vector? input) (= '... (second input)) (query-variable? (first input)))
+                              [(first input) (set argument)])))
+                    (map vector in args))
+        rules (position-of '%)
+        args (cond-> (vec args)
+               (not (neg? rules))
+               (update rules (fn [rule-set]
+                               (mapv (fn [[head & body]] (into [head] (lower-clauses projection bound body))) rule-set))))
+        pull? #(and (seq? %) (= 'pull (first %)))
+        elements (let [[f] find-spec] (if (and (vector? f) (= 1 (count find-spec))) (vec (remove #{'...} f)) (vec (remove #{'.} find-spec))))
+        pulls (into {} (keep-indexed (fn [i element]
+                                       (when (pull? element)
+                                         (let [selector (last element)]
+                                           [i (if (query-variable? selector) (get args (position-of selector)) selector)]))))
+                    elements)
+        find-spec (walk/prewalk #(if (and (pull? %) (not (query-variable? (last %))))
+                              (concat (butlast %) [(lower-selector projection (last %))])
+                              %)
+                           find-spec)
+        args (reduce (fn [args element]
+                       (if (and (pull? element) (query-variable? (last element)))
+                         (update args (position-of (last element)) #(lower-selector projection %))
+                         args))
+                     args elements)
+        lowered (assoc logical :find (vec find-spec) :in in :where (lower-clauses projection bound where))
+        cells (into [] (comp (filter #(and (symbol? %) (.startsWith (name %) "?vector-cell"))) (distinct))
+                    (tree-seq coll? seq [lowered (when-not (neg? rules) (get args rules))]))
+        numbered (zipmap cells (map #(symbol (str "?vector-cell-" %)) (range)))]
+    {:query (walk/postwalk #(get numbered % %) lowered)
+     :args (cond-> args (not (neg? rules)) (update rules #(walk/postwalk (fn [x] (get numbered x x)) %)))
+     :pulls (into {} (filter (fn [[_ selector]] (vector-selector? projection selector))) pulls)}))
+
+(defn vector-query?
+  "Whether `query` needs [[lower-query]] under `projection`: cells are declared
+   and a clause names a vector attribute, an attribute variable, `missing?`,
+   `get-else`/`get-some`, a rule input or a pull."
+  {:malli/schema [:=> [:cat :seon.schema/projection [:or :map [:vector :seon.schema/value]]] :boolean]}
+  [projection query]
+  (and (contains? (:seon.schema.projection/forms projection) :seon.db.vector/cells)
+       (let [{find-spec :find in :in where :where} (query-map query)]
+         (boolean
+          (or (some #{(symbol "%")} in)
+              (some #(and (seq? %) (= 'pull (first %))) (tree-seq coll? seq find-spec))
+              (some (fn [x] (or (and (keyword? x) (vector-attribute-in? projection x))
+                                (contains? #{'missing? 'get-else 'get-some} x)))
+                    (tree-seq coll? seq where))
+              (some (fn [clause]
+                      (some #(and (vector? %) (not (seq? (first %)))
+                                  (let [[head & more] %
+                                        [_ a] (if (query-source? head) more %)]
+                                    (query-variable? a)))
+                            (tree-seq coll? seq clause)))
+                    where))))))
+
 (defn- explicit-value-members
   "Avoid Datahike treating two keyword members as one identity lookup ref."
   [projection entity]
