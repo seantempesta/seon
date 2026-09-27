@@ -10,7 +10,8 @@
                                :description "The cells holding this entity's vector elements. Lifecycle: cascade (components)."}
                          :seon.db/ref]
                  :position [:int {:min 0 :description "A cell's index in its vector; the positions of one vector are exactly 0..n-1."}]
-                 :present [:set {:description "The vector attributes this entity holds, an empty vector included; absence is no member."}
+                 :present [:set {:seon.db/index true
+                                  :description "The vector attributes this entity holds, an empty vector included; absence is no member. Indexed: it is a stored attribute of every parent, and `missing?` over a vector reads it."}
                            :qualified-keyword]
                  :cell [:map {:seon.db/attributes true}
                         [:seon.db.vector/position :seon.db.vector/position]]}

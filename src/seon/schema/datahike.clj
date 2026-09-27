@@ -337,10 +337,14 @@
    True for a vector-shaped attribute when the projection also declares
    `:seon.db.vector/cells`. The second condition is temporal, not a staging
    flag: a value older than the cells carries a projection without them
-   (`seon.db/carried-projection`) and reads its members as they were stored."
+   (`seon.db/carried-projection`) and reads its members as they were stored.
+   A writer whose database already installed the bridge attributes, before its
+   schema rows declare them, sets `::cells-installed?` on the projection it
+   encodes by (`seon.db/prepared-write`)."
   {:malli/schema [:=> [:cat :seon.schema/projection :keyword] :boolean]}
   [projection attr]
-  (and (contains? (:seon.schema.projection/forms projection) :seon.db.vector/cells)
+  (and (or (contains? (:seon.schema.projection/forms projection) :seon.db.vector/cells)
+           (true? (::cells-installed? projection)))
        (vector-shaped-attr-in? projection attr)))
 
 (defn logical-collection
@@ -814,8 +818,9 @@
    union of both for a free or mixed attribute variable."
   {:malli/schema [:=> [:cat :seon.schema/projection [:map-of :symbol [:set :seon.schema/value]] [:vector :seon.schema/value]]
                   [:vector :seon.schema/value]]}
-  [projection bound [head & more :as pattern]]
-  (let [[source [e a v & tail]] (if (query-source? head) [head more] [nil pattern])
+  [projection bound pattern]
+  (let [[head & more] pattern
+        [source [e a v & tail]] (if (query-source? head) [head more] [nil pattern])
         with-source #(if source (into [source] %) %)
         cell (gensym "?vector-cell")
         values (get bound a)
@@ -1014,6 +1019,18 @@
                        :seon.store/transaction-data]
                   :seon.store/transaction-data]}
   [projection vectors-fn transaction-data]
+  (let [;; A tempid whose identity another operation asserts
+        ;; (`[:db/add "t" :seon.fn/sym x]`, a reconciling writer's form) may
+        ;; name an existing entity: its map carries that identity, so its
+        ;; vectors are written as requests, never as a new entity's cells.
+        named (into {}
+                    (keep (fn [operation]
+                            (when (and (vector? operation) (= :db/add (first operation))
+                                       (string? (second operation))
+                                       (keyword? (nth operation 2 nil))
+                                       (identity-attr-in? projection (nth operation 2)))
+                              [(second operation) [(nth operation 2) (nth operation 3)]])))
+                    transaction-data)]
   (batched-vector-requests
    projection vectors-fn
    (into [] (mapcat
@@ -1023,7 +1040,8 @@
         [operation]
 
         (map? operation)
-        (let [[entity requests] (encode-vector-map projection operation)]
+        (let [[attr value] (get named (:db/id operation))
+              [entity requests] (encode-vector-map projection (cond-> operation attr (assoc attr value)))]
           (into (explicit-value-members projection (encode-entity-in projection entity))
                 requests))
 
@@ -1053,7 +1071,7 @@
                 (nnext operation)))]
 
         :else [operation])))
-    transaction-data)))
+    transaction-data))))
 
 (defn encode-transaction-in
   "Encode heterogeneous union slots and vectors against exactly one projection.

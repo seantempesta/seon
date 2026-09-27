@@ -118,7 +118,7 @@
               (is (string? (:seon.test.failure/actual failure)))
               (is (pos-int? (:seon.test.failure/line failure)))
               (is (= "test/seon/test_failure_facts_test.clj" (:seon.test.failure/reported-file failure)))
-              (is (= ["outer" "inner"] (:seon.test.failure/contexts failure))))
+              (is (= ["outer" "inner"] (:seon.test.failure/testing-contexts failure))))
             (is (= 2 (count (db/q '[:find ?report :in $ ?s
                                     :where [?member :seon.test.member/symbol ?s]
                                            [?member :seon.test.member/failures ?report]]

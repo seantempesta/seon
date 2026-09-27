@@ -3647,7 +3647,7 @@
    visited. `refuse!`, when given, receives a vector storage fault and a
    vector attribute's datom stored outside a cell."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection [:map-of [:or :keyword :int] :map]
-                       :seon.db/entity-id [:? [:or :nil :seon.instrument/callable]] [:? :seon.instrument/callable]]
+                       :seon.db/entity-id [:* [:or :nil :seon.instrument/callable]]]
                   :map]}
   [database projection attribute-plans entity-id & [visit-child refuse!]]
   (let [plan (fn [attribute]
@@ -4027,13 +4027,16 @@
              (keep (fn [datom]
                      (let [attribute (:a datom)]
                        (cond
+                         ;; A cell no value owns (made and removed within one report) says nothing.
                          (schema.datahike/vector-attribute-in? projection attribute)
-                         {:e (owner (:e datom)) :a attribute :v (:v datom) :tx (:tx datom) :added (:added datom)}
+                         (when-let [parent (owner (:e datom))]
+                           {:e parent :a attribute :v (:v datom) :tx (:tx datom) :added (:added datom)})
 
                          (and (= :seon.db.vector/position attribute) (:added datom) (not (written (:e datom))))
                          (when-let [held (element (:e datom))]
-                           {:e (owner (:e datom)) :a (:a held) :v (:v held) :tx (:tx datom) :added true
-                            :seon.db.vector/position (:v datom)})
+                           (when-let [parent (owner (:e datom))]
+                             {:e parent :a (:a held) :v (:v held) :tx (:tx datom) :added true
+                              :seon.db.vector/position (:v datom)}))
 
                          (= "seon.db.vector" (namespace attribute)) nil
                          :else datom))))
@@ -4802,8 +4805,8 @@
   "Transaction data moving every element stored directly on a parent (the
    cardinality-many storage before cells) into cells, in datom order, with
    presence: `[:db/retract p a v]` (no cascade, so component elements keep
-   their identity) and one parent map of cells per vector. Nothing when
-   `:seon.db.vector/cells` is not installed in `database`, or when every
+   their identity) and one parent map of cells per vector. Nothing until all
+   three bridge attributes (cells, position, present) are installed in `database`, or when every
    element already lives in a cell: running it again yields nothing. The
    operations are physical, marked encoded for the codec.
    Datom order is the order `declaration-value` read before, so every stored
@@ -4815,7 +4818,9 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection] :seon.store/transaction-data]}
   [database projection]
   (let [installed (dbi/-schema database)]
-    (if-not (get installed :seon.db.vector/cells)
+    ;; Every bridge attribute must be installed before a cell or presence
+    ;; fact is written; until then the members stay where they are.
+    (if-not (every? #(get installed %) [:seon.db.vector/cells :seon.db.vector/position :seon.db.vector/present])
       []
       (schema.datahike/already-encoded
        (into []
@@ -5306,12 +5311,21 @@
    assoc :seon.error/declared-schema :seon.db.write/validation-refusal))
 
 (defn- prepared-write
-  "The request the writer applies for `transaction`: JDK integers as longs,
-  the final-report validator in its metadata, values encoded by `projection`."
-  {:malli/schema [:=> [:cat :seon.schema/projection :seon.store/transaction] :map]}
-  [projection transaction]
-  (let [request (schema.datahike/encode-transaction-in
-                 projection #'vectors-tx
+  "The request the writer applies for `transaction` on `database`: JDK
+  integers as longs, the final-report validator in its metadata, values
+  encoded by `projection`. Vectors are written as cells once `database` has
+  the bridge attributes installed, even before schema rows declare them (a
+  publication installs attributes, then writes its rows); before that, the
+  members a transaction writes move into cells at its end
+  (`vector-migration-tx`), once it installs them."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/database-value :seon.store/transaction] :map]}
+  [projection database transaction]
+  (let [installed? (every? #(get (dbi/-schema database) %)
+                           [:seon.db.vector/cells :seon.db.vector/position :seon.db.vector/present])
+        declared? (contains? (:seon.schema.projection/forms projection) :seon.db.vector/cells)
+        encoding (cond-> projection (and installed? (not declared?)) (assoc :seon.schema.datahike/cells-installed? true))
+        request (schema.datahike/encode-transaction-in
+                 encoding #'vectors-tx
                  (jdk-integers->long
                   (assoc-in (if (map? transaction) transaction {:tx-data transaction})
                             [:tx-meta :datahike/validate-report] #(validate-write-report projection %))))
@@ -5320,11 +5334,10 @@
         namespaces (into #{} (keep #(when (:seon.program/definition-digest %) (:seon.ns/name %))) entity-maps)
         written (into #{} (keep #(some (fn [a] (when-some [v (get % a)] [a v])) [:seon.fn/sym :seon.test/sym])) entity-maps)]
     (cond-> request
-      ;; A store between installing the vector cells and declaring them (a
-      ;; publication writes schema rows after attributes, or in the same
-      ;; transaction) still writes vectors as members: move them, and any this
-      ;; transaction writes, into cells at its end, once the cells are installed.
-      (not (contains? (:seon.schema.projection/forms projection) :seon.db.vector/cells))
+      ;; A transaction on a store without the bridge attributes may install
+      ;; them (a publication's declarations): the members it and earlier
+      ;; transactions wrote move into cells at its end, once installed.
+      (not (or installed? declared?))
       (update :tx-data #(conj (vec %) [:db.fn/call vector-migration-tx projection]))
       (seq namespaces) (update :tx-data #(conj (vec %) [:db.fn/call namespace-digests-tx projection namespaces written])))))
 
@@ -5390,7 +5403,7 @@
                 (if (seq configured-bounds)
                   (apply min configured-bounds)
                   declared-bound)
-                request (prepared-write projection (stamp-receipt transaction))
+                request (prepared-write projection database (stamp-receipt transaction))
                 timeout (Object.)
                 ;; One deadline covers admission and acknowledgement: the
                 ;; writer's put! into its transaction queue runs inside the
@@ -5466,7 +5479,7 @@
   (try
     (let [projection (carried-projection database)]
       (or (write-error database projection transaction)
-          (carry-projection-state (:db-after (d/with database (prepared-write projection transaction)))
+          (carry-projection-state (:db-after (d/with database (prepared-write projection database transaction)))
                                   (:seon.sci.eval/projection-state (meta database)))))
     (catch Throwable throwable
       (write-refusal database transaction throwable))))

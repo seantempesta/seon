@@ -13,7 +13,7 @@
   [:seon.test.failure/message {:optional true} :seon.test.failure/message]
   [:seon.test.failure/message-blob {:optional true} :seon.test.failure/message-blob]
   [:seon.test.failure/message-size {:optional true} :seon.test.failure/message-size]
-  [:seon.test.failure/contexts {:optional true} :seon.test.failure/contexts]
+  [:seon.test.failure/testing-contexts {:optional true} :seon.test.failure/testing-contexts]
   [:seon.test.failure/expected {:optional true} :seon.test.failure/expected]
   [:seon.test.failure/actual {:optional true} :seon.test.failure/actual]
   [:seon.test.failure/expected-blob {:optional true} :seon.test.failure/expected-blob]

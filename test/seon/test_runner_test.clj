@@ -300,7 +300,7 @@
         (is (= 1 (:seon.test/fail-count result)) (pr-str result))
         (is (zero? (:seon.test/error-count result)) (pr-str result))
         (is (= [["[:seon.fn/sym a/b]"]]
-               (mapv :seon.test.failure/contexts (:seon.test.failure/reports result)))))
+               (mapv :seon.test.failure/testing-contexts (:seon.test.failure/reports result)))))
       (finally (remove-ns (ns-name (:ns (meta test-var))))))))
 
 (deftest a-huge-execution-failure-becomes-bounded-text

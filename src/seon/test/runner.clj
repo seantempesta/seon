@@ -208,7 +208,7 @@
     ;; A label prints as `clojure.test/testing-contexts-str` prints it, by `str`
     ;; (`reference-code/clojure/src/clj/clojure/test.clj:307`);
     ;; the stored context is its string, whatever value the label was.
-    (assoc :seon.test.failure/contexts (mapv str (reverse test/*testing-contexts*)))
+    (assoc :seon.test.failure/testing-contexts (mapv str (reverse test/*testing-contexts*)))
     (:file event) (assoc :seon.test.failure/reported-file (str (:file event)))
     (and (integer? (:line event)) (pos? (:line event)))
     (assoc :seon.test.failure/line (:line event))
@@ -1138,7 +1138,7 @@
   ;; carries its own `:seon.error/at`, so a rerun of the same claim stores
   ;; another blob; under the signature alone it collided with the stored
   ;; report and refused the whole completion (fault 93e4a1e2, 2026-09-27).
-  [:seon.test.failure/line :seon.test.failure/reported-file :seon.test.failure/contexts
+  [:seon.test.failure/line :seon.test.failure/reported-file :seon.test.failure/testing-contexts
    :seon.test.failure/actual-blob])
 
 (defn report-entity

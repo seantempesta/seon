@@ -26,7 +26,7 @@
                           [:seon.db.vector/position :seon.db.vector/position]]]
    [:seon.db.vector/cells [:set {:seon.db/component true :seon.db/component-schema :seon.db.vector/cell}
                            :seon.db/ref]]
-   [:seon.db.vector/present [:set :qualified-keyword]]])
+   [:seon.db.vector/present [:set {:seon.db/index true} :qualified-keyword]]])
 
 (def subject-forms
   "Synthetic attributes covering every element kind: scalar, keyword, tuple,
@@ -104,6 +104,12 @@
          (is (schema.datahike/vector-attribute-in? with items))
          (is (not (schema.datahike/vector-attribute-in? with :seon.vector-test.p/tags)))
          (is (not (schema.datahike/vector-attribute-in? with :seon.vector-test.p/id))))
+       (testing "every bridge attribute is a database attribute, so the population installs all three"
+         (is (every? (set (schema.datahike/database-attributes-in with))
+                     [:seon.db.vector/cells :seon.db.vector/position :seon.db.vector/present]))
+         (is (every? (set (schema.datahike/database-attributes-in (schema/handed-projection)))
+                     [:seon.db.vector/cells :seon.db.vector/position :seon.db.vector/present])
+             "the packaged seon.db.vector.edn declares all three (the 2026-09-27 boot installed only two)"))
        (testing "the logical collection follows the declared shape"
          (is (= ["b" "a" "b"] (schema.datahike/logical-collection with items ["b" "a" "b"])))
          (is (= #{:a/b} (schema.datahike/logical-collection with :seon.vector-test.p/tags [:a/b :a/b]))))))))
@@ -156,6 +162,11 @@
                                      [:db/retract 5 items "z"]
                                      [:db/retract 5 items]
                                      [:db.fn/retractAttribute 5 items]]))))
+       (testing "a tempid whose identity another operation asserts is written by request, never as new cells"
+         (is (= [[:db/add "t" :seon.vector-test.p/id "p"]
+                 {:db/id "t" :seon.vector-test.p/id "p"}
+                 [:vectors [[[:seon.vector-test.p/id "p"] items :assert ["x"]]]]]
+                (encoded projection [[:db/add "t" :seon.vector-test.p/id "p"] {:db/id "t" items ["x"]}]))))
        (testing "refusals name the rule"
          (is (= ::schema.datahike/vector-tempid-operation
                 (refusal-rule #(encoded projection [[:db/add "r" items "a"]]))))
