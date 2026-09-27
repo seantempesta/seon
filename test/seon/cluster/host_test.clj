@@ -215,9 +215,12 @@
             racing (async/thread (hosted-run! hosted "2"))
             _ (host/retire! hosted)
             raced (support/await-event! racing ::raced)]
-        (testing "a submission racing retirement either settled first or was refused by name"
+        (testing "a submission racing retirement settled first, was refused by name, or its reply closed"
+          ;; still on the request port when the graph joined: retirement closes
+          ;; its reply (never left hanging) and no run id is claimed for it
           (is (or (= ["2"] raced) (refused-by? :seon.turn/admission-closed raced)
-                  (refused-by? :seon.agent/released? raced))
+                  (refused-by? :seon.agent/released? raced)
+                  (and (:seon.await/closed-operation raced) (not (:seon.turn/id raced))))
               (pr-str raced)))
         (testing "the writer refuses any later run for the agent"
           (let [execution (agent/acquire-context! handle nil {:seon.agent/branch branch})]

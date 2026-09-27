@@ -806,7 +806,9 @@
               (:seon.turn.loop/outcome answer)
               (cond-> {:seon.turn/id run-id}
                 (:seon.turn.loop/basis answer) (assoc :seon.db/db (:seon.turn.loop/basis answer)))
-              (:seon.await/config-attribute answer) (assoc answer :seon.turn/id run-id)
+              ;; At the bound the run may still settle: the timeout carries its id.
+              ;; A closed reply (retirement stopped the graph first) settled nothing.
+              (:seon.await/elapsed-ms answer) (assoc answer :seon.turn/id run-id)
               :else (assoc answer :seon.agent/refused-source-agent agent-id))))))))
 
 ;;; LOAD-CYCLE BOUNDARIES: both namespaces require `seon.cluster`, which
