@@ -328,7 +328,7 @@
 
 (defn- evidence-source
   "The value a fault's evidence stores: `source` with its Throwable replaced by
-  the one error shape's cause chain (`seon.error.refusal/chain`: per link its
+  the one error shape's cause chain (`seon.error.refusal/recorded-chain`: per link its
   class, message, `ex-data` with worlds referenced, and first-party frames).
   A Throwable admitted as itself was `Throwable->map`, every frame of every
   link: fault 317111871b50 kept 107 KB of it and still read back as no value."
@@ -355,7 +355,7 @@
   {:malli/schema [:=> [:cat :seon.error/source [:or :nil :seon.error/throwable] :seon.sci.admit/caps [:maybe :seon.schema/projection]]
                   :seon.sci.admit/admitted]}
   [source failure caps projection]
-  (let [links (when failure (error.refusal/chain failure projection))
+  (let [links (when failure (error.refusal/recorded-chain failure projection))
         value (evidence-source source failure links)
         request (cond-> {:seon.sci.admit/value value
                          :seon.sci.admit/interrupt-fn (constantly nil)

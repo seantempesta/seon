@@ -352,7 +352,27 @@
     (is (printed-bytes error 16384) "the error prints in kilobytes")
     (is (error.refusal/within-evidence-bound? link-data))
     (is (not (error.refusal/within-evidence-bound? (ex-data failure)))
-        "the declared contract refuses the copy")))
+        "the declared contract refuses the copy")
+    (testing "the recorder's chain keeps the whole value for its data blob"
+      (let [recorded (error.refusal/recorded-chain failure projection)]
+        (is (identical? forms (get-in recorded [0 :seon.error/data :seon.error/offending 1]))
+            "the recorder admits the actual argument, not its name")
+        (is (error.refusal/within-evidence-bound-chain? (:seon.error/chain error)))
+        (is (not (error.refusal/within-evidence-bound-chain? recorded)))
+        (is (= (mapv #(dissoc % :seon.error/data) (:seon.error/chain error))
+               (mapv #(dissoc % :seon.error/data) recorded))
+            "only the data differs: frames and relations are the chain's")))))
+
+(deftest the-recorders-chain-still-names-places
+  ;; A place's state is never evidence, whole chain or bounded: the roster
+  ;; atom printed 2 GB (a-place-in-an-error-is-named-never-printed-through).
+  (let [roster (atom (vec (range 100000)))
+        small {:seon.probe/n 1}
+        failure (ex-info "refused" {:seon.probe/roster roster :seon.probe/small small})
+        recorded (error.refusal/recorded-chain failure nil)]
+    (is (str/starts-with? (get-in recorded [0 :seon.error/data :seon.probe/roster]) "#object[clojure.lang.Atom"))
+    (is (identical? small (get-in recorded [0 :seon.error/data :seon.probe/small])) "small data stays identical")
+    (is (printed-bytes recorded 16384))))
 
 (deftest constructor-output-keeps-the-producing-contract
   (let [projection (-> (schema/handed-projection)

@@ -350,6 +350,15 @@
   [data]
   (identical? data (first (bounded-cost data))))
 
+(defn within-evidence-bound-chain?
+  "True when `links` is a vector whose every link's data is
+  `within-evidence-bound?`: what `chain` returns and `recorded-chain` need
+  not."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary values and answers false when they are not a bounded chain.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
+  [links]
+  (and (vector? links)
+       (every? #(within-evidence-bound? (:seon.error/data % {})) links)))
+
 (defn references
   "`value` with every world in it — any value a schema declares
   identity-only in `projection` — replaced by that world's identity data:
@@ -368,15 +377,24 @@
 (defn- link
   "One throwable as a flat link, its complete frames held under `::frames`
   until the chain keeps only the first-party ones, its ex-data with worlds
-  referenced and within the evidence bound (`bounded-cost`)."
-  [project ^Throwable throwable relation]
+  referenced and then passed through `hold`: `bounded-data` for the live
+  chain, `identity` for the recorder's (`recorded-chain`)."
+  {:malli/schema [:=> [:cat :seon.instrument/callable :seon.instrument/callable :seon.error/throwable [:maybe :map]] :map]}
+  [project hold ^Throwable throwable relation]
   (let [message (ex-message throwable)
         data (ex-data throwable)]
     (cond-> (merge {:seon.error/throwable-class (.getName (class throwable))
                     ::frames (stack-frames throwable)}
                    relation)
       (seq message) (assoc :seon.error/message message)
-      data (assoc :seon.error/data (first (bounded-cost (referenced project data)))))))
+      data (assoc :seon.error/data (hold (referenced project data))))))
+
+(defn- bounded-data
+  "`data` within the evidence bound, each larger value held by name
+  (`bounded-cost`)."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Error evidence is arbitrary producer data; only registry-declared worlds inside it are replaced.", :gen/elements [nil false 0 "" :k [] {}]}]] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Error evidence is arbitrary producer data; only registry-declared worlds inside it are replaced.", :gen/elements [nil false 0 "" :k [] {}]}]]}
+  [data]
+  (first (bounded-cost data)))
 
 (defn- first-party-links
   "`links` with each link's frames narrowed to its first-party ones (a link
@@ -390,6 +408,29 @@
                 (seq frames) (assoc :seon.error/frames frames))))
           links)))
 
+(defn- walk-links
+  "The flat links of `throwable`'s whole cause chain (`chain`), each link's
+  ex-data passed through `hold`."
+  {:malli/schema [:=> [:cat :seon.error/throwable [:maybe :map] :seon.instrument/callable] :seon.error/chain]}
+  [throwable projection hold]
+  (let [project (identity-projector projection)]
+    (loop [pending [[throwable nil]] seen #{} links []]
+      (if-let [[head relation] (first pending)]
+        (let [own (vec (take-while (complement seen) (cause-links head)))
+              start (count links)
+              links (into links
+                          (map-indexed
+                           (fn [i t]
+                             (link project hold t (when relation
+                                                    (if (zero? i) relation
+                                                        {:seon.error/cause-of (+ start i -1)})))))
+                          own)
+              suppressed (for [[i ^Throwable t] (map-indexed vector own)
+                               s (.getSuppressed t)]
+                           [s {:seon.error/suppressed-by (+ start i)}])]
+          (recur (into (subvec pending 1) suppressed) (into seen own) links))
+        (first-party-links links)))))
+
 (defn chain
   "The whole cause chain as FLAT links: first the primary chain, outermost to
   root, as `Throwable->map` (`clojure/core_print.clj:473`) reads it — per link
@@ -402,29 +443,29 @@
   again, so a cause cycle ends at its first repeat. The projection
   recognizes worlds; the one-argument form uses the operation's handed one.
   Each link keeps every first-party frame: which of them an agent sees is its
-  error schema's render pair's selection."
+  error schema's render pair's selection. Each link's data is within the
+  evidence bound (`:seon.error/data`): a larger value is held by its class,
+  identity and size, a name that is not retrievable; the recorder's
+  `recorded-chain` keeps it whole in the occurrence's data blob."
   {:malli/schema [:function
-                  [:=> [:cat :seon.error/throwable] :seon.error/chain]
-                  [:=> [:cat :seon.error/throwable [:maybe :map]] :seon.error/chain]]}
+                  [:=> [:cat :seon.error/throwable] :seon.error/bounded-chain]
+                  [:=> [:cat :seon.error/throwable [:maybe :map]] :seon.error/bounded-chain]]}
   ([throwable] (chain throwable (operation-projection)))
-  ([throwable projection]
-   (let [project (identity-projector projection)]
-     (loop [pending [[throwable nil]] seen #{} links []]
-       (if-let [[head relation] (first pending)]
-         (let [own (vec (take-while (complement seen) (cause-links head)))
-               start (count links)
-               links (into links
-                           (map-indexed
-                            (fn [i t]
-                              (link project t (when relation
-                                                (if (zero? i) relation
-                                                    {:seon.error/cause-of (+ start i -1)})))))
-                           own)
-               suppressed (for [[i ^Throwable t] (map-indexed vector own)
-                                s (.getSuppressed t)]
-                            [s {:seon.error/suppressed-by (+ start i)}])]
-           (recur (into (subvec pending 1) suppressed) (into seen own) links))
-         (first-party-links links))))))
+  ([throwable projection] (walk-links throwable projection bounded-data)))
+
+(defn recorded-chain
+  "`chain` with each link's data whole (worlds and places still referenced):
+  the chain the recorder admits as a fault's evidence, whose storage bound
+  caps the inline text and whose occurrence `:seon.error/data-blob` keeps the
+  whole value once by content (`seon.error/evidence-stage`). Only the
+  recorder, which holds the connection and the root, reads this chain.
+
+  ## Costs
+
+  Unarmed, the walk only: no value is printed here."
+  {:malli/schema [:=> [:cat :seon.error/throwable [:maybe :map]] :seon.error/chain]}
+  [throwable projection]
+  (walk-links throwable projection identity))
 
 (defn without-links
   "`links` (a `chain`) without the links `drop?` selects, every remaining
