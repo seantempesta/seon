@@ -1887,15 +1887,12 @@
           environment (or (env/of execution) (env/of source))
           ;; Acquired once on a fork (389 ms), never on the execution's own context:
           ;; each member forks this and finds its program by commit (29 ms), where
-          ;; re-acquiring per member measured 325-581 ms (2026-09-25).
-          ctx (try (let [ctx (sci.eval/fork-cluster-ctx source database connection
-                                                        (:seon.sci.eval/projection-state (meta connection))
-                                                        {:seon.env/environment environment})
-                         acquired (sci.eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db database})]
-                     (when-let [failure (:seon.sci.eval/acquisition-recording-error acquired)]
-                       (throw (ex-info "The request's program acquisition could not record its refusals."
-                                       {:seon.sci.eval/acquisition-recording-error failure})))
-                     ctx)
+          ;; re-acquiring per member measured 325-581 ms (2026-09-25). The fork
+          ;; acquires `database` itself and refuses when its refusals cannot be
+          ;; recorded (`seon.sci.eval/fork-cluster-ctx`).
+          ctx (try (sci.eval/fork-cluster-ctx source database connection
+                                              (:seon.sci.eval/projection-state (meta connection))
+                                              {:seon.env/environment environment})
                    (catch Throwable failure
                      (throw (release! failure [#(store/release-branch! connection) retire!]))))]
       ;; The execution's value with this request's own world: a fresh roster,
