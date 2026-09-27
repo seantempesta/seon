@@ -110,15 +110,21 @@
      (support/preserving-instrumentation-state
       (fn []
         (require 'my.note)
+        ;; Adoption re-arms only the reloaded namespace's changed identities
+        ;; (never the whole JVM, which strips every production wrapper's
+        ;; supplied-default plan); every other wrapper stays the same object.
         (let [projection (db/carried-projection (db/db connection))
-              request {:seon.schema/projection projection}
-              arm (fn [] (schema/call-with-projection projection #(instrument/apply! request)))
-              _ (arm)
-              unrelated @#'cluster/reload-order
               expected (into #{} (keep (fn [[name candidate]]
                                          (when (:malli/schema (meta candidate))
                                            (symbol "my.note" (str name)))))
                              (ns-interns 'my.note))
+              request {:seon.schema/projection projection
+                       :seon.db/db (db/db connection)
+                       :seon.instrument/changed-identities
+                       (into #{} (map #(vector :seon.fn/sym %)) expected)}
+              arm (fn [] (schema/call-with-projection projection #(instrument/apply! request)))
+              _ (arm)
+              unrelated @#'cluster/reload-order
               before (into {} (for [namespace (all-ns)
                                     candidate (vals (ns-interns namespace))
                                     :when (and (bound? candidate)

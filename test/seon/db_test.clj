@@ -505,13 +505,13 @@
   (test-support/with-database
    (fn [connection]
      (test-support/transacted! connection (test-support/agent-tx @connection "wildcard-agent"))
-     (test-support/preserving-instrumentation-state
-      (fn []
-       (instrument/apply! {:seon.schema/projection (schema/handed-projection)})
-         (is (= "wildcard-agent"
-                (:seon.agent/id
-                 (db/pull @connection '[*]
-                          [:seon.agent/id "wildcard-agent"])))))))))
+     ;; Boot armed `db/pull`; the test re-arms nothing (a whole-JVM
+     ;; `apply!` strips every production wrapper's supplied-default plan).
+     (is (contains? (instrument/instrumented) #'db/pull))
+     (is (= "wildcard-agent"
+            (:seon.agent/id
+             (db/pull @connection '[*]
+                      [:seon.agent/id "wildcard-agent"])))))))
 
 (deftest a-query-with-nothing-to-decode-returns-datahikes-value
   ;; Walking a native result rebuilt every tuple: 5 ms / 21 MB for 19,232

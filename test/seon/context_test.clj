@@ -8,17 +8,18 @@
 
 (def ^:dynamic ^:private *connection* nil)
 
-(defn- preserving-instrumentation-state
+(defn- with-connection
   [body]
   (test-support/with-database
    (fn [connection]
-     (test-support/preserving-instrumentation-state
-      #(binding [*connection* connection]
-         (body))))))
+     (binding [*connection* connection]
+       (body)))))
 
-(use-fixtures :each preserving-instrumentation-state)
+(use-fixtures :each with-connection)
 
 (deftest message-custody-accepts-an-absent-run-when-instrumented
-  (instrument/apply! {})
+  ;; Boot armed `message-custody`; the test re-arms nothing (a whole-JVM
+  ;; `apply!` strips every production wrapper's supplied-default plan).
+  (is (contains? (instrument/instrumented) #'context/message-custody))
   (is (= :seon.context/history
          (context/message-custody (db/db *connection*) nil "agent" 1))))

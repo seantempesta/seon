@@ -6,9 +6,9 @@
   a cohosted start enters the same sequence under the existing wrappers
   (`src/seon/cluster/boot.clj`). Both paths must produce valid layer values.
 
-  This namespace reproduces that exact ordering — cluster A boots, the
-  operator's instrumentation is applied under A's projection state, cluster B
-  boots into the same JVM — and asserts what the issue's acceptance criteria
+  This namespace reproduces that exact ordering — cluster A boots and arms
+  every loaded contract with its supplied-default plan, cluster B boots into
+  the same JVM under those wrappers — and asserts what the issue's acceptance criteria
   name: both clusters reach a live boot, each holds its OWN projection state,
   each acquires its own program facts, and ordinary evaluation completes
   in each cluster's own sci ctx.
@@ -27,7 +27,6 @@
             [seon.cluster.boot :as boot]
             [seon.config :as config]
             [seon.instrument :as instrument]
-            [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support]))
 
@@ -66,15 +65,6 @@
   [instance]
   (:seon.sci.eval/projection-state (:seon.sci.eval/ctx instance)))
 
-(defn- apply-instrumentation-under
-  "Apply instrumentation exactly as the operator's add path does: under one
-  already-running cluster's projection state, for the whole process."
-  [instance]
-  (schema/call-with-projection-state
-   (projection-state-of instance)
-   (fn []
-     (instrument/apply! {:seon.sci.admit/caps caps}))))
-
 (defn- evaluate-in
   [instance source]
   (sci.eval/evaluate
@@ -93,7 +83,10 @@
       (let [a (boot/start! {:seon.boot/cluster-name "cohost-a"
                                :seon.boot/root root})
             _ (swap! instances conj a)
-            applied (apply-instrumentation-under a)
+            ;; A's boot armed every loaded contract with its supplied-default
+            ;; plan (`cluster/arm-host-program!`); the test re-arms nothing, as
+            ;; a whole-JVM `apply!` would strip those plans.
+            applied (instrument/instrumented)
             ;; The failure this regression exists for happened HERE: with
             ;; wrappers installed, cluster B's own boot refused at
             ;; boot admission. A throw out of `start!` is the
@@ -102,8 +95,11 @@
                                :seon.boot/root root})
             _ (swap! instances conj b)]
         (testing "instrumentation is genuinely live, not a vacuous pass"
-          (is (pos? (:seon.instrument/instrumented applied))
+          (is (seq applied)
               "zero instrumented vars would make every assertion below empty")
+          (is (every? #(:seon.call-preparation/snapshot (:seon.instrument/policy (meta @%)))
+                      applied)
+              "boot's wrappers carry their supplied-default plans")
           (is (pos? (count (instrument/instrumented)))
               "the wrappers survive the second cluster's boot"))
 

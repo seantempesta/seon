@@ -510,10 +510,18 @@
   ;; was reached by reproducing the diagnostic instead of reading the fact
   ;; (`docs/prds/steward-platform/research/over-bound-evaluation-contract-2026-09-17.md`,
   ;; "Second finding").
+  ;; Only this suite's Var is armed (changed identities), and the scope
+  ;; restores it: an `apply!` without changed identities re-armed every
+  ;; production Var without its supplied-default plan, and nothing restored
+  ;; them (red-triage 2026-09-27: 2,247 of 2,249 wrappers lost their plans).
   (test-support/with-database
    (fn [_connection]
-     (try
-       (instrument/apply! {})
+     (test-support/preserving-instrumentation-state
+      (fn []
+       (is (= 1 (:seon.instrument/registered
+                 (instrument/apply!
+                  {:seon.instrument/changed-identities
+                   #{[:seon.fn/sym 'seon.error-test/wide-return-narrow-violation]}}))))
        (let [thrown (try (wide-return-narrow-violation 1)
                          (catch Throwable throwable throwable))
              prepared (error/prepare (request thrown))
@@ -531,8 +539,7 @@
                 (:seon.error/data-size fact))
              "the offending value is measured, never the source it rode in")
          (is (<= fact-bytes evidence-bytes)
-             (str "stored fault fact was " fact-bytes " UTF-8 bytes")))
-       (finally (instrument/remove!))))))
+             (str "stored fault fact was " fact-bytes " UTF-8 bytes"))))))))
 
 (deftest fault-preparation-bounds-the-fact-and-omits-disposable-flow-state
   ;; THE CLASS PROOF for B1. A fault's evidence is a STORED value and goes

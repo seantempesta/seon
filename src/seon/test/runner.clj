@@ -659,11 +659,25 @@
         var-symbol (fn [candidate]
                      (let [{namespace-object :ns var-name :name} (meta candidate)]
                        (symbol (str (ns-name namespace-object)) (str var-name))))
+        ;; One pass. A wrapper carrying a supplied-default plan (the arming
+        ;; request's `:seon.call-preparation/snapshot`) is PLANNED; a re-arm
+        ;; without `:seon.db/db` keeps the Var's own contract, so `own?` alone
+        ;; cannot see it strip the plan (2026-09-27: 2,247 of 2,249 wrappers).
+        [instrumented armed planned]
+        (reduce (fn [[instrumented armed planned] ^clojure.lang.Var candidate]
+                  (let [named (var-symbol candidate)
+                        root (.getRawRoot candidate)]
+                    (if (own? candidate)
+                      [instrumented (conj! armed named)
+                       (cond-> planned
+                         (:seon.call-preparation/snapshot (:seon.instrument/policy (meta root)))
+                         (conj! named))]
+                      [(conj! instrumented named) armed planned])))
+                [(transient #{}) (transient #{}) (transient #{})] wrapped)
         snapshot
-        {::snapshot-instrumented
-         (into #{} (comp (remove own?) (map var-symbol)) wrapped)
-         ::snapshot-armed
-         (into #{} (comp (filter own?) (map var-symbol)) wrapped)
+        {::snapshot-instrumented (persistent! instrumented)
+         ::snapshot-armed (persistent! armed)
+         ::snapshot-planned (persistent! planned)
          ::snapshot-registered
          (into #{}
                (mapcat (fn [[namespace-symbol entries]]
@@ -711,9 +725,12 @@
   that disappeared is a test stopping something it did not start. A wrapper
   holding its Var's own contract that appeared is the program's arming, which
   concurrent requests install (2026-09-27: a first test after a restart was
-  blamed for another request's first-load arming of seon.test-support)."
+  blamed for another request's first-load arming of seon.test-support). A
+  planned wrapper that lost its supplied-default plan leaves every later
+  caller of that Var refused its supplied `:seon.db/db`."
   {::snapshot-instrumented #{::drift-added ::drift-removed}
    ::snapshot-armed #{::drift-removed}
+   ::snapshot-planned #{::drift-removed}
    ::snapshot-registered #{::drift-removed}
    ::snapshot-live-clusters #{::drift-added ::drift-removed}})
 

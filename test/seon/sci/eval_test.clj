@@ -337,15 +337,13 @@
 
 (deftest
   instrumented-generated-form-does-not-advise-an-absent-program-row
-  (test-support/preserving-instrumentation-state
-    (fn []
+  ;; Boot armed `eval/evaluate`; the test re-arms nothing (a whole-JVM
+  ;; `apply!` strips every production wrapper's supplied-default plan).
       (test-support/with-database
         (fn [connection]
           (let [database (db/db connection)
-                ctx (test-support/fork-cluster-ctx connection)
-                projection (db/carried-projection database)]
-            (instrument/apply!
-              {:seon.schema/projection projection})
+                ctx (test-support/fork-cluster-ctx connection)]
+            (is (contains? (instrument/instrumented) #'eval/evaluate))
             (let [evaluation (eval/evaluate
                                {:seon.sci.eval/ctx ctx,
                                 :seon.db/db database,
@@ -358,7 +356,7 @@
               (is (nil? (:seon.program/row evaluation)))
               (is (ok? evaluation) (pr-str evaluation))
               (is
-                (= :opening-probe (:seon.sci.admit/value evaluation))))))))))
+                (= :opening-probe (:seon.sci.admit/value evaluation))))))))
 
 (deftest the-diagnostics-are-recorded-and-are-not-limits
   (let [evaluation (run "(reduce + (map inc (range 500)))")
@@ -414,29 +412,29 @@
 
 (deftest ^{:seon.test/fixture-observation "Reloads the JVM namespace seon.sci.eval, which every cluster in the process shares; a branch isolates no loaded Var, so on a shared JVM the reload replaces default's roots and generator Vars mid-run."}
   the-evaluator-remains-live-after-its-namespace-reloads
-  (test-support/preserving-instrumentation-state
-    (fn []
-      (let [projection (schema/handed-projection)
-            request {:seon.schema/projection projection
-                     :seon.cluster.eval/source "(+ 1 2)"
-                     :seon.sci.admit/caps caps
-                     :seon.sci.eval/time-limit-ms 10000}
-            before (eval/evaluate request)]
-        (try
-          (is (= 3 (:seon.sci.admit/value before))
-              "the first evaluation realizes the process guard")
-          (require 'seon.sci.eval :reload)
-          (let [after ((requiring-resolve 'seon.sci.eval/evaluate) request)]
-            (is (= 3 (:seon.sci.admit/value after))
-                "ordinary arm data has no reload-sensitive class identity")
-            (is (nil? (:seon.cluster.eval/error after))))
-          (finally
-            ;; Restoration must not reinstall the superseded roots. Arm the
-            ;; definitions the loader just installed, under the handed world.
-            (let [report (instrument/apply!
-                          {:seon.schema/projection projection})]
-              (is (pos-int? (:seon.instrument/instrumented report)) (pr-str report))
-              (is (nil? (:seon.error/at report)) (pr-str report)))))))))
+  (let [entering (instrument/state)
+        projection (schema/handed-projection)
+        request {:seon.schema/projection projection
+                 :seon.cluster.eval/source "(+ 1 2)"
+                 :seon.sci.admit/caps caps
+                 :seon.sci.eval/time-limit-ms 10000}]
+    (try
+      (is (= 3 (:seon.sci.admit/value (eval/evaluate request)))
+          "the first evaluation realizes the process guard")
+      (require 'seon.sci.eval :reload)
+      (let [after ((requiring-resolve 'seon.sci.eval/evaluate) request)]
+        (is (= 3 (:seon.sci.admit/value after))
+            "ordinary arm data has no reload-sensitive class identity")
+        (is (nil? (:seon.cluster.eval/error after))))
+      (finally
+        ;; Restoration never reinstalls the superseded roots: `restore!` arms
+        ;; the definitions the loader just installed under their captured
+        ;; policy. No whole-JVM `apply!`, which strips every production
+        ;; wrapper's supplied-default plan.
+        (let [replaced (instrument/restore! entering)]
+          (is (contains? replaced (find-var 'seon.sci.eval/evaluate)) (pr-str replaced))
+          (is (every? (instrument/instrumented) replaced)
+              "every reloaded contracted definition is armed again"))))))
 
 (deftest isolated-one-off-evaluations-do-not-share-definitions
   (run "(def leaked 1)")
@@ -1686,12 +1684,10 @@
       (let [database (db/db connection)
             projection (db/carried-projection database)
             entering (instrument/instrumented)]
+        ;; Boot armed `db/pull`; the test re-arms nothing (a whole-JVM
+        ;; `apply!` strips every production wrapper's supplied-default plan).
         (test-support/preserving-instrumentation-state
           (fn []
-            (schema/call-with-projection
-              projection
-              #(instrument/apply!
-                {:seon.schema/projection projection}))
             (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))
                   acquired (eval/acquire! {:seon.sci.eval/ctx ctx
                                            :seon.db/db database

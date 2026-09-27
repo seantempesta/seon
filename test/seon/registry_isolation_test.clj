@@ -79,21 +79,31 @@
           (is (= :string (get (:seon.schema.projection/forms b) ::right-only)))
           (is (nil? (get (:seon.schema.projection/forms a) ::right-only)))
           (is (thrown? Exception (m/schema ::left-only)))
-          (instrument/apply! {:seon.schema/projection a
-                              :seon.sci.admit/caps caps})
-          (let [roots (into {} (map (juxt identity deref))
-                            (instrument/instrumented))]
-            (is (contains? roots #'value))
-            (instrument/apply! {:seon.schema/projection b
-                                :seon.sci.admit/caps caps})
+          ;; Each adoption arms only this suite's `value` (changed identities)
+          ;; against its own cluster's projection: a whole-JVM `apply!` re-armed
+          ;; every production Var without its supplied-default plan. One wrapper
+          ;; per adoption (`seon.instrument/arm-var!`): a call never re-selects
+          ;; another projection, so the cluster armed last governs host calls
+          ;; and the other cluster's rows interpret in SCI. RETIRED: one host
+          ;; wrapper validating each call against the projection it carried.
+          (let [arm! (fn [projection]
+                       (instrument/apply!
+                        {:seon.schema/projection projection
+                         :seon.sci.admit/caps caps
+                         :seon.instrument/changed-identities
+                         #{[:seon.fn/sym 'seon.registry-isolation-test/value]}}))]
+            (is (= 1 (:seon.instrument/registered (arm! a))))
             (is (= 7 (value {:seon.schema/projection a ::value 7})))
-            (is (= "right" (value {:seon.schema/projection b ::value "right"})))
             (is (thrown? Exception (value {:seon.schema/projection a ::value "wrong"})))
-            (is (thrown? Exception (value {:seon.schema/projection b ::value 7})))
-            (doseq [ctx [ctx-a ctx-b]]
-              (schema/call-with-projection-state
-               (:seon.sci.eval/projection-state ctx) instrument/remove!))
-            (is (every? (fn [[candidate root]] (identical? root @candidate)) roots))
-            (is (= 9 (value {:seon.schema/projection a ::value 9})))
-            (is (= "still right" (value {:seon.schema/projection b ::value "still right"})))
-            (is (= global-before (m/function-schemas))))))))))
+            (is (= 1 (:seon.instrument/registered (arm! b))))
+            (let [roots (into {} (map (juxt identity deref))
+                              (instrument/instrumented))]
+              (is (contains? roots #'value))
+              (is (= "right" (value {:seon.schema/projection b ::value "right"})))
+              (is (thrown? Exception (value {:seon.schema/projection b ::value 7})))
+              (doseq [ctx [ctx-a ctx-b]]
+                (schema/call-with-projection-state
+                 (:seon.sci.eval/projection-state ctx) instrument/remove!))
+              (is (every? (fn [[candidate root]] (identical? root @candidate)) roots))
+              (is (= "still right" (value {:seon.schema/projection b ::value "still right"})))
+              (is (= global-before (m/function-schemas)))))))))))

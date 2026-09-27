@@ -34,22 +34,20 @@
             (boot/start! {:seon.boot/cluster-name cluster-name
                              :seon.boot/root root})]
         (try
-          (let [connection (:seon.boot/cluster-connection instance)
-                handle (:seon.turn.loop/cluster instance)]
+          (let [connection (:seon.boot/cluster-connection instance)]
             (with-redefs
               [ai/complete
                (fn [_projection request]
                  (async/offer! attempt-requests request)
                  {:seon.ai/text
                   "(seon.run/complete \"instrumented acquisition ran\")"})]
-              (try
-                (let [applied
-                      (instrument/apply!
-                       {:seon.sci.admit/caps
-                        (:seon.sci.admit/caps handle)})]
-                  (is (pos? (:seon.instrument/instrumented applied)))
+              ;; The boot above armed every loaded contract with its
+              ;; supplied-default plan; the test re-arms nothing, as a
+              ;; whole-JVM `apply!` would strip those plans.
+                (let [applied (instrument/instrumented)]
+                  (is (seq applied))
                   (is (contains?
-                       (instrument/instrumented)
+                       applied
                        #'schema.internal/assert-compilable-schema!)
                       "the regression keeps the formerly failing boundary armed")
                   (test-support/transacted!
@@ -66,9 +64,7 @@
                                   :where
                                   [?error :seon.instrument/check _]
                                   [?error :seon.instrument/fn _]]
-                                @connection))))))
-                (finally
-                  (instrument/remove!)))))
+                                @connection))))))))
           (finally
             (boot/stop! instance))))
       (finally
