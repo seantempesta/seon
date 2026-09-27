@@ -26,7 +26,7 @@
                  :seon.render/ai seon.cluster.message/render-inbox-ai,
                  :seon.render/html
                  seon.cluster.message/render-inbox-html,
-                 :seon.render/form seon.render.transcript/inbox-form}
+                 :seon.render/form seon.cluster.message/inbox-form}
                 :seon.db/ref],
                :about
                [:and {:description "The supplied subject identity token. A value that survives target deletion; naming a subject never marks a message inside." :seon.db/index true}

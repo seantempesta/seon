@@ -803,16 +803,6 @@
   [unit]
   (list 'my.message/read {:my.message/id (:seon.message/id unit)}))
 
-(defn inbox-form
-  "Read the recipient's pending messages through the exact reverse inbox edge."
-  {:malli/schema [:=> [:cat :seon.message/to] :seon.render/form]}
-  [recipient]
-  (list 'seon.db/pull
-        (list 'quote '[{:seon.message/_to
-                       [:seon.message/id :seon.message/content
-                        {:seon.message/from [:seon.agent/id]}]}])
-        recipient))
-
 (defn- entry-basis
   [db entry]
   (reduce (fn [latest datom]

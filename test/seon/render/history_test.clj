@@ -1,6 +1,7 @@
 (ns seon.render.history-test
   "Class regressions for self-generating, append-only REPL history."
   (:require [clojure.test :refer [deftest is testing]]
+            [seon.cluster.message :as message]
             [seon.config :as config]
             [seon.db :as db]
             [seon.render :as render]
@@ -71,10 +72,10 @@
          (is (= '(my.message/read #:my.message{:id "history-message"})
                 (transcript/message-form message))))
        (testing "an attribute declaration precedes the landed entity shape"
-         (is (= 'seon.render.transcript/inbox-form
+         (is (= 'seon.cluster.message/inbox-form
                 (selected message :seon.message/to)))
          (let [recipient (:seon.message/to (render/transacted message))
-               form (transcript/inbox-form recipient)]
+               form (message/inbox-form recipient)]
            (is (= 'seon.db/pull (first form)))
            (is (contains? (first (second (second form))) :seon.message/_to)
                (pr-str form))
