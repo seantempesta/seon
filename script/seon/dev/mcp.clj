@@ -374,37 +374,19 @@
     mode))
 
 (defn- jvm-evaluation-form
-  ;; The caller's SOURCE crosses and the one reader (`seon.sci.reader/read`)
-  ;; reads it in the target namespace with that namespace's aliases, Vars,
-  ;; classes and data readers; a reader refusal is thrown as the reader's own.
+  "The prepl form that evaluates the caller's SOURCE in `namespace-symbol`:
+  `seon.operator.prepl/evaluate` reads it with the one reader and evaluates
+  it. The call is compiled in the prepl wire's own namespace (a top-level
+  `do` compiles each form in turn), so no frame of this wrapper is first
+  party and a fault names the caller's form or nothing."
+  {:malli/schema [:=> [:cat :string :symbol :boolean] :string]}
   [source namespace-symbol read-only?]
   (pr-str
    `(do
-      ((requiring-resolve 'seon.cluster/project-next-prepl-value!) {:seon.dev.mcp/read-only? ~read-only?})
-      (in-ns '~namespace-symbol)
-      (clojure.core/refer 'clojure.core)
-      (let [n# *ns*
-            events# ((requiring-resolve 'seon.sci.reader/read)
-                     {:seon.sci.reader/text ~source
-                      :seon.sci.reader/ns '~namespace-symbol
-                      :seon.sci.reader/aliases (into {} (map (fn [[a# t#]] [a# (ns-name t#)])) (ns-aliases n#))
-                      :seon.sci.reader/refers (into {} (keep (fn [[s# v#]] (cond (var? v#) [s# (symbol v#)]
-                                                                                 (class? v#) [s# (symbol (.getName ^Class v#))])))
-                                                    (ns-map n#))
-                      :seon.sci.reader/tags *data-readers*
-                      :seon.config.eval.result/max-source ~(count source)})
-            failure# (if (map? events#) events# (some :seon.sci.reader/error events#))
-            second# (second events#)]
-        (cond
-          failure# (throw (ex-info (:seon.error/message failure#) failure#))
-          (= 1 (count events#)) (eval (:seon.sci.reader/form (first events#)))
-          :else (throw (ex-info (if second#
-                                  (str "Evaluation accepts exactly one form; the second form starts at line "
-                                       (:seon.sci.reader/line second#) ", column " (:seon.sci.reader/column second#)
-                                       ". Wrap sequences in `(do ...)`.")
-                                  "Your reply had no form; only comments/prose. Send a form.")
-                                (select-keys second# [:seon.sci.reader/line :seon.sci.reader/column
-                                                      :seon.sci.reader/source]))))))))
+      (in-ns '~'seon.operator.prepl)
+      (~'seon.operator.prepl/evaluate {:seon.dev.mcp/source ~source
+                                       :seon.dev.mcp/namespace '~namespace-symbol
+                                       :seon.dev.mcp/read-only? ~read-only?}))))
 
 (defn- run-form
   "The prepl form that evaluates `source` as one ordinary agent run

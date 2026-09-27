@@ -574,8 +574,12 @@
                                   :seon.dev.mcp/source "(+ 1 2)"
                                   :seon.dev.mcp/read-only? intent}
                                  mode "default" 'user)
-                  form (read-string source)]]
-      (eval (second form))
+                  form (read-string source)
+                  original (ns-name *ns*)]]
+      ;; JVM mode carries its intent into `seon.operator.prepl/evaluate`,
+      ;; which marks it before evaluating the caller's form.
+      (try (eval (if (= "jvm" mode) form (second form)))
+           (finally (in-ns original)))
       (clojure.test/is (= {:seon.dev.mcp/read-only? intent}
                          (select-keys (consume) [:seon.dev.mcp/read-only?]))))
     (mark)))
