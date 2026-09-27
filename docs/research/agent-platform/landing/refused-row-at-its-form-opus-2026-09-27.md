@@ -2,126 +2,154 @@
 type: design
 lane: one-commit-a-opus (audit cut row 2, outcome classification)
 date: 2026-09-27
-status: revised after Astra REVISE (review-refused-row-2026-09-27.md, ac4e6c50b); awaiting second review
+status: revision 3, after Astra REVISE rounds 1 (ac4e6c50b) and 2 (2bf319f21); awaiting round 3
 ---
 
-# A refused run settlement names the form the writer names
+# A refused deletion names the one form that proposed it, or says why none
 
-## Verdict on the first design: withdrawn
+Round 2 resolved two things, and both stay as they are:
 
-The per-form trial (apply each form's row with `settled-value` and refuse that form at once) **cannot be made
-faithful**, for two reasons.
+- The run keeps its single ordered transaction and whole-run refusal.
+- Every evaluated value stays whole, and the forms are restored in reverse (`restore-evaluations!`,
+  turn.clj:5084-5101).
 
-1. **It rejects repairs within the same transaction.** The writer checks removed identities against the **final**
-   database (`seon.db/removed-definition-error`, db.clj:4150-4208). The arity refusal explicitly allows callers to
-   be repaired in the same transaction (db.clj:4483-4503).
-   - Example: form 1 deletes H, form 2 deletes its caller C. The whole transaction passes.
-   - A trial of form 1's row alone refuses H. Dropping H then publishes a different program.
-   - No single-row trial can know what a later form will repair.
-2. **It is not the settlement's own input.** The trial passes only `{:seon.program/row row}` to `row-tx`. It leaves
-   out the run's identity and provenance, the form's own mid-body writes, final namespace digests, receipts and
-   close (review §2 table).
+The per-form trial is withdrawn (round 1). This revision answers only round 2's two open points:
 
-Making the trial faithful would mean trialling the whole remaining transaction, provisionally, per form. That is
-alternative 3 in the review: a working-world design with no small seam. It is not proposed here. Replacing the
-form's returned value with the refusal also broke the total path (review §1). Both points are accepted.
+- **(A)** The raw refusal's declared identity, fixed at its producer.
+- **(B)** An attribution claim the writer's data can support.
 
-I also correct a claim from the first note. **SCI does not keep the refused change.** On a refused batch,
-`resume-turn` calls `restore-evaluations!` (turn.clj:5084-5101), last form first, before answering. The
-mismatch that remains is only *within* a run: `with-settled` keeps the old working value when a trial refuses.
+## (A) The producer declares what it refused (db.clj patch for shrink-db, plus schemas)
 
-## What exists now (HEAD after f83931226 and cut 1)
+**What exists** (review round 2 §1, all verified from source):
 
-- `settle-batch!` issues one ordered transaction. The writer is the sole authority, and repairs within the
-  transaction hold.
-- On refusal, `settle-batch-refusal!` keeps each form's evaluated `:seon.eval/shown` (its value).
-  - It gives each receipt the same `:seon.cluster.eval/error`: "Not settled: this run's settlement was refused:
-    <message>".
-  - It puts the refusal as data in `:seon.cluster.eval/diagnostics`.
-  - It closes the run in one commit. `restore-evaluations!` then undoes every form's program change.
-- The totality law already holds here. In the failing host test, form 2 shows its real value `nil`. Its error
-  names the surviving referrers, and so does every other form's error.
+- `seon.db/removed-definition-error` (db.clj:4150-4208) builds `:seon.program/referrers`, each entry
+  `{subject, relation, referrer, db/id}`.
+  - `subject` is an untyped symbol or keyword.
+  - The function does not stamp a declared schema.
+- `write-observation` (db.clj:4727-4742) stamps every validator refusal as `:seon.db.write/validation-refusal`.
+- `error/recording` (error.clj:587-612) projects that into `:seon.db.write/error`. Neither schema declares the
+  referrers, so the recorded diagnostic loses them. The `oca-attr` probe (2026-09-27T01:16Z) confirms this.
 
-What is missing is **attribution**. The writer's refusal names what it refused, but every receipt says the same
-thing, so the agent cannot see which of its forms made the change the program refused.
+**Change.** It has three parts, all at their owners, and adds no wrapper and no retag.
 
-## Change: attribute from the writer's own refusal data, whole-run refusal kept
+1. **Typed subject.** Each referrer entry gains `:seon.program/identity`, the removed identity as
+   `[identity-attribute value]` (for example `[:seon.fn/sym my.ns/h]`).
+   - `:seon.program/identity` is the registered tuple (`seon.program.edn:115`), used as its own member name.
+   - The producer knows the family, because it builds each obligation from `:seon.fn/sym`, `:seon.ns/name`,
+     `:seon.schema/key` or `:db/ident`. Nothing downstream infers it from spelling.
+   - `seon.program.edn`: the referrer entry requires `:seon.program/identity`.
+2. **The producer's declared identity survives the write boundary.**
+   - `removed-definition-error` stamps its result's metadata as `:seon.error/declared-schema
+     :seon.program/deletion-refused-error`, the transient schema that already exists (`seon.program.edn:179`).
+   - `write-observation` keeps the write-attempt identity (`:seon.db.write/validation-refusal`, so the
+     recorder's attempt normalization at error.clj:589 is unchanged). It records the validator's own declared
+     schema as a member, `:seon.db.write/refused-schema`, read from the validator value's metadata and never
+     guessed from its keys.
+   - When that member names a schema, the raw value must also validate against it. The recorder already
+     validates declared shapes (`validate-declaration!`), so this is checked there.
+3. **Durable.**
+   - `seon.db.write.edn`: `:seon.db.write/validation-refusal` gains an optional
+     `[:seon.db.write/refused-schema :qualified-keyword]`. `:seon.db.write/error` gains the same member as a
+     stored attribute, so the durable error says which invariant refused. The recorder carries it like any
+     other declared member.
+   - The referrers themselves stay transient on the raw value, as `seon.program.edn:181` declares. Their
+     durable trace is the recorder's bounded source evidence, as today.
+   - What (B) derives from them is stored on the receipts; see B4.
 
-This is the smaller alternative. In `settle-batch-refusal!`, before the receipts are built:
+Before integrating, I will verify through the real writer, on a disposable branch, the exact raw value that
+`settle-batch-refusal!` receives: its metadata, `refused-schema` and typed referrers. I will also verify the
+recorded value. If Datahike's `:datahike/validation-refusal` loses the value's metadata, the member is set by
+`removed-definition-error` on the value itself, never re-derived.
 
-- **Read what the refusal names, by its declared schema, and nothing else.**
-  - For `:seon.program/deletion-refused-error`, the names are the `:seon.program/subject`s of
-    `:seon.program/referrers`: the removed identities whose obligations failed on the final database.
-  - Other refusal schemas attribute nothing in this cut. Each later gets its own mapping, keyed by its declared
-    schema and added only with its regression.
-- **A form is attributed** only when its own evaluated row, from the request's `:seon.program/row`, declares or
-  deletes one of those identities (`:seon.program/delete-identities`, or the row's identity attribute).
-  - That is provenance: the row the form produced, matched against the identity the writer named.
-  - No row is re-applied and nothing is retried. It is one pass over the rows already in hand, costing
-    O(forms × named subjects).
-- **Receipts:**
-  - Every form keeps its evaluated shown value and its own error if it failed. Nothing is replaced.
-  - An attributed form's error is the refusal message itself, marked as this form's change.
-  - Other forms keep today's text, plus the attributed ordinals: "Not settled: this run's settlement was refused
-    for form N's change: <message>".
-  - The refusal data stays in `:seon.cluster.eval/diagnostics`, as now.
-  - If nothing is attributable, today's behaviour is unchanged.
-- **Same-transaction repairs:** the writer judged the whole ordered transaction, so repairs are respected by
-  construction. The subject it names is the removal that still has a surviving referrer on the final database.
-- **SCI and the database:** unchanged. `restore-evaluations!` restores every form, last first, because nothing in
-  the run was published. Its failure keeps its declared unavailable-context answer.
-- **Unchanged:** the working value within a run and the admission and transaction boundaries. The rest of audit
-  row 2 (execution status, and the `shown-result`/`failure-value` replacements at the install gate and `phase`)
-  stays row 2's own slice, per the review's recommended alternative 1.
+## (B) Claim only what the data establishes: one proposing form, else none
 
-Size estimate: about 20 lines added in `turn.clj` (one private `attributed-ordinals` function of the refusal and
-the requests, plus the receipt text). No new schema, since the error text and diagnostics attributes already
-exist. Nothing is deleted.
+The writer reports broken final relations: removed identity H, surviving referrer C, relation R. It carries no
+ordinal and no operation history (review round 2 §2). So the claim is an **association with a proposed
+deletion**, never a cause. It is made only when unambiguous. This is the coordinator's fallback, and it is the
+whole rule.
 
-This is presumed small enough without a matching deletion. If review wants the attribution stored as data
-rather than text, the smallest form is an optional ref from a receipt to the error, so a reader need not parse
-messages. That would be a schema addition and needs a ruling.
+1. **Inputs.**
+   - The raw refusal, only when `:seon.db.write/refused-schema` is `:seon.program/deletion-refused-error`. Every
+     other refusal family attributes nothing.
+   - The settled requests: each request's `:seon.cluster.eval/ordinal` and its
+     `[:seon.sci.eval/evaluation :seon.program/row]`, the row actually carried into settlement.
+   - Never the vector index, the source text or a candidate row an admission refused.
+2. **For each typed identity H named by the refusal:**
+   - `deleters` = requests whose row's `:seon.program/delete-identities` contains H.
+   - `declarers` = requests whose row declares H (the row's identity tuple equals H).
+   - H is attributed to form N only if `deleters` is exactly `{N}` and `declarers` is empty.
+   - Otherwise H is unattributed, with its reason:
+     - `:several-deletions`, for delete, redeclare and delete again;
+     - `:declared-in-run`, for a redefinition next to the deletion;
+     - `:no-deleting-form`, when the deletion came from outside this run's rows.
+   - Repaired identities are not named by the writer, so they never enter. Typed tuples keep a function and a
+     test of the same spelling apart.
+3. **Cost.** One pass builds `{identity → ordinals}` from the rows' identities, and one pass looks up the named
+   identities: O(S + row identities). It runs only in the refusal arm, adds nothing to success, and involves no
+   writer trial, replay or cache.
+4. **As data first, rendered second.**
+   - The association is a value, `[{:seon.program/identity H :seon.cluster.eval/ordinal N
+     :seon.program/referrers [...]}]` for each attributed H, plus `{:seon.program/identity H
+     :seon.turn/unattributed reason}` for the rest.
+   - It is merged into the refusal handed to `error/recording`, as a declared optional member of
+     `:seon.db.write/error`. So the durable error carries which form proposed which deletion. No second error or
+     attribution store is created.
+   - The member name is pending a registry search before implementing. If `:seon.turn/unattributed` or a
+     container key already has an owner, that owner wins.
+   - The receipts' `:seon.cluster.eval/error` text is rendered from that value:
+     - form N: "Not settled: form N proposed deleting H; the final program still references it from C (R)."
+     - other forms: "Not settled: this run's settlement was refused: …"
+     - When nothing is attributable, the text says so and why: "no single form's change is identified:
+       several forms change H".
+   - Ordinals are the run's evaluation ordinals, labelled as such, and need not start at 0.
+5. **Total.** Attribution is a pure function over values already in hand. Its failure (an unexpected shape) is
+   caught at declared cases only. It yields the unattributed batch text and the existing refusal, closure and
+   `restore-evaluations!`, and it never throws past them. Values, result handles and a form's own body error
+   are untouched.
 
-## Open question, verified first
+## Size (revised)
 
-I have not yet checked whether the value `settle-batch-refusal!` receives still carries
-`:seon.program/referrers`. It comes through `phase` and `db/transact!`, and the recorder
-(`error/recording`) may reshape it.
+This is an estimate; it will be measured at landing.
 
-- Evidence so far, from branch `oca-attr` on default at 2026-09-27T01:16Z, now retired: the
-  `ns-unmap` of a helper with a surviving caller answered `:value nil` with the refusal under `:diagnostics`.
-  That is the totality law holding.
-  - The *recorded* diagnostic has no `:seon.program/referrers` key. The subject and referrer appear only
-    inside `:seon.error/message`.
-  - So the recorder's projection drops the field. The raw `outcome` that `settle-batch-refusal!` receives
-    before `error/recording` still needs inspecting.
-- Probe step 1: on a disposable branch, run the host test's three forms and inspect the `:refused-outcome`
-  the settlement returns.
-- The attribution reads the raw refusal, never the recorded one.
-- If the referrers are not there, the producer (`db/transact!`'s refused result) is fixed to keep its declared
-  fields. The design does not fall back to parsing the message.
+| Location | Change |
+| --- | --- |
+| db.clj (shrink-db patch) | about 8 lines: typed identity per break, metadata stamp, refused-schema member |
+| two schema EDN files | about 5 lines |
+| turn.clj | about 30 lines: the association function, merging it into recording, receipt text |
+| error.clj | likely 0 lines, since the recorder carries declared members; confirmed at the probe |
 
-## Cost
+Total is about 45 added lines and no deletions. This is under the 100-line bar, and it adds no new machinery
+beside an owner.
 
-With no refusal, cost is zero: the code runs only in the refusal arm. With a refusal it is one scan of the
-run's rows against the named subjects, with no database work.
+## Regressions (one per behaviour class; canonical branch fixtures, real SCI, armed contracts)
 
-## Regressions
+Most classes go in one new deftest in `test/seon/cluster/host_test.clj`, plus one `seon.db` test.
 
-1. Revise `seon.cluster.host-test/a-refused-settlement-is-its-forms-refusal-and-the-run-closes`, which currently
-   asserts shown text that the total path forbids:
-   - Form 2's shown value is `"nil"`, its real value.
-   - Form 2's error contains "surviving referrers" and marks the change as its own.
-   - Forms 1 and 3 show `"3"` and `"7"`, and their errors name form 1 (0-based ordinal of the `ns-unmap`).
-   - The next run `(refused-caller 1)` answers `"2"`, which proves the restoration.
-2. A same-transaction repair, as a new case in the same deftest's world. One run holds
-   `(ns-unmap … 'refused-helper)` then `(ns-unmap … 'refused-caller)`. It publishes, and both identities are
-   gone from SCI and the database. This exercises the writer's final-database semantics that the withdrawn
-   design would have broken.
-3. Unchanged and still required: `seon.turn-test/a-refused-settlement-keeps-each-evaluated-value`, where a
-   refusal naming no subject attributes nothing.
-4. Unaffected, run for safety: `seon.cluster.host-test/a-run-reads-its-earlier-declarations` and
-   `seon.cluster.evaluate-source-test`.
+1. **Writer evidence** (`seon.db` test).
+   - A real `db/transact!` deletion refusal carries typed `:seon.program/identity` referrers and `refused-schema
+     :seon.program/deletion-refused-error`, with request id and basis.
+   - The recorded error keeps `refused-schema`.
+   - A non-deletion validator refusal has no `refused-schema` or a different one, and attributes nothing.
+2. **Unambiguous association.** Arithmetic, deletion, arithmetic keeps `"3"`, `nil` and `"7"`, with the handles
+   intact.
+   - Form 2's error names it as proposing the deletion. A form with its own body error keeps that error.
+   - The run starts at a nonzero ordinal (a second run of the agent).
+   - Restoration is shown by a pull of the stored rows and an SCI call in the same test.
+   - This revises `a-refused-settlement-is-its-forms-refusal-and-the-run-closes` (nil value; the association
+     read from data and from text separately).
+3. **Repeated identity changes.** Each case asserts exact associations or their absence, with the reason:
+   - redefine H, then delete H: `:declared-in-run`, no blame;
+   - delete, redeclare and delete, if admission admits it: `:several-deletions`;
+   - two subjects in one refusal: each judged on its own.
+4. **Identity boundaries.** An `ns-unmap` removes both `[:seon.fn/sym h]` and `[:seon.test/sym h]`; only the
+   typed identity the writer names matches. The rows actually produced are asserted first.
+5. **Repairs.**
+   - Delete H, then delete its caller C: the run commits and neither remains.
+   - Separate run: H's obligations are repaired while K's stay broken. Only K appears, and the text claims a
+     proposal, not sole cause.
+6. **Totality.** An unsupported refusal family and an unattributable refusal both keep the canonical refusal,
+   values, one terminal and reverse restoration. There is no second evaluation and no writer trial.
+   - `seon.turn-test/a-refused-settlement-keeps-each-evaluated-value` stays as it is.
 
-Review regression classes 1, 4 and 6 (outcome distinctions, changing bases, restoration failure) belong to the
-row 2 slice. This cut adds no new path through them.
+Out of scope, and still open under audit row 2: the executed-versus-unrun outcome, changed bases, and
+restoration-failure continuation. This cut does not touch their owners.
