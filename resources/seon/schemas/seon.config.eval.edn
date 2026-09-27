@@ -22,6 +22,11 @@
                       :seon.repl/finding :large-allocation
                       :seon.repl/fix "Something realized far more than it returned (an unbounded lazy sequence, a whole-store read, a copied collection): realize only what you need."}
                      [:<= 536870912]]
+                    [:seon.eval/unadmitted
+                     {:optional true
+                      :seon.repl/finding :not-admitted
+                      :seon.repl/fix "This form failed, so these definitions stayed private to your context with no program row (no tests, no merge): evaluate each again once its form succeeds."}
+                     [:set {:max 0} :qualified-symbol]]
                     [:seon.repl/out-tokens
                      {:optional true
                       :seon.repl/finding :large-output

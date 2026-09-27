@@ -1,6 +1,6 @@
 #:seon.repl{:cost
-            [:map-of {:description "One evaluation's measures as seon.repl/findings judges them against :seon.config.eval/bounds: each recorded measure the evaluation carries, plus :seon.repl/out-tokens. Absent means not measured."}
-             :qualified-keyword :int]
+            [:map-of {:description "One evaluation's measures as seon.repl/findings judges them against :seon.config.eval/bounds: each recorded measure the evaluation carries (counts, sizes, the set of unadmitted definitions), plus :seon.repl/out-tokens. Absent means not measured."}
+             :qualified-keyword :seon.schema/value]
             :finding [:keyword {:description "What one exceeded declared bound (:seon.config.eval/bounds) names, e.g. :large-value."}]
             :fix [:string {:min 1 :description "The declared fix for one finding."}]
             :with [:vector {:description "The other recorded measures a bound's finding reports beside its own."} :qualified-keyword]

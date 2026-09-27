@@ -334,3 +334,39 @@ Tests whose expectations change once P10 lands (render lane / owners):
   error precedes it in print order.
 - `seon.turn-test`: any assertion on failure prose.
 - `seon.test.accretion-test`: updated in P10.
+
+## Round 6: render functions still select, now as data (pid 73942, 03103544a)
+
+Regression from P10: printing the raw error map structurally showed 22 of Seon's own frames and the layer/operation
+internals, about 840 shown tokens, and a :large-value finding fired on the error.
+
+**P11**, `tmp/eval-feedback-design-opus/p11-small-error-face-and-unadmitted-data.patch` (error.clj, sci/eval.clj,
+turn.clj, seon.eval.edn, the receipt schema):
+- `seon.error/reply-face` selects what an agent acts on as data:
+  - the first cause's message;
+  - `:seon.error/exception-class`;
+  - the agent's own frames (`:seon.sci.eval/stacktrace`);
+  - for a refusal, member, expected and fix.
+- `seon.sci.eval/shown-failure` prints that face and rebinds the handle to the whole error, so `result/eN` still
+  reads everything. It carries no value size, so no size finding fires on an error. It serves:
+  - the agent's own failure;
+  - `refuse-install`;
+  - the unrun refusal.
+
+  The settlement refusal prints the same face through `final-shown`.
+- "NOT ADMITTED" is data. `:seon.eval/unadmitted` (a set of symbols) is recorded on the failed evaluation and receipt,
+  in place of the `;;` line in `:out`. The bound `[:set {:max 0} :qualified-symbol]` in `:seon.config.eval/bounds`
+  makes it a `:not-admitted` finding in the reply map. `unadmitted-notice` is deleted.
+
+Live face measured on branch `efd-21` from the real `(/ 1 0)` error:
+`{:seon.error/exception-class java.lang.ArithmeticException, :seon.sci.eval/stacktrace [[clojure.core// 1022 1] [user 1 1]], :seon.error/message "Divide by zero"}`.
+That is 161 characters, about 50 tokens; the qualified keys cost about 15 more than the unqualified target, and I kept
+them under the namespaced-keys law. The real `(sq "four")` refusal's face is its message ("user/sq refused x at []:
+expected an integer, got a string. Fix: …"), `:seon.error/member`, `:seon.error/expected :int` and its class.
+
+Committed here: the `:not-admitted` bound; `:seon.repl/cost` widened to any value (a set is a measure); a regression.
+Scratch repl_test: 21 tests, 130 assertions, 0 failures. Contracts compile over repl.clj, repl_test and P11's three
+sources with 0 findings.
+
+Still in `:out` as prose, and not converted: the success-path `;; PROGRAM CHANGE replaced your definition …` notice,
+and the non-generatable schema advisory. Both are candidates for the same treatment.
