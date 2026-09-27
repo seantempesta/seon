@@ -258,7 +258,10 @@
     80
     (prop/for-all [generated supported-form-generator]
       (let [[direct wrapped aliased] (declarations generated)]
-        (and (= direct wrapped aliased)
+        ;; An alias does not inherit :db/unique (26f1f40d6); it keeps
+        ;; every other property of the declaration it names.
+        (and (= direct wrapped)
+             (= (dissoc direct :db/unique) aliased)
              (contains? direct :db/valueType)
              (contains? direct :db/cardinality)
              (contains? #{:db.cardinality/one :db.cardinality/many}

@@ -78,7 +78,7 @@
              (is (str/includes? (:seon.eval/shown definition) "Fix the contract"))
              (is (str/blank? (:seon.cluster.eval/output definition)))
              (is (nil? (db/q '[:find ?f . :in $ ?sym :where [?f :seon.fn/sym ?sym]]
-                              @connection (str function-symbol))))
+                              @connection function-symbol)))
              (is (nil? (sci/resolve retained function-symbol)))
              (let [directory (first (filter #(= "(dir my.agents.juniper)" (:seon.cluster.eval/source %)) saved))
                    value (some-> (sci/resolve retained (admit/result-handle (:seon.cluster.eval/id directory))) deref)]
@@ -93,5 +93,5 @@
              (is (identical? accepted @(sci/resolve retained function-symbol)))
              (is (= "(defn largest-customer {:malli/schema [:=> [:cat :int] :int]} [x] x)"
                     (:seon.fn/source (db/pull @connection [:seon.fn/source]
-                                             [:seon.fn/sym (str function-symbol)])))))
+                                             [:seon.fn/sym function-symbol])))))
            (is (nil? (async/poll! @faults)))))))))
