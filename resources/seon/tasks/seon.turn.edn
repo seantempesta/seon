@@ -73,6 +73,6 @@
              :evidence #{"docs/research/agent-platform/landing/one-commit-a-2026-09-26.md"}}
  #:seon.task{:name "a-gate-exception-refuses-the-whole-run"
              :kind :function
-             :intent "An exception inside the install gate escapes as a phase failure (turn.clj ~3551-3567), lands on ordinal 0 and leaves every other ordinal nil: the whole run is refused instead of its one form, violating the total REPL path. The failing form gets its diagnostic beside its value; the others keep theirs (probe-i, cc91a1e62)."
+             :intent "An exception inside the install gate escapes as a phase failure (turn.clj ~3551-3567), lands on ordinal 0 and leaves every other ordinal nil: the whole run is refused instead of its one form, violating the total REPL path. The failing form gets its diagnostic beside its value; the others keep theirs (probe-i, cc91a1e62). Worse: turn/phase (turn.clj:3551) catches only ExceptionInfo, so any other throwable (an NPE, fault 8f6fdfc0) escapes the turn step to Flow and the caller gets \"The awaited channel closed before completion\" with no value at all (fix-b, 5fffb1b48)."
              :must-read #{seon.turn/evaluate-sources}
              :evidence #{"docs/research/agent-platform/landing/program-test-candidate-projection-2026-09-27.md"}}]
