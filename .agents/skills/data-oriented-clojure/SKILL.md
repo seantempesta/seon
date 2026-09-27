@@ -17,7 +17,7 @@ A computation receives its environment, immutable database value,
 schema projection, and render profile. Capture one database value for
 one pure derivation; don't reread a connection at each leaf. The public
 database functions accept explicit inputs and return boundary errors
-(`q`, `src/seon/db.clj:2438`; `pull`, `:2661`; `transact!`, `:4912`).
+(`q`, `src/seon/db.clj:2450`; `pull`, `:2661`; `transact!`, `:5094`).
 
 Use `seon.db` for first-party database work. Agent elision is an
 evaluation service, not permission for a JVM caller to omit custody.
@@ -59,7 +59,7 @@ error values, not a second success/failure envelope.
 read, parse, resolve or decide returns its declared error or typed unknown,
 and every reader passes that on or refuses: never a catch that returns nil,
 an `or` default over a value that can be an error, or one nil for both "no
-such row" and "could not read". Core contracts may keep `:nil` where nil
+such entity" and "could not read". Core contracts may keep `:nil` where nil
 truly means nothing; fix the producer, not the contract's spelling
 (`docs/research/agent-platform/ambiguous-nil-producers-2026-09-24.md`).
 
@@ -80,7 +80,7 @@ Actual results and private defs/atoms remain in memory. `base-ctx` derives
 the program base from one database value, memoized by program identity
 (`src/seon/sci/eval.clj:3350`); `fork-for-turn` forks it and carries those
 private objects while preserving the agent's context handle (`:3156`,
-`regenerate-agent-context!` at `:3082`). Installed functions, schemas, and tests remain durable program rows.
+`regenerate-agent-context!` at `:3082`). Installed functions, schemas, and tests remain durable program entities.
 Restart loses private objects while saved shown text survives.
 
 ## Render as a function of the data — target

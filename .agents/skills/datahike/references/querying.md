@@ -9,7 +9,7 @@ tags: [reference, datahike]
 Loaded when you need Datalog patterns beyond the SKILL.md basics. The examples
 show Datahike's query grammar with `d/q` over one explicit immutable database
 value; reads are synchronous. In Seon code the query owner is `seon.db/q`
-(`src/seon/db.clj:2438`), which accepts the same grammar; direct `datahike.api`
+(`src/seon/db.clj:2450`), which accepts the same grammar; direct `datahike.api`
 calls survive only inside `seon.db`, the store/registry and classified
 branch-custody owners, and system-side listeners (`AGENTS.md:201-204`).
 
@@ -40,7 +40,7 @@ Built-ins: `count`, `count-distinct`, `sum`, `avg`, `min`, `max`, `median`,
 
 An aggregate runs over the **deduplicated projected tuples**. `(sum ?r)` over
 two entities both rated `5` collapses to ONE `5` — because the projected tuple
-`[5]` appears once. Add `:with ?e` to keep each entity's row distinct so
+`[5]` appears once. Add `:with ?e` to keep each entity's result tuple distinct so
 repeated values still count:
 
 ```clojure
@@ -160,7 +160,7 @@ without faulting data in:
 ```
 
 Use index access only for a measured index-level debugging or implementation
-need; in Seon code that is `seon.db/datoms` (`src/seon/db.clj:2882`).
+need; in Seon code that is `seon.db/datoms` (`src/seon/db.clj:2894`).
 
 ## Performance tips
 

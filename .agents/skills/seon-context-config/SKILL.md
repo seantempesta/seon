@@ -15,9 +15,9 @@ Declare each namespaced dial once in its owning schema family.
 Config composites derive from those leaves
 (`derive-config-forms`, `src/seon/schema/edn.clj:63`).
 `seon.config/default-decisions` validates the shipped decisions
-(`src/seon/config.clj:415`, through `validate-default-decisions` `:375`).
+(`src/seon/config.clj:415`, through `validate-default-decisions` `:389`).
 
-`compile-manifest` (`src/seon/config.clj:529`) combines defaults, a sparse
+`compile-manifest` (`src/seon/config.clj:543`) combines defaults, a sparse
 overlay, and an explicit typed environment map in that order. Required
 absence refuses; the absence marker is removed from the effective map
 (`compile-settings`, `:476-527`). This explicit input is not permission
@@ -32,16 +32,16 @@ the `:config-apply` branch of `seon.cluster.boot/request!`
 reconciles the selected document (`src/seon/config.clj:780`); `effective`
 reads from the database (`:819`).
 
-Boot applies the checkout's compiled rows to a branch that may not have
+Boot applies the checkout's compiled entities to a branch that may not have
 adopted the checkout's declarations. `apply-compiled!` installs an added
-dial's attribute (`accrete-row-attributes!`) and keeps the current value of
+dial's attribute (`accrete-entity-attributes!`) and keeps the current value of
 an attribute the checkout no longer declares (`hold-retired-attributes`).
 Adoption retires that attribute with its data (`seon.cluster/declaration-changes`).
 Deleting a dial therefore needs only its declaration and decision lines removed;
 there is no two-step retirement.
 
 Verify both the resulting datoms and the consumer behavior. An applied
-row does not by itself rebuild a graph, executor, or server. For each
+entity does not by itself rebuild a graph, executor, or server. For each
 dial, follow its actual read site to determine whether it is acquired
 at boot, graph arming, a turn, or a request. Do not copy a momentary
 acquisition table whose referenced mechanisms are being deleted.
@@ -49,7 +49,7 @@ acquisition table whose referenced mechanisms are being deleted.
 ## Context and result contract
 
 Each turn forks the agent's SCI context from the cluster base and carries its
-private layer over (`fork-for-turn`, `src/seon/sci/eval.clj:3174`); defs,
+private layer over (`fork-for-turn`, `src/seon/sci/eval.clj:3320`); defs,
 atoms, and result objects stay in memory (`AGENTS.md:127-128`). The evaluation stores
 shown text produced under the render profile once, plus out and error.
 Do not restore a def-blob threshold, result serializer, or separate

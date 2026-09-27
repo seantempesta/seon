@@ -15,11 +15,11 @@ than a remembered commit.
 ## Explicit values and transaction authority
 
 Use `seon.db`. Its query and pull owners accept explicit immutable
-database values or agent-supplied defaults (`q`, `src/seon/db.clj:2438`;
+database values or agent-supplied defaults (`q`, `src/seon/db.clj:2450`;
 `pull`, `:2661`). Its transaction owner accepts an explicit connection or the
 agent's connection and returns errors as values (`transact!`,
 `src/seon/db.clj:4928`). A host JVM probe should supply explicit custody
-(`seon.db/call-with-custody`, `src/seon/db.clj:383`).
+(`seon.db/call-with-custody`, `src/seon/db.clj:390`).
 
 Datahike accepts a transaction map with `:tx-data` and optional
 `:tx-meta`, or a raw vector/sequence. A map lacking `:tx-data`
@@ -72,29 +72,29 @@ return, aborting the whole transaction (`validate-report`,
 `write-report-error` computes `affected` as the distinct `:e` over attempted
 **and** effective tx-data (`src/seon/db.clj:4388-4395`) — which therefore
 includes every entity the sweep touched — and re-validates each one's whole
-resulting row against the schemas its identities select
-(`write-entity-error`, `:3485`).
+resulting entity against the schemas its identities select
+(`write-entity-error`, `:3502`).
 So:
 
 - the swept ref is **required** in the referrer's entity schema → the referrer
   fails `:malli.core/missing-key` and **the deletion refuses**;
-- the swept ref is `{:optional true}` → the row still validates and **the
+- the swept ref is `{:optional true}` → the entity still validates and **the
   deletion sweeps silently**.
 
 `write-entity-error` skips an entity retracted to nothing — coordinated deletion
 is valid. Final owning-value validation (`write-owned-values-error`,
-`src/seon/db.clj:3523`) discovers roots
+`src/seon/db.clj:3540`) discovers roots
 from before and after, expands complete EAVT children, and validates each owned
 child through its relation's `:seon.db/component-schema`. Identity-less unowned
-rows, missing children, cycles, multiple owners and exhausted
+entities, missing children, cycles, multiple owners and exhausted
 `:seon.config.db/validation-node-limit` refuse. No component identity is invented.
 The projection carries the declared bootstrap bound (`with-compiled-cache`,
-`src/seon/schema.clj:331-354`); the final callback reads asserted configuration
+`src/seon/schema.clj:382-405`); the final callback reads asserted configuration
 from the report's final database (`validate-write-report`, `src/seon/db.clj`).
 
 State the lifecycle consequence in the attribute's docstring: **cascade**
 (component), **sweep** (optional ref), **refuse** (required ref in a validated
-surviving row), or **value** (the observation outlives the named entity).
+surviving entity), or **value** (the observation outlives the named entity).
 Required presence alone does not prove a peer target exists. Owned children
 have the complete-value check above. A settlement that moves an edge is application logic,
 not a fifth native deletion mode. Do not copy the old message inbox move:
@@ -158,9 +158,9 @@ after storage. "We looked and found nothing" and "we never looked" are
 the same database state unless **the looking is its own positive fact**.
 Do not encode an event in the cardinality of a collection, and do not
 repair it with a submission-time-only check: the whole-entity write
-validator rebuilds the row from the resulting datoms
-(`seon.db/write-entity-value`, `src/seon/db.clj:3462`;
-`write-entity-error`, `:3485`), where the empty collection is already
+validator rebuilds the entity from the resulting datoms
+(`seon.db/write-entity-value`, `src/seon/db.clj:3479`;
+`write-entity-error`, `:3502`), where the empty collection is already
 gone, so a submission-only check is a pre-read the authority re-decides.
 
 ## Three dependency behaviours that report nothing when they fire
@@ -258,7 +258,7 @@ widening and not a second hand-written pulled schema. The inventory of
 the twelve hand-written descriptions this class has already cost is
 [the pulled-shape study](../../../docs/prds/steward-platform/research/entity-schema-vs-pulled-shape-2026-09-16.md).
 Seon's existing normalizer back to transaction shape is
-`seon.render.value/transacted` (`src/seon/render/value.clj:143`), which
+`seon.render.value/transacted` (`src/seon/render/value.clj:181`), which
 uses the installed value type and cardinality as authority.
 
 ## Decisions that must hold at write time — `:db.fn/call`
@@ -287,17 +287,17 @@ callback and sets the result to `:error`; an `Error` (not an `Exception`)
 closes the queues and rethrows, stopping the writer
 (`reference-code/datahike/src/datahike/writer.cljc:139-171`). The error
 branch neither enqueues a report nor advances the database — it
-`(recur old)` (`:205-206`) — so no datom from that transaction is
+`(recur old)` (`:212-213`) — so no datom from that transaction is
 committed, including operations processed before the throw. External
 side effects a transaction function performed are not database writes and
 are not undone.
 
 Return transaction data from a transaction function, never a refusal map:
 Datahike expects transaction data there. Seon's refusals are built with
-`seon.error.refusal/diagnostic` (`src/seon/error/refusal.clj:107`) and thrown,
+`seon.error.refusal/diagnostic` (`src/seon/error/refusal.clj:227`) and thrown,
 and `seon.db/transact!` (`src/seon/db.clj:4928`) reads the throwable back into
 a flat `:seon.error` value in `transact-call`'s catch, through `write-refusal` and
-`seon.error.refusal/refusal` (`src/seon/db.clj:4655-4665`;
+`seon.error.refusal/refusal` (`src/seon/db.clj:4775-4782`;
 `src/seon/error/refusal.clj:123`). Evidence and the final-report validation seam are in
 [the write-admission study](../../../docs/prds/steward-platform/research/write-admission-2026-09-17.md).
 
@@ -365,7 +365,7 @@ sizes as hard-coded limits or duplicate derived plan state to hide it.
 Query the installed declarations before using an attribute.
 The schema population refuses duplicates within a resource and across
 resources (`src/seon/schema/edn.clj:218-230`, `merge-schema-resources` `:309-332`)
-and exposes canonical forms (`packaged-forms`, `:398`).
+and exposes canonical forms (`packaged-forms`, `:399`).
 The bridge's one fold, `compiled-storage` (`src/seon/schema/datahike.clj:77-146`),
 derives value type, cardinality and a collection's child, and
 `malli->datahike-attr-in` (`:147-186`) adds identity, components, indexes and
@@ -381,13 +381,13 @@ A **component** is part of its parent's value, not an independent entity:
 pull expands it without being asked (`pull_api.cljc:346-351`) and
 `retractEntity` destroys it with the parent (`db/transaction.cljc:832-836`).
 Validate its complete owning value against the parent's schema; do not invent
-identity attributes on component rows to make a selector see them. Child-only
+identity attributes on component entities to make a selector see them. Child-only
 edits and removed component links require discovering affected owners from
 before AND after, not just the changed eid. A supplied pull `:limit` and
 id-only cycle results cannot establish completeness (`pull_api.cljc:238-243`,
 `:315-351`). Component flags prescribe traversal/cascade; `retract-components`
 does not enforce exclusive ownership. Shared shapes need ordinary refs to
-the shared target, with components only for genuinely owned edge rows.
+the shared target, with components only for genuinely owned edge entities.
 
 **Derive an owned child's parent from the forward edge when that is the only
 meaning of a proposed back-pointer.** `:parent/_children` answers it without
@@ -458,18 +458,18 @@ without database values or read payloads by default
 process-local semantic replay. `read-evidence-current?` compares
 revisions and may replay supported reads to compare their results
 (`:1167`). Query execution captures evidence through the dependency's
-evidence-carrying path (`seon.db/q`, `:2438`).
+evidence-carrying path (`seon.db/q`, `:2450`).
 
 These are the existing mechanisms to inspect before adding a refresh
 index or cache.
 
 ## Since-query diff
 
-The installed owner is `seon.turn/system-turn` (`src/seon/turn.clj:2157`)
-through `system-plan` (`:2034-2074`): a distinct read form whose latest
+The installed owner is `seon.turn/system-turn` (`src/seon/turn.clj:2227`)
+through `system-plan` (`:2104-2144`): a distinct read form whose latest
 read-only evaluation still satisfies `read-evidence-current?` is
 `:unchanged`; otherwise it is `:changed` and carries
-`seon.db/read-evidence-changes` (`src/seon/db.clj:1069`) since its read basis.
+`seon.db/read-evidence-changes` (`src/seon/db.clj:1078`) since its read basis.
 
 For every distinct read form in the agent's history, use its latest
 evaluation's read evidence and `:t`. If a named dependency changed

@@ -49,7 +49,7 @@ Current proof:
 
 - the one blueprint, `graph-definition`, with its mailbox, turn and schedule
   procs (`src/seon/cluster/agent.clj:560-607`);
-- the derive-all armer, `armer-step` (`src/seon/cluster/agent.clj:1494`); and
+- the derive-all armer, `armer-step` (`src/seon/cluster/agent.clj:1556`); and
 - the measured parked-proc cost, about 8.5 KB and one virtual thread per idle
   graph
   (`git show 215447c46^:docs/prds/sci-execution-runtime/research/flow-mechanics-2026-07-28.md`,
@@ -79,8 +79,8 @@ At boot every open turn closes and its unfinished evaluations and effects are
 stamped interrupted, then graphs are rebuilt and the agent adapts from
 durable facts.
 
-Read `recover-call` (`src/seon/turn.clj:1717-1739`), its caller
-`recover-runs!` (`src/seon/cluster.clj:3018`), and the boot position: recovery
+Read `recover-call` (`src/seon/turn.clj:1786-1807`), its caller
+`recover-runs!` (`src/seon/cluster.clj:3210`), and the boot position: recovery
 runs before config application and before any agent arms
 (`src/seon/cluster/boot.clj:47-59`). The database records what settled; an
 interrupted receipt is evidence for the next agent decision, not authority for
@@ -111,11 +111,11 @@ channels.
 An entity is its attributes and relations, not a stamped kind
 (`AGENTS.md:188`). Agent identity is discovered by the presence of its
 unique identity attribute; graph custody is discovered by presence in the
-armed routing map. There is no `:type`, `:kind`, active-set row, or status
+armed routing map. There is no `:type`, `:kind`, active-set entity, or status
 flag.
 
 The derivation is explicit in the routing map (`routing`,
-`src/seon/cluster/agent.clj:608`) and the armer (`armer-step`, `:1494`). The
+`src/seon/cluster/agent.clj:608`) and the armer (`armer-step`, `:1556`). The
 data-model rules are maintained in
 [the data guide](../../../../docs/seon/architecture/data-modeling-guide.md).
 
@@ -148,7 +148,7 @@ When a surviving owner exists, strengthen it in place (`AGENTS.md:86-87`):
 - work admission belongs in the work launcher (`seon.flow/submit!!`,
   `seon.flow/submit!`);
 - core faults belong in the one fault route (`seon.fault/fault!`,
-  `src/seon/fault.clj:205`);
+  `src/seon/fault.clj:240`);
 - rendering belongs in the one cluster render pipeline until agent-owned
   derivation is deliberately converted; and
 - configuration enters through `seon.config/apply!`.
@@ -166,18 +166,18 @@ and namespace/agent debug variants in the one Reitit route table
 (`src/seon/render/route.clj:5-31`). A namespace page renders its first
 assigned agent's page, and an unowned namespace renders the agentless
 inspection with an explicit create control; a GET never writes
-(`canonical-namespace-response`, `src/seon/render/web.clj:3538-3554`). The
-debug variant is `debug-response` (`:3410`). Both page kinds acquire through one walk request
+(`canonical-namespace-response`, `src/seon/render/web.clj:3686-3702`). The
+debug variant is `debug-response` (`:3558`). Both page kinds acquire through one walk request
 (`walk-request`, `src/seon/render/web.clj:3148-3165`) over
-`seon.render.walk/neighborhood` (`src/seon/render/walk.clj:697`). Do not
+`seon.render.walk/neighborhood` (`src/seon/render/walk.clj:698`). Do not
 describe context rendering, namespace pages, or debug pages as tabled.
 
 The generalized agent-authored canvas/control API and guarded `/call` route
 remain **[TARGET]**: the live route table has neither. Current interaction is
 the fixed inbound-message and context-action POST routes
 (`src/seon/render/route.clj:17-22`; `inbound`, `src/seon/render/web.clj:2984`;
-`context-response`, `:3630`) plus browser-local Datastar signals such as
-`showEverything` (`:3422`, `:3509`). Agent-owned `::renders` remains
+`context-response`, `:3778`) plus browser-local Datastar signals such as
+`showEverything` (`:3570`, `:3657`). Agent-owned `::renders` remains
 **[TARGET]**; current delivery already uses revisioned packages with delta and
 keyframe bytes, while the agent graph contains mailbox, turn, and schedule
 (`src/seon/cluster/agent.clj:560-607`).

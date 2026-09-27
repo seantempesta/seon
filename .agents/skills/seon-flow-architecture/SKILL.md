@@ -54,13 +54,13 @@ the event that failed to arrive.
 ## Agent context ownership
 
 Installed: each turn forks the current base context (`fork-for-turn`,
-`src/seon/sci/eval.clj:3156-3189`). When the agent's previous context is held,
-`regenerate-agent-context!` (`:3082-3154`) forks the new base and carries the
+`src/seon/sci/eval.clj:3320-3353`). When the agent's previous context is held,
+`regenerate-agent-context!` (`:3246-3318`) forks the new base and carries the
 agent's own private Vars over it as actual objects; inherited program bindings
 are replaced. Base contexts are memoized by program identity in a four-entry
-LRU (`program-cache-policy`, `:3191-3198`). The law is that a context is
+LRU (`program-cache-policy`, `:3355-3362`). The law is that a context is
 reacquired from its branch head at turn start, and
-private defs, atoms and result objects stay in memory (`AGENTS.md:127-130`). Do not restore `:seon.def` rows or rebuild a private layer from
+private defs, atoms and result objects stay in memory (`AGENTS.md:127-130`). Do not restore `:seon.def` entities or rebuild a private layer from
 the database.
 
 **[TARGET]** (`docs/prds/agent-platform/plan/lane-b2-walk-flow-fork.md` §0,
@@ -83,24 +83,24 @@ path.
 Opening is system turn 0: ordinary submitted source, reply present, no
 provider attempt. Before each agent turn, the system turn projects the declared
 opening and every distinct retained read form; unchanged reads contribute no
-evaluation (`system-turn`, `src/seon/turn.clj:2157`). Include generated and
+evaluation (`system-turn`, `src/seon/turn.clj:2227`). Include generated and
 agent-written reads, never writes or effects (`AGENTS.md:250-251`).
 
 Datahike evidence capture and validity live in `seon.db/read-evidence`
-(`src/seon/db.clj:920`) and `seon.db/read-evidence-current?` (`:1167`).
+(`src/seon/db.clj:928`) and `seon.db/read-evidence-current?` (`:1176`).
 Extend the one mechanism in place rather than introducing a central
 dispatcher, block-specific refresh handlers, or another cache.
 
 The turn has three writes: open (`open-call`, `src/seon/turn.clj:421`); store
-the reply and its ordered evaluations (`plan-call`, `:665`); close
+the reply and its ordered evaluations (`plan-call`, `:681`); close
 (`close-tx`, `:458`). Opening while the agent already has an open turn is a
 no-op inside the writer, and an open turn refuses a second reply. At boot open
 turns close and unfinished evaluations become interrupted
-(`recover-call`, `:1717`); no interrupted execution resumes.
+(`recover-call`, `:1786`); no interrupted execution resumes.
 
 The prompt is stored evaluations rendered through their entity pair.
 Old shown text remains unchanged. Compaction wipes evaluations and
-regenerates the opening (`compact!`, `src/seon/turn.clj:2366`).
+regenerates the opening (`compact!`, `src/seon/turn.clj:2430`).
 The [runtime diagrams](../../../docs/seon/architecture/agent-runtime.md)
 show both additive sequences.
 

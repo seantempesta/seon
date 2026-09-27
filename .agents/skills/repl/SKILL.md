@@ -40,10 +40,10 @@ PRD §12 requires virtual replies through the ordinary proc.
 
 Installed: `base-ctx` derives the program-only base from one database value,
 memoized by program identity (`src/seon/sci/eval.clj:3350`). Each turn,
-`fork-for-turn` (`:3156`) forks the current base and, when the agent's previous
+`fork-for-turn` (`:3320`) forks the current base and, when the agent's previous
 context is held, carries the private layer in memory, preserving its context
 handle, owned Vars, atoms and result objects (`regenerate-agent-context!`,
-`:3082`). **[TARGET]** B2 makes the fork the context, with no regeneration
+`:3246`). **[TARGET]** B2 makes the fork the context, with no regeneration
 diff (`docs/prds/agent-platform/plan/lane-b2-walk-flow-fork.md` §0). SCI's generation-based isolation
 is supplied by `reference-code/sci/src/sci/core.cljc:345`. Private objects
 never enter the base or another agent; a JVM restart loses them.
@@ -52,7 +52,7 @@ Do not teach a serialization/restoration ladder.
 Accepted functions, schemas, and tests persist as program facts.
 A `defn` without a Malli contract is refused at installation. A plain
 `def` gets the temporary-state note specified in PRD §12.
-The note generator is `def-note` (`src/seon/repl.clj:119`).
+The note generator is `def-note` (`src/seon/repl.clj:122`).
 
 Results bind actual objects in an evaluation-id map.
 `seon.id/evaluation` derives ids from branch, turn, and ordinal;
@@ -65,14 +65,14 @@ from the value renderer, plus out and error, not the result object.
 System turns store opening and refreshed read evaluations. Before an agent
 turn, every distinct read form's latest evidence is checked against changes
 since its evaluation `:t` (installed: `system-turn`,
-`src/seon/turn.clj:2157`). Generated and agent-written reads participate;
+`src/seon/turn.clj:2227`). Generated and agent-written reads participate;
 writes and effects never rerun. Compaction wipes evaluations and regenerates
 the opening.
 
 The evaluation schema declares its AI/HTML pair; the walk renders
 evaluations in order through that pair. `seon.repl/text` is the one
 REPL grammar (`src/seon/repl.clj:264`); the render pair enters at
-`render-ai` and `render-html` (`:449`, `:474`), and saved shown text renders
+`render-ai` and `render-html` (`:540`, `:565`), and saved shown text renders
 unchanged through `value-text` (`:143-147`).
 
 **[TARGET]** `my.turn/evals` and `my.turn/eval` (PRD §15; `src/my/turn.clj`
@@ -97,8 +97,8 @@ loaded program; name the changed identities when you have them.
 
 For the selected development cluster, the complete JVM form is below.
 Choose the namespace to reload; the database supplies both the projection
-and instrumentation mode (`projection-from-database`, `src/seon/schema.clj:3113`;
-`effective`, `src/seon/config.clj:819`).
+and instrumentation mode (`projection-from-database`, `src/seon/schema.clj:3196`;
+`effective`, `src/seon/config.clj:862`).
 
 ```clojure
 (let [connection (seon.cluster.boot/connection "default")
@@ -126,26 +126,26 @@ Verified at default's REPL on 2026-09-23. Forms and timings are in
 1. **Name your branch.** Call the MCP `branch` tool with `action create` and a
    `name`. It branches off the cluster head's commit through
    `seon.cluster.registry/branch!` (`src/seon/cluster/registry.clj:192`) and is
-   built in `script/seon/dev/mcp.clj:478` (`branch-form`). There is no default
+   built in `script/seon/dev/mcp.clj:486` (`branch-form`). There is no default
    name. These refuse as `:seon.error` values: the cluster's own branch, and a
    name that already exists.
 2. **Code by evaluating forms there.** Call `eval_clj` with `mode sci` and
    `branch <name>`. The form runs as an ordinary agent run of the branch's
    hosted agent `mcp/<name>` (`run-form`, `script/seon/dev/mcp.clj:395-438`).
 3. **What the branch context is not, today.**
-   - Rows are written only by a turn's settlement
-     (`analyze-settlement`, `src/seon/turn.clj:967`; `gate-function-install`,
-     `src/seon/turn.clj:3328`).
+   - Entities are written only by a turn's settlement
+     (`analyze-settlement`, `src/seon/turn.clj:1017`; `gate-function-install`,
+     `src/seon/turn.clj:3403`).
    - Overriding a declaration with `:seon.fn/host-bound?` true refuses by name
      when called (`src/seon/sci/eval.clj:1722-1737`). An unadmitted class fails
      SCI analysis ("Unable to resolve classname").
-4. **Test there.** `seon.test/run` (`src/seon/test.clj:2188`) takes the branch
+4. **Test there.** `seon.test/run` (`src/seon/test.clj:2205`) takes the branch
    handle as `:seon.test/execution` and records on its connection. It runs the
-   branch's program rows, so it does not test an in-memory def (measured).
+   branch's program entities, so it does not test an in-memory def (measured).
 5. **Accept.** Accepting work is D1 §2c's merge:
    root's `my.program/prepare-merge!`, `accept-merge!` and `write-back!`
    (`src/my/program.clj`, over `seon.cluster.source`). They merge the branch's
-   changed program rows through the tested head; the basis is each merged row's
+   changed program entities through the tested head; the basis is each merged entity's
    definition digest, so other writes never stale a merge or its write-back.
    Private SCI defs never merge. Write-back splices the accepted declarations
    into their one file; it refuses `:not-analyzable` when a declaration names a
@@ -155,7 +155,7 @@ Verified at default's REPL on 2026-09-23. Forms and timings are in
    context (`src/seon/cluster/agent.clj:887`), then calls `retire-branch!`
    (`registry.clj:339`). If an agent still holds the branch, retire refuses.
 
-A branch evaluation that persists rows needs an armed agent whose custody is
+A branch evaluation that persists entities needs an armed agent whose custody is
 the branch. The work then goes through `seon.cluster.agent/submit-source!`
-(`src/seon/cluster/agent.clj:660`), the path a model reply uses. A worker is
-created on a candidate by `seon.issue/start!` (`src/seon/issue.clj:1506`).
+(`src/seon/cluster/agent.clj:663`), the path a model reply uses. A worker is
+created on a candidate by `seon.issue/start!` (`src/seon/issue.clj:1520`).

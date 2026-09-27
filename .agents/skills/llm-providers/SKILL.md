@@ -1,6 +1,6 @@
 ---
 name: llm-providers
-description: Verify or plan Seon's LLM provider request construction, prompt caching, streaming, reasoning fields, usage normalization, and database-backed provider descriptor rows. Load before changing seon.ai, an AI config fact, a provider endpoint/model, or the rendered-context/cache boundary.
+description: Verify or plan Seon's LLM provider request construction, prompt caching, streaming, reasoning fields, usage normalization, and database-backed provider descriptor entities. Load before changing seon.ai, an AI config fact, a provider endpoint/model, or the rendered-context/cache boundary.
 ---
 
 # LLM providers
@@ -8,8 +8,8 @@ description: Verify or plan Seon's LLM provider request construction, prompt cac
 ## Overview
 
 Keep one `seon.ai` HTTP owner and represent hosted targets as provider descriptor
-rows, resolved by `resolved-target` and `targets` (`src/seon/ai.clj:384-419`,
-`:444`). Re-open the linked primary source before editing a row or wire shape.
+entities, resolved by `resolved-target` and `targets` (`src/seon/ai.clj:384-419`,
+`:444`). Re-open the linked primary source before editing an entity or wire shape.
 The maintained reference is `docs/seon/reference/llm-adapters.md`. The
 2026-08-03 verified baseline and source inventory were deleted with the retired
 program; read them with
@@ -20,10 +20,10 @@ program; read them with
 - Read `resolved-target` (`src/seon/ai.clj:384-419`), `retry-strategy` and
   `delays` (`:496-560`), `wire-settings` (`:599-633`), `request-body`
   (`:677`), `stream-fold` (`:841`), the capture handoff in `call-turn`
-  (`src/seon/turn.clj:4595-4626`), and `resources/seon/schemas/seon.ai.edn`
+  (`src/seon/turn.clj:4653-5001`), and `resources/seon/schemas/seon.ai.edn`
   plus `resources/seon/schemas/seon.config.ai.edn` before changing the provider
   seam.
-- Keep credentials outside the database. Descriptor rows name the environment
+- Keep credentials outside the database. Descriptor entities name the environment
   variable; `seon.ai/credential` reads it only at the HTTP leaf
   (`src/seon/ai.clj:1043-1058`; `config/default.edn:454-456`).
 - Keep retries and failover in Seon's attempt/disposition mechanism. The HTTP
@@ -37,33 +37,33 @@ program; read them with
   equivalents, such as reported cost.
 - Capture and reuse the exact rendered prompt. The loop commits the capture
   before calling the provider and passes only that string as `:seon.ai/prompt`
-  (`src/seon/turn.clj:4595-4626`, prompt placed at `:4656`;
+  (`src/seon/turn.clj:4866-4899`, prompt placed at `:4899`;
   `resources/seon/schemas/seon.context.capture.edn:1-37`).
 - Historical evaluations render their saved shown text unchanged; system turns
   append changed reads and compaction regenerates the opening
   (`value-text`, `src/seon/repl.clj:143-147`; `system-turn`,
-  `src/seon/turn.clj:2157`; `compact!`, `:2366`). Verify the provider prompt
+  `src/seon/turn.clj:2227`; `compact!`, `:2430`). Verify the provider prompt
   against those exact stored bytes, including handles and timing, as
   `test/seon/loop_proof_test.clj:489-541` does. Never strip timing or preserve old
   evaluations across compaction to manufacture stability.
 - Omit an unverified endpoint, model identifier, field, or default. A missing
   provider fact is a research boundary, not permission to infer a value.
 
-## Shipped provider and model rows
+## Shipped provider and model entities
 
-The default manifest declares provider rows for DeepSeek, Moonshot, Meta and
-OpenRouter (`config/default.edn:558-583`). Each row owns its endpoint,
+The default manifest declares provider entities for DeepSeek, Moonshot, Meta and
+OpenRouter (`config/default.edn:558-583`). Each entity owns its endpoint,
 credential-variable name, OpenAI-compatible chat fact, and output-token wire
-key. Model rows connect `deepseek-flash`, `deepseek-v4-pro`, `kimi-k3`,
+key. Model entities connect `deepseek-flash`, `deepseek-v4-pro`, `kimi-k3`,
 `muse-spark-1.1` and OpenRouter's pinned
 `deepseek/deepseek-v4-flash-20260731` to those providers
-(`config/default.edn:585-666`). `deepseek-flash` is the cluster default by
+(`config/default.edn:545-653`). `deepseek-flash` is the cluster default by
 the 2026-09-10 owner ruling (`config/default.edn:407-411`), with a
 65,536-token completion budget (`:418`) and thinking disabled (`:440`).
 
 `resolved-target` derives endpoint, credential-variable name, provider-specific
 output-token wire key, output cap, and admitted thinking setting from those
-database rows (`src/seon/ai.clj:384-419`). `wire-settings` reads each config
+database entities (`src/seon/ai.clj:384-419`). `wire-settings` reads each config
 schema's `:seon.ai/wire` declarations and substitutes the resolved provider's
 output-token key for the default `max_tokens` key
 (`resources/seon/schemas/seon.config.ai.edn:43-50`;
@@ -77,7 +77,7 @@ Direct API-key calls require `x-api-key`, `anthropic-version`, and
 `content-type`; `system` is top-level rather than a system-role message
 ([Claude API overview](https://platform.claude.com/docs/en/api/overview)).
 Current Seon emits Bearer authentication and OpenAI-style messages, so a native
-Anthropic row is not representable (`request-headers` and `request-body`,
+Anthropic entity is not representable (`request-headers` and `request-body`,
 `src/seon/ai.clj:672-718`).
 
 Anthropic caching is opt-in through `cache_control`: either one top-level field

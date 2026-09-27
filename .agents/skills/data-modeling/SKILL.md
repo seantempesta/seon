@@ -48,7 +48,7 @@ that produced it.
   and the child dies when the parent is retracted. Otherwise they are peers,
   and the fact becomes false when the target goes. A peer's deletion policy is
   already declared, by required-ness: a required ref in the referrer's entity
-  map REFUSES a sweep only when the surviving row is selected and validated;
+  map REFUSES a sweep only when the surviving entity is selected and validated;
   an optional one lets it SWEEP silently. Required presence is not a native
   foreign-key constraint: numeric ref values do not prove target existence
   (`reference-code/datahike/src/datahike/db/utils.cljc:116-155`). See the
@@ -58,7 +58,7 @@ that produced it.
   anything by that name exists is a SEPARATE, derivable question. Store the
   VALUE (`:qualified-symbol`, `:qualified-keyword`, the path string), never a
   ref. Then deleting the named entity touches no observer's datom, and "names
-  something with no row" is one `not-join` clause instead of an
+  something with no entity" is one `not-join` clause instead of an
   impossibility.
 
 The tell for a misfiled token is machinery that exists only to survive a
@@ -106,11 +106,11 @@ yield id-only maps (`reference-code/datahike/src/datahike/pull_api.cljc:238-243`
 Obtain the complete value under the declared work bound or refuse.
 Every owned relation declares `:seon.db/component-schema`; the final writer
 validates those typed values as well as the root (`write-owned-values-error`,
-`src/seon/db.clj:3523`). The config schema declares
+`src/seon/db.clj:3540`). The config schema declares
 `:seon.config.db/validation-node-limit`
 (`resources/seon/schemas/seon.config.db.edn:1`), carried by
 projection acquisition and shared across writers; there is no per-constructor
-escape. A nonempty identity-less row without an owner refuses.
+escape. A nonempty identity-less entity without an owner refuses.
 
 An event fact proves exactly the observation its writer completed. A definition
 analysis digest does not prove test reach ran; a maintenance request's existence
@@ -185,8 +185,8 @@ generated-form family.
 ## Results and identity
 
 Installed: the agent retains a context handle; `fork-for-turn`
-(`src/seon/sci/eval.clj:3156`) forks the current base and
-`regenerate-agent-context!` (`:3082-3154`) carries its private layer over it.
+(`src/seon/sci/eval.clj:3320`) forks the current base and
+`regenerate-agent-context!` (`:3246-3318`) carries its private layer over it.
 Its private defs, atoms, and result objects remain in memory.
 Shown text is stored because it records what was seen, not because
 it can restore the object. The profile is applied once at evaluation
@@ -205,4 +205,4 @@ Program identity tombstones are RETIRED by owner ruling 2026-09-16
 past is a temporal query; `src/` carries no tombstone mechanism.
 The final report refuses identity removal or rename when surviving symbol
 observers still name it; repairs are judged in the same final database
-(`removed-definition-error`, `src/seon/db.clj:4111`; `deletion-error`, `:4171`).
+(`removed-definition-error`, `src/seon/db.clj:4152`; `deletion-error`, `:4219`).

@@ -9,7 +9,7 @@ tags: [reference, flow]
 Use this runbook when a scratch cluster fails during startup, especially while
 other lanes are changing the shared tree. Do not restart, stop or mutate
 another lane's cluster to obtain a cleaner signal; lanes never stop, refork or
-reset `default` (`AGENTS.md:333-334`). A boot longer than ten seconds needs the
+reset `default` (`AGENTS.md:361`). A boot longer than ten seconds needs the
 owner's explicit authorization (`AGENTS.md:307`).
 
 ## 1. Separate launch failure from degraded boot
@@ -45,7 +45,7 @@ Read the missing layers in boot order
 | `:seon.store/store` | process-root store acquisition failed |
 | `:seon.store/branch` | source publication, reachability permit, or cluster branch creation failed |
 | `:seon.boot/cluster-connection` | branch open failed |
-| `:seon.source/commit-id` | the source commit could not be read from the base or the cluster row |
+| `:seon.source/commit-id` | the source commit could not be read from the base or the cluster entity |
 | `:seon.boot/config-result` | coherent-program validation, schema accretion, run recovery, or config application failed; use the exception cause to select among them |
 | `:seon.sci.eval/ctx` | cluster/root-agent convergence, host arming, base-context fork, or work-launcher start failed |
 | `:seon.flow/work-launcher` | environment construction after the context failed |
@@ -59,8 +59,8 @@ or open socket alone.
 ## 2. Inspect the advertisement before touching lifecycle
 
 The per-cluster advertisement is `<bootstrap-root>/<cluster-name>/prepl.edn`
-(`cluster-paths`, `src/seon/cluster.clj:763-780`); the operator reads
-`<operator-root>/data/clusters/*/prepl.edn` (`script/seon/operator.clj:123-131`).
+(`cluster-paths`, `src/seon/cluster.clj:805-822`); the operator reads
+`<operator-root>/data/clusters/*/prepl.edn` (`script/seon/operator.clj:128-137`).
 Boot writes it once the store stands (`src/seon/cluster/boot.clj:165-168`),
 and `serve!` rewrites it with the web URL (`src/seon/cluster.clj:3282`). JVM
 process identity is only `(pid, start-instant)`
