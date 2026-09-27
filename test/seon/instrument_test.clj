@@ -10,6 +10,14 @@
   whose `seon.instrument/restore!` returns the entering state even after a
   throw and never reinstalls a closure over a reloaded definition.
 
+  NO TEST RE-ARMS THE WHOLE JVM. Boot arms every production Var with its
+  supplied-default plan and definition digest; an `apply!` without changed
+  identities re-arms all of them without either, and a concurrent member or
+  agent calling one (a `:seon.render/unit` renderer) is then refused until the
+  restore runs, which a timed-out body never reaches. Each test arms only its
+  own suite Vars (`arm-suite!`, `arm-with!`), builds a production Var's
+  wrapper without installing it (`unarmed-wrapper`), or reads boot's arming.
+
   THE FIXTURE IS THE ARCHIVED DEFECT. `seon.db/transact!`
   declared `[:vector :any]` while the run loop's `:open` branch passed
   Datahike's argument map, and it worked only because Datahike's own
@@ -60,35 +68,61 @@
 
 (use-fixtures :each scoped-instrumentation)
 
+(defn- unarmed-wrapper
+  "The wrapper arming would install on `candidate` under `contract`, compiled
+  against `projection` but installed nowhere, so no other caller sees it."
+  [candidate contract projection caps policy]
+  (#'instrument/compiled-wrapper projection (symbol candidate) contract
+                                 (mi/-f->original @candidate) caps policy))
+
 (defn- arm-with!
   "Arm `candidate` as adoption does: compile its wrapper once against
-  `projection`, then install that wrapper."
+  `projection`, then install that wrapper. Only for this suite's own Vars."
   [candidate contract projection caps policy]
   (#'instrument/arm-var! candidate contract projection
-                         (#'instrument/compiled-wrapper projection (symbol candidate) contract
-                                                        (mi/-f->original @candidate) caps policy)
+                         (unarmed-wrapper candidate contract projection caps policy)
                          policy))
+
+(defn- default-policy
+  "The caps and arming policy `apply!` derives from the compiled defaults."
+  []
+  [(config/result-caps config/defaults)
+   {:seon.config.error/max-evidence-bytes
+    (:seon.config.error/max-evidence-bytes config/defaults)}])
+
+(defn- arm-suite!
+  "Arm only `symbols`, Vars of this suite, as adoption arms changed identities
+  under the handed projection; `request` adds policy. Never the whole JVM: the
+  fixture restores these roots."
+  ([symbols] (arm-suite! symbols {}))
+  ([symbols request]
+   (let [result (instrument/apply!
+                 (merge {:seon.schema/projection (schema/handed-projection)
+                         :seon.instrument/changed-identities
+                         (into #{} (map #(vector :seon.fn/sym %)) symbols)}
+                        request))]
+     (is (= (count symbols) (:seon.instrument/registered result)) (pr-str result))
+     result)))
 
 (deftest an-invalid-apply-request-is-refused-at-its-crossing
   ;; The core-error mode this test once refused is deleted (7c40396b3, M1 0b:
   ;; the :panic/:record dial carriers), so `{}` is a valid request and the
   ;; unarmed typed refusal it reached is gone; the missing-projection
-  ;; registration error keeps its own regression below. Armed, the request
-  ;; contract refuses an invalid dial at the crossing, naming `apply!`.
-  (instrument/apply! {})
-  (let [refusal (test-support/refusal-data
-                 #(instrument/apply! {:seon.config.error/max-evidence-bytes 0}))]
-    (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) refusal))
-    (is (= 'seon.instrument/apply!
-           (:seon.error/operation refusal)))))
+  ;; registration error keeps its own regression below. Armed at boot, the
+  ;; request contract refuses an invalid dial at the crossing, naming `apply!`.
+  ;; Unarmed, the call would re-arm the whole JVM, so it is never made then.
+  (when (is (contains? (instrument/instrumented) #'instrument/apply!))
+    (let [refusal (test-support/refusal-data
+                   #(instrument/apply! {:seon.config.error/max-evidence-bytes 0
+                                        :seon.instrument/changed-identities #{}}))]
+      (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) refusal))
+      (is (= 'seon.instrument/apply!
+             (:seon.error/operation refusal))))))
 
 (defn- instrumented!
-  "Run `body` with instrumentation on, and always take it back off."
-  [body]
-  (try
-    (body (instrument/apply! {}))
-    (finally
-      (instrument/remove!))))
+  "Run `body` with this suite's `symbols` armed, handing it the result."
+  [symbols body]
+  (body (arm-suite! symbols)))
 
 ;;; A var of this suite's own, so the re-evaluation proof does not
 ;;; rewrite a production namespace to make its point.
@@ -139,17 +173,6 @@
   [left right]
   (str left right))
 
-(defn- arm-prefix-contract!
-  "Arm this suite's `prefix-contract` as adoption does. The suite's namespace
-  loads after boot arming, so nothing else arms its Vars; the fixture restores
-  the root afterwards."
-  []
-  (let [result (instrument/apply!
-                {:seon.schema/projection (schema/handed-projection)
-                 :seon.instrument/changed-identities
-                 #{[:seon.fn/sym 'seon.instrument-test/prefix-contract]}})]
-    (is (= 1 (:seon.instrument/registered result)) (pr-str result))))
-
 (defn- many-invalid-values
   []
   (vec (repeat 200 "not an integer")))
@@ -160,6 +183,7 @@
 
 (deftest optional-positional-nil-is-valid-under-instrumentation
   (instrumented!
+   '[seon.instrument-test/optional-positional]
    (fn [_]
      (is (nil? (optional-positional nil))
          "a :maybe positional is validated as nil, not as its child schema"))))
@@ -257,8 +281,8 @@
        (.toPath link)
        (.toAbsolutePath (.toPath outside))
        (make-array java.nio.file.attribute.FileAttribute 0))
-      (instrumented!
-       (fn [_]
+      ;; the two-arity re-enters through the Var boot armed
+      (is (contains? (instrument/instrumented) #'fs/delete-recursively!))
          (is (nil? (fs/delete-recursively! (.getPath root) (.getPath root))))
          (is (not (Files/exists (.toPath root) no-follow)))
          (is (Files/exists (.toPath sentinel) no-follow)
@@ -268,13 +292,13 @@
                  (fs/delete-recursively! base (.getPath outside) nil)
                  (catch Exception thrown thrown))]
            (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) (ex-data failure))
-               "the direct three-arity still requires its options map"))))
+               "the direct three-arity still requires its options map"))
       (finally
         (fs/delete-recursively! base base)))))
 
 (deftest a-wrong-shaped-call-throws-a-flat-error-value
-  (instrumented!
-   (fn [_]
+  ;; boot armed `error/value`; the test re-arms nothing
+  (is (contains? (instrument/instrumented) #'error/value))
      (let [failure (try
                      ;; the archived D1 shape: a value the declared
                      ;; contract forbids, which the callee would have
@@ -295,11 +319,11 @@
        (is (= :seon.error/fact
               (:seon.error/expected data))
            "a cluster re-arm retains the JVM wrapper's bounded evidence policy")
-       (is (str/includes? (ex-message failure) "refused fact at []: expected a map, got a string"))))))
+       (is (str/includes? (ex-message failure) "refused fact at []: expected a map, got a string"))))
 
 (deftest projection-gates-inspect-the-complete-candidate-population
-  (instrumented!
-   (fn [_]
+  ;; boot armed the projection builders; the test re-arms nothing
+  (is (contains? (instrument/instrumented) #'schema/build-projection))
      (let [base-key :seon.instrument-test.local/base
            alias-key :seon.instrument-test.local/alias
            forms (assoc (schema/snapshot)
@@ -310,7 +334,7 @@
               (get (:seon.schema.projection/forms projection) alias-key))
            "a projection gate inspects candidate data against the population
             it was given; instrumentation must not prevalidate that data
-            against the process-global registry")))))
+            against the process-global registry")))
 
 (deftest interpreted-contracts-use-the-active-registry-and-core-error-dial
   (let [projection (or (schema/current-projection)
@@ -442,7 +466,7 @@
                      'my.agents.guarded/result
                      "[:=> [:cat :int] :int [:fn {:error/message \"The guard was evaluated.\"} clojure.core/map?]]"
                      projection caps identity)]
-    (instrument/apply! {:seon.schema/projection projection})
+    (arm-suite! '[seon.instrument-test/guarded-result] {:seon.schema/projection projection})
     (doseq [call [#(guarded-result 1) #(interpreted 1)]]
       (let [failure (test-support/refusal-data call)]
         (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) failure))
@@ -493,6 +517,7 @@
   ;; the contract reporter had just given the interrupt one. Measured in
   ;; `docs/prds/steward-platform/research/sci-arity-message-parity-2026-09-17.md`.
   (instrumented!
+   '[seon.instrument-test/deadline-probe]
    (fn [_]
      (reset! reporter-frames nil)
      (let [options (kernel/context-options)
@@ -555,17 +580,18 @@
          (is (str/includes? (error/render-ai diagnostic) "0")))))))
 
 (deftest a-violation-carries-bounded-arguments-only-when-it-can
-  (let [caps (assoc (config/result-caps (test-support/effective-config))
+  ;; `error/value`'s wrapper under bounded and default caps, built without
+  ;; installing it: the production Var keeps boot's wrapper for every caller.
+  (let [[default-caps policy] (default-policy)
+        caps (assoc (config/result-caps (test-support/effective-config))
                     :seon.config.eval.result/max-depth 4
                     :seon.config.eval.result/max-collection 4
                     :seon.config.eval.result/max-string 32
                     :seon.config.eval.result/max-nodes 64)]
-    (doseq [policy [{:seon.sci.admit/caps caps} {}]]
-      (instrument/apply!
-       (merge {:seon.schema/projection (schema/handed-projection)
-               :seon.instrument/changed-identities #{[:seon.fn/sym 'seon.error/value]}}
-              policy))
-      (let [data (try (error/value "not a fact")
+    (doseq [caps [caps default-caps]]
+      (let [value (unarmed-wrapper #'error/value (mi/-schema #'error/value) (schema/handed-projection)
+                                   caps (assoc policy :seon.sci.admit/caps caps))
+            data (try (value "not a fact")
                       (catch Exception thrown (ex-data thrown)))]
         (is (= ["not a fact"] (:seon.error/offending data)))
         (is (= :seon.error/fact (:seon.error/expected data)))
@@ -581,7 +607,7 @@
   (let [observed {:seon.error/at #inst "2026-09-19T00:00:00Z"
                   :seon.error/layer :seon.db/custody
                   :seon.error/operation 'seon.db/db}
-        _ (arm-prefix-contract!)
+        _ (arm-suite! '[seon.instrument-test/prefix-contract])
         refusal (test-support/refusal-data #(prefix-contract observed))]
     (is ((schema/projection-validator (schema/handed-projection)
                                      :seon.instrument/contract-error) refusal))
@@ -634,8 +660,8 @@
                     :seon.config.eval.result/max-string 64
                     :seon.config.eval.result/max-nodes 64)
         offending (many-invalid-values)]
-    (try
-      (instrument/apply! {:seon.sci.admit/caps caps})
+      (arm-suite! '[seon.instrument-test/many-problem-input seon.instrument-test/many-problem-output]
+                  {:seon.sci.admit/caps caps})
       (doseq [[expected-arm expected-kind function-name invoke]
               [[:input :malli.core/invalid-input
                 "seon.instrument-test/many-problem-input"
@@ -656,9 +682,7 @@
             (is (< (tokens/estimate message) 64)
                 "the headline is a concise diagnosis measured in estimated tokens")
             (is (= 200 (:seon.instrument/problem-count instrument-data))
-                "the problem count is the broken-system signal"))))
-      (finally
-        (instrument/remove!)))))
+                "the problem count is the broken-system signal"))))))
 
 (deftest refusal-value-projection-obeys-the-profile-in-both-faces-and-the-whole-value-stays-retrievable
   ;; THE OFFENDING VALUE IS THE FAILING LEAF, not the container it sat in
@@ -735,8 +759,7 @@
         "the reproduction passes a genuinely oversized schema registry")
     (when-not (.isThreadAllocatedMemoryEnabled thread-bean)
       (.setThreadAllocatedMemoryEnabled thread-bean true))
-    (try
-      (instrument/apply! {:seon.sci.admit/caps caps})
+      (arm-suite! '[seon.instrument-test/integer-inspector] {:seon.sci.admit/caps caps})
       ;; Projection acquisition is deliberately per test. Exercise the
       ;; instrumented boundary once so this measurement isolates violation
       ;; construction rather than first-use registry realization.
@@ -757,9 +780,7 @@
         (is (= 1 (:seon.instrument/problem-count instrument-data)))
         (is (= :int (:seon.error/expected instrument-data)))
         (is (identical? registry
-                        (get-in instrument-data [:seon.error/problems 0 :seon.error/offending]))))
-      (finally
-        (instrument/remove!)))))
+                        (get-in instrument-data [:seon.error/problems 0 :seon.error/offending]))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Idempotence, and the measured hot-reload strip
@@ -824,16 +845,21 @@
            (doseq [name names] (ns-unmap 'seon.instrument-test name))))))))
 
 (deftest applying-twice-is-applying-once
-  (instrumented!
-   (fn [first-result]
-     (let [second-result (instrument/apply! {})]
-       (is (pos? (:seon.instrument/instrumented first-result))
-           "a :panic apply! that instruments zero vars is a bug")
-       (is (= (:seon.instrument/instrumented first-result)
-              (:seon.instrument/instrumented second-result)))
-       (is (= (instrument/instrumented) (instrument/instrumented))
-           "and the second pass wrapped no wrapper: malli unwraps to
-            ::original before re-instrumenting")))))
+  (let [candidates [#'doubled #'integer-inspector]
+        symbols (mapv symbol candidates)]
+    (instrumented!
+     symbols
+     (fn [first-result]
+       (let [second-result (arm-suite! symbols)]
+         (is (pos? (:seon.instrument/instrumented first-result))
+             "an apply! that instruments zero vars is a bug")
+         (is (= (:seon.instrument/registered first-result)
+                (:seon.instrument/registered second-result)))
+         (doseq [candidate candidates]
+           (is (contains? (instrument/instrumented) candidate))
+           (is (nil? (:seon.instrument/var (meta (mi/-f->original @candidate))))
+               "the second pass wrapped no wrapper: arming unwraps to
+                ::original before re-instrumenting")))))))
 
 (deftest authored-contract-changes-rearm-without-reloading
   (let [var-name (symbol (str "contract-freshness-" (random-uuid)))
@@ -843,17 +869,19 @@
         projection (schema/build-projection
                     (assoc (schema/snapshot)
                            old-key [:map [::value :int]]
-                           new-key [:map [::value [:or :int :string]]]))]
+                           new-key [:map [::value [:or :int :string]]]))
+        [caps policy] (default-policy)
+        arm! #(arm-with! candidate (:malli/schema (meta candidate)) projection caps policy)]
     (try
       (schema/call-with-projection
        projection
        (fn []
          (alter-meta! candidate assoc :malli/schema [:=> [:cat old-key] :map])
-         (instrument/apply! {:seon.schema/projection projection})
+         (arm!)
          (let [before @candidate]
            (is (thrown? Exception (candidate {::value "new input"})))
            (alter-meta! candidate assoc :malli/schema [:=> [:cat new-key] :map])
-           (instrument/apply! {:seon.schema/projection projection})
+           (arm!)
            (is (not (identical? before @candidate)))
            (is (identical? (mi/-f->original before) (mi/-f->original @candidate))
                "Only the contract changed; the loaded function was not replaced.")
@@ -863,7 +891,7 @@
              (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) (ex-data failure)))
              (is (str/includes? (ex-message failure) (str new-key))))
            (let [current @candidate]
-             (instrument/apply! {:seon.schema/projection projection})
+             (arm!)
              (is (identical? current @candidate))))))
       (finally (ns-unmap 'seon.instrument-test var-name)))))
 
@@ -881,10 +909,12 @@
         after-projection (schema/build-projection
                           (assoc forms entity-key
                                  [:map [:seon.instrument-test/value [:or :int :string]]]))
+        [caps policy] (default-policy)
         arm (fn [projection]
               (schema/call-with-projection
                projection
-               #(instrument/apply! {:seon.schema/projection projection})))]
+               #(doseq [v [candidate unrelated]]
+                  (arm-with! v (:malli/schema (meta v)) projection caps policy))))]
     (try
       (alter-meta! candidate assoc :malli/schema [:=> [:cat alias-key] :map])
       (alter-meta! unrelated assoc :malli/schema [:=> [:cat :int] :int])
@@ -935,8 +965,10 @@
            changed-projection (schema/build-projection
                                (assoc forms request-key [:map [::value :string]]))
            candidate (intern namespace-name 'content-keyed identity)
-           arm! #(instrument/apply! {:seon.schema/projection %})]
-       (alter-meta! candidate assoc :malli/schema [:=> [:cat request-key] :map])
+           contract [:=> [:cat request-key] :map]
+           [caps policy] (default-policy)
+           arm! #(arm-with! candidate contract % caps policy)]
+       (alter-meta! candidate assoc :malli/schema contract)
        ;; equal inputs answer the one built projection (39960bb15, seon.cache
        ;; since 92b22cbf1), so equal content is one wrapper by construction
        (is (identical? first-projection equal-projection))
@@ -996,6 +1028,7 @@
 
 (deftest prefix-related-sibling-vars-keep-their-own-contracts
   (instrumented!
+   '[seon.instrument-test/prefix-contract seon.instrument-test/prefix-contract-in]
    (fn [_]
      (let [database-form
            [:symbol {:seon.db/identity true}]]
@@ -1137,6 +1170,7 @@
   ;; `def`, the ::original meta is gone, NOTHING warns, and the schema
   ;; stays registered so the registry now disagrees with reality
   (instrumented!
+   '[seon.instrument-test/doubled]
    (fn [_]
      ;; 2.0 violates `:int` and yet multiplies perfectly well, which is
      ;; what makes it the honest probe here: the point is that the
@@ -1151,67 +1185,64 @@
      (is (= 4.0 (doubled 2.0))
          "after a plain re-eval the wrapper is gone and the bad call
           runs — silently, which is the whole problem")
-     (instrument/apply! {})
+     (arm-suite! '[seon.instrument-test/doubled])
      (is (thrown? Exception (doubled 2.0))
          "and apply! is the explicit re-application that restores it"))))
 
 (deftest applying-uses-the-acquired-projection-without-publishing-it
+  ;; No projection in the request: `apply!` arms from the acquired projection
+  ;; state. Only this test's own Var is named, so nothing else re-arms.
   (let [schema-key :seon.instrument-test/late-value
         var-name (symbol (str "late-contract-" (random-uuid)))
-        contract-var (intern *ns* var-name identity)
-        projection
-        (schema/build-projection (assoc (schema/snapshot) schema-key :int))
+        contract-var (intern 'seon.instrument-test var-name identity)
+        function-symbol (symbol contract-var)
+        contract [:=> [:cat schema-key] schema-key]
+        projection (schema/projection-with-function-contract
+                    (schema/build-projection (assoc (schema/snapshot) schema-key :int))
+                    function-symbol contract {:seon.schema.admission/source :core})
         projection-state (atom {:seon.schema/projection projection})]
     (try
-      (alter-meta! contract-var assoc
-                   :malli/schema [:=> [:cat schema-key] schema-key])
+      (alter-meta! contract-var assoc :malli/schema contract)
       (let [observed
             (schema/call-with-projection-state
              projection-state
              #(do
                 (instrument/apply!
-                 {})
+                 {:seon.instrument/changed-identities #{[:seon.fn/sym function-symbol]}})
                 (schema/snapshot)))]
         (is (contains? observed schema-key)))
-
       (is (not (contains? (schema/snapshot) schema-key))
           "the acquired projection remains cluster-local")
+      (is (contains? (instrument/instrumented) contract-var))
       (is (thrown? Exception (@contract-var "not-an-int"))
           "Malli collected the contract against the acquired projection")
       (finally
-        (instrument/remove!)
-        (ns-unmap *ns* var-name)))))
+        (ns-unmap 'seon.instrument-test var-name)))))
 
 (deftest applying-without-a-handed-projection-refuses-before-collection
-  (let [collected? (atom false)
-        result
-        ;; A PROJECTION STATE IS A REFERENCE HOLDING ONE ENVIRONMENT, and
-         ;; the declared contract says so; the missing-projection subject is
-         ;; the redefined `handed-projection` below, not a nil in the state.
-         (schema/call-with-projection-state
-         (atom {})
-         (fn []
-           (with-redefs-fn
-            {#'schema/handed-projection (fn [] nil)
-             #'instrument/collect-contracts!
-             (fn [_]
-               (reset! collected? true)
-               [])}
-            (fn []
-              (instrument/apply!
-               {})))))]
-    (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/registration-error) result))
-    (is (false? @collected?)
-        "a missing projection must refuse before Malli collects contracts")))
+  ;; With no projection supplied or bound, `apply!` answers its registration
+  ;; error before selecting any Var, so the named suite Var keeps its root.
+  ;; The bindings are this thread's; no Var root is redefined.
+  (let [before @#'doubled
+        result (with-bindings {#'schema/*projection* nil
+                               #'schema/*projection-state* nil}
+                 (instrument/apply!
+                  {:seon.instrument/changed-identities
+                   #{[:seon.fn/sym 'seon.instrument-test/doubled]}}))]
+    (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/registration-error) result)
+        (pr-str result))
+    (is (= :seon.schema/projection (:seon.error/member result)))
+    (is (identical? before @#'doubled)
+        "a missing projection refuses before any Var is unarmed or re-armed")))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The dial
 ;;; ---------------------------------------------------------------------------
 
 (deftest cluster-policy-and-removal-preserve-the-jvm-wrappers
-  (instrument/apply! {})
+  ;; boot's wrappers; the test arms nothing
   (let [before (into {} (map (juxt identity deref)) (instrument/instrumented))]
-    (is (pos? (count before)))
+    (is (contains? before #'error/value))
     (is (= (count before) (instrument/remove!)))
     (is (= (count before) (instrument/remove!)))
     (is (every? (fn [[candidate root]] (identical? root @candidate)) before))
@@ -1222,42 +1253,30 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest the-selection-is-declared-vars-with-schemas-and-nothing-else
-  ;; Exercise boot's arming owner, `apply!` without changed identities
-  ;; (`collect-contracts!` over every loaded namespace), against the executing
-  ;; projection. Removing this one wrapper makes selection observable even
-  ;; though this namespace was armed before the test ran.
-  (let [projection (schema/handed-projection)
-        boundary #'private-integer-boundary]
+  ;; The selection is `armable`, Malli's own rule over a namespace's interns,
+  ;; private included, and `apply!` arms each selected Var. Proven on this
+  ;; namespace's population through the changed-identity path: removing one
+  ;; private wrapper makes the selection observable, and no production Var is
+  ;; re-armed.
+  (let [boundary #'private-integer-boundary
+        population (instrument/armable ['seon.instrument-test])
+        symbols (mapv symbol population)
+        original-error {:seon.error/at (java.util.Date.)
+                        :seon.error/layer :seon.instrument-test/reader
+                        :seon.error/operation 'seon.instrument-test/read
+                        :seon.error/message "The read was refused."}]
     (alter-var-root boundary mi/-f->original)
     (is (not (contains? (instrument/instrumented) boundary)))
-    (let [measurements
-          (mapv
-           (fn [phase]
-             (let [started (System/nanoTime)
-                   result (instrument/apply!
-                           {:seon.schema/projection projection})]
-               {:seon.instrument-test/phase phase
-                :seon.instrument-test/elapsed-ms
-                (/ (double (- (System/nanoTime) started)) 1000000.0)
-                :seon.instrument-test/applied result}))
-           [:rearm-private :unchanged])
-          wrapped (instrument/instrumented)
-          original-error {:seon.error/at (java.util.Date.)
-                          :seon.error/layer :seon.instrument-test/reader
-                          :seon.error/operation 'seon.instrument-test/read
-                          :seon.error/message "The read was refused."}]
-      (prn {:seon.instrument-test/arming measurements})
-      (is (every? #(pos? (get-in % [:seon.instrument-test/applied
-                                    :seon.instrument/instrumented])) measurements))
-      (is (= (mapv :seon.instrument-test/applied measurements)
-             (vec (repeat 2 (:seon.instrument-test/applied (first measurements))))))
-      (is (set/subset? (instrument/armable ['seon.instrument-test]) wrapped)
+    (is (true? (:private (meta boundary))))
+    (is (contains? population boundary) "the selection includes a private declared contract")
+    (is (not (contains? population #'many-invalid-values)) "an undeclared function is not selected")
+    (is (every? #(some? (mi/-schema %)) population))
+    (let [results (mapv (fn [_] (arm-suite! symbols)) [:rearm-private :unchanged])
+          wrapped (instrument/instrumented)]
+      (is (apply = results))
+      (is (set/subset? population wrapped)
           "every declared contract of the namespace is armed")
-      (is (true? (:private (meta boundary))))
-      (is (contains? wrapped #'error/value) "a public var with a schema")
-      (is (contains? wrapped boundary)
-          "boot's arming includes a private declared contract")
-      (is (every? #(some? (mi/-schema %)) wrapped))
+      (is (contains? wrapped #'error/value) "boot's public production wrapper stays armed")
       (is (= 7 (private-integer-boundary 7)))
       (doseq [[kind call]
               [[:input #(private-integer-boundary "not an integer")]
@@ -1318,35 +1337,34 @@
     (is (= expected (last (:malli/schema (meta candidate)))) (str candidate))))
 
 (deftest the-work-launcher-api-is-collected-without-an-allowlist
-  (instrumented!
-   (fn [_]
-     (doseq [boundary [#'flow/start-work-launcher!
-                       #'flow/stop-work-launcher!
-                       #'flow/submit!]]
-       (is (some? (mi/-schema boundary))
-           (str boundary " was omitted from Malli collection"))))))
+  (let [selected (instrument/armable ['seon.flow])]
+    (doseq [boundary [#'flow/start-work-launcher!
+                      #'flow/stop-work-launcher!
+                      #'flow/submit!]]
+      (is (some? (mi/-schema boundary))
+          (str boundary " was omitted from Malli collection"))
+      (is (contains? selected boundary)))))
 
 (deftest dependency-free-linters-join-production-instrumentation
-  (instrumented!
-   (fn [_]
-     (let [wrapped (instrument/instrumented)]
-       (is (contains? wrapped #'docstring/check-source))
-       (is (contains? wrapped #'markdown/parse)))
-     (is (:seon.dev.docstring/clean?
-          (docstring/check-source
-           {:seon.dev.docstring/source "(ns example)"})))
-     (is (= "# Example\n"
-            (:seon.dev.markdown/content
-             (markdown/parse
-              {:seon.dev.markdown/content "# Example\n"}))))
-     (doseq [failure [(try
-                        (docstring/check-source
-                         {:seon.dev.docstring/source 1})
-                        (catch Exception thrown thrown))
-                      (try
-                        (markdown/parse {:seon.dev.markdown/content 1})
-                        (catch Exception thrown thrown))]]
-       (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) (ex-data failure)))))))
+  ;; The linters are selected by the one rule, and the wrapper arming would
+  ;; install refuses a wrong call; it is built without installing it.
+  (let [[caps policy] (default-policy)
+        projection (schema/handed-projection)
+        selected (instrument/armable ['seon.dev.docstring 'seon.dev.markdown])]
+    (is (contains? selected #'docstring/check-source))
+    (is (contains? selected #'markdown/parse))
+    (is (:seon.dev.docstring/clean?
+         (docstring/check-source
+          {:seon.dev.docstring/source "(ns example)"})))
+    (is (= "# Example\n"
+           (:seon.dev.markdown/content
+            (markdown/parse
+             {:seon.dev.markdown/content "# Example\n"}))))
+    (doseq [[candidate argument] [[#'docstring/check-source {:seon.dev.docstring/source 1}]
+                                  [#'markdown/parse {:seon.dev.markdown/content 1}]]]
+      (let [wrapper (unarmed-wrapper candidate (mi/-schema candidate) projection caps policy)]
+        (is ((schema/projection-validator projection :seon.instrument/contract-error)
+             (test-support/refusal-data #(wrapper argument))))))))
 
 (deftest restoring-instrumentation-state-never-reinstalls-a-replaced-definition
   ;; THE CLASS (gate batch 88, worker pool-1, run tmp/test-runs/run.j9rx0e):
@@ -1358,8 +1376,6 @@
   ;; refused, so its own armed output contract refused six later calls across
   ;; three namespaces in that worker. A captured root is restorable only while
   ;; the definition under it is still the one it was compiled against.
-  (instrumented!
-   (fn [_]
      (let [namespace-name 'r7.reload.probe
            ;; No file on any classpath, so nothing can load this namespace again.
            load! (fn []
@@ -1398,7 +1414,7 @@
              (is (= (dec entering) (count (instrument/instrumented)))
                  "and nothing else is armed or unarmed by it")))
          (finally
-           (remove-ns namespace-name)))))))
+           (remove-ns namespace-name)))))
 
 (deftest named-generators-survive-compilation-in-refusal-evidence
   (test-support/with-database
@@ -1437,7 +1453,7 @@
        (is (< (count printed) 2000) printed)))))
 
 (deftest the-caller-frame-is-part-of-the-refusal-sentence
-  (arm-prefix-contract!)
+  (arm-suite! '[seon.instrument-test/prefix-contract])
   (let [refusal (test-support/refusal-data #(prefix-contract "wrong"))
         caller (:seon.instrument/caller refusal)]
     (is (string? caller))
@@ -1448,7 +1464,7 @@
 (deftest host-diagnostics-use-the-loaded-vars-arglists
   (test-support/with-database
    (fn [connection]
-     (arm-prefix-contract!)
+     (arm-suite! '[seon.instrument-test/prefix-contract])
      ;; The stored declaration is replaced exactly: an upsert would keep the
      ;; owned attributes the new definition drops.
      (test-support/transacted!
@@ -1604,38 +1620,36 @@
         (is (not (contains? (instrument/instrumented) candidate))))
       (finally (ns-unmap 'seon.instrument-test name)))))
 
-(deftest cold-arming-covers-the-complete-armable-population
-  (doseq [candidate (instrument/instrumented)]
-    (alter-var-root candidate mi/-f->original))
-  (let [population (instrument/armable (map ns-name (all-ns)))
-        applied (instrument/apply! {:seon.schema/projection (schema/handed-projection)})]
-    (is (pos? (count population)))
-    (is (= population (instrument/instrumented)))
-    (is (= (count population) (:seon.instrument/registered applied)
-           (:seon.instrument/instrumented applied)))))
-
 (deftest boot-arming-arms-every-loaded-contract-with-its-definition-digest
-  ;; Boot calls this owner once (`seon.cluster.boot/stand-cluster-runtime!`).
-  ;; e0577a6fb narrowed adoption to changed identities and left boot arming
-  ;; nothing, so a booted cluster ran with zero host wrappers; this regression
-  ;; asserts the wanted population on the canonical fixture's program.
+  ;; Boot calls its arming owner once (`seon.cluster/arm-host-program!`), with
+  ;; the cluster's supplied-default rows and the program's definition digests.
+  ;; e0577a6fb once left boot arming nothing; re-running it here would re-arm
+  ;; every production Var for the whole JVM, so this reads what boot armed.
+  ;; The population is every declared contract in the program's `src/` files.
   (test-support/with-database
    (fn [connection]
      (let [database (db/db connection)
-           result (cluster/arm-host-program!
-                   {:seon.profile/definition-digests (cluster/definition-digests database)
-                    :seon.cluster/program-namespaces []
-                    ;; The cluster's supplied-default rows the wrappers plan from.
-                    :seon.db/db database}
-                   (test-support/effective-config)
-                   nil)
+           namespaces (into #{}
+                            (keep (fn [[function-symbol path]]
+                                    (when (str/starts-with? path "src/")
+                                      (symbol (namespace function-symbol)))))
+                            (db/q '[:find ?sym ?path
+                                    :where [?function :seon.fn/sym ?sym]
+                                           [?function :seon.fn/file ?file]
+                                           [?file :seon.fn.file/relative-path ?path]]
+                                  database))
+           population (instrument/armable (vec namespaces))
            armed (instrument/instrumented)
            digests (cluster/definition-digests database ['seon.id/valid?])]
-       (is (= (count armed) (:seon.instrument/instrumented result)))
-       (is (= (instrument/armable (map ns-name (all-ns))) armed)
-           "every loaded contracted Var is armed, and nothing else")
+       (is (pos? (count population)))
+       (is (= #{} (set/difference population armed))
+           "every loaded contracted program Var is armed")
+       (is (= #{} (into #{} (remove #(:seon.call-preparation/snapshot
+                                      (:seon.instrument/policy (meta @%))))
+                        (set/intersection population armed)))
+           "each wrapper carries its call-preparation plan")
        (is (= (get digests 'seon.id/valid?)
-              (:seon.profile/digest (:seon.instrument/cell (meta @(requiring-resolve (quote seon.id/valid?))))))
+              (:seon.profile/digest (:seon.instrument/cell (meta @(requiring-resolve 'seon.id/valid?)))))
            "the host cell carries the function row's definition digest")))))
 
 (deftest a-root-replaced-outside-a-reload-is-named
