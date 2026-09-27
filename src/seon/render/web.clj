@@ -3514,7 +3514,7 @@
        "AI face: the text the model reads. HTML face: what a human explores. #k: graph order (definitions before uses, turns by time)."
        " " (toggle "true" "open all") " " (toggle "false" "close all")]]
      [:details {:class "seon-graph-sent" (keyword "data-on:toggle") (str "el.open && @get('" (route/path ::route/agent-debug {:id agent-id} {:sent "true"}) "')")}
-      [:summary "The context as sent — the prompt this agent's next turn composes (seon.cluster.prompt/prompt); the walk below is not yet on that path"]
+      [:summary "The context as sent — the prompt this agent's next turn composes (seon.cluster.prompt/prompt): its turns' stored shown text, render forms with their results; the walk below is not yet on that path"]
       [:div {:id (block/surface-id (keyword "graph-sent" agent-id))} "Composing…"]]
      (cond
        (not database) [:p {:class "seon-debug-empty"} (:seon.error/message graph)]
@@ -3548,7 +3548,10 @@
                             (str/join " " (cons "root" (map (fn [[a t]] (str "—" a "→ " (node-text t))) (paths id))))
                             "the root")]
                          [:div {:class "seon-graph-faces"}
-                          [:div {:class "seon-graph-face seon-graph-ai"} [:h3 "AI face"] (if (string? ai) [:pre ai] ai)]
+                          [:div {:class "seon-graph-face seon-graph-ai"}
+                           ;; This page calls no evaluator: the forms are the render function's return, unevaluated.
+                           [:h3 "AI face · forms as the render returns them, not evaluated (the agent sees them evaluated in its system turn; see the context as sent)"]
+                           (if (string? ai) [:pre ai] ai)]
                           [:div {:class "seon-graph-face seon-graph-html"} [:h3 "HTML face"] (if (string? html) [:pre html] html)]]
                          (node-attributes-html projection structure database #(graph-debug-href agent-id query {"root" % "more" nil}) (nodes id))]))))])]))
 
