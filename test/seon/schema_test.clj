@@ -167,11 +167,11 @@
                  [:my.agent/steward :seon.agent/id "root" ""]
                  [:my.agent/namespace :seon.ns/name 'my.example "my.example"]
                  [:my.message/to :seon.agent/id "root" ""]]]
-          (let [row (seon.db/pull database
+          (let [entity (seon.db/pull database
                                  [:seon.schema/key :seon.schema/form]
                                  [:seon.schema/key surface])]
-            (is (= surface (:seon.schema/key row)))
-            (is (seq (:seon.schema/form row)))
+            (is (= surface (:seon.schema/key entity)))
+            (is (seq (:seon.schema/form entity)))
             (is (m/validate surface valid options))
             (is (not (m/validate surface invalid options)))
             (doseq [value [valid invalid nil 42 :root 'root]]
@@ -327,7 +327,7 @@
          (testing (str schema-key)
           (try
            (let [stored? (storable? schema-key)
-                 row (into {}
+                 entity (into {}
                            (keep (fn [[attribute options :as entry]]
                                    (let [reference? (reference-entry? projection entry)]
                                      (when (or reference? (not (and (map? options) (:optional options))))
@@ -342,13 +342,13 @@
                            entries)
                  structural (m/schema (into [:map] entries)
                                       (:seon.schema.projection/compile-options projection))
-                 _ (is (m/validate structural row)
+                 _ (is (m/validate structural entity)
                        (pr-str {:schema schema-key
-                                :errors (mapv :in (:errors (m/explain structural row)))}))]
+                                :errors (mapv :in (:errors (m/explain structural entity)))}))]
              ;; Reference grammar is independent of whole-parent count and domain
              ;; constraints. Complete owning values are proved separately through
              ;; the canonical writer; an id-only child cannot prove those constraints.
-             (is (map? row)))
+             (is (map? entity)))
            (catch Throwable failure
              (is false (str schema-key ": " (ex-message failure)))))))))
        (finally (java.nio.file.Files/deleteIfExists lock-path)))))))
@@ -853,11 +853,11 @@
              (-> (schema/matching-shapes-in projection additional)
                  first
                  :seon.render/html))
-          "custom Malli render properties survive in the shape row")
+          "custom Malli render properties survive in the shape entity")
       (is (empty? (schema/matching-shapes-in projection invalid))
           "an invalid declared optional attribute still refuses"))))
 
-(deftest canonical-rows-carry-arbitrary-namespaced-properties
+(deftest canonical-entities-carry-arbitrary-namespaced-properties
   (let [schema-key :seon.schema-test/class
         definition
         [:map {:seon.config/dial true
@@ -867,20 +867,20 @@
         forms {:seon.config/dial :boolean
                :gen/schema :seon.schema/definition
                schema-key definition}
-        row (some #(when (= schema-key (:seon.schema/key %)) %)
-                  (schema/canonical-schema-rows
+        entity (some #(when (= schema-key (:seon.schema/key %)) %)
+                  (schema/canonical-schema-entities
                    (schema/build-projection
                     (merge (:seon.schema.projection/forms (schema/handed-projection)) forms))
                    forms))]
-    (is (= true (:seon.config/dial row)))
-    (is (not (contains? row :gen/schema))
+    (is (= true (:seon.config/dial entity)))
+    (is (not (contains? entity :gen/schema))
         "a declared but non-storable property remains compile-time Malli data")
-    (is (not (contains? row :seon.unknown/property))
+    (is (not (contains? entity :seon.unknown/property))
         "an undeclared property remains compile-time Malli data")
     (is (= #{:seon.error/message}
-           (:seon.schema/references row))
+           (:seon.schema/references entity))
         "an external canonical reference remains a persisted direct edge")
-    (is (= (pr-str definition) (:seon.schema/form row)))))
+    (is (= (pr-str definition) (:seon.schema/form entity)))))
 
 (deftest matching-shapes-derive-required-attributes-through-and-refs
   (let [forms {:seon.error/message :string
@@ -896,11 +896,11 @@
         projection (schema/build-projection forms)
         value {:seon.schema-test/refused true
                :seon.error/message "The transition was refused."}
-        row (get (:seon.schema.projection/shape-rows projection)
+        entity (get (:seon.schema.projection/shape-rows projection)
                  :seon.schema-test/refused-error)]
     (is (= #{:seon.schema-test/refused :seon.error/message}
-           (:seon.schema/required-attrs row)))
-    (is (= 'seon.error/render-ai (:seon.render/ai row)))
+           (:seon.schema/required-attrs entity)))
+    (is (= 'seon.error/render-ai (:seon.render/ai entity)))
     (is (= :seon.schema-test/refused-error
            (-> (schema/matching-shapes-in projection value)
                first
@@ -1086,12 +1086,12 @@
        (is (not (m/validate compiled (assoc value ::literal [:or payload :seon.db/component-entity]))))
        (is (m/validate compiled {::tree {::children #{{::children #{}}}} ::literal payload}))))))
 
-(deftest a-component-bearing-row-validates-its-own-declared-shape
+(deftest a-component-bearing-entity-validates-its-own-declared-shape
   ;; CLASS: every component attribute declares `[<collection>
   ;; {:seon.db/component true} :seon.db/ref]`, and `:seon.db/ref` admits an
   ;; entity id, a string, a lookup ref, or a map with :db/id — not a new
   ;; component's OWN entity map, which the producer actually builds and
-  ;; Datahike's transaction-data grammar expects. So a row that carried its
+  ;; Datahike's transaction-data grammar expects. So an entity that carried its
   ;; components was refused by its own declared shape, and an agent's first
   ;; `defn` died at `seon.program/with-contract-facts`
   ;; (docs/seon/issues/a-component-value-is-refused-by-its-own-ref-shape.md).
@@ -1135,10 +1135,10 @@
           "a non-component ref requires :db/id on a reference map")
       (is (false? ((schema/projection-validator projection :seon.fn/arities) [{}]))
           "an empty map is not a component entity"))
-    (testing "the canonical indexed function row validates"
+    (testing "the canonical indexed function entity validates"
       (is ((schema/projection-validator projection :seon.fn/fn)
-           (test-support/program-fn-row 'seon.id/id))))
-    (testing "shape selection still picks each row's own family"
+           (test-support/program-fn-entity 'seon.id/id))))
+    (testing "shape selection still picks each entity's own family"
       (let [projection (schema/build-projection forms)
             matches (fn [value]
                       (set (map :seon.schema/key
@@ -1687,7 +1687,7 @@
 
 (deftest a-stored-declaration-naming-a-deleted-predicate-stays-readable
   ;; A resume reads the published commit before the changed files replace its
-  ;; rows; a contract there may name a predicate the loaded files deleted
+  ;; entities; a contract there may name a predicate the loaded files deleted
   ;; (ec1b53b38 deleted seon.db/projection-value-key?). It compiles to a
   ;; callable that refuses by name, never a projection that refuses to build.
   (let [deleted @#'seon.schema/deleted-predicate-functions
@@ -1791,7 +1791,7 @@
   ;; CLASS: a tightened authoring rule judges a new or changed declaration at
   ;; admission (`projection-with-schema`, `register!`, the edit hook), never a
   ;; population it did not admit. A projection build, whole or derived from a
-  ;; base as an as-of view derives its older rows, compiles what it holds.
+  ;; base as an as-of view derives its older entities, compiles what it holds.
   (let [verdict (fn [thunk]
                   (try (thunk) :admitted
                        (catch clojure.lang.ExceptionInfo e
@@ -1910,7 +1910,7 @@
                     projection {:seon.schema/form [:=> [:cat [:fn 'review.none/p?]] :int]
                                 :seon.schema/mode :shape}))))))
 
-(deftest schema-scoped-admissions-are-the-schema-rows-of-the-loader's-admissions
+(deftest schema-scoped-admissions-are-the-schema-entities-of-the-loader's-admissions
   ;; Contracts-out §3 (N5.1): the reader slice 4 switches to answers exactly the
   ;; schema-key half of what the loader reads today.
   (let [database (seon.db/db (:seon.db/connection (test-support/execution-handle nil)))
@@ -1918,21 +1918,21 @@
     (is (= (into {} (filter (fn [[[attribute _] _]] (= :seon.schema/key attribute))) loader)
            (#'schema/schema-scoped-admissions database)))))
 
-(deftest committed-rows-open-without-re-admission-and-writes-are-admitted
-  ;; A published commit whose rows today's rules would refuse still opens:
-  ;; reading history derives its projection from its own rows; completeness
+(deftest committed-entities-open-without-re-admission-and-writes-are-admitted
+  ;; A published commit whose entities today's rules would refuse still opens:
+  ;; reading history derives its projection from its own entities; completeness
   ;; and renderer coherence judge writes. Classes: the 6ab855c9 build's
   ;; :seon.render/db-unit renderer inputs after db-unit's deletion, and a
   ;; contract a newer completeness rule refuses (an agent's bare nilable return).
   (let [database (seon.db/db (:seon.db/connection (test-support/execution-handle nil)))
-        rows {:seon.schema/database-value database
+        entities {:seon.schema/database-value database
               :seon.schema/schema-rows [[:review/incoherent-input ":int" 1]
                                         [:review/shape "[:map {:seon.render/ai review.render/render} [:review/x :int]]" 1]
                                         [:review/x ":int" 1]]
               :seon.schema/function-contract-rows
               [['review.render/render "[:=> [:cat :review/incoherent-input] :string]" 1]
                ['review.nil/f "[:=> [:cat :review/x] [:maybe :string]]" 1]]}
-        projection (schema/projection-from-rows rows)]
+        projection (schema/projection-from-entities entities)]
     (is (contains? (:seon.schema.projection/forms projection) :review/shape) "renderer relation opens")
     (is (contains? (:seon.schema.projection/function-contracts projection) 'review.nil/f)
         "a contract today's completeness rules refuse opens")
@@ -1955,9 +1955,9 @@
                built (schema/build-projection
                       (assoc (:seon.schema.projection/forms (seon.db/carried-projection (seon.db/db connection)))
                              schema-key definition))
-               row (first (schema/canonical-schema-rows built {schema-key definition}))
+               entity (first (schema/canonical-schema-entities built {schema-key definition}))
                basis (:max-tx @connection)
-               refusal (seon.db/transact! connection [row])]
+               refusal (seon.db/transact! connection [entity])]
            (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
            (is (= renderer (get-in refusal [:seon.error/data :seon.render/function]))
                "the renderer with no declared contract is named by the admission refusal")

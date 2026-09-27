@@ -40,10 +40,10 @@
          (is (nil? (:db/id before)))
          (is (some? (:db-after result)) (pr-str result))
          (is (= [receipt-id ordinal] provenance)
-             "the receipt row precedes the transaction's provenance ref"))))))
+             "the receipt entity precedes the transaction's provenance ref"))))))
 
 (deftest a-write-during-a-form-opens-its-run-first
-  ;; One commit per form writes a source run's rows at its settlement, yet a
+  ;; One commit per form writes a source run's entities at its settlement, yet a
   ;; form's own durable writes name its evaluation (the receipt), its run
   ;; (effects, faults, captures). Every write the form makes carries the run's
   ;; open first and the writer applies it once (task c9e0cde3edb3).

@@ -74,12 +74,12 @@
           [?namespace :seon.ns/name ?namespace-name]]
         db cluster-name)))
 
-(deftest source-has-one-owner-editable-getting-started-row
+(deftest source-has-one-owner-editable-getting-started-entity
   (is (re-find #"seon\.render/walk" instruction/getting-started-text))
   (is (= 1 (count (re-seq #"```clojure" instruction/getting-started-text))))
   (is (= [{:seon.cluster.instruction/id :getting-started
            :seon.cluster.instruction/text instruction/getting-started-text}]
-         (instruction/seed-rows)))
+         (instruction/seed-entities)))
   (test-support/with-database
     (fn [connection]
       (test-support/transacted!
@@ -87,8 +87,8 @@
                    [{:seon.cluster.instruction/id :getting-started
                      :seon.cluster.instruction/text "Owner revision."}])
       (test-support/transacted! connection
-                              (#'cluster/instruction-row-changes
-                               @connection (instruction/seed-rows)))
+                              (#'cluster/instruction-entity-changes
+                               @connection (instruction/seed-entities)))
       (is (= #{:getting-started}
              (set
               (db/q '[:find [?id ...]
@@ -125,7 +125,7 @@
                      ;; One attribute on a cluster that already exists is a
                      ;; datom: an identity-keyed map is read against the whole
                      ;; cluster schema and refused for :seon.cluster/config.
-                     (cond-> [(test-support/namespace-row @connection 'my.stale.toolkit)
+                     (cond-> [(test-support/namespace-entity @connection 'my.stale.toolkit)
                               [:db/add [:seon.cluster/name "toolkit"]
                                :seon.cluster/toolkit
                                [:seon.ns/name 'my.stale.toolkit]]]

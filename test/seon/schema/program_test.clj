@@ -6,7 +6,7 @@
 
 (schema.edn/load! {})
 
-(deftest rows-have-one-canonical-persisted-shape
+(deftest entities-have-one-canonical-persisted-shape
   (let [attributes (set (schema/canonical-database-attributes (seon.schema/handed-projection)))]
     (is (= [:enum :io :compute]
            (schema/schema-definition :seon.fn/workload)))
@@ -87,21 +87,21 @@
   (let [catalog (schema/entity-catalog)
         program-keys #{:seon.fn/fn :seon.ns/ns :seon.schema/schema}]
     (testing "the namespace family declares both render projections"
-      (doseq [row (filter (comp #{:seon.ns/ns} :seon.schema/key)
+      (doseq [entity (filter (comp #{:seon.ns/ns} :seon.schema/key)
                           catalog)]
-        (is (contains? row :seon.render/ai))
-        (is (contains? row :seon.render/html))))
+        (is (contains? entity :seon.render/ai))
+        (is (contains? entity :seon.render/html))))
     (testing "families with no built specialist stay bare"
-      (doseq [row (filter (comp (disj program-keys :seon.ns/ns)
+      (doseq [entity (filter (comp (disj program-keys :seon.ns/ns)
                                 :seon.schema/key)
                           catalog)]
-        (is (not (contains? row :seon.render/ai)))
-        (is (not (contains? row :seon.render/html)))))
+        (is (not (contains? entity :seon.render/ai)))
+        (is (not (contains? entity :seon.render/html)))))
     (testing "every projection the catalog still advertises is loadable"
-      (doseq [row catalog
+      (doseq [entity catalog
               projection-key [:seon.render/ai :seon.render/html]
-              :let [projection (get row projection-key)]
+              :let [projection (get entity projection-key)]
               :when projection]
         (is (var? (requiring-resolve projection))
-            (str (:seon.schema/key row)
+            (str (:seon.schema/key entity)
                  " advertises missing " projection-key " " projection))))))

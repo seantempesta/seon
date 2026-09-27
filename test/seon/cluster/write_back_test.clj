@@ -28,9 +28,9 @@
        "(defn caller\n  \"Call the callee.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (callee x))\n"))
 
 (defn- digests
-  "Definition digest by identity of each declaration in `rows`."
-  [rows]
-  (into {} (keep #(when-let [d (:seon.program/definition-digest %)] [(program/row-identity %) d])) rows))
+  "Definition digest by identity of each declaration in `entities`."
+  [entities]
+  (into {} (keep #(when-let [d (:seon.program/definition-digest %)] [(program/row-identity %) d])) entities))
 
 (defn- submit!
   "One ordinary agent turn of `text` on `request`'s agent, observed closed."
@@ -101,17 +101,17 @@
     (spit file (fixture-source fixture-ns))
     (try
       ;; The fixture file indexed onto H by the ordinary analyzer, as publication would.
-      (let [rows (fn/analyze-rows {:seon.fn/root root :seon.fn/roots ["src"]})
+      (let [entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})
             base-text (slurp file)
-            [start stop] (:seon.fn/form-span (first (filter #(= callee (program/row-identity %)) rows)))
-            _ (support/transacted! h-conn (fn/reconcile-tx (db/db h-conn) rows (mapv program/row-identity rows)))
+            [start stop] (:seon.fn/form-span (first (filter #(= callee (program/row-identity %)) entities)))
+            _ (support/transacted! h-conn (fn/reconcile-tx (db/db h-conn) entities (mapv program/row-identity entities)))
             ;; The test is the agent's own, written at its REPL on H before the lane forks.
             _ (with-agent! h-conn cluster-name (str agent-id "-author") fixture-ns
                 #(submit! % "(clojure.test/deftest caller-check (clojure.test/is (= 3 (caller 2))))"))
             _ (support/transacted! h-conn [{:seon.issue/id issue :seon.issue/title "Write back" :seon.issue/status :open
                                             :seon.issue/severity :cleanup :seon.issue/problem "Replace the callee."
                                             :seon.issue/tests #{[:seon.test/sym (symbol (str fixture-ns) "caller-check")]}}])
-            before (digests rows)
+            before (digests entities)
             _ (registry/branch! {:seon.store/store store :seon.store/branch c
                                  :seon.cluster.registry/from (db/commit-id (db/db h-conn))})
             candidate (agent/acquire-context! target nil {:seon.agent/branch c})
@@ -119,7 +119,7 @@
         (try
           ;; The agent is assigned the fixture namespace on C, so its `defn` replaces the file's declaration.
           (with-agent! c-conn cluster-name agent-id fixture-ns #(submit! % replacement))
-          (testing "the agent's evaluation settled one replacement row on its branch"
+          (testing "the agent's evaluation settled one replacement entity on its branch"
             (is (not= (before callee)
                       (:seon.program/definition-digest (db/pull (db/db c-conn) [:seon.program/definition-digest] callee)))))
           (testing "the parent head does not move before the merge"
@@ -143,10 +143,10 @@
               (is (= [callee] (get-in written [:seon.source/written :seon.source/replaced])))
               (is (= (str (subs base-text 0 start) replacement (subs base-text stop)) (slurp file))))
             (testing "the file reindexed from disk declares exactly the merged program"
-              (is (= (assoc before callee merged) (digests (fn/analyze-rows {:seon.fn/root root :seon.fn/roots ["src"]})))))
+              (is (= (assoc before callee merged) (digests (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})))))
             (testing "a second write of the same acceptance refuses: the file is no longer its base"
               (is (= :file-changed (:seon.source/write-back-refused (source/write-back! request)))))
-            (testing "a later change to a written row refuses by name with both digests, before any file is read"
+            (testing "a later change to a written entity refuses by name with both digests, before any file is read"
               (support/transacted! h-conn (support/replacement-tx (db/db h-conn) callee "(defn callee [x] (+ 1 x))" {}))
               (let [now (:seon.program/definition-digest (db/pull (db/db h-conn) [:seon.program/definition-digest] callee))]
                 (is (= [:row-changed {callee merged} {callee now}]
@@ -182,10 +182,10 @@
     (io/make-parents file)
     (spit file (fixture-source fixture-ns))
     (try
-      (let [rows (fn/analyze-rows {:seon.fn/root root :seon.fn/roots ["src"]})
+      (let [entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})
             base-text (slurp file)
-            _ (support/transacted! h-conn (fn/reconcile-tx (db/db h-conn) rows (mapv program/row-identity rows)))
-            before (digests rows)
+            _ (support/transacted! h-conn (fn/reconcile-tx (db/db h-conn) entities (mapv program/row-identity entities)))
+            before (digests entities)
             _ (registry/branch! {:seon.store/store store :seon.store/branch c
                                  :seon.cluster.registry/from (db/commit-id (db/db h-conn))})
             candidate (agent/acquire-context! target nil {:seon.agent/branch c})
@@ -218,7 +218,7 @@
                   (is (str/includes? text function-source))
                   (is (str/includes? text test-source)))
                 (testing "the file reindexed from disk declares the merged program"
-                  (let [reindexed (digests (fn/analyze-rows {:seon.fn/root root :seon.fn/roots ["src"]}))]
+                  (let [reindexed (digests (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]}))]
                     (is (= (set (conj (keys before) added-fn added-test)) (set (keys reindexed))))
                     (is (= (select-keys (digests (db/pull-many (db/db h-conn) [:seon.fn/sym :seon.test/sym :seon.program/definition-digest]
                                                                 [added-fn added-test]))
@@ -249,8 +249,8 @@
     (io/make-parents file)
     (spit file (fixture-source fixture-ns))
     (try
-      (let [rows (fn/analyze-rows {:seon.fn/root root :seon.fn/roots ["src"]})
-            _ (support/transacted! h-conn (fn/reconcile-tx (db/db h-conn) rows (mapv program/row-identity rows)))
+      (let [entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})
+            _ (support/transacted! h-conn (fn/reconcile-tx (db/db h-conn) entities (mapv program/row-identity entities)))
             _ (registry/branch! {:seon.store/store store :seon.store/branch c
                                  :seon.cluster.registry/from (db/commit-id (db/db h-conn))})
             candidate (agent/acquire-context! target nil {:seon.agent/branch c})
@@ -285,8 +285,8 @@
 (deftest ^{:seon.test/long "Two agent turns on C, one prepare-merge! (file proof, then a nested seon.test/run; 60 s is merge-test's measured bound) and two analyses of a one-file fixture."
            :seon.test/long-ms 90000}
   a-require-added-at-the-repl-merges-and-writes-back-its-ns-form
-  ;; Namespaces are program rows: the agent's `ns` form adds a require, the
-  ;; merge carries that row with the declaration that needs it, and write-back
+  ;; Namespaces are program entities: the agent's `ns` form adds a require, the
+  ;; merge carries that entity with the declaration that needs it, and write-back
   ;; splices the `ns` form's span; the namespace's other declarations are
   ;; re-derived under it, so the reindexed file equals the merged program.
   (let [ns-form #(str "(ns " % "\n  \"Write-back fixture.\"\n  (:require [clojure.set]))")]
@@ -296,16 +296,16 @@
      (fn [{:keys [target store issue c root file fixture-ns made]}]
        (let [h-conn (:seon.db/connection target)
              check [:seon.test/sym (symbol (str fixture-ns) "set-check")]
-             namespace-row [:seon.ns/name fixture-ns]
+             namespace-entity [:seon.ns/name fixture-ns]
              proposal (source/prepare-merge! target store c issue #{check} root)
              _ (some->> (:seon.source/candidate proposal) (vswap! made conj))
              _ (is (true? (:seon.test/passed? proposal)) (pr-str proposal))
              accepted (when (:seon.test/passed? proposal) (source/accept-merge! target store proposal))]
-         (is (= #{check namespace-row} (:seon.program/identities accepted)) (pr-str accepted))
+         (is (= #{check namespace-entity} (:seon.program/identities accepted)) (pr-str accepted))
          (when (:seon.source/commit-id accepted)
            (let [written (source/write-back! {:seon.db/connection h-conn :seon.source/accepted accepted :seon.fn/root root})
-                 reindexed (digests (fn/analyze-rows {:seon.fn/root root :seon.fn/roots ["src"]}))]
-             (is (= [namespace-row] (get-in written [:seon.source/written :seon.source/replaced])) (pr-str written))
+                 reindexed (digests (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]}))]
+             (is (= [namespace-entity] (get-in written [:seon.source/written :seon.source/replaced])) (pr-str written))
              (is (str/starts-with? (slurp file) (ns-form fixture-ns)))
              (is (= reindexed
                     (digests (db/pull-many (db/db h-conn) [:seon.fn/sym :seon.test/sym :seon.ns/name :seon.program/definition-digest]

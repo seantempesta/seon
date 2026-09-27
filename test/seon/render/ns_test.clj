@@ -144,15 +144,15 @@
 ;; regressions; the doomed pins are parked, not polished.
 
 (deftest namespace-alias-renders-local-and-target-roles
-  (let [alias-row {:seon.ns.alias/local 'str
+  (let [alias-entity {:seon.ns.alias/local 'str
                    :seon.ns.alias/target-ns 'clojure.string}
         same-name {:seon.ns.alias/local 'seon.fn
                    :seon.ns.alias/target-ns 'seon.fn}
-        html (sut/render-alias-html alias-row)]
+        html (sut/render-alias-html alias-entity)]
     ;; THE AI PROJECTION IS SOURCE (owner ruling 2026-09-07): teaching
     ;; comments, then a form the agent can rerun. It stopped being a bare
     ;; quoted libspec, which told the agent nothing it could act on.
-    (is (str/includes? (sut/render-alias-ai alias-row)
+    (is (str/includes? (sut/render-alias-ai alias-entity)
                        "(dir (quote clojure.string))"))
     (is (str/includes? (sut/render-alias-ai same-name)
                        "(dir (quote seon.fn))"))
@@ -160,7 +160,7 @@
     (is (not (str/includes? (hiccup/->string html)
                             "[clojure.string :as str]")))))
 
-(deftest task-and-schema-rows-render-as-graph-nodes
+(deftest task-and-schema-entities-render-as-graph-nodes
   ;; Class regression: a task and a schema are graph nodes with their own pair.
   ;; Distance 0 names the node; distance 1 shows its content with neighbours as names.
   (support/with-database

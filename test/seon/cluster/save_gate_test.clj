@@ -9,10 +9,10 @@
             [seon.id :as id]
             [seon.test-support :as support]))
 
-(defn- deftest-row
-  "The canonical declaration row of one synthetic deftest in this namespace."
+(defn- deftest-entity
+  "The canonical declaration entity of one synthetic deftest in this namespace."
   [database test-name assertion]
-  (support/program-row database [:seon.test/sym (symbol "seon.cluster.save-gate-test" test-name)]
+  (support/program-entity database [:seon.test/sym (symbol "seon.cluster.save-gate-test" test-name)]
                        (str "(clojure.test/deftest " test-name " (clojure.test/is " assertion "))")))
 
 (defn- writing
@@ -20,7 +20,7 @@
   [test-name assertion]
   (fn [handle]
     (let [connection (:seon.db/connection handle)]
-      (support/transacted! connection [(deftest-row (db/db connection) test-name assertion)])
+      (support/transacted! connection [(deftest-entity (db/db connection) test-name assertion)])
       #{[:seon.test/sym (symbol "seon.cluster.save-gate-test" test-name)]})))
 
 (defn- gate!
@@ -112,8 +112,8 @@
         caller (symbol "seon.cluster.save-gate-test" "gate-caller")
         head #(db/commit-id (db/db connection))]
     (support/transacted! connection
-                         [(support/program-fn-row (db/db connection) callee "(defn gate-callee [] 1)")
-                          (deftest-row (db/db connection) "gate-caller" "(= 1 (seon.cluster.save-gate-test/gate-callee))")])
+                         [(support/program-fn-entity (db/db connection) callee "(defn gate-callee [] 1)")
+                          (deftest-entity (db/db connection) "gate-caller" "(= 1 (seon.cluster.save-gate-test/gate-callee))")])
     (try
       (let [before (head)
             refusal (try (gate! target branch (fn [handle]
@@ -132,7 +132,7 @@
                               (support/transacted! connection
                                                    [[:db/retractEntity [:seon.fn/sym callee]]
                                                     [:db/retractEntity [:seon.test/sym caller]]
-                                                    (deftest-row (db/db connection) "gate-replacement" "(= 1 2)")])
+                                                    (deftest-entity (db/db connection) "gate-replacement" "(= 1 2)")])
                               #{[:seon.fn/sym callee] [:seon.test/sym caller]
                                 [:seon.test/sym 'seon.cluster.save-gate-test/gate-replacement]})))]
           (is (false? (:seon.test/passed? gate)) (:seon.source/tally gate))

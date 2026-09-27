@@ -82,12 +82,12 @@
       (support/transacted! connection [{:seon.message/id "hello" :seon.message/content "Hello\nagain"
                                         :seon.message/from [:seon.agent/id "bob"]
                                         :seon.message/to [:seon.agent/id "alice"]}])
-      (let [row (db/pull @connection '[*] [:seon.message/id "hello"])
-            unit (assoc row :seon.db/db @connection)]
+      (let [entity (db/pull @connection '[*] [:seon.message/id "hello"])
+            unit (assoc entity :seon.db/db @connection)]
         (readable! (message/render-html unit) ["Hello\nagain" "unread" "alice" "bob" "title="])
-        (readable! (message/render-inbox-html [row] @connection) ["Messages (1)" "unread"])
+        (readable! (message/render-inbox-html [entity] @connection) ["Messages (1)" "unread"])
         (is (= (golden :message) (message/render-ai unit)))
-        (is (= (golden :inbox) (message/render-inbox-ai [row])))
+        (is (= (golden :inbox) (message/render-inbox-ai [entity])))
         (support/transacted! connection [{:seon.turn/id "handled-message" :seon.turn/agent [:seon.agent/id "alice"]
                                           :seon.turn/opened-tx "datomic.tx"
                                           :seon.turn/closed-tx "datomic.tx"
@@ -103,12 +103,12 @@
       (support/transacted! connection [{:my.note/id "observation" :my.note/content "Verified"
                                         :my.note/agent [:seon.agent/id "alice"]
                                         :my.note/about [:my.plan.item/id "first"]}])
-      (let [row (assoc (db/pull @connection '[*] [:my.note/id "observation"]) :seon.db/db @connection)
+      (let [entity (assoc (db/pull @connection '[*] [:my.note/id "observation"]) :seon.db/db @connection)
             unit {:seon.agent/id "alice" :seon.db/db @connection}]
-        (readable! (note/render-note-html row) ["observation" "Verified" "Prepare" "datetime="])
+        (readable! (note/render-note-html entity) ["observation" "Verified" "Prepare" "datetime="])
         (readable! (note/render-notes-html unit) ["Current notes (1)" "Prepare"])
-        (is (= (golden :note) (note/render-note-ai {:my.note/id (:my.note/id row)
-                                                   :my.note/content (:my.note/content row)
+        (is (= (golden :note) (note/render-note-ai {:my.note/id (:my.note/id entity)
+                                                   :my.note/content (:my.note/content entity)
                                                    :my.note/agent [:seon.agent/id "alice"]})))
         (is (= (golden :notes) (note/render-notes-ai unit)))))))
 
@@ -165,7 +165,7 @@
       (let [report {:seon.maintenance/entries []}]
         (readable! (maintenance/render-report-html report @connection) ["No maintenance tasks are recorded."])
         ;; An entry's function is the qualified symbol the report reads from
-        ;; its task row (`:seon.fn/sym`, retyped from a string in 0e8f7d323).
+        ;; its task entity (`:seon.fn/sym`, retyped from a string in 0e8f7d323).
         (readable! (maintenance/render-report-html {:seon.maintenance/entries
                      [{:seon.schedule.task/id "collect" :seon.fn/sym 'seon.maintenance/collect}]} @connection)
                    ["collect" "not run"])

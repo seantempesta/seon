@@ -240,7 +240,7 @@
                   :seon.sci.eval/settled-namespaces]],
                 :settled-namespaces
                 [:map-of
-                 {:description "Retiring (no producer or reader since d62d32bf7; delete at the next adoption): the run's working value holds the namespace rows earlier forms store."}
+                 {:description "Retiring (no producer or reader since d62d32bf7; delete at the next adoption): the run's working value holds the namespace entities earlier forms store."}
                  :seon.ns/name :seon.ns/ns],
                 :schema-refused :seon.schema/key,
                 :reader-event-count-error
@@ -284,21 +284,21 @@
   :seon.error/base
   [:map
    {:seon.db/attributes true}
-   ;; exactly one names the observed member: a symbol, or a schema row's key
+   ;; exactly one names the observed member: a symbol, or a schema entity's key
    [:seon.sci.eval/row-member {:optional true} :seon.sci.eval/row-member]
    [:seon.sci.eval/row-symbol {:optional true} :seon.sci.eval/row-symbol]
    [:seon.sci.eval/row-schema-key {:optional true} :seon.sci.eval/row-schema-key]
    [:seon.sci.eval/acquisition-observation :seon.sci.eval/acquisition-observation]]]
 
  :seon.sci.eval/row-member
- [:or {:description "RETIRING (two adoptions): installed as a string, so a symbol could not be stored. No producer or reader remains; row-symbol and row-schema-key replace it. Its declaration goes in the next adoption, once no stored row schema requires it."}
+ [:or {:description "RETIRING (two adoptions): installed as a string, so a symbol could not be stored. No producer or reader remains; entity-symbol and entity-schema-key replace it. Its declaration goes in the next adoption, once no stored entity schema requires it."}
   :symbol :qualified-keyword]
 
  :seon.sci.eval/row-symbol
- [:symbol {:description "The namespace, function or test symbol observed while acquiring a row, stored as a native symbol. A value observation, never a ref; deleting the named declaration leaves this evidence unchanged. Replaces :seon.sci.eval/row-member, which installed as a string."}]
+ [:symbol {:description "The namespace, function or test symbol observed while acquiring an entity, stored as a native symbol. A value observation, never a ref; deleting the named declaration leaves this evidence unchanged. Replaces :seon.sci.eval/row-member, which installed as a string."}]
 
  :seon.sci.eval/row-schema-key
- [:qualified-keyword {:description "The schema key observed while acquiring a schema row, stored as a native keyword. A value observation, never a ref."}]
+ [:qualified-keyword {:description "The schema key observed while acquiring a schema entity, stored as a native keyword. A value observation, never a ref."}]
 
  :seon.sci.eval/acquisition-error
  [:and
@@ -423,17 +423,17 @@
 :stacktrace [:vector {:min 1 :description "An interpreted failure's source location: the author's SCI frames, innermost first, as [function-or-namespace line column] (sci.core/stacktrace). SCI's live callstack is read once and never stored."} [:tuple :symbol :int :int]]
 :position [:tuple {:description "The line and column (1-based) where a form or a declaration inside it starts."} [:int {:min 1}] [:int {:min 1}]]
 :program-change
-[:map {:description "One form's definitions classified by provenance: rows matched to the Var that ran them, unindexed changes, and every declaration made, repeats kept."}
+[:map {:description "One form's definitions classified by provenance: entities matched to the Var that ran them, unindexed changes, and every declaration made, repeats kept."}
  [:seon.sci.eval/matched [:vector [:map [:seon.sci.eval/row :map] [:seon.sci.eval/var :seon.sci.eval/sci-var]]]]
  [:seon.sci.eval/unmatched [:vector :qualified-symbol]]
  [:seon.sci.eval/declared [:vector :seon.sci.eval/program-name]]]
 :program-name [:or :symbol :qualified-keyword]
-:unindexed [:set {:min 1 :description "Function or test Vars a form changed, or stored rows' Vars it removed, that its analysis declares no definition for."} :qualified-symbol]
+:unindexed [:set {:min 1 :description "Function or test Vars a form changed, or stored entities' Vars it removed, that its analysis declares no definition for."} :qualified-symbol]
 :unindexed-change-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
  :seon.error/base
  [:map [:seon.sci.eval/unindexed :seon.sci.eval/unindexed]]]
 :declarations [:vector {:min 1 :description "The program declarations one form made, in order and with repeated occurrences of one name kept: definitions, schema, namespace or deletion identities."} :seon.sci.eval/program-name]
-:removals [:set {:min 1 :description "Stored rows' Vars the same form removed beside its declarations."} :qualified-symbol]
+:removals [:set {:min 1 :description "Stored entities' Vars the same form removed beside its declarations."} :qualified-symbol]
 :multiple-declarations-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
  :seon.error/base
  [:map

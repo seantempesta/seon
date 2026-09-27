@@ -51,10 +51,10 @@
     :db/valueType :db.type/string
     :db/cardinality :db.cardinality/one}])
 
-(defn- probe-schema-rows [projection forms probe-keys]
+(defn- probe-schema-entities [projection forms probe-keys]
   ;; Keep the canonical dependency closure of the synthetic declarations and
   ;; of the writer's own dials (the `seon.config.db` family `seon.db/transact!`
-  ;; reads its write and validation bounds from): once these rows exist the
+  ;; reads its write and validation bounds from): once these entities exist the
   ;; store's declared program is its projection, so without the dials every
   ;; later write refuses. Unrelated render declarations require program
   ;; definitions, not this file-store fixture's schema-only population.
@@ -66,7 +66,7 @@
                            (mapcat #(get references %))
                            needed)]
         (if (= needed expanded)
-          (seon.schema/canonical-schema-rows projection (select-keys forms expanded))
+          (seon.schema/canonical-schema-entities projection (select-keys forms expanded))
           (recur expanded))))))
 
 (def ^:private source-branch :current-src)
@@ -121,7 +121,7 @@
                    projection (seon.schema/canonical-database-attributes projection))
                   probe-schema))
            (test-support/transacted!
-            connection (probe-schema-rows projection forms (keys probe-forms))))
+            connection (probe-schema-entities projection forms (keys probe-forms))))
          (write-marker! (:seon.store/connection-object opened) "ancestral")
          (registry/branch! {:seon.store/store opened
                             :seon.cluster.registry/from :db
@@ -189,7 +189,7 @@
 
 (deftest only-digest-valued-attributes-are-swept-as-blob-references
   ;; A ref or symbol attribute whose PROPERTIES name a schema containing a
-  ;; digest (a component entity, a row schema) stores entity ids and symbols;
+  ;; digest (a component entity, an entity schema) stores entity ids and symbols;
   ;; reading those as digests refused every sweep of a store holding error
   ;; evidence (`referenced-blobs` returned 41112, 2026-09-23).
   (test-support/with-database
@@ -201,7 +201,7 @@
        (is (not (contains? attributes :seon.agent/runtime))
            "a component ref naming an entity schema is not a digest")
        (is (not (contains? attributes :seon.test/sym))
-           "a row identity naming its row schema is not a digest")))))
+           "an entity identity naming its entity schema is not a digest")))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Pure derivation
@@ -238,7 +238,7 @@
         (is (true? (:seon.cluster/created? created)))
         (is (contains? (registry/roster opened) branch)
             "the roster is the fact")
-        (testing "the cluster inherits every source row"
+        (testing "the cluster inherits every source entity"
           (let [connection (store/open-branch! opened branch)]
             (try
               (is (= #{"ancestral"} (markers connection)))
@@ -423,7 +423,7 @@
       (let [connection (:seon.store/connection-object opened)]
         (is (= :seon.config/required-absent
                (:seon.config/rule (refusal #(registry/retention-cutoff opened)))))
-        ; The subject is the stored policy read, using the compiler's complete row.
+        ; The subject is the stored policy read, using the compiler's complete entity.
         (test-support/transacted!
          connection
          [(:seon.config/desired-row
@@ -610,9 +610,9 @@
 (deftest boot-retires-only-branches-no-fact-claims
   ;; A dead process's branches have no owner left to release them, so each
   ;; would root its data forever (90 of 99 roster branches, 2026-09-26). The
-  ;; claims are facts: the cluster branch, each open agent row's branch on it,
+  ;; claims are facts: the cluster branch, each open agent entity's branch on it,
   ;; and the caller's declared branches. A fork inherits the cluster's name
-  ;; row, so it must not read as a cluster; a connected branch is never taken.
+  ;; entity, so it must not read as a cluster; a connected branch is never taken.
   (with-source-store
     (fn [opened]
       (registry/ensure-cluster! (cluster-request opened "alice"))

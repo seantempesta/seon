@@ -53,7 +53,7 @@
                {:seon.artifact/resource initialization-resource})))
 
 (defn install-initialization-pages!
-  "Install packaged `current-src` rows when an operator root is empty."
+  "Install packaged `current-src` entities when an operator root is empty."
   {:malli/schema [:=> [:cat :seon.boot/root] :seon.source/current]}
   [root]
   (let [store-dir (:seon.boot/store-dir
@@ -76,7 +76,7 @@
         (store/release-store! held-store)))))
 
 (defn -main
-  "Install packaged source rows and run one fresh cluster."
+  "Install packaged source entities and run one fresh cluster."
   {:malli/schema [:=> [:cat [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Clojure's command-line entry point receives any number of string arguments; the command parser owns option combinations and their diagnostics.", :gen/elements [[]]} :string]] :nil]}
   [& arguments]
   (let [{operator-root :seon.artifact/operator-root

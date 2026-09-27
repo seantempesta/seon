@@ -27,7 +27,7 @@
 
 (deftest ^{:seon.test/long "Two real indexed publications and datom comparisons, including first canonical fixture acquisition; measured 51.3 seconds in the isolated fast snapshot."
            :seon.test/long-ms 60000}
-  incremental-indexing-reconciles-only-selected-file-rows
+  incremental-indexing-reconciles-only-selected-file-entities
   (support/with-database
    (fn [connection]
      (let [root (str "tmp/publication-index/" (random-uuid))
@@ -65,9 +65,9 @@
                                  (swap! reports conj report)
                                  report))
                              #'functions/add-contract-facts
-                             (fn [rows progress projection]
-                               (swap! observed into rows)
-                               (add-contracts rows progress projection))}
+                             (fn [entities progress projection]
+                               (swap! observed into entities)
+                               (add-contracts entities progress projection))}
                             #(functions/index!
                               {:seon.db/connection connection :seon.fn/manifest after
                                :seon.fn/previous-manifest before :seon.fn/changed-paths #{"src/alpha.clj"}

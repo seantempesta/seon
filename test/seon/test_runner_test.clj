@@ -193,7 +193,7 @@
           (is (nil? (:db/id (db/pull @connection [:db/id] [:seon.test/sym test-symbol])))
               "result recording never recreates a retracted definition")))))))
 
-(deftest result-facts-live-on-the-test-row-and-reruns-replace-them
+(deftest result-facts-live-on-the-test-entity-and-reruns-replace-them
   (test-support/with-database
     (fn [connection]
       (let [run-result (captured-run)
@@ -274,7 +274,7 @@
               "the red run records its content-addressed failing assertion")
           (is (= 1 (:seon.test/pass-count (first green))))
           (is (= (:db/id before) (:db/id after))
-              "a rerun updates the existing indexed test row")
+              "a rerun updates the existing indexed test entity")
           (is (= #:seon.test{:pass-count 1 :fail-count 0 :error-count 0}
                  (select-keys after
                               [:seon.test/pass-count
@@ -380,39 +380,39 @@
       (let [database (db/db connection)
             test-symbol (symbol (str "reach.probe" (random-uuid)) "check")
             source "(deftest check (is true))"
-            row (test-support/program-row database [:seon.test/sym test-symbol] source)
+            entity (test-support/program-entity database [:seon.test/sym test-symbol] source)
             _ (test-support/transacted!
-               connection [(test-support/namespace-row database (symbol (namespace test-symbol))) row])
+               connection [(test-support/namespace-entity database (symbol (namespace test-symbol))) entity])
             before (get (runner/reach-digests (db/db connection) [test-symbol]) test-symbol)
-            ;; The writer's digest owner, with the namespace row this test stored.
-            changed (test-support/revised-row (db/db connection) row
+            ;; The writer's digest owner, with the namespace entity this test stored.
+            changed (test-support/revised-entity (db/db connection) entity
                                               {:seon.test/fixture "a fixture-only change"})]
         (is (string? before))
         (is (= source (:seon.test/source changed)))
-        (is (not= (:seon.program/definition-digest row) (:seon.program/definition-digest changed))
+        (is (not= (:seon.program/definition-digest entity) (:seon.program/definition-digest changed))
             "the producer's digest sees the metadata")
         (test-support/transacted! connection [changed])
         (is (not= before (get (runner/reach-digests (db/db connection) [test-symbol]) test-symbol))
             "reuse keyed by reach sees the same change")))))
 
 (deftest undigested-declarations-never-share-a-reuse-key
-  ;; Rows admitted before the digest was required: the writer now refuses
+  ;; Entities admitted before the digest was required: the writer now refuses
   ;; them, so the pure value is built with Datahike's own `with`.
   (test-support/with-database
     (fn [connection]
       (let [database (db/db connection)
             ns-name (symbol (str "reach.undigested" (random-uuid)))
-            rows (mapv #(test-support/program-row database [:seon.test/sym (symbol (str ns-name) %1)] %2)
+            entities (mapv #(test-support/program-entity database [:seon.test/sym (symbol (str ns-name) %1)] %2)
                        ["one" "two"] ["(deftest one (is true))" "(deftest two (is false))"])
-            symbols (mapv :seon.test/sym rows)
-            _ (test-support/transacted! connection (into [(test-support/namespace-row database ns-name)] rows))
+            symbols (mapv :seon.test/sym entities)
+            _ (test-support/transacted! connection (into [(test-support/namespace-entity database ns-name)] entities))
             digested (runner/reach-digests (db/db connection) symbols)
             undigested (:db-after (d/with (db/db connection)
-                                          (for [row rows]
-                                            [:db/retract [:seon.test/sym (:seon.test/sym row)]
-                                             :seon.program/definition-digest (:seon.program/definition-digest row)])))
+                                          (for [entity entities]
+                                            [:db/retract [:seon.test/sym (:seon.test/sym entity)]
+                                             :seon.program/definition-digest (:seon.program/definition-digest entity)])))
             refusal (runner/reach-digests undigested symbols)]
-        (is (every? string? (map digested symbols)) "the digested rows have reuse keys")
+        (is (every? string? (map digested symbols)) "the digested entities have reuse keys")
         (is (= :seon.program/definition-digest (:seon.error/member refusal)) (pr-str refusal))
         (is (= symbols (:seon.error/offending refusal)) "the refusal names both tests")
         (is (not-any? #(string? (get refusal %)) symbols) "no reuse key is answered")))))

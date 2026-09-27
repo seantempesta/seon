@@ -257,14 +257,14 @@
                             [:seon.fn/sym
                              "my.agents.restart-a/removed-before-restart"])))
           (is (pos? (authored-receipt-count @connection "restart-a")))
-          (let [namespace-row
+          (let [namespace-entity
                 (db/pull @connection
                         [{:seon.ns/requires [:seon.ns/name]}]
                         [:seon.ns/name 'my.agents.restart-a])
                 required-names
                 (into #{}
                       (map :seon.ns/name)
-                      (:seon.ns/requires namespace-row))]
+                      (:seon.ns/requires namespace-entity))]
             (is (contains? required-names 'clojure.set)
                 "a plain require remains an exact load dependency")
             (is (not (contains? required-names 'missing.restart.namespace))

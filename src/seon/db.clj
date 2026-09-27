@@ -562,7 +562,7 @@
               ;; and a connection is none of the shapes below, so both fall
               ;; out without `db?`: its three `satisfies?` misses per node
               ;; were 98% of this walk (677 of 689 ms over one form's 468
-              ;; namespace-row pulls, lane-fix-cost-db-2026-09-25).
+              ;; namespace-entity pulls, lane-fix-cost-db-2026-09-25).
               (record? value)
               [false nil]
 
@@ -718,13 +718,13 @@
                             (parser/find-elements (:qfind parsed)))
               pull-groups
               (when (seq pulls)
-                (let [bound-rows (resolve-bindings (:qwhere parsed) bindings)]
+                (let [bound-entities (resolve-bindings (:qwhere parsed) bindings)]
                   (for [element pulls
                         :let [selector (second (value-of bindings (:pattern element)))]]
                     (when (sequential? selector)
                       (pull-index-patterns
                        database [selector (mapv #(get % (get-in element [:variable :symbol]))
-                                                 bound-rows)]
+                                                 bound-entities)]
                        :pull-many (pull-api/compile-pull-plan database selector))))))]
           (when-not (some nil? pull-groups)
             (into [] (distinct)
@@ -1390,7 +1390,7 @@
   {:malli/schema [:=> [:cat :seon.source/digest :seon.db/database-value] :seon.schema/projection]}
   [builder database]
   (let [context (when (instance? DB database) (:cache-context database))
-        ;; Another builder's rows would survive the replacement unrebuilt.
+        ;; Another builder's entities would survive the replacement unrebuilt.
         candidates (keep (fn [[k cell]] (when (and (map? k) (= builder (::builder k)) (realized? cell)) [k cell]))
                          @projection-cache)]
     (if (seq candidates)
@@ -1430,7 +1430,7 @@
         [::as-of (:datahike.value/commit-id identity) time-point]))))
 
 (defn- declares-program?
-  "True when this value holds declaration rows its projection can derive from."
+  "True when this value holds declaration entities its projection can derive from."
   {:malli/schema [:=> [:cat :seon.db/database-value] :boolean]}
   [database]
   (boolean (and (get (dbi/-schema database) :seon.schema/key)
@@ -1471,7 +1471,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :symbol] [:set :symbol]]}
   [database root]
   ;; A store that has not yet installed the function family (genesis, first
-  ;; population) holds no rows: every symbol is a leaf, never an index read of
+  ;; population) holds no entities: every symbol is a leaf, never an index read of
   ;; an attribute Datahike does not know.
   (if-not (get (dbi/-schema database) :seon.fn/sym)
     #{root}
@@ -2119,7 +2119,7 @@
   (let [mapping-keys (query-return-map-keys return-maps)
         attributes-by-key (zipmap mapping-keys attributes)]
     (mapv
-     (fn [row]
+     (fn [entity-map]
        (reduce-kv
         (fn [decoded mapping-key value]
           (assoc decoded mapping-key
@@ -2127,10 +2127,10 @@
                   declarations
                   (let [attribute (get attributes-by-key mapping-key)]
                     (if (map? attribute)
-                      (get row (nth mapping-keys (::attribute-position attribute)))
+                      (get entity-map (nth mapping-keys (::attribute-position attribute)))
                       attribute)) value)))
-        (empty row)
-        row))
+        (empty entity-map)
+        entity-map))
      result)))
 
 (defn- native-query-result?
@@ -2267,7 +2267,7 @@
 ;;; Suppliers — the two database values call preparation can supply
 ;;; ---------------------------------------------------------------------------
 ;;;
-;;; These are the functions the two `:seon.call-preparation` rows name. Each
+;;; These are the functions the two `:seon.call-preparation` entities name. Each
 ;;; takes exactly one argument — the environment the call is running in — and
 ;;; returns its value or a flat error. They read NO dynamic var (seon-env PRD
 ;;; ruling 2), so a closure handed to a virtual thread still resolves its own
@@ -3399,10 +3399,10 @@
 
 (defn- write-key-candidates
   "Missing declared keys in the closest schema selected by present attributes."
-  [projection row]
-  (let [present (set (keys row))
+  [projection entity-map]
+  (let [present (set (keys entity-map))
         candidates
-        (->> (schema/candidate-shapes-in projection row)
+        (->> (schema/candidate-shapes-in projection entity-map)
              (map (fn [shape]
                     (let [required (:seon.schema/required-attrs shape)]
                       {:matched (count (filter present required))
@@ -3414,7 +3414,7 @@
           (comp (filter #(= best (rank %))) (mapcat :missing)) candidates)))
 
 (defn- write-map-error
-  [database projection row path]
+  [database projection entity-map path]
   (let [schemas (write-entity-schemas projection)
         schema-keys
         (distinct
@@ -3422,7 +3422,7 @@
                    (when (= :db.unique/identity
                             (get-in (dbi/-schema database) [attribute :db/unique]))
                      (get schemas attribute)))
-                 (keys row)))
+                 (keys entity-map)))
         forms (:seon.schema.projection/forms projection)
         entity-form (some->> schema-keys first (get forms))
         failure
@@ -3431,9 +3431,9 @@
                   (write-ref-error database projection value (conj path attribute) entity-form)
                   (write-attribute-error database projection attribute value
                                          (conj path attribute) entity-form false)))
-              row)]
+              entity-map)]
     (if (and failure (= :seon.error/unknown (:seon.schema/form failure)))
-      (let [candidates (write-key-candidates projection row)]
+      (let [candidates (write-key-candidates projection entity-map)]
         (if (= 1 (count candidates))
           (-> failure
               (assoc ::registered-candidates (vec candidates))
@@ -3480,7 +3480,7 @@
   "Read a resulting entity as logical values without expanding reference graphs."
   [database projection attribute-plans entity-id & [visit-child]]
   (reduce
-   (fn [row datom]
+   (fn [entity-map datom]
      (let [attribute (:a datom)
            plan (or (get attribute-plans attribute)
                     (write-attribute-plan projection attribute
@@ -3489,8 +3489,8 @@
        (when (and visit-child (:db/isComponent (get (dbi/-schema database) attribute)))
          (visit-child value))
        (if (db.utils/multival? database attribute)
-         (update row attribute (fnil conj #{}) value)
-         (assoc row attribute value))))
+         (update entity-map attribute (fnil conj #{}) value)
+         (assoc entity-map attribute value))))
    {} (d/datoms database :eavt entity-id)))
 
 (defn- write-error-identity
@@ -3501,8 +3501,8 @@
 
 (defn- write-entity-error
   "Validate the whole resulting entity, including identities present before a retraction."
-  [database projection attribute-plans entity-id identities row & [owned-schemas]]
-  (when (seq row)
+  [database projection attribute-plans entity-id identities entity-map & [owned-schemas]]
+  (when (seq entity-map)
     (let [forms (:seon.schema.projection/forms projection)
           schemas (write-entity-schemas projection)
           schema-keys (distinct (concat owned-schemas (mapcat #(get schemas %) (keys identities))))
@@ -3513,7 +3513,7 @@
                                          (if (db.utils/multival? database attribute)
                                            ((::normalize-many (get attribute-plans attribute)) value)
                                            value)))
-                                {} row)]
+                                {} entity-map)]
       (some
        (fn [schema-key]
          (when-not
@@ -3534,7 +3534,7 @@
              (-> refusal
                  (write-error-identity identities)
                  (update :seon.error/data merge
-                         {::entity identities ::entity-value row ::path (into [entity-id] in)})))))
+                         {::entity identities ::entity-value entity-map ::path (into [entity-id] in)})))))
        schema-keys))))
 
 (defn- write-owned-values-error
@@ -3560,8 +3560,8 @@
                                [a (some-> (mr/schema (:seon.schema.projection/registry projection) a)
                                           m/properties :seon.db/component-schema)]))
                       components)
-        ;; One validation traversal's memo: charged [phase eid] visits, rows
-        ;; and owner edges by [phase eid]. A volatile because the row reader
+        ;; One validation traversal's memo: charged [phase eid] visits, entities
+        ;; and owner edges by [phase eid]. A volatile because the entity reader
         ;; charges through a callback (`write-entity-value`) that no loop owns.
         traversal (volatile! {::seen #{} ::rows {} ::owners {}})
         fail! (fn [cause data]
@@ -3585,7 +3585,7 @@
                       (when (>= (count (::seen @traversal)) limit)
                         (fail! ::validation-node-limit {::entity entity-id ::visited (count (::seen @traversal))}))
                       (vswap! traversal update ::seen conj cache-key))))
-        row (fn [phase database entity-id]
+        entity-map (fn [phase database entity-id]
               (let [cache-key [phase entity-id]]
                 (charge! phase entity-id)
                 (if-let [entry (find (::rows @traversal) cache-key)]
@@ -3675,7 +3675,7 @@
              (fn [walk root]
                (loop [pending [[root false]] active #{} {expanded ::expanded visited ::visited :as walk} walk]
                  (if-let [[entity-id exit?] (peek pending)]
-                   (let [value (row :after after entity-id)
+                   (let [value (entity-map :after after entity-id)
                          child-edges (into []
                                            (mapcat (fn [[a v]]
                                                      (when (components a)
@@ -3701,7 +3701,7 @@
                          (when (> (count (owners-of :after after child)) 1)
                            (fail! ::multiple-component-owners
                                   {::entity child ::owners (owners-of :after after child)}))
-                         (when (empty? (row :after after child))
+                         (when (empty? (entity-map :after after child))
                            (fail! ::missing-component {::entity child ::owner entity-id ::attribute a})))
                        (recur (into (conj (pop pending) [entity-id true])
                                     (map (fn [[_ child]] [child false]) child-edges))
@@ -3742,7 +3742,7 @@
               root-identities
               (mapv (fn [root]
                       (let [value (get expanded root)]
-                        [root value (merge (select-keys (row :before before root) identity-attrs)
+                        [root value (merge (select-keys (entity-map :before before root) identity-attrs)
                                            (select-keys value identity-attrs))]))
                     roots)]
         (or
@@ -3772,22 +3772,22 @@
 (defn- declared-arity-bounds
   {:malli/schema [:=> [:cat [:=> [:cat :seon.db/query :seon.db/database-value] [:or :seon.schema/value :seon.db/error-result]] :seon.db/database-value] [:or [:map-of :qualified-symbol [:set [:map [:seon.fn.arity/min :int] [:seon.fn.arity/max {:optional true} :int]]]] :seon.db/error-result]]}
   [query-fn database]
-  (let [rows (query-fn '[:find ?function-symbol ?minimum ?maximum
+  (let [entity-maps (query-fn '[:find ?function-symbol ?minimum ?maximum
                          :where
                          [?function :seon.fn/sym ?function-symbol]
                          [?function :seon.fn/arities ?arity]
                          [?arity :seon.fn.arity/min ?minimum]
                          [(get-else $ ?arity :seon.fn.arity/max -1) ?maximum]]
                        database)]
-    (if (read-refusal? rows)
-      rows
+    (if (read-refusal? entity-maps)
+      entity-maps
       (reduce
        (fn [bounds [function-symbol minimum maximum]]
          (update bounds function-symbol (fnil conj #{})
                  (cond-> {:seon.fn.arity/min minimum}
                    (nat-int? maximum) (assoc :seon.fn.arity/max maximum))))
        {}
-       rows))))
+       entity-maps))))
 
 (defn- arity-admitted?
   [declared arity]
@@ -3823,13 +3823,13 @@
                    [:or [:set :seon.schema/value] :seon.db/error-result]]]}
   ([query-fn database]
    (reduce (fn [edges query]
-             (let [rows (query-fn query database)]
-               (if (read-refusal? rows) (reduced rows) (into edges rows))))
+             (let [entity-maps (query-fn query database)]
+               (if (read-refusal? entity-maps) (reduced entity-maps) (into edges entity-maps))))
            #{} (:all call-edges-queries)))
   ([query-fn database callers]
    (reduce (fn [edges query]
-             (let [rows (query-fn query database callers)]
-               (if (read-refusal? rows) (reduced rows) (into edges rows))))
+             (let [entity-maps (query-fn query database callers)]
+               (if (read-refusal? entity-maps) (reduced entity-maps) (into edges entity-maps))))
            #{} (:callers call-edges-queries))))
 
 (def ^:private arity-attributes
@@ -4003,7 +4003,7 @@
                        :seon.db/database-value :qualified-symbol [:maybe :map]]
                   [:or :seon.fn/declared-arities :seon.db/error-result]]}
   [query-fn database callee plan]
-  (let [rows (query-fn '[:find ?order ?minimum ?maximum
+  (let [entity-maps (query-fn '[:find ?order ?minimum ?maximum
                          :in $ ?callee
                          :where
                          [?function :seon.fn/sym ?callee]
@@ -4014,9 +4014,9 @@
                        database callee)
         slots (into {} (map (juxt :seon.fn.arity/order (comp count :seon.call-preparation/slots)))
                     (:seon.call-preparation/arities plan))]
-    (if (:seon.db/invalid-read rows)
-      rows
-      (->> rows
+    (if (:seon.db/invalid-read entity-maps)
+      entity-maps
+      (->> entity-maps
            (map (fn [[order minimum maximum]]
                   (cond-> {:seon.fn.arity/min (max 0 (- (long minimum) (long (get slots order 0))))}
                     (nat-int? maximum) (assoc :seon.fn.arity/max maximum))))
@@ -4306,12 +4306,12 @@
 ;; `seon.program` and `seon.fn` require `seon.db` (through `seon.fn.schema-shape`).
 (defonce ^:private program-definition-digest
   (delay (requiring-resolve 'seon.program/definition-digest)))
-;; The one owner of a namespace row's resolver context (`seon.fn` digests with it).
+;; The one owner of a namespace entity's resolver context (`seon.fn` digests with it).
 (defonce ^:private stored-namespace-context
   (delay (requiring-resolve 'seon.fn/stored-namespace-context)))
-;; The one answer to which attributes a declaration row owns: the digest's input.
+;; The one answer to which attributes a declaration entity owns: the digest's input.
 (defonce ^:private program-shapes-in (delay (requiring-resolve 'seon.program/shapes-in)))
-(defonce ^:private program-canonical-row (delay (requiring-resolve 'seon.program/canonical-row)))
+(defonce ^:private program-canonical-entity (delay (requiring-resolve 'seon.program/canonical-row)))
 
 (defn- declaration-value
   "`entity-id` in `database` as the row that wrote it: a component as its nested
@@ -4328,8 +4328,8 @@
    (declaration-value (carried-projection database) database identity-attrs entity-id))
   ([projection database identity-attrs entity-id]
    (let [plans (write-attribute-plans projection database)
-         [row many]
-         (reduce (fn [[row many] {:keys [a v]}]
+         [entity-map many]
+         (reduce (fn [[entity-map many] {:keys [a v]}]
                    (let [installed (get (dbi/-schema database) a)
                          v (cond (not= :db.type/ref (:db/valueType installed)) v
                                  (:db/isComponent installed)
@@ -4338,10 +4338,10 @@
                                                  identity-attrs)
                                            v))]
                      (if (= :db.cardinality/many (:db/cardinality installed))
-                       [(update row a (fnil conj []) v) (conj many a)]
-                       [(assoc row a v) many])))
+                       [(update entity-map a (fnil conj []) v) (conj many a)]
+                       [(assoc entity-map a v) many])))
                  [{} #{}] (d/datoms database :eavt entity-id))]
-     (reduce (fn [row a] (update row a (or (::normalize-many (get plans a)) set))) row many))))
+     (reduce (fn [entity-map a] (update entity-map a (or (::normalize-many (get plans a)) set))) entity-map many))))
 
 (defn definition-digest-of
   "The definition digest the writer admits for function or test `row`:
@@ -4352,12 +4352,12 @@
   every changed row against it, and every producer digests through it."
   {:malli/schema [:=> [:cat :seon.schema/projection :map [:maybe :map]]
                   :seon.program/definition-digest]}
-  [projection row namespace-row]
+  [projection entity-map namespace-entity]
   (@program-definition-digest
-   (@program-canonical-row
+   (@program-canonical-entity
     (schema/projection-cache-value projection ::program-shapes #(@program-shapes-in projection))
-    row)
-   (some-> namespace-row (@stored-namespace-context))))
+    entity-map)
+   (some-> namespace-entity (@stored-namespace-context))))
 
 (defn- namespace-digests-tx
   "Transaction data re-deriving, on the transaction's own value `database`, the
@@ -4373,13 +4373,13 @@
     (vec (for [namespace-name namespaces
                :let [namespace-entity (:e (first (d/datoms database :avet :seon.ns/name namespace-name)))]
                :when namespace-entity
-               :let [namespace-row (declaration-value projection database identity-attrs namespace-entity)]
+               :let [namespace-entity-map (declaration-value projection database identity-attrs namespace-entity)]
                [family namespace-attribute] [[:seon.fn/sym :seon.fn/ns] [:seon.test/sym :seon.test/ns]]
                :when (get (dbi/-schema database) namespace-attribute)
                entity (d/q '[:find [?e ...] :in $ ?a ?n :where [?e ?a ?n]] database namespace-attribute namespace-entity)
-               :let [row (declaration-value projection database identity-attrs entity)
-                     derived (definition-digest-of projection row namespace-row)]
-               :when (and (not (written [family (get row family)])) (not= derived (:seon.program/definition-digest row)))]
+               :let [entity-map (declaration-value projection database identity-attrs entity)
+                     derived (definition-digest-of projection entity-map namespace-entity-map)]
+               :when (and (not (written [family (get entity-map family)])) (not= derived (:seon.program/definition-digest entity-map)))]
            [:db/add entity :seon.program/definition-digest derived]))))
 
 (defn- write-digest-error
@@ -4405,7 +4405,7 @@
                        [:seon.fn/sym :seon.test/sym])
         touched (reduce (fn [result {:keys [e a]}] (update result e (fnil conj #{}) a))
                         (sorted-map) (:tx-data report))
-        ;; One namespace row per namespace in the report, not per row.
+        ;; One namespace entity per namespace in the report, not per entity.
         namespace-of (memoize #(declaration-value projection database identity-attrs %))]
     (some (fn [[entity-id attributes]]
             (when-let [identity-attribute
@@ -4414,23 +4414,23 @@
                                           (first (d/datoms database :eavt entity-id family)))
                                  family))
                              families)]
-              (let [row (declaration-value projection database identity-attrs entity-id)
-                    namespace-name (second (or (:seon.fn/ns row) (:seon.test/ns row)))
+              (let [entity-map (declaration-value projection database identity-attrs entity-id)
+                    namespace-name (second (or (:seon.fn/ns entity-map) (:seon.test/ns entity-map)))
                     namespace-entity (some->> namespace-name (d/datoms database :avet :seon.ns/name) first :e)
-                    stored (:seon.program/definition-digest row)
-                    produced (definition-digest-of projection row (some-> namespace-entity namespace-of))]
+                    stored (:seon.program/definition-digest entity-map)
+                    produced (definition-digest-of projection entity-map (some-> namespace-entity namespace-of))]
                 (when (not= stored produced)
                   (diagnostic
                    {::transaction-refused true
                     :seon.error/message
-                    (str "The stored definition digest of " (pr-str [identity-attribute (get row identity-attribute)])
-                         " is not the one its definition produces. Write the row its canonical writer produced.")
+                    (str "The stored definition digest of " (pr-str [identity-attribute (get entity-map identity-attribute)])
+                         " is not the one its definition produces. Write the entity its canonical writer produced.")
                     :seon.error/layer :database-write
                     :seon.error/operation 'seon.db/transact!
                     :seon.error/member :seon.program/definition-digest
                     :seon.error/expected produced
                     :seon.error/offending (or stored :seon.error/unknown)
-                    :seon.error/data {::entity {identity-attribute (get row identity-attribute)}}})))))
+                    :seon.error/data {::entity {identity-attribute (get entity-map identity-attribute)}}})))))
           touched)))
 
 (defn- write-report-error
@@ -4470,8 +4470,8 @@
      (when-not (find @owned ::changed-identity-attributes) @owned)
      (write-digest-error projection report (identity-attributes database))
      ;; A render target breaks only by a declaration this report wrote or a
-     ;; function it removed. Written rows are read alone; a removed function
-     ;; can be named by any row, so that report reads them all.
+     ;; function it removed. Written entities are read alone; a removed function
+     ;; can be named by any entity, so that report reads them all.
      (let [tx-data (:tx-data report)]
        (if (some #(and (= :seon.fn/sym (:a %)) (not (:added %))
                        (not (db.utils/entid database [:seon.fn/sym (:v %)])))
@@ -4765,10 +4765,10 @@
                  (jdk-integers->long
                   (assoc-in (if (map? transaction) transaction {:tx-data transaction})
                             [:tx-meta :datahike/validate-report] #(validate-write-report projection %))))
-        rows (filter map? (:tx-data request))
-        ;; A namespace row written here re-derives its declarations' digests in this transaction.
-        namespaces (into #{} (keep #(when (:seon.program/definition-digest %) (:seon.ns/name %))) rows)
-        written (into #{} (keep #(some (fn [a] (when-some [v (get % a)] [a v])) [:seon.fn/sym :seon.test/sym])) rows)]
+        entity-maps (filter map? (:tx-data request))
+        ;; A namespace entity written here re-derives its declarations' digests in this transaction.
+        namespaces (into #{} (keep #(when (:seon.program/definition-digest %) (:seon.ns/name %))) entity-maps)
+        written (into #{} (keep #(some (fn [a] (when-some [v (get % a)] [a v])) [:seon.fn/sym :seon.test/sym])) entity-maps)]
     (cond-> request
       (seq namespaces) (update :tx-data #(conj (vec %) [:db.fn/call namespace-digests-tx projection namespaces written])))))
 
@@ -4948,12 +4948,12 @@
         identities (when (and (seq entities) (database-value? database))
                      (vec (sort (identity-attributes database))))
         labels (mapv (fn [entity]
-                       (let [row (when identities
+                       (let [entity-map (when identities
                                    (merge (when (database-value? before)
                                             (pull before identities entity))
                                           (pull database identities entity)))
                              identity (first (sort-by (comp str key)
-                                                      (dissoc row :db/id)))]
+                                                      (dissoc entity-map :db/id)))]
                          (if identity
                            (str (namespace (key identity)) " " (pr-str (val identity)))
                            (str "entity " entity))))

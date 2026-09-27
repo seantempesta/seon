@@ -222,7 +222,7 @@
            (if failure
              (update delivered :seon.error/values conj failure)
              (let [subject about-id
-                   row (cond-> {:seon.message/id (or (:seon.message/id candidate)
+                   entity (cond-> {:seon.message/id (or (:seon.message/id candidate)
                                                       (id/id))
                                 :seon.message/to [:seon.agent/id recipient]
                                 :seon.message/from [:seon.agent/id sender]
@@ -234,7 +234,7 @@
                          (assoc :seon.message/assignment (:my.message/assignment candidate))
                          (:my.message/reason candidate)
                          (assoc :my.message/reason (:my.message/reason candidate)))]
-               (update delivered :seon.message/rows conj row)))))
+               (update delivered :seon.message/rows conj entity)))))
        {:seon.message/rows [] :seon.error/values []}
        candidates))))
 
@@ -721,7 +721,7 @@
   (let [candidate (send-value (:my.message/to request) (:my.message/content request)
                               (some? (:my.message/about request)) (:my.message/about request))
         database (db/db connection)
-        ;; The recipient's row names its home branch; the message is written
+        ;; The recipient's entity names its home branch; the message is written
         ;; there, where the recipient reads and is woken.
         home (when (string? (:my.message/to candidate))
                (db/q '[:find ?branch . :in $ ?id :where [?a :seon.agent/id ?id] [?a :seon.agent/branch ?branch]]

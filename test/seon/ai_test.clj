@@ -67,7 +67,7 @@
   (= value (json/read-str (json/write-str value))))
 
 ;;; ---------------------------------------------------------------------------
-;;; The descriptor rows: one derivation, two roles
+;;; The descriptor entities: one derivation, two roles
 ;;; ---------------------------------------------------------------------------
 
 (def ^:private dials
@@ -103,7 +103,7 @@
     (is (= :disabled (:seon.ai/thinking (:seon.ai/primary targets)))
         "the shipped fast-turn posture explicitly disables thinking")))
 
-(deftest the-shipped-openrouter-backup-resolves-through-its-provider-row
+(deftest the-shipped-openrouter-backup-resolves-through-its-provider-entity
   (test-support/with-database
     (fn [connection]
       (let [backup (:seon.ai/backup (ai/targets (seon.schema/handed-projection) @connection @dials))]
@@ -186,7 +186,7 @@
     (is (not ((schema/projection-validator (schema/handed-projection) :seon.ai/target) (dissoc target :seon.config.ai/no-auth)))
         "omitting a credential does not silently mean no-auth")))
 
-(deftest a-no-auth-config-row-assembles-and-sends-without-authorization
+(deftest a-no-auth-config-entity-assembles-and-sends-without-authorization
   (let [requests (atom [])
         ;; THE ROW IS COMPILED, NOT EDITED: `:seon.config/effective` declares
         ;; the credential variable, so `dissoc`ing it handed `targets` a
@@ -307,7 +307,7 @@
             "an inadmissible setting leaves the provider default untouched")
         (is (= 100 (get body "max_completion_tokens")))
         (is (not (contains? body "max_tokens"))
-            "the provider row, not the model name, selects the wire field")))))
+            "the provider entity, not the model name, selects the wire field")))))
 
 (deftest descriptor-resolution-normalizes-cardinality-many-before-membership
   (test-support/with-database
@@ -357,7 +357,7 @@
             target (:seon.ai/primary (ai/targets (seon.schema/handed-projection) @connection settings))]
         (is (= "TEST_PROVIDER_KEY" (:seon.ai/api-key-variable target)))))))
 
-(deftest a-missing-registry-row-leaves-the-working-call-target-unchanged
+(deftest a-missing-registry-entity-leaves-the-working-call-target-unchanged
   (test-support/with-database
     (fn [connection]
       (let [settings (test-support/effective-config
@@ -366,11 +366,11 @@
         (is (= (ai/targets (seon.schema/handed-projection) settings)
                (ai/targets (seon.schema/handed-projection) @connection settings)))))))
 
-(deftest model-rows-are-queryable-open-and-rendered-without-wire-duplication
+(deftest model-entities-are-queryable-open-and-rendered-without-wire-duplication
   (test-support/with-database
     (fn [connection]
       (seed-registry! connection)
-      (let [model (ai/model-row @connection "registered-model")
+      (let [model (ai/model-entity @connection "registered-model")
             accreted (assoc model :seon.ai.model/future-tailored-fact
                             {:seon.ai.model/example true})
             ai-render (ai/registry-ai @connection)
@@ -384,9 +384,9 @@
              adding or dropping a shipped model is caught without any list
              here to update")
         (is (not (contains? model :seon.config.ai/endpoint))
-            "provider wire facts never duplicate onto model rows")
+            "provider wire facts never duplicate onto model entities")
         (is ((schema/projection-validator (schema/handed-projection) :seon.ai.model/entity) accreted)
-            "a tailored fact can accrete without breaking the open row")
+            "a tailored fact can accrete without breaking the open entity")
         (is (str/includes? ai-render "input $0.250000/M"))
         (is (str/includes? ai-render "registered-model"))
         (is ((schema/projection-validator (schema/handed-projection) :seon.render/hiccup) html-render))))))
@@ -411,7 +411,7 @@
                                   (ai/model-observation-tx @connection second-observation))
         (is (= 100.0
                (:seon.ai.model/last-tokens-per-second
-                (ai/model-row @connection "registered-model"))))
+                (ai/model-entity @connection "registered-model"))))
         (is (= #{200}
                (set
                 (db/q
@@ -974,7 +974,7 @@
 
 (deftest a-truncated-stream-never-reports-output-that-never-arrived
   ;; the flag `disposition` reads was a hardcoded true on every 2xx
-  ;; failure, so an attempt row asserted "output WAS seen" about a stream
+  ;; failure, so an attempt entity asserted "output WAS seen" about a stream
   ;; that delivered nothing. It is derived now, and a truncation that
   ;; delivered nothing is still terminal — no re-request either way.
   (let [empty-truncation (#'seon.ai/streamed-completion (truncating-stream "") nil)

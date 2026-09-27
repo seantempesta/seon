@@ -174,7 +174,7 @@
 
 (deftest ^{:seon.test/fixture-observation
            "Two adoptions admitted at one head write a cluster branch of the same physical store."}
-  stale-adoption-row-writes-refuse-at-the-writer
+  stale-adoption-entity-writes-refuse-at-the-writer
   (#'source-test/with-store
     (fn [opened]
       (let [base (#'source-test/publish opened @#'source-test/digest-a)
@@ -199,7 +199,7 @@
                                       :seon.reconcile/adopt-identities #{[:seon.fn/sym sym]}})
                           (catch clojure.lang.ExceptionInfo failure failure)))
                 ;; Both adoptions were admitted at h1; a newer publication then
-                ;; moves the head to h2 before the first one's row write.
+                ;; moves the head to h2 before the first one's entity write.
                 moved (#'source-test/publish opened @#'source-test/digest-b
                                              'seon.cluster.source-test/populate-from-data!
                                              {:seon.source/expected-commit-id h1
@@ -222,7 +222,7 @@
                                   [:seon.fn/sym sym])
                          (db/pull (db/db connection) '[:seon.fn/sym :seon.program/definition-digest]
                                   [:seon.fn/sym sym]))
-                      "the surviving row is the newer publication's"))
+                      "the surviving entity is the newer publication's"))
                 (finally (d/release-materialized-db second-source)))))
           (finally
             (d/release-materialized-db first-source)

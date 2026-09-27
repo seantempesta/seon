@@ -147,7 +147,7 @@
 (deftest a-jvm-running-the-published-bytes-names-that-commit
   ;; Boot names its published commit as the loaded program only when every
   ;; published file it loaded carries the published bytes; the adoption after
-  ;; boot then writes rows and never reloads what the JVM just loaded.
+  ;; boot then writes entities and never reloads what the JVM just loaded.
   (let [database (db/db (:seon.db/connection (support/execution-handle nil)))
         published (into {} (take 3) (db/q '[:find ?path ?digest
                                            :where [?file :seon.fn.file/relative-path ?path]
@@ -228,27 +228,27 @@
 (deftest a-launch-on-analyzer-bytes-with-unchanged-definitions-publishes-selected
   ;; WANTED: a JVM launched on analyzer files whose reached definitions are
   ;; unchanged (a comment, an unreached defn) names the head's analyzer from the
-  ;; selected rows, so boot publishes only the changed files; a changed or
+  ;; selected entities, so boot publishes only the changed files; a changed or
   ;; deleted reached definition names another analyzer, so every file
   ;; reanalyzes (seon.cluster/selected-analyzer-digest; 2b6625eff61e).
   (let [database (db/db (:seon.db/connection (support/execution-handle nil)))
         selected #'cluster/selected-analyzer-digest
         head (#'cluster/analyzer-digest database)
-        rows (seon.fn/file-rows database ["src/seon/fn.clj"] :seon.fn/file)
+        entities (seon.fn/file-entities database ["src/seon/fn.clj"] :seon.fn/file)
         zero (apply str (repeat 64 "0"))]
-    (is (seq rows) "the indexer's own file is published")
-    (is (= head (selected database #{"src/seon/fn.clj"} rows))
+    (is (seq entities) "the indexer's own file is published")
+    (is (= head (selected database #{"src/seon/fn.clj"} entities))
         "the same definitions from other bytes name the head's analyzer")
     (is (not= head (selected database #{"src/seon/fn.clj"}
-                             (mapv #(cond-> % (= `seon.fn/analyze-rows (:seon.fn/sym %))
+                             (mapv #(cond-> % (= `seon.fn/analyze-entities (:seon.fn/sym %))
                                       (assoc :seon.program/definition-digest zero))
-                                   rows)))
+                                   entities)))
         "a changed reached definition names another analyzer")
     (is (not= head (selected database #{"src/seon/fn.clj"} []))
         "a deleted analyzer file names another analyzer")))
 
 (defn- retire-projection
-  "The packaged population plus one fixture row, whose dial `dial?` declares."
+  "The packaged population plus one fixture entity, whose dial `dial?` declares."
   [dial?]
   (schema/declaration-projection
    (schema.edn/derive-config-forms
@@ -270,11 +270,11 @@
 (deftest ^{:seon.test/long
            "Three real incremental publications of one fixture file (analysis, index!, retirement): 0.18-0.41 s each warm, 1.42 s for the first in a JVM, plus two fixture projections (~0.3 s each cold); measured at the REPL 2026-09-27. The harness run measured 5.49 s including member acquisition."
            :seon.test/long-ms 8000}
-  a-retirement-lands-after-the-program-rows-that-convert-its-writers
+  a-retirement-lands-after-the-program-entities-that-convert-its-writers
   ;; Class regression (fix-retire-ordering 2026-09-27): 13387dc38 retired a
   ;; dial and converted the one test writing it in the same commit, and boot's
   ;; publication refused because `populate-source!` retracted the attribute
-  ;; before `index!` wrote the converted test row. WANTED: a publication that
+  ;; before `index!` wrote the converted test entity. WANTED: a publication that
   ;; retires an attribute and converts its writer is admitted; one that retires
   ;; it while a writer survives is refused naming that writer, retiring nothing.
   (let [root (io/file "tmp" "program-change-retire" (str (random-uuid)))

@@ -1,7 +1,7 @@
 [#:seon.task{:id "023acee5f88d"
              :name "a-refused-settlement-is-stored-as-a-core-fault"
              :kind :function
-             :intent "A run whose settlement is refused by a declared writer refusal is stored as a core fault (signature 6e0c6d4e..., seon.db/transact!), shows 'Contract finding: seon.db/transact! returned this error ...' and carries a datahike.writer stack trace into the MCP reply, although it is the agent's mistake. Decide it in evaluate-sources, where the run's working value already settles each form's row: a row settled-value refuses becomes that form's refusal through refuse-install, and settle-batch-refusal!'s ordinal search is deleted."
+             :intent "A run whose settlement is refused by a declared writer refusal is stored as a core fault (signature 6e0c6d4e..., seon.db/transact!), shows 'Contract finding: seon.db/transact! returned this error ...' and carries a datahike.writer stack trace into the MCP reply, although it is the agent's mistake. Decide it in evaluate-sources, where the run's working value already settles each form's entity: an entity settled-value refuses becomes that form's refusal through refuse-install, and settle-batch-refusal!'s ordinal search is deleted."
              :must-read #{seon.sci.eval/refuse-install seon.turn/evaluate-sources seon.turn/settle-batch!}
              :evidence #{"docs/research/agent-platform/landing/fix-dogfood-api-2026-09-26.md"
                          "docs/seon/issues/a-refused-run-settlement-replaces-every-forms-shown-result.md"
@@ -58,7 +58,7 @@
              :evidence #{"docs/research/agent-platform/landing/perf-eval-overhead-2026-09-26.md"}}
  #:seon.task{:name "an-agent-form-is-read-again-by-each-consumer"
              :kind :function
-             :intent "After the plan reads a reply, its source is read again by evaluable-source?, read-source, source-events (source-key and read-only-evaluation?, which also re-derives declarations with program/declaration-row), seon.sci.eval/one-event and install-row!'s test and deletion replays, besides the clj-kondo parse. A form is parsed once: carry the plan's events and the analyzed rows on the evaluation."
+             :intent "After the plan reads a reply, its source is read again by evaluable-source?, read-source, source-events (source-key and read-only-evaluation?, which also re-derives declarations with program/declaration-row), seon.sci.eval/one-event and install-row!'s test and deletion replays, besides the clj-kondo parse. A form is parsed once: carry the plan's events and the analyzed entities on the evaluation."
              :must-read #{seon.turn/source-events seon.turn/read-only-evaluation? seon.turn/evaluable-source? seon.sci.eval/one-event}
              :evidence #{"docs/research/agent-platform/eval-path-audit-2026-09-26.md"}}
  #:seon.task{:name "receipt-attributes-are-a-hand-list"
@@ -78,12 +78,12 @@
              :evidence #{"docs/research/agent-platform/landing/program-test-candidate-projection-2026-09-27.md"}}
  #:seon.task{:name "analyze-settlement-is-unreached"
              :kind :function
-             :intent "seon.turn/analyze-settlement re-analyzes a settled program row outside SCI, so it cannot see declared-without-root Vars and drops their call edges (the gap b3f1a7ae7 fixed in sci.eval/analyzed-rows). It appears unreached in production: every settle! call site passes :seon.error/value, ordinary runs settle through receipt-settle-batch-tx which does not re-analyze, and its only database-arity caller with a program row is test/seon/fn_test.clj:544. Verify no caller, then delete it and that test (fix-declare-edges, b3f1a7ae7)."
+             :intent "seon.turn/analyze-settlement re-analyzes a settled program entity outside SCI, so it cannot see declared-without-root Vars and drops their call edges (the gap b3f1a7ae7 fixed in sci.eval/analyzed-rows). It appears unreached in production: every settle! call site passes :seon.error/value, ordinary runs settle through receipt-settle-batch-tx which does not re-analyze, and its only database-arity caller with a program entity is test/seon/fn_test.clj:544. Verify no caller, then delete it and that test (fix-declare-edges, b3f1a7ae7)."
              :must-read #{seon.turn/analyze-settlement}
              :evidence #{"docs/research/agent-platform/landing/program-test-candidate-projection-2026-09-27.md"}}
  #:seon.task{:name "a-nested-in-ns-loses-the-whole-run"
              :kind :function
-             :intent "Probed on disposable branch p0-probe 2026-09-27: the run \"(do (in-ns 'p0.nested) 1) (+ 1 2)\" writes the second form's :seon.cluster.eval/ns as the lookup ref [:seon.ns/name p0.nested], but namespace-rows (turn.clj ~619) creates rows only for namespaces segmentation saw (top-level in-ns), so the settlement transaction is refused ('Nothing found for entity id', logged unbounded twice by Datahike) and the caller gets 'The awaited channel closed before completion' with no run id, no values, no events. Total-path violation. Every namespace an evaluation actually ran in or ended in is upserted as {:seon.ns/name sym} in the same settlement transaction (the owner's session-entity plan P2a, docs/research/agent-platform/repl-session-entity-design-2026-09-27.md problem 3)."
+             :intent "Probed on disposable branch p0-probe 2026-09-27: the run \"(do (in-ns 'p0.nested) 1) (+ 1 2)\" writes the second form's :seon.cluster.eval/ns as the lookup ref [:seon.ns/name p0.nested], but namespace-rows (turn.clj ~619) creates entities only for namespaces segmentation saw (top-level in-ns), so the settlement transaction is refused ('Nothing found for entity id', logged unbounded twice by Datahike) and the caller gets 'The awaited channel closed before completion' with no run id, no values, no events. Total-path violation. Every namespace an evaluation actually ran in or ended in is upserted as {:seon.ns/name sym} in the same settlement transaction (the owner's session-entity plan P2a, docs/research/agent-platform/repl-session-entity-design-2026-09-27.md problem 3)."
              :must-read #{seon.turn/evaluate-sources}
              :evidence #{"docs/research/agent-platform/repl-session-entity-design-2026-09-27.md"}}
  #:seon.task{:name "history-acquisition-decodes-stored-read-plans"

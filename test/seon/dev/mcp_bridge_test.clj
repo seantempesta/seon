@@ -228,7 +228,7 @@
                                                       :seon.boot/prepl-port 1))
       (write-advertisement! root "stale" (advertisement "stale" pid (java.util.Date. 0)))
       (let [by-cluster (into {} (map (juxt :seon.dev.mcp/cluster :seon.dev.mcp/state))
-                             ((bridge-var 'discovery-rows) root))]
+                             ((bridge-var 'discovery-entities) root))]
         (is (= {"reachable" :degraded "unreachable" :unknown} by-cluster)))
       (finally
         (core.server/stop-server server-name)
@@ -238,19 +238,19 @@
               (io/file project-root "tmp" (str "mcp-status-face-"
                                                 (random-uuid))))
         selected "selected"
-        selected-row {:seon.dev.mcp/root root
+        selected-entity {:seon.dev.mcp/root root
                       :seon.dev.mcp/cluster selected
                       :seon.dev.mcp/state :alive
                       :seon.dev.mcp/source :advertisement}
-        unrelated-row {:seon.dev.mcp/root root
+        unrelated-entity {:seon.dev.mcp/root root
                        :seon.dev.mcp/cluster "unrelated"
                        :seon.dev.mcp/state :alive
                        :seon.dev.mcp/source :advertisement}
         observations (atom [])
         result
         (with-redefs-fn
-          {(bridge-var 'discovery-rows)
-           (fn [_] [selected-row selected-row unrelated-row])
+          {(bridge-var 'discovery-entities)
+           (fn [_] [selected-entity selected-entity unrelated-entity])
            (bridge-var 'runtime-observation)
            (fn [_ cluster]
              (swap! observations conj cluster)
@@ -264,12 +264,12 @@
           #((bridge-var 'execute-runtime-status)
             {:root root :cluster selected}))
         data (result-data result)
-        rows (:seon.dev.mcp/clusters data)]
+        entities (:seon.dev.mcp/clusters data)]
     (is (= "cluster-health-flow" (name (:seon.dev.mcp/view data))))
     (is (= [selected] @observations))
-    (is (= 1 (count rows)))
-    (is (= selected (:seon.dev.mcp/cluster (first rows))))
-    (is (= 2 (:seon.dev.mcp/observation-count (first rows))))
+    (is (= 1 (count entities)))
+    (is (= selected (:seon.dev.mcp/cluster (first entities))))
+    (is (= 2 (:seon.dev.mcp/observation-count (first entities))))
     (is (= ["selected-session"] (:seon.dev.mcp/sessions data))
         "a session to a JVM its cluster no longer advertises is released, not listed")
     (is (not (str/includes? (get-in result [:content 0 :text])
@@ -594,7 +594,7 @@
       (write-advertisement! root cluster (assoc (advertisement cluster (.pid (java.lang.ProcessHandle/current))
                                                                (current-process-start-date))
                                                 :seon.boot/prepl-port (.getLocalPort server)))
-      (is (= [:alive] (mapv :seon.dev.mcp/state ((bridge-var 'discovery-rows) root))))
+      (is (= [:alive] (mapv :seon.dev.mcp/state ((bridge-var 'discovery-entities) root))))
       (finally
         (clojure.core.server/stop-server server-name)
         (delete-fixture-root! fixture-root)))))
@@ -626,7 +626,7 @@
           (is (<= (count (:seon.dev.mcp/top faults)) 5))
           (is (not-any? :seon.error/message (:seon.dev.mcp/top faults)))))
       (testing "discovery reads health alone and still classifies the live cluster"
-        (is (= [:alive] (mapv :seon.dev.mcp/state ((bridge-var 'discovery-rows) root)))))
+        (is (= [:alive] (mapv :seon.dev.mcp/state ((bridge-var 'discovery-entities) root)))))
       (finally
         (clojure.core.server/stop-server server-name)
         (delete-fixture-root! fixture-root)))))

@@ -137,33 +137,33 @@
   [value]
   (if (map? value) (:db/id value) value))
 
-(defn- ordinary-model-row
-  [row]
-  (cond-> row
-    (:seon.ai.model/provider row)
+(defn- ordinary-model-entity
+  [entity]
+  (cond-> entity
+    (:seon.ai.model/provider entity)
     (update :seon.ai.model/provider pulled-ref-id)
 
-    (:seon.ai.model/deepseek-off-peak-windows row)
+    (:seon.ai.model/deepseek-off-peak-windows entity)
     (update :seon.ai.model/deepseek-off-peak-windows
             #(into #{} (map pulled-ref-id) %))
 
-    (:seon.ai.model/input-modalities row)
+    (:seon.ai.model/input-modalities entity)
     (update :seon.ai.model/input-modalities set)
 
-    (:seon.ai.model/thinking-dials row)
+    (:seon.ai.model/thinking-dials entity)
     (update :seon.ai.model/thinking-dials set)))
 
-(defn model-row
-  "The registered row for one model id, or nil."
+(defn model-entity
+  "The registered entity for one model id, or nil."
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.ai.model/id]
     [:maybe :seon.ai.model/entity]]}
   [database model-id]
   (some-> (db/pull database model-pull [:seon.ai.model/id model-id])
-          ordinary-model-row))
+          ordinary-model-entity))
 
 (defn models
-  "Every registered model row, ordered by model id."
+  "Every registered model entity, ordered by model id."
   {:malli/schema
    [:=> [:cat :seon.db/database-value] :seon.ai.model/models]}
   [database]
@@ -171,7 +171,7 @@
                :where [_ :seon.ai.model/id ?model-id]]
              database)
        sort
-       (mapv #(model-row database %))))
+       (mapv #(model-entity database %))))
 
 (defn- model-details
   [database model-id]
@@ -331,16 +331,16 @@
   {:malli/schema [:=> [:cat :seon.db/db]
                   [:or [:set :qualified-keyword] :seon.db/invalid-read-error :seon.schema/validation-refusal]]}
   [database]
-  (let [row (db/pull database '[(limit :seon.schema/references nil)]
+  (let [entity (db/pull database '[(limit :seon.schema/references nil)]
                      [:seon.schema/key :seon.config/agent-overlay])]
     (cond
-      (:seon.db/invalid-read row) row
-      (seq (:seon.schema/references row))
-      (set (:seon.schema/references row))
+      (:seon.db/invalid-read entity) entity
+      (seq (:seon.schema/references entity))
+      (set (:seon.schema/references entity))
       :else
       (vary-meta (seon.error.refusal/diagnostic (java.util.Date.) :seon.ai/settings 'seon.ai/agent-setting-attributes
        {:seon.error/message "The agent overlay schema has no declared setting references."
-        :seon.schema/refused-value row
+        :seon.schema/refused-value entity
         :seon.schema/expected-value :seon.config/agent-overlay
         :seon.error/member :seon.schema/references
         :seon.error/expected "installed agent-overlay setting references"}) assoc :seon.error/declared-schema :seon.schema/validation-refusal))))
@@ -354,11 +354,11 @@
   (let [attributes (agent-setting-attributes db)]
     (if (db/read-refusal? attributes)
       attributes
-      (let [row (db/pull db [{:seon.agent/settings (vec attributes)}]
+      (let [entity (db/pull db [{:seon.agent/settings (vec attributes)}]
                          [:seon.agent/id agent-id])]
-        (if (:seon.db/invalid-read row)
-          row
-          (select-keys (:seon.agent/settings row) attributes))))))
+        (if (:seon.db/invalid-read entity)
+          entity
+          (select-keys (:seon.agent/settings entity) attributes))))))
 
 (defn request-attributes
   "Declared config-to-request routes from one supplied generation."
@@ -1022,7 +1022,7 @@
    [:=> [:cat :seon.db/database-value :seon.ai.model/observation-request]
     :seon.db/tx-data]}
   [database observation]
-  (if (model-row database (:seon.ai.model/id observation))
+  (if (model-entity database (:seon.ai.model/id observation))
     (let [latency-ms (:seon.ai.model/last-latency-ms observation)
           completion-tokens
           (some-> (:seon.ai/usage observation)
@@ -1377,7 +1377,7 @@
                          ::response-started? true
                          ;; DERIVED, NEVER ASSERTED. This flag used to be
                          ;; a hardcoded `true` on every 2xx failure, so
-                         ;; the attempt row said "output WAS seen" about
+                         ;; the attempt entity said "output WAS seen" about
                          ;; streams that delivered nothing — a durable
                          ;; fact that lied, and one that `disposition`
                          ;; reads. A truncation counted its characters;

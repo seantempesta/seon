@@ -595,7 +595,7 @@
           ;; The ENTERING projection is the reusable value, never the exit
           ;; one: reuse is decided by the fingerprint the value CARRIES, and
           ;; a projection a run edited in memory still carries the
-          ;; fingerprint of the rows it was built from. Reusing it would let
+          ;; fingerprint of the entities it was built from. Reusing it would let
           ;; the run's own edit answer the question the facts must answer.
           (let [derived (schema/projection-from-database
                          database (:seon.schema/projection entering-environment))
@@ -613,7 +613,7 @@
                   committed-removed (set/intersection uncommitted entering-keys)
                   drift-removed (set/intersection absent entering-keys)
                   committed-added (set/difference absent entering-keys)
-                  row (cond-> {:seon.cluster/name cluster-name}
+                  entity (cond-> {:seon.cluster/name cluster-name}
                         (seq drift-added)
                         (assoc ::drift-added (named drift-added))
                         (seq drift-removed)
@@ -622,7 +622,7 @@
                         (assoc ::committed-added (named committed-added))
                         (seq committed-removed)
                         (assoc ::committed-removed (named committed-removed)))]
-              (when (next row) row))))))
+              (when (next entity) entity))))))
     before)))
 
 (defn schema-restore-drift
@@ -633,8 +633,8 @@
   own nothing global. Only the second is a test error, so the caller that
   turns rows into a verdict asks here rather than reading the row keys."
   {:malli/schema [:=> [:cat [:vector :map]] [:vector :map]]}
-  [rows]
-  (filterv #(or (seq (::drift-added %)) (seq (::drift-removed %))) rows))
+  [entities]
+  (filterv #(or (seq (::drift-added %)) (seq (::drift-removed %))) entities))
 
 (defn- ambient-snapshot
   "Facts about this worker JVM's process-global state, DERIVED.
@@ -757,25 +757,25 @@
   (map? v) (into (sorted-map-by #(compare (pr-str %1) (pr-str %2))) v)
   (set? v) (into (sorted-set-by #(compare (pr-str %1) (pr-str %2))) v)
   :else v)) value))
-(defn- reach-row [row]
- (let [sym (or (:seon.test/sym row) (:seon.fn/sym row))
-       schema-key (:seon.schema/key row)
-       spec (some-> (:seon.fn/spec row) edn/read-string)
-       form (some-> (:seon.schema/form row) edn/read-string)]
-  (cond-> row
+(defn- reach-entity [entity]
+ (let [sym (or (:seon.test/sym entity) (:seon.fn/sym entity))
+       schema-key (:seon.schema/key entity)
+       spec (some-> (:seon.fn/spec entity) edn/read-string)
+       form (some-> (:seon.schema/form entity) edn/read-string)]
+  (cond-> entity
    sym (assoc ::reach-symbol sym
               ;; The producer's stored digest (`seon.program/definition-digest`)
               ;; covers source, spec, effective metadata and resolver context.
-              ::reach-leaf (:seon.program/definition-digest row :seon.error/unknown)
-              ::reach-keys (into (set (:seon.fn/keywords row)) (reach-keywords spec)))
+              ::reach-leaf (:seon.program/definition-digest entity :seon.error/unknown)
+              ::reach-keys (into (set (:seon.fn/keywords entity)) (reach-keywords spec)))
    schema-key (assoc ::reach-leaf (id/digest 64 [schema-key (reach-canonical form)])
                      ::reach-keys (reach-keywords form)))))
-(defn- reach-schema-keys [rows schemas seeds]
+(defn- reach-schema-keys [entities schemas seeds]
   (loop [pending (vec seeds) seen #{}]
     (if-let [k (peek pending)]
       (if (seen k)
         (recur (pop pending) seen)
-        (recur (into (pop pending) (get-in rows [(get schemas k) ::reach-keys]))
+        (recur (into (pop pending) (get-in entities [(get schemas k) ::reach-keys]))
                (conj seen k)))
       seen)))
 
@@ -792,9 +792,9 @@
                                (if (keyword? token)
                                  [[:seon.schema/key token]]
                                  [[:seon.fn/sym token] [:seon.test/sym token]])) tokens))]
-    (loop [pending (set (identities test-symbols)) seen #{} rows {}]
+    (loop [pending (set (identities test-symbols)) seen #{} entity-maps {}]
       (if (empty? pending)
-        rows
+        entity-maps
         (let [entities (mapcat
                         (fn [[attribute pairs]]
                           (let [result (db/q '[:find [?entity ...]
@@ -813,22 +813,22 @@
                             database (vec (distinct entities)) (set reach-attributes))
                       [])
               _ (when (map? facts)
-                  (throw (ex-info "Reach rows unavailable." facts)))
+                  (throw (ex-info "Reach entities unavailable." facts)))
               acquired (reduce (fn [result [entity attribute value]]
                                  (if (= :db.cardinality/many
                                         (get-in installed-schema [attribute :db/cardinality]))
                                    (update-in result [entity attribute] (fnil conj #{}) value)
                                    (assoc-in result [entity attribute] value)))
                                {} facts)
-              tokens (mapcat (fn [[_ row]]
-                               (concat (:seon.fn/calls row) (:seon.fn/references row)
-                                       (when-let [subject (:seon.test/subject row)] [subject])
-                                       (:seon.fn/keywords row)
-                                       (reach-keywords (some-> (:seon.fn/spec row) edn/read-string))
-                                       (reach-keywords (some-> (:seon.schema/form row) edn/read-string))))
+              tokens (mapcat (fn [[_ entity-map]]
+                               (concat (:seon.fn/calls entity-map) (:seon.fn/references entity-map)
+                                       (when-let [subject (:seon.test/subject entity-map)] [subject])
+                                       (:seon.fn/keywords entity-map)
+                                       (reach-keywords (some-> (:seon.fn/spec entity-map) edn/read-string))
+                                       (reach-keywords (some-> (:seon.schema/form entity-map) edn/read-string))))
                              acquired)
               seen (into seen pending)]
-          (recur (into #{} (remove seen) (identities tokens)) seen (merge rows acquired)))))))
+          (recur (into #{} (remove seen) (identities tokens)) seen (merge entity-maps acquired)))))))
 
 (defn- reach-revisions
   "Datahike's revisions of the attributes reach reads (`datahike.db/advance-cache-context`,
@@ -856,18 +856,18 @@
             (every? #(get-in previous [::reach-symbols %]) test-symbols))
      (assoc previous ::reach-basis basis ::reach-revisions revisions ::reach-updated 0 ::reach-invalidated 0)
  (let [by-entity (reach-facts database test-symbols)
-       ;; Rows re-read for these tests, and retained rows a write since the
-       ;; previous basis touched; every other retained row is kept as it is.
+       ;; Entities re-read for these tests, and retained entities a write since the
+       ;; previous basis touched; every other retained entity is kept as it is.
        ids (into (set (keys by-entity)) (filter (::reach-rows previous {})) changed-entities)
-       old-rows (::reach-rows previous {})
+       old-entities (::reach-rows previous {})
        pulled (mapv (fn [entity] (assoc (get by-entity entity {}) :db/id entity)) ids)
-       changed (filterv #(not= (dissoc (get old-rows (:db/id %)) ::reach-symbol ::reach-leaf ::reach-keys) %) pulled)
-       rows (reduce (fn [rs r] (assoc rs (:db/id r) (reach-row r))) old-rows changed)
+       changed (filterv #(not= (dissoc (get old-entities (:db/id %)) ::reach-symbol ::reach-leaf ::reach-keys) %) pulled)
+       entities (reduce (fn [rs r] (assoc rs (:db/id r) (reach-entity r))) old-entities changed)
        schemas (if (seq changed)
-                 (into {} (keep (fn [[e row]] (when-let [k (:seon.schema/key row)] [k e]))) rows)
+                 (into {} (keep (fn [[e entity-map]] (when-let [k (:seon.schema/key entity-map)] [k e]))) entities)
                  (::reach-schemas previous {}))
        tokens (into (set (map :db/id changed))
-                    (mapcat (fn [r] (for [v [r (get old-rows (:db/id r))]
+                    (mapcat (fn [r] (for [v [r (get old-entities (:db/id r))]
                                          :let [s (or (:seon.test/sym v) (:seon.fn/sym v))
                                                k (:seon.schema/key v)]
                                          token (cond-> [] s (conj [::reach-symbol s]) k (conj [::reach-schema k]))]
@@ -877,13 +877,13 @@
                     (::reach-digests previous {}))
               (::reach-digests previous {}))]
   (assoc (or previous {})
-    ::reach-basis basis ::reach-revisions revisions ::reach-rows rows
-    ::reach-symbols (if (seq changed) (into {} (keep (fn [[e r]] (when-let [s (::reach-symbol r)] [s e]))) rows) (::reach-symbols previous {}))
+    ::reach-basis basis ::reach-revisions revisions ::reach-rows entities
+    ::reach-symbols (if (seq changed) (into {} (keep (fn [[e r]] (when-let [s (::reach-symbol r)] [s e]))) entities) (::reach-symbols previous {}))
     ::reach-schemas schemas
     ::reach-digests kept
     ::reach-updated (count changed) ::reach-invalidated (- (count (::reach-digests previous)) (count kept)))))))
 (defn- reach-entry [index test-symbol]
-  (let [rows (::reach-rows index)
+  (let [entity-maps (::reach-rows index)
         symbols (::reach-symbols index)
         schemas (::reach-schemas index)
         start (get symbols test-symbol)
@@ -891,23 +891,23 @@
                 (if-let [target (peek pending)]
                   (if (seen target)
                     (recur (pop pending) seen)
-                    (let [row (get rows (get symbols target))]
+                    (let [entity (get entity-maps (get symbols target))]
                       (recur (into (pop pending)
-                                   (concat (:seon.fn/calls row)
-                                           (:seon.fn/references row)
-                                           (when-let [subject (:seon.test/subject row)] [subject])))
+                                   (concat (:seon.fn/calls entity)
+                                           (:seon.fn/references entity)
+                                           (when-let [subject (:seon.test/subject entity)] [subject])))
                              (conj seen target))))
                   seen))
         entities (into #{} (keep symbols) names)
-        keyword-seeds (reduce into #{} (map #(get-in rows [% ::reach-keys]) entities))
-        schema-keys (reach-schema-keys rows schemas keyword-seeds)
-        ;; A name with no program row is host code (`clojure.core/=`); a
-        ;; declared row without its stored digest is unknown evidence.
-        node-parts (mapv (fn [name] [name (get-in rows [(get symbols name) ::reach-leaf]
+        keyword-seeds (reduce into #{} (map #(get-in entity-maps [% ::reach-keys]) entities))
+        schema-keys (reach-schema-keys entity-maps schemas keyword-seeds)
+        ;; A name with no program entity is host code (`clojure.core/=`); a
+        ;; declared entity without its stored digest is unknown evidence.
+        node-parts (mapv (fn [name] [name (get-in entity-maps [(get symbols name) ::reach-leaf]
                                                   :seon.error/unknown)]) (sort names))
         undigested (into [] (comp (filter (fn [[name leaf]] (and (get symbols name) (not (string? leaf)))))
                                   (map first)) node-parts)
-        schema-parts (mapv (fn [key] [key (get-in rows [(get schemas key) ::reach-leaf])])
+        schema-parts (mapv (fn [key] [key (get-in entity-maps [(get schemas key) ::reach-leaf])])
                            (sort schema-keys))]
     {::reach-digest (when (empty? undigested) (id/digest 64 [test-symbol node-parts schema-parts]))
      ::reach-undigested undigested
@@ -918,8 +918,8 @@
                                         (map #(vector ::reach-schema %) schema-keys)))
      ::reach-function-count (count names)}))
 (defonce ^:private reach-holders
-  ;; Keyed by the program content reach reads (each row's definition digest or
-  ;; schema form, with its entity): every branch with equal program rows shares
+  ;; Keyed by the program content reach reads (each entity's definition digest or
+  ;; schema form, with its entity): every branch with equal program entities shares
   ;; one index, whatever else it wrote. LRU bounds retention.
   (cache/lru-cache-factory {} :threshold 16))
 (defonce ^:private reach-lineage
@@ -933,7 +933,7 @@
     (when (:datahike.value/commit-id value)
       [(first (:datahike.value/connection-id value)) (:datahike.value/commit-id value)])))
 (defn- reach-content
-  "What every reach row derives from: each definition digest and schema form by entity."
+  "What every reach entity derives from: each definition digest and schema form by entity."
   [database]
   (let [definitions (db/q '[:find ?e ?d :where [?e :seon.program/definition-digest ?d]] database)
         forms (db/q '[:find ?e ?f :where [?e :seon.schema/form ?f]] database)]
@@ -1134,7 +1134,7 @@
   ;; expected, actual, event signature).
   [:seon.test.failure/line :seon.test.failure/reported-file :seon.test.failure/contexts])
 
-(defn report-row
+(defn report-entity
   "The stored report for one captured failure of `test-symbol`.
 
   Its identity is the captured signature and the position it was reported
@@ -1292,10 +1292,10 @@
         results
         (mapv
           (fn [{test-symbol :seon.test/sym :as result}]
-            (let [test-row (db/pull tested
+            (let [test-entity (db/pull tested
                                    '[{:seon.fn/file [:seon.fn.file/relative-path]}]
                                    [:seon.test/sym test-symbol])
-                  path (get-in test-row [:seon.fn/file :seon.fn.file/relative-path])
+                  path (get-in test-entity [:seon.fn/file :seon.fn.file/relative-path])
                   reports (or (seq (:seon.test.failure/reports result))
                               (when (pos? (+ (:seon.test/fail-count result 0)
                                              (:seon.test/error-count result 0)))
@@ -1342,9 +1342,9 @@
           (:seon.test.runner/results completion))]
     (assoc completion :seon.test.runner/results results :seon.blob/staged-writes @staged)))
 
-(defn- failure-replacement-tx [database test-row-id failures run-ref at]
-  (let [previous (when-not (string? test-row-id)
-                   (db/pull database '[{:seon.test/failures [*]}] test-row-id))
+(defn- failure-replacement-tx [database test-entity-id failures run-ref at]
+  (let [previous (when-not (string? test-entity-id)
+                   (db/pull database '[{:seon.test/failures [*]}] test-entity-id))
         previous-by-id (into {} (map (juxt :seon.test.failure/id identity)) (:seon.test/failures previous))
         retained (set (map :seon.test.failure/id failures))]
     (into
@@ -1356,29 +1356,29 @@
                         (db/pull database '[*] [:seon.test.failure/id failure-id]))
                 old-run (get-in old [:seon.test.failure/last-run :db/id])
                 current-run (:db/id (db/pull database [:db/id] run-ref))
-                row (assoc failure
+                entity (assoc failure
                            :db/id (or (:db/id old) (str "test-failure:" failure-id))
-                           :seon.test.failure/test test-row-id
+                           :seon.test.failure/test test-entity-id
                            :seon.test.failure/first-run (or (get-in old [:seon.test.failure/first-run :db/id]) run-ref)
                            :seon.test.failure/last-run run-ref
                            :seon.test.failure/seen-count (+ (get old :seon.test.failure/seen-count 0)
                                                           (if (and current-run (= old-run current-run)) 0 1))
                            :seon.test.failure/last-seen-at at)]
             (concat
-              ;; Retract ONLY what the new row does not assert. A
+              ;; Retract ONLY what the new entity does not assert. A
               ;; cardinality-one add replaces its own value and an identical
               ;; add emits no datom at all, so retracting every attribute
               ;; first turned an unchanged re-record into pure churn.
               (for [attribute (keys (dissoc old :db/id :seon.test.failure/id))
-                    :when (not (contains? row attribute))]
+                    :when (not (contains? entity attribute))]
                 [:db.fn/retractAttribute (:db/id old) attribute])
               ;; The one cardinality-many failure attribute changes member by
-              ;; member; only the members the new row drops are retracted.
-              (let [wanted (set (:seon.test.failure/contexts row))]
+              ;; member; only the members the new entity drops are retracted.
+              (let [wanted (set (:seon.test.failure/contexts entity))]
                 (for [context (:seon.test.failure/contexts old)
                       :when (not (contains? wanted context))]
                   [:db/retract (:db/id old) :seon.test.failure/contexts context]))
-              [row]))) failures))))
+              [entity]))) failures))))
 
 (defn complete-members
   "Accept immutable member outcomes for an admitted run or its exact writer claim.
@@ -1436,7 +1436,7 @@
                                  (:seon.fn.file/relative-path
                                   (execution-read
                                    (db/pull database [:seon.fn.file/relative-path] file))))]
-                      (report-row report-attributes test-symbol
+                      (report-entity report-attributes test-symbol
                                   (cond-> failure
                                     path (assoc :seon.test.failure/reported-file path)))))
                   (:seon.test/failures result))
@@ -1557,7 +1557,7 @@
         current-by-symbol
         (into {}
               (keep (fn [{test-symbol :seon.test/sym}]
-                      (when-let [row (db/pull database
+                      (when-let [entity (db/pull database
                                               [:db/id
                                                :seon.test/reach-digest
                                                :seon.test/reach-unknown
@@ -1565,7 +1565,7 @@
                                                :seon.test/failing-assertions
                                                '(limit :seon.test/reach nil)]
                                               [:seon.test/sym test-symbol])]
-                        [test-symbol row])))
+                        [test-symbol entity])))
               results)
         file-present?
         (memoize #(some? (db/pull database [:db/id] [:seon.fn.file/relative-path %])))
@@ -1599,7 +1599,7 @@
                       :seon.error/data {:seon.test.run/id run-id
                        :seon.db/basis-t (db/basis-t database)}}) :seon.test.run/immutable run-id)]
         (throw (ex-info (:seon.error/message failure) failure))))
-    ;; A result needs its test row: recording must never recreate a retracted
+    ;; A result needs its test entity: recording must never recreate a retracted
     ;; definition. The writer decides from its own value and refuses the whole
     ;; completion as a declared value, so seon.db/transact! returns it verbatim
     ;; and changes nothing, instead of reporting an unknown outcome.
@@ -1621,7 +1621,7 @@
         (let [test-ref [:seon.test/sym test-symbol]
               current (get current-by-symbol test-symbol)
               exists? (some? current)
-              test-row-id test-ref
+              test-entity-id test-ref
               failures (mapv portable-failure (:seon.test/failures result))
               wanted-reach (when (set? (get reaches test-symbol))
                              (get reaches test-symbol))
@@ -1637,9 +1637,9 @@
               added-members (into #{} (remove held-members) wanted-reach)
               wanted-digest (get digests test-symbol)
               wanted-assertions (set (:seon.test/failing-assertions result))
-              result-row
+              result-entity
               (cond-> (assoc (dissoc result :seon.test/failures :seon.test.run/terminated?)
-                             :db/id test-row-id
+                             :db/id test-entity-id
                              :seon.test/run "test-run"
                              :seon.test/run-basis-t basis-t
                              :seon.test/run-at at)
@@ -1686,8 +1686,8 @@
                   (:seon.test/failing-assertions current))
 
             exists? (into retracted-members)
-            true (conj result-row))
-            (failure-replacement-tx database test-row-id failures run-ref at))))
+            true (conj result-entity))
+            (failure-replacement-tx database test-entity-id failures run-ref at))))
       results))))
 
 (defn record-tx
@@ -1701,9 +1701,9 @@
                   :seon.test.runner/record-tx]}
   [database completion]
   (let [run-id (get-in completion [:seon.test.run/provenance :seon.test.run/id])
-        row (execution-read
+        entity (execution-read
              (db/pull database [:seon.test.run/selection-tx] [:seon.test.run/id run-id]))]
-    (if (or (:seon.test.run/selection-tx row)
+    (if (or (:seon.test.run/selection-tx entity)
             (:seon.test.member/claim-tx completion)
             (:seon.test.member/worker completion))
       (execution-read (complete-members database completion))
@@ -1745,13 +1745,13 @@
         by-eid (into {} (map (juxt :db/id identity)) (vals runs))
         pairs (admitted-members database (mapv #(or (runs %) {:seon.test.run/id %}) run-ids)
                                 (mapv (fn [[id sym]] [(:db/id (runs id)) (symbol sym)]) wanted))
-        report-rows (execution-read
+        report-entities (execution-read
                      (db/q '[:find ?member ?report :in $ [?member ...]
                              :where [?member :seon.test.member/failures ?report]]
                            database (mapv (comp :db/id second) pairs)))
-        reports (group-by first report-rows)
-        pulled (zipmap (map second report-rows)
-                       (execution-read (db/pull-many database '[*] (mapv second report-rows))))]
+        reports (group-by first report-entities)
+        pulled (zipmap (map second report-entities)
+                       (execution-read (db/pull-many database '[*] (mapv second report-entities))))]
     (into {}
           (map (fn [[run-eid member]]
                  (let [run (by-eid run-eid)
@@ -1913,10 +1913,10 @@
   "Refuse incomplete coverage; preserve the owning execution's confidence."
   {:malli/schema [:=> [:cat :seon.test.run/id :seon.test.run/result-facts]
                   :seon.test/results]}
-  [run-id {expected :seon.test.run/expected rows :seon.test.run/rows}]
-  (when-not (and (= expected (set (map first rows))) (= (count expected) (count rows)))
+  [run-id {expected :seon.test.run/expected entities :seon.test.run/rows}]
+  (when-not (and (= expected (set (map first entities))) (= (count expected) (count entities)))
     (execution-refusal! 'seon.test.runner/run-results run-id
-                        :seon.test/population-unknown expected rows))
+                        :seon.test/population-unknown expected entities))
   (mapv (fn [[sym pass fail errors owner at basis program inputs]]
           (cond-> {:seon.test/sym sym :seon.test/pass-count pass
                    :seon.test/fail-count fail :seon.test/error-count errors
@@ -1924,7 +1924,7 @@
                    :seon.test/run-at at :seon.test/run-basis-t basis
                    :seon.test.run/basis-t basis :seon.test.run/program-digest program
                    :seon.test.run/input-digest inputs}
-            (not= run-id owner) (assoc :seon.test/unchanged true))) rows))
+            (not= run-id owner) (assoc :seon.test/unchanged true))) entities))
 
 (defn- result-read-error
   {:malli/schema [:=> [:cat :seon.test.run/id :seon.error/throwable]
@@ -1956,7 +1956,7 @@
                   [:or :seon.test/latest-results :seon.test/execution-error]]}
   [database test-symbols]
   (try
-    (let [rows (execution-read
+    (let [entities (execution-read
                 (db/q '[:find ?symbol ?id ?selected
                         :in $ [?symbol ...] ?branch
                         :where [?member :seon.test.member/symbol ?symbol]
@@ -1967,8 +1967,8 @@
                                (not [?run :seon.test.run/published-base-digest])]
                       database test-symbols
                       (get-in (db/schema-database database) [:config :branch])))
-          latest (vals (reduce (fn [result [sym :as row]] (assoc result sym row))
-                               (sorted-map) (sort-by #(nth % 2) rows)))
+          latest (vals (reduce (fn [result [sym :as entity]] (assoc result sym entity))
+                               (sorted-map) (sort-by #(nth % 2) entities)))
           results (recorded-member-results database (mapv (fn [[sym id]] [id sym]) latest))]
       ;; One batch of reads for every run, never one per run or per test.
       (->> latest

@@ -29,7 +29,7 @@
            ctx (:seon.sci.eval/ctx (test-support/execution-handle connection))
            _ (test-support/transacted!
               connection
-              [(test-support/program-fn-row
+              [(test-support/program-fn-entity
                 (db/db connection) function
                 "(defn identity-int {:malli/schema [:=> [:cat :string] :string]} [value] value)")])
            refusal (#'seon.test/arm-first-loads!
@@ -47,7 +47,7 @@
            ctx (:seon.sci.eval/ctx (test-support/execution-handle connection))
            _ (test-support/transacted!
               connection
-              [(test-support/program-fn-row
+              [(test-support/program-fn-entity
                 (db/db connection) function
                 "(defn identity-int {:malli/schema [:=> [:cat :string] :string]} [value] value)")])
            changed (db/db connection)

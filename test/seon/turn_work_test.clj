@@ -143,8 +143,8 @@
                        lint-ordinal receipts]}]
   (let [projection (db/carried-projection database)
         validator #(#'db/validate-write-report projection %)
-        apply-state (fn [database rows]
-                      (:db-after (d/with database rows
+        apply-state (fn [database entities]
+                      (:db-after (d/with database entities
                                    {:datahike/validate-report validator})))
         message {:seon.message/id message-id
                  :seon.message/to [:seon.agent/id agent-id]
@@ -255,12 +255,12 @@
 ;;; ---------------------------------------------------------------------------
 
 (def ^:private states
-  "Every state the derivation must answer, with its crash-walk row."
+  "Every state the derivation must answer, with its crash-walk entity."
   [{::label "idle: no trigger, no run"
     ::build (fn [_connection] nil)
     ::expect nil}
 
-   {::label "row 1 — trigger committed, nothing else (also the boot pass)"
+   {::label "entity 1 — trigger committed, nothing else (also the boot pass)"
     ::build (fn [connection] (add-trigger! connection))
     ::expect {:seon.turn.work/situation :open
               :seon.agent/id agent-id
@@ -274,7 +274,7 @@
               :seon.turn/id run-id
               :seon.agent/id agent-id}}
 
-   {::label "row 5 — planned, no receipts: fold from ordinal 0"
+   {::label "entity 5 — planned, no receipts: fold from ordinal 0"
     ::build (fn [connection]
               (add-trigger! connection)
               (open-run! connection {:planned? true
@@ -284,7 +284,7 @@
               :seon.agent/id agent-id
               :seon.cluster.eval/ordinal 0}}
 
-   {::label "row 8 — one terminal receipt: fold from ordinal 1"
+   {::label "entity 8 — one terminal receipt: fold from ordinal 1"
     ::build (fn [connection]
               (add-trigger! connection)
               (open-run! connection {:planned? true
@@ -311,7 +311,7 @@
 
 
 
-   {::label "row 10 — closed run, answered trigger, completed: idle"
+   {::label "entity 10 — closed run, answered trigger, completed: idle"
     ;; IDLE NEEDS THE DISPOSITION. A closed provider reply CONTINUES unless
     ;; its turn carries one (`src/seon/turn.clj:2845`; the `:open` arm admits
     ;; "continuation of the latest closed provider reply"), so a fixture that

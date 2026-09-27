@@ -34,7 +34,7 @@
   [character]
   (apply str (repeat 64 character)))
 
-(defn- function-row [function-symbol namespace-name file extra]
+(defn- function-entity [function-symbol namespace-name file extra]
   (merge {:seon.fn/sym function-symbol
           :seon.fn/ns [:seon.ns/name namespace-name]
           :seon.fn/file [:seon.fn.file/relative-path file]
@@ -61,14 +61,14 @@
           {:seon.fn.file/relative-path helper-file
            :seon.fn.file/digest (digest "b")
            :seon.fn.file/relative-root "test"}
-          (function-row complete-fn source-ns source-file
+          (function-entity complete-fn source-ns source-file
                         {:seon.fn/spec "[:=> [:cat :int] :int]"})
-          (function-row uncontracted-fn source-ns source-file {})
-          (function-row untested-fn source-ns source-file
+          (function-entity uncontracted-fn source-ns source-file {})
+          (function-entity untested-fn source-ns source-file
                         {:seon.fn/spec "[:=> [:cat :int] :int]"})
-          (function-row helper-fn helper-ns helper-file {})
+          (function-entity helper-fn helper-ns helper-file {})
           ;; A literal constant has no body: no standard names it.
-          (function-row constant-var source-ns source-file
+          (function-entity constant-var source-ns source-file
                         {:seon.fn/constant? true :seon.fn/defined-by 'clojure.core/def
                          :seon.fn/source "(def constant 7)"})
           {:seon.test/sym (sym-in 'seon.detect-fixture-test "covers")
@@ -151,8 +151,8 @@
             sibling (sym-in source-ns "map->Shared")
             report (seon.db/transact!
                     connection
-                    [(function-row shared source-ns source-file {:seon.fn/form-span [10 20]})
-                     (function-row sibling source-ns source-file {:seon.fn/form-span [10 20]})])
+                    [(function-entity shared source-ns source-file {:seon.fn/form-span [10 20]})
+                     (function-entity sibling source-ns source-file {:seon.fn/form-span [10 20]})])
             _ (clojure.test/is (let [observed report] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str report))
             database (seon.db/db connection)
             contract (into #{} (map :seon.fn/sym)
@@ -178,13 +178,13 @@
             defined (sym-in source-ns "defined-by-defn")
             report (seon.db/transact!
                     connection
-                    [(function-row constructor source-ns source-file
+                    [(function-entity constructor source-ns source-file
                                    {:seon.fn/defined-by 'clojure.core/deftype
                                     :seon.fn/form-span [30 40]})
-                     (function-row method source-ns source-file
+                     (function-entity method source-ns source-file
                                    {:seon.fn/defined-by 'clojure.core/defprotocol
                                     :seon.fn/form-span [50 60]})
-                     (function-row defined source-ns source-file
+                     (function-entity defined source-ns source-file
                                    {:seon.fn/defined-by 'clojure.core/defn
                                     :seon.fn/form-span [70 80]})])
             _ (clojure.test/is (let [observed report] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str report))

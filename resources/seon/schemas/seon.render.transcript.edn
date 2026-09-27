@@ -7,7 +7,7 @@
                          :history-request
                          [:map
                           {:description
-                           "The named request for one agent's own evaluation history. Call preparation supplies the database and agent id; the caller names the cluster whose configuration bounds the runs, because a forked branch carries its parent's cluster rows too."}
+                           "The named request for one agent's own evaluation history. Call preparation supplies the database and agent id; the caller names the cluster whose configuration bounds the runs, because a forked branch carries its parent's cluster entities too."}
                           [:seon.db/db :seon.db/database-value]
                           [:seon.agent/id :seon.agent/id]
                           [:seon.boot/cluster-name :seon.boot/cluster-name]],

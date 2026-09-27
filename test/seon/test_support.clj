@@ -200,17 +200,17 @@
                     result)))
   result)
 
-(defn- offending-fixture-row
+(defn- offending-fixture-entity
   "The authored row write admission refused, taken from its reported path.
 
    The refusal's own `:seon.db/entity-form` is the entity SCHEMA it was read
    against, not the row: the row is the one the fixture wrote at the path's
    leading index, so a seeding fixture reads back exactly what it authored."
   [tx-data report]
-  (let [rows (if (map? tx-data) (:tx-data tx-data) tx-data)
+  (let [entities (if (map? tx-data) (:tx-data tx-data) tx-data)
         index (first (:seon.db/path report))]
-    (when (and (int? index) (sequential? rows) (< -1 index (count rows)))
-      [index (nth rows index)])))
+    (when (and (int? index) (sequential? entities) (< -1 index (count entities)))
+      [index (nth entities index)])))
 
 (defn transacted!
   "Transact fixture data through the writer and prove the report landed.
@@ -240,8 +240,8 @@
         (str "Fixture write was refused at the write: "
              (or (:seon.error/message report)
                  (str "no :db-after in " (pr-str report)))
-             (when-let [[index row] (offending-fixture-row tx-data report)]
-               (str " Offending row " index ": " (pr-str row) ".")))
+             (when-let [[index entity] (offending-fixture-entity tx-data report)]
+               (str " Offending entity " index ": " (pr-str entity) ".")))
         (cond-> (if (map? report) report {:seon.db/report report})
           true (assoc :seon.db/tx-data tx-data)))))
     report))
@@ -713,7 +713,7 @@
                    [:seon.turn/id turn-id])
           [:seon.turn/closed-tx :db/txInstant]))
 
-(defn namespace-row
+(defn namespace-entity
   "A namespace declaration exactly as an agent's `(ns name)` writes it.
    `program/declaration-row` owns the row and derives its definition digest."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ns/name] :seon.ns/ns]}
@@ -756,7 +756,7 @@
   [database agent-ids]
   (into [] (mapcat #(agent-tx database %)) agent-ids))
 
-(defn- digest-namespace-row
+(defn- digest-namespace-entity
   "The namespace row the writer digests a declaration of `namespace-name` with:
    the stored row as the writer reads it (`seon.db/declaration-value`), else the
    canonical row a fixture writes beside the declaration (`namespace-row`)."
@@ -764,9 +764,9 @@
   [database namespace-name]
   (if-let [stored (db/q '[:find ?e . :in $ ?n :where [?e :seon.ns/name ?n]] database namespace-name)]
     (@#'seon.db/declaration-value database (db/identity-attributes database) stored)
-    (namespace-row database namespace-name)))
+    (namespace-entity database namespace-name)))
 
-(defn schema-rows
+(defn schema-entities
   "Canonical schema declaration rows for synthetic `forms`, `[key definition]`
    pairs in dependency order, each declared onto `database`'s projection through
    `seon.schema/projection-with-schema`. The writer derives its projection from
@@ -779,9 +779,9 @@
                              (schema/projection-with-schema
                               current schema-key definition {:seon.schema.admission/source :core}))
                            (db/carried-projection database) forms)]
-    (vec (schema/canonical-schema-rows projection (into {} forms)))))
+    (vec (schema/canonical-schema-entities projection (into {} forms)))))
 
-(defn revised-row
+(defn revised-entity
   "`row` with `overrides` merged, digested from that FINAL row through the one
    digest owner `seon.db/definition-digest-of` with the namespace row the write
    leaves (`digest-namespace-row`), the digest `seon.db/write-digest-error`
@@ -789,16 +789,16 @@
   {:malli/schema [:function
                   [:=> [:cat :seon.db/database-value :map :map] :map]
                   [:=> [:cat :seon.db/database-value :map :map [:maybe :map]] :map]]}
-  ([database row overrides]
-   (revised-row database row overrides
-                (some->> (or (:seon.fn/ns row) (:seon.test/ns row)) second
-                         (digest-namespace-row database))))
-  ([database row overrides namespace-row]
-   ;; The writer digests with the namespace row the SAME transaction stores, so a
-   ;; fixture that writes its namespace beside the row hands that row in.
-   (let [row (merge row overrides)]
-     (assoc row :seon.program/definition-digest
-            (db/definition-digest-of (db/carried-projection database) row namespace-row)))))
+  ([database entity overrides]
+   (revised-entity database entity overrides
+                (some->> (or (:seon.fn/ns entity) (:seon.test/ns entity)) second
+                         (digest-namespace-entity database))))
+  ([database entity overrides namespace-entity]
+   ;; The writer digests with the namespace entity the SAME transaction stores, so a
+   ;; fixture that writes its namespace beside the entity hands that entity in.
+   (let [entity (merge entity overrides)]
+     (assoc entity :seon.program/definition-digest
+            (db/definition-digest-of (db/carried-projection database) entity namespace-entity)))))
 
 (defn revision
   "The upsert changing the STORED declaration `identity` by `overrides`, with the
@@ -813,33 +813,33 @@
     (assoc overrides attribute value
            :seon.program/definition-digest
            (:seon.program/definition-digest
-            (revised-row database (merge-with #(if (set? %1) (into %1 %2) %2) stored overrides) {})))))
+            (revised-entity database (merge-with #(if (set? %1) (into %1 %2) %2) stored overrides) {})))))
 
-(defn program-row
+(defn program-entity
   "Analyze an explicit synthetic declaration through the production source path,
    then `revised-row` with `overrides`. The row is the desired declaration, not
    a write: an upsert onto a stored identity keeps the owned attributes it drops
    and the writer refuses its digest, so write a stored identity through
    `replacement-tx`."
-  ([database identity source] (program-row database identity source {}))
+  ([database identity source] (program-entity database identity source {}))
   ([database identity source overrides]
    (let [projection (db/carried-projection database)
          [attribute declaration-symbol] identity
          namespace-name (symbol (namespace declaration-symbol))
-         ns-row (digest-namespace-row database namespace-name)
-         rows (seon.fn/source-rows
-               database (program/shapes-in projection) ns-row
+         ns-entity (digest-namespace-entity database namespace-name)
+         entities (seon.fn/source-rows
+               database (program/shapes-in projection) ns-entity
                source (set (keys (:seon.schema.projection/forms projection))))]
      ;; Finalized as an agent's definition is: its contract's parsed facts
-     ;; (`seon.fn/contract-facts-row`), then the digest of the final row.
-     (revised-row
+     ;; (`seon.fn/contract-facts-row`), then the digest of the final entity.
+     (revised-entity
       database
       (seon.fn/contract-facts-row
-       projection ns-row
-       (or (some #(when (= declaration-symbol (get % attribute)) %) rows)
+       projection ns-entity
+       (or (some #(when (= declaration-symbol (get % attribute)) %) entities)
            (throw (ex-info "The fixture source did not define the requested declaration."
                            {:seon.program/identity identity :seon.program/source source}))))
-      overrides ns-row))))
+      overrides ns-entity))))
 
 (defn replacement-tx
   "Transaction data leaving `identity` exactly as analyzed from `source` with
@@ -849,12 +849,12 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity :string :map]
                   :seon.store/transaction-data]}
   [database identity source overrides]
-  (let [row (program-row database identity source overrides)]
+  (let [entity (program-entity database identity source overrides)]
     (if-let [stored (db/pull database '[*] identity)]
-      (program/exact-replacement-tx stored row)
-      [row])))
+      (program/exact-replacement-tx stored entity)
+      [entity])))
 
-(defn program-fn-row
+(defn program-fn-entity
   "A complete indexed declaration, or an explicitly analyzed agent fixture.
    The one-argument form re-indexes the declaration's own file through
    publication's incremental path (`seon.fn/rows` with that one changed path,
@@ -870,17 +870,17 @@
                       [:seon.fn/file :seon.fn.file/relative-path])]
      (or (when path
            (some #(when (= function-symbol (:seon.fn/sym %)) %)
-                 (seon.fn/rows {:seon.fn/roots seon.fn/source-roots
+                 (seon.fn/program-entities {:seon.fn/roots seon.fn/source-roots
                                 :seon.fn/changed-paths #{path}
                                 :seon.source/previous-database world})))
          (throw (ex-info "The executing member's world indexes no file defining this declaration; a synthetic fixture definition requires its database and source."
-                         {:seon.error/operation 'seon.test-support/program-fn-row
+                         {:seon.error/operation 'seon.test-support/program-fn-entity
                           :seon.error/expected :seon.fn/file
                           :seon.error/offending function-symbol})))))
   ([database function-symbol source]
-   (program-row database [:seon.fn/sym function-symbol] source {}))
+   (program-entity database [:seon.fn/sym function-symbol] source {}))
   ([database function-symbol source overrides]
-   (program-row database [:seon.fn/sym function-symbol] source overrides)))
+   (program-entity database [:seon.fn/sym function-symbol] source overrides)))
 
 (defn apply-config!
   "Set one cluster's config dials through the production path.
@@ -909,14 +909,14 @@
     (db/call-with-custody {:seon.db/connection connection}
                           #(cluster/ensure-cluster-entity!
                             connection cluster-name cluster/boot-process-identity)))
-   ;; The row a fork records (registry/fork-row): the seeded cluster descends
+   ;; The entity a fork records (registry/fork-entity): the seeded cluster descends
    ;; from the program the executing member's own cluster adopted, which a
    ;; test request's world branches from.
    (when-let [source-commit
               (:seon.source/commit-id
                (db/pull (db/db connection) [:seon.source/commit-id]
                         [:seon.cluster/name (:seon.cluster/name (execution-handle connection))]))]
-     (transacted! connection [(registry/fork-row cluster-name source-commit)]))
+     (transacted! connection [(registry/fork-entity cluster-name source-commit)]))
    nil))
 
 (defn preserving-instrumentation-state

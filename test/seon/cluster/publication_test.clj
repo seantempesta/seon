@@ -18,9 +18,9 @@
               (set (map :seon.fn/sym declarations))))
        (is (every? #(not (contains? % :seon.fn/arities)) declarations)
            "authored declaration comparison does not acquire compiled arities")
-       (doseq [row declarations]
-         (is (= (:seon.fn/source row)
+       (doseq [entity declarations]
+         (is (= (:seon.fn/source entity)
                 (:seon.fn/source (db/pull database [:seon.fn/source]
-                                         [:seon.fn/sym (:seon.fn/sym row)])))))
+                                         [:seon.fn/sym (:seon.fn/sym entity)])))))
        (is (empty? (:seon.fn.manifest/declaration-digests manifest))
            "an ordinary source edit does not hash every schema declaration")))))

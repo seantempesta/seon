@@ -437,7 +437,7 @@
 ;;; The class: a plan source the reader finds no event in
 ;;; ---------------------------------------------------------------------------
 
-;;; A comment-only plan source is a form row nothing can settle: the reader
+;;; A comment-only plan source is a form entity nothing can settle: the reader
 ;;; produces zero events for it, so no receipt is ever written and the run
 ;;; closes with an unsettled form of its own. The 2026-08-08 arc drive read
 ;;; 105 forms / 102 receipts, and all three gaps were deepseek-v4-flash

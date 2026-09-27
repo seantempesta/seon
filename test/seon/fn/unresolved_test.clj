@@ -11,10 +11,10 @@
    (fn [connection]
      (let [caller 'my.note/unresolved-report-probe
            missing 'my.note/unresolved-report-target
-           row (support/program-fn-row
+           entity (support/program-fn-entity
                 (db/db connection) caller
                 "(defn unresolved-report-probe [] (clojure.core/str (my.note/unresolved-report-target)))")]
-       (support/transacted! connection [row])
+       (support/transacted! connection [entity])
        (let [report (functions/unresolved-callers (db/db connection))
              calls (:seon.program/unresolved-callers report)]
          (is (nil? (:seon.error/at report)) (pr-str report))
@@ -24,7 +24,7 @@
          (is (not-any? #(= "clojure.core" (namespace (:seon.fn/callee %))) calls)))
        (support/transacted!
         connection
-        [(support/program-fn-row (db/db connection) missing
+        [(support/program-fn-entity (db/db connection) missing
                                  "(defn unresolved-report-target [] nil)")])
        (is (not-any? #(= [:seon.fn/sym caller] (:seon.program/identity %))
                      (:seon.program/unresolved-callers

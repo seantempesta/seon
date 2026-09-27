@@ -31,7 +31,7 @@
     ;; is the declared supplier of `:seon.db/connection`: handing out that
     ;; cluster's connection IS its whole contract, and it can only produce
     ;; the one carried by the environment it is called with, so it widens no
-    ;; custody. This snapshot caught it exactly as intended — the row landed
+    ;; custody. This snapshot caught it exactly as intended — the entity landed
     ;; with S1 and this census was the thing that noticed.
     ['seon.db/supplied-connection :seon.db/connection]
     ;; Source acquisition owns both values while constructing the one base
@@ -67,7 +67,7 @@
     ['seon.sci.eval/base-ctx :seon.sci.eval/ctx]
     ['seon.sci.eval/copy-base-ctx :seon.sci.eval/ctx]
     ['seon.sci.eval/derive-base-ctx :seon.sci.eval/ctx]
-    ;; Test-world owners, program rows like any other. The fixture fork is the
+    ;; Test-world owners, program entities like any other. The fixture fork is the
     ;; production fork onto the fixture's own connection; `open-world!` returns
     ;; the member branch connection it opened; the agent-custody test's private
     ;; helper returns the connection a handle already holds.
@@ -215,7 +215,7 @@
                    db))
             ;; A public Var the program does not declare as a function is not
             ;; SCI's to install: a deftest is a test declaration, run by
-            ;; `seon.test/run`, and a compiler-generated proxy Var has no row.
+            ;; `seon.test/run`, and a compiler-generated proxy Var has no entity.
             expected
             (into (sorted-map)
                   (map (fn [[namespace-name host-namespace]]
@@ -236,7 +236,7 @@
         (is (seq host-namespaces)
             "a missing loaded program graph is failure, never a healthy census")
         (is (not (contains? host-namespaces 'seon.operator.runtime))
-            "operator custody has no indexed program-graph namespace row")
+            "operator custody has no indexed program-graph namespace entity")
         (is (not (contains? installed-all 'seon.operator.runtime))
             "the operator-owned namespace is never installed into SCI")
         (doseq [[consumer-symbol referred-name] relocated-root-vars
@@ -246,10 +246,10 @@
                  (some-> root-var meta :ns ns-name))
               (pr-str {:seon.custody-stability/consumer consumer-symbol
                        :seon.custody-stability/root-var root-var})))
-        ;; Ruling 47 gives every ctx-resolvable name a row, including macros
+        ;; Ruling 47 gives every ctx-resolvable name an entity, including macros
         ;; and injected non-function bindings. Publics cover those bindings;
         ;; the graph side therefore selects source-backed function definitions
-        ;; instead of treating every identity row as an installed function.
+        ;; instead of treating every identity entity as an installed function.
         (is (= expected installed)
             (pr-str {:seon.custody-stability/expected expected
                      :seon.custody-stability/installed installed}))))))

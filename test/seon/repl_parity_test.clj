@@ -85,8 +85,8 @@
        value))
    (tree-seq coll? seq (get-in result [:value :seon.error/data]))))
 
-(defn- check-row!
-  [row-id expected-state check]
+(defn- check-entity!
+  [entity-id expected-state check]
   (let [outcome
         (try
           (check)
@@ -96,30 +96,30 @@
              :parity/actual {:class (class failure)
                              :message (ex-message failure)}}))
         passes? (:parity/pass? outcome)]
-    (swap! observations assoc row-id
+    (swap! observations assoc entity-id
            (assoc outcome :parity/expected-state expected-state))
     (case expected-state
       :passing
       (is passes?
-          (str row-id " regressed: " (pr-str outcome)))
+          (str entity-id " regressed: " (pr-str outcome)))
 
       :known-divergence
       (is (false? passes?)
-          (str row-id " now matches stock Clojure; promote the row: "
+          (str entity-id " now matches stock Clojure; promote the entity: "
                (pr-str outcome))))))
 
 (defmacro defparity
-  [row-id expected-state check]
-  (let [test-name (symbol (str "parity-" (str/lower-case row-id)))
+  [entity-id expected-state check]
+  (let [test-name (symbol (str "parity-" (str/lower-case entity-id)))
         test-name (with-meta test-name
-                    {:parity/row row-id
+                    {:parity/row entity-id
                      :parity/known-divergence
                      (= :known-divergence expected-state)})]
     `(deftest ~test-name
-       (check-row! ~row-id ~expected-state (fn [] ~check)))))
+       (check-entity! ~entity-id ~expected-state (fn [] ~check)))))
 
-(def pending-rows
-  "Checklist rows with no honest executable production-path assertion yet."
+(def pending-entities
+  "Checklist entities with no honest executable production-path assertion yet."
   [{:parity/row "A7"
     :parity/reason "Route c: Seon's reader intentionally refuses #= input."}
    {:parity/row "D10"
@@ -165,39 +165,39 @@
        vals
        (filter (comp :parity/row meta))))
 
-(def ^:private expected-family-row-counts
+(def ^:private expected-family-entity-counts
   [["A" 10] ["B" 11] ["C" 8] ["D" 11] ["E" 16]
    ["F" 6] ["G" 10] ["H" 8] ["I" 8]])
 
-(def ^:private expected-row-ids
+(def ^:private expected-entity-ids
   (into #{}
-        (mapcat (fn [[family row-count]]
-                  (map #(str family %) (range 1 (inc row-count)))))
-        expected-family-row-counts))
+        (mapcat (fn [[family entity-count]]
+                  (map #(str family %) (range 1 (inc entity-count)))))
+        expected-family-entity-counts))
 
-(defn- current-row-ids
+(defn- current-entity-ids
   []
   (concat (map (comp :parity/row meta) (parity-vars))
-          (map :parity/row pending-rows)))
+          (map :parity/row pending-entities)))
 
-(defn- family-row-counts
-  [row-ids]
+(defn- family-entity-counts
+  [entity-ids]
   (mapv (fn [[family _]]
-          [family (count (filter #(str/starts-with? % family) row-ids))])
-        expected-family-row-counts))
+          [family (count (filter #(str/starts-with? % family) entity-ids))])
+        expected-family-entity-counts))
 
-(defn- assert-complete-row-inventory!
+(defn- assert-complete-entity-inventory!
   []
-  (let [row-ids (vec (current-row-ids))]
-    (is (= (count expected-row-ids) (count row-ids))
-        (str "REPL parity row cardinality changed: " (sort row-ids)))
-    (is (= expected-row-ids (set row-ids))
-        (str "REPL parity row identities changed: "
-             {::missing (sort (remove (set row-ids) expected-row-ids))
-              ::unexpected (sort (remove expected-row-ids row-ids))}))
-    (is (= expected-family-row-counts (family-row-counts row-ids))
+  (let [entity-ids (vec (current-entity-ids))]
+    (is (= (count expected-entity-ids) (count entity-ids))
+        (str "REPL parity entity cardinality changed: " (sort entity-ids)))
+    (is (= expected-entity-ids (set entity-ids))
+        (str "REPL parity entity identities changed: "
+             {::missing (sort (remove (set entity-ids) expected-entity-ids))
+              ::unexpected (sort (remove expected-entity-ids entity-ids))}))
+    (is (= expected-family-entity-counts (family-entity-counts entity-ids))
         (str "REPL parity family cardinalities changed: "
-             (family-row-counts row-ids)))))
+             (family-entity-counts entity-ids)))))
 
 (defn- database-fixture
   [run-tests]
@@ -212,7 +212,7 @@
 
 (defn- report-fixture
   [run-tests]
-  (assert-complete-row-inventory!)
+  (assert-complete-entity-inventory!)
   (reset! observations {})
   (run-tests)
   (let [known (->> (parity-vars)
@@ -222,8 +222,8 @@
                    vec)]
     (println (str "REPL parity known divergences (" (count known) "): "
                   (str/join ", " known)))
-    (println (str "REPL parity pending rows (" (count pending-rows) "): "
-                  (str/join ", " (map :parity/row pending-rows))))))
+    (println (str "REPL parity pending entities (" (count pending-entities) "): "
+                  (str/join ", " (map :parity/row pending-entities))))))
 
 (use-fixtures :once report-fixture)
 ;; Parity cases receive only the immutable database value and create a fresh
@@ -908,7 +908,7 @@
 
 (defparity "H5" :passing
   ;; Was a known divergence pending Lane 1's ctx handling; namespace mutations
-  ;; are visible to `find-var`/`find-ns` at HEAD, so the row is promoted.
+  ;; are visible to `find-var`/`find-ns` at HEAD, so the entity is promoted.
   (let [results
         (repl-session
          ["(ns parity.h5 (:require [clojure.string :as string]))"

@@ -18,8 +18,8 @@
   [{:seon.repl/comment
     "; My namespace is empty — this function will be its first resident."
     :seon.repl/form
-    '(defn largest [rows]
-       (or (last (sort-by :example/amount rows)) {}))}
+    '(defn largest [entities]
+       (or (last (sort-by :example/amount entities)) {}))}
    {:seon.repl/comment
     (str "; Works. But without a :malli/schema it stays my scratch — "
          "nobody else can rely on it.")
@@ -32,8 +32,8 @@
               [:map [:example/label {:optional true} :string]
                [:example/amount {:optional true} :int]]]}
        largest
-       [rows]
-       (or (last (sort-by :example/amount rows)) {}))}
+       [entities]
+       (or (last (sort-by :example/amount entities)) {}))}
    {:seon.repl/comment
     "; Is the contract actually enforced? Try to break it once."
     :seon.repl/form '(largest :not-a-row-sequence)}
@@ -51,7 +51,7 @@
     "; Defined, contracted, proven. Report back and close this run."
     :seon.repl/form
     '(my.turn/complete
-      {:my.turn/result (str "Built largest: a contracted function returning the row with "
+      {:my.turn/result (str "Built largest: a contracted function returning the entity with "
            "the greatest :example/amount, or {} for empty input; its usage "
            "test is green.")})}])
 

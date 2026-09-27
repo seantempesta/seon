@@ -173,7 +173,7 @@
         nominal (optional-value (.lastExecution schedule reference))]
     (some-> nominal .toInstant Date/from)))
 
-(defn- task-rows
+(defn- task-entities
   [database agent-id]
   (->> (db/q '[:find ?task ?task-id ?function ?expression ?zone-id
                :in $ ?agent-id
@@ -181,8 +181,8 @@
                [?owner :seon.agent/id ?agent-id]
                [?task :seon.schedule.task/owner ?owner]
                [?task :seon.schedule.task/id ?task-id]
-               [?task :seon.schedule.task/function ?function-row]
-               [?function-row :seon.fn/sym ?function]
+               [?task :seon.schedule.task/function ?function-entity]
+               [?function-entity :seon.fn/sym ?function]
                [?task :seon.schedule.task/schedule ?schedule]
                [?schedule :seon.schedule/expression ?expression]
                [?schedule :seon.schedule/zone-id ?zone-id]]
@@ -682,11 +682,11 @@
                  fire-count))
              fire-count)))
        0
-       (task-rows @connection agent-id))))
+       (task-entities @connection agent-id))))
 
 (defn- earliest-next-at
   [database agent-id reference-at]
-  (->> (task-rows database agent-id)
+  (->> (task-entities database agent-id)
        (keep (fn [task]
                (next-nominal-after
                 {:seon.schedule/expression (:seon.schedule/expression task)

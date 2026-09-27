@@ -154,21 +154,21 @@
               (dotimes [_ 3]
                 (let [before (.getThreadAllocatedBytes allocation-bean thread-id)
                       started (System/nanoTime)
-                      rows (db/pull-many (db/supplied-database-value environment)
+                      entities (db/pull-many (db/supplied-database-value environment)
                                          selector ids)
                       elapsed (- (System/nanoTime) started)
                       allocated (- (.getThreadAllocatedBytes allocation-bean thread-id)
                                    before)]
-                  (is (= (count ids) (count rows)))
-                  (is (every? :seon.fn/sym rows))
+                  (is (= (count ids) (count entities)))
+                  (is (every? :seon.fn/sym entities))
                   (is (< allocated 10000000) (str "allocated bytes: " allocated))
                   (is (< elapsed 20000000) (str "elapsed ns: " elapsed))))))))
        (is (= "" (str warnings)))))))
 
 (deftest uncarried-read-reports-one-projection-fallback-per-call
   ;; A read takes its projection from the value it reads: a value holding
-  ;; declaration rows derives it with nothing handed, and only a value with
-  ;; no declaration rows (a cold construction boundary) refuses by name,
+  ;; declaration entities derives it with nothing handed, and only a value with
+  ;; no declaration entities (a cold construction boundary) refuses by name,
   ;; once per call.
   (test-support/with-database
    (fn [connection]
@@ -180,10 +180,10 @@
        (without-handed-projection
         (fn []
           (let [warnings (java.io.StringWriter.)
-                rows (binding [*err* warnings]
+                entities (binding [*err* warnings]
                        (db/pull-many database
                                      @#'sci.eval/program-documentation-selector ids))]
-            (is (= (count ids) (count rows)) (pr-str rows))
+            (is (= (count ids) (count entities)) (pr-str entities))
             (is (= "" (str warnings))
                 "a value that declares its program derives its own projection"))))
        (let [configuration {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write}
@@ -319,7 +319,7 @@
            report (db/transact! connection [])
            result (binding [db/*conn* connection]
                     (db/transact! []))
-           ;; A canonical agent row whose id the writer's schema refuses.
+           ;; A canonical agent entity whose id the writer's schema refuses.
            refusal (db/transact! connection
                                  (mapv #(cond-> % (and (map? %) (:seon.agent/id %))
                                           (assoc :seon.agent/id 42))
@@ -404,7 +404,7 @@
      (schema/call-with-projection
       fixture-projection
       (fn []
-        ;; A component attribute's declared child schema is a row too: the
+        ;; A component attribute's declared child schema is an entity too: the
         ;; writer validates the owned value against it.
         (test-support/transacted!
          connection
@@ -414,7 +414,7 @@
                                  (when (and (vector? form) (map? (second form)))
                                    (:seon.db/component-schema (second form))))
                               idents)]
-           (test-support/schema-rows
+           (test-support/schema-entities
             (db/db connection)
             (mapv (fn [schema-key] [schema-key (get forms schema-key)])
                   (concat idents children)))))
@@ -785,7 +785,7 @@
        (is (every? (schema/projection-validator (schema/handed-projection)
                                                 :seon.cluster.eval/read-evidence-entity)
                    stored)
-           "stored evidence is a valid durable row")
+           "stored evidence is a valid durable entity")
        (is (= stored (edn/read-string (pr-str stored)))
            "stored evidence survives the EDN codec it is written through")
        (is (some #(find % :seon.db/read-request) retained)
@@ -955,7 +955,7 @@
 
 ;; Class: a read result's replay walk costs a fraction of digesting it. Each
 ;; node once paid three `satisfies?` misses (`db?`), 98% of the walk and ~6x
-;; the canonical encoding over one form's 468 namespace-row pulls.
+;; the canonical encoding over one form's 468 namespace-entity pulls.
 (deftest the-stable-walk-costs-less-than-encoding-the-read-result
   (test-support/with-database
    (fn [connection]
@@ -1667,13 +1667,13 @@
 (deftest missing-reference-diagnostics-describe-the-declared-value
   (test-support/with-database
    (fn [connection]
-     (doseq [[row attribute]
+     (doseq [[entity attribute]
              [[{:seon.cluster/name "missing-reference-cluster"} :seon.cluster/config]
               [{:seon.turn/id "missing-reference-turn"} :seon.turn/agent]
               [{:seon.cluster.eval/id "missing-reference-evaluation"}
                :seon.cluster.eval/run]]]
        (let [before (db/basis-t (db/db connection))
-             refusal (db/transact! connection [row])
+             refusal (db/transact! connection [entity])
              problem (first (get-in refusal [:seon.error/data :seon.error/problems]))]
          (is (string? (:seon.db.write.attempt/request-id refusal)))
          (is (= attribute (:seon.db/attribute refusal)))
@@ -1842,12 +1842,12 @@
 (deftest final-entity-keyword-sets-are-not-lookup-refs
   (test-support/with-database
    (fn [connection]
-     (let [row (test-support/program-fn-row (db/db connection) 'seon.db/final-keyword-set-fixture "(defn final-keyword-set-fixture [] true)")
-           function-id [:seon.fn/sym (:seon.fn/sym row)]
+     (let [entity (test-support/program-fn-entity (db/db connection) 'seon.db/final-keyword-set-fixture "(defn final-keyword-set-fixture [] true)")
+           function-id [:seon.fn/sym (:seon.fn/sym entity)]
            keywords #{:seon.agent/id :seon.db/db}]
        (test-support/transacted!
         connection
-        [row
+        [entity
          [:db/add function-id :seon.fn/keywords :seon.agent/id]
          [:db/add function-id :seon.fn/keywords :seon.db/db]])
        (is (= keywords (set (:seon.fn/keywords
@@ -1906,7 +1906,7 @@
                            [:db/add [:seon.schedule/id "f2-existing"]
                             :seon.schedule/zone-id "UTC"]])]])]
          (is (string? (:seon.db.write.attempt/request-id refusal))
-             "expanded invalid assertions refuse even when a later operation repairs the row")
+             "expanded invalid assertions refuse even when a later operation repairs the entity")
          (is (= :seon.schedule/zone-id (:seon.db/attribute refusal)))
          (is (= basis (db/basis-t (db/db connection))) "the expanded transaction is atomic"))
        (let [calls (atom 0)]
@@ -1925,19 +1925,19 @@
                         (db/pull (db/db connection) '[*]
                                  [:seon.schedule/id "f2-composed"])))))))))
 
-(deftest a-create-is-validated-complete-while-an-upsert-validates-the-merged-row
+(deftest a-create-is-validated-complete-while-an-upsert-validates-the-merged-entity
   (test-support/with-database
    (fn [connection]
      (let [existing (db/pull (db/db connection) '[*] [:seon.fn/sym (quote seon.id/id)])]
-       (is (some? (:db/id existing)) "the canonical fixture carries a complete program row")
+       (is (some? (:db/id existing)) "the canonical fixture carries a complete program entity")
        (test-support/transacted! connection
                                  [(test-support/revision (db/db connection) [:seon.fn/sym (quote seon.id/id)]
                                                          {:seon.fn/doc "updated documentation"})])
        (let [updated (db/pull (db/db connection) '[*] [:seon.fn/sym (quote seon.id/id)])]
          (is (= "updated documentation" (:seon.fn/doc updated))
-             "a sparse upsert of an existing row is the ruled partial-upsert behaviour")
+             "a sparse upsert of an existing entity is the ruled partial-upsert behaviour")
          (is (= (:db/id (:seon.fn/ns existing)) (:db/id (:seon.fn/ns updated)))
-             "the merged row still carries the keys the submission omitted")))
+             "the merged entity still carries the keys the submission omitted")))
      (doseq [[entity identities]
              [[{:seon.fn/sym (quote seon.source.test/incomplete) :seon.fn/doc "incomplete"}
                {:seon.fn/sym (quote seon.source.test/incomplete)}]
@@ -1952,7 +1952,7 @@
          (is (= identities (get-in refusal [:seon.error/data :seon.db/entity]))
              "the refusal names the entity by its identity attributes")
          (is (= basis (db/basis-t (db/db connection))) "the incomplete create commits nothing")))
-     (test-support/transacted! connection [(test-support/namespace-row @connection 'seon.source.test.complete)])
+     (test-support/transacted! connection [(test-support/namespace-entity @connection 'seon.source.test.complete)])
      (is (some? (:db/id (db/pull (db/db connection) '[:db/id]
                                  [:seon.ns/name 'seon.source.test.complete])))
          "a create carrying every required key of its schema is admitted")
@@ -1973,8 +1973,8 @@
            function (symbol (str namespace-name) "target")]
        (test-support/transacted!
         connection (into (test-support/agent-tx @connection "root")
-                     [(test-support/namespace-row @connection namespace-name)
-                      (test-support/program-fn-row (db/db connection) function "(defn target [] nil)")
+                     [(test-support/namespace-entity @connection namespace-name)
+                      (test-support/program-fn-entity (db/db connection) function "(defn target [] nil)")
                       [:db.fn/call #'schedule/root-maintenance-seed-call]]))
        (let [task-id (first (sort (db/q '[:find [?id ...] :where [_ :seon.schedule.task/id ?id]]
                                         (db/db connection))))]
@@ -2002,8 +2002,8 @@
    (fn [connection]
      (test-support/transacted!
       connection
-      [(test-support/namespace-row (db/db connection) 'sample.seed)
-       (test-support/program-fn-row (db/db connection) 'sample.seed/caller "(defn caller [x] (str x))"
+      [(test-support/namespace-entity (db/db connection) 'sample.seed)
+       (test-support/program-fn-entity (db/db connection) 'sample.seed/caller "(defn caller [x] (str x))"
                                     {:seon.fn/call-arities #{['clojure.core/str 1]}})])
      (let [head (db/db connection)
            content-key (@#'db/arity-content-key head)
@@ -2025,9 +2025,9 @@
            forms (:seon.schema.projection/forms projection)
            callee 'sample.arity/target
            caller 'sample.arity/caller
-           row (program/with-contract-facts
+           entity (program/with-contract-facts
                 {:seon.program/row
-                 (test-support/program-fn-row (db/db connection) callee
+                 (test-support/program-fn-entity (db/db connection) callee
                                               "(defn target {:malli/schema [:=> [:cat :int] :int]} [x] x)")
                  :seon.program/compile-options
                  (:seon.schema.projection/compile-options projection)
@@ -2036,10 +2036,10 @@
                  :seon.program/schema-forms forms})]
        (test-support/transacted!
         connection
-        [(test-support/namespace-row (db/db connection) 'sample.arity)
-         ;; The contract facts are part of the final row its digest covers.
-         (test-support/revised-row (db/db connection) row {})
-         (test-support/program-fn-row (db/db connection) caller "(defn caller [x] (target x))"
+        [(test-support/namespace-entity (db/db connection) 'sample.arity)
+         ;; The contract facts are part of the final entity its digest covers.
+         (test-support/revised-entity (db/db connection) entity {})
+         (test-support/program-fn-entity (db/db connection) caller "(defn caller [x] (target x))"
                                       {:seon.fn/call-arities #{[callee 1]}})])
        (let [arity (db/q '[:find ?arity . :in $ ?callee
                           :where [?f :seon.fn/sym ?callee]
@@ -2062,29 +2062,29 @@
                        [:db/add [:seon.fn/sym caller] :seon.fn/call-arities [callee 2]]]))
          (is (empty? (:seon.fn/arity-mismatches (db/arity-mismatches (db/db connection))))))))))
 
-(deftest a-program-row-keeps-only-the-definition-digest-it-produces
+(deftest a-program-entity-keeps-only-the-definition-digest-it-produces
   ;; CLASS: an identity every reader trusts that the writer never checked. A
-  ;; row whose source changed but whose stored digest did not read "unchanged"
+  ;; entity whose source changed but whose stored digest did not read "unchanged"
   ;; to acquisition, install and test reach. The writer refuses it by name.
   (test-support/with-database
    (fn [connection]
      (let [function 'sample.digest/target
-           row (test-support/program-fn-row (db/db connection) function "(defn target [x] x)")]
+           entity (test-support/program-fn-entity (db/db connection) function "(defn target [x] x)")]
        (test-support/transacted!
-        connection [(test-support/namespace-row (db/db connection) 'sample.digest) row])
+        connection [(test-support/namespace-entity (db/db connection) 'sample.digest) entity])
        (let [basis (db/basis-t (db/db connection))
-             stale (assoc row :seon.fn/source "(defn target [x] (inc x))")
+             stale (assoc entity :seon.fn/source "(defn target [x] (inc x))")
              refusal (db/transact! connection [stale])
              produced (:seon.program/definition-digest
-                       (test-support/program-fn-row (db/db connection) function (:seon.fn/source stale)))]
+                       (test-support/program-fn-entity (db/db connection) function (:seon.fn/source stale)))]
          (is (= :seon.program/definition-digest (:seon.error/member refusal)) (pr-str refusal))
          (is (= 'seon.db/transact! (:seon.error/operation refusal)))
-         (is (= (:seon.program/definition-digest row) (:seon.error/offending refusal)))
+         (is (= (:seon.program/definition-digest entity) (:seon.error/offending refusal)))
          (is (= produced (:seon.error/expected refusal)))
          (is (= {:seon.fn/sym function} (get-in refusal [:seon.error/data :seon.db/entity])))
          (is (= basis (db/basis-t (db/db connection))))
          (test-support/transacted!
-          connection [(test-support/program-fn-row (db/db connection) function (:seon.fn/source stale))])
+          connection [(test-support/program-fn-entity (db/db connection) function (:seon.fn/source stale))])
          (is (= produced (:seon.program/definition-digest
                           (db/pull (db/db connection) [:seon.program/definition-digest]
                                    [:seon.fn/sym function])))))))))
@@ -2097,8 +2097,8 @@
    (fn [connection]
      (let [test-symbol 'sample.evidence/smoke]
        (test-support/transacted!
-        connection [(test-support/namespace-row (db/db connection) 'sample.evidence)
-                    (test-support/program-row (db/db connection) [:seon.test/sym test-symbol]
+        connection [(test-support/namespace-entity (db/db connection) 'sample.evidence)
+                    (test-support/program-entity (db/db connection) [:seon.test/sym test-symbol]
                                               "(clojure.test/deftest smoke (clojure.test/is true))")])
        (test-support/transacted!
         connection [[:db/add [:seon.test/sym test-symbol] :seon.test/pass-count 7]])
@@ -2189,14 +2189,14 @@
   ;; every indexed seeded test was refused. The declared collection is kept.
   (test-support/with-database
    (fn [connection]
-     (let [row (test-support/program-row
+     (let [entity (test-support/program-entity
                 (db/db connection) '[:seon.test/sym sample.seedorder/seeded]
                 (str "(clojure.test/deftest ^{:seon.test/seed [{:seon.test/skip-reason \"a\"}"
                      " {:seon.test/skip-reason \"b\"}]} seeded (clojure.test/is true))"))]
-       (is (= [0 1] (mapv :seon.test.seed/ordinal (:seon.test/seed row))))
+       (is (= [0 1] (mapv :seon.test.seed/ordinal (:seon.test/seed entity))))
        (test-support/transacted!
-        connection [(test-support/namespace-row (db/db connection) 'sample.seedorder) row])
-       (is (= (:seon.program/definition-digest row)
+        connection [(test-support/namespace-entity (db/db connection) 'sample.seedorder) entity])
+       (is (= (:seon.program/definition-digest entity)
               (:seon.program/definition-digest
                (db/pull (db/db connection) [:seon.program/definition-digest]
                         [:seon.test/sym 'sample.seedorder/seeded]))))))))
@@ -2209,39 +2209,39 @@
    (fn [connection]
      (let [database (db/db connection)
            projection (db/carried-projection database)
-           namespace-row (test-support/namespace-row database 'sample.context)
-           widened (assoc namespace-row :seon.ns/refers
+           namespace-entity (test-support/namespace-entity database 'sample.context)
+           widened (assoc namespace-entity :seon.ns/refers
                           #{{:seon.ns.refer/local 'is :seon.ns.refer/target-ns 'clojure.test
                              :seon.ns.refer/target-name 'is}})
            ;; The digest keeps only the resolver context a definition uses
            ;; (9b6df1ff4): `f` calls the refer's target, `g` uses nothing.
-           row (test-support/program-fn-row database 'sample.context/f "(defn f [x] (is x))"
+           entity (test-support/program-fn-entity database 'sample.context/f "(defn f [x] (is x))"
                                             {:seon.fn/calls #{'clojure.test/is}})
-           unused (test-support/program-fn-row database 'sample.context/g "(defn g [x] x)")
-           digested #(assoc row :seon.program/definition-digest (db/definition-digest-of projection row %))]
-       (is (= (:seon.program/definition-digest row) (:seon.program/definition-digest (digested namespace-row))))
-       (is (= (db/definition-digest-of projection unused namespace-row)
+           unused (test-support/program-fn-entity database 'sample.context/g "(defn g [x] x)")
+           digested #(assoc entity :seon.program/definition-digest (db/definition-digest-of projection entity %))]
+       (is (= (:seon.program/definition-digest entity) (:seon.program/definition-digest (digested namespace-entity))))
+       (is (= (db/definition-digest-of projection unused namespace-entity)
               (db/definition-digest-of projection unused widened))
            "a refer the definition does not use leaves its digest unchanged")
        (is (= :seon.program/definition-digest
-              (:seon.error/member (db/transact! connection [namespace-row (digested widened)]))))
-       (test-support/transacted! connection [namespace-row (digested namespace-row)])))))
+              (:seon.error/member (db/transact! connection [namespace-entity (digested widened)]))))
+       (test-support/transacted! connection [namespace-entity (digested namespace-entity)])))))
 
-(deftest a-namespace-row-change-re-derives-its-declarations-digests
+(deftest a-namespace-entity-change-re-derives-its-declarations-digests
   ;; CLASS: a function's digest includes its namespace's resolver context, so
   ;; a require added to the namespace changes its meaning; the declaration kept
-  ;; its old digest because only touched rows were checked. The writer
-  ;; re-derives every declaration of a namespace row it writes, in the same
+  ;; its old digest because only touched entities were checked. The writer
+  ;; re-derives every declaration of a namespace entity it writes, in the same
   ;; transaction.
   (test-support/with-database
    (fn [connection]
-     (let [namespace-row (test-support/namespace-row (db/db connection) 'sample.rederive)
+     (let [namespace-entity (test-support/namespace-entity (db/db connection) 'sample.rederive)
            ;; `f` uses the namespace the require adds; `g` uses nothing, so
            ;; its digest keeps (9b6df1ff4: only the used resolver context).
-           row (test-support/program-fn-row (db/db connection) 'sample.rederive/f "(defn f [x] (clojure.set/union x))"
+           entity (test-support/program-fn-entity (db/db connection) 'sample.rederive/f "(defn f [x] (clojure.set/union x))"
                                             {:seon.fn/calls #{'clojure.set/union}})
-           unused (test-support/program-fn-row (db/db connection) 'sample.rederive/g "(defn g [x] x)")
-           _ (test-support/transacted! connection [namespace-row row unused])
+           unused (test-support/program-fn-entity (db/db connection) 'sample.rederive/g "(defn g [x] x)")
+           _ (test-support/transacted! connection [namespace-entity entity unused])
            required (program/declaration-row (db/carried-projection (db/db connection))
                                              {:seon.ns/name 'sample.rederive :seon.ns/requires #{'clojure.set}
                                               :seon.ns/source "(ns sample.rederive (:require [clojure.set]))"}
@@ -2251,14 +2251,14 @@
            stored (db/pull database '[*] [:seon.fn/sym 'sample.rederive/f])
            stored-namespace (@#'seon.db/declaration-value database (db/identity-attributes database)
                              (:db/id (db/pull database [:db/id] [:seon.ns/name 'sample.rederive])))]
-       (is (not= (:seon.program/definition-digest row) (:seon.program/definition-digest stored)))
-       (is (= (db/definition-digest-of (db/carried-projection database) row stored-namespace)
+       (is (not= (:seon.program/definition-digest entity) (:seon.program/definition-digest stored)))
+       (is (= (db/definition-digest-of (db/carried-projection database) entity stored-namespace)
               (:seon.program/definition-digest stored)))
        (is (= (:seon.program/definition-digest unused)
               (:seon.program/definition-digest (db/pull database [:seon.program/definition-digest]
                                                         [:seon.fn/sym 'sample.rederive/g]))))))))
 
-(deftest render-declarations-require-their-final-function-row
+(deftest render-declarations-require-their-final-function-entity
   (test-support/with-database
    (fn [connection]
      (let [renderer (symbol "sample.render" "ai")
@@ -2267,9 +2267,9 @@
            projection (schema/build-projection
                        (assoc (:seon.schema.projection/forms (db/carried-projection (db/db connection)))
                               schema-key definition))
-           row (first (schema/canonical-schema-rows projection {schema-key definition}))
+           entity (first (schema/canonical-schema-entities projection {schema-key definition}))
            basis (:max-tx @connection)
-           refusal (db/transact! connection [row])
+           refusal (db/transact! connection [entity])
            expected [{:seon.schema/key schema-key
                       :seon.render/property :seon.render/ai
                       :seon.render/function renderer}]]
@@ -2282,11 +2282,11 @@
        (is (= basis (:max-tx @connection)))
        (test-support/transacted!
         connection
-        [(test-support/namespace-row (db/db connection) 'sample.render)
-         (test-support/program-fn-row
+        [(test-support/namespace-entity (db/db connection) 'sample.render)
+         (test-support/program-fn-entity
           (db/db connection) renderer
           "(defn ai {:malli/schema [:=> [:cat :seon.schema/value] :string]} [value] (pr-str value))")
-         row])
+         entity])
        (let [refusal (db/transact! connection [[:db/retractEntity [:seon.fn/sym renderer]]])]
          (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
          (is (= expected (get-in refusal [:seon.error/data :seon.render/declarations]))))
@@ -2458,9 +2458,9 @@
            projection (schema/handed-projection)
            attribute :seon.message/content
            drifted (assoc database :schema (dissoc (:schema database) attribute))
-           row {:seon.message/id "drifted-message" attribute "Uninstalled content"}
-           candidates (#'db/write-key-candidates projection row)
-           refusal (#'db/write-map-error drifted projection row [])]
+           entity {:seon.message/id "drifted-message" attribute "Uninstalled content"}
+           candidates (#'db/write-key-candidates projection entity)
+           refusal (#'db/write-map-error drifted projection entity [])]
        (is (some? (get (:seon.schema.projection/forms projection) attribute)))
        (is (= #{:seon.message/to} (set candidates)))
        (is (= :seon.error/unknown (:seon.schema/form refusal)))
@@ -2612,7 +2612,7 @@
             started (System/nanoTime)
             projection (db/carried-projection edited)
             elapsed-ms (/ (- (System/nanoTime) started) 1e6)]
-        (is (string? source) "the fixture holds the function's source row")
+        (is (string? source) "the fixture holds the function's source entity")
         (is (identical? committed projection))
         (is (< elapsed-ms 10.0)
             (str "a body-only write keeps every declaration revision, so it hits (" elapsed-ms " ms)"))))))
@@ -2705,7 +2705,7 @@
 
 ;; Class: a retained pattern is witnessed by the matcher its query used. A
 ;; read over an attribute set naming uninstalled attributes (the contract-finding
-;; report row's keys, 2026-09-26) matched nothing; its witness through
+;; report entity's keys, 2026-09-26) matched nothing; its witness through
 ;; `d/datoms` refused the attribute and root's graph panicked at every turn.
 (deftest a-pattern-over-an-uninstalled-attribute-witnesses-no-change
   (test-support/with-database
@@ -2725,11 +2725,11 @@
                                                   sources)))))
                          (db/read-evidence @captured))]
        (is (not (contains? (:schema @connection) uninstalled)))
-       ;; A new function row moves `:seon.fn/sym` (a revision of a stored row
+       ;; A new function entity moves `:seon.fn/sym` (a revision of a stored entity
        ;; writes only the attributes it changes).
        (test-support/transacted!
-        connection [(test-support/namespace-row (db/db connection) 'sample.witness)
-                    (test-support/program-fn-row (db/db connection) 'sample.witness/f "(defn f [x] x)")])
+        connection [(test-support/namespace-entity (db/db connection) 'sample.witness)
+                    (test-support/program-fn-entity (db/db connection) 'sample.witness/f "(defn f [x] x)")])
        (is (seq widened))
        (is (false? (db/read-evidence-current? @connection widened)))
        (is (= [:seon.fn/sym] (distinct (map :a (db/read-evidence-changes @connection widened basis))))
@@ -2838,7 +2838,7 @@
 (deftest a-report-touching-no-function-reuses-the-committed-arity-comparison
   ;; The arity gate compares only call edges and bounds under a caller or
   ;; callee this report touched; every other edge is its committed basis's.
-  ;; A plain write to a declaration row runs the gate (its root is a schema
+  ;; A plain write to a declaration entity runs the gate (its root is a schema
   ;; key) and leaves the arity attributes' revisions equal. A transaction
   ;; function's commit advances Datahike's conservative revision instead
   ;; (datahike/writer.cljc:249), so that basis is compared again.
@@ -2863,7 +2863,7 @@
 
 (deftest a-changed-projection-builder-misses-the-projection-cache
   ;; A projection derives from the builder's code as well as the declaration
-  ;; rows: a changed builder derives anew, an unchanged one reuses.
+  ;; entities: a changed builder derives anew, an unchanged one reuses.
   (test-support/with-database
     (fn [connection]
       (let [digest #(#'db/builder-digest (db/db connection))
@@ -2877,7 +2877,7 @@
         (is (identical? projection (#'db/content-projection before database)) "an unchanged builder reuses")
         (restamp! `cluster/serve!)
         (is (= before (digest)) "a declaration outside the builder's reach changes no projection")
-        (restamp! 'seon.schema/shape-row-in)
+        (restamp! 'seon.schema/shape-entity-in)
         (let [after (digest)]
           (is (not= before after) "a changed building declaration changes the builder")
           (is (not (identical? projection (#'db/content-projection after database)))
@@ -2890,17 +2890,17 @@
     (fn [connection]
       (let [database (db/db connection)
             projection (db/carried-projection database)
-            row [:seon.fn/sym 'seon.schema/shape-row-in]
-            original (:seon.program/definition-digest (d/pull database [:seon.program/definition-digest] row))
+            entity [:seon.fn/sym 'seon.schema/shape-entity-in]
+            original (:seon.program/definition-digest (d/pull database [:seon.program/definition-digest] entity))
             record (or (:e (first (d/datoms database :aevt :seon.source/commit-id)))
                        (db/q '[:find ?e . :where [?e :seon.cluster/name]] database))
             _ (test-support/transacted!
-               connection [(test-support/revision database row {:seon.fn/doc "Another builder."})])
+               connection [(test-support/revision database entity {:seon.fn/doc "Another builder."})])
             other-program (db/commit-id (db/db connection))
-            ;; Retracting the doc restores the original row, so its digest.
+            ;; Retracting the doc restores the original entity, so its digest.
             _ (test-support/transacted!
-               connection [[:db/retract row :seon.fn/doc "Another builder."]
-                           {:seon.fn/sym 'seon.schema/shape-row-in :seon.program/definition-digest original}
+               connection [[:db/retract entity :seon.fn/doc "Another builder."]
+                           {:seon.fn/sym 'seon.schema/shape-entity-in :seon.program/definition-digest original}
                            {:db/id record :seon.source/commit-id other-program}])
             retained (db/db connection)]
         (is (not= (#'db/builder-digest database)

@@ -50,13 +50,13 @@
   [connection & identity-sources]
   (support/transacted!
    connection
-   (mapv (fn [[declaration source]] (support/program-row (db/db connection) declaration source))
+   (mapv (fn [[declaration source]] (support/program-entity (db/db connection) declaration source))
          (partition 2 identity-sources))))
 
 (defn- seed-reach-fixture!
   "Two functions in `reach.fixture`, each with one test that calls it."
   [connection]
-  (support/transacted! connection [(support/namespace-row (db/db connection) 'reach.fixture)])
+  (support/transacted! connection [(support/namespace-entity (db/db connection) 'reach.fixture)])
   (define! connection
            '[:seon.fn/sym reach.fixture/a] "(defn a {:malli/schema [:=> [:cat :seon.test/sym] :seon.test/sym]} [x] x)"
            '[:seon.fn/sym reach.fixture/b] "(defn b {:malli/schema [:=> [:cat :int] :int]} [x] x)")
@@ -124,7 +124,7 @@
              "(defn a {:malli/schema [:=> [:cat :seon.test/sym] :seon.test/sym]} [x] (identity x))")
     (is (not= (first results) (runner/reach-digests (db/db connection) [ta])))))))
 
-(deftest a-fresh-branch-with-unchanged-program-rows-derives-nothing
+(deftest a-fresh-branch-with-unchanged-program-entities-derives-nothing
  ;; A nested request runs on a fresh branch that writes only non-program facts;
  ;; the index is keyed by the program content it reads, so it hits.
  (let [s 'seon.id-test/data-shape-and-explicit-length-determine-identity
@@ -167,7 +167,7 @@
             (str "(ns " namespace-name " (:require [clojure.test] [clojure.java.io] [seon.id] [seon.schema] [malli.instrument]))\n"
                  (binding [*print-meta* true]
                    (str/join "\n" (map pr-str sources)))))
-      (support/transacted! connection (functions/rows {:seon.fn/roots [(.getPath root)]}))
+      (support/transacted! connection (functions/program-entities {:seon.fn/roots [(.getPath root)]}))
       (assertion)
       (finally (support/delete-recursively! root)))))
 
@@ -244,10 +244,10 @@
     (fn [connection]
       (support/seed-cluster! connection "default")
       (let [namespace-name 'my.agents.reach-digest
-            _ (support/transacted! connection [(support/namespace-row (db/db connection) namespace-name)])
+            _ (support/transacted! connection [(support/namespace-entity (db/db connection) namespace-name)])
             ctx (support/fork-cluster-ctx connection)
             effective (seon.config/effective (db/db connection) "default")
-            sources ["(defn largest-customer {:malli/schema [:=> [:cat [:vector {:min 1} [:map [:seon.test/pass-count :seon.test/pass-count]]]] [:map [:seon.test/pass-count :seon.test/pass-count]]]} [rows] (apply max-key :seon.test/pass-count rows))"
+            sources ["(defn largest-customer {:malli/schema [:=> [:cat [:vector {:min 1} [:map [:seon.test/pass-count :seon.test/pass-count]]]] [:map [:seon.test/pass-count :seon.test/pass-count]]]} [entities] (apply max-key :seon.test/pass-count entities))"
                      "(clojure.test/deftest largest-customer-test (clojure.test/is (= {:seon.test/pass-count 9} (largest-customer [{:seon.test/pass-count 2} {:seon.test/pass-count 9}]))))"]]
         (doseq [source sources]
           (let [evaluation (seon.sci.eval/evaluate
@@ -261,10 +261,10 @@
                            [{:seon.cluster.eval/source source
                              :seon.cluster.eval/ns [:seon.ns/name namespace-name]
                              :seon.program/row (:seon.program/row evaluation)}])
-                row (when (vector? analysis) (second (first analysis)))]
-            (is (map? row) (pr-str evaluation))
-            (when row
-              (support/transacted! connection [(dissoc row :seon.sci.eval/evaluated?)]))))
+                entity (when (vector? analysis) (second (first analysis)))]
+            (is (map? entity) (pr-str evaluation))
+            (when entity
+              (support/transacted! connection [(dissoc entity :seon.sci.eval/evaluated?)]))))
         (let [database (db/db connection)
               s 'my.agents.reach-digest/largest-customer-test
               f 'my.agents.reach-digest/largest-customer
@@ -279,8 +279,8 @@
                         [:seon.test/sym s])))
           ;; A changed definition is re-analyzed, so its stored digest changes.
           (support/transacted! connection
-                               [(support/program-row database [:seon.fn/sym f]
-                                                     (str/replace (first sources) "rows)" "(seq rows))"))])
+                               [(support/program-entity database [:seon.fn/sym f]
+                                                     (str/replace (first sources) "entities)" "(seq entities))"))])
           (is (not= before (sut/reach-digest (db/db connection) s))))))))
 
 (deftest run-carries-the-connections-projection-to-the-test-thread
@@ -312,7 +312,7 @@
 (def ^:private destructive-owner 'seon.test-support/populate-published-root!)
 
 (defn- owner-destroys
-  "What the declared owner says it destroys, read from its program row."
+  "What the declared owner says it destroys, read from its program entity."
   [database]
   (:seon.fn/destroys (db/pull database [:seon.fn/destroys]
                               [:seon.fn/sym destructive-owner])))
@@ -384,7 +384,7 @@
                        ['seon.id-test/does-not-matter])))
             "an unanswerable reach refuses the request instead of admitting it")))))
 
-(deftest a-test-with-no-program-row-is-unknown-and-is-never-run-in-process
+(deftest a-test-with-no-program-entity-is-unknown-and-is-never-run-in-process
   (support/with-database
     (fn [connection]
       (support/seed-cluster! connection "default")
@@ -502,16 +502,16 @@
         (support/delete-recursively! marker)
         (remove-ns namespace-name)))))
 
-(deftest the-long-declaration-is-indexed-onto-the-test-row
+(deftest the-long-declaration-is-indexed-onto-the-test-entity
   (let [root (doto (clojure.java.io/file "tmp" (str "long-index-" (id/id))) .mkdirs)]
     (try
       (spit (clojure.java.io/file root "probe.clj")
             (str "(ns long.index" (id/id) " (:require [clojure.test :refer [deftest is]]))\n"
                  "(deftest ^{:seon.test/long " (pr-str long-declaration) "} probe (is true))\n"))
-      (let [rows (functions/rows {:seon.fn/roots [(.getPath root)]})
-            row (first (filter :seon.test/sym rows))]
-        (is (= long-declaration (:seon.test/long row))
-            (str "the indexer lifts the declaration onto the row a check queries: " (pr-str row))))
+      (let [entities (functions/program-entities {:seon.fn/roots [(.getPath root)]})
+            entity (first (filter :seon.test/sym entities))]
+        (is (= long-declaration (:seon.test/long entity))
+            (str "the indexer lifts the declaration onto the entity a check queries: " (pr-str entity))))
       (finally (support/delete-recursively! root)))))
 
 (deftest an-in-process-check-excludes-a-declared-long-test-and-names-it

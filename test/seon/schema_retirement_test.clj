@@ -13,9 +13,9 @@
            lookup [:seon.fn/sym writer]
            source "(defn write! [connection] (seon.db/transact! connection [{:retirement.fixture/value 1}]))"
            before (db/db connection)
-           absent-row (support/program-fn-row before writer source)]
+           absent-entity (support/program-fn-entity before writer source)]
        (is (nil? (:db/id (db/pull before [:db/id] [:seon.schema/key attribute]))))
-       (is (contains? (:seon.fn/writes absent-row) attribute)
+       (is (contains? (:seon.fn/writes absent-entity) attribute)
            "analysis records a literal write even before its schema exists")
        (support/transacted!
         connection
@@ -27,10 +27,10 @@
           (db/carried-projection before)
           {:seon.schema/key attribute :seon.schema/form ":int"}
           :all :agent)])
-       (let [row (support/program-fn-row (db/db connection) writer source)]
-         (is (= (:seon.fn/writes absent-row) (:seon.fn/writes row))
+       (let [entity (support/program-fn-entity (db/db connection) writer source)]
+         (is (= (:seon.fn/writes absent-entity) (:seon.fn/writes entity))
              "declaration membership cannot change source write facts")
-         (support/transacted! connection [row]))
+         (support/transacted! connection [entity]))
        (let [before (db/db connection)
              basis (db/basis-t before)
              refusal (db/transact! connection [[:db/retractEntity [:seon.schema/key attribute]]])
@@ -48,7 +48,7 @@
          (is (str/includes? (:seon.error/message refusal) (str writer)))
          (is (= basis (db/basis-t (db/db connection))))
          (is (some? (:db/id (db/pull (db/db connection) [:db/id] [:seon.schema/key attribute])))))
-       (let [converted (support/program-fn-row
+       (let [converted (support/program-fn-entity
                         (db/db connection) writer "(defn write! [connection] nil)")
              report (support/transacted!
                      connection

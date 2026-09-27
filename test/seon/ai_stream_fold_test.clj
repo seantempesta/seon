@@ -371,7 +371,7 @@
                   "the provider error and attempt committed together")))))))))
 
 (deftest settled-reasoning-reuses-the-eval-result-inline-blob-split
-  ;; An ordinary fixture branch: agent creation needs the declaration rows a
+  ;; An ordinary fixture branch: agent creation needs the declaration entities a
   ;; real cluster holds (a fresh store has none), and the blob assertion is a
   ;; content-addressed digest, which a shared blob store answers identically.
   ;; The threshold is the cluster's own dial, set through the config writer.

@@ -40,15 +40,15 @@
                     :seon.cluster.eval/ordinal 0 :seon.cluster.eval/at now
                     :seon.eval/shown "λ" :seon.eval/duration-ms 7}])]
          (is (some? (:db-after result)) (pr-str result)))
-       (let [rows (status/agents {:seon.db/db @connection :seon.db/connection connection})
-             row (first (filter #(= "metrics" (:seon.agent/id %)) rows))]
-         (is (vector? rows) (pr-str rows))
-         (is (= 20 (:seon.cluster.status/last-turn-ms row)))
-         (is (= 1 (:seon.cluster.status/evaluations row)))
-         (is (= 7 (:seon.cluster.status/evaluation-ms row)))
-         (is (= 17 (:seon.cluster.status/provider-tokens row)))
-         (is (= 2 (:seon.cluster.status/storage-bytes row)))
-         (is (string? (get-in row [:seon.cluster.status/provider-cost-usd :seon.cluster.status/unavailable-observation]))))
+       (let [entities (status/agents {:seon.db/db @connection :seon.db/connection connection})
+             entity (first (filter #(= "metrics" (:seon.agent/id %)) entities))]
+         (is (vector? entities) (pr-str entities))
+         (is (= 20 (:seon.cluster.status/last-turn-ms entity)))
+         (is (= 1 (:seon.cluster.status/evaluations entity)))
+         (is (= 7 (:seon.cluster.status/evaluation-ms entity)))
+         (is (= 17 (:seon.cluster.status/provider-tokens entity)))
+         (is (= 2 (:seon.cluster.status/storage-bytes entity)))
+         (is (string? (get-in entity [:seon.cluster.status/provider-cost-usd :seon.cluster.status/unavailable-observation]))))
        (let [staged (blob/stage! connection "abc")
              digest (:seon.blob/digest staged)
              report (blob/with-publication!
@@ -62,13 +62,13 @@
                          :seon.cluster.eval/run [:seon.turn/id "metrics-turn"]
                          :seon.cluster.eval/ordinal 1 :seon.cluster.eval/at (java.util.Date. 0)
                          :seon.eval/shown "x" :seon.eval/duration-ms 99}]))
-             rows (status/agents {:seon.db/db @connection :seon.db/connection connection})
-             row (first (filter #(= "metrics" (:seon.agent/id %)) rows))]
+             entities (status/agents {:seon.db/db @connection :seon.db/connection connection})
+             entity (first (filter #(= "metrics" (:seon.agent/id %)) entities))]
          (is (some? (:db-after report)) (pr-str report))
-         (is (= 1 (:seon.cluster.status/evaluations row)) "prior-session evaluation is excluded")
-         (is (= 7 (:seon.cluster.status/evaluation-ms row)))
-         (is (= 0.125 (:seon.cluster.status/provider-cost-usd row)))
-         (is (= 6 (:seon.cluster.status/storage-bytes row))
+         (is (= 1 (:seon.cluster.status/evaluations entity)) "prior-session evaluation is excluded")
+         (is (= 7 (:seon.cluster.status/evaluation-ms entity)))
+         (is (= 0.125 (:seon.cluster.status/provider-cost-usd entity)))
+         (is (= 6 (:seon.cluster.status/storage-bytes entity))
              "all retained shown bytes plus one copy of the shared blob"))))))
 
 (deftest root-concern-is-selected-by-schema-and-jvm-counts-include-virtual-threads

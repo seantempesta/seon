@@ -73,12 +73,12 @@
   ;; one inadmissible map refuses the WHOLE seed and every later assertion then
   ;; reads absence as render behaviour: a bare `{:seon.fn/sym owner-symbol}`
   ;; (missing the required `:seon.schema.admission/source`,
-  ;; `resources/seon/schemas/seon.fn.edn:92`) and a turn row without its
+  ;; `resources/seon/schemas/seon.fn.edn:92`) and a turn entity without its
   ;; required `:seon.turn/opened-tx` refused this seed entirely, and the 23
   ;; resulting reds read as a value-renderer defect. `my.fs/read` already IS a
-  ;; declaration in the canonical population, so the row is deleted rather than
+  ;; declaration in the canonical population, so the entity is deleted rather than
   ;; repaired — the fixture reuses the real one.
-  ;; TWO transactions, because the effect rows reference the turn by lookup
+  ;; TWO transactions, because the effect entities reference the turn by lookup
   ;; ref and Datahike resolves a lookup ref against the database the
   ;; transaction STARTS from — an entity minted in the same transaction is
   ;; `:entity-id/missing`.
@@ -467,7 +467,7 @@
       (kernel/mark-installed! ctx probe))
     ;; ONE CONTRACT, ARMED. `:record` instruments nothing, so a contract
     ;; refusal is only observable under the dial that raises it — the same
-    ;; call `seon.sci.eval/install-function-contract!` makes for a program row.
+    ;; call `seon.sci.eval/install-function-contract!` makes for a program entity.
     (let [contracted (sci/resolve ctx 'my.render-probe/contracted)]
       (sci/bind-root!
        ctx contracted

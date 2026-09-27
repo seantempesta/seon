@@ -33,7 +33,7 @@
   [name]
   (symbol "selection.fixture" name))
 
-(defn- selection-program-rows
+(defn- selection-program-entities
   {:malli/schema [:=> [:cat :seon.db/database-value :string] :seon.program/rows]}
   [database source]
   (let [projection (db/carried-projection database)]
@@ -45,8 +45,8 @@
 (defn- install-selection-program!
   {:malli/schema [:=> [:cat :seon.db/connection :string] :nil]}
   [connection source]
-  (let [rows (selection-program-rows (db/db connection) source)]
-    (support/transacted! connection rows)
+  (let [entities (selection-program-entities (db/db connection) source)]
+    (support/transacted! connection entities)
     nil))
 
 (defn- install-namespace!
@@ -76,9 +76,9 @@
                       :where [?run :seon.test.run/id ?run-id]
                              [?run :seon.test.run/members ?member]]
                     database (get-in admission [:seon.test.run/provenance :seon.test.run/id]))]
-    (into (mapv (fn [row]
-                  (cond-> row
-                    (:seon.test.run/members row)
+    (into (mapv (fn [entity]
+                  (cond-> entity
+                    (:seon.test.run/members entity)
                     (update :seon.test.run/members #(mapv complete-member %))))
                 (sut/admit-run database admission))
           (map (fn [member] (complete-member {:db/id member})))
@@ -289,9 +289,9 @@
                leaf (fixture-symbol "leaf")
                original (:db/id (db/pull database [:db/id] [:seon.fn/sym leaf]))
                removed (:db-after (d/with database [[:db/retractEntity original]]))
-               leaf-row (some #(when (= leaf (:seon.fn/sym %)) %)
-                              (selection-program-rows removed "(defn leaf [] 9)"))
-               recreated (:db-after (d/with removed [leaf-row]))]
+               leaf-entity (some #(when (= leaf (:seon.fn/sym %)) %)
+                              (selection-program-entities removed "(defn leaf [] 9)"))
+               recreated (:db-after (d/with removed [leaf-entity]))]
            (is (not= original (:db/id (db/pull recreated [:db/id] [:seon.fn/sym leaf]))))
            (doseq [snapshot [removed recreated]]
              (is (= (conj expected (fixture-symbol "unrelated"))
@@ -388,7 +388,7 @@
                         :seon.sci.admit/caps (config/result-caps config/defaults)
                         :seon.sci.eval/time-limit-ms 10000})
            _ (when-not (:seon.program/row evaluation)
-               (throw (ex-info "SCI test declaration did not produce a program row." evaluation)))
+               (throw (ex-info "SCI test declaration did not produce a program entity." evaluation)))
            declaration (program/declaration-row (seon.schema/handed-projection) (:seon.program/row evaluation) :all :agent)]
        (is (nil? (:seon.cluster.eval/error evaluation)))
        (support/transacted! connection [declaration])

@@ -71,7 +71,7 @@
   (is (str/includes? (:doc (meta #'run/wait)) "Use `wait` when")))
 
 (deftest the-usage-test-renders-the-lifecycle-walkthrough
-  ;; The my.turn namespace row renders through the one :seon.ns/ns pair; its
+  ;; The my.turn namespace entity renders through the one :seon.ns/ns pair; its
   ;; teaching lives in the usage test, whose unit declares usage-form.
   (support/with-database
     (fn [connection]

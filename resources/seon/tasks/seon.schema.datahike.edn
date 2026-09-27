@@ -1,7 +1,7 @@
 [#:seon.task{:id "befc26639ad0"
              :name "the-codec-reprints-values-to-compare-them"
              :kind :function
-             :intent "seon.db/pull-many on evaluation entities is 40x Datahike: 49 rows took 231 ms and 1,018 MB against d/pull-many 5.9 ms and 21 MB; the debug-page walk of 83 nodes spends 195 ms / 986 MB of its 215 ms in it. The EDN codec re-prints stored values to compare them (canonical-print-string 3.6 GB in one page recording, storage-compare, reader-round-trips?). Decode without printing."
+             :intent "seon.db/pull-many on evaluation entities is 40x Datahike: 49 entities took 231 ms and 1,018 MB against d/pull-many 5.9 ms and 21 MB; the debug-page walk of 83 nodes spends 195 ms / 986 MB of its 215 ms in it. The EDN codec re-prints stored values to compare them (canonical-print-string 3.6 GB in one page recording, storage-compare, reader-round-trips?). Decode without printing."
              :must-read #{seon.db/pull-many seon.schema.datahike/canonical-print-string seon.schema.datahike/reader-round-trips? seon.schema.datahike/storage-compare}
              :evidence #{"docs/research/agent-platform/landing/debug-context-page-2026-09-26.md"
                          "docs/research/agent-platform/perf-profile-2026-09-26.md"}}

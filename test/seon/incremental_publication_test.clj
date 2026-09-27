@@ -108,10 +108,10 @@
                     (pr-str
                      (update (edn/read-string (slurp (io/file checkout config/default-manifest-path)))
                              :seon.config/initialization
-                             (fn [rows]
+                             (fn [entities]
                                (mapv #(if (= "deepseek" (:seon.ai.model/provider-id %))
                                         (assoc % :seon.config.ai/endpoint "https://fixture.invalid/chat")
-                                        %) rows))))
+                                        %) entities))))
                     (fn [database]
                       (is (= "https://fixture.invalid/chat"
                              (:seon.config.ai/endpoint

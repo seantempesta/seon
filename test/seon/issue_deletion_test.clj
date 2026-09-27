@@ -22,28 +22,28 @@
                _ (support/transacted! connection
                                      [[:db.fn/call issue/index-tx [kept gone]]])
                before (db/db connection)
-               row (db/pull before '[*] lookup)
-               components (mapv :db/id (:seon.issue/files row))
+               entity (db/pull before '[*] lookup)
+               components (mapv :db/id (:seon.issue/files entity))
                file-ids (mapv #(get-in % [:seon.issue.citation/file :db/id])
-                              (:seon.issue/files row))
-               rows (filterv #(= "deletion-kept" (:seon.issue/id %))
-                             (#'issue/identity-rows before))
+                              (:seon.issue/files entity))
+               entities (filterv #(= "deletion-kept" (:seon.issue/id %))
+                             (#'issue/identity-entities before))
                operation (case writer
                            :index [:db.fn/call issue/index-tx [kept]]
-                           :adopt [:db.fn/call issue/adopt-tx rows])
+                           :adopt [:db.fn/call issue/adopt-tx entities])
                report (support/transacted! connection [operation])
                after (:db-after report)]
-           (is (integer? (:db/id row)) "The deleted subject must have existed.")
+           (is (integer? (:db/id entity)) "The deleted subject must have existed.")
            (is (seq components) "The component cascade must have a subject.")
            (is (every? integer? file-ids) "The cited file must resolve before deletion.")
            (is (nil? (db/pull after '[*] lookup)))
-           (is (empty? (db/datoms after :eavt (:db/id row))))
+           (is (empty? (db/datoms after :eavt (:db/id entity))))
            (doseq [component components]
              (is (empty? (db/datoms after :eavt component))))
            (doseq [file-id file-ids]
              (is (seq (db/datoms after :eavt file-id))
                  "A citation's noncomponent file ref does not own the file."))
-           (is (= row (db/pull (db/as-of after (db/basis-t before)) '[*] lookup)))
+           (is (= entity (db/pull (db/as-of after (db/basis-t before)) '[*] lookup)))
            (is (= "deletion-kept"
                   (:seon.issue/id (db/pull after [:seon.issue/id]
                                           [:seon.issue/id "deletion-kept"]))))
@@ -78,15 +78,15 @@
                               [[:db/add lookup :seon.issue/created-by creator]
                                [:db/add lookup :seon.issue/agent creator]])
          (let [before (db/db connection)
-               row (db/pull before '[*] lookup)
+               entity (db/pull before '[*] lookup)
                sibling (db/pull before '[*] [:seon.issue/id "deletion-sibling"])
                result (db/transact! connection
                                     {:tx-data [[:db.fn/call writer []]]
                                      :tx-meta {:seon.db/user creator}})
                after (db/db connection)]
-           (is (seq (:seon.issue/tests row)) "Retention must protect a real test ref.")
-           (is (seq (:seon.issue/files row)) "Refusal must retain citation components.")
+           (is (seq (:seon.issue/tests entity)) "Retention must protect a real test ref.")
+           (is (seq (:seon.issue/files entity)) "Refusal must retain citation components.")
            (is (string? (:seon.db.write.attempt/request-id result)) (pr-str result))
            (is (= (db/basis-t before) (db/basis-t after)))
-           (is (= row (db/pull after '[*] lookup)))
+           (is (= entity (db/pull after '[*] lookup)))
            (is (= sibling (db/pull after '[*] [:seon.issue/id "deletion-sibling"])))))))))

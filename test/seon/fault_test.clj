@@ -260,7 +260,7 @@
         (store/release-branch! cluster)
         (registry/retire-branch! {:seon.store/store store :seon.store/branch home})))))
 
-(deftest a-fault-no-agent-row-places-stays-on-its-own-branch
+(deftest a-fault-no-agent-entity-places-stays-on-its-own-branch
   ;; A test member's world names its cluster (`default` on the development
   ;; JVM) and that cluster's branch is open in the process, but the world is
   ;; not one of the cluster's agents' branches: its fault is recorded there

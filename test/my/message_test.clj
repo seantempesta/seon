@@ -44,7 +44,7 @@
                    (message/inbox {:seon.db/since before}
                                   @connection "bob")))))))
 
-(deftest ^{:seon.test/usage true} read-pulls-one-admitted-message-row
+(deftest ^{:seon.test/usage true} read-pulls-one-admitted-message-entity
   (with-messages
     (fn [connection _before]
       (let [value (message/read "m-1" @connection)]

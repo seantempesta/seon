@@ -149,27 +149,27 @@
        (is (= #{"i"} (values connection :schema.in-place/indexed))
            "and its entity keeps its other attributes")))))
 
-(deftest a-retirement-refuses-while-a-program-row-writes-the-attribute
+(deftest a-retirement-refuses-while-a-program-entity-writes-the-attribute
   (with-population
     (fn [connection]
       (let [writer 'schema.in-place/write!
             source "(defn write! [connection] (seon.db/transact! connection [{:schema.in-place/gone \"g\"}]))"
             projection @population
-            namespace-row (program/declaration-row
+            namespace-entity (program/declaration-row
                            projection
                            {:seon.ns/name 'schema.in-place
                             :seon.ns/source "(ns schema.in-place)"} :all :agent)]
         (support/transacted!
          connection
-         [{:schema.in-place/id "a" :schema.in-place/gone "g"} namespace-row])
-        ;; The production source-row producer with a complete namespace row
-        ;; (`support/program-fn-row` supplies a namespace without its
+         [{:schema.in-place/id "a" :schema.in-place/gone "g"} namespace-entity])
+        ;; The production source-entity producer with a complete namespace entity
+        ;; (`support/program-fn-entity` supplies a namespace without its
         ;; definition digest, which `seon.fn/source-rows` now refuses).
         (support/transacted!
          connection
          [(some #(when (= writer (:seon.fn/sym %)) %)
                 (seon.fn/source-rows
-                 (db/db connection) (program/shapes-in projection) namespace-row
+                 (db/db connection) (program/shapes-in projection) namespace-entity
                  source (set (keys (:seon.schema.projection/forms projection)))))])
         (let [basis (db/basis-t (db/db connection))
               refusal (support/refusal-data #(adopt! connection))
@@ -187,7 +187,7 @@
 (deftest a-required-key-retires-with-its-entity-schema-in-one-transaction
   ;; Class regression (fix-dial-retirement-adoption 2026-09-26): adoption
   ;; retracts a retired attribute with its data and rewrites the entity schema
-  ;; that required it in one transaction (`seon.cluster/adopt-rows!`). The
+  ;; that required it in one transaction (`seon.cluster/adopt-entities!`). The
   ;; writer judged that report by the declarations it replaced, so the
   ;; entity looked like it was missing a required key and the adoption was
   ;; refused. The final report is judged by the declarations it installs.
@@ -212,7 +212,7 @@
                         retired
                         #(db/transact! connection
                                        {:tx-data (into (@#'seon.cluster/declaration-changes database retired)
-                                                       (@#'seon.cluster/schema-row-changes database retired))}))]
+                                                       (@#'seon.cluster/schema-entity-changes database retired))}))]
           (is (some? (:db-after adoption)) (pr-str (:seon.error/message adoption)))
           (is (not (contains? (:schema (db/db connection)) :schema.in-place/required))
               "the required key's attribute is retired with its data")
@@ -259,7 +259,7 @@
         (support/transacted! connection [{:schema.in-place/id "a" :schema.in-place/value 7}])
         (is (= #{7} (values connection :schema.in-place/value)))))))
 
-(deftest a-drop-names-the-files-whose-program-rows-carried-it
+(deftest a-drop-names-the-files-whose-program-entities-carried-it
   (with-population
     (fn [connection]
       (support/transacted!

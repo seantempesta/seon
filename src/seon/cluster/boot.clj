@@ -80,7 +80,7 @@
                                :seon.db/db (db/db connection))
                         boot-dials (:seon.flow/commit-fault! arm-request))
            ;; Launched on the published files and armed against them: the JVM
-           ;; runs that commit, so the adoption after boot writes rows only.
+           ;; runs that commit, so the adoption after boot writes entities only.
            _ (cluster/name-loaded-program! (:seon.store/store instance) published-commit)
            instance (publish! (assoc instance :seon.instrument/applied host-arming))
            bare-ctx
@@ -141,7 +141,7 @@
         database (or (source/commit-database store commit-id)
                      (source/database store commit-id))]
     (try
-      ;; Every stored file row is compared, so an input the files deleted is
+      ;; Every stored file entity is compared, so an input the files deleted is
       ;; published as a deletion instead of later read through its callers.
       (let [stored (into {} (d/q '[:find ?path ?digest
                                    :where [?file :seon.fn.file/relative-path ?path]
@@ -180,7 +180,7 @@
         ;; A resume publishes exactly the inputs whose bytes differ from the
         ;; published program (files edited while the JVM was down), and nothing
         ;; when none differ; a first start publishes everything. A refused
-        ;; publication refuses the boot: stale program rows never run silently.
+        ;; publication refuses the boot: stale program entities never run silently.
         _ (let [published (if (source/current store)
                             (let [changed (changed-source-paths store)]
                               (when (seq changed)
@@ -683,7 +683,7 @@
                  :seon.operator/stopped? true
                  :seon.operator/process-exit? (empty? @running-instances)})
         ;; Reset = unlink the cluster's branch and fork a fresh one from the
-        ;; published program rows (plan §7), in this JVM, keeping every cache:
+        ;; published program entities (plan §7), in this JVM, keeping every cache:
         ;; the store stays held across stop and start, so nothing reopens.
         :reset (let [instance (selected-instance name)
                      config (:seon.boot/config instance)

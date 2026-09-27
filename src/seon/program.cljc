@@ -1,5 +1,5 @@
 (ns seon.program
-  "Pure declaration identities and exact-row ownership for program rows."
+  "Pure declaration identities and exact-entity ownership for program entities."
   (:require [malli.core :as m]
             [seon.error.refusal :as error]
             [seon.fn.signature :as signature]
@@ -192,27 +192,27 @@
            (merge {:seon.program/identity-attribute identity-attribute} data)))
         registry (:seon.schema.projection/registry projection)
         properties (some-> (mr/schema registry identity-attribute) m/properties)
-        row-schema (:seon.program/row-schema properties)
-        _ (when-not (qualified-keyword? row-schema)
-            (refuse! "A program identity attribute declares no row schema."
+        entity-schema (:seon.program/row-schema properties)
+        _ (when-not (qualified-keyword? entity-schema)
+            (refuse! "A program identity attribute declares no entity schema."
                      {:seon.program/missing-attributes [:seon.program/row-schema]}))
         source-attribute (:seon.program/source-attribute properties)
         _ (when-not (qualified-keyword? source-attribute)
             (refuse! "A program identity attribute declares no source attribute."
                      {:seon.program/missing-attributes
                       [:seon.program/source-attribute]}))
-        definition (mr/schema registry row-schema)
+        definition (mr/schema registry entity-schema)
         _ (when-not (and definition (internal/entity-schema? definition))
-            (refuse! "A program row schema is not a declared entity map."
-                     {:seon.program/row-schema row-schema}))
+            (refuse! "A program entity schema is not a declared entity map."
+                     {:seon.program/row-schema entity-schema}))
         entries (internal/entity-entries definition)
         owned (into [] (comp (filter #(nil? (:seon.program/written-by
                                              (entry-properties %))))
                              (keep entry-attribute))
                     entries)]
     (when-not (some #{identity-attribute} owned)
-      (refuse! "A program row schema does not declare its own identity attribute."
-               {:seon.program/row-schema row-schema}))
+      (refuse! "A program entity schema does not declare its own identity attribute."
+               {:seon.program/row-schema entity-schema}))
     {:seon.program/identity-attribute identity-attribute
      :seon.program/source-attribute source-attribute
      :seon.program/owned-attributes
@@ -277,7 +277,7 @@
                                             m/properties))
                    (keys (:seon.schema.projection/forms projection)))))))
 
-;; Process-cache weight: bytes the authored shapes keep alive per row family,
+;; Process-cache weight: bytes the authored shapes keep alive per entity family,
 ;; their projection built (bench/seon/cache_kind_measurement.edn, 2026-09-27:
 ;; 244 KB / 6 families).
 (def shape-bytes-per-family 40600)
@@ -361,16 +361,16 @@
     [:=> [:cat :seon.program/shapes :seon.program/identity-attribute]
      [:maybe :seon.program/shape]]]}
   ([identity-attribute] (get (shapes) identity-attribute))
-  ([row-shapes identity-attribute] (get row-shapes identity-attribute)))
+  ([entity-shapes identity-attribute] (get entity-shapes identity-attribute)))
 
 (defn row-identity
-  "The `[identity-attribute value]` pair carried by `row`."
+  "The `[identity-attribute value]` pair carried by `entity`."
   {:malli/schema
    [:=> [:cat [:maybe :map]]
     [:maybe :seon.program/identity]]}
-  [row]
+  [entity]
   (some (fn [identity-attribute]
-          (when-some [value (get row identity-attribute)]
+          (when-some [value (get entity identity-attribute)]
             [identity-attribute value]))
         identity-attributes))
 
@@ -398,10 +398,10 @@
   use therefore leaves its digest unchanged, while retargeting a used alias
   changes the resolved usages and so the kept entry."
   {:malli/schema [:=> [:cat :map :map] :map]}
-  [row {:keys [requires aliases refers imports]}]
-  (let [used (into (set (:seon.fn/calls row)) (:seon.fn/references row))
+  [entity {:keys [requires aliases refers imports]}]
+  (let [used (into (set (:seon.fn/calls entity)) (:seon.fn/references entity))
         used-namespaces (into #{} (keep #(some-> % namespace symbol))
-                              (concat used (:seon.fn/keywords row)))]
+                              (concat used (:seon.fn/keywords entity)))]
     {:requires (into #{} (filter used-namespaces) requires)
      :aliases (into {} (filter (comp used-namespaces val)) aliases)
      :refers (into {} (filter (comp used val)) refers)
@@ -419,14 +419,14 @@
    [:function
     [:=> [:cat :map] :seon.program/definition-digest]
     [:=> [:cat :map [:maybe :map]] :seon.program/definition-digest]]}
-  ([row] (definition-digest row nil))
-  ([row resolver-context]
+  ([entity] (definition-digest entity nil))
+  ([entity resolver-context]
    (let [parts
          (cond-> {:seon.program/declaration
-                  (apply dissoc row definition-digest-excluded-attributes)}
+                  (apply dissoc entity definition-digest-excluded-attributes)}
            resolver-context
            (assoc :seon.program/resolver-context
-                  (used-resolver-context row resolver-context)))]
+                  (used-resolver-context entity resolver-context)))]
      (id/digest 64 [(schema/canonical-data-string parts)]))))
 
 #?(:clj
@@ -456,9 +456,9 @@
   (let [registry (:seon.schema.projection/registry projection)
         classify
         (fn [attribute]
-          (let [row-schema (some-> (mr/schema registry attribute)
+          (let [entity-schema (some-> (mr/schema registry attribute)
                                    m/properties :seon.program/row-schema)
-                definition (some->> row-schema (mr/schema registry))
+                definition (some->> entity-schema (mr/schema registry))
                 entity? (and definition (internal/entity-schema? definition))
                 digested? (and entity?
                                (some #{:seon.program/definition-digest}
@@ -561,14 +561,14 @@
              ;; Two queries: one join plans a scan (982 ms / 1,000 vs 26 + 22 ms).
              identities
              (let [q (requiring-resolve 'seon.db/q)
-                   rows (q '[:find ?a ?v ?e :in $ [[?a ?v] ...] :where [?e ?a ?v]]
+                   entities (q '[:find ?a ?v ?e :in $ [[?a ?v] ...] :where [?e ?a ?v]]
                            database (vec identities))
-                   stored (if (:seon.error/at rows) rows
+                   stored (if (:seon.error/at entities) entities
                             (into {} (q '[:find ?e ?d :in $ [?e ...] :where
                                           [(get-else $ ?e :seon.program/definition-digest "") ?d]]
-                                        database (mapv peek rows))))
+                                        database (mapv peek entities))))
                    missing (when-not (:seon.error/at stored)
-                             (into #{} (keep (fn [[a v e]] (when (= "" (stored e)) [a v]))) rows))]
+                             (into #{} (keep (fn [[a v e]] (when (= "" (stored e)) [a v]))) entities))]
                (cond
                  (:seon.error/at stored)
                  (digest-map-refusal :seon.program/read "A program declaration could not be read."
@@ -578,7 +578,7 @@
                                      "Program declarations are missing their stored definition digest."
                                      {:seon.error/expected-key :seon.program/definition-digest
                                       :seon.program/undigested-declarations missing})
-                 :else (into {} (map (fn [[a v e]] [[a v] (stored e)])) rows)))
+                 :else (into {} (map (fn [[a v e]] [[a v] (stored e)])) entities)))
 
              :else
              (let [ranges
@@ -632,20 +632,20 @@
            entities (if (:seon.error/at past) past
                       (q '[:find [?e ...] :where [?e :seon.program/definition-digest]]
                          (since past (if (int? base) base (basis-t base)))))
-           rows (if (:seon.error/at entities) entities
+           entity-maps (if (:seon.error/at entities) entities
                   (q '[:find ?e ?a ?v :in $ [?e ...] [?a ...] :where [?e ?a ?v]]
                      past entities (vec (:seon.program/compared-families
                                          (declaration-families (carried database))))))
-           identities (when-not (:seon.error/at rows) (into #{} (map (comp vec rest)) rows))
+           identities (when-not (:seon.error/at entity-maps) (into #{} (map (comp vec rest)) entity-maps))
            outside (into #{} (remove (comp #{:seon.fn/sym :seon.test/sym :seon.ns/name} first)) identities)]
        (cond
-         (:seon.error/at rows)
+         (:seon.error/at entity-maps)
          (refuse :seon.program/history "The changes since the base need readable history."
-                 {:seon.error/offending rows})
+                 {:seon.error/offending entity-maps})
          (< max-datoms (count entities))
          (refuse :seon.program/read-bound "The changes since the base exceed their datom bound."
                  {:seon.program/max-datoms max-datoms})
-         (not= (set entities) (set (map first rows)))
+         (not= (set entities) (set (map first entity-maps)))
          (refuse :seon.program/family-classification
                  "A changed digest belongs to no compared declaration family."
                  {:seon.error/expected-key :seon.program/declaration-identity})
@@ -702,11 +702,11 @@
       :seon.program/conflict-digests {}}
      (into #{} (concat (keys base) (keys branch) (keys head))))))
 
-(defn- row-identities
-  [row]
+(defn- entity-identities
+  [entity]
   (into []
         (keep (fn [identity-attribute]
-                (when-some [value (get row identity-attribute)]
+                (when-some [value (get entity identity-attribute)]
                   [identity-attribute value])))
         identity-attributes))
 
@@ -723,7 +723,7 @@
   (component-id function-symbol
                 [:arity arity-order :argument argument-index :binding path]))
 
-(declare binding-row)
+(declare binding-entity)
 
 (defn- binding-child
   [function-symbol arity-order argument-index path order role binding]
@@ -732,7 +732,7 @@
    :seon.fn.binding.child/order (long order)
    :seon.fn.binding.child/role role
    :seon.fn.binding.child/binding
-   (binding-row function-symbol arity-order argument-index
+   (binding-entity function-symbol arity-order argument-index
                 (conj path :child order :binding) binding)})
 
 (defn- shorthand-source-key
@@ -841,7 +841,7 @@
       :inst (assoc base :seon.schema.map-entry/key-inst value)
       base)))
 
-(defn- binding-entry-row
+(defn- binding-entry-entity
   [function-symbol arity-order argument-index path
    {order :seon.fn.binding.entry/order
     spelling :seon.fn.binding.entry/spelling
@@ -855,7 +855,7 @@
      :seon.fn.binding.entry/order order
      :seon.fn.binding.entry/spelling spelling
      :seon.fn.binding.entry/binding
-     (binding-row function-symbol arity-order argument-index
+     (binding-entity function-symbol arity-order argument-index
                   (conj path :entry order :binding) local-binding)}
     (typed-key-facts source-key))
     default-edn
@@ -908,7 +908,7 @@
                        (binding-child function-symbol arity-order argument-index
                                       path order :element value))))))))
 
-(defn- binding-row
+(defn- binding-entity
   [function-symbol arity-order argument-index path binding]
   (cond
     (symbol? binding)
@@ -926,7 +926,7 @@
         :seon.fn.binding/shape :map}
         (seq entries)
         (assoc :seon.fn.binding/entries
-               (mapv #(binding-entry-row function-symbol arity-order
+               (mapv #(binding-entry-entity function-symbol arity-order
                                          argument-index path %)
                      entries))
         as-binding
@@ -948,7 +948,7 @@
      (ex-info "Function declaration has an unsupported binding form."
               {:seon.error/at #?(:clj (java.util.Date.) :cljs (js/Date.))
                 :seon.error/layer :seon.program/declaration
-                :seon.error/operation 'seon.program/binding-row
+                :seon.error/operation 'seon.program/binding-entity
                 :seon.error/message "Function binding is unsupported; use a symbol, map or sequential binding."
                 :seon.error/offending binding
                 :seon.program/binding-function function-symbol
@@ -1020,7 +1020,7 @@
     (string? label) (assoc :seon.fn.argument/label-string label)
     (symbol? label) (assoc :seon.fn.argument/label-symbol label)))
 
-(defn- argument-row
+(defn- argument-entity
   [function-symbol arity-order source-signature order
    {label :seon.fn.argument/label}]
   (let [bindings (:seon.fn.signature/bindings source-signature)
@@ -1031,10 +1031,10 @@
       :seon.fn.argument/index (long order)
       :seon.fn.argument/rest? (= order rest-index)
       :seon.fn.argument/binding
-      (binding-row function-symbol arity-order order [] (nth bindings order))}
+      (binding-entity function-symbol arity-order order [] (nth bindings order))}
       (some? label) (merge (label-facts label)))))
 
-(defn- arity-row
+(defn- arity-entity
   "One stored arity row. `references` are this arity's `[input output guard]`
    reference sets, derived with the compiled contract in its own compilation
    world ([[seon.schema/contract-references]]); they are never re-derived here."
@@ -1047,7 +1047,7 @@
              (ex-info "A source binding has no matching Malli input slot."
                       {:seon.error/at #?(:clj (java.util.Date.) :cljs (js/Date.))
                         :seon.error/layer :seon.program/declaration
-                        :seon.error/operation 'seon.program/arity-row
+                        :seon.error/operation 'seon.program/arity-entity
                         :seon.error/member function-symbol
                         :seon.error/message "Source bindings and contract slots differ; declare one slot per binding."
                         :seon.error/offending source-signature
@@ -1056,7 +1056,7 @@
                         :seon.error/data {:seon.fn.signature/source-count expected-count}
                         :seon.error/expected expected-count})))
         arguments (mapv (fn [argument-order slot]
-                          (argument-row function-symbol order source-signature
+                          (argument-entity function-symbol order source-signature
                                         argument-order slot))
                         (range) slots)]
     (cond->
@@ -1136,7 +1136,7 @@
      {:seon.fn/arities
       (mapv (fn [order arity references]
               (let [info (m/-function-info arity)]
-                (arity-row function-symbol order info references
+                (arity-entity function-symbol order info references
                            (get source-by-key (malli-arity-key info)))))
             (range)
             arities
@@ -1144,7 +1144,7 @@
       override? (assoc :seon.fn/arglists-override? true))))
 
 (defn with-contract-facts
-  "Add parsed facts to one canonical contracted function row."
+  "Add parsed facts to one canonical contracted function entity."
   {:malli/schema
    [:=>
     [:cat
@@ -1154,44 +1154,44 @@
       [:seon.program/predicate-functions :map]
       [:seon.program/schema-keys [:set :keyword]]]]
     :seon.program/declaration-row]}
-  [{row :seon.program/row
+  [{entity :seon.program/row
     compile-options :seon.program/compile-options
     predicate-functions :seon.program/predicate-functions
     canonical-keys :seon.program/schema-keys
     reader-aliases :seon.program/reader-aliases}]
   (cond
-    (:seon.fn/spec row)
-    (merge row
+    (:seon.fn/spec entity)
+    (merge entity
            (contract-facts
             (cond->
-             {:seon.program/function-symbol (:seon.fn/sym row)
-              :seon.program/spec (:seon.fn/spec row)
-              :seon.program/source (:seon.fn/source row)
+             {:seon.program/function-symbol (:seon.fn/sym entity)
+              :seon.program/spec (:seon.fn/spec entity)
+              :seon.program/source (:seon.fn/source entity)
               :seon.program/compile-options compile-options
               :seon.program/predicate-functions predicate-functions
               :seon.program/schema-keys canonical-keys
               :seon.program/reader-namespace
-              (second (:seon.fn/ns row))
+              (second (:seon.fn/ns entity))
               :seon.program/reader-aliases (or reader-aliases {})}
-              (:seon.fn/arglists row)
-              (assoc :seon.program/arglists (:seon.fn/arglists row)))))
+              (:seon.fn/arglists entity)
+              (assoc :seon.program/arglists (:seon.fn/arglists entity)))))
 
-    :else row))
+    :else entity))
 
-(defn- canonical-row-in
-  [row-shapes row]
-  (let [identities (row-identities row)]
+(defn- canonical-entity-in
+  [entity-shapes entity]
+  (let [identities (entity-identities entity)]
     (when (> (count identities) 1)
       (declaration-refused!
-       "A declaration row carries more than one identity family."
+       "A declaration entity carries more than one identity family."
        identities
        {}))
     (when-let [[identity-attribute _] (first identities)]
       (let [owned-attributes
-            (:seon.program/owned-attributes (get row-shapes identity-attribute))
+            (:seon.program/owned-attributes (get entity-shapes identity-attribute))
             owned-attributes
             (if (= :seon.program/schema-row-properties owned-attributes)
-              (into [] (filter qualified-keyword?) (keys row))
+              (into [] (filter qualified-keyword?) (keys entity))
               owned-attributes)]
         (into {}
               (remove (fn [[attribute value]]
@@ -1202,7 +1202,7 @@
                                               :seon.ns/refers}
                                             attribute)
                                  (empty? value)))))
-              (select-keys row owned-attributes))))))
+              (select-keys entity owned-attributes))))))
 
 (defn canonical-row
   "The exact non-nil attributes owned by one declaration row.
@@ -1215,8 +1215,8 @@
    [:function
     [:=> [:cat [:maybe :map]] [:maybe :map]]
     [:=> [:cat :seon.program/shapes [:maybe :map]] [:maybe :map]]]}
-  ([row] (canonical-row-in (shapes) row))
-  ([row-shapes row] (canonical-row-in row-shapes row)))
+  ([entity] (canonical-entity-in (shapes) entity))
+  ([entity-shapes entity] (canonical-entity-in entity-shapes entity)))
 
 (defn- canonical-namespace-components
   "Namespace components in the one shape `:seon.ns/ns` declares.
@@ -1226,13 +1226,13 @@
   the same facts as sets, with each requirement a `:seon.ns/name` lookup ref.
   The evaluator also builds these components directly from SCI's namespace
   table, so this is idempotent over an already canonical row."
-  [row]
-  (cond-> row
-    (:seon.ns/requires row)
+  [entity]
+  (cond-> entity
+    (:seon.ns/requires entity)
     (update :seon.ns/requires set)
-    (:seon.ns/aliases row) (update :seon.ns/aliases set)
-    (:seon.ns/imports row) (update :seon.ns/imports set)
-    (:seon.ns/refers row) (update :seon.ns/refers set)))
+    (:seon.ns/aliases entity) (update :seon.ns/aliases set)
+    (:seon.ns/imports entity) (update :seon.ns/imports set)
+    (:seon.ns/refers entity) (update :seon.ns/refers set)))
 
 (defn declaration-row
   "Canonical declaration row for a reader event under a function policy.
@@ -1277,24 +1277,24 @@
                 (schema/projection-with-schema
                  projection schema-key definition
                  {:seon.schema.admission/source admission-source})
-                row (some #(when (= schema-key (:seon.schema/key %)) %)
-                          (schema/canonical-schema-rows
+                entity (some #(when (= schema-key (:seon.schema/key %)) %)
+                          (schema/canonical-schema-entities
                            candidate-projection {schema-key definition}))]
             (cond-> (assoc (merge (select-keys candidate
                                               [:seon.schema/generatable?])
-                                 row)
+                                 entity)
                            :seon.schema.admission/source
                            (:seon.schema.admission/source candidate))
               (:seon.schema/ns candidate)
               (assoc :seon.schema/ns (:seon.schema/ns candidate))))
 
           :else candidate)
-        row-shapes (shapes-in projection)
-        candidate (canonical-row row-shapes candidate)
-        ;; Only a namespace or schema digest is its row alone. A function or
+        entity-shapes (shapes-in projection)
+        candidate (canonical-row entity-shapes candidate)
+        ;; Only a namespace or schema digest is its entity alone. A function or
         ;; test digest includes its namespace's resolver context, which this
         ;; stage does not hold: `seon.db/definition-digest-of` supplies it, and
-        ;; an undigested row refuses at the writer by the missing key.
+        ;; an undigested entity refuses at the writer by the missing key.
         candidate
         (if (and candidate
                  (or (:seon.ns/name candidate)
@@ -1303,24 +1303,24 @@
           (assoc candidate :seon.program/definition-digest
                  (definition-digest candidate))
           candidate)
-        row candidate]
-    (when row
-      (let [[identity-attribute _ :as program-identity] (row-identity row)
+        entity candidate]
+    (when entity
+      (let [[identity-attribute _ :as program-identity] (row-identity entity)
             source-attribute (:seon.program/source-attribute
-                              (shape row-shapes identity-attribute))]
-        (when-not (get row source-attribute)
+                              (shape entity-shapes identity-attribute))]
+        (when-not (get entity source-attribute)
           (declaration-refused!
            "A reader declaration has no source. Analysis has not run at this stage."
            [program-identity]
            {:seon.program/missing-attributes [source-attribute]}))))
-    row))
+    entity))
 
 (defn- changed-attributes-in
-  [row-shapes current desired]
+  [entity-shapes current desired]
   (if-let [[identity-attribute _]
            (or (row-identity desired) (row-identity current))]
     (let [owned-attributes
-          (:seon.program/owned-attributes (get row-shapes identity-attribute))
+          (:seon.program/owned-attributes (get entity-shapes identity-attribute))
           owned-attributes
           (if (= :seon.program/schema-row-properties owned-attributes)
             (into #{}
@@ -1346,13 +1346,13 @@
     [:=> [:cat :map :map] [:vector :keyword]]
     [:=> [:cat :seon.program/shapes :map :map] [:vector :keyword]]]}
   ([current desired] (changed-attributes-in (shapes) current desired))
-  ([row-shapes current desired]
-   (changed-attributes-in row-shapes current desired)))
+  ([entity-shapes current desired]
+   (changed-attributes-in entity-shapes current desired)))
 
 (defn- replacement-tx
-  [row-shapes current desired]
+  [entity-shapes current desired]
   (let [entity-id (:db/id current)
-        changed (changed-attributes-in row-shapes current desired)]
+        changed (changed-attributes-in entity-shapes current desired)]
     (into
      []
      (concat
@@ -1360,7 +1360,7 @@
              ;; Datahike validates tuple values before dispatching retraction.
              ;; Cardinality-many values are sets; validate one existing tuple,
              ;; not the set. retractAttribute still removes the entire attribute.
-             ;; The current row comes from the writer's transaction database.
+             ;; The current entity comes from the writer's transaction database.
              (let [value (get current attribute)]
                [:db.fn/retractAttribute entity-id attribute
                 (if (or (set? value)
@@ -1381,11 +1381,11 @@
   {:malli/schema
    [:=> [:cat :seon.program/shapes [:map [:db/id :int]] :map]
     [:vector :seon.schema/value]]}
-  [row-shapes current desired]
-  (replacement-tx row-shapes current desired))
+  [entity-shapes current desired]
+  (replacement-tx entity-shapes current desired))
 
 (defn exact-replacement-tx
-  "Replace one declaration row using current values and component retraction."
+  "Replace one declaration entity using current values and component retraction."
   {:malli/schema
    [:=> [:cat [:map [:db/id :int]] :map] [:vector :seon.schema/value]]}
   [current desired]

@@ -8,11 +8,11 @@
   [:seon.test.seed/tx-data {:optional true} :seon.test.seed/tx-data]
   [:seon.config/manifest {:optional true} :seon.config/manifest]]
  :ordinal [:int {:min 0 :description "The entry's position in the deftest's :seon.test/seed vector; cardinality-many refs keep no order, so the vector is reconstructed by ordinal."}]
- :function [:and {:seon.db/index true :description "The qualified seed function an entry names (form 2): an authored name, resolved to its current row for validation and walking."} :seon.program/edge-symbol]
+ :function [:and {:seon.db/index true :description "The qualified seed function an entry names (form 2): an authored name, resolved to its current entity for validation and walking."} :seon.program/edge-symbol]
  :writes [:set {:description "Qualified attributes the entry's literal entity maps write (form 1). The value itself stays in the test's source."} :qualified-keyword]
  :occurrence
  [:map {:seon.db/attributes true
-        :description "One ordered seed entry, owned by its test row."}
+        :description "One ordered seed entry, owned by its test entity."}
   [:seon.test.seed/ordinal :seon.test.seed/ordinal]
   [:seon.test.seed/function {:optional true} :seon.test.seed/function]
   [:seon.test.seed/writes {:optional true} :seon.test.seed/writes]]

@@ -41,11 +41,11 @@
              :seon.schema/declaration-predicates :seon.program/authored-shapes}
            (set (keys kinds)))
         "every weighed schema-family kind has a measurement")
-    (doseq [[kind row] kinds]
+    (doseq [[kind entity] kinds]
       (testing kind
-        (let [ratio (/ (double (charge kind row)) (:retained-bytes row))]
+        (let [ratio (/ (double (charge kind entity)) (:retained-bytes entity))]
           (is (<= (/ 1 tolerance) ratio tolerance)
-              (str kind " charges " (charge kind row) " B for " (:retained-bytes row)
+              (str kind " charges " (charge kind entity) " B for " (:retained-bytes entity)
                    " B measured (ratio " ratio ")")))))))
 
 (deftest the-packaged-declaration-projection-is-one-entry

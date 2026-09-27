@@ -41,8 +41,8 @@
   (let [target (home-connection connection)]
     (db/call-with-custody {:seon.db/connection target} #(db/transact! target tx))))
 
-(defn- task-row
-  "`declaration` as the runtime task row `agent-id` writes, under its handle."
+(defn- task-entity
+  "`declaration` as the runtime task entity `agent-id` writes, under its handle."
   {:malli/schema [:=> [:cat :seon.task/declaration :seon.agent/id] :seon.task/task]}
   [{:seon.task/keys [ns name kind] :as declaration} agent-id]
   (assoc declaration :seon.task/id (issue/task-handle ns name kind) :seon.task/created-by [:seon.agent/id agent-id]))
@@ -52,11 +52,11 @@
   `connection`, or [] when that home already holds its declaration. A revised
   declaration throws the writer's conflict with base, current and proposed."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.task/task :seon.task/basis] :seon.db/tx-data]}
-  [connection row basis]
-  (let [handles #{(:seon.task/id row)}]
-    (if (empty? (issue/adopt-tasks-tx (db/db (home-connection connection)) [row] handles basis))
+  [connection entity basis]
+  (let [handles #{(:seon.task/id entity)}]
+    (if (empty? (issue/adopt-tasks-tx (db/db (home-connection connection)) [entity] handles basis))
       []
-      [[:db.fn/call #'issue/adopt-tasks-tx [row] handles basis]])))
+      [[:db.fn/call #'issue/adopt-tasks-tx [entity] handles basis]])))
 
 (defn- refusal-data
   "Call `f`; the task writer's thrown refusal answers as its data."
@@ -82,13 +82,13 @@
                   [:or [:map [:seon.task/id :seon.task/id] [:seon.task/changed? :seon.task/changed?]]
                    :seon.task/refused-error :seon.task/conflict-error :seon.error/value]]}
   [{connection :seon.db/connection agent-id :seon.agent/id :as request}]
-  (let [row (task-row (select-keys request [:seon.task/ns :seon.task/name :seon.task/kind :seon.task/intent
+  (let [entity (task-entity (select-keys request [:seon.task/ns :seon.task/name :seon.task/kind :seon.task/intent
                                             :seon.task/must-read :seon.task/evidence]) agent-id)
-        tx (refusal-data #(task-call connection row (:seon.task/basis request {})))
+        tx (refusal-data #(task-call connection entity (:seon.task/basis request {})))
         report (if (and (vector? tx) (seq tx)) (written connection tx) tx)]
     (if (:seon.error/at report)
       report
-      {:seon.task/id (:seon.task/id row) :seon.task/changed? (boolean (seq tx))})))
+      {:seon.task/id (:seon.task/id entity) :seon.task/changed? (boolean (seq tx))})))
 
 (defn assign!
   "Root assigns the task `:seon.task/assigned` to the agent `:seon.task/agent`
@@ -156,9 +156,9 @@
                         [:seon.task/program :seon.task/program]]]
                   [:or :seon.task/proposal-view :seon.task/conflict-error :seon.error/value]]}
   [connection agent-id {:seon.task/keys [key ns proposes]} view]
-  (let [row (task-row {:seon.task/ns ns :seon.task/name (str "merge " key) :seon.task/kind :merge
+  (let [entity (task-entity {:seon.task/ns ns :seon.task/name (str "merge " key) :seon.task/kind :merge
                        :seon.task/intent (str "Merge branch " (name (:seon.task/branch view)) "'s change for " key ".")}
                       agent-id)
-        view (assoc view :seon.task/proposal (id/id [key (:seon.task/commit view)]) :seon.task/merge (:seon.task/id row))
-        report (refusal-data #(written connection (conj (task-call connection row {}) (assoc view :seon.task/proposes proposes))))]
+        view (assoc view :seon.task/proposal (id/id [key (:seon.task/commit view)]) :seon.task/merge (:seon.task/id entity))
+        report (refusal-data #(written connection (conj (task-call connection entity {}) (assoc view :seon.task/proposes proposes))))]
     (if (:seon.error/at report) report view)))

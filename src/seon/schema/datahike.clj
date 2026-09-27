@@ -293,14 +293,14 @@
   (::core (compiled-attribute-selection projection)))
 
 (defn database-attributes-for-in
-  "Select attributes of authored rows using the complete supplied generation."
+  "Select attributes of authored entities using the complete supplied generation."
   {:malli/schema [:=> [:cat :map :map] [:vector :qualified-keyword]]}
   [projection forms]
   (::attributes (compiled-attribute-selection
                  (assoc projection :seon.schema.projection/forms forms))))
 
 (defn database-attributes-in
-  "Database attributes plus bridge-storable schema-row properties."
+  "Database attributes plus bridge-storable schema-entity properties."
   {:malli/schema [:=> [:cat :map] [:vector :qualified-keyword]]}
   [projection]
   (::attributes (compiled-attribute-selection projection)))

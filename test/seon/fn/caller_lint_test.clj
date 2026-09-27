@@ -11,7 +11,7 @@
   (let [connection (:seon.db/connection (support/execution-handle nil))
         callee [:seon.fn/sym (symbol "seon.id" "digest")]
         ;; Each edit lands with the digest the writer admits for the
-        ;; stored row's final value (`support/revision`).
+        ;; stored entity's final value (`support/revision`).
         callers-after #(seon.fn/caller-files
                         (support/transacted! connection
                                              [(support/revision (db/db connection) callee %)]))]

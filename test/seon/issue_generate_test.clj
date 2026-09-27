@@ -23,7 +23,7 @@
                          :seon.issue/detector detector
                          :seon.issue/severity :cleanup}))
 
-(defn- issue-row [connection issue-id]
+(defn- issue-entity [connection issue-id]
   (seon.db/pull (seon.db/db connection)
                 '[:db/id :seon.issue/id :seon.issue/status :seon.issue/problem :seon.issue/title
                   :seon.issue/severity :seon.issue/resolved-tx
@@ -69,27 +69,27 @@
                                               (seon.db/db connection))))
            first-run (generate! connection)
            issue-id (subject-issue-id subject)
-           row (issue-row connection issue-id)]
+           entity (issue-entity connection issue-id)]
        (clojure.test/is (let [observed first-run] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str first-run))
        (clojure.test/is (pos? (:seon.issue/count first-run)) (pr-str first-run))
-       (clojure.test/is (= :open (:seon.issue/status row)) (pr-str row))
-       (clojure.test/is (= detector (get-in row [:seon.issue/detector :seon.fn/sym])))
-       (clojure.test/is (= #{subject} (set (map :seon.fn/sym (:seon.issue/functions row))))
+       (clojure.test/is (= :open (:seon.issue/status entity)) (pr-str entity))
+       (clojure.test/is (= detector (get-in entity [:seon.issue/detector :seon.fn/sym])))
+       (clojure.test/is (= #{subject} (set (map :seon.fn/sym (:seon.issue/functions entity))))
                         "the subject is stored as a ref, not as text")
        (clojure.test/is (= #{(symbol (namespace (symbol subject)))}
-                           (set (map :seon.ns/name (:seon.issue/namespaces row))))
+                           (set (map :seon.ns/name (:seon.issue/namespaces entity))))
                         "the responsible namespace is a ref the steward can query")
-       (clojure.test/is (nil? (:seon.issue/status (issue-row connection (subject-issue-id documented))))
+       (clojure.test/is (nil? (:seon.issue/status (issue-entity connection (subject-issue-id documented))))
                         "a function that already carries a docstring is no subject")
        ;; A human's edit of the prose survives every later run.
-       (written! connection [[:db/add (:db/id row) :seon.issue/problem "Edited by hand."]])
+       (written! connection [[:db/add (:db/id entity) :seon.issue/problem "Edited by hand."]])
        (let [before (:max-tx (seon.db/db connection))
              second-run (generate! connection)
-             again (issue-row connection issue-id)]
+             again (issue-entity connection issue-id)]
          (clojure.test/is (= 0 (:seon.issue/forms second-run))
                           (str "a second run of the same subjects writes nothing: " (pr-str second-run)))
          (clojure.test/is (= before (:max-tx (seon.db/db connection))))
-         (clojure.test/is (= (:db/id row) (:db/id again))
+         (clojure.test/is (= (:db/id entity) (:db/id again))
                           "the identity is the detector plus the subject, so one entity")
          (clojure.test/is (= "Edited by hand." (:seon.issue/problem again)))
          (clojure.test/is (= (:seon.issue/count first-run) (:seon.issue/count second-run))))))))
@@ -101,13 +101,13 @@
            entity (function-entity connection subject)
            issue-id (subject-issue-id subject)]
        (generate! connection)
-       (let [opened (issue-row connection issue-id)]
+       (let [opened (issue-entity connection issue-id)]
          (clojure.test/is (= :open (:seon.issue/status opened)) (pr-str opened))
          (clojure.test/is (nil? (:seon.issue/resolved-tx opened)) (pr-str opened))
          ;; The standard now holds: the subject leaves the detector's result.
          (written! connection [[:db/add entity :seon.fn/doc "It answers its own question."]])
          (generate! connection)
-         (let [resolved (issue-row connection issue-id)]
+         (let [resolved (issue-entity connection issue-id)]
            (clojure.test/is (= (:db/id opened) (:db/id resolved))
                             "resolution keeps the entity; nothing is deleted")
            (clojure.test/is (= :resolved (:seon.issue/status resolved)) (pr-str resolved))
@@ -120,7 +120,7 @@
          ;; The finding comes back.
          (written! connection [[:db/retract entity :seon.fn/doc]])
          (generate! connection)
-         (let [reopened (issue-row connection issue-id)]
+         (let [reopened (issue-entity connection issue-id)]
            (clojure.test/is (= (:db/id opened) (:db/id reopened)))
            (clojure.test/is (= :open (:seon.issue/status reopened)) (pr-str reopened))
            (clojure.test/is (nil? (:seon.issue/resolved-tx reopened)) (pr-str reopened))))))))
@@ -154,7 +154,7 @@
              view (seon.issue/status {:seon.db/db database
                                       :seon.issue/id (subject-issue-id subject)})
              unit {:seon.db/db database
-                   :seon.render/value (issue-row connection (subject-issue-id subject))}
+                   :seon.render/value (issue-entity connection (subject-issue-id subject))}
              text (seon.issue/render-ai unit)]
          (clojure.test/is (empty? (:seon.issue/tests view)) (pr-str view))
          (clojure.test/is (= (list detector '(seon.db/db))

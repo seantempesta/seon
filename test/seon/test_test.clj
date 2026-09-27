@@ -271,7 +271,7 @@
          :seon.source/test-input-digest (id/digest 64 [:admission :inputs])}])
      (let [stale (runner/provenance (db/db connection))
            _ (test-support/transacted!
-              ;; A digested attribute changes through the row its writer digests.
+              ;; A digested attribute changes through the entity its writer digests.
               connection [(test-support/revision (db/db connection) [:seon.fn/sym 'seon.id/id]
                                                  {:seon.fn/doc "Written after the tested basis."})])
            database (db/db connection)
@@ -298,8 +298,8 @@
          (is (= before (db/basis-t (db/db connection)))))
        (let [report (test-support/transacted!
                      connection [[:db.fn/call sut/admit-run request]])
-             row (db/pull (:db-after report)
+             entity (db/pull (:db-after report)
                          [:seon.test.run/selection-tx :seon.test.run/members]
                          [:seon.test.run/id (get-in request [:seon.test.run/provenance :seon.test.run/id])])]
-         (is (integer? (get-in row [:seon.test.run/selection-tx :db/id])))
-         (is (not (seq (:seon.test.run/members row)))))))))
+         (is (integer? (get-in entity [:seon.test.run/selection-tx :db/id])))
+         (is (not (seq (:seon.test.run/members entity)))))))))

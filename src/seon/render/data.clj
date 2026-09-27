@@ -161,18 +161,18 @@
 
            (if (db/read-refusal? page)
              (reduced page)
-             (let [rows (into (::datoms result) (:datahike.index-page/datoms page))
+             (let [entities (into (::datoms result) (:datahike.index-page/datoms page))
                    more? (not (:datahike.index-page/complete? page))
                    next-offset (if more? offset (inc offset))
                    complete? (and (not more?) (= next-offset (count attributes)))
                    next-result
-                   (cond-> {::datoms rows ::complete? complete?
+                   (cond-> {::datoms entities ::complete? complete?
                             ::ref-attributes-probed (inc (::ref-attributes-probed result))}
                      (not complete?)
                      (assoc ::continuation
                             (continuation snapshot eid :incoming next-offset
                                           (:datahike.index-page/cursor page))))]
-               (if (or more? (= limit (count rows)))
+               (if (or more? (= limit (count entities)))
                  (reduced next-result)
                  next-result)))))
        (cond-> {::datoms [] ::complete? (= start (count attributes))

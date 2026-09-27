@@ -45,7 +45,7 @@
            (pr-str evidence))
        ;; The form's evidence is what the form read on its own branch: the
        ;; context's acquisition held the pre-write value and the host
-       ;; program's rows, and neither is the form's read.
+       ;; program's entities, and neither is the form's read.
        (is (= #{(:datahike.cache/connection-id (:cache-context @connection))}
               (into #{} (map #(get-in % [:datahike.read/revision :datahike.cache/connection-id])) evidence))
            (pr-str (mapv :datahike.read/revision evidence)))

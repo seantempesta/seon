@@ -42,11 +42,11 @@
 (defn- declare!
   {:malli/schema [:=> [:cat :seon.agent/execution-handle :string] :nil]}
   [handle source]
-  (let [row (:seon.program/row (evaluate! handle source))
+  (let [entity (:seon.program/row (evaluate! handle source))
         connection (:seon.db/connection handle)]
-    (when-not row (throw (ex-info "Expected an analyzed declaration." {})))
+    (when-not entity (throw (ex-info "Expected an analyzed declaration." {})))
     ;; The fixture writer binds the connection it names.
-    (support/transacted! connection (#'turn/row-tx (db/db connection) {} row)))
+    (support/transacted! connection (#'turn/row-tx (db/db connection) {} entity)))
   nil)
 
 (defn- with-published-store
@@ -136,7 +136,7 @@
                    (measured #(agent/acquire-context!
                                (agent/acquire-context! handle "acquisition-c") "acquisition-c")))]
              (is (zero? @installs))
-             (println "C2-UNCHANGED" (:seon.proof/ms repeat-acquisition) "ms" @installs "installed rows"))
+             (println "C2-UNCHANGED" (:seon.proof/ms repeat-acquisition) "ms" @installs "installed entities"))
            (println "C2-VISIBILITY" (/ (- (System/nanoTime) started) 1e6) "ms")
            (let [release (measured #(agent/release-context! a))]
              (println "C2-RELEASE" (:seon.proof/ms release) "ms"))

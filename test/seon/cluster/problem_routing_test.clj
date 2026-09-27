@@ -22,8 +22,8 @@
                   connection
                   (into (test-support/agent-tx @connection "root")
                         cat
-                        [[(test-support/namespace-row @connection 'my.gen.planner)
-                          (test-support/namespace-row @connection 'my.gen.alpha)]
+                        [[(test-support/namespace-entity @connection 'my.gen.planner)
+                          (test-support/namespace-entity @connection 'my.gen.alpha)]
                          (test-support/agent-tx @connection "planner" 'my.gen.planner)
                          (test-support/agent-tx @connection "alpha" 'my.gen.alpha)
                          [{:seon.message/id "goal" :seon.message/to [:seon.agent/id "root"] :seon.message/content "Generate the program."}]]))
@@ -35,7 +35,7 @@
                   [{:seon.turn/id run-id :seon.turn/agent [:seon.agent/id "planner"] :seon.turn/trigger [:seon.message/id "planner-goal"] :seon.turn/opened-tx "datomic.tx"}])
      (body connection))))
 
-(defn- form-row
+(defn- form-entity
   [ordinal]
   {:seon.cluster.eval/id (str "form-" ordinal)
    :seon.cluster.eval/run [:seon.turn/id run-id]
@@ -45,14 +45,14 @@
    :seon.cluster.eval/source (str "(form-" ordinal ")")
    :seon.cluster.eval/ns [:seon.ns/name 'my.gen.alpha]})
 
-(defn- receipt-row
+(defn- receipt-entity
   "The started/settled facts of the SAME evaluation entity `form-row` freezes.
 
   One entity per (run, ordinal): a started evaluation carries
   `:seon.cluster.eval/at`, and its terminal facts accrete onto it."
   [ordinal terminal]
   (merge
-   (form-row ordinal)
+   (form-entity ordinal)
    {:seon.problems/id (str "problem-" ordinal)
     :seon.cluster.eval/at now}
    terminal))
@@ -105,8 +105,8 @@
    (fn [connection]
      (test-support/transacted!
                   connection
-                  [(receipt-row 0 {})
-                   (dissoc (receipt-row 1 {}) :seon.cluster.eval/ns)])
+                  [(receipt-entity 0 {})
+                   (dissoc (receipt-entity 1 {}) :seon.cluster.eval/ns)])
      (let [failed (evaluation-error "boom")
            attributed
            (problems/form-problem
@@ -134,7 +134,7 @@
      (test-support/transacted!
                   connection
                   [(dissoc
-                    (receipt-row
+                    (receipt-entity
                      0
                      {:seon.eval/shown
                       (pr-str {})
@@ -198,18 +198,18 @@
    (fn [connection]
      (test-support/transacted!
                   connection
-                  [(receipt-row 1 {})
-                    (receipt-row 2 {:seon.eval/shown "2"})
-                    (receipt-row 3 {:seon.eval/shown
+                  [(receipt-entity 1 {})
+                    (receipt-entity 2 {:seon.eval/shown "2"})
+                    (receipt-entity 3 {:seon.eval/shown
                                     (pr-str {})
                                     :seon.cluster.eval/error "red 3"
                                     })
-                    (receipt-row 4 {:seon.eval/shown
+                    (receipt-entity 4 {:seon.eval/shown
                                     (pr-str {})
                                     :seon.cluster.eval/error "red 4"
                                     })
-                    (receipt-row 5 {:seon.eval/shown "5"})
-                    (receipt-row 6 {:seon.eval/shown
+                    (receipt-entity 5 {:seon.eval/shown "5"})
+                    (receipt-entity 6 {:seon.eval/shown
                                     (pr-str {})
                                     :seon.cluster.eval/error "red 6"
                                     })])

@@ -1326,15 +1326,15 @@
         current (db/q '[:find [?function ?now ?changed] :in $ ?signature
                         :where [?error :seon.error/signature ?signature]
                                [?error :seon.instrument/fn ?function]
-                               [?row :seon.fn/sym ?function]
-                               [?row :seon.program/definition-digest ?now ?changed]]
+                               [?entity :seon.fn/sym ?function]
+                               [?entity :seon.program/definition-digest ?now ?changed]]
                       database signature)
         [function now changed] (when (vector? current) current)
         ;; the latest digest datom at or before `latest`; an assertion wins its tx
         then (when (and (int? latest) changed (> changed latest))
                (let [datoms (db/q '[:find ?tx ?digest ?added :in $ ?function ?latest
-                                    :where [?row :seon.fn/sym ?function]
-                                           [?row :seon.program/definition-digest ?digest ?tx ?added]
+                                    :where [?entity :seon.fn/sym ?function]
+                                           [?entity :seon.program/definition-digest ?digest ?tx ?added]
                                            [(<= ?tx ?latest)]]
                                   (db/history database) function latest)]
                  (if (map? datoms) datoms
@@ -1500,7 +1500,7 @@
                      (:seon.error/related-occurrence request)
                      (assoc :seon.error.occurrence/related
                             [:seon.error.occurrence/id (:seon.error/related-occurrence request)]))
-        error-row (assoc (select-keys fact [:seon.error/signature :seon.error/id :seon.error/declared-schema
+        error-entity (assoc (select-keys fact [:seon.error/signature :seon.error/id :seon.error/declared-schema
                                           :seon.error/layer :seon.error/operation :seon.instrument/fn :seon.error/frame
                                           :seon.error/exception-class])
                          :seon.error/occurrences #{occurrence})
@@ -1531,7 +1531,7 @@
               (some? opened) (into (map #(vector :db/retract [:seon.error/signature signature]
                                                   :seon.error/notified %))
                                    notified)
-              true (conj (cond-> error-row
+              true (conj (cond-> error-entity
                            (seq messages) (assoc :seon.error/notified (set (map :db/id messages))))))
             messages))))))
 
@@ -1629,7 +1629,7 @@
                                      (and turn-id (not obligation)) (assoc :seon.turn/id turn-id)
                                      (and (nil? turn-id) (not obligation))
                                      (assoc :seon.db.process/id (:seon.error/process fact)))))
-         rows [{:db/id (fact-tempid (:seon.error/id request))
+         entities [{:db/id (fact-tempid (:seon.error/id request))
                 :seon.error/id signature :seon.error/signature signature
                 :seon.error/declared-schema (:seon.error/declared-schema fact)
                 :seon.error/layer (:seon.error/layer fact)
@@ -1637,7 +1637,7 @@
          ;; the writer's call holds data and references, never a world: the
          ;; projection is the writer database's own (`db/carried-projection`),
          ;; and a refused write copies this call into its refusal
-         tx (conj rows [:db.fn/call #'commit-call
+         tx (conj entities [:db.fn/call #'commit-call
                         (-> (dissoc request :seon.schema/projection)
                             (assoc :seon.error/fact fact :seon.error.occurrence/id occurrence-id))])]
      {:seon.error/fact fact
@@ -1677,7 +1677,7 @@
                                  [:seon.error/resolution {:optional true} :seon.error/resolution]]]
                    :seon.db/error-result]]}
   [database since]
-  (let [rows (db/q '[:find ?signature ?tx ?branch
+  (let [entities (db/q '[:find ?signature ?tx ?branch
                      :in $ ?since
                      :where [?occurrence :seon.error.occurrence/last-at _ ?tx]
                             [(> ?tx ?since)]
@@ -1685,10 +1685,10 @@
                             [?error :seon.error/signature ?signature]
                             [(get-else $ ?occurrence :seon.error.occurrence/branch false) ?branch]]
                    database since)
-        selector (when-not (map? rows)
+        selector (when-not (map? entities)
                    (observation-selector (db/carried-projection database)))]
-    (if (map? rows)
-      rows
+    (if (map? entities)
+      entities
       (reduce (fn [found [signature group]]
                 (let [error (db/pull database selector [:seon.error/signature signature])
                       resolved (resolution database signature)
@@ -1700,7 +1700,7 @@
                                   resolved (assoc :seon.error/resolution resolved))))))
               []
               (sort-by (fn [[_ group]] (- (reduce max (map second group))))
-                       (group-by first rows))))))
+                       (group-by first entities))))))
 
 (defn commit-tx
   "Transaction data for one observation, or its acquisition refusal."
@@ -1780,7 +1780,7 @@
                 (:seon.render/value unit)
                 unit)
         database (:seon.db/db unit)
-        ;; The stored row, when this database holds one; an error it never
+        ;; The stored entity, when this database holds one; an error it never
         ;; stored (a refusal returned before, or instead of, its recording)
         ;; is shown as the value itself.
         ;; A held observation is rendered as held; only a bare identity
@@ -2105,12 +2105,12 @@
   {:malli/schema [:=> [:cat :seon.render/unit] [:or :nil :seon.render/form :seon.db/error-result]]}
   [unit]
   (when-let [entity (faults-input unit)]
-   (let [row (db/pull (:seon.db/db unit) [:seon.agent/id] entity)]
-    (if (and (map? row) (inst? (:seon.error/at row))
-             (qualified-keyword? (:seon.error/layer row))
-             (qualified-symbol? (:seon.error/operation row)))
-      row
-      (when-let [agent-id (:seon.agent/id row)]
+   (let [entity-map (db/pull (:seon.db/db unit) [:seon.agent/id] entity)]
+    (if (and (map? entity-map) (inst? (:seon.error/at entity-map))
+             (qualified-keyword? (:seon.error/layer entity-map))
+             (qualified-symbol? (:seon.error/operation entity-map)))
+      entity-map
+      (when-let [agent-id (:seon.agent/id entity-map)]
       {:seon.repl/comment
        ";; Inspect errors in the namespaces assigned to me and in my own turns."
        :seon.repl/form (list 'seon.error/for-agent '(seon.db/db) agent-id)})))))
@@ -2134,16 +2134,16 @@
   ([unit] (render-faults-html (faults-input unit) (:seon.db/db unit)))
   ([faults database]
   (let [acquired? (and (sequential? faults) (not (keyword? (first faults))))
-        row (when-not acquired?
-              (let [identity-row (db/pull database [:seon.agent/id] faults)]
-                (if-let [agent-id (:seon.agent/id identity-row)]
+        entity (when-not acquired?
+              (let [identity-entity (db/pull database [:seon.agent/id] faults)]
+                (if-let [agent-id (:seon.agent/id identity-entity)]
                   (for-agent database agent-id)
-                  identity-row)))
+                  identity-entity)))
         references (cond acquired? faults
-                         (and (map? row) (inst? (:seon.error/at row))
-                              (qualified-keyword? (:seon.error/layer row))
-                              (qualified-symbol? (:seon.error/operation row))) [row]
-                         :else row)
+                         (and (map? entity) (inst? (:seon.error/at entity))
+                              (qualified-keyword? (:seon.error/layer entity))
+                              (qualified-symbol? (:seon.error/operation entity))) [entity]
+                         :else entity)
         entities (fault-entities references)]
     (into [:section {:class "seon-family-entry seon-error-faults"}
            [:h2 (str "Faults (" (count entities) ")")]]

@@ -1,0 +1,507 @@
+{{:file "src/seon/render/transcript.clj", :kind :tied, :symbol "rows"}
+ 13,
+ {:file "test/seon/test/scoped_first_run_test.clj",
+  :kind :deferred,
+  :symbol "program/declaration-row"}
+ 1,
+ {:file "test/seon/test/seed_preparation_test.clj",
+  :kind :deferred,
+  :symbol "seon.fn/source-rows"}
+ 1,
+ {:file "test/my/program_mutation_test.clj",
+  :kind :deferred,
+  :symbol "seon-program/declaration-row"}
+ 1,
+ {:file "test/seon/contracts_fixture.clj",
+  :kind :deferred,
+  :symbol "sci-eval/install-evaluated-rows!"}
+ 1,
+ {:file "test/seon/cluster/acquisition_test.clj",
+  :kind :deferred,
+  :symbol "sci/install-row!"}
+ 2,
+ {:file "test/seon/render/entity_pairs_test.clj",
+  :kind :deferred,
+  :symbol "program/declaration-row"}
+ 1,
+ {:file "test/seon/test/selection_test.clj",
+  :kind :deferred,
+  :symbol "program/declaration-row"}
+ 2,
+ {:file "src/seon/plan.clj",
+  :kind :fallback,
+  :symbol "row",
+  :with "entity-map"}
+ 4,
+ {:file "src/seon/edit.clj", :kind :line-form} 2,
+ {:file "resources/seon/tasks/seon.schema.edn",
+  :kind :deferred,
+  :symbol "seon.sci.eval/definition-row"}
+ 2,
+ {:file "test/seon/program_test.clj",
+  :kind :deferred,
+  :symbol "program/declaration-row"}
+ 7,
+ {:file "src/seon/schema.clj",
+  :kind :tied,
+  :symbol "function-contract-rows"}
+ 2,
+ {:file "test/seon/render_simplification_test.clj",
+  :kind :deferred,
+  :symbol "program/declaration-row"}
+ 1,
+ {:file "src/seon/fn.clj",
+  :kind :deferred,
+  :symbol "accretion/schema-row"}
+ 1,
+ {:file "test/seon/test/scoped_first_run_test.clj",
+  :kind :deferred,
+  :symbol "functions/source-rows"}
+ 1,
+ {:file "test/seon/program_test.clj",
+  :kind :deferred,
+  :symbol "program/canonical-row"}
+ 9,
+ {:file "test/seon/cluster/root_seed_digest_test.clj",
+  :kind :deferred,
+  :symbol "program/declaration-row"}
+ 1,
+ {:file "test/seon/test_test.clj",
+  :kind :deferred,
+  :symbol "sci.eval/install-evaluated-rows!"}
+ 2,
+ {:file "test/my/test_test.clj",
+  :kind :deferred,
+  :symbol "program/declaration-row"}
+ 1,
+ {:file "src/seon/issue.clj",
+  :kind :fallback,
+  :symbol "row",
+  :with "entity-map"}
+ 16,
+ {:file "test/seon/owned_value_test.clj",
+  :kind :deferred,
+  :symbol "accretion/schema-row"}
+ 1,
+ {:file "test/seon/fn/incremental_deletion_test.clj",
+  :kind :deferred,
+  :symbol "program/declaration-row"}
+ 1,
+ {:file "resources/seon/tasks/seon.sci.eval.edn",
+  :kind :deferred,
+  :symbol "seon.sci.eval/definition-row"}
+ 4,
+ {:file "test/seon/schema_retirement_test.clj",
+  :kind :deferred,
+  :symbol "program/declaration-row"}
+ 2,
+ {:file "src/seon/schema/admission.clj", :kind :line-form} 2,
+ {:file "test/seon/cluster/turn_test.clj",
+  :kind :deferred,
+  :symbol "sci.eval/committed-row?"}
+ 3,
+ {:file "src/seon/fn/analyzer.clj", :kind :line-form} 7,
+ {:file "test/seon/schema_test.clj",
+  :kind :deferred,
+  :symbol "turn/row-tx"}
+ 1,
+ {:file "src/seon/fn.clj", :kind :deferred, :symbol "source-rows"} 10,
+ {:file "test/seon/cluster/turn_test.clj",
+  :kind :deferred,
+  :symbol "program/declaration-row"}
+ 3,
+ {:file "test/seon/cluster/write_back_test.clj",
+  :kind :deferred,
+  :symbol "program/row-identity"}
+ 5,
+ {:file "src/seon/test/runner.clj",
+  :kind :fallback,
+  :symbol "row",
+  :with "entity-map"}
+ 9,
+ {:file "test/seon/sci/eval_test.clj",
+  :kind :deferred,
+  :symbol "program/declaration-row"}
+ 2,
+ {:file "test/seon/reset_edges_test.clj",
+  :kind :deferred,
+  :symbol "functions/source-rows"}
+ 2,
+ {:file "test/seon/issue_settlement_test.clj",
+  :kind :deferred,
+  :symbol "evaluation/install-evaluated-rows!"}
+ 1,
+ {:file "test/seon/contracts_compile_test.clj", :kind :line-form} 5,
+ {:file "src/seon/fn.clj",
+  :kind :deferred,
+  :symbol "program/declaration-row"}
+ 1,
+ {:file "resources/seon/tasks/seon.sci.eval.edn",
+  :kind :deferred,
+  :symbol "seon.sci.eval/install-row!"}
+ 3,
+ {:file "test/my/test_test.clj",
+  :kind :deferred,
+  :symbol "evaluation/install-evaluated-rows!"}
+ 1,
+ {:file "src/seon/program.cljc",
+  :kind :fallback,
+  :symbol "rows",
+  :with "entity-maps"}
+ 6,
+ {:file "test/seon/fault_test.clj", :kind :tied, :symbol "row"} 5,
+ {:file "test/seon/sci/documentation_test.clj",
+  :kind :deferred,
+  :symbol "program/canonical-row"}
+ 2,
+ {:file "test/seon/sci/reader_test.clj", :kind :line-form} 1,
+ {:file "test/seon/sci/branch_execution_test.clj",
+  :kind :deferred,
+  :symbol "turn/row-tx"}
+ 2,
+ {:file "resources/seon/tasks/seon.sci.reader.edn",
+  :kind :deferred,
+  :symbol "seon.sci.eval/analyzed-rows"}
+ 1,
+ {:file "test/seon/agent_situation_test.clj",
+  :kind :deferred,
+  :symbol "program/declaration-row"}
+ 1,
+ {:file "src/seon/cluster.clj",
+  :kind :deferred,
+  :symbol "program/row-identity"}
+ 1,
+ {:file "src/seon/fn.clj",
+  :kind :deferred,
+  :symbol "program/row-identity"}
+ 19,
+ {:file "resources/seon/tasks/seon.sci.eval.edn",
+  :kind :deferred,
+  :symbol "seon.sci.eval/declared-row"}
+ 1,
+ {:file "test/seon/cluster/publication_delta_test.clj",
+  :kind :deferred,
+  :symbol "program/row-identity"}
+ 1,
+ {:file "test/seon/cluster/source_test.clj",
+  :kind :deferred,
+  :symbol "sci.eval/install-row!"}
+ 1,
+ {:file "test/seon/sci/eval_test.clj",
+  :kind :deferred,
+  :symbol "seon.turn/row-tx"}
+ 1,
+ {:file "test/seon/core_functions_test.clj",
+  :kind :deferred,
+  :symbol "evaluation/install-evaluated-rows!"}
+ 1,
+ {:file "src/seon/db.clj",
+  :kind :deferred,
+  :symbol "seon.program/canonical-row"}
+ 1,
+ {:file "test/seon/program_test.clj",
+  :kind :deferred,
+  :symbol "accretion/schema-row"}
+ 1,
+ {:file "test/seon/adoption_rows_test.clj",
+  :kind :deferred,
+  :symbol "program/row-identity"}
+ 2,
+ {:file "test/seon/schema_in_place_test.clj",
+  :kind :deferred,
+  :symbol "program/declaration-row"}
+ 1,
+ {:file "src/seon/test/runner.clj",
+  :kind :fallback,
+  :symbol "rows",
+  :with "entity-maps"}
+ 9,
+ {:file "src/seon/cluster/source.clj",
+  :kind :deferred,
+  :symbol "program/row-identity"}
+ 1,
+ {:file "test/seon/program_test.clj",
+  :kind :deferred,
+  :symbol "program/row-identity"}
+ 3,
+ {:file "test/seon/fn_test.clj",
+  :kind :deferred,
+  :symbol "program/row-identity"}
+ 11,
+ {:file "test/seon/program_test.clj",
+  :kind :deferred,
+  :symbol "program/deletion-row"}
+ 2,
+ {:file "src/seon/fn.clj",
+  :kind :fallback,
+  :symbol "rows",
+  :with "entity-maps"}
+ 26,
+ {:file "test/seon/sci/eval_test.clj",
+  :kind :deferred,
+  :symbol "eval/declared-row"}
+ 1,
+ {:file "test/seon/cluster/acquisition_test.clj",
+  :kind :deferred,
+  :symbol "turn/row-tx"}
+ 1,
+ {:file "test/seon/test_test.clj",
+  :kind :deferred,
+  :symbol "program/declaration-row"}
+ 1,
+ {:file "test/seon/fn_test.clj",
+  :kind :deferred,
+  :symbol "program/declaration-row"}
+ 2,
+ {:file "test/seon/sci/eval_test.clj",
+  :kind :deferred,
+  :symbol "seon.program/declaration-row"}
+ 1,
+ {:file "resources/seon/tasks/seon.fn.edn",
+  :kind :deferred,
+  :symbol "seon.sci.eval/install-row!"}
+ 1,
+ {:file "resources/seon/tasks/seon.sci.reader.edn",
+  :kind :deferred,
+  :symbol "seon.program/declaration-row"}
+ 1,
+ {:file "test/seon/sci/documentation_test.clj",
+  :kind :deferred,
+  :symbol "evaluation/install-evaluated-rows!"}
+ 1,
+ {:file "test/seon/cluster/turn_test.clj",
+  :kind :deferred,
+  :symbol "sci.eval/install-row!"}
+ 4,
+ {:file "src/seon/schema.clj", :kind :tied, :symbol "schema-rows"} 2,
+ {:file "test/seon/render/root_pull_test.clj",
+  :kind :deferred,
+  :symbol "program/declaration-row"}
+ 2,
+ {:file "test/seon/test/selection_test.clj",
+  :kind :deferred,
+  :symbol "functions/source-rows"}
+ 1,
+ {:file "test/seon/test/accretion_test.clj",
+  :kind :deferred,
+  :symbol "accretion/schema-row"}
+ 2,
+ {:file "test/seon/test_support.clj",
+  :kind :deferred,
+  :symbol "seon.fn/source-rows"}
+ 1,
+ {:file "test/seon/datahike_fork_test.clj",
+  :kind :deferred,
+  :symbol "seon.turn/row-tx"}
+ 2,
+ {:file "resources/seon/schemas/seon.sci.reader.edn", :kind :line-form}
+ 1,
+ {:file "test/seon/schema_usage_guard_test.clj",
+  :kind :deferred,
+  :symbol "program/declaration-row"}
+ 1,
+ {:file "src/seon/fn.clj", :kind :line, :symbol "row"} 19,
+ {:file "test/seon/schema/program_test.clj",
+  :kind :deferred,
+  :symbol "program/declaration-row"}
+ 1,
+ {:file "test/seon/call_preparation_test.clj",
+  :kind :deferred,
+  :symbol "program/declaration-row"}
+ 1,
+ {:file "test/seon/test/overlay_world_test.clj",
+  :kind :deferred,
+  :symbol "program/declaration-row"}
+ 1,
+ {:file "src/seon/program.cljc",
+  :kind :deferred,
+  :symbol "canonical-row"}
+ 2,
+ {:file "test/seon/db_test.clj",
+  :kind :deferred,
+  :symbol "turn/row-tx"}
+ 3,
+ {:file "test/seon/db_test.clj",
+  :kind :deferred,
+  :symbol "program/declaration-row"}
+ 1,
+ {:file "test/seon/schema_usage_guard_test.clj",
+  :kind :tied,
+  :symbol "extra-row"}
+ 2,
+ {:file "test/seon/schema/datahike_parity.edn", :kind :line-form} 1,
+ {:file "test/seon/fn/incremental_deletion_test.clj",
+  :kind :tied,
+  :symbol "extra-rows"}
+ 3,
+ {:file "resources/seon/tasks/seon.sci.reader.edn",
+  :kind :deferred,
+  :symbol "seon.sci.eval/row"}
+ 1,
+ {:file "script/seon/dev/docstring.clj", :kind :line-form} 1,
+ {:file "test/seon/contracts_fixture.clj",
+  :kind :deferred,
+  :symbol "program/canonical-row"}
+ 1,
+ {:file "test/seon/fn_test.clj",
+  :kind :deferred,
+  :symbol "seon.fn/source-rows"}
+ 1,
+ {:file "test/seon/schema_in_place_test.clj",
+  :kind :deferred,
+  :symbol "seon.fn/source-rows"}
+ 2,
+ {:file "src/seon/edit.clj", :kind :line, :symbol "row"} 2,
+ {:file "test/seon/sci/eval_test.clj",
+  :kind :deferred,
+  :symbol "eval/unmap-row"}
+ 1,
+ {:file "test/seon/contracts_compile_test.clj",
+  :kind :tied,
+  :symbol "row"}
+ 4,
+ {:file "test/seon/schema_usage_guard_test.clj",
+  :kind :deferred,
+  :symbol "turn/row-tx"}
+ 1,
+ {:file "test/seon/test/one_request_test.clj",
+  :kind :deferred,
+  :symbol "program/declaration-row"}
+ 1,
+ {:file "src/seon/fn.clj",
+  :kind :fallback,
+  :symbol "row",
+  :with "entity-map"}
+ 24,
+ {:file "src/seon/test.clj",
+  :kind :fallback,
+  :symbol "row",
+  :with "entity-map"}
+ 3,
+ {:file "src/seon/fn.clj", :kind :line-form} 5,
+ {:file "test/seon/schema/projection_writer_test.clj",
+  :kind :deferred,
+  :symbol "turn/row-tx"}
+ 2,
+ {:file "test/seon/schema/datahike_test.clj",
+  :kind :fallback,
+  :symbol "row",
+  :with "entity-map"}
+ 5,
+ {:file "test/seon/fault_test.clj", :kind :line-form} 1,
+ {:file "src/seon/issue.clj", :kind :line, :symbol "row"} 7,
+ {:file "test/seon/render/web_test.clj",
+  :kind :deferred,
+  :symbol "program/declaration-row"}
+ 2,
+ {:file "test/seon/test_support.clj",
+  :kind :deferred,
+  :symbol "program/declaration-row"}
+ 1,
+ {:file "test/seon/schema/admission_gate_test.clj", :kind :line-form}
+ 1,
+ {:file "resources/seon/schemas/seon.lint.edn", :kind :line-form} 1,
+ {:file "src/seon/error.clj",
+  :kind :fallback,
+  :symbol "row",
+  :with "entity-map"}
+ 7,
+ {:file "src/my/program.clj",
+  :kind :fallback,
+  :symbol "row",
+  :with "entity-map"}
+ 7,
+ {:file "test/seon/sci/branch_execution_test.clj",
+  :kind :deferred,
+  :symbol "eval/install-row!"}
+ 2,
+ {:file "test/seon/fn_test.clj",
+  :kind :deferred,
+  :symbol "program/canonical-row"}
+ 4,
+ {:file "test/seon/classification_test.clj",
+  :kind :deferred,
+  :symbol "program/declaration-row"}
+ 1,
+ {:file "resources/seon/tasks/seon.sci.eval.edn",
+  :kind :deferred,
+  :symbol "seon.sci.eval/install-evaluated-rows!"}
+ 2,
+ {:file "resources/seon/tasks/seon.sci.eval.edn",
+  :kind :deferred,
+  :symbol "seon.sci.eval/namespace-context-row"}
+ 1,
+ {:file "src/seon/fn.clj",
+  :kind :deferred,
+  :symbol "contract-facts-row"}
+ 1,
+ {:file "test/seon/cluster/root_seed_digest_test.clj",
+  :kind :deferred,
+  :symbol "program/canonical-row"}
+ 1,
+ {:file "test/seon/fn/incremental_deletion_test.clj",
+  :kind :deferred,
+  :symbol "seon.fn/source-rows"}
+ 1,
+ {:file "test/seon/test/effect_attempt_test.clj",
+  :kind :deferred,
+  :symbol "program/declaration-row"}
+ 1,
+ {:file "src/seon/issue.clj", :kind :line-form} 3,
+ {:file "test/seon/error_test.clj",
+  :kind :deferred,
+  :symbol "program/declaration-row"}
+ 1,
+ {:file "src/seon/program.cljc",
+  :kind :deferred,
+  :symbol "declaration-row"}
+ 1,
+ {:file "script/seon/dev/citations.clj", :kind :line-form} 1,
+ {:file "src/seon/test.clj",
+  :kind :deferred,
+  :symbol "program/row-identity"}
+ 1,
+ {:file "resources/seon/tasks/seon.sci.reader.edn",
+  :kind :deferred,
+  :symbol "seon.fn/source-rows"}
+ 1,
+ {:file "src/seon/program.cljc",
+  :kind :deferred,
+  :symbol "deletion-row"}
+ 1,
+ {:file "test/seon/fn/seed_admission_test.clj",
+  :kind :deferred,
+  :symbol "seon.fn/source-rows"}
+ 1,
+ {:file "test/seon/sci/eval_test.clj",
+  :kind :deferred,
+  :symbol "eval/install-row!"}
+ 2,
+ {:file "test/seon/test_support.clj",
+  :kind :deferred,
+  :symbol "seon.fn/contract-facts-row"}
+ 2,
+ {:file "test/seon/sci/eval_test.clj",
+  :kind :deferred,
+  :symbol "turn/row-tx"}
+ 1,
+ {:file "test/seon/core_functions_test.clj",
+  :kind :deferred,
+  :symbol "program/canonical-row"}
+ 1,
+ {:file "src/seon/program.cljc",
+  :kind :deferred,
+  :symbol "row-identity"}
+ 4,
+ {:file "test/seon/sci/eval_test.clj",
+  :kind :deferred,
+  :symbol "eval/committed-row?"}
+ 2,
+ {:file "src/seon/fn.clj",
+  :kind :deferred,
+  :symbol "program/canonical-row"}
+ 3,
+ {:file "test/seon/sci/definition_digest_test.clj",
+  :kind :deferred,
+  :symbol "program/canonical-row"}
+ 3}

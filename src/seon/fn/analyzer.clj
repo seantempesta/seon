@@ -917,7 +917,7 @@
         (list operation function-name (first arglists) nil)
         (list* operation function-name
                (map #(list % nil) arglists)))
-      ;; Historical rows can honestly lack analyzer arities. Keep those names
+      ;; Historical entities can honestly lack analyzer arities. Keep those names
       ;; resolvable without claiming a fixed contract the database does not
       ;; contain.
       (list operation function-name '[& arguments] nil))))
@@ -935,9 +935,9 @@
        (group-by #(some-> (:seon.fn/sym %) symbol namespace symbol))
        (sort-by (comp str key))
        (mapcat
-        (fn [[namespace-name rows]]
+        (fn [[namespace-name entities]]
           (cons (list 'ns namespace-name)
-                (map function-stub (sort-by :seon.fn/sym rows)))))
+                (map function-stub (sort-by :seon.fn/sym entities)))))
        (map pr-str)
        (str/join "\n")))
 

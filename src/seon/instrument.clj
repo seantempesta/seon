@@ -216,7 +216,7 @@
        :seon.instrument.lookup/cause (failure-cause failure)})))
 
 (defn- diagnostic-arglists
-  "The loaded Var owns host arglists; the program row describes SCI-only code."
+  "The loaded Var owns host arglists; the program entity describes SCI-only code."
   {:malli/schema [:=> [:cat :symbol] [:map
      [:seon.instrument.lookup/status [:enum :found :missing :failed :no-program-graph]]
      [:seon.instrument.lookup/cause {:optional true} [:string {:min 1}]]
@@ -750,7 +750,7 @@
          (profile/with-cell cell
           (with-meta
            ;; One wrapper per adoption: a call never picks another projection,
-           ;; so it never compiles. Other branches' differing rows interpret
+           ;; so it never compiles. Other branches' differing entities interpret
            ;; in SCI.
            (fn [& arguments]
              (if *compiling-contract*
@@ -823,7 +823,7 @@
         :seon.error/offending :seon.instrument/missing-projection})
       (let [defaults config/defaults
             caps (or caps (config/result-caps defaults))
-            ;; The adoption's supplied-default rows, read once: each
+            ;; The adoption's supplied-default entities, read once: each
             ;; wrapper's plan is decided from them at arming.
             current (when database (call-preparation/snapshot database projection))
             _ (when (db/read-refusal? current)
@@ -1026,7 +1026,7 @@
   wrapper is looked through to the function it wraps."
   {:malli/schema [:=> [:cat [:sequential [:tuple :qualified-symbol :string]]]
                   [:vector :seon.instrument/replaced-root]]}
-  [rows]
+  [entities]
   (into []
         (keep (fn [[function-symbol relative-path]]
                 (when-let [candidate (when (find-ns (symbol (namespace function-symbol)))
@@ -1049,7 +1049,7 @@
                                :seon.instrument/expected-class expected
                                :seon.instrument/expected-file relative-path}
                         (string? loaded-file) (assoc :seon.instrument/loaded-file loaded-file)))))))
-        rows))
+        entities))
 
 (def loaded-var-generator
   "A real Var from this owner for the loaded-Var contract."

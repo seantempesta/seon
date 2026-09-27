@@ -120,8 +120,8 @@
          (is (not= (::data/snapshot first-page)
                    (get-in refused [:seon.error/offending ::data/snapshot]))))
        (let [incoming (data/entity-observation (assoc request ::data/limit 200))
-             incoming-rows (get-in incoming [::data/incoming ::data/datoms])]
-         (is (= 2 (count (filter #(= ::link (:a %)) incoming-rows)))))))))
+             incoming-entities (get-in incoming [::data/incoming ::data/datoms])]
+         (is (= 2 (count (filter #(= ::link (:a %)) incoming-entities)))))))))
 
 (deftest index-pages-enforce-native-bounds
   (support/with-database

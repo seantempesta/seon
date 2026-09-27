@@ -69,9 +69,9 @@
     (or (:seon.cluster.eval/error result) (:seon.sci.admit/value result))))
 
 (deftest branch-mode-is-the-acquisition-decision-not-a-cluster-label
-  ;; The member branch inherits default's cluster rows. Before the fix the mode
-  ;; compared the agent row's branch with the label branch of an arbitrary
-  ;; cluster row, so an agent live on the member's branch read :isolated.
+  ;; The member branch inherits default's cluster entities. Before the fix the mode
+  ;; compared the agent entity's branch with the label branch of an arbitrary
+  ;; cluster entity, so an agent live on the member's branch read :isolated.
   (let [parent (support/execution-handle db/*conn*)
         connection (:seon.db/connection parent)
         parent-branch (get-in @connection [:config :branch])

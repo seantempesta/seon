@@ -19,7 +19,7 @@
       (support/with-database
        (fn [connection]
          (support/transacted! connection
-                              (source/rows {:seon.fn/root (.getCanonicalPath root)
+                              (source/program-entities {:seon.fn/root (.getCanonicalPath root)
                                             :seon.fn/roots ["src"]}))
          (let [requires #(set (:seon.ns/requires (db/pull (db/db connection) [:seon.ns/requires]
                                                           [:seon.ns/name %])))]

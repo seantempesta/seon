@@ -58,7 +58,7 @@
     (.mkdirs (.getParentFile file))
     (spit file (str "(ns sample.seeded-test (:require [clojure.test :refer [deftest is]]))\n(deftest ^{:seon.test/seed "
                     "[{:seon.test/skip-reason \"l\"} (fn [_] {:seon.test.seed/tx-data [{:seon.test/long-ms 1}]})]} seeded (is true))\n"))
-    (try (is (every? (set (:seon.fn/keywords (first (filter :seon.test/sym (seon.fn/rows {:seon.fn/roots [(.getPath root)] :seon.schema/projection (schema/build-projection (schema.edn/packaged-forms))})))))
+    (try (is (every? (set (:seon.fn/keywords (first (filter :seon.test/sym (seon.fn/program-entities {:seon.fn/roots [(.getPath root)] :seon.schema/projection (schema/build-projection (schema.edn/packaged-forms))})))))
                      [:seon.test/skip-reason :seon.test/long-ms :seon.test.seed/tx-data]))
          (finally (run! io/delete-file (reverse (file-seq root)))))))
 
@@ -66,12 +66,12 @@
   ;; The body would run the Var resolved before seeding, so a changed definition digest refuses.
   (let [test-symbol 'seon.test.seed-preparation-test/redefined-by-its-own-seed
         redefine (fn [{database :seon.db/db}]
-                   (let [namespace-row (let [row {:seon.ns/name 'seon.test.seed-preparation-test
+                   (let [namespace-entity (let [entity {:seon.ns/name 'seon.test.seed-preparation-test
                                                   :seon.ns/source "(ns seon.test.seed-preparation-test (:require [clojure.test :refer [deftest is]]))"}]
-                                         (assoc row :seon.program/definition-digest (program/definition-digest row)))
-                         rows (seon.fn/source-rows database (program/shapes-in (schema/projection-from-database database))
-                                                   namespace-row "(deftest redefined-by-its-own-seed (is false))" #{})]
-                     {:seon.test.seed/tx-data (seon.fn/reconcile-tx database (mapv #(support/revised-row database % {}) rows) [])}))
+                                         (assoc entity :seon.program/definition-digest (program/definition-digest entity)))
+                         entities (seon.fn/source-rows database (program/shapes-in (schema/projection-from-database database))
+                                                   namespace-entity "(deftest redefined-by-its-own-seed (is false))" #{})]
+                     {:seon.test.seed/tx-data (seon.fn/reconcile-tx database (mapv #(support/revised-entity database % {}) entities) [])}))
         entered (atom false)
         result (run-seeded test-symbol [redefine] #(reset! entered true))]
     (is (false? @entered) "the pre-seed Var never runs")

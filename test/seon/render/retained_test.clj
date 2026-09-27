@@ -165,15 +165,15 @@
                        (invoke input))]
          (let [before (render/acquire-context! (request))
                snapshot @(:seon.sci.kernel/program-snapshot ctx)
-               namespace-row (db/pull (db/db connection) [:seon.ns/source]
+               namespace-entity (db/pull (db/db connection) [:seon.ns/source]
                                       [:seon.ns/name 'seon.schedule])]
            (is (string? (:seon.cluster.prompt/text before)) (pr-str before))
            (is (= 2 @calls) "both saved evaluations use the real SCI render pair")
-           (is (string? (:seon.ns/source namespace-row)))
+           (is (string? (:seon.ns/source namespace-entity)))
            (is (:db-after
                 (db/transact! connection
                   [[:db/add [:seon.ns/name 'seon.schedule]
-                    :seon.ns/source (str (:seon.ns/source namespace-row) "\n")]
+                    :seon.ns/source (str (:seon.ns/source namespace-entity) "\n")]
                    [:db/add [:seon.cluster/name "web-test"]
                     :seon.source/commit-id #uuid "f54229d7-54eb-472d-9ae8-917a0f97af71"]])))
            ;; The same acquisition owner used by development adoption replaces

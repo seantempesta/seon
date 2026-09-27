@@ -18,7 +18,7 @@
                [:seon.boot/cluster-name
                 :seon.boot/cluster-name]],
               :cluster [:string {:min 1, :seon.db/identity true :seon.program/row-schema :seon.config/entity}],
-              :overlay-keys [:set {:min 1 :description "The dials a layer above the shipped defaults decided for this cluster: boot's overlays, the environment and every apply. `seon.config/apply!` holds these decisions underneath its own manifest, so an apply changes only its keys; a key listed here but absent from the row was decided absent."} :qualified-keyword],
+              :overlay-keys [:set {:min 1 :description "The dials a layer above the shipped defaults decided for this cluster: boot's overlays, the environment and every apply. `seon.config/apply!` holds these decisions underneath its own manifest, so an apply changes only its keys; a key listed here but absent from the entity was decided absent."} :qualified-keyword],
               :missing-effective :seon.boot/cluster-name
               :missing-effective-error :seon.config/error
               :compile-request

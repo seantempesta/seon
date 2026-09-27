@@ -57,8 +57,8 @@
     owning-namespace
     (assoc :seon.render.call/function (symbol (str owning-namespace) "subject"))))
 
-(defn- schema-row
-  "One schema declaration row as the program owner writes it (with its digest)."
+(defn- schema-entity
+  "One schema declaration entity as the program owner writes it (with its digest)."
   [connection schema-key form]
   (program/declaration-row (db/carried-projection (db/db connection))
                            {:seon.schema/key schema-key :seon.schema/form (pr-str form)}
@@ -75,10 +75,10 @@
   (let [producer (if (qualified-symbol? named) named (symbol (str named) "subject"))
         subject (keyword (namespace producer) (name producer))]
     (support/transacted! connection
-                         [(schema-row connection subject
+                         [(schema-entity connection subject
                                       [:map pair [:seon.ns/name {:optional true} :seon.ns/name]])])
     (support/transacted! connection
-                         [(support/program-fn-row
+                         [(support/program-fn-entity
                            (db/db connection) producer
                            (str "(defn " (name producer) " {:malli/schema [:=> [:cat] " subject "]} [] {})"))])
     producer))
@@ -203,7 +203,7 @@
           "normalization does not depend on a root :db/id projection")
         (is (= 'seon.plan/render-item-html (:seon.render.selection/selected decision)))
         (is (= :selected (:seon.render.selection.stage/status declared-stage))
-            "the item's identity names its row schema's pair")
+            "the item's identity names its entity schema's pair")
         (is (str/includes? (hiccup/->string rendered) "Render the pulled item"))))))
 
 (deftest
@@ -373,12 +373,12 @@
                                  :seon.fn/private? (= 'cache-helper name),
                                  :seon.schema.admission/source :agent}}))
                            definitions)
-                ;; Analyzed facts, then the digest of each FINAL row (the writer's).
-                rows (mapv #(support/revised-row (db/db connection) (second %) {})
+                ;; Analyzed facts, then the digest of each FINAL entity (the writer's).
+                entities (mapv #(support/revised-entity (db/db connection) (second %) {})
                            (seon.fn/analyze-forms (db/db connection) requests))
-                report (db/transact! connection rows)]
+                report (db/transact! connection entities)]
             (is (:db-after report) (pr-str report))
-            (is (some #{helper} (:seon.fn/calls (second rows))))
+            (is (some #{helper} (:seon.fn/calls (second entities))))
             (sci/binding
               [sci/ns (sci/create-ns fixture-a)]
               (doseq [definition definitions] (sci/eval-form ctx definition)))))
@@ -466,7 +466,7 @@
       ;; An identity-less value nested under a registered attribute gets that
       ;; attribute's named schema (design §1): the report renders its pair.
       (support/transacted! connection
-                           [(schema-row connection :seon.render-simplification-test/report
+                           [(schema-entity connection :seon.render-simplification-test/report
                                         :seon.db/transaction-report)])
       (let [database (db/db connection)
             ctx (support/fork-cluster-ctx connection)
@@ -501,11 +501,11 @@
         connection
         (vec (for [[schema-key renderer] [[:seon.render-simplification.fixture-ambiguous/first first-ai]
                                           [:seon.render-simplification.fixture-ambiguous/second second-ai]]]
-               (schema-row connection schema-key
+               (schema-entity connection schema-key
                            [:map {:seon.render/ai renderer} [:seon.ns/name :seon.ns/name]]))))
        (support/transacted!
         connection
-        [(support/program-fn-row
+        [(support/program-fn-entity
           (db/db connection) producer
           (str "(defn subject {:malli/schema [:=> [:cat] [:or "
                ":seon.render-simplification.fixture-ambiguous/first "
@@ -562,7 +562,7 @@
          (is (not (str/includes? (hiccup/->string raw-result)
                                  "<script>raw-agent-bytes</script>"))))))))
 
-(deftest cold-context-reacquires-the-same-row
+(deftest cold-context-reacquires-the-same-entity
   (support/with-database
    (fn [connection]
      (declare-fixture-subjects! connection)
@@ -816,7 +816,7 @@
 
 (deftest a-program-change-replaces-a-private-definition-and-says-so
   ;; Root ruling 2026-09-25: a context's own definition survives its symbol's
-  ;; first lazy install, but a changed program row advances in place over it
+  ;; first lazy install, but a changed program entity advances in place over it
   ;; at the next idle boundary, and the evaluation says so.
   (support/with-database
    (fn [connection]
@@ -844,7 +844,7 @@
          (is (str/includes? (pr-str evaluation)
                             (str "PROGRAM CHANGE replaced your definition of " renderer))
              (pr-str evaluation)))
-       (is (= (str "program:" fixture-a) (render)) "the changed program row runs")))))
+       (is (= (str "program:" fixture-a) (render)) "the changed program entity runs")))))
 
 (deftest generic-renderer-receives-the-acquired-entity-id
   (support/with-database

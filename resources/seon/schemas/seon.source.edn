@@ -33,7 +33,7 @@
               :test-input-digest
               [:and {:seon.db/identity false :description "Digest of the sorted publication input inventory outside the program graph, including pinned gitlink identities. Observed value survives its input files."} :seon.source/digest],
               :analyzer-digest
-              [:and {:seon.db/identity false :description "Digest of the definition digests reached from seon.fn/analyze-rows in the program this JVM loaded when it analyzed the published rows. Rows derive from that code as well as from their file bytes."} :seon.source/digest],
+              [:and {:seon.db/identity false :description "Digest of the definition digests reached from seon.fn/analyze-entities in the program this JVM loaded when it analyzed the published entities. Entities derive from that code as well as from their file bytes."} :seon.source/digest],
               :test-input-digests [:map-of :string :seon.source/digest],
               :digest-request
               [:map [:seon.source/roots :seon.source/roots]
@@ -46,8 +46,8 @@
               :relative-file-digests [:map-of :string :seon.source/digest],
               :populate :qualified-symbol,
               ;; The owner that installs one changed input's facts: a Clojure
-              ;; file's program rows, a schema resource's declarations, the
-              ;; shipped config document's initialization rows, or nothing at
+              ;; file's program entities, a schema resource's declarations, the
+              ;; shipped config document's initialization entities, or nothing at
               ;; all. An incremental publication runs exactly the named owners.
               :change-class
               [:enum :program :schema-resource :config :no-program-facts],
@@ -111,10 +111,10 @@
                [:seon.source/expected-digests :seon.source/expected-digests]
                [:parents [:set :seon.source/commit-id]]],
               :candidate-bytes [:and {:description "The proven file bytes a write-back installs."} :seon.source/file-bytes],
-              :proof-rows [:sequential {:description "Each written declaration with its row before and after the merge (absent: nil)."}
+              :proof-rows [:sequential {:description "Each written declaration with its entity before and after the merge (absent: nil)."}
                            [:tuple :seon.program/declaration-identity [:maybe :map] [:maybe :map]]],
               :proof
-              [:map {:description "A write-back proven before installation: the file, the bytes it was analyzed from, the candidate and its rows."}
+              [:map {:description "A write-back proven before installation: the file, the bytes it was analyzed from, the candidate and its entities."}
                [:seon.source/path :seon.source/path] [:seon.source/base-digest :seon.source/base-digest]
                [:seon.source/candidate-bytes :seon.source/candidate-bytes] [:seon.source/proof-rows :seon.source/proof-rows]],
               :base-commit-id [:uuid {:description "The branch's commit a merge was transacted onto."}],

@@ -25,7 +25,7 @@
         :seon.source/test-input-digest (id/digest 64 [::owned-test-inputs])}])
      (support/transacted! connection
                           [{:seon.agent/id "owner"
-                            :seon.agent/namespace (support/namespace-row @connection 'my.agents.owner)}])
+                            :seon.agent/namespace (support/namespace-entity @connection 'my.agents.owner)}])
      (let [base (support/fork-cluster-ctx connection)
            _ (evaluation/acquire! {:seon.sci.eval/ctx base :seon.db/db (db/db connection)})
            ctx (:seon.sci.eval/ctx
@@ -42,18 +42,18 @@
                       :seon.cluster.eval/ns [:seon.ns/name 'my.agents.owner]
                       :seon.sci.admit/caps (config/result-caps config/defaults)
                       :seon.sci.eval/time-limit-ms 120000})
-           row (when (:seon.program/row declared)
+           entity (when (:seon.program/row declared)
                  (program/declaration-row (seon.schema/handed-projection) (:seon.program/row declared) :all :agent))]
        (is (nil? (:seon.cluster.eval/error declared)) (pr-str declared))
-       (is (map? row) (pr-str declared))
+       (is (map? entity) (pr-str declared))
        (let [written-on (db/db connection)
-             written (support/transacted! connection [row])]
+             written (support/transacted! connection [entity])]
          (evaluation/install-evaluated-rows!
           {:seon.sci.eval/ctx base :seon.sci.eval/agent-ctx ctx
            :seon.db/db (:db-after written) :seon.db/transaction-report written
            :seon.sci.eval/written-on written-on
            :seon.sci.eval/installations
-           [{:seon.program/row row :seon.sci.eval/evaluation declared}]}))
+           [{:seon.program/row entity :seon.sci.eval/evaluation declared}]}))
        (let [first-result (first (support/agent-value ctx "(my.test/run)" 'my.agents.owner))
              second-result (first (support/agent-value ctx "(my.test/run)" 'my.agents.owner))
              database (db/db connection)

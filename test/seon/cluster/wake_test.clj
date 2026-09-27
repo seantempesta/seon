@@ -272,9 +272,9 @@
   deciding it here."
   [property]
   (into #{}
-        (comp (filter (fn [row] (true? (get row property))))
+        (comp (filter (fn [entity] (true? (get entity property))))
               (map :seon.schema/key))
-        (seon.schema/canonical-schema-rows)))
+        (seon.schema/canonical-schema-entities)))
 
 (deftest the-listened-set-is-declared-not-listed
   ;; THE CLASS: a hand list of wake attributes drifts from the families
@@ -434,7 +434,7 @@
                                               :seon.ns/steward [:seon.agent/id "agent-a"]}]))
       (test-support/transacted!
        connection
-       [(test-support/program-fn-row (db/db connection) 'my.agents.agent-a/broken
+       [(test-support/program-fn-entity (db/db connection) 'my.agents.agent-a/broken
                                      "(defn broken [] true)")])
       (let [mailbox (async/chan (async/sliding-buffer 1))
             {:keys [key]} (route-probe! connection mailbox)

@@ -30,13 +30,13 @@
             [seon.schema]
             [seon.program :as program]))
 
-(defn- namespace-row
+(defn- namespace-entity
   "A namespace row absent from the fixture branch, carrying the required
   definition digest its owner derives (`seon.program/definition-digest`)."
   {:malli/schema [:=> [:cat :seon.ns/name] :map]}
   [namespace-name]
-  (let [row {:seon.ns/name namespace-name}]
-    (assoc row :seon.program/definition-digest (program/definition-digest row))))
+  (let [entity {:seon.ns/name namespace-name}]
+    (assoc entity :seon.program/definition-digest (program/definition-digest entity))))
 
 (deftest attempt-model-identity-survives-descriptor-retraction
   (support/with-database
@@ -77,10 +77,10 @@
         (is (int? attempt))
         (support/transacted! connection
                              [[:db/retractEntity [:seon.ai.model/id model]]])
-        (let [row (db/pull (db/db connection)
+        (let [entity (db/pull (db/db connection)
                            [:seon.ai/model :seon.ai.attempt/at]
                            attempt)]
-          (is (= {:seon.ai/model model :seon.ai.attempt/at observed-at} row)))))))
+          (is (= {:seon.ai/model model :seon.ai.attempt/at observed-at} entity)))))))
 
 (defn- checked-transact! {:malli/schema [:=> [:cat :seon.db/connection :seon.store/transaction] :seon.db/transaction-report]}
   [connection transaction]
@@ -416,7 +416,7 @@
              ;; The turn entity disappears under the running loop — measured
              ;; on `default` 2026-09-16T15:33:01Z, where the live fixture's
              ;; history wipe retracted a turn one transaction after it opened.
-             ;; Match clear-history!: evaluation rows and their turn disappear
+             ;; Match clear-history!: evaluation entities and their turn disappear
              ;; together; retaining an evaluation without its run is invalid.
              _ (checked-transact! connection
                                   [[:db.fn/retractEntity [:seon.cluster.eval/id evaluation-id]]
@@ -855,11 +855,11 @@
             test-symbol 'fixture.pending/target-test
             function-symbol 'fixture.pending/target
             now (java.util.Date. 1785000000000)
-            ;; The canonical producer analyzes and digests the row the
-            ;; writer reproduces (`support/program-row`).
-            settle-row!
+            ;; The canonical producer analyzes and digests the entity the
+            ;; writer reproduces (`support/program-entity`).
+            settle-entity!
             (fn [run-id agent-id declaration source]
-              (let [row (support/program-row @connection declaration source
+              (let [entity (support/program-entity @connection declaration source
                                              {:seon.schema.admission/source :agent})]
                 (support/transacted!
                         connection
@@ -877,9 +877,9 @@
                          {::turn/id run-id
                           :seon.cluster.eval/ordinal 0
                           :seon.eval/shown "nil"
-                          :seon.program/row row}))))]
-        (support/transacted! connection [(support/namespace-row @connection namespace-name)])
-        (settle-row!
+                          :seon.program/row entity}))))]
+        (support/transacted! connection [(support/namespace-entity @connection namespace-name)])
+        (settle-entity!
          "pending-test-run" "pending-test-agent"
          [:seon.test/sym test-symbol]
          (str "(clojure.test/deftest ^{:seon.test/subject " function-symbol
@@ -887,13 +887,13 @@
         (let [pending (db/pull @connection '[*]
                                [:seon.test/sym test-symbol])]
           (is (= function-symbol (:seon.test/subject pending))
-              "the observed subject name is stored before a function row exists")
+              "the observed subject name is stored before a function entity exists")
           (is (nil? (:db/id (db/pull @connection [:db/id]
                                      [:seon.fn/sym function-symbol])))
-              "settlement does not fabricate a function row for the name")
+              "settlement does not fabricate a function entity for the name")
           (is (some #{test-symbol}
                     (seon.fn/gate-set @connection function-symbol))))
-        (settle-row!
+        (settle-entity!
          "pending-function-run" "pending-function-agent"
          [:seon.fn/sym function-symbol]
          "(defn ^{:malli/schema [:=> [:cat] :int]} target [] 1)")
@@ -909,7 +909,7 @@
    (fn [connection]
      (let [now (java.util.Date.)]
        (support/transacted! connection
-                            (into [(namespace-row 'fixture.batch)]
+                            (into [(namespace-entity 'fixture.batch)]
                                   cat
                                   [(support/agent-tx @connection "batch")
                                    [{:seon.turn/id "batch" :seon.turn/agent [:seon.agent/id "batch"] :seon.turn/opened-tx "datomic.tx"}]]))
@@ -918,23 +918,23 @@
                               (turn/receipt-start-tx
                                {::turn/id "batch" :seon.cluster.eval/ordinal ordinal
                                 :seon.cluster.eval/at now})))
-       (let [rows [(support/program-row
+       (let [entities [(support/program-entity
                     @connection '[:seon.test/sym fixture.batch/target-test]
                     (str "(clojure.test/deftest "
                          "^{:seon.test/subject fixture.batch/target} "
                          "target-test (clojure.test/is true))")
                     {:seon.schema.admission/source :agent})
-                   (support/program-row
+                   (support/program-entity
                     @connection '[:seon.fn/sym fixture.batch/target]
                     "(defn ^{:malli/schema [:=> [:cat] :int]} target [] 1)"
                     {:seon.schema.admission/source :agent})]
              result (db/transact!
                      connection
                      (turn/receipt-settle-batch-tx
-                      (mapv (fn [ordinal row]
+                      (mapv (fn [ordinal entity]
                               {::turn/id "batch" :seon.cluster.eval/ordinal ordinal
-                               :seon.eval/shown "nil" :seon.program/row row})
-                            (range 2) rows)))
+                               :seon.eval/shown "nil" :seon.program/row entity})
+                            (range 2) entities)))
              saved (db/pull @connection '[:seon.test/subject]
                             [:seon.test/sym 'fixture.batch/target-test])]
          (is (some? (:db-after result)) (pr-str result))
@@ -1068,7 +1068,7 @@
     (fn [connection]
       (support/transacted!
               connection
-              (into [(namespace-row 'my.agents.generated)]
+              (into [(namespace-entity 'my.agents.generated)]
                     cat
                     [(support/agent-tx @connection "generated-agent" 'my.agents.generated)]))
       (is (= ::committed
@@ -1157,7 +1157,7 @@
     (fn [connection]
       (support/transacted!
               connection
-              (into [(namespace-row 'replay.start)]
+              (into [(namespace-entity 'replay.start)]
                     cat
                     [(support/agent-tx @connection "replay-agent" 'replay.start)]))
       (support/transacted!
@@ -1170,7 +1170,7 @@
                    '[* {:seon.turn/starting-ns [:seon.ns/name]}]
                    [::turn/id "replay-run"])]
           (support/transacted! connection
-                               [(namespace-row 'replay.later)
+                               [(namespace-entity 'replay.later)
                                 {::turn/id "replay-run"
                                  ::turn/agent [:seon.agent/id "replay-agent"]
                                  :seon.turn/opened-tx "datomic.tx"}])
@@ -1225,13 +1225,13 @@
 (deftest ^{:seon.test/long "Canonical turn creation, four evaluation settlements and runtime declaration analysis exercise the real writer and unresolved-call report. The two-analysis publication regression measured 20.54 s; this integration test includes additional settlement transactions."
            :seon.test/long-ms 60000}
   settlement-keeps-unresolved-call-and-require-names-as-values
-  ;; Source observations survive independently of whether a declaration row
+  ;; Source observations survive independently of whether a declaration entity
   ;; currently exists. Resolution is a query; settlement never fabricates it.
   (support/with-database
     (fn [connection]
       (support/transacted!
               connection
-              (into [(namespace-row 'my.macro-caller)]
+              (into [(namespace-entity 'my.macro-caller)]
                     cat
                     [(support/agent-tx @connection "macro-caller" 'my.macro-caller)]))
       (support/transacted!
@@ -1244,13 +1244,13 @@
                   "(require 'unindexed.required)"}
                  {:seon.cluster.eval/source
                   "(defn unresolved-caller [] (missing.target/nope))"}]}))
-      (let [macro-row
+      (let [macro-entity
             (db/pull @connection
                      [:db/id :seon.fn/source :seon.fn/macro?]
                      [:seon.fn/sym 'seon.bootstrap/help])]
-        (is (:db/id macro-row) "publication supplies the macro identity")
-        (is (string? (:seon.fn/source macro-row)))
-        (is (true? (:seon.fn/macro? macro-row))))
+        (is (:db/id macro-entity) "publication supplies the macro identity")
+        (is (string? (:seon.fn/source macro-entity)))
+        (is (true? (:seon.fn/macro? macro-entity))))
       (let [result
             (db/transact!
              connection
@@ -1266,7 +1266,7 @@
                           [:seon.cluster.eval/id
                            (turn/receipt-identity "macro-call-run" 0)])]
         (is (empty? (:seon.fn/calls form))
-            "a receipt carries no calls: static form analysis is not a program row"))
+            "a receipt carries no calls: static form analysis is not a program entity"))
       (let [result
             (db/transact!
              connection
@@ -1314,7 +1314,7 @@
                             [:seon.ns/name 'my.macro-caller])))))
       (let [source (str "(defn ^{:malli/schema [:=> [:cat] :int]} "
                         "unresolved-caller [] (missing.target/nope))")
-            preliminary-row
+            preliminary-entity
             {:seon.fn/sym 'my.macro-caller/unresolved-caller
              :seon.fn/ns [:seon.ns/name 'my.macro-caller]
              :seon.fn/source source
@@ -1322,22 +1322,22 @@
              :seon.fn/private? false
              :seon.fn/spec "[:=> [:cat] :int]"
              :seon.schema.admission/source :agent}
-            row (second
+            entity (second
                  (seon.fn/analyze-form
-                  @connection source (:seon.fn/ns preliminary-row)
-                  preliminary-row))
+                  @connection source (:seon.fn/ns preliminary-entity)
+                  preliminary-entity))
             result (db/transact!
                     connection
                     (turn/receipt-settle-tx
                      {::turn/id "macro-call-run"
                       :seon.cluster.eval/ordinal 3
                       :seon.eval/shown "nil"
-                      :seon.program/row row}))
+                      :seon.program/row entity}))
             report (seon.fn/unresolved-callers @connection)]
         (is (some? (:db-after result)) (pr-str result))
         (is (not-any? #(= 'missing.target/nope (:seon.fn/callee %))
                       (:seon.program/unresolved-callers report))
-            "a namespace without a program row is outside the unresolved-call report")
+            "a namespace without a program entity is outside the unresolved-call report")
         (is (= #{'missing.target/nope}
                (set (:seon.fn/calls (db/pull @connection [:seon.fn/calls]
                                            [:seon.fn/sym 'my.macro-caller/unresolved-caller])))))))))
@@ -1449,10 +1449,10 @@
             qualified-id 'my.defs.shared/scratch
             agent-ref (fn [agent-id]
                         [:seon.agent/id agent-id])
-            function-row
+            function-entity
             (memoize
              (fn [result]
-               (support/program-row
+               (support/program-entity
                 @connection [:seon.fn/sym qualified-id]
                 (str "(defn ^{:malli/schema [:=> [:cat] :int]} "
                      "scratch [] " result ")")
@@ -1477,7 +1477,7 @@
         (support/transacted!
                 connection
                 (into (support/agents-tx @connection [agent-a agent-b])
-                  [(support/namespace-row @connection namespace-name)]))
+                  [(support/namespace-entity @connection namespace-name)]))
         (doseq [[run-id agent-id] [[run-a agent-a] [run-b agent-b]]]
           (support/transacted!
                   connection
@@ -1485,21 +1485,21 @@
 
         (start! run-a 0)
         (is (= ::committed
-               (settle! run-a 0 {:seon.program/row (function-row 1)})))
+               (settle! run-a 0 {:seon.program/row (function-entity 1)})))
 
         (testing "a divergent definition from an older opening basis refuses"
           (start! run-b 1)
           (is (= ::turn/program-row-changed-after-open
                  (::turn/rule
                   (settle! run-b 1
-                           {:seon.program/row (function-row 2)}))))
-          (is (= (:seon.fn/source (function-row 1))
+                           {:seon.program/row (function-entity 2)}))))
+          (is (= (:seon.fn/source (function-entity 1))
                  (:seon.fn/source
                   (db/pull @connection '[*]
                            [:seon.fn/sym qualified-id]))))
           (is (= ::committed
                  (settle! run-b 1
-                          {:seon.program/row (function-row 1)}))
+                          {:seon.program/row (function-entity 1)}))
               "an identical declaration is an assertion-free success"))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -1668,7 +1668,7 @@
             (transact-or-refusal
              connection
              ;; A stored namespace: the plan declares an absent one only
-             ;; from its evaluation's row or the source that moved into it,
+             ;; from its evaluation's entity or the source that moved into it,
              ;; else the writer refuses the bare identity by name.
              (turn/plan-tx
               {::turn/id run-id ::turn/starting-ns [:seon.ns/name 'my.agents.a1]
@@ -2121,7 +2121,7 @@
    (fn [connection]
      (support/transacted! connection
                           (into (support/agent-tx @connection "unbound-receipt")
-                                [(namespace-row 'user)
+                                [(namespace-entity 'user)
                                  {:seon.turn/id "unbound-receipt-turn"
                                   :seon.turn/agent [:seon.agent/id "unbound-receipt"]
                                   :seon.turn/opened-tx "datomic.tx"}]))
@@ -2165,13 +2165,13 @@
 (deftest an-agent-dial-read-that-refuses-is-not-an-absent-dial
   ;; THE CLASS: `(or overlay carried effective)` read a refused config as an
   ;; absent dial, so the bound fell to the next source or to nil. A cluster
-  ;; with no config row makes the effective read refuse.
+  ;; with no config entity makes the effective read refuse.
   (support/with-database
    (fn [connection]
      (support/transacted! connection (support/agent-tx @connection "dial-reader"))
      ;; The handle is built from the shipped decisions (no cluster world), then
      ;; names the missing cluster: `cluster-handle` itself refuses a cluster
-     ;; with no config row, and the refusal under test is the dial read's.
+     ;; with no config entity, and the refusal under test is the dial read's.
      (let [handle (assoc (support/cluster-handle
                           {:seon.db/connection connection
                            :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
@@ -2341,7 +2341,7 @@
 
 (deftest ^{:seon/tasks #{"023acee5f88d"}} a-refused-settlement-keeps-each-evaluated-value
   ;; THE CLASS (audit 2026-09-26 M4 L3): a refused batch settlement guessed a
-  ;; failing ordinal by re-applying rows, and every other form's shown text
+  ;; failing ordinal by re-applying entities, and every other form's shown text
   ;; was replaced by the refusal. The evaluated values stay; the refused
   ;; commit is each receipt's publication status.
   (support/with-database

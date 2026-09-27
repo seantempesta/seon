@@ -40,14 +40,14 @@
      (test-support/transacted! connection
        (:seon.message/rows
         (message/delivery @connection
-          (assoc (request "subject-row" "A different family shares this token")
+          (assoc (request "subject-entity" "A different family shares this token")
                  :my.message/value (assoc (message/send "bob" "Subject") :seon.message/id "failure-17")))))
      (let [delivery (message/delivery @connection
                                       (request "run-1" "repair this"))
-           rows (:seon.message/rows delivery)]
+           entities (:seon.message/rows delivery)]
        (is (empty? (:seon.error/values delivery)))
-       (is (= 1 (count rows)))
-       (test-support/transacted! connection rows)
+       (is (= 1 (count entities)))
+       (test-support/transacted! connection entities)
        (is (= "failure-17"
               (db/q '[:find ?failure-id .
                      :where
@@ -88,10 +88,10 @@
            (message/delivery
             @connection
             {:my.message/value (seon.cluster.message/decline "alice" "receipt-17" reason) :seon.agent/id "bob" :seon.turn/id "declination-run" :seon.cluster.eval/ordinal 0 :seon.config.message/max-chain 16})
-           rows (:seon.message/rows declination)]
+           entities (:seon.message/rows declination)]
        (is (empty? (:seon.error/values declination)))
-       (is (= 1 (count rows)))
-       (test-support/transacted! connection rows)
+       (is (= 1 (count entities)))
+       (test-support/transacted! connection entities)
        (testing "the reply shape joins the assigned owner back to the problem"
          (is (= 1
                 (db/q '[:find (count ?declination) .

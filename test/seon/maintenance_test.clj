@@ -105,7 +105,7 @@
 
 (defn- task-transaction
   [task-id handler]
-  [(test-support/program-fn-row handler)
+  [(test-support/program-fn-entity handler)
    {:seon.schedule/id (str task-id "/schedule")
     :seon.schedule/expression "0 2 * * *"
     :seon.schedule/zone-id "UTC"}

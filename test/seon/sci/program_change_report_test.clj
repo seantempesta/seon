@@ -13,8 +13,8 @@
 (deftest ^{:seon/tasks #{"361088de3d56"}} a-batched-report-does-not-advance-the-acquired-program
   (support/with-database
    (fn [connection]
-     ;; Notes carry no program identity; the agent row (with its seeded
-     ;; namespace, a program row) is setup.
+     ;; Notes carry no program identity; the agent entity (with its seeded
+     ;; namespace, a program entity) is setup.
      (support/transacted! connection (support/agent-tx @connection "report-writer"))
      (let [covers? #'sci.eval/installation-covers-program-change?
            note #(vector {:my.note/id (str "report-note-" %) :my.note/agent [:seon.agent/id "report-writer"]

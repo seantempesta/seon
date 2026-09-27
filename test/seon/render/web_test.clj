@@ -285,7 +285,7 @@ handle))}}
      [:render-settled])))
 
 (defn- open-run!
-  "Open a minimal run row for one renderer presence-gate test."
+  "Open a minimal run entity for one renderer presence-gate test."
   [connection run-id]
   (support/transacted! connection
                      [{:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}]))
@@ -488,7 +488,7 @@ handle))}}
         (is (str/includes? (.body known)
                            (str "action=\"/agent/" namespace-name "/context\"")))))))
 
-(deftest namespace-routes-admit-by-reader-and-existing-corpus-row
+(deftest namespace-routes-admit-by-reader-and-existing-corpus-entity
   (with-server
     (fn [connection server _context]
       (testing "the explicit POST creates the owner once, with its provenance"
@@ -515,7 +515,7 @@ handle))}}
               "a repeated create resumes the existing owner untouched")))
       (is (= 404 (.statusCode (post-form server "/agent/nonexistent.thing/context"
                                          "action=create-owner")))
-          "creation refuses a namespace with no corpus row")
+          "creation refuses a namespace with no corpus entity")
       ;; The head commit id is the whole-store witness; decoding every
       ;; datom to count them cost seconds and proved nothing more.
       (doseq [path ["/ns/nonexistent.thing" "/ns/123bad"]]
@@ -617,7 +617,7 @@ handle))}}
     (is (str/includes? entity-href "subject=20")
         "a referenced entity id selects that entity")
     (is (str/includes? renderer-href "subject=[:seon.fn/sym \"my.render/card\"]")
-        "a render function link selects its program row")
+        "a render function link selects its program entity")
     (doseq [link-href [entity-href renderer-href]]
       (is (str/starts-with? link-href "/ns/my.viewer/debug?")
           "navigation keeps the viewing namespace")
@@ -726,7 +726,7 @@ handle))}}
              (str/includes? renderers "my.render/other-ai")
              (str/includes? renderers "my.render/other-html")))
     (is (not (str/includes? renderers "my.render/rejected"))
-        "rejected candidates are absent rather than empty rows")
+        "rejected candidates are absent rather than empty entities")
     (is (not (str/includes? previews "my.render/other-ai"))
         "an alternative is named but never rendered beside the selected value")))
 
@@ -911,19 +911,19 @@ handle))}}
     (is (str/includes? missing "No source is stored for this function.")
         "an absent stored definition is explicit rather than blank or fabricated")))
 
-(deftest debug-renderer-definition-accepts-the-acquired-program-row
+(deftest debug-renderer-definition-accepts-the-acquired-program-entity
   (support/with-database
     (fn [connection]
       (let [ctx (support/fork-cluster-ctx connection)
-            row (sci.kernel/program-function ctx 'seon.plan/render-item-html)
+            entity (sci.kernel/program-function ctx 'seon.plan/render-item-html)
             html (hiccup/->string
                   ((web-private 'debug-renderer-definition)
                    {:seon.render.call/static-evidence
-                    {:seon.render.call/declaration-row row}}))]
-        (is (string? (:seon.sci.eval/function-source row))
-            "the acquired kernel row carries the normalized source key")
+                    {:seon.render.call/declaration-row entity}}))]
+        (is (string? (:seon.sci.eval/function-source entity))
+            "the acquired kernel entity carries the normalized source key")
         (is (str/includes? html "(defn render-item-html")
-            "the disclosure consumes the actual acquired program row")))))
+            "the disclosure consumes the actual acquired program entity")))))
 
 (deftest debug-graph-model-preserves-datom-identity-and-direction
   (let [request {:seon.render.debug/viewer-namespace 'my.viewer
@@ -1028,7 +1028,7 @@ handle))}}
 
 (deftest an-unchanged-head-re-derives-no-block-and-an-input-change-re-derives-its-block
   ;; The page key is the program and the committed value, never the database
-  ;; object the context snapshot last advanced to (census row A2). `acquire!`
+  ;; object the context snapshot last advanced to (census entity A2). `acquire!`
   ;; advances that object on every same-program acquisition. The page's own
   ;; agent: every fork of one cluster context shares its render cache, so a
   ;; live `root` page in the hosting JVM would share this page's entry.
@@ -1085,7 +1085,7 @@ handle))}}
               "an unchanged head asks no read evidence and derives no block")
           (support/transacted!
            connection
-           ;; A data row (not program: a namespace edit re-acquires the program)
+           ;; A data entity (not program: a namespace edit re-acquires the program)
            ;; that no root page block reads.
            [{:seon.cluster/name "render.web.page-key-unrelated"
              :seon.cluster/config
@@ -1186,8 +1186,8 @@ handle))}}
                 ;; Invocations are content-keyed in the cache every fork of
                 ;; this cluster context shares, so a JVM that rendered this
                 ;; subject before answers the initial comparison from it.
-                ;; A data row NO acquisition derives interest in: no identity,
-                ;; no listened attribute, no join. A bystander agent row mints
+                ;; A data entity NO acquisition derives interest in: no identity,
+                ;; no listened attribute, no join. A bystander agent entity mints
                 ;; a half-agent beside the real creation path (peer issue
                 ;; an-unrelated-fixture-transaction-mints-a-half-agent).
                 (support/transacted!
@@ -1572,11 +1572,11 @@ handle))}}
         (in-root '(do (def hold-first? (atom true))
                       (def pass-entered (promise))
                       (def pass-released (promise))))
-        ;; the renderer is a program row (the namespace stage selects the
+        ;; the renderer is a program entity (the namespace stage selects the
         ;; viewer's public contracted functions from the acquired program)
         ;; and the same form in this context, closing over the promises
         (support/transacted! connection
-                             [(support/program-fn-row (db/db connection) 'my.agents.root/ns-view source)])
+                             [(support/program-fn-entity (db/db connection) 'my.agents.root/ns-view source)])
         (sci.eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
                             :seon.schema/projection (sci.kernel/context-projection ctx)})
         (in-root (edn/read-string source))
@@ -1617,7 +1617,7 @@ handle))}}
   ;; paint derives EVERY block from current facts. The database holds no
   ;; partial text at ANY basis (an as-of walk over the window), and
   ;; nothing is retracted because nothing was ever written: after F2 no
-  ;; partial row CAN exist, so the stale-partial repair class is
+  ;; partial entity CAN exist, so the stale-partial repair class is
   ;; unrepresentable rather than handled.
   (with-server
     (fn [connection server context]
@@ -1664,7 +1664,7 @@ handle))}}
             (is (empty?
                  (filter #(= :seon.ai.stream/text (:a %))
                          (db/datoms (db/as-of db t) :eavt)))
-                (str "no partial row at basis " t))))))))
+                (str "no partial entity at basis " t))))))))
 
 ;;; Seal revision, 2026-07-29 — terminal facts supersede partials
 
@@ -2274,7 +2274,7 @@ handle))}}
 
 ;;; The proc surviving a throwing page was the repair that made the rest of
 ;;; 2026-09-07 diagnosable; what it left behind was a fault committed on every
-;;; pass — six identical rows in ninety seconds, live — plus an `offer!` whose
+;;; pass — six identical entities in ninety seconds, live — plus an `offer!` whose
 ;;; refusal nobody could observe, and a `failed-page-result` sitting outside
 ;;; the pass's own protection, so a throw while REPORTING a failure ended the
 ;;; proc exactly as the failure would have.

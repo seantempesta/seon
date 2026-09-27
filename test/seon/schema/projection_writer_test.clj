@@ -108,7 +108,7 @@
             (is (= 1 @derivations))))))))
 
 (defn- unrelated-write
-  "A `:db.fn/call` operation writing one row no projection derivation reads."
+  "A `:db.fn/call` operation writing one entity no projection derivation reads."
   {:malli/schema [:=> [:cat :string] [:vector :seon.schema/value]]}
   [message-id]
   [:db.fn/call (fn [_] [{:seon.message/id message-id
@@ -169,7 +169,7 @@
             bound (:seon.db/value-cache-size db/projection-cache-policy)
             _ (cache/seed value-cache {})
             ;; Declaration datoms written directly: the tier's subject is the
-            ;; value, not the row writer (`turn/row-tx` costs ~400 ms each).
+            ;; value, not the entity writer (`turn/row-tx` costs ~400 ms each).
             references
             (vec (for [index (range (inc bound))]
                    (let [staged (:db-after (d/with head [{:seon.schema/key

@@ -152,7 +152,7 @@
     (vector? definition)
     (some map-entries (rest definition))))
 
-(defn- declared-member-rows
+(defn- declared-member-entities
   ;; Read the declaration ONCE. `schema/schema-definition` falls through to
   ;; `seon.schema.edn/packaged-forms`, which re-reads and re-merges every
   ;; schema resource on each call whenever no projection is bound — and no
@@ -170,7 +170,7 @@
         (throw
          (ex-info
           "The :seon.env/environment schema is not registered."
-          (seon.error.refusal/diagnostic (java.util.Date.) ::construction 'seon.env/declared-member-rows
+          (seon.error.refusal/diagnostic (java.util.Date.) ::construction 'seon.env/declared-member-entities
            {:seon.error/offending :seon.env/environment
     ::missing-schema :seon.env/environment
     :seon.error/message "The environment declaration must be registered before construction."
@@ -186,7 +186,7 @@
                       (= :required (:seon.env/boot properties))})))
             (map-entries definition))))
 
-(def ^:private declared-members (delay (declared-member-rows)))
+(def ^:private declared-members (delay (declared-member-entities)))
 
 (defn members
   "The declared environment members, in the dependency order boot builds.
@@ -246,10 +246,10 @@
      (some (fn [{member :seon.env/member
                  optional? :seon.env/optional?
                  boot-required? :seon.env/boot-required?
-                 :as row}]
+                 :as entity}]
              (when (and (not (contains? supplied member))
                         (or (not optional?) (and boot? boot-required?)))
-               (absent-member-error row supplied)))
+               (absent-member-error entity supplied)))
            (members))
      (into empty-environment supplied))))
 

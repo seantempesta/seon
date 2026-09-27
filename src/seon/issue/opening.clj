@@ -39,7 +39,7 @@
 (defn- links
   "The identities this issue links, read from the database it is rendered in."
   [database issue-id]
-  (let [row (db/pull database
+  (let [entity (db/pull database
                      '[:seon.issue/id :seon.issue/title :seon.issue/problem
                        {:seon.issue/agent [:seon.agent/id]}
                        {:seon.issue/detector [:seon.fn/sym]}
@@ -47,23 +47,23 @@
                         [:seon.fn/sym {:seon.fn/ns [:seon.ns/name]}
                          {:seon.fn/file [:seon.fn.file/relative-path]}]}]
                      [:seon.issue/id issue-id])]
-    (when (:seon.issue/title row)
-      (cond-> {:seon.issue/id (:seon.issue/id row)
-       :seon.issue/title (:seon.issue/title row)
-       :seon.issue/problem (:seon.issue/problem row)
-       :seon.issue/detector (get-in row [:seon.issue/detector :seon.fn/sym])
+    (when (:seon.issue/title entity)
+      (cond-> {:seon.issue/id (:seon.issue/id entity)
+       :seon.issue/title (:seon.issue/title entity)
+       :seon.issue/problem (:seon.issue/problem entity)
+       :seon.issue/detector (get-in entity [:seon.issue/detector :seon.fn/sym])
        :seon.test/syms (vec (sort (db/q '[:find [?symbol ...] :in $ ?issue-id
                                          :where [?issue :seon.issue/id ?issue-id]
                                                 [?issue :seon.issue/tests ?test]
                                                 [?test :seon.test/sym ?symbol]]
                                        database issue-id)))
-       :seon.fn/syms (vec (sort (map :seon.fn/sym (:seon.issue/functions row))))
+       :seon.fn/syms (vec (sort (map :seon.fn/sym (:seon.issue/functions entity))))
        :seon.ns/names (vec (sort (distinct (keep #(get-in % [:seon.fn/ns :seon.ns/name])
-                                                 (:seon.issue/functions row)))))
+                                                 (:seon.issue/functions entity)))))
        :seon.fn.file/relative-paths (vec (sort (distinct (keep #(get-in % [:seon.fn/file :seon.fn.file/relative-path])
-                                                      (:seon.issue/functions row)))))}
-        (get-in row [:seon.issue/agent :seon.agent/id])
-        (assoc :seon.agent/id (get-in row [:seon.issue/agent :seon.agent/id]))))))
+                                                      (:seon.issue/functions entity)))))}
+        (get-in entity [:seon.issue/agent :seon.agent/id])
+        (assoc :seon.agent/id (get-in entity [:seon.issue/agent :seon.agent/id]))))))
 
 (defn candidate
   "The candidate this issue's worker is dialled to, or the floor."
@@ -185,25 +185,25 @@
          (repl/source-text (status-form id))))
 
 (defmethod render-candidate :default
-  [_ link-row]
-  (render-candidate default-candidate link-row))
+  [_ link-entity]
+  (render-candidate default-candidate link-entity))
 
 (defn source
   "Render one issue's opening block through the candidate its worker is dialled to."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.issue/id]
                   [:or :seon.render/source :seon.error/value]]}
   [database issue-id]
-  (if-let [link-row (links database issue-id)]
+  (if-let [link-entity (links database issue-id)]
     (block
      (comment-lines
-      (if (seq (:seon.test/syms link-row))
-        [(str "Done when these exact tests pass: " (str/join ", " (:seon.test/syms link-row)) ".")
+      (if (seq (:seon.test/syms link-entity))
+        [(str "Done when these exact tests pass: " (str/join ", " (:seon.test/syms link-entity)) ".")
          "After each turn the system checks changed evidence and reports passed and failed tests."]
-        [(str "Done when (" (:seon.issue/detector link-row)
+        [(str "Done when (" (:seon.issue/detector link-entity)
               " (seon.db/db)) no longer names this issue's subject.")
          "The system checks the detector after each turn and reports whether the issue is still open."]))
-     (render-candidate (if (seq (:seon.test/syms link-row))
-                         (candidate database issue-id) :bare) link-row))
+     (render-candidate (if (seq (:seon.test/syms link-entity))
+                         (candidate database issue-id) :bare) link-entity))
     (seon.error.refusal/diagnostic (java.util.Date.) :seon.issue/opening 'seon.issue.opening/source
      {:seon.error/message (str "No current issue " issue-id)})))
 
@@ -212,22 +212,22 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn context
-  "One hop further out from an issue: its functions' and tests' own rows."
+  "One hop further out from an issue: its functions' and tests' own entities."
   {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.db/database-value]
                              [:seon.issue/id :seon.issue/id]
                              [:seon.render/distance {:optional true} :seon.render/distance]]]
                   [:or :map :seon.error/value]]}
   [{database :seon.db/db issue-id :seon.issue/id}]
-  (if-let [link-row (links database issue-id)]
+  (if-let [link-entity (links database issue-id)]
     {:seon.issue/id issue-id
      :seon.issue/functions
      (mapv #(db/pull database
                      '[:seon.fn/sym :seon.fn/doc :seon.fn/source
                        {:seon.fn/file [:seon.fn.file/relative-path]}]
                      [:seon.fn/sym %])
-           (:seon.fn/syms link-row))
+           (:seon.fn/syms link-entity))
      :seon.issue/tests
      (mapv #(test/recorded-result database %)
-           (:seon.test/syms link-row))}
+           (:seon.test/syms link-entity))}
     (seon.error.refusal/diagnostic (java.util.Date.) :seon.issue/opening 'seon.issue.opening/context
      {:seon.error/message (str "No current issue " issue-id)})))

@@ -13,28 +13,28 @@
 
 (deftest ^{:seon.test/long "Two declaration analyses and three canonical writer transactions, including deletion validation and history readback; the former refused deletion run measured 6.22 s."
            :seon.test/long-ms 15000}
-  transaction-report-identities-select-only-changed-program-rows
+  transaction-report-identities-select-only-changed-program-entities
   (support/with-database
    (fn [connection]
      (let [changed-symbol (symbol "my.note" (str "report-changed-" (id/id)))
            other-symbol (symbol "my.note" (str "report-other-" (id/id)))
            before (db/db connection)
-           changed (support/program-fn-row before changed-symbol (pr-str (list 'defn (symbol (name changed-symbol)) [] 1)))
-           other (support/program-fn-row before other-symbol (pr-str (list 'defn (symbol (name other-symbol)) [] 2)))
+           changed (support/program-fn-entity before changed-symbol (pr-str (list 'defn (symbol (name changed-symbol)) [] 1)))
+           other (support/program-fn-entity before other-symbol (pr-str (list 'defn (symbol (name other-symbol)) [] 2)))
            _ (support/transacted! connection [changed other])
            report (support/transacted! connection
                                            [{:seon.fn/sym changed-symbol
                                              :seon.fn/doc "Changed documentation"}])
            identities (seon.fn/report-identities report)
-           rows (seon.fn/published-index-rows (:db-after report) (vec identities))]
+           entities (seon.fn/published-index-entities (:db-after report) (vec identities))]
        (is (= #{[:seon.fn/sym changed-symbol]} identities))
-       (is (= identities (into #{} (keep program/row-identity) rows)))
-       (is (= "Changed documentation" (:seon.fn/doc (first rows))))
+       (is (= identities (into #{} (keep program/row-identity) entities)))
+       (is (= "Changed documentation" (:seon.fn/doc (first entities))))
        (let [removed (support/transacted! connection
                                              [[:db/retractEntity [:seon.fn/sym changed-symbol]]])
              identities (seon.fn/report-identities removed)]
          (is (contains? identities [:seon.fn/sym changed-symbol]))
-         (is (empty? (seon.fn/published-index-rows (:db-after removed)
+         (is (empty? (seon.fn/published-index-entities (:db-after removed)
                                                   [[:seon.fn/sym changed-symbol]])))
          (let [history-datoms (vec (d/datoms
                                     (d/since (d/history (:db-after removed))
@@ -61,7 +61,7 @@
        (fn [connection]
          (support/transacted!
           connection
-          (seon.fn/rows {:seon.fn/root (.getCanonicalPath root)
+          (seon.fn/program-entities {:seon.fn/root (.getCanonicalPath root)
                         :seon.fn/roots ["src"]}))
          (let [selected (cluster/development-namespaces
                          (db/db connection) [[:seon.fn/sym 'sample.reload.leaf/value]])]
@@ -146,12 +146,12 @@
   (support/with-database
    (fn [connection]
      (let [sym (symbol "my.note" (str "arming-probe-" (id/id)))
-           row (support/program-fn-row
+           entity (support/program-fn-entity
                 (db/db connection) sym
                 (pr-str (list 'defn (symbol (name sym))
                               {:malli/schema [:=> [:cat :seon.source/published] :boolean]}
                               '[value] '(boolean value))))
-           _ (support/transacted! connection [row])
+           _ (support/transacted! connection [entity])
            selected (#'cluster/development-arming-identities
                      (db/db connection) #{} [[:seon.schema/key :seon.source/commit-id]])]
        (is (some? (:db/id (db/pull (db/db connection) [:db/id] [:seon.fn/sym sym]))))
@@ -160,7 +160,7 @@
 
 (deftest ^{:seon.test/long "Two selected-file analyses and canonical reconciliation on a fixture branch."
            :seon.test/long-ms 15000}
-  selected-rows-reconcile-without-a-manifest
+  selected-entities-reconcile-without-a-manifest
   (let [root (io/file "tmp" (str "publication-rows-" (id/id)))
         file (io/file root "src/sample/rows.clj")
         request {:seon.fn/root (.getCanonicalPath root) :seon.fn/roots ["src"]}
@@ -170,7 +170,7 @@
       (spit file "(ns sample.rows)\n(defn retained [] 1)\n(defn removed [] 2)\n")
       (support/with-database
        (fn [connection]
-         (support/transacted! connection (seon.fn/analyze-rows request))
+         (support/transacted! connection (seon.fn/analyze-entities request))
          (let [before (db/db connection)
                projection (db/carried-projection before)]
            (is (= 'sample.rows/removed
@@ -179,7 +179,7 @@
            (spit file "(ns sample.rows)\n(defn retained [] 1)\n")
            (let [selected (assoc request :seon.source/previous-database before
                                          :seon.fn/changed-paths #{path})
-                 analyzed (seon.fn/analyze-rows selected)
+                 analyzed (seon.fn/analyze-entities selected)
                  result (schema/call-with-projection
                          projection
                          #(seon.fn/index! (assoc selected :seon.db/connection connection

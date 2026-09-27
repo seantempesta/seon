@@ -76,9 +76,9 @@
    (fn [connection]
      (let [database (db/db connection)
            target [:seon.fn/sym 'seon.id/id]
-           row (db/pull database [:seon.program/analyzed-source-digest :seon.fn/file] target)
+           entity (db/pull database [:seon.program/analyzed-source-digest :seon.fn/file] target)
            basis (db/basis-t database)]
-       (is (= 64 (count (:seon.program/analyzed-source-digest row))))
+       (is (= 64 (count (:seon.program/analyzed-source-digest entity))))
        (doseq [attribute [:seon.program/analyzed-source-digest :seon.fn/file]]
          (let [refusal (db/transact! connection [[:db.fn/retractAttribute target attribute]])]
            (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
@@ -88,17 +88,17 @@
   (support/with-database
    (fn [connection]
      (let [database (db/db connection)
-           namespace-row (support/namespace-row database 'seon.reset-edges-test)
+           namespace-entity (support/namespace-entity database 'seon.reset-edges-test)
            target (symbol "seon.reset-edges-test" "owned-unreferenced-definition")
-           rows (functions/source-rows
-                 database (program/shapes) namespace-row
+           entities (functions/source-rows
+                 database (program/shapes) namespace-entity
                  "(defn owned-unreferenced-definition [] true)" #{})
            test-name 'seon.reset-edges-test/analysis-is-a-required-positive-fact]
-       (is (= target (:seon.fn/sym (first rows))))
-       (is (= 64 (count (:seon.program/analyzed-source-digest (first rows)))))
-       (is (nil? (:seon.fn/file (first rows))))
+       (is (= target (:seon.fn/sym (first entities))))
+       (is (= 64 (count (:seon.program/analyzed-source-digest (first entities)))))
+       (is (nil? (:seon.fn/file (first entities))))
        ;; The writer digests with the installed namespace's resolver context.
-       (support/transacted! connection (mapv #(support/revised-row database % {}) rows))
+       (support/transacted! connection (mapv #(support/revised-entity database % {}) entities))
        (support/transacted! connection
                             [{:seon.test/sym test-name :seon.test/reach #{target}}])
        (support/transacted! connection [[:db/retractEntity [:seon.fn/sym target]]])
@@ -188,14 +188,14 @@
                    (functions/build-artifact
                     {:seon.fn/source-path (.getCanonicalPath file)
                      :seon.fn.file/first-party-functions
-                     (into [] (keep :seon.fn/sym) (functions/rows {:seon.fn/manifest manifest}))}))]
+                     (into [] (keep :seon.fn/sym) (functions/program-entities {:seon.fn/manifest manifest}))}))]
     (.mkdirs root)
     (try
       (spit target-file "(ns reset.publication.target) (defn target [] true)")
       (spit caller-file "(ns reset.publication.caller (:require [reset.publication.target :as target])) (defn caller [] (target/target))")
       (let [before (artifact target-file)
             caller (artifact caller-file)
-            baseline (into (functions/rows {:seon.fn/manifest manifest})
+            baseline (into (functions/program-entities {:seon.fn/manifest manifest})
                            (concat (:seon.fn.file/rows before) (:seon.fn.file/rows caller)))]
         (#'source-test/with-store
          (fn [opened]
@@ -256,9 +256,9 @@
    (fn [connection]
      (let [note {:seon.issue/path "docs/seon/issues/reset-invalid-note.md"
                  :seon.issue/text "---\ntype: defect\nstatus: open\nseverity: blocker\n---\n# Invalid type\n\n## Problem\nThis note is refused.\n"}
-           rows (issue/index-tx (db/db connection) [note])]
-       (is (seq (:seon.issue/refusals (meta rows))))
-       (is (empty? rows))
+           entities (issue/index-tx (db/db connection) [note])]
+       (is (seq (:seon.issue/refusals (meta entities))))
+       (is (empty? entities))
        (is (nil? (db/pull (db/db connection) [:db/id]
                           [:seon.issue/id "reset-invalid-note"])))))))
 
@@ -293,19 +293,19 @@
   (support/with-database
    (fn [connection]
      (let [database (db/db connection)
-           namespace-row (support/namespace-row database 'seon.id)
+           namespace-entity (support/namespace-entity database 'seon.id)
            source "(defn reset-analysis-proof [] true)"
            analyze (fn [database]
                      (#'functions/runtime-analysis-batch
                       database [{:namespace-name 'seon.id :form-source source
-                                 :seon.fn/namespace-row namespace-row}]))
+                                 :seon.fn/namespace-row namespace-entity}]))
            captured (analyze database)
-           rows (functions/source-rows database (program/shapes) namespace-row source #{})
+           entities (functions/source-rows database (program/shapes) namespace-entity source #{})
            expected (id/sha-256 [(.getBytes ^String (:seon.fn/source captured)
                                            java.nio.charset.StandardCharsets/UTF_8)])]
        (is (not= source (:seon.fn/source captured)) "resolver declarations are part of the input")
-       (is (= expected (:seon.program/analyzed-source-digest (first rows))))
-       (support/transacted! connection (mapv #(support/revised-row database % {}) rows))
+       (is (= expected (:seon.program/analyzed-source-digest (first entities))))
+       (support/transacted! connection (mapv #(support/revised-entity database % {}) entities))
        (let [next-captured (analyze (db/db connection))]
          (is (not= (:seon.fn/source captured) (:seon.fn/source next-captured)))
          (is (not= expected (id/sha-256 [(.getBytes ^String (:seon.fn/source next-captured)
@@ -348,11 +348,11 @@
   (support/with-database
    (fn [connection]
      (let [target (symbol "seon.reset-edges-test" "removable-test")
-           row (support/program-row (db/db connection)
+           entity (support/program-entity (db/db connection)
                                     [:seon.test/sym target]
                                     "(deftest removable-test (is true))")
            observer 'seon.reset-edges-test/analysis-is-a-required-positive-fact]
-       (support/transacted! connection [row])
+       (support/transacted! connection [entity])
        (support/transacted! connection [{:seon.test/sym observer :seon.fn/references #{target}}])
        (support/transacted! connection [[:db/retractEntity [:seon.test/sym target]]])
        (is (nil? (db/pull (db/db connection) [:db/id] [:seon.test/sym target])))

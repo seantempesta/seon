@@ -89,18 +89,18 @@
                 agent-id (update :where into
                                  '[[?run :seon.turn/agent ?agent]
                                    [?agent :seon.agent/id ?agent-id]]))
-        rows (if agent-id (db/q query database model agent-id)
+        entities (if agent-id (db/q query database model agent-id)
                  (db/q query database model))]
     ;; An unread usage history is not an empty one: the prior stands in only
     ;; for a model with no recorded attempts, never for a refused read.
-    (if (:seon.db/invalid-read rows)
-      rows
+    (if (:seon.db/invalid-read entities)
+      entities
       (tokens/recent-calibration
        (keep (fn [[_attempt _at characters provider-tokens]]
                (when (and (int? provider-tokens) (pos? provider-tokens))
                  {:seon.ai.tokens/characters characters
                   :seon.ai.usage/prompt-tokens provider-tokens}))
-             (sort-by (juxt second first) rows))
+             (sort-by (juxt second first) entities))
        10 fallback-calibration))))
 
 (defn model-calibration

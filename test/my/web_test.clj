@@ -11,7 +11,7 @@
                  :my.web/method :head})))
     (is (false? ((schema/projection-validator (schema/handed-projection) :my.web/fetch-request) {:my.web/url "https://example.com"
                   :my.web/method :post}))))
-  (testing "search requires a nonblank query and accepts a lower row limit"
+  (testing "search requires a nonblank query and accepts a lower entity limit"
     (is (true? ((schema/projection-validator (schema/handed-projection) :my.web/search-request) {:my.web/query "current Clojure release"
                  :my.web/max-results 3
                  :example/extra :ignored})))

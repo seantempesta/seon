@@ -21,15 +21,15 @@
 
 (schema.edn/load! {})
 
-(defn- agent-row
-  "The agent's row on `database` with its branch and admission, or nil when absent."
+(defn- agent-entity
+  "The agent's entity on `database` with its branch and admission, or nil when absent."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
                   [:maybe [:map [:db/id :int]]]]}
   [database agent-id]
-  (let [row (db/pull database [:db/id :seon.agent/branch :seon.agent/admission-closed-tx]
+  (let [entity (db/pull database [:db/id :seon.agent/branch :seon.agent/admission-closed-tx]
                      [:seon.agent/id agent-id])]
-    (when (:seon.error/at row) (throw (ex-info (str (:seon.error/message row)) row)))
-    (when (:db/id row) row)))
+    (when (:seon.error/at entity) (throw (ex-info (str (:seon.error/message entity)) entity)))
+    (when (:db/id entity) entity)))
 
 (defn- refusal
   "The flat refusal a host decision throws; the writer returns it verbatim."
@@ -53,7 +53,7 @@
                        :seon.ns/name :seon.cluster/name]
                   :seon.store/transaction-data]}
   [database agent-id branch namespace-name cluster-name]
-  (let [existing (agent-row database agent-id)]
+  (let [existing (agent-entity database agent-id)]
     (cond
       (:seon.agent/admission-closed-tx existing)
       (throw (refusal `home-call "The hosted agent's admission is closed."
@@ -77,7 +77,7 @@
   (let [connection (:seon.db/connection execution)
         branch (:seon.agent/branch execution)
         roster (:seon.agent/routing execution)]
-    ;; The agent is a row of the cluster naming its home branch, and of that
+    ;; The agent is an entity of the cluster naming its home branch, and of that
     ;; branch: a message to or from it resolves on either, and root lists it.
     (doseq [target [(:seon.db/connection cluster-handle) connection]]
       (let [result (db/call-with-custody {}
@@ -165,14 +165,14 @@
   {:malli/schema [:=> [:cat ::host] :nil]}
   [{handle :seon.turn.loop/cluster roster :seon.agent/routing agent-id :seon.agent/id
     execution ::execution :as host}]
-  ;; The branch row first: its run writer refuses every later run from then
-  ;; on. The cluster row then records that this host is closed.
+  ;; The branch entity first: its run writer refuses every later run from then
+  ;; on. The cluster entity then records that this host is closed.
   (doseq [connection (keep identity [(:seon.db/connection handle) (::parent host)])
-          :let [row (agent-row @connection agent-id)]
-          :when (and row (not (:seon.agent/admission-closed-tx row)))]
+          :let [entity (agent-entity @connection agent-id)]
+          :when (and entity (not (:seon.agent/admission-closed-tx entity)))]
     (let [result (db/call-with-custody {}
                    #(db/transact! connection
-                      [[:db/add (:db/id row) :seon.agent/admission-closed-tx "datomic.tx"]]))]
+                      [[:db/add (:db/id entity) :seon.agent/admission-closed-tx "datomic.tx"]]))]
       (when-not (:db-after result) (throw (ex-info "Closing the host's admission was refused." result)))))
   (cluster/disarm-agents! host)
   (swap! roster dissoc ::host)

@@ -124,7 +124,7 @@
                           (into (test-support/agent-tx @connection "compact-agent")
                             [{:seon.turn/id "compact-before" :seon.turn/agent [:seon.agent/id "compact-agent"] :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx"}
                              {:seon.turn/id "compact-after" :seon.turn/agent [:seon.agent/id "compact-agent"] :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx"}
-                             (test-support/namespace-row @connection 'compact.context)
+                             (test-support/namespace-entity @connection 'compact.context)
                              {:seon.cluster.eval/id "compact-before-0"
                               :seon.cluster.eval/run
                               [:seon.turn/id "compact-before"]

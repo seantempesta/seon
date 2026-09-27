@@ -12,8 +12,8 @@
 (defn- seed-situation!
   [connection]
   ;; The fixture's own cluster. Its turn bound is the agent's own override:
-  ;; the world also carries boot's config row, and the cluster-default read
-  ;; does not select between config rows.
+  ;; the world also carries boot's config entity, and the cluster-default read
+  ;; does not select between config entities.
   (support/seed-cluster! connection "situation")
   (support/transacted!
           connection

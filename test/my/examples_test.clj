@@ -117,15 +117,15 @@
                             :seon.sci.admit/caps (config/result-caps (support/effective-config))
                             :seon.sci.eval/time-limit-ms 10000})))
                   namespaces (instruction/toolkit-namespaces @connection)
-                  rows (mapcat (fn [namespace-name]
+                  entities (mapcat (fn [namespace-name]
                                  (let [directory (:seon.sci.admit/value (run (str "(dir " namespace-name ")")))]
                                    (is (seq (:functions directory)) (str namespace-name))
                                    (:functions directory))) namespaces)]
-              (is (seq rows))
+              (is (seq entities))
               (is (some #{'my.examples.nested-fixture} namespaces))
               (is (= (bootstrap/help-value @connection "examples")
                      (:seon.sci.admit/value (run "(help)"))))
-              (doseq [{function-symbol :sym} rows]
+              (doseq [{function-symbol :sym} entities]
                 (is (true? (:seon.sci.admit/value
                             (run (str "(boolean (resolve '" function-symbol "))"))))
                     (str function-symbol)))
@@ -143,7 +143,7 @@
                 (is (= :input
                        (get-in failed [:seon.sci.admit/value :seon.instrument/check]))
                     "A refused test lookup stays one flat error, never a vector of fake test results."))
-              (doseq [{function-symbol :sym} rows
+              (doseq [{function-symbol :sym} entities
                       :let [metadata (some-> function-symbol requiring-resolve meta)]
                       :when (not (:seon.fn/internal? metadata))]
                 (testing (str function-symbol)

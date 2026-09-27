@@ -24,7 +24,7 @@
         "the member's branch is on the store roster while its body runs")))
 
 (defn- define-agent-test!
-  "Evaluate one deftest as an agent does and write its canonical declaration row."
+  "Evaluate one deftest as an agent does and write its canonical declaration entity."
   ([handle source] (define-agent-test! handle source 'seon.test.one-request-test))
   ([handle source namespace-name]
   (let [connection (:seon.db/connection handle)
@@ -41,10 +41,10 @@
                        :seon.sci.admit/caps (config/result-caps config/defaults)
                        :seon.sci.eval/time-limit-ms 5000})))
                     ::agent-test-defined)
-        row (program/declaration-row (db/carried-projection (db/db connection))
+        entity (program/declaration-row (db/carried-projection (db/db connection))
                                      (:seon.program/row evaluation) :all :agent)]
     (is (nil? (:seon.cluster.eval/error evaluation)) (pr-str evaluation))
-    (support/transacted! connection [row]))))
+    (support/transacted! connection [entity]))))
 
 (def ^:private marker
   (support/file-store-probe-schema :seon.test.one-request-test/marker))
@@ -86,7 +86,7 @@
        (testing "unchanged green members are answered from the record"
          (let [again (request #{'seon.test.one-request-test/writes-a})]
            (is (true? (:seon.test/passed? again)) (sut/tally again))
-           ;; Reuse also requires the loaded program to be the one the rows
+           ;; Reuse also requires the loaded program to be the one the entities
            ;; record (proved both ways in
            ;; `evidence-earned-by-another-loaded-program-is-never-reused`);
            ;; a restart from files before adoption executes again, by name.
@@ -231,10 +231,10 @@
          (is (= 1 (:seon.test/executed-count after)) (sut/tally after))
          (is (true? (:seon.test/passed? after))))))))
 
-(deftest ^{:seon.test/long "One agent test definition, one row edit and one nested request on a fixture branch: 13.8 s measured on default's JVM (load 14.7): define 1.0 s, edit 0.2 s, member 0.06 s, the nested request's admission and recording 12.6 s (docs/seon/issues/a-data-only-commit-rebuilds-the-whole-sci-program.md)."
+(deftest ^{:seon.test/long "One agent test definition, one entity edit and one nested request on a fixture branch: 13.8 s measured on default's JVM (load 14.7): define 1.0 s, edit 0.2 s, member 0.06 s, the nested request's admission and recording 12.6 s (docs/seon/issues/a-data-only-commit-rebuilds-the-whole-sci-program.md)."
            :seon.test/long-ms 30000}
   a-member-whose-test-does-not-resolve-is-red-and-its-branch-released
-  ;; A real resolution failure: the row's namespace is not its symbol's, so
+  ;; A real resolution failure: the entity's namespace is not its symbol's, so
   ;; the member's resolution refuses its provenance.
   (support/with-database
    (fn [connection]
@@ -242,7 +242,7 @@
            store (:seon.store/store handle)
            test-symbol 'seon.test.one-request-test/resolves-nowhere]
        (define-agent-test! handle "(clojure.test/deftest resolves-nowhere (clojure.test/is true))")
-       ;; A partial edit of the stored row, digested by its final namespace as the writer digests it.
+       ;; A partial edit of the stored entity, digested by its final namespace as the writer digests it.
        (support/transacted! connection [(support/revision (db/db connection) [:seon.test/sym test-symbol]
                                                           {:seon.test/ns [:seon.ns/name probe-ns]})])
        (let [result (sut/run {:seon.test/execution (support/execution-handle connection)
@@ -287,7 +287,7 @@
            :seon.test/long-ms 30000}
   evidence-earned-by-another-loaded-program-is-never-reused
   ;; A restart from changed files loads new source while the cluster's program
-  ;; rows still describe the old program: green recorded against the rows then
+  ;; entities still describe the old program: green recorded against the entities then
   ;; vouched for code the JVM no longer runs (run bba05ce63419, 2026-09-23).
   (support/with-database
    (fn [connection]
@@ -299,15 +299,15 @@
                               :seon.test/identities #{test-symbol}})
            database (db/db connection)
            cluster [:seon.cluster/name (:seon.cluster/name handle)]
-           rows-commit (:seon.source/commit-id (db/pull database [:seon.source/commit-id] cluster))
+           entities-commit (:seon.source/commit-id (db/pull database [:seon.source/commit-id] cluster))
            select (fn [loaded]
                     (sut/select {:seon.db/db database :seon.test.run/cluster cluster
                                  :seon.test.run/policy :named :seon.test/identities #{test-symbol}
                                  :seon.test/loaded-source loaded}))
-           matching (select rows-commit)
+           matching (select entities-commit)
            drifted (select (random-uuid))]
        (is (true? (:seon.test/passed? recorded)) (sut/tally recorded))
-       (is (uuid? rows-commit) "the cluster records the source commit its rows came from")
+       (is (uuid? entities-commit) "the cluster records the source commit its entities came from")
        (is (= [test-symbol] (map :seon.test/sym (:seon.test.selection/unchanged matching)))
            "the same loaded program reuses its recorded green")
        (is (empty? (:seon.test.selection/unchanged drifted)))
@@ -316,12 +316,12 @@
        (is (:seon.test/loaded-source-drift drifted))
        (testing "a recorded run names its loaded program; one naming none is unknown"
          (let [run [:seon.test.run/id (:seon.test.run/id recorded)]]
-           (is (= rows-commit (:seon.test.run/loaded-commit-id
+           (is (= entities-commit (:seon.test.run/loaded-commit-id
                                (db/pull database [:seon.test.run/loaded-commit-id] run))))
-           (support/transacted! connection [[:db/retract run :seon.test.run/loaded-commit-id rows-commit]])
+           (support/transacted! connection [[:db/retract run :seon.test.run/loaded-commit-id entities-commit]])
            (let [old (sut/select {:seon.db/db (db/db connection) :seon.test.run/cluster cluster
                                   :seon.test.run/policy :named :seon.test/identities #{test-symbol}
-                                  :seon.test/loaded-source rows-commit})]
+                                  :seon.test/loaded-source entities-commit})]
              (is (empty? (:seon.test.selection/unchanged old)))
              (is (= [test-symbol] (map :seon.test/sym (:seon.test.run/members old)))))))))))
 
@@ -371,7 +371,7 @@
        ;; 15 s bound; no request of the cluster is admitted until the watcher
        ;; records that exit. A test world holds the program, never the
        ;; execution's data, so B is released by redefining it: the changed
-       ;; row reaches the next world, where B reruns and passes, and C runs.
+       ;; entity reaches the next world, where B reruns and passes, and C runs.
        (support/await-event! connection ::unfinished-body-exited
                              (fn [database]
                                (empty? (db/q '[:find [?m ...]
@@ -424,14 +424,14 @@
        (is (string? (:seon.error/signature recorded)) "the refused admission is a stored core fault")
        ;; The occurrence keeps the evidence inline (`:seon.error/data-edn`);
        ;; only capped evidence goes whole to the blob tier (`seon.error/evidence-stage`).
-       (let [row (db/pull (db/db connection)
+       (let [entity (db/pull (db/db connection)
                           [{:seon.error/occurrences [:seon.error/data-edn
                                                      {:seon.error.occurrence/data-blob [:seon.error.occurrence/blob-digest]}]}]
                           [:seon.error/signature (:seon.error/signature recorded)])
-             occurrence (first (:seon.error/occurrences row))
+             occurrence (first (:seon.error/occurrences entity))
              digest (get-in occurrence [:seon.error.occurrence/data-blob :seon.error.occurrence/blob-digest])
              evidence (if digest (str (blob/get connection digest)) (:seon.error/data-edn occurrence))]
-         (is (string? evidence) (str "the fault is stored with its evidence: " (pr-str row)))
+         (is (string? evidence) (str "the fault is stored with its evidence: " (pr-str entity)))
          (is (str/includes? (str evidence) "writer-refused")
              "the stored evidence keeps the root cause's data"))
        (is (empty? (db/q '[:find [?m ...] :where [?m :seon.test.member/symbol seon.test.one-request-test/refused-recording]]

@@ -34,17 +34,17 @@
                   [{:seon.cluster.eval/source source
                     :seon.cluster.eval/ns [:seon.ns/name namespace-name]
                     :seon.program/row (:seon.program/row evaluated)}])
-        row (when (sequential? analysis) (second (first analysis)))]
-    (when (or (:seon.cluster.eval/error evaluated) (not row))
+        entity (when (sequential? analysis) (second (first analysis)))]
+    (when (or (:seon.cluster.eval/error evaluated) (not entity))
       (throw (ex-info "Issue test source admission failed."
                       {:seon.test/evaluation evaluated :seon.test/analysis analysis})))
     (let [written-on (db/db connection)
-          report (db/transact! connection [(dissoc row :seon.sci.eval/evaluated?)])]
+          report (db/transact! connection [(dissoc entity :seon.sci.eval/evaluated?)])]
       (when-not (:db-after report) (throw (ex-info "Issue test admission transaction failed." report)))
       (evaluation/install-evaluated-rows!
        {:seon.sci.eval/ctx ctx :seon.db/db (:db-after report) :seon.db/transaction-report report
         :seon.sci.eval/written-on written-on
-        :seon.sci.eval/installations [{:seon.program/row row :seon.sci.eval/evaluation evaluated}]}))))
+        :seon.sci.eval/installations [{:seon.program/row entity :seon.sci.eval/evaluation evaluated}]}))))
 
 (deftest issue-settlement-runs-tests-and-derives-completion
   (support/with-database

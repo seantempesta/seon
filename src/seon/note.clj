@@ -38,9 +38,9 @@
 
     :else value))
 
-(defn- note-row
-  [row]
-  (note-value row))
+(defn- note-entity
+  [entity]
+  (note-value entity))
 
 (defn- note-line
   [note]
@@ -254,7 +254,7 @@
       result
       (let [note (db/pull (:db-after result) note-selector
                           [:my.note/id id])]
-        (if (db/read-refusal? note) note (note-row note))))))
+        (if (db/read-refusal? note) note (note-entity note))))))
 
 (defn add!
   "Add or update one note owned by the calling agent."
@@ -286,7 +286,7 @@
            {:my.note/id id :seon.agent/id agent-id}]])]
     (if (or (:seon.db.write.attempt/request-id result) (:seon.db/invalid-read result) (:seon.schema/expected-value result))
       result
-      (note-row (db/pull (:db-before result) note-selector [:my.note/id id])))))
+      (note-entity (db/pull (:db-before result) note-selector [:my.note/id id])))))
 
 (defn notes
   "List this agent's bounded current notes in identity order."
@@ -294,7 +294,7 @@
    [:=> [:cat :seon.db/database-value :seon.agent/id]
     [:or :my.note/notes :seon.db/error-result]]}
   [database agent-id]
-  (let [rows
+  (let [entities
         (db/q '[:find ?id ?note
                 :in $ ?agent-id
                 :where
@@ -302,9 +302,9 @@
                 [?note :my.note/agent ?agent]
                 [?note :my.note/id ?id]]
               database agent-id)]
-    (if (db/read-refusal? rows)
-      rows
-      (->> rows
+    (if (db/read-refusal? entities)
+      entities
+      (->> entities
            (sort-by first)
            (mapv (fn [[_ note]]
-                   (note-row (db/pull database note-selector note))))))))
+                   (note-entity (db/pull database note-selector note))))))))

@@ -279,8 +279,8 @@
             function-symbol 'source-deletion-probe/value
             fn-identity [:seon.fn/sym function-symbol]]
         (test-support/transacted! connection
-                                  [(test-support/namespace-row @connection 'source-deletion-probe)
-                                   (test-support/program-fn-row
+                                  [(test-support/namespace-entity @connection 'source-deletion-probe)
+                                   (test-support/program-fn-entity
                                     (db/db connection) function-symbol
                                     "(ns source-deletion-probe) (defn value [] 1)")])
         (sci/eval-string* ctx "(ns source-deletion-probe) (defn value [] 1)")
@@ -321,11 +321,11 @@
   (let [target (test-support/execution-handle nil)
         held-store (:seon.store/store target)
         h-conn (:seon.db/connection target)
-        row #(test-support/program-row (db/db %1) %2 %3)
+        entity #(test-support/program-entity (db/db %1) %2 %3)
         s (keyword (str "gate-class-" (id/id)))]
-    (test-support/transacted! h-conn [(test-support/namespace-row (db/db h-conn) 'scratch.gate-class)
-                                      (row h-conn '[:seon.fn/sym scratch.gate-class/f] "(defn f [] 1)")])
-    (test-support/transacted! h-conn [(row h-conn '[:seon.test/sym scratch.gate-class/f-check]
+    (test-support/transacted! h-conn [(test-support/namespace-entity (db/db h-conn) 'scratch.gate-class)
+                                      (entity h-conn '[:seon.fn/sym scratch.gate-class/f] "(defn f [] 1)")])
+    (test-support/transacted! h-conn [(entity h-conn '[:seon.test/sym scratch.gate-class/f-check]
                                            "(clojure.test/deftest f-check (clojure.test/is (pos? (scratch.gate-class/f))))")])
     (try
       (let [gate (cluster/candidate-gate!
@@ -333,7 +333,7 @@
                   (fn [execution]
                     ;; The real writer, never the fixture writer that binds its own custody.
                     (let [c (:seon.db/connection execution)
-                          written (db/transact! c [(row c '[:seon.fn/sym scratch.gate-class/f] "(defn f [] 2)")])]
+                          written (db/transact! c [(entity c '[:seon.fn/sym scratch.gate-class/f] "(defn f [] 2)")])]
                       (is (:db-after written) (pr-str (select-keys written [:seon.error/message])))
                       #{[:seon.fn/sym 'scratch.gate-class/f]}))
                   (constantly #{}))]
@@ -355,22 +355,22 @@
 (deftest ^{:seon.test/long "Two prepares, each one nested seon.test/run on a new candidate commit (the save gate's cost, lane-nsa-slice4-2026-09-23.md)."
            :seon.test/long-ms 120000}
   a-merge-naming-a-task-the-destination-lacks-refuses-and-an-admitted-task-survives-a-refused-merge
-  ;; P1-3 (review 5fb38b91f, spec 7.13): task rows never ride the merge, so the
+  ;; P1-3 (review 5fb38b91f, spec 7.13): task entities never ride the merge, so the
   ;; destination's admitted tasks decide the merged program's task edges.
   (let [target (test-support/execution-handle nil)
         held-store (:seon.store/store target)
         h-conn (:seon.db/connection target)
-        ;; A namespace this test writes itself: test-support/program-row digests with the
-        ;; fixture namespace row, which must be the one stored (67580898d).
+        ;; A namespace this test writes itself: test-support/program-entity digests with the
+        ;; fixture namespace entity, which must be the one stored (67580898d).
         sym #(symbol "scratch.merge-tasks" %)
-        row #(test-support/program-row (db/db %1) [%2 (sym %3)] %4)
+        entity #(test-support/program-entity (db/db %1) [%2 (sym %3)] %4)
         write! #(test-support/transacted! %1 (vec %2))
         handle (issue/task-handle 'scratch.merge-tasks "merge-task" :function)
         issue-id (str "merge-task-test-" (id/id))
         c (keyword (str "merge-task-test-c-" (id/id)))
-        _ (write! h-conn [(test-support/namespace-row (db/db h-conn) 'scratch.merge-tasks)
-                          (row h-conn :seon.fn/sym "merge-tasked" "(defn merge-tasked [] 1)")])
-        _ (write! h-conn [(row h-conn :seon.test/sym "merge-tasked-check" "(clojure.test/deftest merge-tasked-check (clojure.test/is (pos? (scratch.merge-tasks/merge-tasked))))")
+        _ (write! h-conn [(test-support/namespace-entity (db/db h-conn) 'scratch.merge-tasks)
+                          (entity h-conn :seon.fn/sym "merge-tasked" "(defn merge-tasked [] 1)")])
+        _ (write! h-conn [(entity h-conn :seon.test/sym "merge-tasked-check" "(clojure.test/deftest merge-tasked-check (clojure.test/is (pos? (scratch.merge-tasks/merge-tasked))))")
                           {:seon.issue/id issue-id :seon.issue/title "Tasked" :seon.issue/status :open
                            :seon.issue/severity :cleanup :seon.issue/problem "Replace the tasked function."
                            :seon.issue/tests #{[:seon.test/sym (sym "merge-tasked-check")]}}])
@@ -383,7 +383,7 @@
                    (some->> (:seon.source/candidate p) (vswap! made conj)) p)
         intent #(:seon.task/intent (db/pull (db/db h-conn) [:seon.task/intent] [:seon.task/id handle]))]
     (try
-      (write! c-conn [(row c-conn :seon.fn/sym "merge-tasked" (str "(defn merge-tasked {:seon/tasks #{\"" handle "\"}} [] 2)"))])
+      (write! c-conn [(entity c-conn :seon.fn/sym "merge-tasked" (str "(defn merge-tasked {:seon/tasks #{\"" handle "\"}} [] 2)"))])
       (let [proposal (prepare)
             before (db/commit-id (db/db h-conn))
             refused (source/accept-merge! target held-store proposal)]
@@ -394,7 +394,7 @@
           (is (:seon.task/changed? (issue/index-tasks! {:seon.db/connection h-conn :seon.task/basis {}
                                                          :seon.task/files {"resources/seon/tasks/scratch.merge-tasks.edn"
                                                                            "[#:seon.task{:name \"merge-task\" :kind :function :intent \"Merge.\"}]"}})))
-          ;; The task write touches no merged row, so the same proposal now merges.
+          ;; The task write touches no merged entity, so the same proposal now merges.
           (is (:seon.source/commit-id (source/accept-merge! target held-store proposal)))
           (is (= #{handle} (issue/open-tasks (db/db h-conn) [:seon.fn/sym (sym "merge-tasked")])))
           (is (= "Merge." (intent)))))

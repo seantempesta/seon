@@ -41,10 +41,10 @@
          (body root)
          (finally (test-support/delete-recursively! root)))))
 
-(defn- rows-of
+(defn- entities-of
   {:malli/schema [:=> [:cat :string] :seon.program/rows]}
   [source]
-  (with-root {"tq/a.clj" source} #(seon.fn/rows {:seon.fn/roots [(.getPath %)]})))
+  (with-root {"tq/a.clj" source} #(seon.fn/program-entities {:seon.fn/roots [(.getPath %)]})))
 
 (defn- refusal
   "The task rule a returned or thrown refusal names."
@@ -55,8 +55,8 @@
 
 (defn- admit!
   {:malli/schema [:=> [:cat :seon.db/connection :seon.program/rows] :seon.schema/value]}
-  [connection rows]
-  (test-support/transacted! connection (seon.fn/reconcile-tx @connection rows [])))
+  [connection entities]
+  (test-support/transacted! connection (seon.fn/reconcile-tx @connection entities [])))
 
 (defn- ingest!
   {:malli/schema [:=> [:cat :seon.db/connection :string [:* :seon.task/basis]] :seon.schema/value]}
@@ -67,8 +67,8 @@
 (deftest ingested-tasks-answer-both-ways-and-unchanged-input-writes-nothing
   (test-support/with-database
    (fn [connection]
-     (let [rows (rows-of subject-source) text (task-text "Prove ingestion." ":must-read #{tq.a/g} :evidence #{}")]
-       (admit! connection rows)
+     (let [entities (entities-of subject-source) text (task-text "Prove ingestion." ":must-read #{tq.a/g} :evidence #{}")]
+       (admit! connection entities)
        (is (:seon.task/changed? (ingest! connection text)))
        (is (= #:seon.task{:subjects '#{tq.a tq.a/f tq.a/g} :proofs '#{tq.a/proves} :referrers #{'tq.a 'tq.a/f handle}}
               (issue/task-edges @connection handle)))
@@ -77,15 +77,15 @@
        (is (not-any? #(contains? % handle) (vals (issue/task-findings @connection))))
        (testing "unchanged input, with an empty optional set, writes nothing"
          (is (= {:seon.task/changed? false} (ingest! connection text)))
-         (is (empty? (seon.fn/reconcile-tx @connection rows []))))
+         (is (empty? (seon.fn/reconcile-tx @connection entities []))))
        (testing "the same aspect with a new intent keeps its handle; clearing a set retracts it"
          (is (:seon.task/changed? (ingest! connection (task-text "Changed." ""))))
          (is (= {:seon.task/intent "Changed."}
                 (db/pull @connection [:seon.task/intent :seon.task/must-read] [:seon.task/id handle]))))
        (testing "removing one annotation drops only that edge"
-         (admit! connection (rows-of (str/replace subject-source "(defn g {:seon/tasks #{\"043df611d179\"}}" "(defn g")))
+         (admit! connection (entities-of (str/replace subject-source "(defn g {:seon/tasks #{\"043df611d179\"}}" "(defn g")))
          (is (= '#{tq.a tq.a/f} (:seon.task/subjects (issue/task-edges @connection handle)))))
-       (testing "program attributes carry the handle edges, never task rows"
+       (testing "program attributes carry the handle edges, never task entities"
          (let [attributes (program/program-attributes (db/carried-projection @connection))]
            (is (contains? attributes :seon.task/tasks))
            (is (not-any? attributes [:seon.task/id :seon.task/intent]))))
@@ -122,11 +122,11 @@
 
 (deftest annotation-placement-is-positional-and-body-usage-stays-legal
   (let [head "(ns tq.a (:require [clojure.test :refer [deftest is]] [tq.b :as-alias b]))\n"]
-    (is (= :metadata-after-test-name (refusal #(rows-of (str head "(deftest t {:seon/tasks #{\"x\"}} (is true))\n")))))
-    (is (nil? (refusal #(rows-of (str head "(deftest t (is (:seon/tasks {:seon/tasks #{::b/x}})))\n")))))
-    (is (= :malformed-annotation (refusal #(rows-of (str head "(defn f {:seon/tasks #{::b/x}} [v] v)\n")))))
-    (is (= :malformed-annotation (refusal #(rows-of (str head "(defn ^:seon/tasks f [v] v)\n")))))
-    (is (= :malformed-annotation (refusal #(rows-of (str head "(defn f {:seon/must-read [clojure.core/inc]} [v] v)\n")))))))
+    (is (= :metadata-after-test-name (refusal #(entities-of (str head "(deftest t {:seon/tasks #{\"x\"}} (is true))\n")))))
+    (is (nil? (refusal #(entities-of (str head "(deftest t (is (:seon/tasks {:seon/tasks #{::b/x}})))\n")))))
+    (is (= :malformed-annotation (refusal #(entities-of (str head "(defn f {:seon/tasks #{::b/x}} [v] v)\n")))))
+    (is (= :malformed-annotation (refusal #(entities-of (str head "(defn ^:seon/tasks f [v] v)\n")))))
+    (is (= :malformed-annotation (refusal #(entities-of (str head "(defn f {:seon/must-read [clojure.core/inc]} [v] v)\n")))))))
 
 (deftest publication-ingests-tasks-and-refuses-a-dangling-handle
   ;; The destination is a branch of the live program, so the checkout's own task
@@ -136,7 +136,7 @@
         dangling #(try (% ) nil (catch clojure.lang.ExceptionInfo e (keys (:seon.task/dangling (ex-data e)))))]
     (test-support/with-database
      (fn [connection]
-       (admit! connection (rows-of subject-source))
+       (admit! connection (entities-of subject-source))
        (is (= [handle] (with-root checkout (fn [root] (dangling #(publish-tasks! connection digest (.getPath root) nil)))))
            "an annotation whose task is absent at the destination refuses with its holders")
        (with-root (assoc checkout task-path (task-text "Prove ingestion." ""))
@@ -154,7 +154,7 @@
   ;; as dangling. The gate reads the tasks of the same published source.
   (test-support/with-database
    (fn [connection]
-     (admit! connection (rows-of subject-source))
+     (admit! connection (entities-of subject-source))
      (with-root (assoc (issue/task-files "." nil) task-path (task-text "Prove ingestion." ""))
        (fn [root]
          (is (:seon.task/changed? (#'seon.cluster.source/index-tasks! connection digest (.getPath root) nil)))
@@ -193,17 +193,17 @@
             (is (= [nil "Mine."] (map intent [handle own]))))))))))
 
 (deftest a-merged-program-dangles-by-holder-against-the-destinations-admitted-tasks
-  ;; P1-3: the candidate's rows for the merged identities, every other holder's
+  ;; P1-3: the candidate's entities for the merged identities, every other holder's
   ;; from the destination, against the destination's tasks.
   (test-support/with-database
    (fn [connection]
      (let [head @connection
            merged #{[:seon.fn/sym 'tq.a/f] [:seon.test/sym 'tq.a/proves]}]
-       (admit! connection (rows-of subject-source))
+       (admit! connection (entities-of subject-source))
        (is (= {handle '#{tq.a/f tq.a/proves}} (issue/candidate-dangling @connection head merged)))
        (is (not (contains? (issue/candidate-dangling @connection head #{}) handle)) "unmerged holders are the destination's")
        (is (= {handle '#{tq.a tq.a/g}} (select-keys (issue/candidate-dangling head @connection merged) [handle]))
-           "a merged row without the annotation drops its edge; the unmerged holders keep theirs")
+           "a merged entity without the annotation drops its edge; the unmerged holders keep theirs")
        (ingest! connection (task-text "Prove ingestion." ""))
        (is (= {} (select-keys (issue/candidate-dangling @connection @connection merged) [handle])))))))
 

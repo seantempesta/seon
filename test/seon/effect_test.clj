@@ -137,7 +137,7 @@
   [connection owner handler request-schema]
   (transact-fixture!
    connection
-   [(test-support/program-fn-row
+   [(test-support/program-fn-entity
      (db/db connection) owner
      (pr-str (list 'defn (symbol (name owner))
                    {:malli/schema [:=> [:cat request-schema] [:or :map :seon.error/value]]
@@ -179,7 +179,7 @@
           (is (= handler (:seon.effect/capability declaration))))))))
 
 (defn- cluster-config
-  "Compile the desired config row, including its declaration provenance."
+  "Compile the desired config entity, including its declaration provenance."
   [background-limit-ms]
   (:seon.config/desired-row
    (config/compile-manifest
@@ -600,12 +600,12 @@
       (install-capability! connection)
       (transact-fixture!
        connection
-       [(test-support/program-fn-row
+       [(test-support/program-fn-entity
          (db/db connection) 'seon.effect-test/pure-caller
          "(defn pure-caller [request] (capability-owner request))")])
       (transact-fixture!
        connection
-       [(test-support/program-fn-row
+       [(test-support/program-fn-entity
          (db/db connection) 'seon.effect-test/indirect-caller
          "(defn indirect-caller [request] (if request (pure-caller request) (indirect-caller request)))")])
       (let [database (db/db connection)
@@ -909,7 +909,7 @@
             (throw (ex-info
                     (str "This fixture's cluster declares no "
                          ":seon.config.fs/working-root; seed the compiled "
-                         "config row before asking for a path inside it.")
+                         "config entity before asking for a path inside it.")
                     {:seon.config.fs/working-root working})))
         scratch (java.io.File. ^String working "tmp")
         _ (.mkdirs scratch)

@@ -101,7 +101,7 @@
                        :seon.boot/cluster-name cluster-name})
        (create-agent! connection cluster-name sender 'streams.test.sender)
        (create-agent! connection cluster-name recipient 'streams.test.recipient)
-       ;; The delivery rows reference the sender's open turn; a message row
+       ;; The delivery entities reference the sender's open turn; a message entity
        ;; naming a turn that was never opened is refused for its agent.
        (test-support/transacted!
                     connection
@@ -116,10 +116,10 @@
              (message/delivery
               @connection
               {:my.message/value value :seon.agent/id sender :seon.turn/id "streams-test-message-run" :seon.cluster.eval/ordinal 1 :seon.config.message/max-chain 64})
-             rows (:seon.message/rows delivery)
+             entities (:seon.message/rows delivery)
              expected-ids (mapv #(str "streams-test-message-run-1-message-" %)
                                 (range 12))]
-         (test-support/transacted! connection rows)
+         (test-support/transacted! connection entities)
          (let [database @connection
                facts
                (db/q '[:find ?id ?content ?ordinal
@@ -143,7 +143,7 @@
                      (range 12))]
            (testing "delivery keeps source-vector identity before commit"
              (is (= expected-ids
-                    (mapv :seon.message/id rows)))
+                    (mapv :seon.message/id entities)))
              (is (empty? (:seon.error/values delivery))))
            (testing "the database and trigger derivation lose no message"
              (is (= 12 (count facts)))

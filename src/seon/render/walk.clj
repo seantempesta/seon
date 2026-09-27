@@ -888,7 +888,7 @@
        (fn [entries saved]
          (let [lookup [:seon.cluster.eval/id (:seon.cluster.eval/id saved)]
                ;; `:t` is the read's basis (kept below), not an attribute of
-               ;; the receipt row; without it the row's owner and pair apply.
+               ;; the receipt entity; without it the entity's owner and pair apply.
                rendered (render/render-call
                          (assoc request :seon.render/value (dissoc saved :t)
                                         :seon.render/output :seon.render/ai
@@ -1086,7 +1086,7 @@
                   targets (remove nodes (distinct (map peek kept)))
                   fresh (vec (sort (filter (comp rendered schemas) targets)))
                   admitted (vec (take (max 0 (- max-nodes (count nodes))) fresh))
-                  ;; An identity-less owned row is known by the component attribute reaching it.
+                  ;; An identity-less owned entity is known by the component attribute reaching it.
                   reached (into {} (keep (fn [[_ a t]] (when ((::component-owners structure) a) [t a]))) kept)
                   nodes (into nodes (map (fn [e] [e (cond-> {::node-level (inc level) ::node-schema (schemas e)}
                                                       (reached e) (assoc ::attribute (reached e)))])) admitted)]

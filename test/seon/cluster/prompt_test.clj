@@ -411,8 +411,8 @@
          (is (= 2.8 (get-in rendered [:seon.ai.tokens/budget-report :seon.ai.tokens/chars-per-token]))
              "the prompt budget uses the same agent-scoped measurement"))))))
 
-;; THE CLASS: a consumer re-discovered its cluster from whichever config row
-;; the database held, so a forked branch (holding its parent's rows too) or a
+;; THE CLASS: a consumer re-discovered its cluster from whichever config entity
+;; the database held, so a forked branch (holding its parent's entities too) or a
 ;; database without configuration produced a different policy per consumer.
 ;; The caller's carried environment names the cluster; its configuration is
 ;; read once, and its absence is the same typed refusal on every path.

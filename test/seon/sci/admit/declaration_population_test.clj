@@ -67,7 +67,7 @@
           carrier-symbols)
     (thunk)))
 
-(defn- rows
+(defn- entities
   [n]
   {:rows (mapv (fn [i] {:index i :label (str "row-" i)}) (range n))})
 
@@ -77,7 +77,7 @@
     ;; The identity descriptors resolve their projection functions with
     ;; `requiring-resolve` the first time they are built; warm that so the
     ;; counts below measure the population and nothing else.
-    (admit/admit-value (request (rows 1) projection))
+    (admit/admit-value (request (entities 1) projection))
     (testing "one explicit packaged acquisition reads every schema resource"
       (is (pos? one)
           "the acquisition measurement must read resources, or it is vacuous"))
@@ -88,9 +88,9 @@
      (fn []
        (doseq [[label value]
               [["vector of 50" (vec (range 50))]
-               ["map of 20 maps" (rows 20)]
-               ["map of 100 maps" (rows 100)]
-               ["set of 40 maps" (set (:rows (rows 40)))]
+               ["map of 20 maps" (entities 20)]
+               ["map of 100 maps" (entities 100)]
+               ["set of 40 maps" (set (:rows (entities 40)))]
                ["lazy sequence of 60 maps" (map (fn [i] {:i i}) (range 60))]
                ["deeply nested maps" (reduce (fn [acc i] {:child acc :i i})
                                              {:leaf true}
@@ -103,18 +103,18 @@
                    " must use its explicit projection without re-resolution"))))))))
 
 (deftest an-admission-that-asks-no-identity-question-resolves-nothing
-  (admit/admit-value (request (rows 1)))
+  (admit/admit-value (request (entities 1)))
   (testing "scalars never reach the identity question"
     (doseq [value [42 "a string" :a-keyword 'a-symbol nil true 3.5]]
       (is (zero? (reads-of #(admit/admit-value (request value))))
           (str "admitting " (pr-str value) " must resolve nothing")))))
 
 (deftest a-supplied-projection-is-used-and-resolves-nothing
-  (admit/admit-value (request (rows 1)))
+  (admit/admit-value (request (entities 1)))
   (let [projection (schema/declaration-projection)]
     (testing "with the projection supplied, admission reads no resource at all"
       (is (zero?
            (reads-of
             #(schema/call-with-projection
               projection
-              (fn [] (admit/admit-value (request (rows 20)))))))))))
+              (fn [] (admit/admit-value (request (entities 20)))))))))))

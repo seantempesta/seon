@@ -15,7 +15,7 @@
      (let [function-symbol (symbol "seon.eval.drive/uuid-text")]
        (support/transacted!
         connection
-        [(assoc (support/program-fn-row function-symbol)
+        [(assoc (support/program-fn-entity function-symbol)
                 :seon.schema.admission/source :agent
                 :seon.fn/private? true
                 :seon.fn/source
@@ -66,20 +66,20 @@
            missing-ns (run "(dir missing.namespace)")
            empty-ns (run "(do (in-ns 'fixture.empty-doc) (dir fixture.empty-doc))")
            directory-value (:seon.sci.admit/value directory)
-           rows (:functions directory-value)
-           row (:seon.sci.admit/value documentation)]
-       (is (seq rows))
-       (is (some #(= 'my.agent/settings! (:sym %)) rows))
-       (is (every? #(and (:in %) (:out %)) rows))
-       (is (every? #(not (str/includes? (:doc %) "\n")) rows))
-       (is (= #{:summary :body :example :arglists :in :out :supplied} (set (keys row))))
+           entities (:functions directory-value)
+           entity (:seon.sci.admit/value documentation)]
+       (is (seq entities))
+       (is (some #(= 'my.agent/settings! (:sym %)) entities))
+       (is (every? #(and (:in %) (:out %)) entities))
+       (is (every? #(not (str/includes? (:doc %) "\n")) entities))
+       (is (= #{:summary :body :example :arglists :in :out :supplied} (set (keys entity))))
        (is (= (first (str/split-lines (:seon.fn/doc (db/pull (db/db connection) [:seon.fn/doc]
                                     [:seon.fn/sym 'my.agent/settings!]))))
-              (:summary row)))
-       (is (= (:in row)
-              (:in (first (filter #(= 'my.agent/settings! (:sym %)) rows)))))
+              (:summary entity)))
+       (is (= (:in entity)
+              (:in (first (filter #(= 'my.agent/settings! (:sym %)) entities)))))
        (is (= :map (first (get-in directory-value [:schemas :my.agent/settings-request]))))
-       (is (= :map (first (second (:in row)))))
+       (is (= :map (first (second (:in entity)))))
        (doseq [target ["my.message/send" "my.agent/done" "my.plan" "my.note"]
                :let [doc (:seon.sci.admit/value (run (str "(doc " target ")")))]]
          (is (= (cond-> #{:summary :body :example :in :out}
@@ -103,7 +103,7 @@
   (support/with-database
    (fn [connection]
      (is (:db-after (db/transact! connection
-                                 [(support/namespace-row @connection 'fixture.own-functions)])))
+                                 [(support/namespace-entity @connection 'fixture.own-functions)])))
      (let [ctx (support/fork-cluster-ctx connection)
            configuration (support/effective-config)
            captured (atom [])
@@ -121,23 +121,23 @@
            initial (run "(dir fixture.own-functions)")
            evidence (db/read-evidence @captured)
            defined (run "(defn identity-number \"Return the number.\nA durable function.\" {:malli/schema [:=> [:cat :int] :int]} [number] number)")
-           row (:seon.program/row defined)]
+           entity (:seon.program/row defined)]
        (is (= [] (get-in initial [:seon.sci.admit/value :functions])))
        (is (seq evidence))
        (is (true? (db/read-evidence-current? (db/db connection) evidence)))
        (is (nil? (:seon.cluster.eval/error defined)) (pr-str defined))
-       (is (= 'fixture.own-functions/identity-number (:seon.fn/sym row)))
+       (is (= 'fixture.own-functions/identity-number (:seon.fn/sym entity)))
        (let [written-on (db/db connection)
              written (db/transact! connection
-                                   [(support/namespace-row @connection 'fixture.own-functions)
-                                    (program/canonical-row row)])]
+                                   [(support/namespace-entity @connection 'fixture.own-functions)
+                                    (program/canonical-row entity)])]
          (is (:db-after written) (pr-str written))
          (when (:db-after written)
            (evaluation/install-evaluated-rows!
             {:seon.sci.eval/ctx ctx :seon.db/db (:db-after written) :seon.db/transaction-report written
              :seon.sci.eval/written-on written-on
              :seon.sci.eval/installations
-             [{:seon.program/row row :seon.sci.eval/evaluation defined}]})))
+             [{:seon.program/row entity :seon.sci.eval/evaluation defined}]})))
        (is (false? (db/read-evidence-current? (db/db connection) evidence)))
        (let [directory (run "(dir fixture.own-functions)")]
          (is (nil? (:seon.cluster.eval/error directory)) (pr-str directory))
@@ -181,7 +181,7 @@
      (is (:db-after (db/transact! connection
                                  [{:seon.agent/id "bare-tests"
                                    :seon.agent/namespace
-                                   (support/namespace-row @connection 'fixture.bare-tests)}])))
+                                   (support/namespace-entity @connection 'fixture.bare-tests)}])))
      (doseq [ctx [(evaluation/build-base-ctx (seon.schema/handed-projection))
                  (support/fork-cluster-ctx connection)]]
        (sci/add-namespace! ctx 'fixture.bare-tests {})
@@ -199,12 +199,12 @@
                     :seon.cluster.eval/source "(deftest durable-arithmetic (is (= 2 (+ 1 1))))"
                     :seon.sci.admit/caps (config/result-caps (support/effective-config))
                     :seon.sci.eval/time-limit-ms 10000})
-           row (:seon.program/row result)]
+           entity (:seon.program/row result)]
        (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
-       (is (= 'fixture.bare-tests/durable-arithmetic (:seon.test/sym row)))
-       (let [written (db/transact! connection [(program/canonical-row row)])]
+       (is (= 'fixture.bare-tests/durable-arithmetic (:seon.test/sym entity)))
+       (let [written (db/transact! connection [(program/canonical-row entity)])]
          (is (:db-after written) (pr-str written))
-         (is (= (:seon.test/source row)
+         (is (= (:seon.test/source entity)
                 (:seon.test/source
                  (db/pull (db/db connection) [:seon.test/source]
                           [:seon.test/sym 'fixture.bare-tests/durable-arithmetic])))))))))
@@ -215,7 +215,7 @@
      (is (:db-after (db/transact! connection
                                  [{:seon.agent/id "retained-tests"
                                    :seon.agent/namespace
-                                   (support/namespace-row @connection 'fixture.retained-tests)}])))
+                                   (support/namespace-entity @connection 'fixture.retained-tests)}])))
      (let [base (support/fork-cluster-ctx connection)
            _ (sci/eval-string* base
                               "(do (ns-unmap 'clojure.core 'deftest) (ns-unmap 'clojure.core 'is))")
@@ -274,23 +274,23 @@
 
 (deftest an-absent-declaration-is-a-typed-statement-not-an-empty-one
   ;; `doc` and `dir` used to render an absent :seon.fn/spec as [], absent
-  ;; arglists as () and an absent docstring as "": three claims the row does
+  ;; arglists as () and an absent docstring as "": three claims the entity does
   ;; not support. An agent reads this surface before deciding how to call a
   ;; function, so absence must say so (AGENTS.md section 2.4).
   (support/with-database
    (fn [connection]
      (support/transacted!
       connection
-      [(assoc (support/program-fn-row (db/db connection) 'my.note/undeclared "(defn undeclared [] true)")
+      [(assoc (support/program-fn-entity (db/db connection) 'my.note/undeclared "(defn undeclared [] true)")
               :seon.fn/private? false)])
      (let [database (db/db connection)
            doc (evaluation/documentation-value database
                                                'my.note/undeclared
                                                'my.note/undeclared)
-           row (some #(when (= 'my.note/undeclared (:sym %)) %)
+           entity (some #(when (= 'my.note/undeclared (:sym %)) %)
                      (:functions (evaluation/directory-value database 'my.note false)))]
        (is (contains? doc :in))
-       (is (some? row) "the undeclared row is still listed by dir")
+       (is (some? entity) "the undeclared entity is still listed by dir")
        (doseq [[label value attribute]
                [["doc :in" (:in doc) :seon.fn/spec]
                 ["doc :out" (:out doc) :seon.fn/spec]
@@ -300,7 +300,7 @@
        (is (not= [] (:in doc)) "an absent contract never reads as a declared empty one")
        (is (not= "" (:summary doc)))
        (is (str/includes? (:summary doc) (str :seon.fn/doc)))
-       (is (str/includes? (:doc row) (str :seon.fn/doc)))))))
+       (is (str/includes? (:doc entity) (str :seon.fn/doc)))))))
 
 (deftest clojure-test-at-the-agent-repl-reports-into-the-evaluations-output
   (support/with-database
@@ -308,7 +308,7 @@
      (is (:db-after (db/transact! connection
                                  [{:seon.agent/id "clojure-test"
                                    :seon.agent/namespace
-                                   (support/namespace-row @connection 'fixture.clojure-test)}])))
+                                   (support/namespace-entity @connection 'fixture.clojure-test)}])))
      (let [ctx (support/fork-cluster-ctx connection)
            run (fn [source]
                  (evaluation/evaluate

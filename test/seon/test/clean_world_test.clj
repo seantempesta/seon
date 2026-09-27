@@ -50,10 +50,10 @@
         "the member's only turn is its attempt's")
     (doseq [attribute [:seon.error/id :seon.message/about]]
       (is (empty? (db/datoms world :aevt attribute))
-          (str "the member inherits no " attribute " rows")))
+          (str "the member inherits no " attribute " entities")))
     (is (< 100 (count program-attributes)) "the program partition is derived from entity schemas")
     (is (= (digests live) (digests world))
-        "the member's program is its cluster's: the published commit plus the differing rows")
+        "the member's program is its cluster's: the published commit plus the differing entities")
     (is (= base (:seon.source/commit-id
                  (db/pull world [:seon.source/commit-id] [:seon.cluster/name cluster])))
         "the world records the program it was branched from")
@@ -64,4 +64,4 @@
                                (remove (comp program-attributes :a))
                                (map :e))
                      added))
-        "beside program rows and the attempt's two transactions only the cluster, config and process entities are added")))
+        "beside program entities and the attempt's two transactions only the cluster, config and process entities are added")))

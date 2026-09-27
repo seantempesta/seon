@@ -422,7 +422,7 @@
    (fn [connection]
      (let [tx (db/transact!
                connection
-               [(support/namespace-row @connection 'root-walk.required)
+               [(support/namespace-entity @connection 'root-walk.required)
                 (program/declaration-row
                  (db/carried-projection @connection)
                  {:seon.ns/name 'root-walk.subject :seon.ns/source "(ns root-walk.subject)"
@@ -433,7 +433,7 @@
                  {:seon.ns/name 'root-walk.dependent :seon.ns/source "(ns root-walk.dependent)"
                   :seon.ns/requires #{'root-walk.subject}}
                  :all :agent)
-                (support/program-fn-row
+                (support/program-fn-entity
                  (db/db connection) 'root-walk.subject/unrelated
                  "(defn unrelated {:malli/schema [:=> [:cat] :nil]} [] nil)")])
            acquisition

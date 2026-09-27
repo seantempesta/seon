@@ -278,7 +278,7 @@
               :seon.turn.loop/cluster cluster
               :seon.agent/routing (atom {})}
               ;; A fixture renderer is named by its declared subject; the
-              ;; stored run selects its own row schema's pair.
+              ;; stored run selects its own entity schema's pair.
               (= "seon.render-source-test" (namespace producer))
               (assoc :seon.render.call/function (subject-of producer))))
            stored-run (db/pull database '[*] [:seon.turn/id "stored-transcript"])

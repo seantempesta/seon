@@ -21,8 +21,8 @@
   (support/with-database
    (fn [connection]
      ;; The fixture's own cluster. Its turn bound is the agent's own override:
-     ;; the world also carries boot's config row, and the cluster-default read
-     ;; does not select between config rows.
+     ;; the world also carries boot's config entity, and the cluster-default read
+     ;; does not select between config entities.
      (support/seed-cluster! connection "run6-stall" {:seon.config.ai/no-provider true})
      (is (:db-after
           (transact! connection
@@ -75,9 +75,9 @@
                     :seon.render/profile (render/agent-render-profile (support/effective-config))}
            snapshot (fn []
                       (let [unit (assoc request :seon.db/db @connection)
-                            rows (#'transcript/ledger-rows @connection
-                                   (#'transcript/turn-rows @connection "run6-stall") {})
-                            problems (#'transcript/session-problems unit rows {})]
+                            entities (#'transcript/ledger-entities @connection
+                                   (#'transcript/turn-entities @connection "run6-stall") {})
+                            problems (#'transcript/session-problems unit entities {})]
                         {:header (pr-str (transcript/render-agent-header unit))
                          :problems problems
                          :html (#'transcript/problems-html unit problems)}))

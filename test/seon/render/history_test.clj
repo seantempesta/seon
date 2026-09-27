@@ -39,10 +39,10 @@
                                    :seon.message/to
                                    :seon.agent/agent}
                                  :seon.schema/key))
-                   (schema/canonical-schema-rows)))
+                   (schema/canonical-schema-entities)))
      (support/transacted!
              connection
-             (into [(support/namespace-row @connection 'fixture.history)]
+             (into [(support/namespace-entity @connection 'fixture.history)]
                    cat
                    [(support/agent-tx @connection "history-agent" 'fixture.history)
                     [{:seon.message/id "history-message" :seon.message/to [:seon.agent/id "history-agent"] :seon.message/content "Read me."}]]))
@@ -140,10 +140,10 @@
                             :seon.ns/ns
                             :seon.agent/agent}
                           :seon.schema/key))
-            (schema/canonical-schema-rows)))
+            (schema/canonical-schema-entities)))
      (support/transacted!
       connection
-      (into [(support/namespace-row @connection 'fixture.neighbour)]
+      (into [(support/namespace-entity @connection 'fixture.neighbour)]
             cat
             [(support/agent-tx @connection "neighbour-agent" 'fixture.neighbour)]))
      (let [database (db/db connection)

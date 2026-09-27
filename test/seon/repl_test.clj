@@ -136,7 +136,7 @@
 (deftest every-def-says-it-is-not-persisted
   ;; THE CLASS: an agent told nothing keeps defining data it expects to keep.
   ;; Owner, 2026-09-08: every top-level def carries the one note; definers
-  ;; that become program rows carry none.
+  ;; that become program entities carry none.
   (let [emission (fn [source]
                    {:seon.cluster.eval/source source
                     :seon.ns/name 'my.agents.juniper

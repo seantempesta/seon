@@ -832,7 +832,7 @@
      :at event-at
      :content content}))
 
-(defn- generated-rows
+(defn- generated-entities
   [{:keys [source-index event-kind id content]
     event-at :at}]
   (if (contains? message-event-kinds event-kind)
@@ -918,14 +918,14 @@
           (support/with-database
             (fn [connection]
               (let [events (mapv generated-event (range) history)
-                    rows (into (agents-tx connection agent-id peer-id)
-                               (mapcat generated-rows)
+                    entities (into (agents-tx connection agent-id peer-id)
+                               (mapcat generated-entities)
                                events)
                     ;; EVERY GENERATED MESSAGE IS ORDERED BY THIS INSTANT,
                     ;; not by the one its event declared: they all ride this
                     ;; single transaction.
                     message-at (transaction-instant
-                                (support/transacted! connection rows))]
+                                (support/transacted! connection entities))]
                 (let [request (unit connection)
                       ai (transcript/render-ai request)
                       html-value (transcript/render-html request)
@@ -1071,7 +1071,7 @@
                      {:seon.db/db database :seon.agent/id agent-id
                       :seon.boot/cluster-name cluster-name})
             runs (:seon.render.transcript/runs derived)
-            rows (db/pull-many
+            entities (db/pull-many
                   database
                   '[:db/id :seon.turn/id :seon.turn/opened-tx
                     :seon.turn/closed-tx :seon.turn/agent]
@@ -1079,14 +1079,14 @@
                         (:seon.turn/_agent
                          (db/pull database [:seon.turn/_agent]
                                   [:seon.agent/id agent-id]))))
-            html (transcript/render-history-html rows database)]
+            html (transcript/render-history-html entities database)]
         (testing "runs come back newest first"
           (is (= ["history-run-2" "history-run-1" "history-run-0"]
                  (mapv :seon.turn/id runs))))
         (testing "the attribute's own AI projection emits no duplicate bytes"
           ;; The declared `:seon.render/ai` pair deliberately emits nothing,
           ;; so a walk cannot print the same history a second time.
-          (is (= "" (transcript/render-history-ai rows database))))
+          (is (= "" (transcript/render-history-ai entities database))))
         (testing "the HTML projection heads the same turns, newest first"
           (is (= [:h2 "Turns (3)"] (nth html 2)))
           (is (= ["Turn history-run-2" "Turn history-run-1" "Turn history-run-0"]

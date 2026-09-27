@@ -29,14 +29,14 @@
   (test-support/with-database
     (fn [connection]
       (let [forms (schema.edn/packaged-forms)
-            rows (schema/canonical-schema-rows forms)
-            materialized-keys (into #{} (map :seon.schema/key) rows)
-            row-positions
+            entities (schema/canonical-schema-entities forms)
+            materialized-keys (into #{} (map :seon.schema/key) entities)
+            entity-positions
             (into {}
                   (map-indexed
-                   (fn [position row]
-                     [(:seon.schema/key row) position]))
-                  rows)
+                   (fn [position entity]
+                     [(:seon.schema/key entity) position]))
+                  entities)
             computed
             (-> (schema/build-projection forms)
                 :seon.schema.projection/schema-dependencies
@@ -52,10 +52,10 @@
         (is (seq computed)
             "P-SCHEMA-CLOSURE must not pass over an absent graph")
         (is (every? (fn [[source target]]
-                      (< (get row-positions target)
-                         (get row-positions source)))
+                      (< (get entity-positions target)
+                         (get entity-positions source)))
                     computed)
-            "lookup-ref targets must precede their referencing rows")
+            "lookup-ref targets must precede their referencing entities")
         (is (= computed persisted)
             "persisted direct edges must equal the computed projection")))))
 

@@ -115,21 +115,21 @@
          (finally (support/delete-recursively! root)))))))
 
 
-(deftest file-row-selection-follows-declaration-and-finding-refs
+(deftest file-entity-selection-follows-declaration-and-finding-refs
   (support/with-database
    (fn [connection]
      (let [database (db/db connection)
            path "src/my/note.clj"
-           declarations (functions/file-rows database [path] :seon.fn/file)]
+           declarations (functions/file-entities database [path] :seon.fn/file)]
        (is (= #{'my.note/add! 'my.note/forget! 'my.note/notes}
               (into #{} (keep :seon.fn/sym) declarations)))
        (is (every? #(= [:seon.fn.file/relative-path path] (:seon.fn/file %))
                    declarations))
-       (is (empty? (functions/file-rows database ["resources/seon/schemas/seon.fn.edn"]
+       (is (empty? (functions/file-entities database ["resources/seon/schemas/seon.fn.edn"]
                                      :seon.fn/file))
-           "a publication input row alone does not declare an analysis input")
-       (is (empty? (functions/file-rows database [] :seon.lint/file)))
-       (is (empty? (functions/file-rows database ["missing-file.clj"] :seon.fn/file)))))))
+           "a publication input entity alone does not declare an analysis input")
+       (is (empty? (functions/file-entities database [] :seon.lint/file)))
+       (is (empty? (functions/file-entities database ["missing-file.clj"] :seon.fn/file)))))))
 
 (deftest publication-classifies-configuration-and-loaded-dependencies
   (let [pin (apply str (repeat 64 "a"))
@@ -225,13 +225,13 @@
       (spit file "(ns publication.captured)\n(defn value [] 1)\n")
       (let [[digests captured] (source/capture-paths directory [path])]
         (spit file "(ns publication.captured)\n(defn value [] 2)\n")
-        (let [rows (functions/analyze-rows
+        (let [entities (functions/analyze-entities
                     {:seon.fn/root directory :seon.fn/roots ["src"]
                      :seon.fn/changed-paths #{path} :seon.fn.analyzer/sources captured})
-              function (first (filter :seon.fn/sym rows))
-              file-row (first (filter :seon.fn.file/relative-path rows))]
+              function (first (filter :seon.fn/sym entities))
+              file-entity (first (filter :seon.fn.file/relative-path entities))]
           (is (= "(defn value [] 1)" (:seon.fn/source function)))
-          (is (= (get digests path) (:seon.fn.file/digest file-row)))
+          (is (= (get digests path) (:seon.fn.file/digest file-entity)))
           (is (not= digests (source/path-digests directory [path])))))
       (finally (support/delete-recursively! root)))))
 

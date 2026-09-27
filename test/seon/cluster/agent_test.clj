@@ -182,7 +182,7 @@
    :seon.config.error/recurrence-limit 3
    :seon.config.message/max-chain 16}))
 
-(defn- config-row
+(defn- config-entity
   [cluster-name overlay]
   (:seon.config/desired-row
    (config/compile-manifest {:seon.boot/cluster-name cluster-name
@@ -254,12 +254,12 @@
                       :seon.cluster/name cluster-name}))
 
 
-(defn- agent-row
+(defn- agent-entity
   [connection agent-id]
   {:seon.agent/id agent-id
    :seon.agent/branch (live-branch connection)
    :seon.agent/namespace
-   (test-support/namespace-row @connection (symbol (str "my.agents." agent-id)))})
+   (test-support/namespace-entity @connection (symbol (str "my.agents." agent-id)))})
 
 (defn- create-generated-agent!
   [connection cluster-name agent-id]
@@ -439,7 +439,7 @@
             events (database-events connection)
             source "(defn uncontracted [] 42)"
             function-symbol 'my.agents.contract-probe/uncontracted]
-        (test-support/transacted! connection [(config-row "contract-probe" {}) (agent-row connection "contract-probe")])
+        (test-support/transacted! connection [(config-entity "contract-probe" {}) (agent-entity connection "contract-probe")])
         (try
           (arm-one! connection ctx routing "contract-probe" "contract-probe")
           (let [submission
@@ -477,14 +477,14 @@
 
 (deftest a-run-defining-with-an-alias-its-own-ns-form-required-settles
   ;; Issue an-alias-required-by-an-earlier-form-of-a-batch: settlement analyzed
-  ;; the batch against the run's starting namespace row, refused `str/` as an
+  ;; the batch against the run's starting namespace entity, refused `str/` as an
   ;; unanalyzed dependency, and routed that refusal as a panicking core fault
   ;; that could not be stored: the run never closed and the agent stayed busy.
   (with-connection
     (fn [connection ctx]
       (let [routing (armory connection)
             events (database-events connection)]
-        (test-support/transacted! connection [(config-row "alias-batch" {}) (agent-row connection "alias-batch")])
+        (test-support/transacted! connection [(config-entity "alias-batch" {}) (agent-entity connection "alias-batch")])
         (try
           (arm-one! connection ctx routing "alias-batch" "alias-batch")
           (let [submit! (fn [text]
@@ -531,8 +531,8 @@
                       "; Read a second value.\n(identity (+ 1 1))")]
         (test-support/transacted!
                      connection
-                     [(agent-row connection "source-agent")
-                      (config-row "source-submission"
+                     [(agent-entity connection "source-agent")
+                      (config-entity "source-submission"
                                   {:seon.config.run/max-episode-runs 100})])
         (let [cluster-handle
               (assoc (handle connection ctx "source-submission")
@@ -653,9 +653,9 @@
             events (database-events connection)]
         (test-support/transacted!
                      connection
-                     [(assoc (agent-row connection "prompt-refusal-cap")
+                     [(assoc (agent-entity connection "prompt-refusal-cap")
                              :seon.agent/settings {:seon.config.run/max-episode-runs 1})
-                      (config-row "prompt-refusal-cap" {})])
+                      (config-entity "prompt-refusal-cap" {})])
         (try
           (with-redefs [prompt/prompt
                         (fn [& _]
@@ -712,11 +712,11 @@
         (with-provider ledger (constantly "(seon.run/complete \"done\")")
           (fn [provider]
             (test-support/transacted! connection
-                                    (into [(config-row
+                                    (into [(config-entity
                                             "trial"
                                             (merge {:seon.config.run/max-episode-runs 100}
                                                    (provider-config provider)))]
-                                          (map (partial agent-row connection))
+                                          (map (partial agent-entity connection))
                                           agent-ids))
             (try
               (doseq [agent-id agent-ids]
@@ -819,7 +819,7 @@
   (with-connection
     (fn [connection ctx]
       (let [routing (armory connection)]
-        (test-support/transacted! connection [(config-row "agent-a" {}) {:seon.agent/id "agent-a" :seon.agent/branch (live-branch connection)}])
+        (test-support/transacted! connection [(config-entity "agent-a" {}) {:seon.agent/id "agent-a" :seon.agent/branch (live-branch connection)}])
         (try
           (is (false? (agent/fenced? routing "agent-a"))
               "an unarmed agent has no fence")
@@ -846,7 +846,7 @@
   (with-connection
     (fn [connection ctx]
       (let [routing (armory connection)
-            _ (test-support/transacted! connection [(config-row "agent-a" {}) {:seon.agent/id "agent-a" :seon.agent/branch (live-branch connection)}])
+            _ (test-support/transacted! connection [(config-entity "agent-a" {}) {:seon.agent/id "agent-a" :seon.agent/branch (live-branch connection)}])
             entry (arm-one! connection ctx routing "agent-a" "agent-a")
             eid (:seon.agent/eid entry)
             channel (:seon.cluster.wake/channel entry)
@@ -868,7 +868,7 @@
 
 (defn- provider-backstop-config
   [cluster-name turn-completion-backstop-ms]
-  (config-row
+  (config-entity
    cluster-name
    {:seon.config.agent/turn-completion-backstop-ms
     turn-completion-backstop-ms
@@ -1231,7 +1231,7 @@
         (test-support/transacted!
                      connection
                      [{:seon.agent/id agent-id :seon.agent/branch (live-branch connection)}
-                      (config-row
+                      (config-entity
                        "lost-turn-permit"
                        {:seon.config.agent/turn-completion-backstop-ms timeout-ms})])
         (let [cluster (assoc (handle connection ctx "lost-turn-permit")
@@ -1265,12 +1265,12 @@
             timeout-ms 100
             completion (async/chan 1)
             backstop-state (atom nil)
-            ;; the cluster's config row exists before its handle reads
+            ;; the cluster's config entity exists before its handle reads
             ;; `config/effective` of that cluster (4d163db4b)
             _ (test-support/transacted!
                connection
                [{:seon.agent/id agent-id :seon.agent/branch (live-branch connection)}
-                (config-row
+                (config-entity
                  "quiescent-failed-transform"
                  {:seon.config.agent/turn-completion-backstop-ms timeout-ms})])
             cluster (assoc (handle connection ctx "quiescent-failed-transform")
@@ -1339,8 +1339,8 @@
             events (database-events connection)]
         (test-support/transacted!
                      connection
-                     [(agent-row connection agent-id)
-                      (config-row
+                     [(agent-entity connection agent-id)
+                      (config-entity
                        "install-gate-chain"
                        {:seon.config.agent/turn-completion-backstop-ms timeout-ms})
                       {:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "finish generated opening"}])
@@ -1401,13 +1401,13 @@
             (stop-database-events! connection events)
             (disarm-all! routing)))))))
 
-(deftest a-changed-core-row-refuses-by-name-and-every-agent-still-arms
-  ;; Owner ruling 2026-09-23 (AGENTS.md error policy): a core row the program
+(deftest a-changed-core-entity-refuses-by-name-and-every-agent-still-arms
+  ;; Owner ruling 2026-09-23 (AGENTS.md error policy): a core entity the program
   ;; cannot install never throws out of arm!. acquire-context! threw
   ;; "Program acquisition refused." and stopped every agent after it. The
-  ;; changed host-bound row is admitted as `:agent`:
-  ;; only an agent-authored row overrides the loaded program (8cf62cd13).
-  ;; WANTED since be96a64ba/c4dbc48c5: that row refuses by name when called
+  ;; changed host-bound entity is admitted as `:agent`:
+  ;; only an agent-authored entity overrides the loaded program (8cf62cd13).
+  ;; WANTED since be96a64ba/c4dbc48c5: that entity refuses by name when called
   ;; in each agent's context, never the acquisition, so no acquisition fault
   ;; is recorded for it.
   (with-connection
@@ -1422,12 +1422,12 @@
                                 (some #(when (:seon.sci.eval/refused-function (ex-data %)) (ex-data %))
                                       (take-while some? (iterate ex-cause failure))))))]
         (test-support/transacted! connection
-                                  [(config-row "core-fault" {})
-                                   (agent-row connection "fault-a")
-                                   (agent-row connection "fault-b")])
+                                  [(config-entity "core-fault" {})
+                                   (agent-entity connection "fault-a")
+                                   (agent-entity connection "fault-b")])
         (test-support/transacted! connection
                                   [(test-support/revision @connection [:seon.fn/sym subject]
-                                                          {:seon.fn/doc "A changed host-bound row."
+                                                          {:seon.fn/doc "A changed host-bound entity."
                                                            :seon.schema.admission/source :agent})])
         (try
           (let [first-agent (arm-one! connection ctx routing "core-fault" "fault-a")
@@ -1438,7 +1438,7 @@
               (is (= subject
                      (:seon.sci.eval/refused-function
                       (refusal-of (get-in entry [:seon.turn.loop/cluster :seon.sci.eval/agent-ctx]))))
-                  "the changed host-bound row refuses by name when called")))
+                  "the changed host-bound entity refuses by name when called")))
           (finally (disarm-all! routing)))))))
 
 (deftest canonical-agent-handle-supplies-declared-producer-outputs
@@ -1446,7 +1446,7 @@
     (fn [connection ctx]
       (let [routing (armory connection)]
         (test-support/transacted! connection
-                                  [(config-row "declared-agent-inputs" {})])
+                                  [(config-entity "declared-agent-inputs" {})])
         (test-support/transacted! connection
                                   (agent/creation-tx
                                    {:seon.agent/id "declared-agent-inputs"
@@ -1472,8 +1472,8 @@
         (with-provider ledger (constantly "(seon.run/complete \"done\")")
           (fn [provider]
             (test-support/transacted! connection
-                                    [(agent-row connection "parked")
-                                     (config-row "park-2026072812"
+                                    [(agent-entity connection "parked")
+                                     (config-entity "park-2026072812"
                                                  (merge {:seon.config.run/max-episode-runs 100}
                                                         (provider-config provider)))])
             (try
@@ -1522,8 +1522,8 @@
                          "(seon.run/complete \"done\")")
           (fn [provider]
             (test-support/transacted! connection
-                                    [(agent-row connection "pausable")
-                                     (config-row "pause-2026072813"
+                                    [(agent-entity connection "pausable")
+                                     (config-entity "pause-2026072813"
                                                  (merge {:seon.config.run/max-episode-runs 100}
                                                         (provider-config provider)))])
             (try
@@ -1619,9 +1619,9 @@
                      :seon.db.process/id process
                      :seon.turn.work/now (Date.)}]
         (test-support/transacted! connection
-                                [(agent-row connection "alice")
-                                 (agent-row connection "bob")
-                                 (config-row "cap-2026072814"
+                                [(agent-entity connection "alice")
+                                 (agent-entity connection "bob")
+                                 (config-entity "cap-2026072814"
                                              {:seon.config.run/max-episode-runs 3})])
         ;; episode 1: a human asks
         (outside-trigger! connection "alice" "h1" "human asks")
@@ -1692,12 +1692,12 @@
     (fn [connection ctx]
       (let [original @#'seon.turn/step
             routing (armory connection)
-            ;; the cluster's config row exists before its handle reads
+            ;; the cluster's config entity exists before its handle reads
             ;; `config/effective` of that cluster (4d163db4b)
             _ (test-support/transacted!
                connection
                [{:seon.agent/id "reloaded" :seon.agent/branch (live-branch connection)}
-                (config-row "hot-2026072815"
+                (config-entity "hot-2026072815"
                             {:seon.config.run/max-episode-runs 100})])
             base (handle connection ctx "hot-2026072815")
             v2-ran (atom 0)
@@ -1789,9 +1789,9 @@
         (with-provider ledger (constantly "(seon.run/complete \"done\")")
           (fn [provider]
             (test-support/transacted! connection
-                                    [(agent-row connection "midfold")
-                                     (agent-row connection "waiting")
-                                     (config-row "restamp-2026072816"
+                                    [(agent-entity connection "midfold")
+                                     (agent-entity connection "waiting")
+                                     (config-entity "restamp-2026072816"
                                                  (merge {:seon.config.run/max-episode-runs 100}
                                                         (provider-config provider)))])
             ;; the dead process's history: open+claim on an outside
@@ -1893,7 +1893,7 @@
                   ;; suffix HAS its frozen evaluation — the intent transaction
                   ;; made it durable — and recovery settled it with no result
                   ;; and no error, only the interruption stamp. "It never ran"
-                  ;; is the absence of a RESULT, not the absence of the row.
+                  ;; is the absence of a RESULT, not the absence of the entity.
                   (let [suffix (db/q '[:find (pull ?receipt [*]) .
                                        :where
                                        [?run :seon.turn/id "run-dead"]
@@ -1963,7 +1963,7 @@
           ;; The local provider is this trial's provider; its dials also retract
           ;; the machine's no-provider dial, under which no turn reaches it.
           (test-support/transacted! connection
-                                    [(config-row "route-trial"
+                                    [(config-entity "route-trial"
                                                  (merge {:seon.config.run/max-episode-runs 100}
                                                         (provider-config provider)))])
           (let [routing (armory connection)
@@ -2153,8 +2153,8 @@
         (with-provider ledger (constantly "(seon.run/wait \"need input\")")
           (fn [provider]
             (test-support/transacted! connection
-                                    [(agent-row connection "waiter")
-                                     (config-row "wait-2026072820"
+                                    [(agent-entity connection "waiter")
+                                     (config-entity "wait-2026072820"
                                                  (merge {:seon.config.run/max-episode-runs 100}
                                                         (provider-config provider)))])
             (try

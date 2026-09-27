@@ -50,7 +50,7 @@
                       (get-in @(:seon.agent/routing parent) [:seon.agent/children child-branch]))
           "the parent roster records the child's by branch")
       (is (not (identical? parent-connection (held-connection child "custody-parent")))
-          "an inherited row never reaches the parent's held connection")
+          "an inherited entity never reaches the parent's held connection")
       (created! child-connection "custody-child")
       (is (= child-branch (recorded-branch child-connection "custody-child")))
       (let [held (held-connection child "custody-child")]
@@ -71,14 +71,14 @@
         connection (:seon.db/connection child)
         namespace-name (symbol (str "custody.poison-" tag))
         member #(symbol (str namespace-name) %)]
-    (support/transacted! connection [(support/namespace-row (db/db connection) namespace-name)])
+    (support/transacted! connection [(support/namespace-entity (db/db connection) namespace-name)])
     (support/transacted! connection (agent/creation-tx {:seon.agent/id (str "poison-" tag)
                                                         :seon.ns/name namespace-name
                                                         :seon.cluster/name (:seon.cluster/name parent)}))
     (support/transacted! connection
-                         [(support/program-fn-row (db/db connection) (member "bad")
+                         [(support/program-fn-entity (db/db connection) (member "bad")
                                                   "(defn ^{:malli/schema [:=> [:cat :int] :int]} bad [x] (missing-dependency x))")
-                          (support/program-fn-row (db/db connection) (member "good")
+                          (support/program-fn-entity (db/db connection) (member "good")
                                                   "(defn ^{:malli/schema [:=> [:cat :int] :int]} good [x] (inc x))")])
     {:child child :bad (member "bad") :good (member "good") :agent-id (str "poison-" tag)}))
 
@@ -96,7 +96,7 @@
 (deftest ^{:seon.test/long "Measured 6,555 ms (root run 16b466ddab78, 2026-09-25): two isolated child acquisitions with their fixture writes (about 0.8 s and 0.9 s each at the REPL) and two program acquisitions (0.7-1.3 s each)."
            :seon.test/long-ms 10000}
   an-acquisition-records-its-refusal-on-the-acquired-branch-under-another-custody
-  ;; Astra de1075aa3 finding 1: recording an un-installable row is the acquired
+  ;; Astra de1075aa3 finding 1: recording an un-installable entity is the acquired
   ;; branch's own write, whether acquisition enters through the agent entrance or
   ;; through a lazy first invocation, and whoever's custody the caller holds.
   (let [parent (support/execution-handle db/*conn*)

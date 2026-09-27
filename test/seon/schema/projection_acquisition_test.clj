@@ -8,7 +8,7 @@
             [seon.schema.datahike :as bridge]
             [seon.test-support :as support]))
 
-(deftest sorted-declarations-and-indexed-rows-preserve-registry-identities
+(deftest sorted-declarations-and-indexed-entities-preserve-registry-identities
   (support/with-database
     (fn [connection]
       (let [indexed (db/carried-projection (db/db connection))
@@ -36,7 +36,7 @@
 
 (deftest ^{:seon.test/long "Compares indexed acquisition with the original whole-population Datalog joins on the canonical fixture."
            :seon.test/long-ms 10000}
-  indexed-projection-rows-preserve-the-query-result
+  indexed-projection-entities-preserve-the-query-result
   (support/with-database
     (fn [connection]
       (let [database (db/db connection)]
@@ -52,7 +52,7 @@
                 expected (d/q query database identity-attribute value-attribute)]
             (is (seq expected))
             (is (= expected
-                   (set (#'schema/projection-rows database identity-attribute
+                   (set (#'schema/projection-entities database identity-attribute
                                                    value-attribute identity-tx?))))))
         (is (= (into {}
                      (map (fn [[attribute identity source]]

@@ -79,7 +79,7 @@
                   [:or [:vector :seon.fn/sym] :seon.test/unknown-error]]}
   [database test-symbol]
   (try
-    (let [rows (db/q '[:find ?selected ?basis
+    (let [entities (db/q '[:find ?selected ?basis
                        :in $ ?symbol ?branch
                        :where [?member :seon.test.member/symbol ?symbol]
                               [?member :seon.test.member/completed-tx]
@@ -95,9 +95,9 @@
                               (not [?run :seon.test.run/published-base-digest])]
                      database test-symbol
                      (get-in (db/schema-database database) [:config :branch]))]
-      (if (:seon.error/at rows)
-        (unknown test-symbol (:seon.error/message rows))
-        (if-let [[_ basis] (last (sort-by first rows))]
+      (if (:seon.error/at entities)
+        (unknown test-symbol (:seon.error/message entities))
+        (if-let [[_ basis] (last (sort-by first entities))]
           (let [tested (db/as-of database basis)
                 before (runner/reach-memberships tested [test-symbol])
                 after (runner/reach-memberships database [test-symbol])
@@ -369,21 +369,21 @@
   {:malli/schema [:=> [:cat :seon.db/database-value]
                   [:or [:map-of :seon.fn/sym :seon.fn/destroys] :seon.error/value]]}
   [database]
-  (let [rows (db/q '[:find ?sym ?destroys
+  (let [entities (db/q '[:find ?sym ?destroys
                      :where
                      [?function :seon.fn/destroys ?destroys]
                      [?function :seon.fn/sym ?sym]]
                    database)]
     (cond
-      (and (map? rows) (contains? rows :seon.error/at) (contains? rows :seon.error/layer) (contains? rows :seon.error/operation)) rows
-      (empty? rows)
+      (and (map? entities) (contains? entities :seon.error/at) (contains? entities :seon.error/layer) (contains? entities :seon.error/operation)) entities
+      (empty? entities)
       (unknown :seon.fn/destroys
                (str "No function in this program declares :seon.fn/destroys, "
                     "so an in-process run cannot tell whether a test deletes a "
                     "filesystem path it did not create. Republish the program "
                     "(bin/seon init --dev default), or declare the attribute "
                     "in the owner's own metadata at its definition."))
-      :else (into {} rows))))
+      :else (into {} entities))))
 
 (defn- destructive-reach
   "Every test symbol whose reach includes a destructive owner, mapped to it.
@@ -494,12 +494,12 @@
   (let [owners (destroyers database)]
     (if (and (map? owners) (contains? owners :seon.error/at) (contains? owners :seon.error/layer) (contains? owners :seon.error/operation))
       owners
-      (let [row (db/pull database [:db/id] [:seon.test/sym test-symbol])]
+      (let [entity (db/pull database [:db/id] [:seon.test/sym test-symbol])]
         (cond
-          (and (map? row) (contains? row :seon.error/at) (contains? row :seon.error/layer) (contains? row :seon.error/operation)) row
-          (nil? (:db/id row))
+          (and (map? entity) (contains? entity :seon.error/at) (contains? entity :seon.error/layer) (contains? entity :seon.error/operation)) entity
+          (nil? (:db/id entity))
           (unknown test-symbol
-                   (str "No program row declares the test " test-symbol
+                   (str "No program entity declares the test " test-symbol
                         ", so its call graph is unknown and where it runs "
                         "cannot be derived. Publish the program "
                         "(bin/seon init --dev default --changed <file>) and "
@@ -719,12 +719,12 @@
   (try
     (if-not cluster
       (selection-refusal database :seon.test/cluster-required "Selection requires explicit cluster custody." :absent)
-      (let [cluster-row (when cluster (selection-read! (db/pull database [:db/id :seon.cluster/name] cluster)))
-            cluster-id (:db/id cluster-row)
+      (let [cluster-entity (when cluster (selection-read! (db/pull database [:db/id :seon.cluster/name] cluster)))
+            cluster-id (:db/id cluster-entity)
             refuse! (fn [kind message observed]
                       (let [refusal (selection-refusal database kind message observed)]
                         (throw (ex-info message refusal))))
-            _ (when (and cluster (not (:seon.cluster/name cluster-row)))
+            _ (when (and cluster (not (:seon.cluster/name cluster-entity)))
                 (refuse! :seon.test/cluster-unavailable "The requested cluster is absent." cluster))
             branch (if cluster (get-in (db/schema-database database) [:config :branch]) :current-src)
             basis-t (db/basis-t database)
@@ -895,8 +895,8 @@
                               :seon.schema.admission/source :seon.program/analyzed-source-digest
                               :seon.test/fixture :seon.test/fixture-observation
                               :seon.test/long :seon.test/platform])
-            related-ids (into #{} (mapcat (fn [row]
-                                           (concat (:seon.test/ns row) (:seon.fn/file row))))
+            related-ids (into #{} (mapcat (fn [entity-map]
+                                           (concat (:seon.test/ns entity-map) (:seon.fn/file entity-map))))
                               (vals candidate-data))
             candidate-data (merge candidate-data
                                   (selection-facts database (vec related-ids)
@@ -957,7 +957,7 @@
                                         (not (excluded? [test-symbol entity])) (one entity :seon.test/long))
                                {:seon.test/sym test-symbol :seon.test/long (one entity :seon.test/long)
                                 :seon.test/command (if cluster
-                                                    ["bin/test-check" (:seon.cluster/name cluster-row)
+                                                    ["bin/test-check" (:seon.cluster/name cluster-entity)
                                                      "--test" (str test-symbol)]
                                                     ["bin/test" "--full"])}))) tests)
             reasons (reduce-kv
@@ -981,8 +981,8 @@
                                               (= input-digest (one % :seon.test.run/input-digest))
                                               (one % :seon.test.run/selection-tx)) run-ids)))
             ;; Recorded evidence was earned by the program its JVM loaded. When
-            ;; the JVM loaded source the cluster's program rows do not describe
-            ;; (a restart from changed files, before adoption), the rows cannot
+            ;; the JVM loaded source the cluster's program entities do not describe
+            ;; (a restart from changed files, before adoption), the entities cannot
             ;; vouch for what executes: unknown, so nothing is reused.
             ;; The adopted commit whose loaded, armed definitions agree with
             ;; its record (`seon.sci.eval/loaded-identity`): base provenance.
@@ -1052,7 +1052,7 @@
           (seq namespaces) (assoc :seon.test.run/namespaces namespaces)
           (seq identities) (assoc :seon.test.run/identities identities)
           loaded-drift? (assoc :seon.test/loaded-source-drift
-                               ;; Rows that record no source commit are absent,
+                               ;; Entities that record no source commit are absent,
                                ;; never a nil commit id.
                                (cond-> {:seon.test/loaded-source (:seon.test/loaded-source request)}
                                  recorded (assoc :seon.source/commit-id recorded))))))
@@ -1138,31 +1138,31 @@
                (contains? ids :seon.error/layer)
                (contains? ids :seon.error/operation))
       (throw (ex-info (:seon.error/message ids) ids)))
-    (mapv #(let [row (db/pull database
+    (mapv #(let [entity (db/pull database
                              [:db/id :seon.test.member/symbol :seon.test.member/reasons] %)]
-             (when (or (and (map? row)
-                            (contains? row :seon.error/at)
-                            (contains? row :seon.error/layer)
-                            (contains? row :seon.error/operation))
-                       (not (:seon.test.member/symbol row))
-                       (not (seq (:seon.test.member/reasons row))))
+             (when (or (and (map? entity)
+                            (contains? entity :seon.error/at)
+                            (contains? entity :seon.error/layer)
+                            (contains? entity :seon.error/operation))
+                       (not (:seon.test.member/symbol entity))
+                       (not (seq (:seon.test.member/reasons entity))))
                (admission-refusal! :seon.test/population-unknown run-id
-                                   :admitted-member (or row :seon.error/unknown)))
-             row)
+                                   :admitted-member (or entity :seon.error/unknown)))
+             entity)
           ids)))
 
 (defn- admission-scope
   {:malli/schema [:=> [:cat [:map-of :keyword :seon.schema/value]] [:map-of :keyword :seon.schema/value]]}
-  [row]
-  (cond-> (-> (select-keys row [:seon.test.run/cluster :seon.test.run/program-digest
+  [entity]
+  (cond-> (-> (select-keys entity [:seon.test.run/cluster :seon.test.run/program-digest
                        :seon.test.run/published-base-digest :seon.test.run/overlay-input-digest
                        :seon.test.run/input-digest :seon.test.run/branch
                        :seon.test.run/tested-branch :seon.test.run/change-basis-t
                        :seon.test.run/policy :seon.test.run/include-long?])
-      (assoc :seon.test.run/namespaces (set (:seon.test.run/namespaces row))
-             :seon.test.run/identities (set (:seon.test.run/identities row))))
-    (= :named (:seon.test.run/policy row))
-    (assoc :seon.test.run/basis-t (:seon.test.run/basis-t row))))
+      (assoc :seon.test.run/namespaces (set (:seon.test.run/namespaces entity))
+             :seon.test.run/identities (set (:seon.test.run/identities entity))))
+    (= :named (:seon.test.run/policy entity))
+    (assoc :seon.test.run/basis-t (:seon.test.run/basis-t entity))))
 
 (defn- admission-member-values
   {:malli/schema [:=> [:cat [:sequential [:map-of :keyword :seon.schema/value]]] [:set [:map-of :keyword :seon.schema/value]]]}
@@ -1195,15 +1195,15 @@
         snapshot? (some? (:seon.test.run/published-base-digest run))
         ;; Its commit is the adopted program agreeing with its record
         ;; (`seon.sci.eval/loaded-identity`), read here at the writer.
-        cluster-row (when cluster (db/pull database [:db/id :seon.cluster/name :seon.source/commit-id] cluster))
-        cluster-id (:db/id cluster-row)
+        cluster-entity (when cluster (db/pull database [:db/id :seon.cluster/name :seon.source/commit-id] cluster))
+        cluster-id (:db/id cluster-entity)
         branch (get-in (db/schema-database database) [:config :branch])
         ;; The writer's value has no commit id, so the digest memo cannot name it;
         ;; with no program write since the tested basis its digest is the tested one.
         digest (if (or snapshot? (false? (runner/program-written-since? database (:seon.test.run/basis-t run))))
                  (:seon.test.run/program-digest run)
                  (runner/program-digest database))
-        row (-> (merge (select-keys request
+        entity (-> (merge (select-keys request
                                    [:seon.test.run/cluster :seon.test.run/input-digest
                                     :seon.test.run/policy :seon.test.run/include-long?
                                     :seon.test.run/deadline
@@ -1217,25 +1217,25 @@
                                      :seon.test.run/callers-at-head
                                      :seon.test.run/branch :seon.test.run/tested-branch]))
                 (cond-> cluster-id (assoc :seon.test.run/cluster cluster-id)
-                  (:seon.source/commit-id cluster-row)
-                  (assoc :seon.test.run/loaded-commit-id (:seon.source/commit-id cluster-row))))
+                  (:seon.source/commit-id cluster-entity)
+                  (assoc :seon.test.run/loaded-commit-id (:seon.source/commit-id cluster-entity))))
         selector (into [:db/id :seon.test.run/selection-tx
                         [:seon.test.run/callers-at-head :limit nil]
                         [:seon.test.run/namespaces :limit nil]
                         [:seon.test.run/exclusions :limit nil]
                         [:seon.test.run/identities :limit nil]]
-                       (keys (dissoc row :seon.test.run/members
+                       (keys (dissoc entity :seon.test.run/members
                                      :seon.test.run/namespaces :seon.test.run/identities
                                      :seon.test.run/callers-at-head
                                      :seon.test.run/exclusions)))
         previous (db/pull database selector [:seon.test.run/id run-id])]
-    (doseq [read-result [cluster-row previous]]
+    (doseq [read-result [cluster-entity previous]]
       (when (and (map? read-result)
                  (contains? read-result :seon.error/at)
                  (contains? read-result :seon.error/layer)
                  (contains? read-result :seon.error/operation))
         (throw (ex-info (:seon.error/message read-result) read-result))))
-    (when-not (or snapshot? (:seon.cluster/name cluster-row))
+    (when-not (or snapshot? (:seon.cluster/name cluster-entity))
       (admission-refusal! :seon.test/cluster-unavailable run-id
                           :explicit-authority-cluster cluster))
     (when (and (not snapshot?) (or (not= branch (:seon.test.run/branch run))
@@ -1260,7 +1260,7 @@
                  (:seon.test.run/basis-t run))))
       (admission-refusal! :seon.test/invalid-basis run-id
                           (db/basis-t database)
-                          (select-keys row [:seon.test.run/basis-t
+                          (select-keys entity [:seon.test.run/basis-t
                                             :seon.test.run/change-basis-t])))
     (when-not snapshot?
     (let [inputs (selection-read!
@@ -1287,17 +1287,17 @@
                            (cond-> (:seon.test.run/callers-at-head %)
                              (update :seon.test.run/callers-at-head set))
                            (update :seon.test.run/exclusions
-                                   (fn [rows] (set (map (fn [row] (dissoc row :db/id)) rows))))
+                                   (fn [entities] (set (map (fn [entity] (dissoc entity :db/id)) entities))))
                            (dissoc :seon.test.run/namespaces :seon.test.run/identities)
                            (merge (select-keys (admission-scope %)
                                               [:seon.test.run/namespaces
                                                :seon.test.run/identities])))]
         (when (or (not (:seon.test.run/selection-tx previous))
-                  (not= (normalize row) (normalize prior))
+                  (not= (normalize entity) (normalize prior))
                   (not= (admission-member-values requested-members)
                         (admission-member-values
                          (admission-members database (:db/id previous)))))
-          (admission-refusal! :seon.test.run/immutable run-id row prior))
+          (admission-refusal! :seon.test.run/immutable run-id entity prior))
         [])
       (let [runs (if snapshot?
                    (db/q '[:find [?run ...] :in $ ?base ?overlay ?digest ?basis
@@ -1313,7 +1313,7 @@
                                 [?run :seon.test.run/program-digest ?digest]
                                 [?run :seon.test.run/input-digest ?inputs]
                                 [?run :seon.test.run/selection-tx]]
-                       database cluster-id digest (:seon.test.run/input-digest row)))
+                       database cluster-id digest (:seon.test.run/input-digest entity)))
             _ (when (and (map? runs)
                          (contains? runs :seon.error/at)
                          (contains? runs :seon.error/layer)
@@ -1371,29 +1371,29 @@
             existing
             (into {}
                   (keep (fn [[run-eid member-eid test-symbol]]
-                          (let [member-row (selection-read!
+                          (let [member-entity (selection-read!
                                      (db/pull database [:db/id :seon.test.member/symbol
                                                         :seon.test.member/reasons
                                                         :seon.test.member/completed-tx
                                                         :seon.test.member/terminated-tx]
                                               member-eid))]
-                            (when (if (:seon.test.member/completed-tx member-row)
+                            (when (if (:seon.test.member/completed-tx member-entity)
                                     ;; A body not observed to exit holds its test
                                     ;; in every scope.
-                                    (not (:seon.test.member/terminated-tx member-row))
+                                    (not (:seon.test.member/terminated-tx member-entity))
                                     ;; An admitted, unstarted member covers an
                                     ;; identical concurrent request; a stopped
                                     ;; run is no longer concurrent.
                                     (and (not (:seon.test.run/stopped
                                                (selection-read! (db/pull database [:seon.test.run/stopped] run-eid))))
-                                         (= (admission-scope row) (scope-of run-eid))))
-                              [test-symbol (select-keys member-row [:db/id :seon.test.member/symbol
+                                         (= (admission-scope entity) (scope-of run-eid))))
+                              [test-symbol (select-keys member-entity [:db/id :seon.test.member/symbol
                                                              :seon.test.member/reasons])]))))
                   (sort-by first > candidates))
             covered (keep #(get existing (:seon.test.member/symbol %)) members)
             coverage (into (set (:seon.test.run/covered-by request)) (map :db/id) covered)
             reserved (remove #(get existing (:seon.test.member/symbol %)) members)]
-        [(cond-> (assoc row :seon.test.run/selection-tx "datomic.tx")
+        [(cond-> (assoc entity :seon.test.run/selection-tx "datomic.tx")
            (seq reserved) (assoc :seon.test.run/members (vec reserved))
            (seq coverage) (assoc :seon.test.run/covered-by coverage))]))))
 
@@ -1483,7 +1483,7 @@
                    :seon.error/offending observed
                    :seon.error/data {:seon.test.run/basis-t (db/basis-t database)}
           :seon.test/error-test-symbol test-symbol} :seon.test/resolution-refusal kind))
-        row (db/pull database
+        entity (db/pull database
                      '[:db/id :seon.test/source :seon.schema.admission/source
                        :seon.program/analyzed-source-digest :seon.fn/file
                        {:seon.test/ns [:seon.ns/name]}]
@@ -1492,27 +1492,27 @@
         ;; The acquisition owner answers whether this context holds the tested
         ;; program (same value, or equal program revisions at another commit).
         acquired? (sci.eval/acquired-database? ctx database)
-        source (:seon.test/source row)
-        admission (:seon.schema.admission/source row)]
+        source (:seon.test/source entity)
+        admission (:seon.schema.admission/source entity)]
     (cond
-      (and (map? row) (contains? row :seon.error/at) (contains? row :seon.error/layer) (contains? row :seon.error/operation)) row
-      (not (:db/id row))
-      (refuse :seon.test/identity-unresolved "The admitted test has no current row." test-symbol)
+      (and (map? entity) (contains? entity :seon.error/at) (contains? entity :seon.error/layer) (contains? entity :seon.error/operation)) entity
+      (not (:db/id entity))
+      (refuse :seon.test/identity-unresolved "The admitted test has no current entity." test-symbol)
       (or (not (string? source))
           (not= (symbol (namespace test-symbol))
-                (get-in row [:seon.test/ns :seon.ns/name]))
+                (get-in entity [:seon.test/ns :seon.ns/name]))
           ;; Analysis covers the resolver context, not just declaration text.
           ;; Acquired program equality below verifies the complete admitted facts.
-          (nil? (:seon.program/analyzed-source-digest row)))
-      (refuse :seon.test/provenance-unknown "The test lacks matching source, namespace or analysis evidence." row)
+          (nil? (:seon.program/analyzed-source-digest entity)))
+      (refuse :seon.test/provenance-unknown "The test lacks matching source, namespace or analysis evidence." entity)
       (not acquired?)
       (refuse :seon.test/program-mismatch "The SCI context did not acquire the tested program."
               {:seon.source/commit-id (db/commit-id database)
                :seon.test/acquired-commit-id (some-> (:seon.db/db acquired) db/commit-id)})
       (seq (:seon.test/acquisition-refusals acquired))
       (first (:seon.test/acquisition-refusals acquired))
-      (not (or (= :agent admission) (and (= :core admission) (:seon.fn/file row))))
-      (refuse :seon.test/provenance-unknown "The test has no executable admission provenance." row)
+      (not (or (= :agent admission) (and (= :core admission) (:seon.fn/file entity))))
+      (refuse :seon.test/provenance-unknown "The test has no executable admission provenance." entity)
       :else
       (try
         (let [test-var (schema/call-with-projection
@@ -1620,12 +1620,12 @@
                       (if (:seon.error/at found) found (into {} found))))
         [held offered :as maps] (mapv by-digest [world candidate])
         named (fn [database digests other]
-                (let [rows (db/pull-many database families
+                (let [entities (db/pull-many database families
                                          (into [] (keep (fn [[digest e]] (when-not (get other digest) e)))
                                                digests))]
-                  (if (:seon.error/at rows) rows
-                      (into #{} (mapcat (fn [row] (keep #(when-some [v (get row %)] [% v]) families)))
-                            rows))))
+                  (if (:seon.error/at entities) entities
+                      (into #{} (mapcat (fn [entity] (keep #(when-some [v (get entity %)] [% v]) families)))
+                            entities))))
         present (when-not (some :seon.error/at maps) (named candidate offered held))
         changed (when (set? present) (named world held offered))]
     (cond (some :seon.error/at maps) (some #(when (:seon.error/at %) %) maps)
@@ -1652,41 +1652,41 @@
         [present changed] (when (vector? differences) differences)
         ;; Attributes the candidate installed that the world lacks (an agent's
         ;; or fixture's new schema): schema-on-write needs them installed before
-        ;; a carried row or a member writes them. Sub-millisecond on 2,452.
+        ;; a carried entity or a member writes them. Sub-millisecond on 2,452.
         attributes (into [] (keep (fn [[attribute declaration]]
                                     (when (and (qualified-keyword? attribute)
                                                (not (get (:schema world) attribute)))
                                       declaration)))
                          (sort-by key (filter (comp keyword? key) (:schema candidate))))
         ;; Only the program partition carries over: another writer's fact on
-        ;; a row (a namespace's steward agent) names data the world lacks.
+        ;; an entity (a namespace's steward agent) names data the world lacks.
         others #(let [program (program/program-attributes (db/carried-projection candidate))]
                   (into #{} (remove (fn [a] (or (program a) (= "db" (namespace a)))))
                         (filter qualified-keyword? (keys (:schema candidate)))))
-        read-rows #(functions/published-index-rows candidate (vec (sort %)) (others))
+        read-entities #(functions/published-index-entities candidate (vec (sort %)) (others))
         identity? (set (db/identity-attributes world))
         ;; Any identity the transaction names by lookup that neither the world
-        ;; nor the transaction's rows hold: a recomputed row (a file) a carried
-        ;; row names travels with it; the world keeps its own file rows.
-        missing (fn [tx rows]
-                  (let [created (into #{} (map program/row-identity) rows)]
+        ;; nor the transaction's entities hold: a recomputed entity (a file) a carried
+        ;; entity names travels with it; the world keeps its own file entities.
+        missing (fn [tx entities]
+                  (let [created (into #{} (map program/row-identity) entities)]
                     (into #{} (filter #(and (vector? %) (not (map-entry? %)) (= 2 (count %)) (identity? (first %))
                                             (not (created %))
                                             (nil? (db/q '[:find ?e . :in $ ?a ?v :where [?e ?a ?v]]
                                                         world (first %) (second %)))))
                           (tree-seq coll? seq tx))))
         overlay (fn [extra]
-                  (let [rows (read-rows (into present extra))
-                        tx (if (:seon.error/at rows) rows
-                               (functions/reconcile-tx world rows (vec (sort (into present changed)))))]
-                    [rows tx]))]
+                  (let [entities (read-entities (into present extra))
+                        tx (if (:seon.error/at entities) entities
+                               (functions/reconcile-tx world entities (vec (sort (into present changed)))))]
+                    [entities tx]))]
     (cond
       (:seon.error/at differences) differences
       (empty? (into present changed)) attributes
       :else
       (loop [extra #{}]
-        (let [[rows tx] (overlay extra)
-              absent (when (vector? tx) (missing tx rows))]
+        (let [[entities tx] (overlay extra)
+              absent (when (vector? tx) (missing tx entities))]
           (cond
             (not (vector? tx)) tx
             (empty? absent) (into attributes tx)
@@ -1838,7 +1838,7 @@
   (let [store (or (:seon.store/store execution) (:seon.store/store (env/of execution)))
         base (world-base recording cluster)
         candidate (db/db (:seon.db/connection execution))
-        ;; Branching shares the base's entity ids, so rows reconciled against
+        ;; Branching shares the base's entity ids, so entities reconciled against
         ;; the base apply unchanged on its checkpoint's descendants.
         overlay (program-overlay-tx (source/database store base) candidate)
         _ (when (:seon.error/at overlay) (throw (world-refusal "program overlay read" overlay)))
@@ -2195,7 +2195,7 @@
          #(instrument/apply!
            (cond-> {:seon.sci.admit/caps (config/result-caps effective)
                     :seon.schema/projection projection
-                    ;; The request's supplied-default rows the contracts plan from.
+                    ;; The request's supplied-default entities the contracts plan from.
                     :seon.db/db database
                     :seon.instrument/changed-identities (into #{} (map (fn [sym] [:seon.fn/sym sym])) interns)}
              evidence-bytes (assoc :seon.config.error/max-evidence-bytes evidence-bytes)
@@ -2305,7 +2305,7 @@
             since @sci.eval/loaded-identity
             reach (when (seq runnable) (runner/reach-digests database runnable))
             provenance (:seon.test.run/provenance selection)
-            exclusion-rows
+            exclusion-entities
             (when runnable
               (vec (concat
                     (for [entry (:seon.test/long-excluded selection)]
@@ -2365,15 +2365,15 @@
                 admit! (fn [index members]
                          (let [batch-provenance (cond-> provenance
                                                   (pos? index) (assoc :seon.test.run/id (id/id)))
-                               row (cond-> (assoc selection
+                               entity (cond-> (assoc selection
                                                   :seon.test.run/provenance batch-provenance
                                                   :seon.test.run/members
                                                   (filterv #((set members) (:seon.test.member/symbol %))
                                                            (:seon.test.run/members selection)))
-                                     (and (zero? index) (seq exclusion-rows))
-                                     (assoc :seon.test.run/exclusions exclusion-rows)
+                                     (and (zero? index) (seq exclusion-entities))
+                                     (assoc :seon.test.run/exclusions exclusion-entities)
                                      (pos? index) (dissoc :seon.test.run/covered-by))
-                               report (own-write! `admit-run (write! recording [[:db.fn/call admit-run row]]))]
+                               report (own-write! `admit-run (write! recording [[:db.fn/call admit-run entity]]))]
                            (if (:seon.error/at report)
                              report
                              {::provenance batch-provenance
@@ -2389,7 +2389,7 @@
                                                     (:seon.test.run/id batch-provenance)))})))
                 ;; Every request, a cluster's or an isolated attempt's, branches
                 ;; from its loaded program with boot's facts and its execution's
-                ;; differing program rows, never from its operational data. It is
+                ;; differing program entities, never from its operational data. It is
                 ;; built by the first admitted batch: a refused admission builds none.
                 held-handle (volatile! nil)
                 request-handle! #(or @held-handle
@@ -2595,7 +2595,7 @@
                              (:seon.agent/branch entry) ": " (:seon.test/failure-message entry))))
            (when-let [drift (:seon.test/loaded-source-drift result)]
              (str "\nno reuse: source " (:seon.test/loaded-source drift)
-                  " is published but not yet adopted; the cluster's program rows record "
+                  " is published but not yet adopted; the cluster's program entities record "
                   (or (:seon.source/commit-id drift) "no source commit")
                   " (adopt the files to reuse recorded evidence)"))
            (when-let [pending (seq (:seon.test/pending result))]

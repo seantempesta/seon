@@ -79,10 +79,10 @@
             :seon.cluster.eval/id "run-1-receipt-0"}
            {:seon.cluster.eval/read-evidence evidence}))
         elapsed-ms (/ (- (System/nanoTime) started) 1000000.0)
-        rows (:seon.cluster.eval/read-evidence (first tx-data))]
-    (is (= 1024 (count rows)))
+        entities (:seon.cluster.eval/read-evidence (first tx-data))]
+    (is (= 1024 (count entities)))
     (is (= "seon.cluster.eval/read-evidence/run-1-receipt-0/1023"
-           (:db/id (last rows))))
+           (:db/id (last entities))))
     (is (< elapsed-ms 200.0)
         (str "read-evidence transaction projection took " elapsed-ms " ms"))))
 
@@ -115,7 +115,7 @@
         :seon.ai.model/last-latency-ms 200
         :seon.ai/usage {"completion_tokens" 20}}
        now)
-      (let [model (ai/model-row @connection "deepseek-flash")]
+      (let [model (ai/model-entity @connection "deepseek-flash")]
         (is (= now (:seon.ai.model/last-used-at model)))
         (is (= 200 (:seon.ai.model/last-latency-ms model)))
         (is (= 100.0 (:seon.ai.model/last-tokens-per-second model)))
@@ -143,7 +143,7 @@
                        :seon.ns/name starting-ns
                        :seon.cluster/name cluster-name}))
         ;; An ending namespace is an observed symbol value. Resuming a fold
-        ;; does not require a fabricated namespace row.
+        ;; does not require a fabricated namespace entity.
         (test-support/transacted!
                      connection
                      (turn/open-tx {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}))
@@ -243,7 +243,7 @@
                    (get-in evaluation
                            [:seon.program/row :seon.fn/sym])))))))))
 
-(deftest two-agents-resolve-one-config-row-with-ordinary-inheritance
+(deftest two-agents-resolve-one-config-entity-with-ordinary-inheritance
   (test-support/with-database
     (fn [connection]
       (let [cluster-name "settings-resolution"]
@@ -374,7 +374,7 @@
            (is (= :error (:seon.turn.loop/outcome report)))
            (is (inst? (test-support/turn-closed-at @connection run-id)))
            (is (empty? (settings-attempts @connection))
-               "no model attempt row: the provider boundary was never crossed")
+               "no model attempt entity: the provider boundary was never crossed")
            (is (= (:seon.error/message refusal)
                   (:seon.error/message capture)))
            (is (int? (:seon.context.capture/basis-t capture)))
@@ -432,7 +432,7 @@
            overlays (atom [])
            overlay-values (atom [])
            requests (atom [])
-           ;; ONE APPLY. `config/apply!` EXACT-reconciles the desired row, so the
+           ;; ONE APPLY. `config/apply!` EXACT-reconciles the desired entity, so the
            ;; overlay applied first and `seed-cluster!`'s empty manifest second
            ;; left the shipped models behind — the call then read
            ;; "deepseek-flash", not "before-apply". The cluster is seeded WITH its
@@ -528,20 +528,20 @@
                   agent's settings changed mid-flight, and this equality is
                   what rules that out"))
             (let [first-settings (first @resolutions)
-                  first-rows (settings-attempts @connection)]
-              (is (= 2 (count first-rows)))
+                  first-entities (settings-attempts @connection)]
+              (is (= 2 (count first-entities)))
               (is (every? #(= first-settings
                               (edn/read-string
                                (:seon.ai.attempt/settings-edn %)))
-                          first-rows))
+                          first-entities))
               (is (= "stop" (:seon.ai.attempt/finish-reason
-                              (second first-rows))))
+                              (second first-entities))))
               (is (= {"completion_tokens_details" {"reasoning_tokens" 7}}
                      (edn/read-string
-                      (:seon.ai.attempt/usage-edn (second first-rows)))))
+                      (:seon.ai.attempt/usage-edn (second first-entities)))))
               (is (not (contains?
                         (edn/read-string
-                         (:seon.ai.attempt/usage-edn (second first-rows)))
+                         (:seon.ai.attempt/usage-edn (second first-entities)))
                         :seon.ai/settings))
                   "settings are beside usage, never inside it"))
 
@@ -570,12 +570,12 @@
               (is (= :high (:seon.ai/thinking (last @requests))))
               (is (apply = @overlay-values)
                   "the second run's own three reads still settle on one value")
-              (let [last-row (last (settings-attempts @connection))]
-                (is (= "after-apply" (:seon.ai/model last-row)))
+              (let [last-entity (last (settings-attempts @connection))]
+                (is (= "after-apply" (:seon.ai/model last-entity)))
                 (is (= "after-apply"
                        (:seon.config.ai/model
                         (edn/read-string
-                         (:seon.ai.attempt/settings-edn last-row))))))))))))))
+                         (:seon.ai.attempt/settings-edn last-entity))))))))))))))
 
 ;;; THE class regression for the self-feeding fault loop (2026-08-08 live
 ;;; drive). Delivery is the wake attribute, so any message a refused phase
@@ -717,7 +717,7 @@
             terminal-data (private-loop-fn 'evaluation-terminal-data)]
         (test-support/transacted!
                      connection
-                     (into [(test-support/namespace-row @connection 'my.agents.undisposed-agent)]
+                     (into [(test-support/namespace-entity @connection 'my.agents.undisposed-agent)]
                            cat
                            [(test-support/agent-tx @connection agent-id 'my.agents.undisposed-agent)
                             [{:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "prove the contract"}]]))
@@ -747,7 +747,7 @@
               (terminal-data
                {:seon.turn.loop/cluster
                 (test-support/cluster-handle
-                 ;; The world's own cluster: a second cluster row would make
+                 ;; The world's own cluster: a second cluster entity would make
                  ;; the world name no single cluster for its readers.
                  {:seon.env/environment (test-support/environment (:seon.cluster/name (test-support/execution-handle connection)) connection)
                   :seon.db/connection connection
@@ -823,7 +823,7 @@
 ;;; These two tests are the recurring surface for that class. The subset
 ;;; assertion is cheap and states the invariant; the transact-against-a
 ;;; -boot-built-database test is the one with teeth, because it uses the
-;;; SAME derivation boot uses and then writes the rows the turn writes.
+;;; SAME derivation boot uses and then writes the entities the turn writes.
 ;;; ---------------------------------------------------------------------------
 
 (deftest everything-the-loop-writes-is-installable-by-boot
@@ -851,7 +851,7 @@
                       :seon.boot/cluster-name "loop-test"})
       (test-support/transacted! connection
                               (into (test-support/agent-tx @connection "agent-a")
-                                [(test-support/namespace-row @connection 'user)
+                                [(test-support/namespace-entity @connection 'user)
                                
                                  {:seon.message/id "m-1" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "go"}]))
       (body connection))))
@@ -859,8 +859,8 @@
 (defn- commit-run! [connection {:keys [planned? receipts closed? completed?]}]
   ;; OPEN THROUGH THE WRITER. Since ae0e54841 the agent's open turn is read
   ;; through its runtime component (seon.turn/open-for-agent), and only
-  ;; `open-call` writes that edge — an authored {:seon.turn/id …} row leaves
-  ;; `agent-run` nil, so every row of this table derived `:open`.
+  ;; `open-call` writes that edge — an authored {:seon.turn/id …} entity leaves
+  ;; `agent-run` nil, so every entity of this table derived `:open`.
   (test-support/transacted!
    connection
    (turn/open-tx {:seon.turn/id "run-1"

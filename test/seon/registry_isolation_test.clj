@@ -39,11 +39,11 @@
                   :seon.boot/cluster-name cluster-name})
   ;; Fixture writes go through `transacted!` (custody of the connection it
   ;; names; a nested `with-database` otherwise wrote into the other world's
-  ;; branch, f46f9d461), the schema as its canonical digested row
-  ;; (`schema-rows`) and the program row through the production analyzer
+  ;; branch, f46f9d461), the schema as its canonical digested entity
+  ;; (`schema-entities`) and the program entity through the production analyzer
   ;; (`replacement-tx`): `:seon.fn/sym` is a symbol since 0e8f7d323, and a
-  ;; hand-written spec on a stored row fails the writer's digest check.
-  (support/transacted! connection (support/schema-rows @connection [[schema-key definition]]))
+  ;; hand-written spec on a stored entity fails the writer's digest check.
+  (support/transacted! connection (support/schema-entities @connection [[schema-key definition]]))
   (support/transacted!
    connection
    (support/replacement-tx
@@ -90,7 +90,7 @@
           ;; every production Var without its supplied-default plan. One wrapper
           ;; per adoption (`seon.instrument/arm-var!`): a call never re-selects
           ;; another projection, so the cluster armed last governs host calls
-          ;; and the other cluster's rows interpret in SCI. RETIRED: one host
+          ;; and the other cluster's entities interpret in SCI. RETIRED: one host
           ;; wrapper validating each call against the projection it carried.
           (let [arm! (fn [projection]
                        (instrument/apply!

@@ -30,7 +30,7 @@
 
 (set! *warn-on-reflection* true)
 
-(def ^:private rows-per-agent 3)
+(def ^:private entities-per-agent 3)
 (def ^:private form-count 6)
 (def ^:private test-git-sha (apply str (repeat 40 "a")))
 (def ^:private scenario-sizes [5 5 5 10 10 10])
@@ -100,20 +100,20 @@
         (symbol (str "my.agents.concurrency." scenario ".a" index))
         run-id (str "stress-" scenario "-run-" index)
         function-name (symbol (str "stress-f-" scenario "-" index))
-        row-ids (mapv #(str "stress-" scenario "-row-" index "-" %)
-                      (range rows-per-agent))
-        rows (mapv (fn [row-id]
-                     {:seon.test.run/id row-id
+        entity-ids (mapv #(str "stress-" scenario "-row-" index "-" %)
+                      (range entities-per-agent))
+        entities (mapv (fn [entity-id]
+                     {:seon.test.run/id entity-id
                       :seon.test.run/at now
                       :seon.test.run/git-sha test-git-sha})
-                   row-ids)]
+                   entity-ids)]
     {::agent-id agent-id
      ::namespace namespace-name
      ::run-id run-id
      ::function-name function-name
      ::function-qualified (str namespace-name "/" function-name)
-     ::row-ids row-ids
-     ::rows rows}))
+     ::row-ids entity-ids
+     ::rows entities}))
 
 (defn- plan-sources
   [spec]
@@ -121,16 +121,16 @@
         agent-id (::agent-id spec)
         next-agent-id (::next-agent-id spec)
         function-name (::function-name spec)
-        row-ids (::row-ids spec)
-        row-transaction
+        entity-ids (::row-ids spec)
+        entity-transaction
         {:tx-data (::rows spec)
          :tx-meta {:seon.db/user [:seon.agent/id agent-id]}}
         sources
-        [(str "(seon.db/transact! " (pr-str row-transaction) ")")
+        [(str "(seon.db/transact! " (pr-str entity-transaction) ")")
          (str "(seon.db/q "
               "'[:find [?id ...] :in $ [?id ...] "
               ":where [_ :seon.test.run/id ?id]] "
-              (pr-str row-ids) ")")
+              (pr-str entity-ids) ")")
          (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
               function-name " [x] (+ x " (+ 1000 (::index spec)) "))")
          (str "(" function-name " 1)")
@@ -295,7 +295,7 @@
        (when (= (set run-ids) (set closed))
          closed)))))
 
-(defn- receipt-rows
+(defn- receipt-entities
   [database run-ids]
   (db/q '[:find ?receipt-id ?run-id ?agent-id ?ordinal
           :in $ [?run-id ...]
@@ -334,7 +334,7 @@
 (defn- assert-receipts!
   [database specs]
   (let [run-ids (mapv ::run-id specs)
-        actual (set (receipt-rows database run-ids))
+        actual (set (receipt-entities database run-ids))
         expected
         (into #{}
               (mapcat
@@ -361,35 +361,35 @@
       (is (= (::run-id spec) (:seon.turn/id turn)))
       (is (inst? (test-support/turn-closed-at database (::run-id spec)))))))
 
-(defn- assert-owned-rows!
+(defn- assert-owned-entities!
   [database specs]
-  (let [row-ids (into [] (mapcat ::row-ids) specs)
+  (let [entity-ids (into [] (mapcat ::row-ids) specs)
         actual
-        (db/q '[:find ?row-id ?agent-id
-                :in $ [?row-id ...]
+        (db/q '[:find ?entity-id ?agent-id
+                :in $ [?entity-id ...]
                 :where
-                [?row :seon.test.run/id ?row-id ?tx true]
+                [?entity :seon.test.run/id ?entity-id ?tx true]
                 [?tx :seon.db/user ?agent ?tx true]
                 [?agent :seon.agent/id ?agent-id]]
-              (db/history database) row-ids)
+              (db/history database) entity-ids)
         expected
         (into #{}
               (mapcat (fn [spec]
-                        (map (fn [row-id]
-                               [row-id (::agent-id spec)])
+                        (map (fn [entity-id]
+                               [entity-id (::agent-id spec)])
                              (::row-ids spec))))
               specs)]
     (is (= expected (set actual))
-        "every committed stress row carries its owning agent as tx provenance")
-    (is (= (* rows-per-agent (count specs)) (count actual))
+        "every committed stress entity carries its owning agent as tx provenance")
+    (is (= (* entities-per-agent (count specs)) (count actual))
         "the one writer lost none of the concurrent agent transactions")))
 
-(defn- assert-rows!
+(defn- assert-entities!
   [database specs]
   (doseq [spec specs]
     (let [definition-source
           (:seon.cluster.eval/source (nth (::sources spec) 2))
-          row
+          entity
           (db/pull database
                    [:seon.fn/sym
                     :seon.fn/source
@@ -397,12 +397,12 @@
                     :seon.schema.admission/source
                     {:seon.fn/ns [:seon.ns/name]}]
                    [:seon.fn/sym (::function-qualified spec)])]
-      (is (= (::function-qualified spec) (:seon.fn/sym row)))
+      (is (= (::function-qualified spec) (:seon.fn/sym entity)))
       (is (= (::namespace spec)
-             (get-in row [:seon.fn/ns :seon.ns/name])))
-      (is (= definition-source (:seon.fn/source row)))
-      (is (= :agent (:seon.schema.admission/source row)))
-      (is (string? (:seon.fn/spec row))
+             (get-in entity [:seon.fn/ns :seon.ns/name])))
+      (is (= definition-source (:seon.fn/source entity)))
+      (is (= :agent (:seon.schema.admission/source entity)))
+      (is (string? (:seon.fn/spec entity))
           "the durable function retained its declared contract"))))
 
 (defn- ring-facts
@@ -488,9 +488,9 @@
       (doseq [foreign foreign-specs]
         (is (not (str/includes? rendered (::function-qualified foreign)))
             "another agent's contracted definition never enters this transcript")
-        (doseq [row-id (::row-ids foreign)]
-          (is (not (str/includes? rendered row-id))
-              "another agent's committed rows never enter this transcript"))
+        (doseq [entity-id (::row-ids foreign)]
+          (is (not (str/includes? rendered entity-id))
+              "another agent's committed entities never enter this transcript"))
         (when-not (contains? #{(::agent-id spec) (::agent-id incoming)}
                              (::agent-id foreign))
           (is (not (str/includes? rendered (::payload foreign)))
@@ -513,7 +513,7 @@
             completion (db/pull database [:seon.turn/disposition :seon.turn/result]
                                 [:seon.turn/id (::run-id spec)])]
         (is (every? #(str/includes? (str query-shown) (pr-str %)) (::row-ids spec))
-            "each agent queried the rows it had just committed")
+            "each agent queried the entities it had just committed")
         (is (= (str (+ 1001 (::index spec))) call-shown)
             "the contracted function call used this agent's own definition")
         (is (= {:seon.turn/disposition :completed
@@ -563,8 +563,8 @@
       (testing (str scenario " with N=" agent-count)
         (assert-receipts! database specs)
         (assert-closed! database specs)
-        (assert-owned-rows! database specs)
-        (assert-rows! database specs)
+        (assert-owned-entities! database specs)
+        (assert-entities! database specs)
         (assert-ring! database specs)
         (assert-transcripts! instance database specs)
         (assert-plan-results! database specs))

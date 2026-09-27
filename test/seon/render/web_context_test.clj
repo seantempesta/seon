@@ -197,7 +197,7 @@
   ;; re-derived the page. Every retained call on the root page reads named
   ;; attributes. Two wait: faults (`seon.error/for-agent`,
   ;; tmp/shrink-web-opus/error-faults-bounded.patch) and settings, whose
-  ;; `config/effective` pulls the config row with `[*]`
+  ;; `config/effective` pulls the config entity with `[*]`
   ;; (tmp/shrink-web-opus/config-bounded-dials.patch: 73 -> 310 µs a read).
   (#'web-test/with-server
    (fn [_connection server context]
@@ -226,7 +226,7 @@
          (fn []
            (let [ordinary (#'web-test/fetch server "/agent/root/debug")]
              (is (= 200 (.statusCode ordinary)))
-             (is (= 1 @calls) "The ledger acquires current history once for saved rows and byte totals.")
+             (is (= 1 @calls) "The ledger acquires current history once for saved entities and byte totals.")
              (is (str/includes? (.body ordinary) "Turn ledger"))
              (is (str/includes? (.body ordinary) "Record")))
            (let [explicit (#'web-test/fetch server "/agent/root/debug?prompt=true")]

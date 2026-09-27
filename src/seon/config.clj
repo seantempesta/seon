@@ -33,7 +33,7 @@
   "config/default.edn")
 
 (def initialization-key
-  "The reserved shipped-default key carrying desired initialization rows."
+  "The reserved shipped-default key carrying desired initialization entities."
   :seon.config/initialization)
 
 (def managing-process-identity
@@ -247,42 +247,42 @@
        nil)))
     declared))
 
-(defn- row-identity
-  [projection row]
+(defn- entity-identity
+  [projection entity]
   (let [identities
         (into []
               (comp
                (filter #(schema/identity-attr? projection %))
-               (map (fn [attribute] [attribute (get row attribute)])))
-              (keys row))]
+               (map (fn [attribute] [attribute (get entity attribute)])))
+              (keys entity))]
     (when (= 1 (count identities))
       (first identities))))
 
-(defn- admit-initialization-rows
+(defn- admit-initialization-entities
   [projection population]
   (let [forms (:seon.schema.projection/forms projection)
         database-attributes (set (schema/canonical-database-attributes projection))]
     (mapv
-     (fn [row]
-       (when-not (map? row)
+     (fn [entity]
+       (when-not (map? entity)
          (refuse!
        (vary-meta {:seon.error/at (java.util.Date.)
          :seon.error/layer :seon.config/compile
-         :seon.error/operation 'seon.config/admit-initialization-rows
+         :seon.error/operation 'seon.config/admit-initialization-entities
          :seon.error/message "Configuration requires an initialization entity map."
          :seon.config/error-key :seon.config/initialization
          :seon.config/rule ::invalid-initialization-row
          :seon.error/expected-key :seon.config/initialization
-         :seon.error/offending row
+         :seon.error/offending entity
          :seon.error/expected "an initialization entity map"} assoc :seon.error/declared-schema :seon.config/error)
        nil))
-       (doseq [[attribute value] row]
+       (doseq [[attribute value] entity]
          (cond
            (not (qualified-keyword? attribute))
            (refuse!
        (vary-meta {:seon.error/at (java.util.Date.)
          :seon.error/layer :seon.config/compile
-         :seon.error/operation 'seon.config/admit-initialization-rows
+         :seon.error/operation 'seon.config/admit-initialization-entities
          :seon.error/message "Configuration requires qualified attribute keys."
          :seon.config/error-key :seon.config/initialization
          :seon.config/rule ::invalid-initialization-attribute
@@ -296,7 +296,7 @@
            (refuse!
        (vary-meta {:seon.error/at (java.util.Date.)
          :seon.error/layer :seon.config/compile
-         :seon.error/operation 'seon.config/admit-initialization-rows
+         :seon.error/operation 'seon.config/admit-initialization-entities
          :seon.error/message "Configuration requires declared database attributes."
          :seon.config/error-key attribute
          :seon.config/rule ::unknown-initialization-attribute
@@ -310,7 +310,7 @@
            (refuse!
        (vary-meta {:seon.error/at (java.util.Date.)
          :seon.error/layer :seon.config/compile
-         :seon.error/operation 'seon.config/admit-initialization-rows
+         :seon.error/operation 'seon.config/admit-initialization-entities
          :seon.error/message "Configuration requires values satisfying their declared attribute schemas."
          :seon.config/error-key attribute
          :seon.config/rule ::invalid-initialization-value
@@ -321,24 +321,24 @@
                      ((schema/projection-explainer projection attribute) value)}
          :seon.error/expected "values satisfying their declared attribute schemas"} assoc :seon.error/declared-schema :seon.config/error)
        nil)))
-       (when-not (row-identity projection row)
+       (when-not (entity-identity projection entity)
          (refuse!
        (vary-meta {:seon.error/at (java.util.Date.)
          :seon.error/layer :seon.config/compile
-         :seon.error/operation 'seon.config/admit-initialization-rows
+         :seon.error/operation 'seon.config/admit-initialization-entities
          :seon.error/message "Configuration requires an installed entity identity attribute."
          :seon.config/error-key :seon.config/initialization
          :seon.config/rule ::invalid-initialization-identity
          :seon.error/expected-key :seon.config/initialization
-         :seon.error/offending row
+         :seon.error/offending entity
          :seon.error/data {::explanation
                    {:seon.config/identity-attributes
                     (into []
                           (filter #(schema/identity-attr? projection %))
-                          (keys row))}}
+                          (keys entity))}}
          :seon.error/expected "an installed entity identity attribute"} assoc :seon.error/declared-schema :seon.config/error)
        nil))
-       row)
+       entity)
      population)))
 
 (defn- admit-initialization
@@ -356,7 +356,7 @@
          :seon.error/data {::explanation {:seon.config/expected :vector-of-maps}}
          :seon.error/expected "a vector of initialization entity maps"} assoc :seon.error/declared-schema :seon.config/error)
        nil))
-  (admit-initialization-rows projection population))
+  (admit-initialization-entities projection population))
 
 (defn- default-document
   []
@@ -379,7 +379,7 @@
   (schema/declaration-projection (schema.edn/packaged-forms)))
 
 (defn default-population
-  "Read and admit the shipped initialization entity rows."
+  "Read and admit the shipped initialization entity entities."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   []
   (let [projection (declared-projection)]
@@ -541,7 +541,7 @@
        :seon.config/resolved-attributes (set (keys decisions))})))
 
 (defn compile-manifest
-  "Compile settings and a desired row for the explicitly named cluster."
+  "Compile settings and a desired entity for the explicitly named cluster."
   {:malli/schema
    [:=> [:cat :seon.config/compile-request] :seon.config/compiled]}
   [request]
@@ -563,7 +563,7 @@
           projection (declared-projection)
           initialization (admit-initialization projection (get document initialization-key []))
           compiled (compile-settings projection document request)
-          ;; The row records which dials a layer above the shipped defaults
+          ;; The entity records which dials a layer above the shipped defaults
           ;; decided, so a later apply can hold them underneath its own keys.
           overlay-keys (into #{} (filter (dial-attributes projection))
                              (keys (merge (:seon.config/manifest request)
@@ -589,7 +589,7 @@
 
 (defn- population-transaction-data
   [projection database desired]
-  (let [identities (mapv #(row-identity projection %) desired)
+  (let [identities (mapv #(entity-identity projection %) desired)
         entity-ids
         (into {}
               (map
@@ -622,8 +622,8 @@
             entity-id
             value))]
     (mapv
-     (fn [row]
-       (into {:db/id (get entity-ids (row-identity projection row))}
+     (fn [entity]
+       (into {:db/id (get entity-ids (entity-identity projection entity))}
              (map
               (fn [[attribute value]]
                 (let [attribute-schema (get-in database [:schema attribute])]
@@ -634,20 +634,20 @@
                        (into (empty value) (map ref-value) value)
                        (ref-value value))
                      value)])))
-             row))
+             entity))
      desired)))
 
 (defn require-functions!
   "Refuse every manifest symbol lacking a current program function, in one query."
   {:malli/schema [:=> [:cat :seon.db/database-value [:vector :map]] :nil]}
-  [database rows]
+  [database entities]
   (letfn [(references [attribute value]
             (cond
               (qualified-symbol? value) [[attribute value]]
               (map? value) (mapcat (fn [[key child]] (references (if (qualified-keyword? key) key attribute) child)) value)
               (coll? value) (mapcat #(references attribute %) value)
               :else []))]
-    (let [named (vec (distinct (mapcat #(references :seon.config/initialization %) rows)))
+    (let [named (vec (distinct (mapcat #(references :seon.config/initialization %) entities)))
           missing (db/q '[:find ?key ?symbol
                           :in $ [[?key ?symbol]]
                           :where (not-join [?symbol] [_ :seon.fn/sym ?symbol])]
@@ -660,7 +660,7 @@
            (vary-meta {:seon.error/at (java.util.Date.)
              :seon.error/layer :seon.config/compile
              :seon.error/operation 'seon.config/require-functions!
-             :seon.error/message (str "Configuration names functions with no program row: " (pr-str missing))
+             :seon.error/message (str "Configuration names functions with no program entity: " (pr-str missing))
              :seon.config/error-key (ffirst missing)
              :seon.config/rule ::missing-function
              :seon.error/expected-key :seon.fn/sym
@@ -678,9 +678,9 @@
   [database desired request]
   (require-functions! database desired)
   (let [tx-data (reconcile/plan database request)
-        rows (filterv map? tx-data)
-        replacements (zipmap rows (population-transaction-data
-                                   (db/carried-projection database) database rows))]
+        entities (filterv map? tx-data)
+        replacements (zipmap entities (population-transaction-data
+                                   (db/carried-projection database) database entities))]
     (mapv #(get replacements % %) tx-data)))
 
 (defn- hold-retired-attributes
@@ -694,20 +694,20 @@
   own declarations may still require it."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection [:vector :map]]
                   [:vector :map]]}
-  [database projection rows]
+  [database projection entities]
   (let [declared (schema.edn/packaged-forms)]
-    (mapv (fn [row]
-            (let [identity (row-identity projection row)
+    (mapv (fn [entity]
+            (let [identity (entity-identity projection entity)
                   current (when identity (db/pull database '[*] identity))]
               (when (:seon.db/invalid-read current)
                 (throw (ex-info (str (:seon.error/message current)) current)))
-              (into row
+              (into entity
                     (remove (fn [[attribute _]]
                               (or (= :db/id attribute) (contains? declared attribute))))
                     current)))
-          rows)))
+          entities)))
 
-(defn- accrete-row-attributes!
+(defn- accrete-entity-attributes!
   "Install each attribute the desired rows name that the branch has not installed.
 
   Rows compile from the checkout's declarations, but boot writes them onto a
@@ -717,12 +717,12 @@
   compiled from and transacted before the row. Adoption later installs the
   declaration row itself; a converged branch pays one schema lookup per key."
   {:malli/schema [:=> [:cat :seon.db/connection [:vector :map]] :nil]}
-  [connection rows]
+  [connection entities]
   (let [installed (:schema (db/db connection))
         missing (into (sorted-set)
                       (comp (mapcat keys) (filter qualified-keyword?)
                             (remove #(contains? installed %)))
-                      rows)]
+                      entities)]
     (when (seq missing)
       (let [projection (declared-projection)
             result (db/transact!
@@ -734,12 +734,12 @@
   nil)
 
 (defn apply-compiled!
-  "Exact-reconcile one already-compiled desired config row."
+  "Exact-reconcile one already-compiled desired config entity."
   {:malli/schema
    [:=> [:cat :seon.db/connection :seon.config/compiled]
     :seon.reconcile/result]}
   [connection compiled]
-  (accrete-row-attributes! connection (into [(:seon.config/desired-row compiled)]
+  (accrete-entity-attributes! connection (into [(:seon.config/desired-row compiled)]
                                            (:seon.config/initialization compiled)))
   (let [database (db/db connection)
         projection (or (db/carried-projection database)
@@ -752,11 +752,11 @@
          database projection
          (into [(:seon.config/desired-row compiled)]
                (:seon.config/initialization compiled)))
-        desired-identities (into #{} (keep #(row-identity projection %)) desired)
-        ;; A config row another cluster's required `:seon.cluster/config`
+        desired-identities (into #{} (keep #(entity-identity projection %)) desired)
+        ;; A config entity another cluster's required `:seon.cluster/config`
         ;; names is that cluster's: retracting it would invalidate its
         ;; referrer, so reconciliation never manages it, whichever process
-        ;; wrote it. An inherited row no cluster owns is reconciled away.
+        ;; wrote it. An inherited entity no cluster owns is reconciled away.
         owned-config-identities
         (into #{}
               (comp (map (fn [cluster-name] [:seon.config/cluster cluster-name]))
@@ -782,7 +782,7 @@
                  ::reconcile/adopt-identities identities}
           (seq owned-config-identities)
           (assoc ::reconcile/retain-identities owned-config-identities))
-        ;; Both config dials and initialization rows are compared as facts.
+        ;; Both config dials and initialization entities are compared as facts.
         operations (count (reconcile/plan database request))
         result
         (if (zero? operations)
@@ -814,11 +814,11 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.boot/cluster-name]
                   :seon.config/manifest]}
   [database cluster-name]
-  (let [row (db/pull database '[*] [:seon.config/cluster cluster-name])]
-    (when (:seon.db/invalid-read row)
-      (throw (ex-info (str (:seon.error/message row)) row)))
-    (into {} (map (fn [config-key] [config-key (get row config-key absent)]))
-          (:seon.config/overlay-keys row))))
+  (let [entity (db/pull database '[*] [:seon.config/cluster cluster-name])]
+    (when (:seon.db/invalid-read entity)
+      (throw (ex-info (str (:seon.error/message entity)) entity)))
+    (into {} (map (fn [config-key] [config-key (get entity config-key absent)]))
+          (:seon.config/overlay-keys entity))))
 
 (defn apply!
   "Compile once and exact-reconcile the one desired config row.
@@ -888,18 +888,18 @@
          :seon.boot/cluster-name :seon.schema/projection :seon.schema/projection]
     [:or :seon.config/effective :seon.config/error :seon.db/invalid-read-error]]}
   [db cluster-name projection declared]
-  (let [row (db/pull db '[*] [:seon.config/cluster cluster-name])]
-    ;; A refused read is not an absent row. Reading the refusal's own keys as
-    ;; the config row reports every dial missing and blames the facts; the
+  (let [entity (db/pull db '[*] [:seon.config/cluster cluster-name])]
+    ;; A refused read is not an absent entity. Reading the refusal's own keys as
+    ;; the config entity reports every dial missing and blames the facts; the
     ;; cause here is the read, so return the read's refusal unchanged.
-    (if (:seon.db/invalid-read row)
-      row
+    (if (:seon.db/invalid-read entity)
+      entity
       (let [required (required-dial-attributes declared)
             config-effective
             (merge (select-keys (registration-defaults declared) required)
-                   (select-keys row (into (dial-attributes declared) (dial-attributes projection))))
+                   (select-keys entity (into (dial-attributes declared) (dial-attributes projection))))
             missing (vec (sort (set/difference required (set (keys config-effective)))))]
-        (if (and row (empty? missing))
+        (if (and entity (empty? missing))
           config-effective
           (let [available
                   (db/q '[:find [?available ...]
@@ -912,5 +912,5 @@
              {:seon.config/error-key :seon.config/cluster
               :seon.error/expected-key :seon.config/effective
               :seon.config/missing-effective cluster-name
-              :seon.error/message "Effective configuration requires a matching cluster row with every required dial."
+              :seon.error/message "Effective configuration requires a matching cluster entity with every required dial."
               :seon.error/data {::missing missing ::available (vec (sort available))}}) assoc :seon.error/declared-schema :seon.config/error))))))))

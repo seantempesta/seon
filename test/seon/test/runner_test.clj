@@ -139,12 +139,12 @@
         (is (not (str/includes? (str output) "enclosing gate"))))
       (finally (remove-ns namespace-name)))))
 
-(deftest a-namespace-declared-long-reaches-every-test-row
+(deftest a-namespace-declared-long-reaches-every-test-entity
   ;; A namespace of real-boot drills declares the cost ONCE on its ns form
   ;; (seon.cluster.armed-test, concurrency-streams, program-restart, …). The
   ;; Var-side reader inherited that; the static indexer read only the deftest
   ;; Var, so a published base answered NOT-LONG for twelve real drills and
-  ;; the row-reading checker refused every cold gate. One rule now serves both
+  ;; the entity-reading checker refused every cold gate. One rule now serves both
   ;; seams: seon.program/test-markers, deftest winning per attribute.
   (let [root (doto (io/file "tmp" (str "ns-long-" (id/id))) .mkdirs)
         file (io/file root "declarations.clj")
@@ -159,19 +159,19 @@
                  "(deftest inherits (is true))\n"
                  "(deftest ^{:seon.test/long " (pr-str own-reason)
                  "} overrides (is true))\n"))
-      (let [rows (:seon.fn.file/rows
+      (let [entities (:seon.fn.file/rows
                   (program-fn/build-artifact
                    {:seon.fn/source-path (str file)
                     :seon.fn.file/first-party-functions []}))
-            by-symbol (into {} (keep (fn [row]
-                                       (when-let [s (:seon.test/sym row)]
-                                         [s row])))
-                            rows)]
+            by-symbol (into {} (keep (fn [entity]
+                                       (when-let [s (:seon.test/sym entity)]
+                                         [s entity])))
+                            entities)]
         (is (= 2 (count by-symbol)) (pr-str (keys by-symbol)))
         (is (= {:seon.test/long namespace-reason :seon.test/long-ms 600000}
                (select-keys (get by-symbol (symbol (str namespace-name) "inherits"))
                             [:seon.test/long :seon.test/long-ms]))
-            "a namespace-declared long reaches the row of a test that declares nothing")
+            "a namespace-declared long reaches the entity of a test that declares nothing")
         (is (= {:seon.test/long own-reason :seon.test/long-ms 600000}
                (select-keys (get by-symbol (symbol (str namespace-name) "overrides"))
                             [:seon.test/long :seon.test/long-ms]))
@@ -227,10 +227,10 @@
                     :seon.db/basis-t (db/basis-t (db/db connection))}))
 
 (defn- declare-schema-key!
-  "Commit one synthetic declaration the way the canonical rows express it."
+  "Commit one synthetic declaration the way the canonical entities express it."
   [connection schema-key]
   (test-support/transacted!
-   connection (schema/canonical-schema-rows {schema-key :string})))
+   connection (schema/canonical-schema-entities {schema-key :string})))
 
 (defn- retract-schema-key!
   "Retract the synthetic declaration; its past remains in history."
@@ -262,20 +262,20 @@
           (retract-schema-key! connection retracted)
           (declare-schema-key! connection added)
           (let [report (runner/restore-live-cluster-schema! before)
-                row (first report)
+                entity (first report)
                 forms (:seon.schema.projection/forms (:seon.schema/projection @state))]
             (is (= 1 (count report)) (pr-str report))
-            (is (= "restore-probe" (:seon.cluster/name row)))
+            (is (= "restore-probe" (:seon.cluster/name entity)))
             (is (not (contains? forms retracted))
                 "the declaration its own writer retracted STAYS retracted")
             (is (contains? forms added)
                 "and the one its writer added is in the projection the cluster now holds")
-            (is (= [(str retracted)] (:seon.test.runner/committed-removed row))
+            (is (= [(str retracted)] (:seon.test.runner/committed-removed entity))
                 "the retraction is named a committed change, by key")
-            (is (= [(str added)] (:seon.test.runner/committed-added row))
+            (is (= [(str added)] (:seon.test.runner/committed-added entity))
                 "so is the addition")
-            (is (nil? (:seon.test.runner/drift-added row)))
-            (is (nil? (:seon.test.runner/drift-removed row)))
+            (is (nil? (:seon.test.runner/drift-added entity)))
+            (is (nil? (:seon.test.runner/drift-removed entity)))
             (is (empty? (runner/schema-restore-drift report))
                 "a committed change is the writer doing its job, never a test error")))))))
 
@@ -295,11 +295,11 @@
         (swap! state update-in [:seon.schema/projection :seon.schema.projection/forms]
                assoc leaked [:string {:seon.db/identity true}])
         (let [report (runner/restore-live-cluster-schema! before)
-              row (first report)]
+              entity (first report)]
           (is (= 1 (count report)) (pr-str report))
-          (is (= [(str leaked)] (:seon.test.runner/drift-added row))
+          (is (= [(str leaked)] (:seon.test.runner/drift-added entity))
               "the leaked key is named, not merely counted")
-          (is (nil? (:seon.test.runner/committed-removed row)))
+          (is (nil? (:seon.test.runner/committed-removed entity)))
           (is (not (contains? (:seon.schema.projection/forms
                                (:seon.schema/projection @state))
                               leaked))

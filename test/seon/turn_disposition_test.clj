@@ -14,7 +14,7 @@
 (deftest a-refused-disposition-settles-through-resume
   (support/with-database
    (fn [connection]
-     ;; The executing branch's own root agent and its program namespace row.
+     ;; The executing branch's own root agent and its program namespace entity.
      (let [namespace-name (get-in (db/pull @connection
                                            [{:seon.agent/namespace [:seon.ns/name]}]
                                            [:seon.agent/id "root"])

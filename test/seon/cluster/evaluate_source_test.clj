@@ -71,7 +71,7 @@
                    (shown connection (agent/evaluate-source! (assoc request :seon.cluster.reply/text "(str *ns*)"
                                                                     :seon.turn/starting-ns [:seon.ns/name 'seon.id]))))
                 "a requested starting namespace is where the run starts (85b459845: no starting-namespace refusal)"))
-          (testing "a defn then a require in one run settles: its row digests against the namespace row the run stores"
+          (testing "a defn then a require in one run settles: its entity digests against the namespace entity the run stores"
             (let [namespace-name (str "my.agents." agent-id)
                   defn-source "(defn run-inc \"Adds one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))"
                   settled (fn [sources]
@@ -154,7 +154,7 @@
               (is (not-any? :seon.cluster.eval/error
                             (drive/run-receipts (:seon.db/db result) [(:seon.turn/id result)])))))
           (testing "a form's own durable write opens its run first, so its provenance names a written evaluation"
-            ;; Under one commit per form the run's rows were written only at
+            ;; Under one commit per form the run's entities were written only at
             ;; settlement, and every write a form made refused "Nothing found
             ;; for entity id [:seon.cluster.eval/id ...]" (task c9e0cde3edb3).
             (let [note-id (str "one-commit-note-" (id/id))

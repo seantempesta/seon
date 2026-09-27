@@ -86,24 +86,24 @@
   Only `:seon.fn/sym` rows are consumers. A test that reads a dial proves the
   dial is exercised, never that anything in the running system applies it, so
   `:seon.test/sym` rows are deliberately excluded."
-  [rows attributes]
+  [entities attributes]
   (reduce
-   (fn [consumers row]
-     (if-let [function-symbol (:seon.fn/sym row)]
+   (fn [consumers entity]
+     (if-let [function-symbol (:seon.fn/sym entity)]
        (reduce (fn [consumers used]
                  (cond-> consumers
                    (contains? attributes used)
                    (update used (fnil conj (sorted-set)) function-symbol)))
                consumers
-               (:seon.fn/keywords row))
+               (:seon.fn/keywords entity))
        consumers))
    {}
-   rows))
+   entities))
 
 (defn- unapplied-attributes
   "Dials lacking a literal reader or a declared request/environment route."
-  [rows forms attributes]
-  (let [literal (set (keys (consumers-by-attribute rows attributes)))
+  [entities forms attributes]
+  (let [literal (set (keys (consumers-by-attribute entities attributes)))
         request-routes (set (keys (ai/request-attributes (seon.schema/build-projection forms))))
         environment-routes
         (into #{} (keep (fn [[attribute definition]]
@@ -112,7 +112,7 @@
                             attribute))) forms)]
     (set/difference attributes literal request-routes environment-routes)))
 
-(defn- running-system-rows
+(defn- running-system-entities
   "The function rows of the running system's source — `src` and the operator
   script — each with the keywords it reads.
 
@@ -144,23 +144,23 @@
       (let [forms (:seon.schema.projection/forms
                    (schema/projection-from-database @connection))
             registered (config/dial-attributes (seon.schema/build-projection forms))
-            rows (running-system-rows (db/db connection))]
+            entities (running-system-entities (db/db connection))]
         (is (seq registered) "The canonical dial population must be present.")
-        (is (= #{} (unapplied-attributes rows forms registered))
+        (is (= #{} (unapplied-attributes entities forms registered))
             "Each admitted dial has a literal consumer or a declared application route.")))))
 
 (deftest an-unread-config-attribute-is-detected-as-a-dead-dial
   (let [attributes #{:seon.config.sample/applied :seon.config.orphan/dial}
-        rows [{:seon.fn/sym "sample.consumer/apply-setting"
+        entities [{:seon.fn/sym "sample.consumer/apply-setting"
                :seon.fn/keywords [:seon.config.sample/applied
                                   :sample.consumer/unrelated]}
               {:seon.test/sym "sample.consumer-test/orphan-is-covered"
                :seon.fn/keywords [:seon.config.orphan/dial]}]
-        consumers (consumers-by-attribute rows attributes)]
+        consumers (consumers-by-attribute entities attributes)]
     (is (= {:seon.config.sample/applied #{"sample.consumer/apply-setting"}}
            consumers)
         "keywords outside the registered set never enter the derivation")
-    (is (= #{:seon.config.orphan/dial} (unapplied-attributes rows {} attributes))
+    (is (= #{:seon.config.orphan/dial} (unapplied-attributes entities {} attributes))
         "a dial only a test reads has no application owner and must fail")))
 
 (deftest ^{:seon.test/fixture-observation "Real store creation, executors and listening ports must consume the applied configuration during boot."} ^{:seon.test/long "Starts a real cluster to observe applied runtime configuration."}

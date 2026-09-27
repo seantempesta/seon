@@ -82,8 +82,8 @@
 (defn- observed-query-shape
   []
   (let [text (apply str (repeat 36 \x))]
-    (mapv (fn [row]
-            (into {:db/id row}
+    (mapv (fn [entity]
+            (into {:db/id entity}
                   (map (fn [field]
                          [(keyword "seon.fn" (str "field-" field)) text]))
                   (range 7)))
@@ -166,21 +166,21 @@
   ;; A result below the blob threshold is still fitted by the MCP profile's
   ;; budget. Since 36609fc3e each cut is its one text (`print/elided-text`),
   ;; never a node naming its profile, path and refusal: WANTED is a root cut
-  ;; counting the rows not shown, cuts inside shown rows, and no cut naming a
+  ;; counting the entities not shown, cuts inside shown entities, and no cut naming a
   ;; continuation, because nothing was stored. The render unit's database
   ;; (required since 93144cb71) is the custody's here: this cluster has no
   ;; instance, so no connection hands one.
   (support/with-database
    (fn [_connection]
      (let [cluster-name "mcp-unconditional-fit-test"
-           ;; A budget the 116 rows exceed, so members of nested rows are cut
-           ;; too; at the default budget 32 whole rows fit (13,506 characters).
+           ;; A budget the 116 entities exceed, so members of nested entities are cut
+           ;; too; at the default budget 32 whole entities fit (13,506 characters).
            effective (assoc config/defaults
                             :seon.config.eval.result/blob-threshold 1000000
                             :seon.config.render.agent/token-budget 1000)
-           rows (observed-query-shape)
+           entities (observed-query-shape)
            text (apply str (repeat 36 \x))
-           result (projected cluster-name effective rows)
+           result (projected cluster-name effective entities)
            face (:seon.dev.mcp/value result)
            cut? #(and (string? %) (str/starts-with? % "…"))
            root-cut (peek face)]
@@ -188,12 +188,12 @@
            "the value is projected, not printed plainly beside a refusal")
        (is (str/includes? (pr-str face) (pr-str text))
            "the observed 36-character strings remain readable")
-       (is (cut? root-cut) "the rows not shown are one root cut")
+       (is (cut? root-cut) "the entities not shown are one root cut")
        (is (and (cut? root-cut)
-                (= (count rows) (+ (dec (count face)) (parse-long (subs root-cut 1)))))
-           "the root cut counts exactly the rows not shown")
+                (= (count entities) (+ (dec (count face)) (parse-long (subs root-cut 1)))))
+           "the root cut counts exactly the entities not shown")
        (is (some #(and (map? %) (some cut? (tree-seq coll? seq %))) face)
-           "members of shown rows are cut too")
+           "members of shown entities are cut too")
        (is (every? #(re-matches #"…\+?\d+" %) (filter cut? (tree-seq coll? seq face)))
            "a cut without a stored artifact names no continuation")
        (is (false? (:seon.dev.mcp/windowed? result))
@@ -509,7 +509,7 @@
 (deftest artifact-lifecycle-preserves-identity-paging-and-retraction
   ;; Every scenario configures and seeds its cluster, which a program-less
   ;; fresh store cannot take (config resolves the functions it names to program
-  ;; rows), so they run on the member's branched world. No assertion needs a
+  ;; entities), so they run on the member's branched world. No assertion needs a
   ;; private store: digests are content identities, the zero-transaction check
   ;; reads this branch's commit, and the absent digest is absent everywhere.
   (let [scenarios

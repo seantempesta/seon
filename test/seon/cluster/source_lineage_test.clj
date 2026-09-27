@@ -103,7 +103,7 @@
             :where
             [_ :seon.source.test/marker ?marker]]
           current-db)))
-       "complete population repairs stale rows under an equal digest")))))))
+       "complete population repairs stale entities under an equal digest")))))))
 
 (deftest
  ^#:seon.test{:fixture-observation "A database branch cannot isolate competing physical-store publications held across a latch."

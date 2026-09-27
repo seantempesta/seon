@@ -101,7 +101,7 @@
       (into #{}
             (comp (filter (fn [[_ group]] (> (count group) 1)))
                   (mapcat (fn [[_ group]] (map first group))))
-            (group-by (fn [row] [(nth row 1) (nth row 2)]) spans)))))
+            (group-by (fn [tuple] [(nth tuple 1) (nth tuple 2)]) spans)))))
 
 (defn- carrying
   "The symbols of declarations that carry `attribute` at all.
@@ -110,12 +110,12 @@
   standards differ by WHICH fact is absent and share one candidate query."
   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword] [:or [:set :qualified-symbol] :seon.db/error-result]]}
   [database attribute]
-  (let [rows (db/q '[:find [?sym ...] :in $ ?attribute :where
+  (let [entities (db/q '[:find [?sym ...] :in $ ?attribute :where
                      [?f :seon.fn/sym ?sym] [?f ?attribute _]]
                    database attribute)]
-    (if (and (map? rows) (:seon.error/at rows)
-                      (:seon.error/layer rows) (:seon.error/operation rows)) ; debt: seon.db/q and basis-t declare generic errors.
- rows (set rows))))
+    (if (and (map? entities) (:seon.error/at entities)
+                      (:seon.error/layer entities) (:seon.error/operation entities)) ; debt: seon.db/q and basis-t declare generic errors.
+ entities (set entities))))
 
 (def ^:private bodiless-defining-forms
   "Clojure's own var-interning forms that write no body for the author.
@@ -133,12 +133,12 @@
   "Declarations interned by a form that writes no body."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:or [:set :qualified-symbol] :seon.db/error-result]]}
   [database]
-  (let [rows (db/q '[:find [?sym ...] :in $ [?form ...] :where
+  (let [entities (db/q '[:find [?sym ...] :in $ [?form ...] :where
                      [?f :seon.fn/sym ?sym] [?f :seon.fn/defined-by ?form]]
                    database (vec bodiless-defining-forms))]
-    (if (and (map? rows) (:seon.error/at rows)
-                      (:seon.error/layer rows) (:seon.error/operation rows)) ; debt: seon.db/q and basis-t declare generic errors.
- rows (set rows))))
+    (if (and (map? entities) (:seon.error/at entities)
+                      (:seon.error/layer entities) (:seon.error/operation entities)) ; debt: seon.db/q and basis-t declare generic errors.
+ entities (set entities))))
 
 (defn- declarations
   "Public source-bearing declarations as sorted `[symbol namespace-name]` rows.
@@ -152,7 +152,7 @@
   or function docstring standard applies to it."
   {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :seon.fn.file/relative-root]] [:or [:sequential [:tuple :qualified-symbol :symbol]] :seon.db/error-result]]}
   [database root]
-  (let [rows (if root
+  (let [entities (if root
                (db/q '[:find ?sym ?name :in $ ?root :where
                        [?f :seon.fn/sym ?sym] [?f :seon.fn/private? false] [?f :seon.fn/source _]
                        (not [?f :seon.fn/constant? true])
@@ -164,9 +164,9 @@
                        (not [?f :seon.fn/constant? true])
                        [?f :seon.fn/ns ?ns] [?ns :seon.ns/name ?name]]
                      database))]
-    (if (and (map? rows) (:seon.error/at rows)
-                      (:seon.error/layer rows) (:seon.error/operation rows)) ; debt: seon.db/q and basis-t declare generic errors.
- rows (sort rows))))
+    (if (and (map? entities) (:seon.error/at entities)
+                      (:seon.error/layer entities) (:seon.error/operation entities)) ; debt: seon.db/q and basis-t declare generic errors.
+ entities (sort entities))))
 
 (defn- doc-subject [[sym namespace-name]]
   {:seon.fn/sym sym
@@ -326,7 +326,7 @@
            (if (db/read-refusal? gates)
              gates
              (into []
-                   (keep (fn [[sym _ :as row]]
+                   (keep (fn [[sym _ :as entity]]
                            (when (empty? (get gates sym))
-                             (reaching-test-subject basis-t row))))
+                             (reaching-test-subject basis-t entity))))
                    candidates)))))))

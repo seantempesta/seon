@@ -1,0 +1,1896 @@
+{:renames
+ {"?detector-row"
+  {:to "?detector-entity",
+   :uses 2,
+   :meaning "Datalog variable bound to an entity id"},
+  "?function-row"
+  {:to "?function-entity",
+   :uses 4,
+   :meaning "Datalog variable bound to an entity id"},
+  "?row"
+  {:to "?entity",
+   :uses 30,
+   :meaning "Datalog variable bound to an entity id"},
+  "?row-id"
+  {:to "?entity-id",
+   :uses 3,
+   :meaning "Datalog variable bound to an entity id"},
+  "?task-row"
+  {:to "?task-entity",
+   :uses 2,
+   :meaning "Datalog variable bound to an entity id"},
+  "_namespace-rows"
+  {:to "_namespace-entities",
+   :uses 1,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "a-caller-files-findings-name-its-value-defs-rows"
+  {:to "a-caller-files-findings-name-its-value-defs-entities",
+   :uses 1,
+   :meaning "deftest name"},
+  "a-changed-core-row-refuses-by-name-and-every-agent-still-arms"
+  {:to
+   "a-changed-core-entity-refuses-by-name-and-every-agent-still-arms",
+   :uses 1,
+   :meaning "deftest name"},
+  "a-component-bearing-row-validates-its-own-declared-shape"
+  {:to "a-component-bearing-entity-validates-its-own-declared-shape",
+   :uses 1,
+   :meaning "deftest name"},
+  "a-config-row-cannot-be-left-without-a-required-result-cap"
+  {:to "a-config-entity-cannot-be-left-without-a-required-result-cap",
+   :uses 1,
+   :meaning "deftest name"},
+  "a-create-is-validated-complete-while-an-upsert-validates-the-merged-row"
+  {:to
+   "a-create-is-validated-complete-while-an-upsert-validates-the-merged-entity",
+   :uses 1,
+   :meaning "deftest name"},
+  "a-data-only-commit-reuses-the-acquired-program-and-a-program-row-reacquires"
+  {:to
+   "a-data-only-commit-reuses-the-acquired-program-and-a-program-entity-reacquires",
+   :uses 1,
+   :meaning "deftest name"},
+  "a-definition-digests-with-the-namespace-row-its-settlement-stores"
+  {:to
+   "a-definition-digests-with-the-namespace-entity-its-settlement-stores",
+   :uses 1,
+   :meaning "deftest name"},
+  "a-drop-names-the-files-whose-program-rows-carried-it"
+  {:to "a-drop-names-the-files-whose-program-entities-carried-it",
+   :uses 1,
+   :meaning "deftest name"},
+  "a-fault-no-agent-row-places-stays-on-its-own-branch"
+  {:to "a-fault-no-agent-entity-places-stays-on-its-own-branch",
+   :uses 1,
+   :meaning "deftest name"},
+  "a-fork-taken-after-a-program-row-commit-holds-that-row"
+  {:to "a-fork-taken-after-a-program-entity-commit-holds-that-entity",
+   :uses 1,
+   :meaning "deftest name"},
+  "a-fresh-branch-with-unchanged-program-rows-derives-nothing"
+  {:to
+   "a-fresh-branch-with-unchanged-program-entities-derives-nothing",
+   :uses 1,
+   :meaning "deftest name"},
+  "a-matching-model-registry-row-prevents-the-finding"
+  {:to "a-matching-model-registry-entity-prevents-the-finding",
+   :uses 1,
+   :meaning "deftest name"},
+  "a-missing-registry-row-leaves-the-working-call-target-unchanged"
+  {:to
+   "a-missing-registry-entity-leaves-the-working-call-target-unchanged",
+   :uses 1,
+   :meaning "deftest name"},
+  "a-namespace-declared-long-reaches-every-test-row"
+  {:to "a-namespace-declared-long-reaches-every-test-entity",
+   :uses 1,
+   :meaning "deftest name"},
+  "a-namespace-row-change-re-derives-its-declarations-digests"
+  {:to "a-namespace-entity-change-re-derives-its-declarations-digests",
+   :uses 1,
+   :meaning "deftest name"},
+  "a-no-auth-config-row-assembles-and-sends-without-authorization"
+  {:to
+   "a-no-auth-config-entity-assembles-and-sends-without-authorization",
+   :uses 1,
+   :meaning "deftest name"},
+  "a-program-row-keeps-only-the-definition-digest-it-produces"
+  {:to "a-program-entity-keeps-only-the-definition-digest-it-produces",
+   :uses 1,
+   :meaning "deftest name"},
+  "a-pulled-function-row-is-its-attributes-not-steering-prose"
+  {:to "a-pulled-function-entity-is-its-attributes-not-steering-prose",
+   :uses 1,
+   :meaning "deftest name"},
+  "a-refused-contract-commits-a-receipt-and-no-row"
+  {:to "a-refused-contract-commits-a-receipt-and-no-entity",
+   :uses 1,
+   :meaning "deftest name"},
+  "a-retirement-lands-after-the-program-rows-that-convert-its-writers"
+  {:to
+   "a-retirement-lands-after-the-program-entities-that-convert-its-writers",
+   :uses 1,
+   :meaning "deftest name"},
+  "a-retirement-refuses-while-a-program-row-writes-the-attribute"
+  {:to
+   "a-retirement-refuses-while-a-program-entity-writes-the-attribute",
+   :uses 1,
+   :meaning "deftest name"},
+  "a-row-disagreeing-with-its-supplier-is-refused"
+  {:to "an-entity-disagreeing-with-its-supplier-is-refused",
+   :uses 1,
+   :meaning "deftest name"},
+  "a-row-naming-an-absent-supplier-is-refused"
+  {:to "an-entity-naming-an-absent-supplier-is-refused",
+   :uses 1,
+   :meaning "deftest name"},
+  "a-row-published-after-a-warm-plan-is-seen-synchronously"
+  {:to "an-entity-published-after-a-warm-plan-is-seen-synchronously",
+   :uses 1,
+   :meaning "deftest name"},
+  "a-row-written-before-a-dial-existed-reads-its-declared-default"
+  {:to
+   "an-entity-written-before-a-dial-existed-reads-its-declared-default",
+   :uses 1,
+   :meaning "deftest name"},
+  "a-seeded-cluster-reads-its-own-row-on-the-member-branch"
+  {:to "a-seeded-cluster-reads-its-own-entity-on-the-member-branch",
+   :uses 1,
+   :meaning "deftest name"},
+  "a-stale-host-bound-row-refuses-by-name-only-when-called"
+  {:to "a-stale-host-bound-entity-refuses-by-name-only-when-called",
+   :uses 1,
+   :meaning "deftest name"},
+  "a-storable-declarations-committed-row-is-recognised-by-its-value"
+  {:to
+   "a-storable-declarations-committed-entity-is-recognised-by-its-value",
+   :uses 1,
+   :meaning "deftest name"},
+  "a-supplied-file-row-never-widens-the-reconciliation"
+  {:to "a-supplied-file-entity-never-widens-the-reconciliation",
+   :uses 1,
+   :meaning "deftest name"},
+  "a-synthetic-third-default-is-derived-from-its-row"
+  {:to "a-synthetic-third-default-is-derived-from-its-entity",
+   :uses 1,
+   :meaning "deftest name"},
+  "a-test-with-no-program-row-is-unknown-and-is-never-run-in-process"
+  {:to
+   "a-test-with-no-program-entity-is-unknown-and-is-never-run-in-process",
+   :uses 1,
+   :meaning "deftest name"},
+  "absent-row"
+  {:to "absent-entity",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "accrete-row-attributes!"
+  {:to "accrete-entity-attributes!",
+   :uses 2,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "added-row"
+  {:to "added-entity",
+   :uses 2,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "admit-initialization-rows"
+  {:to "admit-initialization-entities",
+   :uses 7,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "adopt-rows!"
+  {:to "adopt-entities!",
+   :uses 5,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "adoption-rows-land-in-one-transaction-or-not-at-all"
+  {:to "adoption-entities-land-in-one-transaction-or-not-at-all",
+   :uses 1,
+   :meaning "deftest name"},
+  "advertised-rows"
+  {:to "advertised-entities",
+   :uses 3,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "agent-row"
+  {:to "agent-entity",
+   :uses 38,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "alias-row"
+  {:to "alias-entity",
+   :uses 5,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "alias-rows"
+  {:to "alias-entities",
+   :uses 3,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "all-function-rows"
+  {:to "all-function-entities",
+   :uses 6,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "all-namespace-row-by-name"
+  {:to "all-namespace-entity-by-name",
+   :uses 5,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "all-namespace-rows"
+  {:to "all-namespace-entities",
+   :uses 4,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "alternate-row"
+  {:to "alternate-entity",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "an-invalid-note-refuses-itself-and-mints-no-identity-only-row"
+  {:to
+   "an-invalid-note-refuses-itself-and-mints-no-identity-only-entity",
+   :uses 1,
+   :meaning "deftest name"},
+  "an-unrelated-transaction-refreshes-without-changing-the-row-basis"
+  {:to
+   "an-unrelated-transaction-refreshes-without-changing-the-entity-basis",
+   :uses 1,
+   :meaning "deftest name"},
+  "analysed-row"
+  {:to "analysed-entity",
+   :uses 4,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "analysis-rows-by-file"
+  {:to "analysis-entities-by-file",
+   :uses 5,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "analyze-rows"
+  {:to "analyze-entities",
+   :uses 20,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "analyzed-row"
+  {:to "analyzed-entity",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "analyzed-row-tx"
+  {:to "analyzed-entity-tx",
+   :uses 4,
+   :meaning
+   "transaction data (entity maps and :db/add operations a writer submits)"},
+  "analyzed-rows"
+  {:to "analyzed-entities",
+   :uses 2,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "analyzed-test-row"
+  {:to "analyzed-test-entity",
+   :uses 11,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "argument-row"
+  {:to "argument-entity",
+   :uses 2,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "arity-row"
+  {:to "arity-entity",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "assert-complete-row-inventory!"
+  {:to "assert-complete-entity-inventory!",
+   :uses 2,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "assert-one-row-per-identity!"
+  {:to "assert-one-entity-per-identity!",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "assert-owned-rows!"
+  {:to "assert-owned-entities!",
+   :uses 2,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "assert-rows!"
+  {:to "assert-entities!",
+   :uses 2,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "attempt-rows"
+  {:to "attempt-entities",
+   :uses 6,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "attribute-rows"
+  {:to "attribute-entities",
+   :uses 5,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "authored-rows"
+  {:to "authored-entities",
+   :uses 3,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "backup-row"
+  {:to "backup-entity",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "bad-row"
+  {:to "bad-entity",
+   :uses 4,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "base-declared-row"
+  {:to "base-declared-entity",
+   :uses 9,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "before-rows"
+  {:to "before-entities",
+   :uses 3,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "binding-entry-row"
+  {:to "binding-entry-entity",
+   :uses 2,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "binding-row"
+  {:to "binding-entity",
+   :uses 6,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "binding-rows"
+  {:to "binding-entities",
+   :uses 3,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "bound-rows"
+  {:to "bound-entities",
+   :uses 2,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "canonical-row"
+  {:to "canonical-entity",
+   :uses 30,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "canonical-row-in"
+  {:to "canonical-entity-in",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "canonical-rows"
+  {:to "canonical-entities",
+   :uses 4,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "canonical-rows-carry-arbitrary-namespaced-properties"
+  {:to "canonical-entities-carry-arbitrary-namespaced-properties",
+   :uses 1,
+   :meaning "deftest name"},
+  "canonical-schema-rows"
+  {:to "canonical-schema-entities",
+   :uses 24,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "cast-rows"
+  {:to "cast-entities",
+   :uses 2,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "changed-row-attributes"
+  {:to "changed-entity-attributes",
+   :uses 4,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "changed-rows"
+  {:to "changed-entities",
+   :uses 3,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "check-row!"
+  {:to "check-entity!",
+   :uses 2,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "class-row"
+  {:to "class-entity",
+   :uses 2,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "cluster-row"
+  {:to "cluster-entity",
+   :uses 10,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "cold-context-reacquires-the-same-row"
+  {:to "cold-context-reacquires-the-same-entity",
+   :uses 1,
+   :meaning "deftest name"},
+  "committed-row?"
+  {:to "committed-entity?",
+   :uses 7,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "committed-rows-open-without-re-admission-and-writes-are-admitted"
+  {:to
+   "committed-entities-open-without-re-admission-and-writes-are-admitted",
+   :uses 1,
+   :meaning "deftest name"},
+  "config-row"
+  {:to "config-entity",
+   :uses 35,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "configured-models-without-registry-rows-are-derived"
+  {:to "configured-models-without-registry-entities-are-derived",
+   :uses 1,
+   :meaning "deftest name"},
+  "context-row"
+  {:to "context-entity",
+   :uses 9,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "contract-facts-row"
+  {:to "contract-facts-entity",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "contracted-redefinition-exactly-replaces-the-row"
+  {:to "contracted-redefinition-exactly-replaces-the-entity",
+   :uses 1,
+   :meaning "deftest name"},
+  "contracted-rows-carry-queryable-facts-in-their-spec-transaction"
+  {:to
+   "contracted-entities-carry-queryable-facts-in-their-spec-transaction",
+   :uses 1,
+   :meaning "deftest name"},
+  "contribution-row"
+  {:to "contribution-entity",
+   :uses 2,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "current-row"
+  {:to "current-entity",
+   :uses 8,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "current-row-ids"
+  {:to "current-entity-ids",
+   :uses 2,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "current-rows"
+  {:to "current-entities",
+   :uses 7,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "database-rows"
+  {:to "database-entities",
+   :uses 17,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "debug-renderer-definition-accepts-the-acquired-program-row"
+  {:to "debug-renderer-definition-accepts-the-acquired-program-entity",
+   :uses 1,
+   :meaning "deftest name"},
+  "declaration-admission-refuses-ambiguous-or-incomplete-rows"
+  {:to
+   "declaration-admission-refuses-ambiguous-or-incomplete-entities",
+   :uses 1,
+   :meaning "deftest name"},
+  "declaration-row"
+  {:to "declaration-entity",
+   :uses 50,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "declared-member-rows"
+  {:to "declared-member-entities",
+   :uses 3,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "declared-row"
+  {:to "declared-entity",
+   :uses 6,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "declared-row-attributes"
+  {:to "declared-entity-attributes",
+   :uses 2,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "declared-row-evaluates-a-schema-once-inside-its-delta"
+  {:to "declared-entity-evaluates-a-schema-once-inside-its-delta",
+   :uses 1,
+   :meaning "deftest name"},
+  "declaring-an-attribute-on-a-program-row-schema-is-sufficient"
+  {:to
+   "declaring-an-attribute-on-a-program-entity-schema-is-sufficient",
+   :uses 1,
+   :meaning "deftest name"},
+  "definition-row"
+  {:to "definition-entity",
+   :uses 7,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "deftest-row"
+  {:to "deftest-entity",
+   :uses 4,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "deletion-row"
+  {:to "deletion-entity",
+   :uses 7,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "delivery-rows"
+  {:to "delivery-entities",
+   :uses 2,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "desired-row"
+  {:to "desired-entity",
+   :uses 8,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "desired-rows"
+  {:to "desired-entities",
+   :uses 8,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "detector-rows"
+  {:to "detector-entities",
+   :uses 6,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "digest-namespace-row"
+  {:to "digest-namespace-entity",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "discovery-rows"
+  {:to "discovery-entities",
+   :uses 6,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "edited-rows"
+  {:to "edited-entities",
+   :uses 2,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "error-row"
+  {:to "error-entity",
+   :uses 2,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "evaluated-row?"
+  {:to "evaluated-entity?",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "evaluation-row"
+  {:to "evaluation-entity",
+   :uses 9,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "every-agent-dial-has-a-declared-settings-row"
+  {:to "every-agent-dial-has-a-declared-settings-entity",
+   :uses 1,
+   :meaning "deftest name"},
+  "every-declaration-row-satisfies-its-own-output-contract"
+  {:to "every-declaration-entity-satisfies-its-own-output-contract",
+   :uses 1,
+   :meaning "deftest name"},
+  "every-program-row-attribute-is-owned-or-names-another-writer"
+  {:to
+   "every-program-entity-attribute-is-owned-or-names-another-writer",
+   :uses 1,
+   :meaning "deftest name"},
+  "exclusion-rows"
+  {:to "exclusion-entities",
+   :uses 3,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "expected-family-row-counts"
+  {:to "expected-family-entity-counts",
+   :uses 4,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "expected-row-ids"
+  {:to "expected-entity-ids",
+   :uses 5,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "explicit-synthetic-schema-rows-extend-only-that-database"
+  {:to "explicit-synthetic-schema-entities-extend-only-that-database",
+   :uses 1,
+   :meaning "deftest name"},
+  "extra-row"
+  {:to "extra-entity",
+   :uses 2,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "extra-rows"
+  {:to "extra-entities",
+   :uses 3,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "family-row-counts"
+  {:to "family-entity-counts",
+   :uses 3,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "file-row"
+  {:to "file-entity",
+   :uses 16,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "file-row-selection-follows-declaration-and-finding-refs"
+  {:to "file-entity-selection-follows-declaration-and-finding-refs",
+   :uses 1,
+   :meaning "deftest name"},
+  "file-rows"
+  {:to "file-entities",
+   :uses 12,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "file-rows-read-in-batches-not-per-row"
+  {:to "file-entities-read-in-batches-not-per-entity",
+   :uses 1,
+   :meaning "deftest name"},
+  "first-row"
+  {:to "first-entity",
+   :uses 5,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "first-rows"
+  {:to "first-entities",
+   :uses 9,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "fn-row"
+  {:to "fn-entity",
+   :uses 11,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "fork-row"
+  {:to "fork-entity",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "form-row"
+  {:to "form-entity",
+   :uses 2,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "function-contract-rows"
+  {:to "function-contract-entities",
+   :uses 2,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "function-row"
+  {:to "function-entity",
+   :uses 46,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "function-rows"
+  {:to "function-entities",
+   :uses 15,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "function-rows-by-ns"
+  {:to "function-entities-by-ns",
+   :uses 6,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "generated-rows"
+  {:to "generated-entities",
+   :uses 2,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "generic-schema-deletion-removes-unused-row-and-attribute"
+  {:to "generic-schema-deletion-removes-unused-entity-and-attribute",
+   :uses 1,
+   :meaning "deftest name"},
+  "host-bound-row?"
+  {:to "host-bound-entity?",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "host-row"
+  {:to "host-entity",
+   :uses 8,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "identical-rows"
+  {:to "identical-entities",
+   :uses 2,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "identity-row"
+  {:to "identity-entity",
+   :uses 5,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "identity-rows"
+  {:to "identity-entities",
+   :uses 7,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "import-row"
+  {:to "import-entity",
+   :uses 2,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "incoming-rows"
+  {:to "incoming-entities",
+   :uses 2,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "incremental-indexing-reconciles-only-selected-file-rows"
+  {:to "incremental-indexing-reconciles-only-selected-file-entities",
+   :uses 1,
+   :meaning "deftest name"},
+  "index-rows-name-a-data-entity-by-its-identity"
+  {:to "index-entities-name-a-data-entity-by-its-identity",
+   :uses 1,
+   :meaning "deftest name"},
+  "indexable-row-id"
+  {:to "indexable-entity-id",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "indexed-projection-rows-preserve-the-query-result"
+  {:to "indexed-projection-entities-preserve-the-query-result",
+   :uses 1,
+   :meaning "deftest name"},
+  "indexed-reach-rows-retain-the-pulled-facts"
+  {:to "indexed-reach-entities-retain-the-pulled-facts",
+   :uses 1,
+   :meaning "deftest name"},
+  "initialization-orders-provider-rows-before-the-models-naming-them"
+  {:to
+   "initialization-orders-provider-entities-before-the-models-naming-them",
+   :uses 1,
+   :meaning "deftest name"},
+  "initialization-rows-apply-query-and-converge-with-the-config-row"
+  {:to
+   "initialization-entities-apply-query-and-converge-with-the-config-entity",
+   :uses 1,
+   :meaning "deftest name"},
+  "install-evaluated-rows!"
+  {:to "install-evaluated-entities!",
+   :uses 11,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "install-row"
+  {:to "install-entity",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "install-row!"
+  {:to "install-entity!",
+   :uses 23,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "instruction-row-changes"
+  {:to "instruction-entity-changes",
+   :uses 3,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "instrumented-generated-form-does-not-advise-an-absent-program-row"
+  {:to
+   "instrumented-generated-form-does-not-advise-an-absent-program-entity",
+   :uses 1,
+   :meaning "deftest name"},
+  "interpreter-refer-rows"
+  {:to "interpreter-refer-entities",
+   :uses 2,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "issue-row"
+  {:to "issue-entity",
+   :uses 8,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "last-row"
+  {:to "last-entity",
+   :uses 7,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "leaf-row"
+  {:to "leaf-entity",
+   :uses 5,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "ledger-rows"
+  {:to "ledger-entities",
+   :uses 5,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "link-row"
+  {:to "link-entity",
+   :uses 11,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "lint-rows"
+  {:to "lint-entities",
+   :uses 2,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "live-schema-row?"
+  {:to "live-schema-entity?",
+   :uses 5,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "logical-row"
+  {:to "logical-entity",
+   :uses 2,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "macro-row"
+  {:to "macro-entity",
+   :uses 4,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "member-row"
+  {:to "member-entity",
+   :uses 4,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "merged-row"
+  {:to "merged-entity",
+   :uses 2,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "message-row"
+  {:to "message-entity",
+   :uses 2,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "missing-model-rows"
+  {:to "missing-model-entities",
+   :uses 3,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "missing-process-rows"
+  {:to "missing-process-entities",
+   :uses 5,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "missing-projection-is-a-refusal-not-query-rows"
+  {:to "missing-projection-is-a-refusal-not-query-entities",
+   :uses 1,
+   :meaning "deftest name"},
+  "missing-rows"
+  {:to "missing-entities",
+   :uses 3,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "model-row"
+  {:to "model-entity",
+   :uses 6,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "model-rows-are-queryable-open-and-rendered-without-wire-duplication"
+  {:to
+   "model-entities-are-queryable-open-and-rendered-without-wire-duplication",
+   :uses 1,
+   :meaning "deftest name"},
+  "namespace-context-row"
+  {:to "namespace-context-entity",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "namespace-routes-admit-by-reader-and-existing-corpus-row"
+  {:to "namespace-routes-admit-by-reader-and-existing-corpus-entity",
+   :uses 1,
+   :meaning "deftest name"},
+  "namespace-row"
+  {:to "namespace-entity",
+   :uses 217,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "namespace-row-by-name"
+  {:to "namespace-entity-by-name",
+   :uses 5,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "namespace-row?"
+  {:to "namespace-entity?",
+   :uses 2,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "namespace-rows"
+  {:to "namespace-entities",
+   :uses 9,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "new-bare-row"
+  {:to "new-bare-entity",
+   :uses 1,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "new-row"
+  {:to "new-entity",
+   :uses 2,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "newest-row-transaction"
+  {:to "newest-entity-transaction",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "normalized-index-row"
+  {:to "normalized-index-entity",
+   :uses 4,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "note-row"
+  {:to "note-entity",
+   :uses 4,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "ns-row"
+  {:to "ns-entity",
+   :uses 4,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "offending-fixture-row"
+  {:to "offending-fixture-entity",
+   :uses 2,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "old-row"
+  {:to "old-entity",
+   :uses 5,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "old-rows"
+  {:to "old-entities",
+   :uses 10,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "one-unloadable-row-cannot-prevent-cold-acquisition"
+  {:to "one-unloadable-entity-cannot-prevent-cold-acquisition",
+   :uses 1,
+   :meaning "deftest name"},
+  "open-rows"
+  {:to "open-entities",
+   :uses 4,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "ordinary-model-row"
+  {:to "ordinary-model-entity",
+   :uses 2,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "overridden-row?"
+  {:to "overridden-entity?",
+   :uses 6,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "owner-row"
+  {:to "owner-entity",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "parse-rows"
+  {:to "parse-entities",
+   :uses 3,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "parsed-rows"
+  {:to "parsed-entities",
+   :uses 2,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "pending-rows"
+  {:to "pending-entities",
+   :uses 4,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "persistent-row"
+  {:to "persistent-entity",
+   :uses 4,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "preliminary-row"
+  {:to "preliminary-entity",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "primary-row"
+  {:to "primary-entity",
+   :uses 5,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "prior-rows"
+  {:to "prior-entities",
+   :uses 2,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "probe-schema-rows"
+  {:to "probe-schema-entities",
+   :uses 2,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "process-rows"
+  {:to "process-entities",
+   :uses 9,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "program-canonical-row"
+  {:to "program-canonical-entity",
+   :uses 2,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "program-fn-row"
+  {:to "program-fn-entity",
+   :uses 106,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "program-identity-attributes-are-exactly-the-declared-row-schemas"
+  {:to
+   "program-identity-attributes-are-exactly-the-declared-entity-schemas",
+   :uses 1,
+   :meaning "deftest name"},
+  "program-row"
+  {:to "program-entity",
+   :uses 60,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "program-row-identity"
+  {:to "program-entity-identity",
+   :uses 4,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "program-rows"
+  {:to "program-entities",
+   :uses 2,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "projection-from-rows"
+  {:to "projection-from-entities",
+   :uses 5,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "projection-rows"
+  {:to "projection-entities",
+   :uses 3,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "publish-schema-rows?"
+  {:to "publish-schema-entities?",
+   :uses 4,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "published-index-rows"
+  {:to "published-index-entities",
+   :uses 15,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "qualified-row"
+  {:to "qualified-entity",
+   :uses 2,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "raw-row"
+  {:to "raw-entity",
+   :uses 10,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "reach-row"
+  {:to "reach-entity",
+   :uses 4,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "read-pulls-one-admitted-message-row"
+  {:to "read-pulls-one-admitted-message-entity",
+   :uses 1,
+   :meaning "deftest name"},
+  "read-row"
+  {:to "read-entity",
+   :uses 5,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "read-rows"
+  {:to "read-entities",
+   :uses 2,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "reader-events-have-one-canonical-declaration-row"
+  {:to "reader-events-have-one-canonical-declaration-entity",
+   :uses 1,
+   :meaning "deftest name"},
+  "receipt-row"
+  {:to "receipt-entity",
+   :uses 15,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "receipt-rows"
+  {:to "receipt-entities",
+   :uses 2,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "recent-message-rows"
+  {:to "recent-message-entities",
+   :uses 2,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "recent-receipt-rows"
+  {:to "recent-receipt-entities",
+   :uses 2,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "refer-rows"
+  {:to "refer-entities",
+   :uses 3,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "refused-index-reads-never-become-publication-rows"
+  {:to "refused-index-reads-never-become-publication-entities",
+   :uses 1,
+   :meaning "deftest name"},
+  "render-declarations-require-their-final-function-row"
+  {:to "render-declarations-require-their-final-function-entity",
+   :uses 1,
+   :meaning "deftest name"},
+  "replace-shape-rows"
+  {:to "replace-shape-entities",
+   :uses 2,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "report-row"
+  {:to "report-entity",
+   :uses 7,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "report-rows"
+  {:to "report-entities",
+   :uses 4,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "require-context-rows-carry-namespace-symbols"
+  {:to "require-context-entities-carry-namespace-symbols",
+   :uses 1,
+   :meaning "deftest name"},
+  "resolvable-runtime-function-rows"
+  {:to "resolvable-runtime-function-entities",
+   :uses 2,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "result-facts-live-on-the-test-row-and-reruns-replace-them"
+  {:to "result-facts-live-on-the-test-entity-and-reruns-replace-them",
+   :uses 1,
+   :meaning "deftest name"},
+  "result-row"
+  {:to "result-entity",
+   :uses 2,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "retiring-an-identity-attribute-with-rows-is-admitted"
+  {:to "retiring-an-identity-attribute-with-entities-is-admitted",
+   :uses 1,
+   :meaning "deftest name"},
+  "retracted-data-allows-removal-and-historical-rows-restore-validation"
+  {:to
+   "retracted-data-allows-removal-and-historical-entities-restore-validation",
+   :uses 1,
+   :meaning "deftest name"},
+  "revised-row"
+  {:to "revised-entity",
+   :uses 11,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "row"
+  {:to "entity",
+   :uses 1655,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "row-acquisition-observations-have-no-program-digest-promise"
+  {:to
+   "entity-acquisition-observations-have-no-program-digest-promise",
+   :uses 1,
+   :meaning "deftest name"},
+  "row-admission"
+  {:to "entity-admission",
+   :uses 12,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "row-attributes"
+  {:to "entity-attributes",
+   :uses 5,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "row-backed?"
+  {:to "entity-backed?",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "row-bindings"
+  {:to "entity-bindings",
+   :uses 9,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "row-by-identity"
+  {:to "entity-by-identity",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "row-count"
+  {:to "entity-count",
+   :uses 4,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "row-definition"
+  {:to "entity-definition",
+   :uses 11,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "row-definition-digest"
+  {:to "entity-definition-digest",
+   :uses 4,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "row-form"
+  {:to "entity-form",
+   :uses 2,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "row-id"
+  {:to "entity-id",
+   :uses 14,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "row-identities"
+  {:to "entity-identities",
+   :uses 2,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "row-identity"
+  {:to "entity-identity",
+   :uses 80,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "row-ids"
+  {:to "entity-ids",
+   :uses 17,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "row-lookup-refusal"
+  {:to "entity-lookup-refusal",
+   :uses 2,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "row-positions"
+  {:to "entity-positions",
+   :uses 3,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "row-projection"
+  {:to "entity-projection",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "row-properties"
+  {:to "entity-properties",
+   :uses 2,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "row-query"
+  {:to "entity-query",
+   :uses 5,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "row-ready?"
+  {:to "entity-ready?",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "row-refusal-describes-the-cause-without-copying-the-projection"
+  {:to
+   "entity-refusal-describes-the-cause-without-copying-the-projection",
+   :uses 1,
+   :meaning "deftest name"},
+  "row-report"
+  {:to "entity-report",
+   :uses 2,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "row-satisfied?"
+  {:to "entity-satisfied?",
+   :uses 2,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "row-schema"
+  {:to "entity-schema",
+   :uses 13,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "row-shapes"
+  {:to "entity-shapes",
+   :uses 37,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "row-transaction"
+  {:to "entity-transaction",
+   :uses 2,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "row-tx"
+  {:to "entity-tx",
+   :uses 45,
+   :meaning
+   "transaction data (entity maps and :db/add operations a writer submits)"},
+  "rows"
+  {:to "entities",
+   :uses 887,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "rows-by-symbol"
+  {:to "entities-by-symbol",
+   :uses 6,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "rows-commit"
+  {:to "entities-commit",
+   :uses 6,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "rows-connection"
+  {:to "entities-connection",
+   :uses 2,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "rows-for"
+  {:to "entities-for",
+   :uses 7,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "rows-from"
+  {:to "entities-from",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "rows-have-one-canonical-persisted-shape"
+  {:to "entities-have-one-canonical-persisted-shape",
+   :uses 1,
+   :meaning "deftest name"},
+  "rows-of"
+  {:to "entities-of",
+   :uses 11,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "rows-per-agent"
+  {:to "entities-per-agent",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "rows?"
+  {:to "entities?",
+   :uses 2,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "run-row"
+  {:to "run-entity",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "running-system-rows"
+  {:to "running-system-entities",
+   :uses 2,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "runtime-function-rows-carry-parsed-contract-facts"
+  {:to "runtime-function-entities-carry-parsed-contract-facts",
+   :uses 1,
+   :meaning "deftest name"},
+  "runtime-row"
+  {:to "runtime-entity",
+   :uses 4,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "scalar-upsert-rows"
+  {:to "scalar-upsert-entities",
+   :uses 2,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "schema-row"
+  {:to "schema-entity",
+   :uses 26,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "schema-row-changes"
+  {:to "schema-entity-changes",
+   :uses 4,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "schema-row-converged?"
+  {:to "schema-entity-converged?",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "schema-row-convergence-uses-the-stores-own-semantics"
+  {:to "schema-entity-convergence-uses-the-stores-own-semantics",
+   :uses 1,
+   :meaning "deftest name"},
+  "schema-row-properties-lift-only-when-their-declarations-are-storable"
+  {:to
+   "schema-entity-properties-lift-only-when-their-declarations-are-storable",
+   :uses 1,
+   :meaning "deftest name"},
+  "schema-row-properties-survive-and-retract-exactly"
+  {:to "schema-entity-properties-survive-and-retract-exactly",
+   :uses 1,
+   :meaning "deftest name"},
+  "schema-rows"
+  {:to "schema-entities",
+   :uses 14,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "schema-rows-record-the-derived-generatable-fact"
+  {:to "schema-entities-record-the-derived-generatable-fact",
+   :uses 1,
+   :meaning "deftest name"},
+  "schema-scoped-admissions-are-the-schema-rows-of-the-loader's-admissions"
+  {:to
+   "schema-scoped-admissions-are-the-schema-entities-of-the-loader's-admissions",
+   :uses 1,
+   :meaning "deftest name"},
+  "seed-rows"
+  {:to "seed-entities",
+   :uses 5,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "seeded-row"
+  {:to "seeded-entity",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "selected-row"
+  {:to "selected-entity",
+   :uses 14,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "selected-rows"
+  {:to "selected-entities",
+   :uses 4,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "selected-rows-reconcile-without-a-manifest"
+  {:to "selected-entities-reconcile-without-a-manifest",
+   :uses 1,
+   :meaning "deftest name"},
+  "selection-program-rows"
+  {:to "selection-program-entities",
+   :uses 3,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "seon.adoption-rows-test"
+  {:to "seon.adoption-entities-test",
+   :uses 1,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "settle-row!"
+  {:to "settle-entity!",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "shadow-row"
+  {:to "shadow-entity",
+   :uses 4,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "shape-only-row"
+  {:to "shape-only-entity",
+   :uses 2,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "shape-row-in"
+  {:to "shape-entity-in",
+   :uses 6,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "shape-rows"
+  {:to "shape-entities",
+   :uses 16,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "sorted-declarations-and-indexed-rows-preserve-registry-identities"
+  {:to
+   "sorted-declarations-and-indexed-entities-preserve-registry-identities",
+   :uses 1,
+   :meaning "deftest name"},
+  "source-has-one-owner-editable-getting-started-row"
+  {:to "source-has-one-owner-editable-getting-started-entity",
+   :uses 1,
+   :meaning "deftest name"},
+  "source-publication-records-core-on-every-row"
+  {:to "source-publication-records-core-on-every-entity",
+   :uses 1,
+   :meaning "deftest name"},
+  "source-row"
+  {:to "source-entity",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "source-rows"
+  {:to "source-entities",
+   :uses 24,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "source-rows-keep-declared-targets-outside-the-submitted-form"
+  {:to
+   "source-entities-keep-declared-targets-outside-the-submitted-form",
+   :uses 1,
+   :meaning "deftest name"},
+  "stale-adoption-row-writes-refuse-at-the-writer"
+  {:to "stale-adoption-entity-writes-refuse-at-the-writer",
+   :uses 1,
+   :meaning "deftest name"},
+  "static-findings-are-replaced-with-their-program-rows"
+  {:to "static-findings-are-replaced-with-their-program-entities",
+   :uses 1,
+   :meaning "deftest name"},
+  "static-index-preserves-the-jvm-row-contract"
+  {:to "static-index-preserves-the-jvm-entity-contract",
+   :uses 1,
+   :meaning "deftest name"},
+  "static-row"
+  {:to "static-entity",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "subject-row"
+  {:to "subject-entity",
+   :uses 5,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "task-and-schema-rows-render-as-graph-nodes"
+  {:to "task-and-schema-entities-render-as-graph-nodes",
+   :uses 1,
+   :meaning "deftest name"},
+  "task-row"
+  {:to "task-entity",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "task-rows"
+  {:to "task-entities",
+   :uses 5,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "test-row"
+  {:to "test-entity",
+   :uses 20,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "test-row-id"
+  {:to "test-entity-id",
+   :uses 7,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "test-rows"
+  {:to "test-entities",
+   :uses 9,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "test-rows-by-ns"
+  {:to "test-entities-by-ns",
+   :uses 3,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "the-indexer-emits-no-attribute-the-program-row-schema-drops"
+  {:to
+   "the-indexer-emits-no-attribute-the-program-entity-schema-drops",
+   :uses 1,
+   :meaning "deftest name"},
+  "the-long-declaration-is-indexed-onto-the-test-row"
+  {:to "the-long-declaration-is-indexed-onto-the-test-entity",
+   :uses 1,
+   :meaning "deftest name"},
+  "the-row-basis-reads-history-or-refuses"
+  {:to "the-entity-basis-reads-history-or-refuses",
+   :uses 1,
+   :meaning "deftest name"},
+  "the-shipped-openrouter-backup-resolves-through-its-provider-row"
+  {:to
+   "the-shipped-openrouter-backup-resolves-through-its-provider-entity",
+   :uses 1,
+   :meaning "deftest name"},
+  "transact-row!"
+  {:to "transact-entity!",
+   :uses 4,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "transact-schema-row!"
+  {:to "transact-schema-entity!",
+   :uses 4,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "transaction-report-identities-select-only-changed-program-rows"
+  {:to
+   "transaction-report-identities-select-only-changed-program-entities",
+   :uses 1,
+   :meaning "deftest name"},
+  "turn-row"
+  {:to "turn-entity",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "turn-rows"
+  {:to "turn-entities",
+   :uses 13,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "two-agents-resolve-one-config-row-with-ordinary-inheritance"
+  {:to
+   "two-agents-resolve-one-config-entity-with-ordinary-inheritance",
+   :uses 1,
+   :meaning "deftest name"},
+  "unmap-row"
+  {:to "unmap-entity",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "unmap-row-carries-the-exact-forked-namespace-state"
+  {:to "unmap-entity-carries-the-exact-forked-namespace-state",
+   :uses 1,
+   :meaning "deftest name"},
+  "unrelated-row"
+  {:to "unrelated-entity",
+   :uses 5,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "value-row"
+  {:to "value-entity",
+   :uses 3,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "var-row"
+  {:to "var-entity",
+   :uses 4,
+   :meaning
+   "an entity: an entity map to write, a pulled entity or its id"},
+  "var-rows"
+  {:to "var-entities",
+   :uses 2,
+   :meaning "entities (maps, ids or transaction data) of one family"},
+  "with-rows"
+  {:to "with-entities",
+   :uses 3,
+   :meaning "entities (maps, ids or transaction data) of one family"}},
+ :overrides {},
+ :file-overrides
+ {"src/seon/db.clj" {"row" "entity-map", "rows" "entity-maps"}},
+ :site-overrides
+ {"src/seon/fn.clj"
+  {[3072 7] "program-entities",
+   [3331 22] "program-entities",
+   [3992 69] "program-entities",
+   [4002 77] "program-entities"}},
+ :deferred-files
+ #{"src/seon/sci/admit.clj"
+   "src/seon/test/accretion.clj"
+   "src/seon/sci/reader.cljc"
+   "src/seon/sci/kernel.clj"
+   "src/seon/turn.clj"
+   "src/seon/cluster/reply.clj"
+   "src/seon/cluster/agent.clj"
+   "src/seon/sci/eval.clj"
+   "src/seon/problems.clj"},
+ :deferred-namespaces
+ #{"seon.sci.reader"
+   "seon.cluster.reply"
+   "seon.problems"
+   "seon.sci.admit"
+   "seon.test.accretion"
+   "seon.sci.kernel"
+   "seon.cluster.agent"
+   "seon.turn"
+   "seon.sci.eval"},
+ :line-sensitive #{"last-row" "first-row" "row" "rows"},
+ :keep-in-file {"src/seon/fn.clj" #{"last-row" "first-row"}},
+ :form-overrides
+ {"src/seon/fn.clj" {"lint-rows" {"rows" "entities"}},
+  "src/seon/db.clj"
+  {"namespace-digests-tx" {"namespace-row" "namespace-entity-map"}}},
+ :def-names
+ #{"a-caller-files-findings-name-its-value-defs-rows"
+   "a-changed-core-row-refuses-by-name-and-every-agent-still-arms"
+   "a-component-bearing-row-validates-its-own-declared-shape"
+   "a-config-row-cannot-be-left-without-a-required-result-cap"
+   "a-create-is-validated-complete-while-an-upsert-validates-the-merged-row"
+   "a-data-only-commit-reuses-the-acquired-program-and-a-program-row-reacquires"
+   "a-definition-digests-with-the-namespace-row-its-settlement-stores"
+   "a-drop-names-the-files-whose-program-rows-carried-it"
+   "a-fault-no-agent-row-places-stays-on-its-own-branch"
+   "a-fork-taken-after-a-program-row-commit-holds-that-row"
+   "a-fresh-branch-with-unchanged-program-rows-derives-nothing"
+   "a-matching-model-registry-row-prevents-the-finding"
+   "a-missing-registry-row-leaves-the-working-call-target-unchanged"
+   "a-namespace-declared-long-reaches-every-test-row"
+   "a-namespace-row-change-re-derives-its-declarations-digests"
+   "a-no-auth-config-row-assembles-and-sends-without-authorization"
+   "a-program-row-keeps-only-the-definition-digest-it-produces"
+   "a-pulled-function-row-is-its-attributes-not-steering-prose"
+   "a-refused-contract-commits-a-receipt-and-no-row"
+   "a-retirement-lands-after-the-program-rows-that-convert-its-writers"
+   "a-retirement-refuses-while-a-program-row-writes-the-attribute"
+   "a-row-disagreeing-with-its-supplier-is-refused"
+   "a-row-naming-an-absent-supplier-is-refused"
+   "a-row-published-after-a-warm-plan-is-seen-synchronously"
+   "a-row-written-before-a-dial-existed-reads-its-declared-default"
+   "a-seeded-cluster-reads-its-own-row-on-the-member-branch"
+   "a-stale-host-bound-row-refuses-by-name-only-when-called"
+   "a-storable-declarations-committed-row-is-recognised-by-its-value"
+   "a-supplied-file-row-never-widens-the-reconciliation"
+   "a-synthetic-third-default-is-derived-from-its-row"
+   "a-test-with-no-program-row-is-unknown-and-is-never-run-in-process"
+   "accrete-row-attributes!"
+   "admit-initialization-rows"
+   "adopt-rows!"
+   "adoption-rows-land-in-one-transaction-or-not-at-all"
+   "advertised-rows"
+   "agent-row"
+   "alternate-row"
+   "an-unrelated-transaction-refreshes-without-changing-the-row-basis"
+   "analysis-rows-by-file"
+   "analyze-rows"
+   "analyzed-row-tx"
+   "analyzed-rows"
+   "analyzed-test-row"
+   "argument-row"
+   "arity-row"
+   "assert-complete-row-inventory!"
+   "assert-one-row-per-identity!"
+   "assert-owned-rows!"
+   "assert-rows!"
+   "attempt-rows"
+   "attribute-rows"
+   "binding-entry-row"
+   "binding-row"
+   "binding-rows"
+   "canonical-row"
+   "canonical-row-in"
+   "canonical-rows-carry-arbitrary-namespaced-properties"
+   "canonical-schema-rows"
+   "cast-rows"
+   "changed-row-attributes"
+   "check-row!"
+   "cold-context-reacquires-the-same-row"
+   "committed-row?"
+   "committed-rows-open-without-re-admission-and-writes-are-admitted"
+   "config-row"
+   "configured-models-without-registry-rows-are-derived"
+   "contract-facts-row"
+   "contracted-redefinition-exactly-replaces-the-row"
+   "contracted-rows-carry-queryable-facts-in-their-spec-transaction"
+   "contribution-row"
+   "current-row-ids"
+   "database-rows"
+   "debug-renderer-definition-accepts-the-acquired-program-row"
+   "declaration-admission-refuses-ambiguous-or-incomplete-rows"
+   "declaration-row"
+   "declared-member-rows"
+   "declared-row"
+   "declared-row-attributes"
+   "declared-row-evaluates-a-schema-once-inside-its-delta"
+   "declaring-an-attribute-on-a-program-row-schema-is-sufficient"
+   "definition-row"
+   "deftest-row"
+   "deletion-row"
+   "delivery-rows"
+   "desired-rows"
+   "detector-rows"
+   "digest-namespace-row"
+   "discovery-rows"
+   "every-agent-dial-has-a-declared-settings-row"
+   "every-declaration-row-satisfies-its-own-output-contract"
+   "every-program-row-attribute-is-owned-or-names-another-writer"
+   "expected-family-row-counts"
+   "expected-row-ids"
+   "explicit-synthetic-schema-rows-extend-only-that-database"
+   "family-row-counts"
+   "file-row-selection-follows-declaration-and-finding-refs"
+   "file-rows"
+   "file-rows-read-in-batches-not-per-row"
+   "fork-row"
+   "form-row"
+   "function-row"
+   "generated-rows"
+   "generic-schema-deletion-removes-unused-row-and-attribute"
+   "host-bound-row?"
+   "identity-rows"
+   "incremental-indexing-reconciles-only-selected-file-rows"
+   "index-rows-name-a-data-entity-by-its-identity"
+   "indexable-row-id"
+   "indexed-projection-rows-preserve-the-query-result"
+   "indexed-reach-rows-retain-the-pulled-facts"
+   "initialization-orders-provider-rows-before-the-models-naming-them"
+   "initialization-rows-apply-query-and-converge-with-the-config-row"
+   "install-evaluated-rows!"
+   "install-row!"
+   "instruction-row-changes"
+   "instrumented-generated-form-does-not-advise-an-absent-program-row"
+   "interpreter-refer-rows"
+   "issue-row"
+   "ledger-rows"
+   "lint-rows"
+   "list-row"
+   "live-schema-row?"
+   "missing-process-rows"
+   "missing-projection-is-a-refusal-not-query-rows"
+   "model-row"
+   "model-rows-are-queryable-open-and-rendered-without-wire-duplication"
+   "namespace-context-row"
+   "namespace-routes-admit-by-reader-and-existing-corpus-row"
+   "namespace-row"
+   "namespace-rows"
+   "newest-row-transaction"
+   "normalized-index-row"
+   "note-row"
+   "offending-fixture-row"
+   "one-unloadable-row-cannot-prevent-cold-acquisition"
+   "ordinary-model-row"
+   "organic-row"
+   "overridden-row?"
+   "pending-rows"
+   "probe-schema-rows"
+   "program-canonical-row"
+   "program-fn-row"
+   "program-identity-attributes-are-exactly-the-declared-row-schemas"
+   "program-row"
+   "program-row-identity"
+   "projection-from-rows"
+   "projection-rows"
+   "published-index-rows"
+   "reach-row"
+   "read-pulls-one-admitted-message-row"
+   "reader-events-have-one-canonical-declaration-row"
+   "receipt-row"
+   "receipt-rows"
+   "recent-message-rows"
+   "recent-receipt-rows"
+   "refused-index-reads-never-become-publication-rows"
+   "render-declarations-require-their-final-function-row"
+   "replace-shape-rows"
+   "report-row"
+   "require-context-rows-carry-namespace-symbols"
+   "resolvable-runtime-function-rows"
+   "result-facts-live-on-the-test-row-and-reruns-replace-them"
+   "retiring-an-identity-attribute-with-rows-is-admitted"
+   "retracted-data-allows-removal-and-historical-rows-restore-validation"
+   "revised-row"
+   "row"
+   "row-acquisition-observations-have-no-program-digest-promise"
+   "row-attributes"
+   "row-backed?"
+   "row-bindings"
+   "row-by-identity"
+   "row-definition-digest"
+   "row-identities"
+   "row-identity"
+   "row-lookup-refusal"
+   "row-query"
+   "row-ready?"
+   "row-refusal-describes-the-cause-without-copying-the-projection"
+   "row-satisfied?"
+   "row-tx"
+   "rows"
+   "rows-have-one-canonical-persisted-shape"
+   "rows-of"
+   "rows-per-agent"
+   "running-system-rows"
+   "runtime-function-rows-carry-parsed-contract-facts"
+   "scalar-upsert-rows"
+   "schema-row"
+   "schema-row-changes"
+   "schema-row-converged?"
+   "schema-row-convergence-uses-the-stores-own-semantics"
+   "schema-row-properties-lift-only-when-their-declarations-are-storable"
+   "schema-row-properties-survive-and-retract-exactly"
+   "schema-rows"
+   "schema-rows-record-the-derived-generatable-fact"
+   "schema-scoped-admissions-are-the-schema-rows-of-the-loader's-admissions"
+   "seed-rows"
+   "seeded-row"
+   "selected-rows-reconcile-without-a-manifest"
+   "selection-program-rows"
+   "shape-row-in"
+   "sorted-declarations-and-indexed-rows-preserve-registry-identities"
+   "source-has-one-owner-editable-getting-started-row"
+   "source-publication-records-core-on-every-row"
+   "source-row"
+   "source-rows"
+   "source-rows-keep-declared-targets-outside-the-submitted-form"
+   "stale-adoption-row-writes-refuse-at-the-writer"
+   "static-findings-are-replaced-with-their-program-rows"
+   "static-index-preserves-the-jvm-row-contract"
+   "subject-row"
+   "table-row?"
+   "task-and-schema-rows-render-as-graph-nodes"
+   "task-row"
+   "task-rows"
+   "the-indexer-emits-no-attribute-the-program-row-schema-drops"
+   "the-long-declaration-is-indexed-onto-the-test-row"
+   "the-row-basis-reads-history-or-refuses"
+   "the-shipped-openrouter-backup-resolves-through-its-provider-row"
+   "transact-schema-row!"
+   "transaction-report-identities-select-only-changed-program-rows"
+   "turn-rows"
+   "two-agents-resolve-one-config-row-with-ordinary-inheritance"
+   "unmap-row"
+   "unmap-row-carries-the-exact-forked-namespace-state"
+   "unrelated-row"
+   "var-row"
+   "with-rows"},
+ :var-overrides {"seon.fn" {"rows" "program-entities"}},
+ :deferred-defs
+ {"seon.fn" #{"contract-facts-row" "source-rows"},
+  "seon.problems" #{"row"},
+  "seon.program"
+  #{"canonical-row" "declaration-row" "deletion-row" "row-identity"},
+  "seon.sci.eval"
+  #{"analyzed-rows"
+    "binding-rows"
+    "committed-row?"
+    "declared-row"
+    "definition-row"
+    "host-bound-row?"
+    "install-evaluated-rows!"
+    "install-row!"
+    "namespace-context-row"
+    "overridden-row?"
+    "program-row-identity"
+    "row"
+    "row-backed?"
+    "row-bindings"
+    "row-definition-digest"
+    "unmap-row"},
+  "seon.test.accretion" #{"schema-row"},
+  "seon.turn"
+  #{"delivery-rows"
+    "namespace-rows"
+    "receipt-row"
+    "row-tx"
+    "source-rows"}},
+ :keep-files
+ {"src/seon/render/web.clj" "UI: rows are rendered page units",
+  "src/seon/render/value.clj"
+  "printer: rows of the permitted-operation table",
+  "script/seon/dev/markdown.clj" "Markdown table rows",
+  "src/seon/web/search.clj" "web search result rows",
+  "resources/seon/tasks/seon.dev.mcp.edn"
+  "uncommitted edit held by another lane",
+  "docs/seon/architecture/vocabulary.md"
+  "the avoid column lists row; edited by hand"},
+ :keep
+ {"stream-row" "a rendered UI unit row",
+  "start-row" "source position: a line number",
+  "organic-row" "a web search result row (provider JSON)",
+  "last-source-row" "source position: a line number",
+  "table-row?" "a Markdown table row",
+  "end-row"
+  "source position: clj-kondo/edamame :end-row is a line number",
+  "set-rows" "printer container items",
+  "list-row" "a printer layout row of permitted operations",
+  "reader-row" "source position: tools.reader line",
+  "map-rows" "printer container items",
+  "html-rows" "rendered HTML entries in a transcript test",
+  "first-source-row" "source position: a line number"},
+ :about
+ "Entity-vocabulary sweep (task db889f0b3, row-vocabulary-sweep). An entity is the datoms sharing one e; transaction data is what a writer submits. Every symbol whose name has a row/rows segment and means an entity, entity map, entity id or transaction data is renamed by :renames (derived by tmp/entity-vocabulary/sweep.clj map: row->entity, rows->entities, a-row->an-entity, :overrides win). Keywords are never renamed: see :keywords-for-schema-step.",
+ :collision-fallback {"row" "entity-map", "rows" "entity-maps"}}

@@ -29,7 +29,7 @@
         (comp (filter vector?) (map first))
         (schema/schema-definition :seon.config/manifest)))
 
-(deftest every-agent-dial-has-a-declared-settings-row
+(deftest every-agent-dial-has-a-declared-settings-entity
   (test-support/with-database
     (fn [connection]
       (test-support/seed-cluster! connection "settings-display")
@@ -86,9 +86,9 @@
         (test-support/apply-config! connection "flag-test" flags)
         (let [database (db/db connection)
               projection (schema/projection-from-database database)
-              row (db/pull database (vec (keys flags))
+              entity (db/pull database (vec (keys flags))
                            [:seon.config/cluster "flag-test"])]
-          (is (= flags row))
+          (is (= flags entity))
           (doseq [attribute (keys flags)]
             (let [valid? (schema/projection-validator projection attribute)]
               (is (valid? true))
@@ -97,12 +97,12 @@
         ;; An apply changes only its keys: clearing a flag is an explicit absence.
         (test-support/apply-config! connection "flag-test"
                                     (zipmap (keys flags) (repeat config/absent)))
-        (let [row (db/pull (db/db connection)
+        (let [entity (db/pull (db/db connection)
                            [:seon.config/cluster
                             :seon.config.agent/show-all-settings
                             :seon.config.ai/retain-reasoning]
                            [:seon.config/cluster "flag-test"])]
-          (is (= {:seon.config/cluster "flag-test"} row)))))))
+          (is (= {:seon.config/cluster "flag-test"} entity)))))))
 
 (defn- with-default-document
   [document body]
@@ -175,21 +175,21 @@
 
 (deftest shipped-initialization-admission-is-registry-derived
   (let [base (edn/read-string (slurp config/default-manifest-path))
-        row {:seon.db.process/id "config-population-admission-test"}]
-    (testing "a declared row with exactly one declared identity is admitted"
+        entity {:seon.db.process/id "config-population-admission-test"}]
+    (testing "a declared entity with exactly one declared identity is admitted"
       (with-default-document
-        (assoc base config/initialization-key [row])
-        #(is (= [row] (config/default-population)))))
+        (assoc base config/initialization-key [entity])
+        #(is (= [entity] (config/default-population)))))
     (testing "the reserved entry is not a sparse overlay dial"
       (let [data
             (test-support/refusal-data
              #(config/compile-manifest
                {:seon.boot/cluster-name "default" :seon.config/manifest
-                {config/initialization-key [row]}}))]
+                {config/initialization-key [entity]}}))]
         (is (= ::config/initialization-not-allowed (::config/rule data)))))
     (doseq [[label population expected-rule expected-key]
             [["the population must be a vector"
-              row
+              entity
               ::config/invalid-initialization
               nil]
              ["every member must be a map"
@@ -208,11 +208,11 @@
               [{:seon.db.process/id ""}]
               ::config/invalid-initialization-value
               :seon.db.process/id]
-             ["a row must have an identity attribute"
+             ["an entity must have an identity attribute"
               [{:seon.config.eval/time-limit-ms 1234}]
               ::config/invalid-initialization-identity
               nil]
-             ["a row cannot have two identity attributes"
+             ["an entity cannot have two identity attributes"
               [{:seon.db.process/id "x"
                 :seon.config/cluster "x"}]
               ::config/invalid-initialization-identity
@@ -226,7 +226,7 @@
           (when expected-key
             (is (= expected-key (::config/key data)))))))))
 
-(deftest initialization-rows-apply-query-and-converge-with-the-config-row
+(deftest initialization-entities-apply-query-and-converge-with-the-config-entity
   (let [base (edn/read-string (slurp config/default-manifest-path))
         process-id "seon.db.process/config-population-test"
         document
@@ -276,18 +276,18 @@
               (is (= basis (:max-tx @connection))))))
        (is (= 1 (count @transactions)))
        (let [tx-data (first @transactions)
-             rows (filter map? tx-data)]
+             entities (filter map? tx-data)]
          (is (= [[:db.fn/retractAttribute [:seon.config/cluster "difference"]
                    :seon.config.flow.io/queue-depth]]
                 (filterv vector? tx-data)))
-         (is (= 1 (count rows)))
+         (is (= 1 (count entities)))
          (is (= #{:db/id :seon.config/cluster :seon.config.flow.io/queue-depth
                   :seon.config/overlay-keys}
-                (set (keys (first rows)))))
+                (set (keys (first entities)))))
          (is (= #{:seon.config.flow.io/queue-depth}
-                (:seon.config/overlay-keys (first rows)))
-             "the row records the one dial this apply decided")
-         (is (= 23 (:seon.config.flow.io/queue-depth (first rows)))))))))
+                (:seon.config/overlay-keys (first entities)))
+             "the entity records the one dial this apply decided")
+         (is (= 23 (:seon.config.flow.io/queue-depth (first entities)))))))))
 
 (deftest converged-apply-uses-carried-projection-and-remains-exact
   (test-support/with-database
@@ -440,7 +440,7 @@
          (is (nil? (find reset :seon.config.ai/no-provider))))))))
 
 (deftest an-apply-on-a-branch-lacking-the-overlay-attribute-installs-it-first
-  ;; Class regression (revert 81f9b1b3e): boot wrote a row naming
+  ;; Class regression (revert 81f9b1b3e): boot wrote an entity naming
   ;; :seon.config/overlay-keys onto a branch whose program had not adopted its
   ;; declaration, and Datahike's :write schema mode refused the whole boot.
   (test-support/with-database
@@ -488,8 +488,8 @@
              "the undeclared dial keeps its value until adoption retires it"))))))
 
 (deftest apply-surfaces-a-refused-reconcile-as-its-flat-rule-error
-  ;; A real refusal inside the reconcile transaction: the desired row names a
-  ;; function with no program row. The writer returns that flat error verbatim.
+  ;; A real refusal inside the reconcile transaction: the desired entity names a
+  ;; function with no program entity. The writer returns that flat error verbatim.
   (test-support/with-database
     (fn [connection]
       (let [dial :seon.config.web/search-result-projection
@@ -520,10 +520,10 @@
            (is (= caller (:seon.instrument/fn refusal)))))
        (is (= basis (:max-tx @connection)))))))
 
-(deftest a-seeded-cluster-reads-its-own-row-on-the-member-branch
+(deftest a-seeded-cluster-reads-its-own-entity-on-the-member-branch
   ;; Class regression (shrink-turn 2026-09-26): tests that seed their own
-  ;; cluster read "requires a matching cluster row", because the reader
-  ;; required a dial the world's rows predated. The seeded row is read on the
+  ;; cluster read "requires a matching cluster entity", because the reader
+  ;; required a dial the world's entities predated. The seeded entity is read on the
   ;; member branch it was written to.
   (test-support/with-database
    (fn [connection]
@@ -533,11 +533,11 @@
        (is (nil? (:seon.error/at effective)) (pr-str effective))
        (is (= 4321 (:seon.config.eval/time-limit-ms effective)))))))
 
-(deftest a-row-written-before-a-dial-existed-reads-its-declared-default
-  ;; Accretion (Astra F5, 2026-09-26): a retained branch's row, written by a
+(deftest an-entity-written-before-a-dial-existed-reads-its-declared-default
+  ;; Accretion (Astra F5, 2026-09-26): a retained branch's entity, written by a
   ;; program older than a declared-default dial, lacks it. The reader requires
   ;; nothing of it: the dial answers its declared default by schema name, and
-  ;; every dial the row holds reads as held.
+  ;; every dial the entity holds reads as held.
   (test-support/with-database
    (fn [connection]
      (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "older-row"
@@ -550,7 +550,7 @@
                                (get (db/pull (db/db connection) [dial] [:seon.config/cluster "older-row"]) dial)]]))
            effective (config/effective older "older-row")]
        (is (nil? (get (db/pull older [dial] [:seon.config/cluster "older-row"]) dial))
-           "the row genuinely lacks the dial")
+           "the entity genuinely lacks the dial")
        (is (nil? (:seon.error/at effective)) (pr-str effective))
        (is (= (:seon.config/default (malli.core/properties (schema/structural-schema declared)))
               (get effective dial)))
@@ -559,14 +559,14 @@
 (deftest zero-overlay-compilation-resolves-every-registered-config-attribute
   (let [compiled (config/compile-manifest {:seon.boot/cluster-name "default"})
         effective (:seon.config/effective compiled)
-        row (:seon.config/desired-row compiled)]
+        entity (:seon.config/desired-row compiled)]
     (is (= dial-attributes (:seon.config/resolved-attributes compiled))
         "this is the standing zero-overlay completeness proof")
-    (is (= effective (select-keys row dial-attributes)))
-    (is (= "default" (:seon.config/cluster row))
+    (is (= effective (select-keys entity dial-attributes)))
+    (is (= "default" (:seon.config/cluster entity))
         "the caller names the cluster explicitly")
     (is ((schema/projection-validator (schema/handed-projection) :seon.config/effective) effective))
-    (is ((schema/projection-validator (schema/handed-projection) :seon.config/entity) row))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.config/entity) entity))
     (is (= (long (.availableProcessors (Runtime/getRuntime)))
            (:seon.config.flow.compute/concurrency effective)))
     (is (true? (:seon.config.db/keep-history? effective))
@@ -613,7 +613,7 @@
          {:seon.boot/cluster-name "default" :seon.config/manifest
           {:seon.config.run/max-episode-runs config/absent}})
         effective (:seon.config/effective absent)
-        row (:seon.config/desired-row absent)]
+        entity (:seon.config/desired-row absent)]
     (is (= 100
            (:seon.config.run/max-episode-runs
             (:seon.config/effective baseline))
@@ -621,8 +621,8 @@
             (:seon.config/effective omitted)))
         "omission inherits the shipped default; it never means retraction")
     (is (not (contains? effective :seon.config.run/max-episode-runs)))
-    (is (not (contains? row :seon.config.run/max-episode-runs)))
-    (is (not-any? nil? (vals row)))
+    (is (not (contains? entity :seon.config.run/max-episode-runs)))
+    (is (not-any? nil? (vals entity)))
     (is (not= (:seon.config/effective baseline)
               (:seon.config/effective absent)))
     (testing "a required entry cannot be removed"
@@ -767,10 +767,10 @@
                (:seon.config.flow.io/queue-depth
                 (config/effective @connection "fork"))))))))
 
-(deftest a-config-row-cannot-be-left-without-a-required-result-cap
+(deftest a-config-entity-cannot-be-left-without-a-required-result-cap
   ;; This assertion moved. It used to retract a cap key, then prove
-  ;; `result-caps` refused the stale row it produced. Write admission reads an
-  ;; identity-keyed map against the WHOLE config schema, so that row can no
+  ;; `result-caps` refused the stale entity it produced. Write admission reads an
+  ;; identity-keyed map against the WHOLE config schema, so that entity can no
   ;; longer be constructed at all: the retraction itself is refused, naming
   ;; the key, and nothing lands. `result-caps` remains proven against the
   ;; refusal shapes that DO reach it — a `missing-effective-error` in
@@ -847,8 +847,8 @@
               (is (string? (:seon.error/message refusal))))))))))
 
 (deftest a-refused-read-is-returned-as-the-cause-not-reported-as-missing-facts
-  ;; The class: a reader that treats an error value as an ordinary/absent row.
-  ;; `effective-in` bound `seon.db/pull`'s answer as the config row and derived
+  ;; The class: a reader that treats an error value as an ordinary/absent entity.
+  ;; `effective-in` bound `seon.db/pull`'s answer as the config entity and derived
   ;; `missing` from its keys, so an hour of `:seon.db/invalid-read` refusals
   ;; reported every dial missing and named the FACTS instead of the READ.
   ;; `seon.db/pull` returns its database argument unchanged when that argument

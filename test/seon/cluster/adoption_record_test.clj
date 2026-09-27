@@ -11,7 +11,7 @@
             [seon.test-support :as support]))
 
 (defn- published
-  "The live `current-src` head the writer guards, naming `database` as its rows."
+  "The live `current-src` head the writer guards, naming `database` as its entities."
   {:malli/schema [:=> [:cat :seon.db/connection] :seon.source/published]}
   [connection]
   {:seon.source/branch source/current-branch
@@ -21,7 +21,7 @@
 
 (deftest ^{:seon.test/fixture-observation
            "The writer's head guard reads the shared store's live current-src head."}
-  adoption-rows-land-in-one-transaction-or-not-at-all
+  adoption-entities-land-in-one-transaction-or-not-at-all
   (support/with-database
    (fn [connection]
      (let [adopted (symbol "seon.cluster.adoption-record-test" "adopted-value")
@@ -33,8 +33,8 @@
            note-id [:seon.issue/id "adoption-record-atomic"]
            database (db/db connection)
            _ (support/transacted!
-              connection [(support/program-fn-row database adopted "(defn adopted-value [] 1)")
-                          (support/program-fn-row database cited "(defn cited-value [] 2)")])
+              connection [(support/program-fn-entity database adopted "(defn adopted-value [] 1)")
+                          (support/program-fn-entity database cited "(defn cited-value [] 2)")])
            _ (support/transacted! connection [[:db.fn/call issue/index-tx [note]]])
            source-database (db/db connection)
            _ (is (seq (:seon.issue/functions (db/pull source-database [:seon.issue/functions] note-id)))
@@ -43,22 +43,22 @@
                                               [:db/retractEntity [:seon.fn/sym adopted]]
                                               [:db/retractEntity [:seon.fn/sym cited]]])
            adopt! (fn [identities]
-                    (try (#'seon.cluster/adopt-rows! connection (published connection)
+                    (try (#'seon.cluster/adopt-entities! connection (published connection)
                                                       identities source-database)
                          (catch clojure.lang.ExceptionInfo refused refused)))
            present? #(some? (:db/id (db/pull (db/db connection) [:db/id] %)))
            before (db/basis-t (db/db connection))]
        ;; The issue part refuses: its citation names a function this adoption
-       ;; does not carry, so the whole transaction refuses with the program row.
+       ;; does not carry, so the whole transaction refuses with the program entity.
        (is (instance? clojure.lang.ExceptionInfo
                       (adopt! #{[:seon.fn/sym adopted] [:seon.issue/id "adoption-record-atomic"]})))
        (is (= before (db/basis-t (db/db connection))) "a refused issue part commits nothing")
-       (is (not (present? [:seon.fn/sym adopted])) "the program row did not land alone")
+       (is (not (present? [:seon.fn/sym adopted])) "the program entity did not land alone")
        (adopt! #{[:seon.fn/sym adopted] [:seon.fn/sym cited] [:seon.issue/id "adoption-record-atomic"]})
        (let [database (db/db connection)
              tx-of #(:tx (first (db/datoms database :eavt (:db/id (db/pull database [:db/id] %)))))
              txs (set (map tx-of [[:seon.fn/sym adopted] [:seon.fn/sym cited] note-id]))]
-         (is (= 1 (count txs)) "program and issue rows are one transaction")
+         (is (= 1 (count txs)) "program and issue entities are one transaction")
          (is (empty? (db/datoms database :eavt (first txs) :seon.test/adoption-inputs))
-             "the rows carry no adoption record; it follows load and arm"))
+             "the entities carry no adoption record; it follows load and arm"))
        nil))))

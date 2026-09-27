@@ -56,8 +56,8 @@
        sort
        vec))
 
-(defn seed-rows
-  "Instruction rows installed only when absent from the source database."
+(defn seed-entities
+  "Instruction entities installed only when absent from the source database."
   {:malli/schema
    [:=> [:cat]
     :seon.cluster.instruction/seed-rows]}

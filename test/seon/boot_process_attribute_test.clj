@@ -13,7 +13,7 @@
      (let [projection (schema/handed-projection)
            report (support/transacted!
                    connection
-                   {:tx-data (instruction/seed-rows)
+                   {:tx-data (instruction/seed-entities)
                     :tx-meta {:seon.db/process
                               [:seon.db.process/id cluster/boot-process-identity]}})
            database (:db-after report)]
@@ -35,4 +35,4 @@
                     [?schema :seon.schema/key :seon.db/process ?tx]
                     [?tx :seon.db/process ?process]]
                   database cluster/boot-process-identity))
-           "canonical population committed its schema row with boot provenance")))))
+           "canonical population committed its schema entity with boot provenance")))))

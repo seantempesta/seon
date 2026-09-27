@@ -33,8 +33,8 @@
         (is (str/includes? (:seon.eval/shown saved) "Convert the sequence with vec") (:seon.eval/shown saved))
         (is (not (find refusal :seon.error/doc)) "printing never enriches the refusal"))
       (let [[saved value] (fixture/submit connection handle routing
-                                  (str/replace fixture/run5-lazy-call "(largest-customer order-rows)"
-                                               "(largest-customer (vec order-rows))"))]
+                                  (str/replace fixture/run5-lazy-call "(largest-customer order-entities)"
+                                               "(largest-customer (vec order-entities))"))]
         (is (nil? (:seon.cluster.eval/error saved)))
         (is (= {:customer "Ada" :total 115} value))))))
 

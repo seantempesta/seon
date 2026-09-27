@@ -58,7 +58,7 @@
   ;; The recurring failure class: a fixture that discards `transact!`'s answer
   ;; reads ABSENCE OF SIGNAL as health. One write path means admission's
   ;; refusal stops the fixture where it happened, naming the diagnostic and
-  ;; the offending row, instead of an empty world several assertions later.
+  ;; the offending entity, instead of an empty world several assertions later.
   (test-support/with-database
    (fn [connection]
      (let [reached-downstream? (atom false)
@@ -80,13 +80,13 @@
                           ":seon.agent/not-an-installed-attribute")
            "the failure carries write admission's own diagnostic")
        (is (str/includes? (ex-message failure)
-                          (str "Offending row 0: "
+                          (str "Offending entity 0: "
                                (pr-str {:seon.agent/id "refused-fixture-write"
                                         :seon.agent/not-an-installed-attribute 1})))
-           "the failure names the authored row, not the schema it was read against")
+           "the failure names the authored entity, not the schema it was read against")
        (is (nil? (db/q '[:find ?id . :where [_ :seon.agent/id ?id]]
                        (db/db connection)))
-           "the refused row seeded nothing")
+           "the refused entity seeded nothing")
        (let [report (test-support/transacted!
                      connection (test-support/agent-tx @connection "admitted-fixture-write"))]
          (is (some? (:db-after report)))
@@ -157,7 +157,7 @@
             (into
              (into #{}
                    (map :seon.schema/key)
-                   (schema/canonical-schema-rows packaged-forms))
+                   (schema/canonical-schema-entities packaged-forms))
              (keep :seon.schema/key)
              (mapcat :seon.fn.file/rows
                      (:seon.fn.manifest/artifacts @test-support/source-manifest)))
@@ -171,7 +171,7 @@
                     (schema/canonical-database-attributes (schema/handed-projection))))
         (is (not (contains? installed :seon.schema/created-at)))
         (is (every? #(not (contains? % :seon.schema/created-at))
-                    (schema/canonical-schema-rows packaged-forms)))
+                    (schema/canonical-schema-entities packaged-forms)))
         (is (= expected-schema-keys (set actual-schema-keys)))
         (is (= (->> (db/identity-attributes database)
                     (filter #(seq (db/datoms database :avet %)))
@@ -243,7 +243,7 @@
 
 (deftest ^{:seon.test/platform
            "Moving part: the one test bracket every other test forks through."}
-  explicit-synthetic-schema-rows-extend-only-that-database
+  explicit-synthetic-schema-entities-extend-only-that-database
   (let [options
         {::test-support/extra-schema
          (test-support/file-store-probe-schema ::marker)}]
@@ -253,7 +253,7 @@
              (fn [connection]
                (db/transact! connection [{::marker "installed"}])
                (test-support/file-store-markers connection ::marker))))
-        "the leased database sees its own synthetic marker rows")
+        "the leased database sees its own synthetic marker entities")
     (let [[installed? markers]
           (test-support/with-database
             (fn [connection]
@@ -412,7 +412,7 @@
 (deftest a-seeded-cluster-records-the-source-commit-a-fork-records
   ;; CLASS: `seed-cluster!` wrote no :seon.source/commit-id, so every agent test
   ;; request in a seeded world refused "The cluster records no adopted source
-  ;; commit". It now writes the row a fork records (registry/fork-row) with the
+  ;; commit". It now writes the entity a fork records (registry/fork-entity) with the
   ;; executing member's cluster's adopted commit.
   (test-support/with-database
    (fn [connection]

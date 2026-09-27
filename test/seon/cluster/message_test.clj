@@ -275,16 +275,16 @@
   id)
 
 (defn- deliver!
-  "Commit a delivery the way the loop commits its ordinary rows."
+  "Commit a delivery the way the loop commits its ordinary entities."
   [connection {:keys [sender trigger run ordinal value chain]
                :or {ordinal 0 chain limit}}]
   (let [delivery (message/delivery
                   @connection
                   (cond-> {:my.message/value value :seon.agent/id sender :seon.turn/id run :seon.cluster.eval/ordinal ordinal :seon.config.message/max-chain chain}
                     trigger (assoc :seon.message/trigger trigger)))
-        rows (:seon.message/rows delivery)]
-    (when (seq rows)
-      (test-support/transacted! connection rows))
+        entities (:seon.message/rows delivery)]
+    (when (seq entities)
+      (test-support/transacted! connection entities))
     delivery))
 
 (def ^:private agent-ids ["alice" "bob" "carol" "dana"])
@@ -382,7 +382,7 @@
             deliverable (if refused-kind
                           []
                           (filterv ::known? recipients))
-            rows (mapv (fn [{::keys [candidate-index to content]}]
+            entities (mapv (fn [{::keys [candidate-index to content]}]
                          (let [id (id/id (random-uuid) 8)]
                            (cond-> {::id id ::to to ::from sender
                                     ::content content
@@ -397,15 +397,15 @@
                                {:seon.message/unknown-recipient (::to recipient)})
                              (remove ::known? recipients)))
             next-model (reduce
-                        (fn [current row]
+                        (fn [current entity]
                           (-> current
-                              (assoc-in [::messages (::id row)] row)
-                              (update ::message-order conj (::id row))))
+                              (assoc-in [::messages (::id entity)] entity)
+                              (update ::message-order conj (::id entity))))
                         model
-                        rows)]
+                        entities)]
         [next-model
          {::data data
-          ::rows rows
+          ::rows entities
           ::refusals refusals}]))))
 
 (defn- actual-messages
@@ -432,11 +432,11 @@
                 :where [?message :seon.message/id _]]
               db)))
 
-(defn- with-rows
+(defn- with-entities
   "`database` with `rows` applied by the writer's own checks (`seon.db/with`);
   a refusal is thrown whole, as a fixture write refusal is."
-  [database rows]
-  (let [after (db/with database rows)]
+  [database entities]
+  (let [after (db/with database entities)]
     (if (:seon.error/message after)
       (throw (ex-info (str (:seon.error/message after)) after))
       after)))
@@ -451,7 +451,7 @@
     (if (= :human (::command command))
       (let [{::keys [message-id to content]}
             (command-data model command command-index)
-            after (with-rows database [{:seon.message/id message-id
+            after (with-entities database [{:seon.message/id message-id
                                       :seon.message/to [:seon.agent/id to]
                                       :seon.message/content content}])]
         [next-model
@@ -469,15 +469,15 @@
                       trigger
                       (assoc :seon.message/trigger trigger))
             delivery (message/delivery database request)
-            rows (:seon.message/rows delivery)
-            after (if (seq rows) (with-rows database rows) database)]
+            entities (:seon.message/rows delivery)
+            after (if (seq entities) (with-entities database entities) database)]
         [next-model
          (and
           (or (nil? chain-limit)
               (schema/valid-candidate-value? (schema/handed-projection)
                :seon.message/delivery-request request))
           (= (mapv ::id (::rows expected))
-             (mapv :seon.message/id rows))
+             (mapv :seon.message/id entities))
           (= (::refusals expected)
              (mapv #(select-keys % [:seon.message/no-limit :seon.message/chain-limit :seon.message/unknown-recipient]) (:seon.error/values delivery)))
           (every? #(schema/valid-candidate-value? (schema/handed-projection) :seon.error/value %)
@@ -543,11 +543,11 @@
   (with-database
     (fn [connection]
       (ask! connection "m-0" "alice" "hello")
-      (let [rows (:seon.message/rows
+      (let [entities (:seon.message/rows
                   (deliver! connection
                             {:sender "alice" :trigger "m-0" :run "r-1"
                              :value (seon.cluster.message/send "bob" "hello bob")}))
-            written (into #{} (mapcat keys) rows)]
+            written (into #{} (mapcat keys) entities)]
         (is (seq (set/intersection written
                                    (wake/wake-attributes (db/db connection))))
             "a delivery writes a wake attribute — that IS the transport")
@@ -557,7 +557,7 @@
              so an ordinary turn still cannot wake itself")))))
 
 ;;; ---------------------------------------------------------------------------
-;;; The rows
+;;; The entities
 ;;; ---------------------------------------------------------------------------
 
 (deftest a-delivery-records-who-sent-it
@@ -624,10 +624,10 @@
                                          recipient
                                          (str "hop " hop
                                               " — and how about this?"))})
-                      rows (:seon.message/rows delivery)]
-                  (if (seq rows)
+                      entities (:seon.message/rows delivery)]
+                  (if (seq entities)
                     (recur (inc hop) recipient sender
-                           (:seon.message/id (first rows))
+                           (:seon.message/id (first entities))
                            (inc delivered))
                     {:outcome :refused
                      :delivered delivered
@@ -655,10 +655,10 @@
                                   {:sender sender :trigger trigger
                                    :run (str head "-r-" hop)
                                    :value (seon.cluster.message/send recipient "…")})
-                        rows (:seon.message/rows delivery)]
-                    (if (and (seq rows) (< hop 200))
+                        entities (:seon.message/rows delivery)]
+                    (if (and (seq entities) (< hop 200))
                       (recur (inc hop) recipient sender
-                             (:seon.message/id (first rows))
+                             (:seon.message/id (first entities))
                              (inc delivered))
                       delivered))))]
           (is (= limit (run-to-refusal "m-0")))
@@ -744,11 +744,11 @@
   (with-database
     (fn [connection]
       (commit-inbound! connection (inbound-request "bob" "hello bob"))
-      (let [row (db/q '[:find (pull ?message [*]) .
+      (let [entity (db/q '[:find (pull ?message [*]) .
                        :where
                        [?message :seon.message/content "hello bob"]]
                      @connection)]
-        (is (string? (:seon.message/id row)))
+        (is (string? (:seon.message/id entity)))
         (is (= "bob"
                (db/q '[:find ?agent-id .
                       :in $ ?message-id
@@ -757,9 +757,9 @@
                       [?message :seon.message/to ?agent]
                       [?agent :seon.agent/id ?agent-id]]
                     @connection
-                    (:seon.message/id row))))
+                    (:seon.message/id entity))))
         (is (nil? (get (:schema @connection) :seon.message/inbox)))
-        (is (not (contains? row :seon.message/from))
+        (is (not (contains? entity :seon.message/from))
             "absence, not a human/origin stamp, is the outside contract")))))
 
 (deftest inbound-identity-is-unique-under-burst-test
@@ -831,7 +831,7 @@
                       :seon.error/value %)
                     results))
         (is (not-any? vector? results)
-            "every refusal is a flat value and produces no rows")))))
+            "every refusal is a flat value and produces no entities")))))
 
 (deftest reverse-agent-concerns-are-schema-declarations
   (let [forms (schema.edn/packaged-forms)

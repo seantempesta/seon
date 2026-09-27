@@ -613,7 +613,7 @@
         problem-counts
         (when (and ready (not unavailable))
           (into (sorted-map)
-                (map (fn [[family rows]] [family (count rows)]))
+                (map (fn [[family entities]] [family (count entities)]))
                 problems))
         ;; Each OPEN fault (no resolution after its latest occurrence), as
         ;; its signature, operation, latest occurrence and cause-chain head;
@@ -685,7 +685,7 @@
   [unit]
   (let [observation (:seon.render/value unit)
         ;; THE FACE FITS THE VALUE BUDGET BY SELECTING LESS (owner 2026-09-27):
-        ;; at the 1,000-token agent budget five fault rows and five
+        ;; at the 1,000-token agent budget five fault entities and five
         ;; over-second lines beside the cache counters came to 1,107 tokens,
         ;; and the MCP reply fell to a blob handle. Three of each family; the
         ;; whole value is one read away.
@@ -697,7 +697,7 @@
         faults (:seon.dev.mcp/open-faults observation)
         flow (:seon.dev.mcp/flow observation)
         procs (when (map? flow)
-                (for [row (:seon.oversight/agents flow) proc (:seon.oversight/procs row)] proc))
+                (for [entity (:seon.oversight/agents flow) proc (:seon.oversight/procs entity)] proc))
         roots (:seon.dev.mcp/replaced-roots observation)]
     (cond-> (merge (select-keys observation [:seon.dev.mcp/cluster :seon.dev.mcp/health
                                              :seon.dev.mcp/problem-counts :seon.dev.mcp/resolved-fault-count])
@@ -1100,7 +1100,7 @@
                   [:vector :qualified-keyword]]}
   [database projection]
   (let [forms (:seon.schema.projection/forms projection)
-        rows? (contains? (:schema database) :seon.schema/key)]
+        entities? (contains? (:schema database) :seon.schema/key)]
     ;; Datahike's `:schema` also maps each attribute's entity id to its ident
     ;; (`reference-code/datahike/src/datahike/db/transaction.cljc:120`), so the
     ;; keys mix longs and keywords: select idents BEFORE sorting.
@@ -1109,11 +1109,11 @@
            (remove #(contains? datahike.schema/implicit-schema-spec %))
            (remove #(contains? forms %))
            (remove (fn [attribute]
-                     (some (fn [row]
+                     (some (fn [entity]
                              (some #(not= :core (:v %))
-                                   (d/datoms database :eavt (:e row)
+                                   (d/datoms database :eavt (:e entity)
                                              :seon.schema.admission/source)))
-                           (when rows?
+                           (when entities?
                              (d/datoms database :avet :seon.schema/key attribute))))))
           (sort (filter qualified-keyword? (keys (:schema database)))))))
 
@@ -1352,8 +1352,8 @@
      :seon.fn/changed-paths
      (into #{} (concat (paths :seon.fn/file) (paths :seon.lint/file)))}))
 
-(defn- missing-process-rows
-  "Return required process rows absent from `db`, or its read refusal."
+(defn- missing-process-entities
+  "Return required process entities absent from `db`, or its read refusal."
   {:malli/schema [:=> [:cat
                        [:or :seon.db/database-value :seon.error/value]]
                   [:or [:vector [:map
@@ -1417,24 +1417,24 @@
     (if (coll? value) (set value) #{value})
     value))
 
-(defn- schema-row-converged?
+(defn- schema-entity-converged?
   "Does the stored row already carry every desired attribute value?
 
   Compares under the store's own semantics for each attribute, so a
   cardinality-many value read back in a different order is convergence, not a
   change to re-transact on every branch open."
   [installed-schema desired current]
-  (letfn [(comparable [row]
+  (letfn [(comparable [entity]
             (into {}
                   (map (fn [[attribute value]]
                          [attribute
                           (store-comparable-value
                            installed-schema attribute value)]))
-                  row))]
+                  entity))]
     (= (comparable desired)
        (comparable (select-keys current (keys desired))))))
 
-(defn- schema-row-changes
+(defn- schema-entity-changes
   [db projection]
   (into
    []
@@ -1457,12 +1457,12 @@
                              [attribute (as-schema-lookup-refs value)]
                              [attribute value])))
                     pulled))]
-        (when-not (schema-row-converged? (:schema db) desired current)
+        (when-not (schema-entity-converged? (:schema db) desired current)
           desired))))
-   (schema/canonical-schema-rows projection (:seon.schema.projection/forms projection))))
+   (schema/canonical-schema-entities projection (:seon.schema.projection/forms projection))))
 
-(defn- instruction-row-changes
-  [db rows]
+(defn- instruction-entity-changes
+  [db entities]
   (into
    []
    (remove
@@ -1473,7 +1473,7 @@
                     [?instruction :seon.cluster.instruction/id
                      ?instruction-id]]
                   db instruction-id))))
-   rows))
+   entities))
 
 (defn- lookup-refs-in
   [database value]
@@ -1513,26 +1513,26 @@
 
       :else {::lookup lookup})))
 
-(defn- row-lookup-refusal
-  [database row]
+(defn- entity-lookup-refusal
+  [database entity]
   (reduce (fn [_ lookup]
             (let [resolution (lookup-resolution database lookup)]
               (if (::refusal resolution) (reduced resolution) nil)))
           nil
-          (lookup-refs-in database row)))
+          (lookup-refs-in database entity)))
 
-(defn- row-ready?
-  [database row]
+(defn- entity-ready?
+  [database entity]
   (every? (fn [lookup] (nil? (lookup-resolution database lookup)))
-          (lookup-refs-in database row)))
+          (lookup-refs-in database entity)))
 
 (defn- transact-initialization!
-  [connection rows]
-  (config/require-functions! (db/db connection) rows)
-  (loop [pending (vec rows)]
+  [connection entities]
+  (config/require-functions! (db/db connection) entities)
+  (loop [pending (vec entities)]
     (when (seq pending)
       (let [database (db/db connection)
-            refusal (some #(row-lookup-refusal database %) pending)]
+            refusal (some #(entity-lookup-refusal database %) pending)]
         ;; A refused readiness read is surfaced verbatim BEFORE any judgement
         ;; about what resolves: the readiness question cannot be answered at
         ;; all while the read seam is refusing.
@@ -1545,8 +1545,8 @@
               :seon.activation/lookup-value value
               :seon.boot/population :seon.config/initialization
               :seon.boot/result (::refusal refusal)})))
-        (let [ready (into [] (filter #(row-ready? database %)) pending)
-              waiting (into [] (remove #(row-ready? database %)) pending)]
+        (let [ready (into [] (filter #(entity-ready? database %)) pending)
+              waiting (into [] (remove #(entity-ready? database %)) pending)]
           (when (empty? ready)
             (refused!
              "Initialization lookup refs do not resolve."
@@ -1604,9 +1604,9 @@
      [:or :nil :seon.db/transaction-report]]]}
   ([connection cluster-name]
    (accrete-schema-population! connection cluster-name true))
-  ([connection cluster-name publish-schema-rows?]
-   (accrete-schema-population! connection cluster-name publish-schema-rows? true))
-  ([connection cluster-name publish-schema-rows? retire?]
+  ([connection cluster-name publish-schema-entities?]
+   (accrete-schema-population! connection cluster-name publish-schema-entities? true))
+  ([connection cluster-name publish-schema-entities? retire?]
   (let [forms (schema.edn/packaged-forms)
         projection (or (schema/handed-projection) (schema/declaration-projection forms))]
     (schema/call-with-forms
@@ -1621,29 +1621,29 @@
               (require-committed!
                (db/transact! connection {:tx-data declarations})
                {:seon.boot/population :seon.schema/declarations})))
-          (let [process-rows (missing-process-rows (db/db connection))]
-            (when (and (map? process-rows)
-                       (contains? process-rows :seon.error/at)
-                       (contains? process-rows :seon.error/layer)
-                       (contains? process-rows :seon.error/operation))
-              (throw (ex-info (:seon.error/message process-rows)
-                              process-rows)))
-            (when (seq process-rows)
+          (let [process-entities (missing-process-entities (db/db connection))]
+            (when (and (map? process-entities)
+                       (contains? process-entities :seon.error/at)
+                       (contains? process-entities :seon.error/layer)
+                       (contains? process-entities :seon.error/operation))
+              (throw (ex-info (:seon.error/message process-entities)
+                              process-entities)))
+            (when (seq process-entities)
               (require-committed!
-               (db/transact! connection {:tx-data process-rows})
+               (db/transact! connection {:tx-data process-entities})
                {:seon.boot/population :seon.db/processes})))
           (let [database (db/db connection)
                 ;; A projection that IS this branch's own carried projection
-                ;; describes these rows already; diffing them against
-                ;; themselves cost 2.8-4.2 s of per-row pulls on every resume
+                ;; describes these entities already; diffing them against
+                ;; themselves cost 2.8-4.2 s of per-entity pulls on every resume
                 ;; (docs/prds/agent-platform/landing/lane-resume-in-seconds-2026-09-23.md (e)).
-                schema-rows (when (and publish-schema-rows?
+                schema-entities (when (and publish-schema-entities?
                                        (not (identical? projection (db/carried-projection database))))
-                              (schema-row-changes database projection))]
-            (when (seq schema-rows)
+                              (schema-entity-changes database projection))]
+            (when (seq schema-entities)
               (require-committed!
                (db/transact! connection
-                             {:tx-data schema-rows
+                             {:tx-data schema-entities
                               :tx-meta
                               {:seon.db/process
                                [:seon.db.process/id boot-process-identity]}})
@@ -1695,7 +1695,7 @@
                 program? (or (nil? classes) (classes :program))
                 ;; Read BEFORE the population transacts: the datoms a replaced
                 ;; or retired attribute drops, and the files whose program
-                ;; rows carried them (owner 2026-09-23: drop the data, update
+                ;; entities carried them (owner 2026-09-23: drop the data, update
                 ;; the schema, reapply what the files derive).
                 dropped (when schema?
                           (let [database (db/db connection)]
@@ -1705,11 +1705,11 @@
                 schema-report
                 (when schema?
           (report-source-progress! "schema population started")
-          ;; Schema rows land with their renderer definitions in index!'s one
-          ;; final transaction whenever program rows publish too (always, for
+          ;; Schema entities land with their renderer definitions in index!'s one
+          ;; final transaction whenever program entities publish too (always, for
           ;; a complete or an incremental publication); publishing them first
           ;; refused a schema naming a renderer its own publication defines.
-          ;; Retired attributes likewise wait for the program rows: a writer
+          ;; Retired attributes likewise wait for the program entities: a writer
           ;; this publication converts must not refuse their retirement.
           (let [report (accrete-schema-population!
                         connection nil (and (some? classes) (not program?)) (not program?))]
@@ -1718,21 +1718,21 @@
                   (:seon.db/datom-count dropped 0) " datoms"))
             report))]
           (when (nil? classes)
-          (report-source-progress! "instruction rows")
-          (let [rows (instruction-row-changes
+          (report-source-progress! "instruction entities")
+          (let [entities (instruction-entity-changes
                       (db/db connection)
-                      (instruction/seed-rows))]
-            (when (seq rows)
+                      (instruction/seed-entities))]
+            (when (seq entities)
               (require-committed!
                (db/transact! connection
-                             {:tx-data rows
+                             {:tx-data entities
                               :tx-meta
                               {:seon.db/process
                                [:seon.db.process/id boot-process-identity]}})
                {:seon.boot/population :seon.cluster.instruction/rows}))))
           (let [result
                 (when program?
-                  (report-source-progress! "program rows started")
+                  (report-source-progress! "program entities started")
                   (let [result (seon.fn/index!
              (cond-> {:seon.db/connection connection
                       :seon.schema/projection (schema/handed-projection)
@@ -1749,15 +1749,15 @@
                paths (assoc :seon.fn/changed-paths paths)
                (nil? manifest) (assoc :seon.fn/roots (or roots seon.fn/source-roots)))
              report-source-progress!)]
-                    (report-source-progress! "program rows complete")
+                    (report-source-progress! "program entities complete")
                     result))
                 ;; The writer judges the retirement against the final program
-                ;; rows, then the files behind its dropped datoms re-derive.
+                ;; entities, then the files behind its dropped datoms re-derive.
                 _ (when (and schema? program? (not (:seon.error/at result)))
                     (retire-attributes! connection (schema/handed-projection)))
                 reapply (:seon.fn/changed-paths dropped)
-                ;; Re-derive only the files whose program rows lost datoms,
-                ;; compared against the database AFTER the drop so every row
+                ;; Re-derive only the files whose program entities lost datoms,
+                ;; compared against the database AFTER the drop so every entity
                 ;; missing a dropped value differs and is reasserted.
                 reapplied
                 (when (seq reapply)
@@ -1786,18 +1786,18 @@
                          :else {:seon.reconcile/converged? false
                                 :seon.reconcile/operations 0
                                 :seon.reconcile/dropped-datoms dropped-datoms})]
-          ;; Initialization rows come LAST because they may name a program row
+          ;; Initialization entities come LAST because they may name a program entity
           ;; by lookup ref — the call-preparation suppliers do — and program
-          ;; rows are asserted by `index!` immediately above. Nothing earlier in
+          ;; entities are asserted by `index!` immediately above. Nothing earlier in
           ;; this population reads a config fact (`seon.fn` and
           ;; `seon.cluster.instruction` name no config attribute), so the move
           ;; costs no dependency and removes an ordering hazard that would
-          ;; otherwise force every declared row to predate the program graph.
+          ;; otherwise force every declared entity to predate the program graph.
           (when (or (nil? classes) (classes :config))
-          (report-source-progress! "initialization rows")
-          (let [rows (config/default-population)]
-            (when (seq rows)
-              (transact-initialization! connection rows))))
+          (report-source-progress! "initialization entities")
+          (let [entities (config/default-population)]
+            (when (seq entities)
+              (transact-initialization! connection entities))))
             (cond-> result
               (and result schema-report)
               (update :seon.reconcile/adopt-identities (fnil into #{})
@@ -1812,7 +1812,7 @@
 ;;; population above is derived from the Clojure program plus the
 ;;; classpath schema population. The indexer reads only Clojure files,
 ;;; while the source digest also covers the EDN declarations whose
-;;; Datahike schema and canonical rows are installed into `current-src`.
+;;; Datahike schema and canonical entities are installed into `current-src`.
 (def source-roots
   "The complete file roots whose content identifies `current-src`."
   (into seon.fn/source-roots
@@ -1927,9 +1927,9 @@
               (:seon.source/partial? currentness)
               (str "partial ("
                    (:seon.source/namespace-count currentness)
-                   " namespace rows and "
+                   " namespace entities and "
                    (:seon.source/function-count currentness)
-                   " function rows)")
+                   " function entities)")
 
               (empty? (:seon.source/recorded-digests currentness))
               "unprimed (no recorded source digest)"
@@ -1940,7 +1940,7 @@
                    ")")
 
               :else
-              "unprimed (the source-owned program rows are absent)")]
+              "unprimed (the source-owned program entities are absent)")]
         (refused!
          (str
           "Cluster `" cluster-name "` was not started because its program "
@@ -1969,7 +1969,7 @@
 (declare published-analyzer-digest selected-analyzer-digest)
 
 (defn- full-source-refresh!
-  "Capture, compare, classify and analyze selected rows on the current lineage."
+  "Capture, compare, classify and analyze selected entities on the current lineage."
   {:malli/schema
    [:=> [:cat :seon.boot/root :seon.store/store
          [:map [:seon.fn/root :string] [:seon.source/roots :seon.source/roots]
@@ -2006,14 +2006,14 @@
                           {:seon.fn/root directory :seon.source/changed-paths (vec unknown)}))
             changed (into #{} (filter #(not= (get prior %) (get observed %))) paths)
             analyzer (:seon.source/analyzer-digest roots)
-            ;; Rows derive from the analyzer as well as the bytes: rows another
+            ;; Entities derive from the analyzer as well as the bytes: entities another
             ;; analyzer produced are all stale, whatever file changed.
             stored-analyzer (when (and committed (contains? (:schema committed) :seon.source/analyzer-digest))
                               (db/q '[:find ?digest . :where [_ :seon.source/analyzer-digest ?digest]] committed))
             analyzer-changed? (and committed analyzer (not= analyzer stored-analyzer))
             launched (::launched-analyzer roots)
             ;; Launch loaded analyzer files as bytes the head did not publish:
-            ;; those files are changed inputs, so the selected rows decide below
+            ;; those files are changed inputs, so the selected entities decide below
             ;; whether any reached definition changed.
             settle? (and analyzer-changed? launched (not (::reanalyze? roots)))
             classification (cond
@@ -2059,7 +2059,7 @@
             selected analysis-paths]
         (try
           (let [paths (when database selected)
-                analyzed (seon.fn/analyze-rows
+                analyzed (seon.fn/analyze-entities
                           (cond-> {:seon.fn/root directory
                                    :seon.fn/roots (:seon.fn/roots roots)
                                    :seon.fn/changed-paths selected
@@ -2071,7 +2071,7 @@
           (if (and settle? (not= settled stored-analyzer))
             (full-source-refresh! root store (assoc roots ::reanalyze? true))
             (let [previous-findings (when database
-                                      (seon.fn/file-rows database (vec paths) :seon.lint/file))
+                                      (seon.fn/file-entities database (vec paths) :seon.lint/file))
                   _ (when (:seon.error/at previous-findings)
                       (refused! "Published findings could not be read." previous-findings))
                   _ (report-analysis-warnings! previous-findings (filterv :seon.lint/id analyzed))
@@ -2103,7 +2103,7 @@
                                              (:seon.source/commit-id published))
                             ;; A JVM launched on analyzer files the head did not
                             ;; publish names the analyzer of those bytes: the
-                            ;; head's with the selected rows, else every row.
+                            ;; head's with the selected entities, else every entity.
                             analyzer (assoc :seon.source/analyzer-digest
                                             (cond settled settled
                                                   sealed? (published-analyzer-digest analyzed)
@@ -2305,13 +2305,13 @@
          ;; its definition digest; an equal digest in both values is no edit.
          digests (when (= 2 (count databases))
                    (mapv (fn [database]
-                           (let [rows (db/q '[:find ?symbol ?digest :in $ [?symbol ...]
+                           (let [entities (db/q '[:find ?symbol ?digest :in $ [?symbol ...]
                                               :where [?e :seon.fn/sym ?symbol]
                                                      [?e :seon.program/definition-digest ?digest]]
                                             database symbols)]
-                             (when (:seon.db/invalid-read rows)
-                               (refused! "Declaration definition digests could not be read." rows))
-                             (into {} rows)))
+                             (when (:seon.db/invalid-read entities)
+                               (refused! "Declaration definition digests could not be read." entities))
+                             (into {} entities)))
                          databases))
          unedited? (fn [symbol]
                      (and digests
@@ -2324,7 +2324,7 @@
                                              :where [_ :seon.ns/name ?name]]
                                            database namespace-names)]
                            (when (:seon.db/invalid-read names)
-                             (refused! "Changed namespace rows could not be read." names))
+                             (refused! "Changed namespace entities could not be read." names))
                            (set names)))
                        databases)
          dependent-seeds
@@ -2479,11 +2479,11 @@
         (finally (d/release-materialized-db database))))))
 
 (defn- analyzer-reach
-  "The declarations reached from `seon.fn/analyze-rows` through `calls`."
+  "The declarations reached from `seon.fn/analyze-entities` through `calls`."
   {:malli/schema [:=> [:cat [:map-of :qualified-symbol [:sequential :qualified-symbol]]]
                   [:set :qualified-symbol]]}
   [calls]
-  (loop [reached #{} pending (list `seon.fn/analyze-rows)]
+  (loop [reached #{} pending (list `seon.fn/analyze-entities)]
     (if-let [[function & more] (seq pending)]
       (recur (conj reached function) (into more (remove reached) (get calls function)))
       reached)))
@@ -2523,23 +2523,23 @@
                        (analyzer-reach (update-vals functions (comp vec :seon.fn/calls))))]))
 
 (defn- published-analyzer-digest
-  "`analyzer-digest` of the rows a publication analyzed, before they are stored."
+  "`analyzer-digest` of the entities a publication analyzed, before they are stored."
   {:malli/schema [:=> [:cat :seon.program/rows] :seon.source/analyzer-digest]}
-  [rows]
-  (reached-digest (into {} (keep #(when (and (:seon.fn/sym %) (:seon.fn/file %)) [(:seon.fn/sym %) %])) rows)))
+  [entities]
+  (reached-digest (into {} (keep #(when (and (:seon.fn/sym %) (:seon.fn/file %)) [(:seon.fn/sym %) %])) entities)))
 
 (defn- selected-analyzer-digest
   "`analyzer-digest` of `database` with the files at `paths`, and every file
   `rows` analyzed, replaced by `rows`: a selected publication's analyzer."
   {:malli/schema [:=> [:cat :seon.db/database-value [:set :string] :seon.program/rows]
                   :seon.source/analyzer-digest]}
-  [database paths rows]
-  (let [analyzed (filterv :seon.fn/sym rows)
+  [database paths entities]
+  (let [analyzed (filterv :seon.fn/sym entities)
         replaced (into paths (keep #(some-> % :seon.fn/file second)) analyzed)
         stored (db/q '[:find [(pull ?function [:seon.fn/sym :seon.program/definition-digest :seon.fn/calls
                                                {:seon.fn/file [:seon.fn.file/relative-path]}]) ...]
                        :where [?function :seon.fn/sym]] database)]
-    (when (map? stored) (refused! "Published function rows could not be read." stored))
+    (when (map? stored) (refused! "Published function entities could not be read." stored))
     (reached-digest
      (into {} (map (juxt :seon.fn/sym identity))
            (concat (sequence (comp (remove #(contains? replaced (get-in % [:seon.fn/file :seon.fn.file/relative-path])))
@@ -2662,7 +2662,7 @@
                 #(instrument/apply!
                   (cond-> {:seon.sci.admit/caps (config/result-caps effective)
                            :seon.schema/projection projection
-                           ;; The cluster's supplied-default rows: each contract's
+                           ;; The cluster's supplied-default entities: each contract's
                            ;; call preparation is decided from them at arming.
                            :seon.db/db database
                            :seon.profile/definition-digests digests}
@@ -2742,9 +2742,9 @@
   [held-store published prior-commit published-database]
   (if prior-commit
     (source/changed-identities held-store published prior-commit)
-    (into #{} (keep program/row-identity) (seon.fn/published-index-rows published-database))))
+    (into #{} (keep program/row-identity) (seon.fn/published-index-entities published-database))))
 
-(defn- adopt-rows!
+(defn- adopt-entities!
   "Write the schema, program, issue and task rows among `identities` from
   `published-database` onto `connection` in ONE transaction, and answer the
   program identities.
@@ -2774,13 +2774,13 @@
                    (into (require-committed! ((requiring-resolve 'seon.issue/adopt-call)
                                               published-database issue-identities)
                                              {:seon.boot/population :seon.issue/rows})))
-                 ;; Tasks are data the publication admitted, never program rows;
+                 ;; Tasks are data the publication admitted, never program entities;
                  ;; the whole set reconciles, empty when the cluster agrees.
                  (require-committed! ((requiring-resolve 'seon.issue/adopt-tasks-call)
                                       published-database (db/db connection))
                                      {:seon.boot/population :seon.task/rows}))]
     (when (next tx-data)
-      (report-source-progress! "development rows")
+      (report-source-progress! "development entities")
       (require-committed!
        (schema/call-with-forms
         (:seon.schema.projection/forms projection)
@@ -2800,7 +2800,7 @@
         cluster-ref [:seon.cluster/name cluster-name]
         ctx (:seon.sci.eval/ctx instance)
         ;; A refused pull (invalid read or budget) is not "no adopted commit",
-        ;; which would adopt every row.
+        ;; which would adopt every entity.
         prior (db/pull (db/db connection) [:seon.source/commit-id] cluster-ref)
         _ (when (or (:seon.db/invalid-read prior) (:seon.error/at prior))
             (refused! "The adopted source commit could not be read." prior))
@@ -2821,17 +2821,17 @@
       (let [previous-database (db/db connection)
         published-database (source/database held-store (:seon.source/commit-id published))]
        (try
-        ;; Rows, then load, then arm, then the record: the adopter writes with
+        ;; Entities, then load, then arm, then the record: the adopter writes with
         ;; the code it started with, and the record names the loaded commit.
-        ;; Rows ahead of the record are interpreted by contexts (B2 §2a).
+        ;; Entities ahead of the record are interpreted by contexts (B2 §2a).
         (let [identities (published-changes held-store published prior-commit published-database)
         program-identities (into #{} (filter (comp (set program/identity-attributes) first)) identities)
         projection (db/carried-projection published-database)
         changed-identities (adoption-identities program-identities)
         deleted-identities (filterv #(empty? (db/pull published-database '[*] %)) changed-identities)
-        ;; Reload and arming are the JVM's, rows and record the cluster's: a
+        ;; Reload and arming are the JVM's, entities and record the cluster's: a
         ;; JVM already running the published commit (booted on it, or adopted
-        ;; for another cluster) only writes this cluster's rows and record.
+        ;; for another cluster) only writes this cluster's entities and record.
         loaded? (= (:seon.source/commit-id published)
                    (:seon.source/commit-id @sci.eval/loaded-identity))
         namespaces (if loaded? #{}
@@ -2841,7 +2841,7 @@
     ;; dependent never enters this JVM. The check after reload catches an
     ;; edit that lands during it.
     (verify-development-sources! published-database (fs/source-directory) namespaces)
-    (adopt-rows! connection published identities published-database)
+    (adopt-entities! connection published identities published-database)
     (report-source-progress! "development loaded definitions")
     ;; Unmap, reload and arm wait for no one: a member or evaluation spanning
     ;; them reads a changed loaded identity at its end and refuses its result.
@@ -3077,7 +3077,7 @@
             (if (empty? host-bound)
               (candidate-gate!
                (:seon.turn.loop/cluster instance) held-store branch
-               #(adopt-rows! (:seon.db/connection %) published identities published-database)
+               #(adopt-entities! (:seon.db/connection %) published identities published-database)
                adopt!)
               (assoc (adopt-then-test! (:seon.turn.loop/cluster instance) identities host-bound adopt!)
                      :seon.source/candidate branch)))

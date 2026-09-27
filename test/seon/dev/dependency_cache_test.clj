@@ -25,7 +25,7 @@
        (throw (ex-info "The dependency-cache test seam is absent."
                        {:seon.dev-cache/symbol sym :seon.dev-cache/namespace owner})))))
 
-(defn- source-row
+(defn- source-entity
   [source-root namespace-symbol]
   (let [path (str (-> (str namespace-symbol)
                       (str/replace "." "/")
@@ -59,17 +59,17 @@
     ;; Loader classes must be strictly newer than source under RT/load.
     (.setLastModified first-file 1)
     (.setLastModified second-file 1)
-    [(source-row source-root 'cache-probe.first)
-     (source-row source-root 'cache-probe.second)]))
+    [(source-entity source-root 'cache-probe.first)
+     (source-entity source-root 'cache-probe.second)]))
 
 (defn- compile-probes!
-  [source-root rows staging]
+  [source-root entities staging]
   (let [form
         (pr-str
          `(binding [*compile-path* ~(.getCanonicalPath (io/file staging))]
-            ~@(map (fn [row]
-                     `(compile '~(:seon.dev-cache/namespace row)))
-                   rows)))
+            ~@(map (fn [entity]
+                     `(compile '~(:seon.dev-cache/namespace entity)))
+                   entities)))
         result
         (operator.process/run-process!
          {:seon.operator.subprocess/argv
@@ -85,7 +85,7 @@
       (throw (ex-info "The cache probe namespaces did not compile."
                       {:seon.dev-cache/exit exit
                        :seon.dev-cache/output output})))
-    rows))
+    entities))
 
 (defn- start-lazy-loader!
   [cache-path]
@@ -144,7 +144,7 @@
         references-root (io/file root "processes")
         lock-file (io/file root "cache.lock")
         result-file (io/file root "result.edn")
-        rows (write-probe-sources! source-root)
+        entities (write-probe-sources! source-root)
         child (atom nil)]
     (try
       (with-redefs-fn
@@ -157,7 +157,7 @@
          (private-var 'result-file) (.getCanonicalPath result-file)
          (private-var 'run-build!)
          (fn [_basis staging]
-           (compile-probes! source-root rows staging))}
+           (compile-probes! source-root entities staging))}
         (fn []
           (let [first-cache (:seon.dev-cache/path (dev-cache/refresh nil))
                 before (directory-state first-cache)
@@ -324,7 +324,7 @@
                :jvm-opts []}
         run-child! (private-var 'run-child!)]
     (try
-      ;; A row before the extension loads clojure.pprint, as in the real
+      ;; An entity before the extension loads clojure.pprint, as in the real
       ;; closure, so compiling in end order reproduces the cyclic load.
       (doseq [[file text] {"uses_pprint.clj" "(ns cache-probe.uses-pprint (:require [clojure.pprint]))\n"
                            "pprint_root.clj" (str "(ns cache-probe.pprint-root\n"
@@ -343,15 +343,15 @@
                    (.getCanonicalPath result)
                    'cache-probe.pprint-root)
                   "The compile-order probe discovery failed." (.getPath staging))
-      (let [rows (edn/read-string (slurp result))
-            order (mapv :seon.dev-cache/namespace rows)]
+      (let [entities (edn/read-string (slurp result))
+            order (mapv :seon.dev-cache/namespace entities)]
         (testing "discovery records the namespace before its extension"
           (is (= '[babashka.process babashka.process.pprint]
                  (filterv '#{babashka.process babashka.process.pprint} order))))
         (testing "the recorded order compiles in a fresh JVM"
           (run-child! basis
-                      ((private-var 'compile-form) rows (.getCanonicalPath staging))
+                      ((private-var 'compile-form) entities (.getCanonicalPath staging))
                       "The compile-order probe compilation failed." (.getPath staging))
-          ((private-var 'validate!) staging rows)))
+          ((private-var 'validate!) staging entities)))
       (finally
         (test-support/delete-recursively! root)))))

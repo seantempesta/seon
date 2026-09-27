@@ -1,4 +1,4 @@
-;;; Call preparation — the declared supplied-default rows and the derived
+;;; Call preparation — the declared supplied-default entities and the derived
 ;;; invocation plan (P17 S1).
 ;;;
 ;;; "Call preparation" is sci's own name for the hook seam
@@ -11,22 +11,22 @@
 ;;;
 ;;; A SUPPLIER is the named function that produces one such value from the
 ;;; calling environment. It is the role the ambient-injection r2 draft called a
-;;; "provider"; the word is avoided here because `provider descriptor row`
-;;; already names one hosted model provider's config row (AGENTS.md vocabulary
+;;; "provider"; the word is avoided here because `provider descriptor entity`
+;;; already names one hosted model provider's config entity (AGENTS.md vocabulary
 ;;; table) and the two are unrelated.
 #:seon.call-preparation
-{;; --- the declared row -----------------------------------------------------
+{;; --- the declared entity -----------------------------------------------------
  ;; Three facts make a value suppliable. Adding a third supplied default is
- ;; adding one row plus one ordinary contracted function — never editing a
+ ;; adding one entity plus one ordinary contracted function — never editing a
  ;; dispatch map, a case expression, or a naming convention.
  :key [:qualified-keyword {:seon.db/identity true :seon.program/row-schema :seon.call-preparation/row}],
 
- ;; Ref to the registered `:seon.schema/key` row naming the supplied value
+ ;; Ref to the registered `:seon.schema/key` entity naming the supplied value
  ;; contract. Only that authored schema name matches; an inline structural
  ;; copy or differently named alias requests no default.
  :schema :seon.db/ref,
 
- ;; Ref to the supplier's `:seon.fn/sym` row. The symbol is DATA: it is
+ ;; Ref to the supplier's `:seon.fn/sym` entity. The symbol is DATA: it is
  ;; resolved live at preparation time so hot reload stays visible and a
  ;; cached plan never captures a function root.
  :supplier :seon.db/ref,
@@ -58,7 +58,7 @@
  :refusals [:vector [:or :seon.call-preparation/incoherent-supplier-error :seon.db/error-result]],
 
  ;; The basis at which this snapshot was derived (`checked-through-t`) and the
- ;; newest transaction that asserted or retracted any row fact (`basis-t`).
+ ;; newest transaction that asserted or retracted any entity fact (`basis-t`).
  ;; Both are Datahike basis transactions read from a database value, never
  ;; stored counters. `basis-t` is the third element of a plan cache key, so an
  ;; unrelated transaction may force one conservative re-derivation of the

@@ -1,5 +1,5 @@
 (ns seon.reconcile-retain-test
-  "Config reconciliation never retracts a config row another cluster references."
+  "Config reconciliation never retracts a config entity another cluster references."
   (:require [clojure.test :refer [deftest is]]
             [seon.db :as db]
             [seon.test-support :as support]))
@@ -7,9 +7,9 @@
 (deftest ^{:seon.test/long "Three config applies on one fixture branch: 57.0 s at 15ffb4936 and 94.8 s at 0e53eb8b1 on scratch clusters, each apply's one reconcile transaction ~16.5 s (routed to the writer-cost owner; 313 ms per apply at bfe3445f8)."
            :seon.test/long-ms 120000}
   a-config-another-cluster-references-survives-a-later-apply
-  ;; Every config row is first written by the one config process, so a
+  ;; Every config entity is first written by the one config process, so a
   ;; process-scoped reconciliation managed all of them: applying B retracted
-  ;; A's row and the retraction refused on A's required :seon.cluster/config.
+  ;; A's entity and the retraction refused on A's required :seon.cluster/config.
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "retain-a")
@@ -24,4 +24,4 @@
                             database))]
        (is (every? configs ["retain-a" "retain-b"]) (pr-str configs))
        (is (every? owned ["retain-a" "retain-b"])
-           "each cluster still references its own config row")))))
+           "each cluster still references its own config entity")))))

@@ -18,7 +18,7 @@
            targets (when detailed-spans?
                      {(ns-resolve 'seon.cluster.source 'capture-paths) :seon.probe/capture
                       (ns-resolve 'seon.cluster.source 'classify-paths) :seon.probe/classify
-                      (ns-resolve 'seon.fn 'analyze-rows) :seon.probe/analyze
+                      (ns-resolve 'seon.fn 'analyze-entities) :seon.probe/analyze
                       (ns-resolve 'seon.fn 'index!) :seon.probe/index
                       (ns-resolve 'seon.db 'transact!) :seon.probe/transact
                       (ns-resolve 'seon.cluster 'load-development-definitions!) :seon.probe/reload
@@ -122,16 +122,16 @@
                                         (assert terminal-line line)
                                         (edn/read-string (subs terminal-line (count prefix))))))
                          state (read-state)
-                         row (merge {:seon.probe/case label :seon.probe/elapsed-ms elapsed
+                         entity (merge {:seon.probe/case label :seon.probe/elapsed-ms elapsed
                                      :seon.probe/request-count (count @calls)
                                      :seon.probe/forms @calls :seon.probe/terminal terminal}
                                     state)]
-                     (prn row) (flush)
-                     (assert (= 1 (count @calls)) (pr-str row))
+                     (prn entity) (flush)
+                     (assert (= 1 (count @calls)) (pr-str entity))
                      (when (= expected "accepted")
                        (assert (= (:seon.source/commit-id terminal)
                                   (get-in state [:seon.probe/adoption :seon.source/commit-id]))))
-                     row))
+                     entity))
           leaf (io/file "src/my/note.clj") core (io/file "src/seon/id.clj")
           leaf-before (slurp leaf) core-before (slurp core)]
       (original-client endpoint

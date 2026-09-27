@@ -21,9 +21,9 @@
                      [?caller :seon.fn/calls ?target]
                      [?target :seon.fn/sym ?target-symbol]]
                    @connection
-                   "seon.fn/var-row"
+                   "seon.fn/var-entity"
                    printer-symbols))]
         (is (seq targets)
             "a planted core-printer caller must make the census non-vacuous")
         (is (= #{"clojure.core/pr-str"} targets)
-            "the census resolves the call edge through the core function row")))))
+            "the census resolves the call edge through the core function entity")))))

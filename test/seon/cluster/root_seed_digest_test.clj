@@ -19,26 +19,26 @@
       (cluster/seed-root-agent!
        connection "root-seed-digest" cluster/boot-process-identity)
       (let [database (db/db connection)
-            namespace-row (db/pull database
+            namespace-entity (db/pull database
                                    '[* {:seon.ns/refers
                                         [:seon.ns.refer/local
                                          :seon.ns.refer/target-ns
                                          :seon.ns.refer/target-name]}]
                                    [:seon.ns/name 'my.agents.root])
-            row (program/canonical-row
+            entity (program/canonical-row
                  (program/shapes-in (db/carried-projection database))
-                 (value/transacted namespace-row database))
-            digest (:seon.program/definition-digest row)]
-        (is (= 'my.agents.root (:seon.ns/name row)))
+                 (value/transacted namespace-entity database))
+            digest (:seon.program/definition-digest entity)]
+        (is (= 'my.agents.root (:seon.ns/name entity)))
         (is (= '(ns my.agents.root
                   (:require [my.message] [my.turn] [seon.db]
                             [seon.bootstrap :refer [help dir doc]]
                             [clojure.test :refer [deftest is]]))
-               (some-> (:seon.ns/source row) edn/read-string)))
+               (some-> (:seon.ns/source entity) edn/read-string)))
         (is (= #{'my.message 'my.turn 'seon.db 'seon.bootstrap 'clojure.test}
-               (:seon.ns/requires row)))
+               (:seon.ns/requires entity)))
         (is (and (string? digest) (re-matches #"[0-9a-f]{64}" digest)))
-        (is (= (program/definition-digest row) digest))
+        (is (= (program/definition-digest entity) digest))
         (is (= "root" (:seon.agent/id
                         (db/pull database [:seon.agent/id]
                                  [:seon.agent/id "root"]))))
@@ -56,10 +56,10 @@
                                    {:seon.sci.reader/text text
                                     :seon.config.eval.result/max-source (count text)})))
                          [source (str "\n\n" source)])
-            rows (mapv #(program/declaration-row projection % :contracted :agent)
+            entities (mapv #(program/declaration-row projection % :contracted :agent)
                        events)]
         (is (= [1 3] (mapv :seon.sci.reader/line events)))
-        (is (every? #(= source (:seon.ns/source %)) rows))
-        (is (apply = (map :seon.program/definition-digest rows)))
+        (is (every? #(= source (:seon.ns/source %)) entities))
+        (is (apply = (map :seon.program/definition-digest entities)))
         (is (every? #(= (program/definition-digest %)
-                       (:seon.program/definition-digest %)) rows))))))
+                       (:seon.program/definition-digest %)) entities))))))

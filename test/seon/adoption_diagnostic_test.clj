@@ -7,7 +7,7 @@
             [seon.sci.eval :as eval]
             [seon.test-support :as test-support]))
 
-(deftest row-refusal-describes-the-cause-without-copying-the-projection
+(deftest entity-refusal-describes-the-cause-without-copying-the-projection
   (let [projection {:seon.schema.projection/function-contracts
                     (apply str (repeat 99000 "x"))}
         refusal (#'eval/acquisition-refusal

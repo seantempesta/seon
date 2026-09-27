@@ -315,7 +315,7 @@
                 (is (str/includes? html "data-fleet-oversight=\"unavailable\""))
                 (is (not (str/includes? html "data-fleet-oversight=\"agents\""))
                     "missing state never renders as an empty fleet"))))
-          (testing "a caller naming no cluster is unavailable, never a guessed row"
+          (testing "a caller naming no cluster is unavailable, never a guessed entity"
             (let [routing (agent/routing)
                   _ (swap! routing assoc :seon.flow/graph graph :seon.agent/armed {})]
               (is (= {:seon.oversight/missing [:seon.boot/cluster-name]}
@@ -350,7 +350,7 @@
             "a stopped graph's open turn is not work in progress")))))
 
 (deftest every-consumer-reads-the-cluster-its-caller-names
-  ;; THE CLASS: a forked branch carries its parent's cluster and config rows,
+  ;; THE CLASS: a forked branch carries its parent's cluster and config entities,
   ;; so `[:find ?name .]` picked one of several. Each consumer now reads the
   ;; name from the caller's context environment and refuses by that name.
   (support/with-database
@@ -370,14 +370,14 @@
             history #(transcript/agent-history {:seon.db/db db :seon.agent/id "nobody"
                                                 :seon.boot/cluster-name %})]
         (try
-          (is (<= 3 (count names)) "the branch carries several cluster rows")
+          (is (<= 3 (count names)) "the branch carries several cluster entities")
           (testing "the named cluster's configuration answers"
             (is (= [] (:seon.oversight/agents (fleet "named-b"))))
             (is (= 3 (:seon.render.profile/max-children (profile "named-a"))))
             (is (= 5 (:seon.render.profile/max-children (profile "named-b"))))
             (is (= [] (:seon.render.transcript/runs (history "named-b")))))
-          ;; A cluster row requires its config (`:seon.cluster/config`), so the
-          ;; unconfigured name is one this world holds no rows for.
+          ;; A cluster entity requires its config (`:seon.cluster/config`), so the
+          ;; unconfigured name is one this world holds no entities for.
           (is (not-any? #{"unconfigured"} names))
           (testing "a named cluster without configuration refuses by that name"
             (doseq [refusal [(fleet "unconfigured") (profile "unconfigured")

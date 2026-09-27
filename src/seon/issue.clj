@@ -195,9 +195,9 @@
         projection (db/carried-projection database)
         registry (:seon.schema.projection/registry projection)
         ;; Keys and schemas come from ONE projection. Reading keys from the
-        ;; database's schema rows while resolving them in the carried
+        ;; database's schema entities while resolving them in the carried
         ;; projection refused every adoption that added a schema key: the
-        ;; transaction database holds the new rows before its carried
+        ;; transaction database holds the new entities before its carried
         ;; projection advances (`:malli.core/invalid-schema` with schema nil).
         cites (into {}
                     (for [attribute (keys (:seon.schema.projection/forms projection))
@@ -402,9 +402,9 @@
         (into (into #{} (comp (filter selected?)
                              (mapcat :seon.issue.parse/tags)
                              (keep classes)) valid)
-              (keep (fn [row]
-                      (when (some selected-entities (component-ids (:seon.issue/members row)))
-                        (:seon.issue/id row)))) existing)
+              (keep (fn [entity-map]
+                      (when (some selected-entities (component-ids (:seon.issue/members entity-map)))
+                        (:seon.issue/id entity-map)))) existing)
         results
         (mapv
          (fn [{:seon.issue/keys [id path] :as note}]
@@ -433,24 +433,24 @@
                  citations (file-citations id (get grouped :seon.issue/files) citation-entities)
                  test-refs (into (component-ids (:seon.issue/tests current))
                                  (map :seon.issue/entity) (get grouped :seon.issue/tests))
-                 row (cond-> (select-keys note [:seon.issue/id :seon.issue/path :seon.issue/title
+                 entity-map (cond-> (select-keys note [:seon.issue/id :seon.issue/path :seon.issue/title
                                                 :seon.issue/status :seon.issue/severity :seon.issue/problem])
                        opened (assoc :seon.issue/opened opened)
                        (seq test-refs) (assoc :seon.issue/tests test-refs)
                        (seq unresolved) (assoc :seon.issue/unresolved (set unresolved))
                        (seq citations) (assoc :seon.issue/files citations))
-                 row (reduce (fn [row [attribute attribute-hits]]
+                 entity-map (reduce (fn [entity-map [attribute attribute-hits]]
                                (let [entities (cond-> (into #{} (map :seon.issue/entity) attribute-hits)
                                                 (= :seon.issue/issues attribute)
                                                 (disj (:db/id current)))]
                                  (if (or (contains? #{:seon.issue/files :seon.issue/tests} attribute)
                                          (empty? entities))
-                                   row
-                                   (assoc row attribute entities))))
-                             row grouped)
-                 row (reduce (fn [row [attribute values]]
-                               (if (seq values) (assoc row attribute (set values)) row))
-                             row
+                                   entity-map
+                                   (assoc entity-map attribute entities))))
+                             entity-map grouped)
+                 entity-map (reduce (fn [entity-map [attribute values]]
+                               (if (seq values) (assoc entity-map attribute (set values)) entity-map))
+                             entity-map
                              [[:seon.issue/commits (filter #(hex-token? 9 %) tokens)]
                               [:seon.issue/members
                                (for [member (get members-by-class id)]
@@ -471,18 +471,18 @@
                 :seon.issue/tx
                 (into stale
                       (if current
-                        (replacement-tx current (merge (apply dissoc current replaced) row))
-                        [row]))})))
+                        (replacement-tx current (merge (apply dissoc current replaced) entity-map))
+                        [entity-map]))})))
          (filterv #(or (selected? %) (affected-classes (:seon.issue/id %))) parsed))
         ;; `present`, not `admitted`: a note on disk that this index refused
-        ;; is still present, so its stored row is left exactly as it was.
+        ;; is still present, so its stored entity is left exactly as it was.
         removed (filter #(and (selected? %)
                               (not (contains? present (:seon.issue/id %)))) existing)
         ;; A VALID slug the database does not hold yet is minted here, so a
         ;; class note may name a member first seen in this same transaction by
         ;; lookup ref. An already stored slug needs no upsert: it re-asserts
         ;; one identity fact per note the database already holds (1,649 of
-        ;; them today). An invalid slug is never minted: an identity-only row
+        ;; them today). An invalid slug is never minted: an identity-only entity
         ;; has no `:seon.issue/title`, which the whole-entity validator
         ;; requires, so one bad note refused every publication.
         tx (into (mapv #(hash-map :seon.issue/id %)
@@ -528,7 +528,7 @@
                result (assoc :seon.db/transaction-report result))))))
 
 ;;; TASKS (spec 7.1-7.16): declarations from resources/seon/tasks/<ns>.edn; subjects
-;;; and proofs are the `:seon.task/tasks` handles program rows carry.
+;;; and proofs are the `:seon.task/tasks` handles program entities carry.
 
 (defn task-handle
   "The task handle of an identifying aspect: seon.id/id over [ns name kind] (3b.6)."
@@ -603,10 +603,10 @@
   {:malli/schema [:=> [:cat :seon.db/database-value [:enum :seon.task/ns :seon.task/id] [:set [:or :seon.task/ns :seon.task/handle]]]
                   [:or [:map-of :seon.task/handle :map] :seon.db/invalid-read-error]]}
   [database attribute values]
-  (let [rows (if (contains? (:schema database) attribute)
+  (let [entities (if (contains? (:schema database) attribute)
                (db/q database '[:find [(pull ?e [*]) ...] :in $ ?a [?v ...] :where [?e ?a ?v]] attribute (vec values))
                [])]
-    (or (read-error rows) (into {} (map (juxt :seon.task/id identity)) rows))))
+    (or (read-error entities) (into {} (map (juxt :seon.task/id identity)) entities))))
 
 (defn task-basis
   "The declarations stored now for the files' namespaces: the basis a caller reads with its proposal."
@@ -669,10 +669,10 @@
   `rows` retracts."
   {:malli/schema [:=> [:cat :seon.db/database-value [:vector :map] [:set :seon.task/handle] :seon.task/basis]
                   [:vector :seon.schema/value]]}
-  [database rows handles basis]
+  [database entities handles basis]
   (let [stored (stored-tasks database :seon.task/id handles)]
     (when (read-error stored) (throw (ex-info (:seon.error/message stored) stored)))
-    (task-delta (db/carried-projection database) stored (into {} (map (juxt :seon.task/id #(dissoc % :db/id))) rows) basis)))
+    (task-delta (db/carried-projection database) stored (into {} (map (juxt :seon.task/id #(dissoc % :db/id))) entities) basis)))
 
 (defn- task-handles
   "Every stored task handle, or with `retracted?` every handle `database`'s history
@@ -699,12 +699,12 @@
   (let [published (task-handles source false) retracted (task-handles source true) held (task-handles destination false)
         failure (some read-error [published retracted held])
         handles (when-not failure (into published (filter retracted) held))
-        rows (when handles (stored-tasks source :seon.task/id handles))
+        entities (when handles (stored-tasks source :seon.task/id handles))
         basis (when handles (stored-tasks destination :seon.task/id handles))]
-    (or failure (read-error rows) (read-error basis)
-        (let [rows (vec (vals rows))
+    (or failure (read-error entities) (read-error basis)
+        (let [entities (vec (vals entities))
               basis (update-vals basis #(declaration (db/carried-projection destination) %))]
-          (if (empty? (adopt-tasks-tx destination rows handles basis)) [] [[:db.fn/call #'adopt-tasks-tx rows handles basis]])))))
+          (if (empty? (adopt-tasks-tx destination entities handles basis)) [] [[:db.fn/call #'adopt-tasks-tx entities handles basis]])))))
 
 (defn index-tasks!
   "Reconcile task files through the writer against the declarations the caller read
@@ -802,7 +802,7 @@
   [detector [attribute value]]
   (id/id (into (sorted-map) {:seon.issue/detector detector attribute value})))
 
-(defn- subject-row
+(defn- subject-entity
   "The facts one detector subject asserts, on the identity the detector gives it.
   The identity is the detector plus the subject's own identity value, so two
   runs upsert one entity; an entity id would change under a refork and is
@@ -813,7 +813,7 @@
         _ (when-not (= 1 (count identifying))
             (refuse! {:seon.error/at (java.util.Date.)
         :seon.error/layer :seon.issue/request
-        :seon.error/operation 'seon.issue/subject-row
+        :seon.error/operation 'seon.issue/subject-entity
         :seon.error/message "Issue operation requires exactly one installed subject identity."
         :seon.error/offending subject
         :seon.issue/subject-identity-count (count identifying)
@@ -822,7 +822,7 @@
         issue-attribute (or (get cites attribute)
                             (refuse! {:seon.error/at (java.util.Date.)
         :seon.error/layer :seon.issue/request
-        :seon.error/operation 'seon.issue/subject-row
+        :seon.error/operation 'seon.issue/subject-entity
         :seon.error/message "Issue operation requires a declared citation relation for the identity."
         :seon.error/offending subject
         :seon.issue/uncited-subject-attribute attribute
@@ -830,7 +830,7 @@
         entity (or (:db/id (db/pull database [:db/id] [attribute value]))
                    (refuse! {:seon.error/at (java.util.Date.)
         :seon.error/layer :seon.issue/request
-        :seon.error/operation 'seon.issue/subject-row
+        :seon.error/operation 'seon.issue/subject-entity
         :seon.error/message "Issue operation requires an existing subject entity."
         :seon.error/offending subject
         :seon.issue/missing-subject-attribute attribute
@@ -845,14 +845,14 @@
       (:seon.issue/problem subject) (assoc :seon.issue/problem (:seon.issue/problem subject))
       (seq cited) (assoc :seon.issue/namespaces cited))))
 
-(defn- detector-rows
+(defn- detector-entities
   "Read a detector through its program identity and derive its issue subjects."
   [database request]
   (let [detector (:seon.issue/detector request)
         program (or (:db/id (db/pull database [:db/id] [:seon.fn/sym detector]))
                     (refuse! {:seon.error/at (java.util.Date.)
         :seon.error/layer :seon.issue/request
-        :seon.error/operation 'seon.issue/detector-rows
+        :seon.error/operation 'seon.issue/detector-entities
         :seon.error/message "Issue operation requires an installed detector function."
         :seon.error/offending request
         :seon.issue/missing-detector detector
@@ -860,7 +860,7 @@
         detect (or (requiring-resolve (symbol detector))
                    (refuse! {:seon.error/at (java.util.Date.)
         :seon.error/layer :seon.issue/request
-        :seon.error/operation 'seon.issue/detector-rows
+        :seon.error/operation 'seon.issue/detector-entities
         :seon.error/message "Issue operation requires a resolving detector Var."
         :seon.error/offending request
         :seon.issue/unresolved-detector detector
@@ -872,7 +872,7 @@
 
             (refuse! {:seon.error/at (java.util.Date.)
         :seon.error/layer :seon.issue/request
-        :seon.error/operation 'seon.issue/detector-rows
+        :seon.error/operation 'seon.issue/detector-entities
         :seon.error/message "Issue operation requires a successful detector read."
         :seon.error/offending subjects
         :seon.issue/refused-detector detector
@@ -882,7 +882,7 @@
                  :identities (set (db/identity-attributes database))
                  :cites (citation-attributes database)
                  :namespaces (into {} (db/q '[:find ?name ?e :where [?e :seon.ns/name ?name]] database))}]
-    (mapv #(subject-row database context %) subjects)))
+    (mapv #(subject-entity database context %) subjects)))
 
 (defn generate-subject-call
   "Write one detector finding against the issue the writer holds now. A new
@@ -891,20 +891,20 @@
   {:malli/schema [:=> [:cat :seon.db/database-value
                        [:map [:seon.issue/id :seon.issue/id] [:seon.issue/status :seon.issue/status]]]
                   :seon.db/tx-data]}
-  [database row]
-  (let [held (db/pull database '[*] [:seon.issue/id (:seon.issue/id row)])]
+  [database entity]
+  (let [held (db/pull database '[*] [:seon.issue/id (:seon.issue/id entity)])]
     (cond
-      (= :resolved (:seon.issue/status row))
+      (= :resolved (:seon.issue/status entity))
       (if held
-        (let [desired (cond-> row (not (:seon.issue/resolved-tx held))
+        (let [desired (cond-> entity (not (:seon.issue/resolved-tx held))
                         (assoc :seon.issue/resolved-tx "datomic.tx"))]
           (replacement-tx held desired (set (keys desired))))
         [])
       ;; The generator owns exactly what it decides plus the resolution fact,
       ;; so a worker's tests, agent and edited prose are never touched by a run.
-      held (let [desired (apply dissoc row (filter #(contains? held %) generated-prose))]
+      held (let [desired (apply dissoc entity (filter #(contains? held %) generated-prose))]
              (replacement-tx held desired (conj (set (keys desired)) :seon.issue/resolved-tx)))
-      :else [(assoc row :seon.issue/opened (java.util.Date.))])))
+      :else [(assoc entity :seon.issue/opened (java.util.Date.))])))
 
 (defn generate
   "Derive one detector's findings once, outside the writer, as one
@@ -920,8 +920,8 @@
                   :seon.db/tx-data]}
   [database request]
   (let [program (:db/id (db/pull database [:db/id] [:seon.fn/sym (:seon.issue/detector request)]))
-        rows (detector-rows database request)
-        yielded (into #{} (map :seon.issue/id) rows)
+        entities (detector-entities database request)
+        yielded (into #{} (map :seon.issue/id) entities)
         stored (if-let [root (:seon.fn.file/relative-root request)]
                  (db/q '[:find [?id ...] :in $ ?detector ?root :where
                          [?e :seon.issue/detector ?detector] [?e :seon.issue/id ?id]
@@ -933,20 +933,20 @@
                        database program))]
     (into []
           (comp (filter #(seq (generate-subject-call database %)))
-                (map (fn [row] [:db.fn/call #'generate-subject-call row])))
-          (concat rows
+                (map (fn [entity] [:db.fn/call #'generate-subject-call entity])))
+          (concat entities
                   (for [issue-id (sort stored) :when (not (contains? yielded issue-id))]
                     {:seon.issue/id issue-id :seon.issue/status :resolved})))))
 
 (defn- generated-report [database request]
   (let [program (:db/id (db/pull database [:db/id] [:seon.fn/sym (:seon.issue/detector request)]))
-        rows (mapv #(db/pull database [:seon.issue/id :seon.issue/status] %)
+        entities (mapv #(db/pull database [:seon.issue/id :seon.issue/status] %)
                    (db/q '[:find [?e ...] :in $ ?detector :where [?e :seon.issue/detector ?detector]]
                          database program))]
     {:seon.issue/detector (:seon.issue/detector request)
-     :seon.issue/count (count rows)
-     :seon.issue/open (count (filterv #(= :open (:seon.issue/status %)) rows))
-     :seon.issue/resolved (count (filterv #(= :resolved (:seon.issue/status %)) rows))}))
+     :seon.issue/count (count entities)
+     :seon.issue/open (count (filterv #(= :open (:seon.issue/status %)) entities))
+     :seon.issue/resolved (count (filterv #(= :resolved (:seon.issue/status %)) entities))}))
 
 (defn generate!
   "Run one detector through the writer and report its issues.
@@ -992,8 +992,8 @@
 
 (defn- detector-symbol
   "The detector's symbol when the issue names one and the pull resolved it."
-  [row]
-  (some-> (get-in row [:seon.issue/detector :seon.fn/sym]) symbol))
+  [entity]
+  (some-> (get-in entity [:seon.issue/detector :seon.fn/sym]) symbol))
 
 (defn- check-form
   "The form that decides this issue's completion, or nothing when none does.
@@ -1001,10 +1001,10 @@
   the check, because the run that stops naming the subject resolves it. An
   issue with neither carries NO form: `(my.test/check {:seon.test/changed []})`
   promised a verification that would pass by being empty."
-  [row test-rows]
+  [entity test-entities]
   (cond
-    (seq test-rows) (list 'my.test/check {:seon.test/changed (mapv :seon.test/sym test-rows)})
-    (detector-symbol row) (list (detector-symbol row) '(seon.db/db))))
+    (seq test-entities) (list 'my.test/check {:seon.test/changed (mapv :seon.test/sym test-entities)})
+    (detector-symbol entity) (list (detector-symbol entity) '(seon.db/db))))
 
 (defn status
   "Read the issue and test outcomes; verification uses the current test reach digest."
@@ -1012,7 +1012,7 @@
                              [:seon.issue/id :seon.issue/id]]]
                   [:or :seon.issue/status-view :seon.db/error-result :seon.issue/not-found-error]]}
   [{database :seon.db/db issue-id :seon.issue/id}]
-  (let [row (db/pull database '[:db/id :seon.issue/id :seon.issue/title :seon.issue/status :seon.issue/severity
+  (let [entity (db/pull database '[:db/id :seon.issue/id :seon.issue/title :seon.issue/status :seon.issue/severity
                                   :seon.issue/problem :seon.issue/path :seon.issue/opened :seon.issue/commits
                                   {:seon.issue/agent [:db/id :seon.agent/id]} :seon.issue/budget :seon.issue/resolved-tx
                                   :seon.issue/budget-exhausted-tx
@@ -1030,10 +1030,10 @@
                                   {:seon.issue/errors [:db/id :seon.error/signature {:seon.error/occurrences [:seon.error.occurrence/count]}]}]
                      [:seon.issue/id issue-id])]
     (cond
-      (and (map? row) (:seon.error/at row)
-           (:seon.error/layer row) (:seon.error/operation row)) ; debt: database and detector reads still declare generic seon.db/error-result.
- row
-      (not (:seon.issue/title row))
+      (and (map? entity) (:seon.error/at entity)
+           (:seon.error/layer entity) (:seon.error/operation entity)) ; debt: database and detector reads still declare generic seon.db/error-result.
+ entity
+      (not (:seon.issue/title entity))
       {:seon.error/at (java.util.Date.)
         :seon.error/layer :seon.issue/request
         :seon.error/operation 'seon.issue/status
@@ -1042,7 +1042,7 @@
         :seon.issue/missing-issue-id issue-id
         :seon.error/expected "an existing issue"}
       :else
-      (let [test-rows (mapv
+      (let [test-entities (mapv
                        (fn [test-value]
                          (let [recorded (seon.test/recorded-result database (:seon.test/sym test-value))
                                test-value (if (or (:seon.test/unknown recorded) (:seon.test/execution-refusal recorded))
@@ -1061,21 +1061,21 @@
                              (db/q '[:find ?test ?symbol :in $ ?issue
                                      :where [?issue :seon.issue/tests ?test]
                                             [?test :seon.test/sym ?symbol]]
-                                   database (:db/id row)))))]
-        (cond-> (assoc row :seon.issue/tests test-rows
+                                   database (:db/id entity)))))]
+        (cond-> (assoc entity :seon.issue/tests test-entities
                            :seon.issue/turns-remaining
-                           (if-let [agent-id (get-in row [:seon.issue/agent :seon.agent/id])]
+                           (if-let [agent-id (get-in entity [:seon.issue/agent :seon.agent/id])]
                              (@turn-turns-left database agent-id) 0)
-                           :seon.issue/status (if (:seon.issue/resolved-tx row) :resolved (:seon.issue/status row))
-                           :seon.issue/functions (mapv #(vector :seon.fn/sym (:seon.fn/sym %)) (:seon.issue/functions row))
+                           :seon.issue/status (if (:seon.issue/resolved-tx entity) :resolved (:seon.issue/status entity))
+                           :seon.issue/functions (mapv #(vector :seon.fn/sym (:seon.fn/sym %)) (:seon.issue/functions entity))
                            :seon.issue/errors (mapv (fn [error]
                                                       (cond-> (dissoc error :seon.error/occurrences)
                                                         (seq (:seon.error/occurrences error))
                                                         (assoc :seon.error/occurrence-count
                                                                (reduce + (map :seon.error.occurrence/count (:seon.error/occurrences error))))))
-                                                    (:seon.issue/errors row)))
-          (check-form row test-rows)
-          (assoc :seon.issue/check-form (check-form row test-rows)))))))
+                                                    (:seon.issue/errors entity)))
+          (check-form entity test-entities)
+          (assoc :seon.issue/check-form (check-form entity test-entities)))))))
 
 (defn status-text
   "Render the issue's current checks, failures, and remaining turn budget."
@@ -1090,13 +1090,13 @@
        (when-let [form (:seon.issue/check-form view)]
          (str "\nDone condition: " (repl/source-text form)))
        (apply str
-              (for [test-row (:seon.issue/tests view)]
-                (str "\n" (:seon.test/sym test-row) ": "
-                     (case (:seon.issue.test/state test-row)
+              (for [test-entity (:seon.issue/tests view)]
+                (str "\n" (:seon.test/sym test-entity) ": "
+                     (case (:seon.issue.test/state test-entity)
                        :verified "passed" :red "failed" :unrun "not run" "not verified")
-                     (when-let [failure (if (seq (:seon.test.failure/reports test-row))
-                                          (seon.test/failure-message test-row)
-                                          (:seon.test/failure-message test-row))]
+                     (when-let [failure (if (seq (:seon.test.failure/reports test-entity))
+                                          (seon.test/failure-message test-entity)
+                                          (:seon.test/failure-message test-entity))]
                        (str "\n" failure)))))))
 
 (defn- status-view
@@ -1105,11 +1105,11 @@
   authority that decides them. A unit carrying no database, or an issue
   `status` cannot read, renders the row it was handed."
   [unit]
-  (let [row (or (:seon.render/value unit) unit)]
+  (let [entity (or (:seon.render/value unit) unit)]
     (or (when-let [database (:seon.db/db unit)]
-          (let [view (status {:seon.db/db database :seon.issue/id (:seon.issue/id row)})]
+          (let [view (status {:seon.db/db database :seon.issue/id (:seon.issue/id entity)})]
             (when (:seon.issue/title view) view)))
-        row)))
+        entity)))
 
 (defn render-ai
   "Show the issue's status and exact verification form as one data block.
@@ -1143,7 +1143,7 @@
               :when (not= :seon.issue/files attribute)]
           {attribute [identity-attribute]})))
 
-(defn- identity-rows
+(defn- identity-entities
   {:malli/schema [:=> [:cat :seon.db/database-value]
                   [:or [:vector :seon.db/pulled-entity] :seon.db/error-result]]}
   [database]
@@ -1156,26 +1156,26 @@
    [:function
     [:=> [:cat :seon.db/database-value [:vector :map]] :seon.db/tx-data]
     [:=> [:cat :seon.db/database-value [:vector :map] [:set :seon.issue/id]] :seon.db/tx-data]]}
-  ([database rows]
-   (adopt-tx database rows
-             (into (set (map :seon.issue/id rows))
+  ([database entities]
+   (adopt-tx database entities
+             (into (set (map :seon.issue/id entities))
                    (db/q '[:find [?id ...] :where [?e :seon.issue/id ?id]
                            [?e :seon.issue/path]] database))))
-  ([database rows identities]
+  ([database entities identities]
   (let [pulled (mapv #(db/pull database '[*] [:seon.issue/id %]) identities)
         _ (when-let [refusal (some #(when (:seon.error/at %) %) pulled)]
             (throw (ex-info (:seon.error/message refusal) refusal)))
         current (filterv :seon.issue/id pulled)
         by-id (into {} (map (juxt :seon.issue/id identity)) current)
-        ids (set (map :seon.issue/id rows))
+        ids (set (map :seon.issue/id entities))
         ref-attributes (into {:seon.issue/members :seon.issue/id}
                              (for [[identity-attribute attribute] (citation-attributes database)
                                    :when (not= :seon.issue/files attribute)]
                                [attribute identity-attribute]))
         adopted-citations
-        (fn [row]
-          (if-let [citations (seq (:seon.issue/files row))]
-            (assoc row :seon.issue/files
+        (fn [entity]
+          (if-let [citations (seq (:seon.issue/files entity))]
+            (assoc entity :seon.issue/files
                    (into #{} (map (fn [cited]
                                     (or (:db/id (db/pull database [:db/id]
                                                         [:seon.issue.citation/id (:seon.issue.citation/id cited)]))
@@ -1185,24 +1185,24 @@
                                                [:seon.fn.file/relative-path (get-in cited [:seon.issue.citation/file
                                                                                   :seon.fn.file/relative-path])])))))
                          citations))
-            row))]
+            entity))]
     (into (mapv #(hash-map :seon.issue/id %) (remove by-id (sort ids)))
           (concat
            (mapcat
-            (fn [row]
-              (let [row (reduce-kv
-                         (fn [row attribute identity-attribute]
-                           (if (get row attribute)
-                             (assoc row attribute
+            (fn [entity]
+              (let [entity (reduce-kv
+                         (fn [entity attribute identity-attribute]
+                           (if (get entity attribute)
+                             (assoc entity attribute
                                     (set (map (fn [cited]
                                                 (let [lookup [identity-attribute (get cited identity-attribute)]]
                                                   (or (:db/id (db/pull database [:db/id] lookup)) lookup)))
-                                              (get row attribute)))) row))
-                         (adopted-citations row) ref-attributes)
-                    prior (get by-id (:seon.issue/id row))
-                    desired row]
+                                              (get entity attribute)))) entity))
+                         (adopted-citations entity) ref-attributes)
+                    prior (get by-id (:seon.issue/id entity))
+                    desired entity]
                 (if prior (replacement-tx prior desired) [desired])))
-            rows)
+            entities)
            (map #(vector :db/retractEntity [:seon.issue/id (:seon.issue/id %)])
                    (remove #(contains? ids (:seon.issue/id %)) current)))))))
 
@@ -1213,14 +1213,14 @@
    [:=> [:cat :seon.db/database-value [:set :seon.issue/id]]
     [:or :seon.db/tx-data :seon.db/error-result]]}
   [source identities]
-  (let [rows (db/pull-many source (citation-pattern (citation-attributes source))
+  (let [entities (db/pull-many source (citation-pattern (citation-attributes source))
                            (mapv #(vector :seon.issue/id %) identities))]
-    (if (:seon.error/at rows)
-      rows
-      [[:db.fn/call #'adopt-tx (filterv :seon.issue/id rows) identities]])))
+    (if (:seon.error/at entities)
+      entities
+      [[:db.fn/call #'adopt-tx (filterv :seon.issue/id entities) identities]])))
 
 (defn- adopt-selected!
-  "Transact the selected identities' rows after the writer-side `guards`."
+  "Transact the selected identities' entities after the writer-side `guards`."
   {:malli/schema
    [:=> [:cat :seon.db/connection :seon.db/database-value [:set :seon.issue/id]
          :seon.db/tx-data]
@@ -1246,10 +1246,10 @@
           :seon.source/expected-head]
      [:or :nil :seon.db/transaction-report :seon.db/error-result :seon.issue/citations-undeclared-error]]]}
   ([connection source]
-   (let [rows (identity-rows source)]
-     (if (:seon.error/at rows)
-       rows
-       (db/transact! connection [[:db.fn/call #'adopt-tx rows]]))))
+   (let [entities (identity-entities source)]
+     (if (:seon.error/at entities)
+       entities
+       (db/transact! connection [[:db.fn/call #'adopt-tx entities]]))))
   ([connection source identities]
    (adopt-selected! connection source identities []))
   ([connection source identities expected-head]
@@ -1274,25 +1274,25 @@
   "Whether the issue's tests verify, or its detector no longer names it."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/ref] :boolean]}
   [database reference]
-  (let [row (db/pull database
+  (let [entity (db/pull database
                      '[:db/id :seon.issue/id :seon.issue/tests :seon.issue/severity
                        {:seon.issue/detector [:seon.fn/sym]} {:seon.issue/functions [:seon.fn/sym]}]
                      reference)
-        functions (:seon.issue/functions row)]
+        functions (:seon.issue/functions entity)]
     (cond
-      (seq (:seon.issue/tests row))
-      (let [result (db/q tests-done-query database (:db/id row))]
+      (seq (:seon.issue/tests entity))
+      (let [result (db/q tests-done-query database (:db/id entity))]
         ;; Debt: seon.db/q still declares the generic seon.db/error-result.
         (when (and (map? result) (:seon.error/at result)
                    (:seon.error/layer result) (:seon.error/operation result))
           (throw (ex-info (:seon.error/message result) result)))
         (boolean result))
 
-      (get-in row [:seon.issue/detector :seon.fn/sym])
-      (not-any? #(= (:seon.issue/id row) (:seon.issue/id %))
-                (detector-rows database
-                               (cond-> {:seon.issue/detector (get-in row [:seon.issue/detector :seon.fn/sym])
-                                        :seon.issue/severity (:seon.issue/severity row)}
+      (get-in entity [:seon.issue/detector :seon.fn/sym])
+      (not-any? #(= (:seon.issue/id entity) (:seon.issue/id %))
+                (detector-entities database
+                               (cond-> {:seon.issue/detector (get-in entity [:seon.issue/detector :seon.fn/sym])
+                                        :seon.issue/severity (:seon.issue/severity entity)}
                                  ;; One subject: the detector checks it alone.
                                  (= 1 (count functions))
                                  (assoc :seon.fn/sym (:seon.fn/sym (first functions))))))
@@ -1329,28 +1329,28 @@
                   :seon.db/tx-data]}
   [database request]
   (let [issue-id (:seon.issue/id request)
-        row (db/pull database '[* {:seon.issue/functions [:seon.fn/sym {:seon.fn/ns [:seon.ns/name]}]}]
+        entity (db/pull database '[* {:seon.issue/functions [:seon.fn/sym {:seon.fn/ns [:seon.ns/name]}]}]
                      [:seon.issue/id issue-id])
         agent-id (id/id [issue-id])
         namespace-name (or (:seon.ns/name request)
-                           (get-in (first (sort-by :seon.fn/sym (:seon.issue/functions row)))
+                           (get-in (first (sort-by :seon.fn/sym (:seon.issue/functions entity)))
                                    [:seon.fn/ns :seon.ns/name]))
         cluster-name (db/q '[:find ?name . :where [_ :seon.cluster/name ?name]] database)]
-    (when-not (:seon.issue/title row) (refuse! {:seon.error/at (java.util.Date.)
+    (when-not (:seon.issue/title entity) (refuse! {:seon.error/at (java.util.Date.)
         :seon.error/layer :seon.issue/request
         :seon.error/operation 'seon.issue/create-tx
         :seon.error/message "Issue operation requires an existing issue."
         :seon.error/offending issue-id
         :seon.issue/missing-issue-id issue-id
         :seon.error/expected "an existing issue"}))
-    (when (:seon.issue/agent row) (refuse! {:seon.error/at (java.util.Date.)
+    (when (:seon.issue/agent entity) (refuse! {:seon.error/at (java.util.Date.)
         :seon.error/layer :seon.issue/request
         :seon.error/operation 'seon.issue/create-tx
         :seon.error/message "Issue operation requires an unassigned issue or a larger budget for an open issue."
         :seon.error/offending request
         :seon.issue/assigned-issue-id issue-id
         :seon.error/expected "an unassigned issue or a larger budget for an open issue"}))
-    (when-not (or (seq (:seon.issue/tests row)) (:seon.issue/detector row))
+    (when-not (or (seq (:seon.issue/tests entity)) (:seon.issue/detector entity))
       (refuse! {:seon.error/at (java.util.Date.)
         :seon.error/layer :seon.issue/request
         :seon.error/operation 'seon.issue/create-tx
@@ -1358,7 +1358,7 @@
         :seon.error/offending request
         :seon.issue/unverifiable-issue-id issue-id
         :seon.error/expected "success tests or a detector before starting an issue"}))
-    (require-test-refs! database (:seon.issue/tests row))
+    (require-test-refs! database (:seon.issue/tests entity))
     (when-not namespace-name (refuse! {:seon.error/at (java.util.Date.)
         :seon.error/layer :seon.issue/request
         :seon.error/operation 'seon.issue/create-tx
@@ -1419,15 +1419,15 @@
                   :seon.db/tx-data]}
   [database request]
   (let [issue-id (:seon.issue/id request)
-        row (db/pull database '[:seon.issue/budget :seon.issue/resolved-tx
+        entity (db/pull database '[:seon.issue/budget :seon.issue/resolved-tx
                                :seon.issue/tests :seon.issue/detector
                                {:seon.issue/agent [:seon.agent/id]}]
                      [:seon.issue/id issue-id])
-        agent-id (get-in row [:seon.issue/agent :seon.agent/id])]
+        agent-id (get-in entity [:seon.issue/agent :seon.agent/id])]
     (if-not agent-id
       (create-tx database request)
       (do
-        (when-not (or (seq (:seon.issue/tests row)) (:seon.issue/detector row))
+        (when-not (or (seq (:seon.issue/tests entity)) (:seon.issue/detector entity))
           (refuse! {:seon.error/at (java.util.Date.)
         :seon.error/layer :seon.issue/request
         :seon.error/operation 'seon.issue/start-tx
@@ -1435,8 +1435,8 @@
         :seon.error/offending request
         :seon.issue/unverifiable-issue-id issue-id
         :seon.error/expected "success tests or a detector before starting an issue"}))
-        (when (or (:seon.issue/resolved-tx row)
-                  (<= (:seon.issue/budget request) (:seon.issue/budget row 0)))
+        (when (or (:seon.issue/resolved-tx entity)
+                  (<= (:seon.issue/budget request) (:seon.issue/budget entity 0)))
           (refuse! {:seon.error/at (java.util.Date.)
         :seon.error/layer :seon.issue/request
         :seon.error/operation 'seon.issue/start-tx
@@ -1590,8 +1590,8 @@
                         [:seon.agent/id :seon.agent/id]]]
                   :seon.db/tx-data]}
   [database request]
-  (let [row (db/pull database [:seon.issue/title] [:seon.issue/id (:seon.issue/id request)])]
-    (when-not (:seon.issue/title row) (refuse! {:seon.error/at (java.util.Date.)
+  (let [entity (db/pull database [:seon.issue/title] [:seon.issue/id (:seon.issue/id request)])]
+    (when-not (:seon.issue/title entity) (refuse! {:seon.error/at (java.util.Date.)
         :seon.error/layer :seon.issue/request
         :seon.error/operation 'seon.issue/guard-call
         :seon.error/message "Issue operation requires an existing issue."
@@ -1641,7 +1641,7 @@
                                         (contains? (:seon.issue.parse/tags parsed) "class-kill"))
                                (:seon.issue/id parsed))))
                          source-notes))
-        rows (if class-tag
+        entities (if class-tag
                (if class-id
                  (:seon.issue/members
                   (db/pull database '[{:seon.issue/members [:seon.issue/id :seon.issue/path :seon.issue/status]}]
@@ -1652,8 +1652,8 @@
                    (and class-tag (nil? class-id))
                    (conj (diagnostic "docs/seon/issues" :unknown-class class-tag)))
         unresolved (:seon.issue/unresolved (meta tx))]
-    {:seon.issue/count (count rows)
-     :seon.issue/entities (vec (sort-by :seon.issue/id rows))
+    {:seon.issue/count (count entities)
+     :seon.issue/entities (vec (sort-by :seon.issue/id entities))
      :seon.issue/refusals refusals
      :seon.issue/ambiguous (:seon.issue/ambiguous (meta tx))
      :seon.issue/unresolved unresolved

@@ -51,7 +51,7 @@
        (support/transacted!
         connection
         (into [(schema.datahike/malli->datahike-attr-in projection ::subject)]
-              (schema/canonical-schema-rows projection
+              (schema/canonical-schema-entities projection
                                             (select-keys candidate [::subject ::observation]))))
        (is (some? (db/pull (db/db connection) [:seon.schema/key]
                           [:seon.schema/key ::observation])))
@@ -82,7 +82,7 @@
            ;; The previously admitted historical population, built by the one
            ;; constructor. Its forms that current admission refuses (129 of
            ;; 3,277, lane delete-duplicates 2026-09-25) were dropped with their
-           ;; attributes and native rows; the rest is the original oracle.
+           ;; attributes and native entities; the rest is the original oracle.
            initial-projection (schema/build-projection
                                (:seon.bridge.parity/forms initial))
            initial-attributes (schema.datahike/database-attributes-in initial-projection)
@@ -271,7 +271,7 @@
               (schema.datahike/malli->datahike-attr-in
                (fixture-projection) ::literal)))))))
 
-(deftest schema-row-properties-lift-only-when-their-declarations-are-storable
+(deftest schema-entity-properties-lift-only-when-their-declarations-are-storable
   (let [forms {:seon.config/dial :boolean
                :gen/schema :seon.schema/definition
                :seon.error/message :string
@@ -373,7 +373,7 @@
            :seon.test/long-ms 120000}
   agent-authored-render-symbols-cross-the-transaction-function-codec
   ;; CLASS: transaction data returned by `:db.fn/call` used to bypass the one
-  ;; logical-to-storage encoder. Agent-authored schema rows are built at that
+  ;; logical-to-storage encoder. Agent-authored schema entities are built at that
   ;; seam, so coherent qualified render symbols reached Datahike's string-backed
   ;; render attributes raw and could never publish. Wrapping transaction-function
   ;; output in the same codec makes every returned heterogeneous slot cross the
@@ -391,11 +391,11 @@
            {:seon.render/ai :seon.render/ai
             :seon.render/html :seon.render/html
             :seon.render/form :seon.render/form}
-           row-tx (ns-resolve 'seon.turn 'row-tx)
-           transact-row!
-           (fn [row]
+           entity-tx (ns-resolve 'seon.turn 'row-tx)
+           transact-entity!
+           (fn [entity-map]
              (support/transacted!
-              connection [[:db.fn/call row-tx {:seon.turn/declarations-preceding? true} row]])
+              connection [[:db.fn/call entity-tx {:seon.turn/declarations-preceding? true} entity-map]])
              (let [database (db/db connection)
                    state (:seon.sci.eval/projection-state (meta database))]
                (env/advance-projection!
@@ -406,23 +406,23 @@
        (support/transacted! connection
                             [{:seon.ns/name namespace-name
                               :seon.ns/source (pr-str (list 'ns namespace-name))}])
-       (transact-row!
+       (transact-entity!
         {:seon.schema/key attribute
          :seon.schema/form (pr-str attribute-form)})
        (doseq [[property renderer] renderers]
          (let [function-name (symbol (name renderer))
-               row (support/program-fn-row
+               entity-map (support/program-fn-entity
              (db/db connection) renderer
              (pr-str
               (list 'defn function-name
                     {:malli/schema [:=> [:cat argument-form] (get outputs property)]}
                     '[plan] nil)))]
-           (is (string? (:seon.fn/spec row)) (str "Analyzed renderer contract: " renderer))
-           (transact-row! row)
+           (is (string? (:seon.fn/spec entity-map)) (str "Analyzed renderer contract: " renderer))
+           (transact-entity! entity-map)
            (is (string? (:seon.fn/spec
                          (db/pull (db/db connection) [:seon.fn/spec] [:seon.fn/sym renderer])))
                (str "Stored renderer contract: " renderer))))
-       (transact-row!
+       (transact-entity!
         {:seon.schema/key shape
          :seon.schema/form
          (pr-str
@@ -430,25 +430,25 @@
            (merge {:seon.db/attributes true} renderers)
            [attribute attribute]])})
        (support/transacted! connection [{attribute "plan-1"}])
-       (let [raw-row
+       (let [raw-entity
              (d/pull (db/db connection)
                      [:seon.render/ai :seon.render/html :seon.render/form]
                      [:seon.schema/key shape])
-             logical-row
+             logical-entity
              (db/pull (db/db connection)
                       [:seon.render/ai :seon.render/html :seon.render/form]
                       [:seon.schema/key shape])
              projection (schema/projection-from-database (db/db connection))
              entity (db/pull (db/db connection) '[*] [attribute "plan-1"])
-             selected-row
+             selected-entity
              (some #(when (= shape (:seon.schema/key %)) %)
                    (schema/matching-shapes-in projection entity))]
          (testing "storage uses the declared encoded representation"
-           (is (= (update-vals renderers pr-str) raw-row)))
+           (is (= (update-vals renderers pr-str) raw-entity)))
          (testing "database reads restore the logical qualified symbols"
-           (is (= renderers logical-row)))
+           (is (= renderers logical-entity)))
          (testing "cold acquisition preserves the declarations used by selection"
-           (is (= renderers (select-keys selected-row (keys renderers))))))))))
+           (is (= renderers (select-keys selected-entity (keys renderers))))))))))
 
 (deftest encode-transaction-resolves-the-declaration-population-once
   ;; The class: the encode seam resolving the declaration population PER
@@ -513,10 +513,10 @@
     (support/with-database
      (fn [connection]
        (let [where
-             '[[?row :seon.call-preparation/key ?key]
-               [?row :seon.call-preparation/schema ?schema]
+             '[[?entity :seon.call-preparation/key ?key]
+               [?entity :seon.call-preparation/schema ?schema]
                [?schema :seon.schema/key ?schema-key]
-               [?row :seon.call-preparation/supplier ?function]
+               [?entity :seon.call-preparation/supplier ?function]
                [?function :seon.fn/sym ?supplier]]
              attributes
              [:seon.call-preparation/key
@@ -565,7 +565,7 @@
              (fn [id read-request dependency-plan]
                ;; The holder is a canonical namespace declaration (digest derived).
                (merge
-                (support/namespace-row (db/db connection) (symbol (str "codec." id)))
+                (support/namespace-entity (db/db connection) (symbol (str "codec." id)))
                {:db/id id
                 :seon.db/source-argument-position 0
                 :datahike.read/dependency-plan dependency-plan
@@ -621,7 +621,7 @@
         (schema/call-with-projection
          projection
          (fn []
-           (let [report (db/transact! connection [(assoc (support/namespace-row (db/db connection) 'sample.tuple)
+           (let [report (db/transact! connection [(assoc (support/namespace-entity (db/db connection) 'sample.tuple)
                                                                 ::position [9 2])])]
              (is (:db-after report))
              (when (:db-after report)

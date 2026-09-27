@@ -51,10 +51,10 @@
           (is (not= support/committed refusal))
           (is (= basis (db/basis-t @connection)) "the refused write is atomic"))))))
 
-(deftest ^{:seon.test/long "The admitted source change derives the digest once: 11.6 s for the member on a scratch cluster at 04da53689, whose adoption rewrote 1,797 program rows since the seal (derivation 4.7 s measured at the REPL; the derivation reads every program row changed since the seal, filed in lane-realities-commit-5-2026-09-23.md)."
+(deftest ^{:seon.test/long "The admitted source change derives the digest once: 11.6 s for the member on a scratch cluster at 04da53689, whose adoption rewrote 1,797 program entities since the seal (derivation 4.7 s measured at the REPL; the derivation reads every program entity changed since the seal, filed in lane-realities-commit-5-2026-09-23.md)."
            :seon.test/long-ms 20000}
   program-identity-excludes-results-and-includes-admitted-source
-  ;; The digest is a function of the source seal and the program rows,
+  ;; The digest is a function of the source seal and the program entities,
   ;; memoized by the program attributes' revisions: a result commit reads the
   ;; digest already derived (it was derived three times per request, 1,529 ms,
   ;; and 2,279 ms on a new branch; 2026-09-23 cache audit).

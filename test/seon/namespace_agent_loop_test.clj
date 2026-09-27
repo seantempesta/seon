@@ -82,7 +82,7 @@
                  "although C inherits H's agents")
              (is (= branch (:seon.agent/branch (db/pull (db/db conn) [:seon.agent/branch]
                                                         [:seon.agent/id worker])))
-                 "the worker's row carries C")
+                 "the worker's entity carries C")
              (is (= branch (get-in @(:seon.db/connection
                                     (:seon.turn.loop/cluster (agent/armed routing worker)))
                                    [:config :branch]))

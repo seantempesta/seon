@@ -265,7 +265,7 @@
   [:seon.program/mentions {:optional true} :seon.program/mentions]
   [:seon.program/plan {:optional true} :seon.program/plan]]
  :seon.program/definition
- [:map-of {:description "A program row's exact attribute values at one basis. Families and authored contracts are polymorphic; refs remain datom entity ids."}
+ [:map-of {:description "A program entity's exact attribute values at one basis. Families and authored contracts are polymorphic; refs remain datom entity ids."}
   :qualified-keyword :seon.schema/value]
  :seon.program/history-entry
  [:map

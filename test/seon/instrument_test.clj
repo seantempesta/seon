@@ -388,16 +388,16 @@
                   [:declared [domain 1] nil true]]]
            (let [name (symbol (str "sci-declared-schema-" (clojure.core/name mode) "-" (clojure.core/name label)))
                  qualified (symbol "user" (str name))
-                 ;; WANTED since 9dd373901: a fixture row carries its contract's
+                 ;; WANTED since 9dd373901: a fixture entity carries its contract's
                  ;; arity facts, which refuse source arities the contract does not
                  ;; declare, as an agent's defn is refused; so the source declares
                  ;; exactly the contract's two arities.
                  source (str "(defn ^{:malli/schema " (pr-str contract) "} " name
                              " ([value] (swap! calls inc) value)"
                              " ([value _extra] (swap! calls inc) value))")
-                 row (test-support/program-fn-row database qualified source)
+                 entity (test-support/program-fn-entity database qualified source)
                  _ (sci/eval-string* ctx source)
-                 _ (#'sci.eval/install-function-contract! ctx row projection database)
+                 _ (#'sci.eval/install-function-contract! ctx entity projection database)
                  before (sci/eval-string* ctx "@calls")
                  [result] (kernel/with-arm
                            ctx (* 1000 test-support/event-backstop-seconds)
@@ -558,9 +558,9 @@
      (let [function-symbol 'seon.instrument-test/agent-largest
            registration (test-support/transacted!
               connection
-              [(test-support/program-fn-row
+              [(test-support/program-fn-entity
                 (db/db connection) function-symbol
-                "(defn agent-largest [rows] rows)")])
+                "(defn agent-largest [entities] entities)")])
            projection (schema/build-projection (schema/snapshot))
            wrapped (instrument/wrap-interpreted
                     function-symbol
@@ -581,7 +581,7 @@
        (let [diagnostic (ex-data failure)]
          (is (str/includes? (error/render-ai diagnostic)
                             (str function-symbol " refused argument count at []:")))
-         (is (str/includes? (error/render-ai diagnostic) "([rows])"))
+         (is (str/includes? (error/render-ai diagnostic) "([entities])"))
          (is (str/includes? (error/render-ai diagnostic) "0")))))))
 
 (deftest a-violation-carries-bounded-arguments-only-when-it-can
@@ -1636,7 +1636,7 @@
 
 (deftest boot-arming-arms-every-loaded-contract-with-its-definition-digest
   ;; Boot calls its arming owner once (`seon.cluster/arm-host-program!`), with
-  ;; the cluster's supplied-default rows and the program's definition digests.
+  ;; the cluster's supplied-default entities and the program's definition digests.
   ;; e0577a6fb once left boot arming nothing; re-running it here would re-arm
   ;; every production Var for the whole JVM, so this reads what boot armed.
   ;; The population is every declared contract in the program's `src/` files.
@@ -1664,13 +1664,13 @@
            "each wrapper carries its call-preparation plan")
        (is (= (get digests 'seon.id/valid?)
               (:seon.profile/digest (:seon.instrument/cell (meta @(requiring-resolve 'seon.id/valid?)))))
-           "the host cell carries the function row's definition digest")))))
+           "the host cell carries the function entity's definition digest")))))
 
 (deftest a-root-replaced-outside-a-reload-is-named
   ;; `doubled` is this file's own defn: its compiled root and recorded file
-  ;; match the row, so nothing is reported until a redefinition replaces it.
-  (let [rows [['seon.instrument-test/doubled "test/seon/instrument_test.clj"]]]
-    (is (= [] (instrument/replaced-roots rows)))
+  ;; match the entity, so nothing is reported until a redefinition replaces it.
+  (let [entities [['seon.instrument-test/doubled "test/seon/instrument_test.clj"]]]
+    (is (= [] (instrument/replaced-roots entities)))
     (with-redefs [doubled (fn [n] n)]
       (is (= [{:seon.instrument/replaced-var 'seon.instrument-test/doubled
                :seon.instrument/expected-class "seon.instrument_test$doubled"
@@ -1678,8 +1678,8 @@
              (mapv #(select-keys % [:seon.instrument/replaced-var
                                     :seon.instrument/expected-class
                                     :seon.instrument/expected-file])
-                   (instrument/replaced-roots rows)))))
-    (is (= [] (instrument/replaced-roots rows)) "restoring the root clears the report")))
+                   (instrument/replaced-roots entities)))))
+    (is (= [] (instrument/replaced-roots entities)) "restoring the root clears the report")))
 
 (deftest a-handed-projection-without-the-contracts-declarations-uses-the-loaded-ones
   ;; A cluster whose stored program predates a loaded schema resource hands a

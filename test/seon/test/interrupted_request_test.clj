@@ -49,7 +49,7 @@
     (is (not (:seon.error/at committed)) (pr-str committed))
     {:seon.test.run/id (:seon.test.run/id provenance) ::completion (completion [])})))
 
-(deftest ^{:seon.test/long "admit-run measured 13.7-15.3 s on default pid 90963 (2026-09-23), the rest under 1 s: it derives the program digest from every program row changed since the source seal (docs/seon/issues/admit-run-derives-the-program-digest-from-every-change-since-the-seal.md)." :seon.test/long-ms 30000}
+(deftest ^{:seon.test/long "admit-run measured 13.7-15.3 s on default pid 90963 (2026-09-23), the rest under 1 s: it derives the program digest from every program entity changed since the source seal (docs/seon/issues/admit-run-derives-the-program-digest-from-every-change-since-the-seal.md)." :seon.test/long-ms 30000}
   a-thrown-request-records-its-unfinished-members-as-failed-obligations
   (support/with-database
    (fn [connection]
@@ -71,7 +71,7 @@
        (is (= [] (runner/record-interrupted! connection completion failure))
            "a second observation writes nothing")))))
 
-(deftest ^{:seon.test/long "admit-run measured 13.7-15.3 s on default pid 90963 (2026-09-23), the rest under 1 s: it derives the program digest from every program row changed since the source seal (docs/seon/issues/admit-run-derives-the-program-digest-from-every-change-since-the-seal.md)." :seon.test/long-ms 30000}
+(deftest ^{:seon.test/long "admit-run measured 13.7-15.3 s on default pid 90963 (2026-09-23), the rest under 1 s: it derives the program digest from every program entity changed since the source seal (docs/seon/issues/admit-run-derives-the-program-digest-from-every-change-since-the-seal.md)." :seon.test/long-ms 30000}
   one-incomplete-member-is-its-own-unknown-and-its-run-mates-stay-readable
   (support/with-database
    (fn [connection]
@@ -100,7 +100,7 @@
            "a captured result, not yet recorded at a basis, is judged by its counts")
        ;; The branch inherits the store's problems; judge only this fixture's members.
        (let [members #{finished red interrupted}
-             own (fn [k rows] (set/intersection members (set (map k rows))))]
+             own (fn [k entities] (set/intersection members (set (map k entities))))]
          (is (= #{red} (own :seon.test/sym (:seon.problems/failed-tests found)))
              "the red stays visible; the unknown and the green are not failed")
          (is (= #{interrupted}
@@ -108,7 +108,7 @@
              "the open member alone is unknown"))
        (is (str/includes? (problems/ai-prose found) (str interrupted)) "the unknown is shown by name")))))
 
-(deftest ^{:seon.test/long "admit-run measured 13.7-15.3 s on default pid 90963 (2026-09-23), the rest under 1 s: it derives the program digest from every program row changed since the source seal (docs/seon/issues/admit-run-derives-the-program-digest-from-every-change-since-the-seal.md)." :seon.test/long-ms 30000}
+(deftest ^{:seon.test/long "admit-run measured 13.7-15.3 s on default pid 90963 (2026-09-23), the rest under 1 s: it derives the program digest from every program entity changed since the source seal (docs/seon/issues/admit-run-derives-the-program-digest-from-every-change-since-the-seal.md)." :seon.test/long-ms 30000}
   a-huge-assertion-message-is-a-blob-and-readiness-reads-only-counts
   (support/with-database
    (fn [connection]
@@ -144,7 +144,7 @@
        (is (>= threshold (longest '[:find [?m ...] :where [_ :seon.test.failure/message ?m]]))
            "no stored assertion message is inline above the threshold")
        (is (>= threshold (longest '[:find [?m ...] :where [_ :seon.test/failure-message ?m]]))
-           "the test row keeps no joined copy of the claim")
+           "the test entity keeps no joined copy of the claim")
        (is (= 1 (:seon.test/fail-count (first latest))))
        (is (not (contains? (first latest) :seon.test/failure-message))
            "a result read builds no failure text")
@@ -152,7 +152,7 @@
        (is (str/includes? (sut/failure-message (first latest)) "seon.blob/get")
            "the shown text names the blob")))))
 
-(deftest ^{:seon.test/long "admit-run measured 13.7-15.3 s on default pid 90963 (2026-09-23), the rest under 1 s: it derives the program digest from every program row changed since the source seal (docs/seon/issues/admit-run-derives-the-program-digest-from-every-change-since-the-seal.md)." :seon.test/long-ms 30000}
+(deftest ^{:seon.test/long "admit-run measured 13.7-15.3 s on default pid 90963 (2026-09-23), the rest under 1 s: it derives the program digest from every program entity changed since the source seal (docs/seon/issues/admit-run-derives-the-program-digest-from-every-change-since-the-seal.md)." :seon.test/long-ms 30000}
   a-deleted-tests-red-member-is-history-not-a-failed-test
   (support/with-database
    (fn [connection]
@@ -188,11 +188,11 @@
            failed (set (map :seon.test/sym (:seon.problems/failed-tests (problems/problems database {}))))]
        (is (not (:seon.error/at committed)) (pr-str committed))
        (is (nil? (db/q '[:find ?t . :in $ ?s :where [?t :seon.test/sym ?s]] database deleted))
-           "the deleted symbol has no test row")
+           "the deleted symbol has no test entity")
        (is (= 1 (:seon.test/fail-count (first (runner/latest-results database [deleted]))))
            "its member evidence stays readable as history")
        (is (contains? failed red) "a current test's red is listed")
-       (is (not (contains? failed deleted)) "a symbol that is no test row is not a failed test")))))
+       (is (not (contains? failed deleted)) "a symbol that is no test entity is not a failed test")))))
 
 (deftest ^{:seon.test/long "two admit-runs, each measured 13.7-15.3 s on default pid 90963 (2026-09-23; docs/seon/issues/admit-run-derives-the-program-digest-from-every-change-since-the-seal.md); the reads under test are about 1 ms." :seon.test/long-ms 45000}
   latest-results-reads-one-batch-whatever-the-runs-it-spans

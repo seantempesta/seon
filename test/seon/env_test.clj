@@ -181,14 +181,14 @@
        ::io-terminals-settled)
 
       (let [expected (fn [ordinal] (str "launcher-" ordinal))
-            wrong (fn [rows]
+            wrong (fn [entities]
                     (vec (remove (fn [[ordinal observed & _]]
                                    (= (expected ordinal) observed))
-                                 rows)))
-            conveyed (fn [rows]
+                                 entities)))
+            conveyed (fn [entities]
                        (vec (remove (fn [[_ _ conn context]]
                                       (and (nil? conn) (nil? context)))
-                                    rows)))]
+                                    entities)))]
         (is (= (* 2 per-launcher) (count @io-observed)))
         (is (= [] (wrong @io-observed))
             "io work read exactly its own submission's environment")

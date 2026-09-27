@@ -36,7 +36,7 @@
                                 (into (test-support/agent-tx @connection "root")
                                   [[:db.fn/call #'schedule/root-maintenance-seed-call]]))
            database (db/db connection)
-           rows (db/q database
+           entities (db/q database
                       '[:find ?task-id ?function ?expression ?zone
                         :where
                         [?owner :seon.agent/id "root"]
@@ -52,9 +52,9 @@
                           declarations)]
        (is (seq (:tx-data result)) (pr-str result))
        (is (seq expected))
-       (is (= expected (set rows)))
-       (is (every? #(not= "* * * * *" (nth % 2)) rows))
-       (is (some #(= (quote seon.maintenance/collect!) (second %)) rows))
+       (is (= expected (set entities)))
+       (is (every? #(not= "* * * * *" (nth % 2)) entities))
+       (is (some #(= (quote seon.maintenance/collect!) (second %)) entities))
        (is (empty? (schedule/root-maintenance-seed-call database)))))))
 
 (defn- instant
@@ -133,7 +133,7 @@
    connection
    (into (test-support/agent-tx @connection "root")
      [{:seon.ns/name handler-ns}
-      (test-support/program-fn-row @connection handler (repl/source-fn handler))
+      (test-support/program-fn-entity @connection handler (repl/source-fn handler))
       {:seon.schedule/id (str task-id "/schedule")
        :seon.schedule/expression "* * * * *"
        :seon.schedule/zone-id "UTC"}
@@ -373,8 +373,8 @@
                         [?evaluation :seon.maintenance.receipt/error ?error]
                         [?error :seon.error/id ?error-id]
                         [?evaluation :seon.maintenance.receipt/fire ?fire]
-                        [?fire :seon.schedule.fire/task ?task-row]
-                        [?task-row :seon.schedule.task/id ?task]
+                        [?fire :seon.schedule.fire/task ?task-entity]
+                        [?task-entity :seon.schedule.task/id ?task]
                         [?fire :seon.schedule.fire/nominal-at ?nominal]]
                              @connection))]
             (is (id/valid? 64 error-id))

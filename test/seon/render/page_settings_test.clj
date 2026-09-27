@@ -70,11 +70,11 @@
              database namespace-name)
        (sort-by (juxt #(get % :seon.fn/doc-order Long/MAX_VALUE)
                       :seon.fn/sym))
-       (keep (fn [row]
+       (keep (fn [entity]
                (let [example (:example (evaluation/docstring-parts
-                                        (:seon.fn/doc row)))]
+                                        (:seon.fn/doc entity)))]
                  (when-not (str/blank? example)
-                   [(:seon.fn/sym row) example]))))
+                   [(:seon.fn/sym entity) example]))))
        vec))
 
 (deftest effective-settings-and-authored-plan-examples-work-through-sci

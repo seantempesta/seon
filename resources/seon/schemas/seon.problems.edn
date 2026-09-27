@@ -36,16 +36,16 @@
                  [:seon.agent/id :seon.agent/id]],
                 :stale-var
                 [:map
-                 ;; NO RENDER PAIR. This row's only attribute is
+                 ;; NO RENDER PAIR. This entity's only attribute is
                  ;; `:seon.fn/sym`, the `:db.unique/identity` of the
                  ;; `:seon.fn` family, and maps are OPEN — so a declared
-                 ;; pair here is selected for EVERY function row an agent
+                 ;; pair here is selected for EVERY function entity an agent
                  ;; pulls, and the whole published program graph was
                  ;; presented as stale Vars. `ai-prose` and `html-report`
                  ;; call `stale-var-ai`/`stale-var-html` directly on the
-                 ;; rows `stale-vars` derived, which is the one mechanism
+                 ;; entities `stale-vars` derived, which is the one mechanism
                  ;; and the only place the staleness is actually known;
-                 ;; the sibling finding rows (`:failed-run`,
+                 ;; the sibling finding entities (`:failed-run`,
                  ;; `:unowned-namespace`) declare no pair for the same
                  ;; reason.
                  [:seon.fn/sym :seon.fn/sym]],

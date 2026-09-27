@@ -29,13 +29,13 @@
      {::support/extra-schema
       (schema.datahike/malli->datahike-schema-in projection [::id ::key ::value ::extra ::children])}
      (fn [connection]
-       ;; The writer derives its projection from the value's declaration rows
-       ;; (9b8c5b405), so the test's own declarations are rows, not a handed
+       ;; The writer derives its projection from the value's declaration entities
+       ;; (9b8c5b405), so the test's own declarations are entities, not a handed
        ;; projection.
        (support/transacted!
         connection
         (mapv (partial accretion/schema-row forms)
-              (schema/canonical-schema-rows
+              (schema/canonical-schema-entities
                projection (into {} (filter #(= (namespace ::id) (namespace (key %)))) forms))))
        (db/carry-connection-projection-state!
         connection (evaluation/projection-state @connection projection))
@@ -138,7 +138,7 @@
     (fn [connection]
       (let [database (db/db connection)
             projection (:seon.schema/projection (meta database))
-            ;; A complete function value (a stored row's own facts and its
+            ;; A complete function value (a stored entity's own facts and its
             ;; first arity) rides on the transaction entity: a function root
             ;; requires every declared key, digests included.
             schema (:schema database)

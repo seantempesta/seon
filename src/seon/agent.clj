@@ -14,34 +14,34 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
                   [:or :my.agent/identity :seon.error/value]]}
   [database agent-id]
-  (let [row (db/pull database
+  (let [entity (db/pull database
                      [:seon.agent/id {:seon.agent/namespace
                                       [:seon.ns/name {:seon.ns/steward [:seon.agent/id]}]}]
                      [:seon.agent/id agent-id])]
     (cond
-      (db/read-refusal? row) row
-      (not (:seon.agent/id row))
+      (db/read-refusal? entity) entity
+      (not (:seon.agent/id entity))
       {:seon.agent/no-such-agent agent-id
        :seon.error/at (java.util.Date.) :seon.error/layer :seon.agent/identity
        :seon.error/operation 'seon.agent/identity
        :seon.error/message (str "No agent has id " (pr-str agent-id) ".")}
       :else
-      (cond-> {:my.agent/id (:seon.agent/id row)}
-        (get-in row [:seon.agent/namespace :seon.ns/name])
-        (assoc :my.agent/namespace (get-in row [:seon.agent/namespace :seon.ns/name]))
-        (get-in row [:seon.agent/namespace :seon.ns/steward :seon.agent/id])
-        (assoc :my.agent/steward (get-in row [:seon.agent/namespace :seon.ns/steward :seon.agent/id]))))))
+      (cond-> {:my.agent/id (:seon.agent/id entity)}
+        (get-in entity [:seon.agent/namespace :seon.ns/name])
+        (assoc :my.agent/namespace (get-in entity [:seon.agent/namespace :seon.ns/name]))
+        (get-in entity [:seon.agent/namespace :seon.ns/steward :seon.agent/id])
+        (assoc :my.agent/steward (get-in entity [:seon.agent/namespace :seon.ns/steward :seon.agent/id]))))))
 
 (defn archived?
   "Whether this retained agent has a positive archival transaction."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
                   [:or :boolean :seon.error/value]]}
   [database agent-id]
-  (let [row (db/pull database [:seon.agent/id :seon.agent/archived-tx]
+  (let [entity (db/pull database [:seon.agent/id :seon.agent/archived-tx]
                      [:seon.agent/id agent-id])]
     (cond
-      (db/read-refusal? row) row
-      (:seon.agent/id row) (boolean (:seon.agent/archived-tx row))
+      (db/read-refusal? entity) entity
+      (:seon.agent/id entity) (boolean (:seon.agent/archived-tx entity))
       :else {:seon.agent/no-such-agent agent-id
              :seon.error/at (java.util.Date.) :seon.error/layer :seon.agent/identity
              :seon.error/operation 'seon.agent/archived?
@@ -59,16 +59,16 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
                   :seon.db/tx-data]}
   [database agent-id]
-  (let [row (db/pull database [:db/id :seon.agent/archived-tx]
+  (let [entity (db/pull database [:db/id :seon.agent/archived-tx]
                      [:seon.agent/id agent-id])]
     (cond
-      (db/read-refusal? row)
-      (throw (ex-info (:seon.error/message row) row))
-      (nil? (:db/id row))
+      (db/read-refusal? entity)
+      (throw (ex-info (:seon.error/message entity) entity))
+      (nil? (:db/id entity))
       (throw (ex-info "The agent to archive does not exist."
                       {:seon.agent/no-such-agent agent-id}))
-      (:seon.agent/archived-tx row) []
-      :else [[:db/add (:db/id row) :seon.agent/archived-tx :db/current-tx]])))
+      (:seon.agent/archived-tx entity) []
+      :else [[:db/add (:db/id entity) :seon.agent/archived-tx :db/current-tx]])))
 
 (defn archive!
   "Archive an agent for presentation, retaining its identity and all live machinery."
@@ -219,7 +219,7 @@
           (into [:tbody]
                 (map (fn [[attribute value]]
                        [:tr
-                        [:th {:scope "row" :title (title attribute)}
+                        [:th {:scope "entity" :title (title attribute)}
                          (label attribute)
                          [:span {:class "seon-setting-override"} "● override"]]
                         [:td (display attribute value)]]))

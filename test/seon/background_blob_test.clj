@@ -59,7 +59,7 @@
               :seon.schema.admission/source :core
               :seon.schema/form
               (pr-str [:map [:seon.background-blob-test/size :int]])}
-             (merge (support/program-fn-row 'seon.background-blob-test/binary-capability)
+             (merge (support/program-fn-entity 'seon.background-blob-test/binary-capability)
                     {:seon.fn/spec
                      (pr-str [:=> [:cat :seon.background-blob-test/request]
                               :seon.blob/octet-array])

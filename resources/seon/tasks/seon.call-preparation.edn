@@ -1,14 +1,14 @@
 [#:seon.task{:id "0261d4d9bbe6"
              :name "acquired-functions-get-no-supplied-defaults"
              :kind :function
-             :intent "Call preparation supplies nothing inside any function acquired from program rows: SCI reads the hook from the context the fn closure captured, and acquired functions were analysed in the memoized program base, which holds no custody, so hook passes arguments through. From a REPL deftest (plan-now) calling (my.plan/current) refuses argument count, and ((fn [] (my.plan/current {:seon.agent/id 'root'}))) refuses [:seon.db/db]. It covers another agent calling mine and every call after a reload. Owner decision: hook reads the arming evaluation's environment (~10 lines), S12's wrapper-applied defaults (recommended, ruled plan step), or acquire into each execution's own fork (loses 389 ms -> 29 ms per member)."
+             :intent "Call preparation supplies nothing inside any function acquired from program entities: SCI reads the hook from the context the fn closure captured, and acquired functions were analysed in the memoized program base, which holds no custody, so hook passes arguments through. From a REPL deftest (plan-now) calling (my.plan/current) refuses argument count, and ((fn [] (my.plan/current {:seon.agent/id 'root'}))) refuses [:seon.db/db]. It covers another agent calling mine and every call after a reload. Owner decision: hook reads the arming evaluation's environment (~10 lines), S12's wrapper-applied defaults (recommended, ruled plan step), or acquire into each execution's own fork (loses 389 ms -> 29 ms per member)."
              :must-read #{seon.call-preparation/hook seon.call-preparation/supply seon.sci.eval/acquire!}
              :evidence #{"docs/research/agent-platform/landing/agent-test-worlds-2026-09-26.md"
                          "docs/seon/issues/an-agents-test-world-has-no-agent-so-my-functions-cannot-be-tested-as-documented.md"}}
  #:seon.task{:id "d62c97ea13f2"
              :name "supply-reads-the-connection-head"
              :kind :function
-             :intent "The hook plans and supplies against the connection's head, not the evaluation's working value, so a my.* read inside a run (tests-reaching after a defn in the same run) misses rows the run already wrote (D7). a44538acc fixed the older-value half only."
+             :intent "The hook plans and supplies against the connection's head, not the evaluation's working value, so a my.* read inside a run (tests-reaching after a defn in the same run) misses entities the run already wrote (D7). a44538acc fixed the older-value half only."
              :must-read #{seon.call-preparation/hook seon.call-preparation/snapshot}
              :evidence #{"docs/research/agent-platform/landing/fix-dogfood-api-2026-09-26.md"
                          "docs/research/agent-platform/landing/inv-lifecycle-storage-opus-2026-09-26.md"

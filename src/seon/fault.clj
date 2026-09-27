@@ -187,7 +187,7 @@
                      (delivered-to result (:seon.error/signature prepared-fact)))]))
               home (cluster.branch/cluster-branch cluster-name)
               ;; The copy is the record of an AGENT's branch, kept past that
-              ;; branch's retirement: a fault no agent row places on a branch
+              ;; branch's retirement: a fault no agent entity places on a branch
               ;; stays where it happened (a test member's world names its
               ;; cluster but is not one of its agents' branches). No copy when
               ;; this process runs no such cluster (a fixture's name).

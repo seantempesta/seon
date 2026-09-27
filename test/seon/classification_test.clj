@@ -81,7 +81,7 @@
                         {:seon.ns/name 'sample.relevant :seon.ns/source "(ns sample.relevant)"
                          :seon.ns/context-relevant? true}
                         :all :agent)
-                       (test-support/namespace-row @connection 'my.impostor)
+                       (test-support/namespace-entity @connection 'my.impostor)
                        {:seon.fn/sym "sample.relevant/call"
                         :seon.schema.admission/source :core
                         :seon.fn/ns [:seon.ns/name 'sample.relevant]

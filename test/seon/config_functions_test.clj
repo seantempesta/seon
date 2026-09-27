@@ -23,7 +23,7 @@
        (is (= before (db/basis-t (db/db connection))))
        (support/transacted!
         connection
-        [(support/program-fn-row (db/db connection) function "(defn config-supplier [] {})")])
+        [(support/program-fn-entity (db/db connection) function "(defn config-supplier [] {})")])
        (let [result (config/apply-compiled! connection compiled)]
          (is (nil? (:seon.error/at result)) (pr-str result))
          (is (= function

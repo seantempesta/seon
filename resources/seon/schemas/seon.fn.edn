@@ -26,7 +26,7 @@
            {:description
             "Asserts clj-kondo's ::analyzer/macro fact at indexing; absent means the function is not a macro."}],
           :inline?
-          [:boolean {:description "The analyzer observed :inline metadata on this defn. Explicit false records completed analysis; absence on an older row is unknown for reload selection."}]
+          [:boolean {:description "The analyzer observed :inline metadata on this defn. Explicit false records completed analysis; absence on an older entity is unknown for reload selection."}]
           :constant?
           [:boolean {:description "The analyzer observed a plain def whose initializer is literal data. Such a declaration has no body, contract or test reach; macros may read its value at caller compilation. Absent means not a literal constant."}]
           :host-bound?
@@ -71,7 +71,7 @@
           :unresolved-references [:set {:description "Known function targets mentioned outside an attributable definition. A changed target widens selection; absence of a caller never proves no test is needed. Analyzer usages with :clj-kondo/unknown-namespace have no target identity and cannot enter this target-keyed relation."} :seon.program/edge-symbol],
           :writes
           [:set {:seon.db/index true
-                 :description "Qualified attributes the analyzed declaration writes. Values survive schema-row retraction; literal mentions remain a separate relation."}
+                 :description "Qualified attributes the analyzed declaration writes. Values survive schema-entity retraction; literal mentions remain a separate relation."}
            :qualified-keyword],
           :call-arities
           [:set
@@ -234,7 +234,7 @@
           :duplicate-program-identity [:= true]
           :duplicate-program-identity-error [:map {:seon.render/ai seon.error/index-refusal-prose :seon.render/html seon.error/render-html :error/message "must mark duplicate program identities"} [:seon.fn/duplicate-program-identity :seon.fn/duplicate-program-identity] [:seon.error/message :seon.error/message]]
           :population-incomplete :seon.fn/missing-population
-          :population-incomplete-error [:map {:seon.render/ai seon.error/index-refusal-prose :seon.render/html seon.error/render-html :error/message "must identify the program population with no rows"} [:seon.fn/population-incomplete :seon.fn/population-incomplete] [:seon.error/message :seon.error/message]]
+          :population-incomplete-error [:map {:seon.render/ai seon.error/index-refusal-prose :seon.render/html seon.error/render-html :error/message "must identify the program population with no entities"} [:seon.fn/population-incomplete :seon.fn/population-incomplete] [:seon.error/message :seon.error/message]]
           :schema-declaration-invalid :seon.schema/key
           :schema-declaration-invalid-error [:map {:seon.render/ai seon.error/index-refusal-prose :seon.render/html seon.error/render-html :error/message "must identify the declaration that is not a Malli schema"} [:seon.fn/schema-declaration-invalid :seon.fn/schema-declaration-invalid] [:seon.error/message :seon.error/message]]
           :scratch-not-fresh :seon.fn/existing-program-entity

@@ -56,7 +56,7 @@
 (defn- transaction-id [report]
   (:max-tx (:db-after report)))
 
-(defn- transact-schema-row!
+(defn- transact-schema-entity!
   ([connection schema-key]
    (transaction-id
     (db/transact! connection [{:seon.schema/key schema-key}])))
@@ -103,10 +103,10 @@
         keep-history?
         (fn [connection]
           (let [core-tx
-                (transact-schema-row!
+                (transact-schema-entity!
                  connection :test.schema.admission/core :core)
                 agent-tx
-                (transact-schema-row!
+                (transact-schema-entity!
                  connection :test.schema.admission/agent :agent)]
             (is (= :core
                    (:seon.schema.admission/source
@@ -125,7 +125,7 @@
       (let [decision
             (admission
              connection
-             (transact-schema-row!
+             (transact-schema-entity!
               connection :test.schema.admission/missing-source))]
         (is (= :agent (:seon.schema.admission/source decision)))
         (is (string? (:seon.schema.admission/note decision)))))))
@@ -148,7 +148,7 @@
 
 (deftest ^{:seon.test/long "Complete cold publication verifies admission on the full program population."
            :seon.test/long-ms 300000}
-  source-publication-records-core-on-every-row
+  source-publication-records-core-on-every-entity
   (with-published-source
     (fn [connection]
       (let [database @connection

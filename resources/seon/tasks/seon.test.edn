@@ -24,7 +24,7 @@
  #:seon.task{:id "c86d834ab695"
              :name "a-test-world-has-no-agent"
              :kind :function
-             :intent "A REPL deftest's member world contains no agent row and no :seon.agent/id, so (my.plan/current), the documented example, is untestable (only refusal paths are). Seeding the agent costs 88 ms (creation-tx); acquiring with an agent id 626 ms against 31 ms. Owner ruling: seed the executing agent, or branch the world from the agent's own commit (which deletes the checkpoint and overlay machinery, about 200 lines)."
+             :intent "A REPL deftest's member world contains no agent entity and no :seon.agent/id, so (my.plan/current), the documented example, is untestable (only refusal paths are). Seeding the agent costs 88 ms (creation-tx); acquiring with an agent id 626 ms against 31 ms. Owner ruling: seed the executing agent, or branch the world from the agent's own commit (which deletes the checkpoint and overlay machinery, about 200 lines)."
              :must-read #{seon.cluster.agent/creation-tx seon.test/clean-request-handle}
              :evidence #{"docs/research/agent-platform/dogfood-report-2026-09-26.md"
                          "docs/research/agent-platform/landing/agent-test-worlds-2026-09-26.md"
@@ -39,7 +39,7 @@
  #:seon.task{:id "b9933ca067dc"
              :name "tests-redefine-default-vars"
              :kind :namespace
-             :intent "About 300 with-redefs / alter-var-root sites in test/ redefine default's Vars JVM-wide; e.g. fn_test.clj:1067's with-redefs of analyzer/analyze made a concurrent read-only analyze-rows throw 'analysis must not run', and a concurrent publication or write-back fails the same way. Substitute effects as explicit values in injected worlds."
+             :intent "About 300 with-redefs / alter-var-root sites in test/ redefine default's Vars JVM-wide; e.g. fn_test.clj:1067's with-redefs of analyzer/analyze made a concurrent read-only analyze-entities throw 'analysis must not run', and a concurrent publication or write-back fails the same way. Substitute effects as explicit values in injected worlds."
              :must-read #{seon.test/run}
              :evidence #{"docs/research/agent-platform/landing/merge-ns-rows-2026-09-26.md"
                          "docs/seon/issues/eval-test-with-redefs-of-packaged-forms-breaks-concurrent-publication.md"}}

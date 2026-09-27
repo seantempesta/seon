@@ -20,7 +20,7 @@
                       :description "The declared reason this test is a platform regression: a moving part whose breakage poisons the bulk tier. Indexed from the test Var's or its namespace's :seon.test/platform metadata, so the tier partition reads the fact the coordinator already holds instead of re-reading Var metadata."}],
             :fixture
             [:string {:min 1
-                      :description "The declared reason this namespace's tests are fixture material another test asserts over, never gate members: a deliberate failure, an assertionless example, a usage sample. Declared once on the ns form and lifted onto every test row, so bare selection excludes it by fact instead of by a filename that does not end in _test."}],
+                      :description "The declared reason this namespace's tests are fixture material another test asserts over, never gate members: a deliberate failure, an assertionless example, a usage sample. Declared once on the ns form and lifted onto every test entity, so bare selection excludes it by fact instead of by a filename that does not end in _test."}],
             :long-ms
             [:int {:min 1
                    :description "Per-test completion bound in milliseconds. Only a positive allowance accompanied by a nonblank :seon.test/long reason may exceed the default; exceeding the bound is a test failure."}],
@@ -316,7 +316,7 @@
   [:seon.test/batch-limit {:optional true} :seon.test/batch-limit]]
  :seon.test/loaded-source [:and {:description "The source commit this JVM loaded (its store's published head), supplied to selection."} :seon.source/commit-id]
  :seon.test/loaded-source-drift
- [:map {:description "The loaded source differs from the program rows the cluster records: recorded evidence cannot vouch for what executes, so nothing was reused."}
+ [:map {:description "The loaded source differs from the program entities the cluster records: recorded evidence cannot vouch for what executes, so nothing was reused."}
   [:seon.test/loaded-source :seon.test/loaded-source]
   [:seon.source/commit-id {:optional true} :seon.source/commit-id]]
  :seon.test/batch-limit [:int {:min 1 :description "Members per admission and per release transaction; defaults to seon.test/batch-limit."}]

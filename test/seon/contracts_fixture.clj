@@ -56,15 +56,15 @@
                   (assoc evaluation-request :seon.render/value value
                          :seon.render/output :seon.render/ai))))
           "The fixture projection selects the refusal's schema renderer."))
-    (when-let [row (:seon.program/row evaluated)]
+    (when-let [entity (:seon.program/row evaluated)]
       (let [written-on (db/db connection)
-            written (db/transact! connection [(program/canonical-row row)])]
+            written (db/transact! connection [(program/canonical-row entity)])]
         (is (:db-after written))
         (sci-eval/install-evaluated-rows!
          {:seon.sci.eval/ctx ctx :seon.db/db (:db-after written) :seon.db/transaction-report written
          :seon.sci.eval/written-on written-on
           :seon.sci.eval/installations
-          [{:seon.program/row row :seon.sci.eval/evaluation evaluated}]})))
+          [{:seon.program/row entity :seon.sci.eval/evaluation evaluated}]})))
     [evaluated value]))
 
 (defn with-grammar-agent [body]

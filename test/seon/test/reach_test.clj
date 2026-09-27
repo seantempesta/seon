@@ -20,7 +20,7 @@
          (is (string? after) (pr-str after))
          (is (not= before after)))))))
 
-(deftest indexed-reach-rows-retain-the-pulled-facts
+(deftest indexed-reach-entities-retain-the-pulled-facts
   (support/with-database
    (fn [connection]
      (let [current (db/db connection)
@@ -31,16 +31,16 @@
            identities [[:seon.fn/sym 'seon.id/id]
                        [:seon.test/sym 'seon.id-test/data-shape-and-explicit-length-determine-identity]
                        [:seon.schema/key :seon.fn/calls]]
-           rows (db/pull-many database
+           entities (db/pull-many database
                  '[:db/id :seon.fn/sym :seon.fn/source :seon.fn/spec :seon.fn/keywords
                    (limit :seon.fn/calls nil) (limit :seon.fn/references nil)
                    :seon.test/sym :seon.test/source :seon.test/subject
                    :seon.schema/key :seon.schema/form] identities)]
-       (is (= (count identities) (count (filter :db/id rows))))
+       (is (= (count identities) (count (filter :db/id entities))))
        (is (< (count (::runner/reach-rows index))
               (db/q '[:find (count ?entity) . :where [?entity :seon.fn/sym]] database))
            "A scoped reach acquisition does not collect the whole program.")
-       (doseq [row rows :when (:db/id row)]
+       (doseq [entity entities :when (:db/id entity)]
          (let [normalized (reduce-kv
                            (fn [result attribute value]
                              (assoc result attribute
@@ -48,9 +48,9 @@
                                            (get-in (db/schema-database database)
                                                    [:schema attribute :db/cardinality]))
                                       (set value) value)))
-                           {} row)]
-           (is (= (#'runner/reach-row normalized)
-                  (get-in index [::runner/reach-rows (:db/id row)])))))))))
+                           {} entity)]
+           (is (= (#'runner/reach-entity normalized)
+                  (get-in index [::runner/reach-rows (:db/id entity)])))))))))
 
 (deftest result-only-writes-do-not-read-the-reachable-program-again
   (support/with-database
@@ -63,5 +63,5 @@
        (is (= before
               (with-redefs-fn
                 {#'runner/reach-facts
-                 (fn [& _] (throw (ex-info "Result-only write reread program rows." {})))}
+                 (fn [& _] (throw (ex-info "Result-only write reread program entities." {})))}
                 #(runner/reach-digests (db/db connection) [target]))))))))

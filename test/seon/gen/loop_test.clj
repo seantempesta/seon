@@ -50,7 +50,7 @@
    ["alpha" 'my.gen.alpha]
    ["beta" 'my.gen.beta]])
 
-(def ^:private cast-rows
+(def ^:private cast-entities
   (into []
         (mapcat (fn [[agent-id namespace-name]]
                   (agent/creation-tx {:seon.agent/id agent-id
@@ -119,7 +119,7 @@
       (try
        (test-support/seed-cluster! connection "generate-code-v0")
        (test-support/transacted! connection
-                               (conj cast-rows
+                               (conj cast-entities
                                      (:seon.config/desired-row
                                       (config/compile-manifest
                                        {:seon.boot/cluster-name "generate-code-v0"

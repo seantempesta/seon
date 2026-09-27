@@ -9,8 +9,8 @@
 (deftest writer-reports-and-their-composed-datoms-name-the-same-changes
   (support/with-database
     (fn [connection]
-      (let [digested (fn [row] (assoc row :seon.program/definition-digest
-                                      (program/definition-digest row)))
+      (let [digested (fn [entity] (assoc entity :seon.program/definition-digest
+                                      (program/definition-digest entity)))
             a 'publication.report/a
             b 'publication.report/b
             created (support/transacted! connection [(digested {:seon.ns/name a})

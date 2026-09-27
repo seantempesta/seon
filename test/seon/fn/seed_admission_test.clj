@@ -28,8 +28,8 @@
       (finally
         (run! io/delete-file (reverse (file-seq root)))))))
 
-(defn- seeded-row [rows]
-  (some #(when (= 'sample.seeded-test/seeded (:seon.test/sym %)) %) rows))
+(defn- seeded-entity [entities]
+  (some #(when (= 'sample.seeded-test/seeded (:seon.test/sym %)) %) entities))
 
 (defn- packaged-projection []
   (schema/build-projection (schema.edn/packaged-forms)))
@@ -39,7 +39,7 @@
     seeds
     (fn [root]
       (try
-        (seon.fn/rows {:seon.fn/roots [root] :seon.schema/projection projection})
+        (seon.fn/program-entities {:seon.fn/roots [root] :seon.schema/projection projection})
         nil
         (catch clojure.lang.ExceptionInfo failure
           (select-keys (ex-data failure)
@@ -61,8 +61,8 @@
   (with-seeded-root
     three-forms
     (fn [root]
-      (let [rows (seon.fn/rows {:seon.fn/roots [root] :seon.schema/projection (packaged-projection)})
-            seeded (seeded-row rows)]
+      (let [entities (seon.fn/program-entities {:seon.fn/roots [root] :seon.schema/projection (packaged-projection)})
+            seeded (seeded-entity entities)]
         (testing "the analyzer reads the ordered vector into owned occurrences"
           (is (= stored-in-order (:seon.test/seed seeded)))
           ;; WANTED: a named seed is a CALL edge of its test, so changing the
@@ -73,7 +73,7 @@
         (testing "the canonical writer stores the occurrences; ordinals rebuild the vector"
           (test-support/with-database
            (fn [connection]
-             (test-support/transacted! connection (seon.fn/reconcile-tx (db/db connection) rows []))
+             (test-support/transacted! connection (seon.fn/reconcile-tx (db/db connection) entities []))
              (let [pulled (db/pull (db/db connection)
                                    [{:seon.test/seed [:seon.test.seed/ordinal :seon.test.seed/function
                                                       :seon.test.seed/writes]}]
@@ -89,7 +89,7 @@
   (with-seeded-root
     "[]"
     (fn [root]
-      (is (not (contains? (seeded-row (seon.fn/rows {:seon.fn/roots [root]
+      (is (not (contains? (seeded-entity (seon.fn/program-entities {:seon.fn/roots [root]
                                                      :seon.schema/projection (packaged-projection)}))
                           :seon.test/seed))))))
 
@@ -114,18 +114,18 @@
            (refused "[[{:sample.nothing/here 1}]]")))))
 
 (deftest an-sci-deftest-settles-with-its-seed-attributes-as-keywords
-  ;; An SCI deftest's row comes from `source-rows`; its settlement re-analysis
+  ;; An SCI deftest's entity comes from `source-rows`; its settlement re-analysis
   ;; (`analyze-form`) must keep the seed's schema edges, not only kondo's holders.
   (let [database (db/db)
-        namespace-row (let [row {:seon.ns/name 'seon.fn.seed-admission-test
+        namespace-entity (let [entity {:seon.ns/name 'seon.fn.seed-admission-test
                                  :seon.ns/source "(ns seon.fn.seed-admission-test (:require [clojure.test :refer [deftest is]]))"}]
-                        (assoc row :seon.program/definition-digest (seon.program/definition-digest row)))
+                        (assoc entity :seon.program/definition-digest (seon.program/definition-digest entity)))
         source "(deftest ^{:seon.test/seed [{:seon.test/skip-reason \"sci\"}]} evaluated (is true))"
-        [row] (seon.fn/source-rows database (seon.program/shapes-in (schema/projection-from-database database))
-                                   namespace-row source #{})
+        [entity] (seon.fn/source-rows database (seon.program/shapes-in (schema/projection-from-database database))
+                                   namespace-entity source #{})
         [_ settled] (seon.fn/analyze-form database source
-                                          [:seon.ns/name 'seon.fn.seed-admission-test] row)]
+                                          [:seon.ns/name 'seon.fn.seed-admission-test] entity)]
     (is (= [{:seon.test.seed/ordinal 0 :seon.test.seed/writes #{:seon.test/skip-reason}}]
-           (:seon.test/seed row) (:seon.test/seed settled)))
-    (is (contains? (:seon.fn/keywords row) :seon.test/skip-reason))
+           (:seon.test/seed entity) (:seon.test/seed settled)))
+    (is (contains? (:seon.fn/keywords entity) :seon.test/skip-reason))
     (is (contains? (:seon.fn/keywords settled) :seon.test/skip-reason))))

@@ -1037,7 +1037,7 @@
       (not recognized?)
       (assoc :seon.schema.admission/note
              (str "The asserting transaction does not identify exactly one "
-                  "recorded admission source, so this row is admitted as "
+                  "recorded admission source, so this entity is admitted as "
                   "agent-authored.")))))
 
 ;;; ---------------------------------------------------------------------------
@@ -1628,48 +1628,48 @@
         canonical-keys (or canonical-keys (set (keys forms)))
         default-admission (or admission
                               {:seon.schema.admission/source :agent})]
-    (letfn [(walk-schema [schema role row-identity row-definition row-admission visited]
-              (if (and (keyword? row-identity)
+    (letfn [(walk-schema [schema role entity-identity entity-definition entity-admission visited]
+              (if (and (keyword? entity-identity)
                        reference-advisories
-                       (contains? compiled-schemas row-identity))
+                       (contains? compiled-schemas entity-identity))
                 (reference-advisories
-                 row-identity role row-admission
-                 #(walk-schema-body schema role row-identity row-definition
-                                    row-admission visited))
-                (walk-schema-body schema role row-identity row-definition
-                                  row-admission visited)))
-            (walk-schema-body [schema role row-identity row-definition row-admission
+                 entity-identity role entity-admission
+                 #(walk-schema-body schema role entity-identity entity-definition
+                                    entity-admission visited))
+                (walk-schema-body schema role entity-identity entity-definition
+                                  entity-admission visited)))
+            (walk-schema-body [schema role entity-identity entity-definition entity-admission
                                visited]
-              (when (keyword? row-identity)
-                (@schema-datahike-assert-storable-schema! row-identity schema))
+              (when (keyword? entity-identity)
+                (@schema-datahike-assert-storable-schema! entity-identity schema))
               (let [advisories
                     (if (and reference-advisories
-                             (= :core (:seon.schema.admission/source row-admission))
-                             (not= :seon.error/base row-identity)
+                             (= :core (:seon.schema.admission/source entity-admission))
+                             (not= :seon.error/base entity-identity)
                              (not (internal/extends-schema? schema :seon.error/base)))
                       ;; For core declarations this inspection can refuse only
                       ;; error-schema inheritance. Its other output is advisory
                       ;; data, which the constructor does not consume.
                       []
                       (internal/assert-complete-schema!
-                     {:seon.schema/identity row-identity
+                     {:seon.schema/identity entity-identity
                       :seon.schema/forms forms
                       :seon.schema/storable-attribute?
                       (fn [attribute] (@schema-datahike-storable-attribute-in?
                                        {:seon.schema.projection/forms forms
                                         :seon.schema.projection/registry registry} attribute))
-                      :seon.schema/definition row-definition
+                      :seon.schema/definition entity-definition
                       :seon.schema/compiled schema
                       :seon.schema/role role
-                      :seon.schema/admission row-admission
+                      :seon.schema/admission entity-admission
                       :seon.schema/predicate-symbols
-                      (predicate-symbols-in row-definition)
+                      (predicate-symbols-in entity-definition)
                       :seon.schema/pure-predicate-symbols pure-predicate-symbols
                       :seon.schema/canonical-keys canonical-keys}))
                     references
-                    (if (and (keyword? row-identity)
-                             (contains? schema-dependencies row-identity))
-                      (get schema-dependencies row-identity)
+                    (if (and (keyword? entity-identity)
+                             (contains? schema-dependencies entity-identity))
+                      (get schema-dependencies entity-identity)
                       (contract-references (:registry compile-options) canonical-keys schema))]
                 (into advisories
                       (mapcat
@@ -1687,7 +1687,7 @@
                               role reference reference-form reference-admission
                               (conj visited reference))))))
                       references)))
-            (walk-function [compiled row-identity row-definition row-admission]
+            (walk-function [compiled entity-identity entity-definition entity-admission]
               (if (m/-function-schema? compiled)
                 (into
                  []
@@ -1697,17 +1697,17 @@
                           (m/-function-info arity)]
                       (cond->
                        (into
-                        (walk-schema input :input row-identity row-definition
-                                     row-admission #{})
-                        (walk-schema output :output row-identity row-definition
-                                     row-admission #{}))
+                        (walk-schema input :input entity-identity entity-definition
+                                     entity-admission #{})
+                        (walk-schema output :output entity-identity entity-definition
+                                     entity-admission #{}))
                         guard
                         (into
-                         (walk-schema guard :guard row-identity row-definition
-                                      row-admission #{}))))))
+                         (walk-schema guard :guard entity-identity entity-definition
+                                      entity-admission #{}))))))
                  (m/-function-schema-arities compiled))
-                (walk-schema compiled :schema row-identity row-definition
-                             row-admission #{})))]
+                (walk-schema compiled :schema entity-identity entity-definition
+                             entity-admission #{})))]
       (let [compiled
             (or compiled
                 (if (and (vector? definition)
@@ -2033,7 +2033,7 @@
     (render-contract-refusal! declaration observation))
   projection)
 
-(defn- shape-row-in
+(defn- shape-entity-in
   [registry schema-key]
   (let [compiled (mr/schema registry schema-key)]
     ;; Only maps and conjunctions can contribute entity entries. Scalar
@@ -2293,18 +2293,18 @@
             dependencies))
          {}
          function-dependencies)
-        shape-rows
+        shape-entities
         (into (sorted-map)
               (keep
                 (fn [[k _]]
-                  (when-let [row (shape-row-in registry k)]
-                    [k row])))
+                  (when-let [entity (shape-entity-in registry k)]
+                    [k entity])))
               forms)
         required-by-key
         (into (sorted-map)
-              (map (fn [[k row]]
-                     [k (:seon.schema/required-attrs row)]))
-              shape-rows)
+              (map (fn [[k entity]]
+                     [k (:seon.schema/required-attrs entity)]))
+              shape-entities)
         raw-shape-index
         (reduce-kv
           (fn [index schema-key required-attrs]
@@ -2323,7 +2323,7 @@
               (map (fn [[attr schema-keys]]
                      [attr (vec (sort-by shape-rank schema-keys))]))
               raw-shape-index)
-        catalog  (->> shape-rows
+        catalog  (->> shape-entities
                       (sort-by (comp str key))
                       (map second)
                       (filter :seon.schema/entity?)
@@ -2351,7 +2351,7 @@
           reverse-function-dependencies
           :seon.schema.projection/required-by-key required-by-key
           :seon.schema.projection/shape-index shape-index
-          :seon.schema.projection/shape-rows shape-rows
+          :seon.schema.projection/shape-rows shape-entities
           :seon.schema.projection/catalog catalog
           :seon.schema.projection/fingerprint-version
           projection-fingerprint-version
@@ -2445,14 +2445,14 @@
      without-before
      after)))
 
-(defn- replace-shape-rows
-  [shape-rows registry schema-keys]
+(defn- replace-shape-entities
+  [shape-entities registry schema-keys]
   (reduce
-   (fn [rows schema-key]
-     (if-let [row (shape-row-in registry schema-key)]
-       (assoc rows schema-key row)
-       (dissoc rows schema-key)))
-   shape-rows
+   (fn [entities schema-key]
+     (if-let [entity (shape-entity-in registry schema-key)]
+       (assoc entities schema-key entity)
+       (dissoc entities schema-key)))
+   shape-entities
    schema-keys))
 
 (defn- function-dependents-of
@@ -2516,9 +2516,9 @@
   {:malli/schema
    [:=> [:cat [:fn malli.registry/registry?] :map :keyword]
     [:sequential :keyword]]}
-  [registry shape-rows schema-key]
-  (if-let [row (get shape-rows schema-key)]
-    (vec (or (seq (:seon.schema/required-attrs row))
+  [registry shape-entities schema-key]
+  (if-let [entity (get shape-entities schema-key)]
+    (vec (or (seq (:seon.schema/required-attrs entity))
              (map first (internal/entity-entries (mr/schema registry schema-key)))))
     []))
 
@@ -2531,13 +2531,13 @@
    re-sorted."
   {:malli/schema
    [:=> [:cat :map [:fn malli.registry/registry?] :map [:set :keyword]] :map]}
-  [projection registry shape-rows schema-keys]
-  (let [old-rows (:seon.schema.projection/shape-rows projection)
+  [projection registry shape-entities schema-keys]
+  (let [old-entities (:seon.schema.projection/shape-rows projection)
         old-registry (:seon.schema.projection/registry projection)
         required-by-key
         (reduce (fn [required schema-key]
-                  (if-let [row (get shape-rows schema-key)]
-                    (assoc required schema-key (:seon.schema/required-attrs row))
+                  (if-let [entity (get shape-entities schema-key)]
+                    (assoc required schema-key (:seon.schema/required-attrs entity))
                     (dissoc required schema-key)))
                 (:seon.schema.projection/required-by-key projection)
                 schema-keys)
@@ -2554,14 +2554,14 @@
                                 (dissoc index attr))))
                           index
                           (distinct (shape-index-attributes
-                                     old-registry old-rows schema-key))))
+                                     old-registry old-entities schema-key))))
                 (:seon.schema.projection/shape-index projection)
                 schema-keys)
         entering
         (into [] (mapcat (fn [schema-key]
                            (map (fn [attr] [attr schema-key])
                                 (shape-index-attributes
-                                 registry shape-rows schema-key))))
+                                 registry shape-entities schema-key))))
               (sort-by str schema-keys))
         shape-index
         (reduce (fn [index attr]
@@ -2572,7 +2572,7 @@
                 (distinct (map first entering)))
         kept (into [] (remove #(contains? schema-keys (:seon.schema/key %)))
                    (:seon.schema.projection/catalog projection))
-        entities (filter :seon.schema/entity? (keep #(get shape-rows %) schema-keys))
+        entities (filter :seon.schema/entity? (keep #(get shape-entities %) schema-keys))
         catalog (if (seq entities)
                   (vec (sort-by (comp str :seon.schema/key) (into kept entities)))
                   kept)]
@@ -2774,16 +2774,16 @@
                     (:seon.schema.projection/reverse-function-dependencies projection)
                     (into affected-fns removed-fns))
             shape-keys (into affected-keys removed-keys)
-            shape-rows
-            (replace-shape-rows
+            shape-entities
+            (replace-shape-entities
              (apply dissoc (:seon.schema.projection/shape-rows projection) removed-keys)
              registry affected-keys)
             shape-data
-            (if (= shape-rows (:seon.schema.projection/shape-rows projection))
+            (if (= shape-entities (:seon.schema.projection/shape-rows projection))
               (select-keys projection [:seon.schema.projection/required-by-key
                                        :seon.schema.projection/shape-index
                                        :seon.schema.projection/catalog])
-              (shape-projections-with projection registry shape-rows shape-keys))
+              (shape-projections-with projection registry shape-entities shape-keys))
             fingerprint
             (-> (reusable-projection-fingerprint projection)
                 (fingerprint-with :forms old-forms forms (into changed-keys removed-keys))
@@ -2816,7 +2816,7 @@
                      :seon.schema.projection/function-dependencies function-dependencies
                      :seon.schema.projection/reverse-function-dependencies
                      reverse-function-dependencies
-                     :seon.schema.projection/shape-rows shape-rows
+                     :seon.schema.projection/shape-rows shape-entities
                      :seon.schema.projection/fingerprint-version
                      projection-fingerprint-version
                      :seon.schema.projection/fingerprint fingerprint}
@@ -2849,7 +2849,7 @@
                          (render-declarations-in candidate (keys forms)))))))
         (with-compiled-cache candidate)))))
 
-(defn- projection-rows
+(defn- projection-entities
   "Join attribute ranges, retaining historical values for duplicate refusal."
   {:malli/schema
    [:=> [:cat :seon.db/database-value :qualified-keyword :qualified-keyword :boolean]
@@ -2867,7 +2867,7 @@
           (d/datoms database :avet identity-attribute))))
 
 (defn- projection-admissions
-  "Join declaration identities to admission datoms once, without per-row reads."
+  "Join declaration identities to admission datoms once, without per-entity reads."
   {:malli/schema [:=> [:cat :seon.db/database-value] :map]}
   [database]
   (let [sources (into {} (map (juxt :e :v))
@@ -2925,14 +2925,14 @@
                                        " declaration still names it.")
                                   {:seon.error/at (java.util.Date.)
                                    :seon.error/layer :seon.schema/compilation
-                                   :seon.error/operation 'seon.schema/projection-from-rows
+                                   :seon.error/operation 'seon.schema/projection-from-entities
                                    :seon.error/message "A stored declaration names a deleted predicate."
                                    :seon.schema/error :seon.schema/unresolved-predicate
                                    :seon.schema/unresolved-predicate predicate
                                    :seon.error/offending value})))])))
         (tree-seq coll? seq [(vals forms) (vals function-contracts)])))
 
-(defn projection-from-rows
+(defn projection-from-entities
   "Build one complete projection from committed schema and contract rows.
 
    Rows are ordinary database query results. Duplicate identities are rejected
@@ -2946,7 +2946,7 @@
                  [::projection ::projection]]
      ::projection]]}
   ([projection-input]
-   (projection-from-rows projection-input {}))
+   (projection-from-entities projection-input {}))
   ([{:seon.schema/keys [database-value schema-rows function-contract-rows
                         artifact-exports
                         pure-predicate-symbols]
@@ -2965,26 +2965,26 @@
                 {:seon.schema.admission/source :agent
                  :seon.schema.admission/note
                  "The supplied database has no admission provenance for this identity."}))]
-     (letfn [(parse-rows [rows identity-fn identity-label identity-attribute
+     (letfn [(parse-tuples [tuples identity-fn identity-label identity-attribute
                           prior-definitions]
             (reduce
-              (fn [parsed row]
-                (when-not (and (sequential? row)
-                               (= 3 (count row)))
+              (fn [parsed tuple]
+                (when-not (and (sequential? tuple)
+                               (= 3 (count tuple)))
                   (throw (ex-info (str "Malformed committed " identity-label
-                                       " row.")
+                                       " tuple.")
                                   {:seon.schema/error
                                    :seon.schema/malformed-projection-row
-                                   :seon.schema/row row
+                                   :seon.schema/row tuple
                                    :seon.schema/malformed-projection-row true})))
-                (let [[raw-identity form-string _asserting-tx-eid] row
+                (let [[raw-identity form-string _asserting-tx-eid] tuple
                       identity (identity-fn raw-identity)]
                   (when-not (string? form-string)
                     (throw (ex-info (str "Malformed committed " identity-label
                                          " form.")
                                     {:seon.schema/error
                                      :seon.schema/malformed-projection-form
-                                     :seon.schema/row row
+                                     :seon.schema/row tuple
                                      :seon.schema/malformed-projection-form true})))
                   (when (contains? parsed identity)
                     (throw (ex-info (str "Duplicate committed " identity-label
@@ -3005,9 +3005,9 @@
                           :seon.schema.parsed/admission
                           (admission-for-identity identity-attribute raw-identity)})))
               {}
-              rows))]
+              tuples))]
     (let [schemas
-          (parse-rows schema-rows
+          (parse-tuples schema-rows
                   (fn [identity]
                     (if (keyword? identity)
                       identity
@@ -3019,7 +3019,7 @@
                   "schema" :seon.schema/key
                   (:seon.schema.projection/forms reusable-projection {}))
           contracts
-          (parse-rows function-contract-rows
+          (parse-tuples function-contract-rows
                   (fn [identity]
                     (cond
                       (qualified-symbol? identity) identity
@@ -3064,20 +3064,20 @@
                                     :seon.schema/malformed-artifact-export true})))))
                 artifact-exports)
           forms
-          (into {} (map (fn [[k row]]
-                          [k (:seon.schema.parsed/form row)]))
+          (into {} (map (fn [[k entity]]
+                          [k (:seon.schema.parsed/form entity)]))
                 schemas)
           function-contracts
-          (into {} (map (fn [[k row]]
-                          [k (:seon.schema.parsed/form row)]))
+          (into {} (map (fn [[k entity]]
+                          [k (:seon.schema.parsed/form entity)]))
                 contracts)
           schema-admissions
-          (into {} (map (fn [[k row]]
-                          [k (:seon.schema.parsed/admission row)]))
+          (into {} (map (fn [[k entity]]
+                          [k (:seon.schema.parsed/admission entity)]))
                 schemas)
           function-admissions
-          (into {} (map (fn [[k row]]
-                          [k (:seon.schema.parsed/admission row)]))
+          (into {} (map (fn [[k entity]]
+                          [k (:seon.schema.parsed/admission entity)]))
                 contracts)
           ;; A complete reusable projection answers by replacement (it is
           ;; returned itself when nothing differs), so the population-wide
@@ -3103,21 +3103,21 @@
               :seon.schema/pure-predicate-symbols pure-predicate-symbols
               :seon.schema/predicate-functions
               (deleted-predicate-functions forms function-contracts)
-              ;; Reading committed rows re-admits nothing: completeness and
-              ;; renderer coherence were judged when the rows were written
+              ;; Reading committed entities re-admits nothing: completeness and
+              ;; renderer coherence were judged when the entities were written
               ;; (`projection-with-schema` and the other replacements,
               ;; publication's build). A historical commit opens as its own
-              ;; rows, under the rules that admitted it, not today's.
+              ;; entities, under the rules that admitted it, not today's.
               :seon.schema/validate-render-contracts? false
               :seon.schema/admission? false}))
-          ;; The row text each form was read from, so the next derivation
-          ;; from this projection reads only rows whose text differs. A
+          ;; The entity text each form was read from, so the next derivation
+          ;; from this projection reads only entities whose text differs. A
           ;; runtime member: every other constructor drops it, so it never
           ;; outlives its forms.
           definition-strings
           (persistent!
-           (reduce-kv (fn [strings identity row]
-                        (assoc! strings identity (:seon.schema.parsed/string row)))
+           (reduce-kv (fn [strings identity entity]
+                        (assoc! strings identity (:seon.schema.parsed/string entity)))
                       (transient {})
                       (merge schemas contracts)))]
       (if (= definition-strings
@@ -3181,9 +3181,9 @@
    (when-not (db-utils/db? db)
      (let [refusal (refuse-projection-source db)]
        (throw (ex-info (:seon.error/message refusal) refusal))))
-   (projection-from-rows
+   (projection-from-entities
     (reduce-kv (fn [input member [identity value identity-tx?]]
-                 (assoc input member (projection-rows db identity value identity-tx?)))
+                 (assoc input member (projection-entities db identity value identity-tx?)))
                {:seon.schema/database-value db
                 :seon.schema/artifact-exports #{}
                 :seon.schema/pure-predicate-symbols #{}}
@@ -3269,11 +3269,11 @@
    [:=> [:cat ::projection :qualified-keyword]
     [:or :nil ::registry-key]]}
   [projection attribute]
-  (let [rows (:seon.schema.projection/shape-rows projection)
+  (let [entities (:seon.schema.projection/shape-rows projection)
         candidates
         (->> (get-in projection
                      [:seon.schema.projection/shape-index attribute])
-             (filter #(true? (:seon.schema/entity? (get rows %)))))]
+             (filter #(true? (:seon.schema/entity? (get entities %)))))]
     (when (= 1 (count candidates)) (first candidates))))
 
 (defn- selector-target-schema
@@ -3686,7 +3686,7 @@
       [[] #{}]
       (sort-by str schema-keys)))))
 
-(defn canonical-schema-rows
+(defn canonical-schema-entities
   "Build canonical rows from a complete construction generation.
   The two-argument arity selects authored rows while reference and storage
   decisions use the complete supplied projection. Missing targets still refuse."
@@ -3695,8 +3695,8 @@
     [:=> [:cat] [:vector :map]]
     [:=> [:cat :map] [:vector :map]]
     [:=> [:cat ::projection :map] [:vector :map]]]}
-  ([] (canonical-schema-rows (registered-schemas)))
-  ([forms] (canonical-schema-rows (build-projection forms) forms))
+  ([] (canonical-schema-entities (registered-schemas)))
+  ([forms] (canonical-schema-entities (build-projection forms) forms))
   ([projection forms]
    (let [materialized-keys (into #{} (filter keyword?) (keys forms))
          reference-graph (:seon.schema.projection/schema-dependencies projection)
@@ -3704,7 +3704,7 @@
      (mapv
       (fn [schema-key]
         (let [references (get reference-graph schema-key)]
-          (let [row
+          (let [entity
                 (cond->
                  (merge (@schema-datahike-storable-properties-in projection schema-key)
                         {:seon.schema/key schema-key
@@ -3712,8 +3712,8 @@
                          (binding [*print-namespace-maps* false] (pr-str (get forms schema-key)))
                          :seon.schema.admission/source :core})
                   (seq references) (assoc :seon.schema/references (set references)))]
-            (assoc row :seon.program/definition-digest
-                   ((requiring-resolve 'seon.program/definition-digest) row)))))
+            (assoc entity :seon.program/definition-digest
+                   ((requiring-resolve 'seon.program/definition-digest) entity)))))
       (dependency-first-schema-keys ordering-graph materialized-keys)))))
 
 (defn canonical-database-attributes
@@ -3753,7 +3753,7 @@
   ((projection-explainer projection schema-key) value))
 
 (def ^:const shape-candidate-limit
-  "Maximum schema rows examined and returned for structural diagnostics."
+  "Maximum schema entities examined and returned for structural diagnostics."
   32)
 
 (def ^:const shape-input-key-limit
@@ -3975,9 +3975,9 @@
   [value]
   (identity-only-projection-in (shape-projection) value))
 
-(defn- shape-rank [row]
-  [(- (count (:seon.schema/required-attrs row)))
-   (str (:seon.schema/key row))])
+(defn- shape-rank [entity]
+  [(- (count (:seon.schema/required-attrs entity)))
+   (str (:seon.schema/key entity))])
 
 (defn- complete-present-attrs [value]
   (when (map? value)
@@ -4023,9 +4023,9 @@
   {:malli/schema [:=> [:catn [:seon.schema/projection :seon.schema/projection] [:seon.schema/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Schema discovery and explanation inspect arbitrary candidate values, including scalars, nil and host objects; the supplied validators decide whether they match.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:vector :map]]}
   [projection value]
   (if-let [attrs (seq (sort-by str (diagnostic-present-attrs value)))]
-    (let [rows (:seon.schema.projection/shape-rows projection)]
+    (let [entities (:seon.schema.projection/shape-rows projection)]
       (->> (diagnostic-schema-keys projection attrs)
-           (map rows)
+           (map entities)
            (sort-by shape-rank)
            vec))
     []))
@@ -4036,13 +4036,13 @@
   [projection value]
   (if-let [attrs (seq (complete-present-attrs value))]
     (let [index (:seon.schema.projection/shape-index projection)
-          rows (:seon.schema.projection/shape-rows projection)
+          entities (:seon.schema.projection/shape-rows projection)
           present (set attrs)
           possible (into #{} (mapcat #(get index % [])) attrs)]
       (->> possible
-           (map rows)
-           (filter (fn [row]
-                     (every? present (:seon.schema/required-attrs row))))
+           (map entities)
+           (filter (fn [entity]
+                     (every? present (:seon.schema/required-attrs entity))))
            (sort-by shape-rank)
            (filter (fn [{:seon.schema/keys [key]}]
                       ((projection-validator projection key) value)))

@@ -46,7 +46,7 @@
           ;; grammar accepts it in the place of a ref. Nothing declares this
           ;; key at a call site: the registry derives it as the second arm of
           ;; every child position whose enclosing form declares
-          ;; `:seon.db/component true`, so a component-bearing row validates
+          ;; `:seon.db/component true`, so a component-bearing entity validates
           ;; as the transaction data it is.
           :component-entity
           [:map-of

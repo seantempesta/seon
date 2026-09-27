@@ -16,11 +16,11 @@
 
 (def ^:private managing-process
   ;; The test's own managing process, so the managed slice is exactly the
-  ;; rows these tests write. The member's branch already holds its cluster's
-  ;; config row under boot's `seon.db.process/config` provenance; managing as
-  ;; that process planned the row's retraction on every apply, which the
-  ;; writer refuses (the cluster row requires :seon.cluster/config).
-  ;; Production's `config/apply!` retains the configs a cluster row
+  ;; entities these tests write. The member's branch already holds its cluster's
+  ;; config entity under boot's `seon.db.process/config` provenance; managing as
+  ;; that process planned the entity's retraction on every apply, which the
+  ;; writer refuses (the cluster entity requires :seon.cluster/config).
+  ;; Production's `config/apply!` retains the configs a cluster entity
   ;; references; this suite's subject is the reconciler itself.
   "seon.db.process/reconcile-test")
 
@@ -54,7 +54,7 @@
   {::reconcile/desired desired
    ::reconcile/process managing-process})
 
-(defn- config-row
+(defn- config-entity
   [cluster queue-depth]
   (:seon.config/desired-row
    (config/compile-manifest
@@ -68,7 +68,7 @@
     (fn [connection]
       (transact-as! connection
                     managing-process
-                    [(config-row "provenance-proof" 10)])
+                    [(config-entity "provenance-proof" 10)])
       (is (= managing-process
              (db/q
               '[:find ?process-id .
@@ -82,7 +82,7 @@
 (deftest first-apply-writes-and-reapply-is-zero-writes
   (with-model-database
     (fn [connection]
-      (let [desired [(config-row "alpha" 10)]
+      (let [desired [(config-entity "alpha" 10)]
             before (:max-tx @connection)
             first-result (reconcile/reconcile! connection (request desired))
             after-first (:max-tx @connection)
@@ -107,13 +107,13 @@
             (with-redefs [db/transact! (fn [& _] refusal)]
               (reconcile/reconcile!
                connection
-               (request [(config-row "refused" 10)])))]
+               (request [(config-entity "refused" 10)])))]
         (is (= refusal result))))))
 
 (deftest a-hand-edit-is-repaired-by-the-next-apply
   (with-model-database
     (fn [connection]
-      (let [desired [(config-row "drifted" 10)]]
+      (let [desired [(config-entity "drifted" 10)]]
         (reconcile/reconcile! connection (request desired))
         (transact-as! connection
                       unmanaged-process
@@ -136,11 +136,11 @@
     (fn [connection]
       (reconcile/reconcile!
        connection
-       (request [(config-row "keep" 10)
-                 (config-row "remove" 11)]))
+       (request [(config-entity "keep" 10)
+                 (config-entity "remove" 11)]))
       (reconcile/reconcile!
        connection
-       (request [(config-row "keep" 10)]))
+       (request [(config-entity "keep" 10)]))
       (is (some? (db/pull @connection
                          '[:seon.config/cluster]
                          [:seon.config/cluster "keep"])))
@@ -151,9 +151,9 @@
 (deftest planning-pulls-only-the-provenance-managed-slice
   (with-model-database
     (fn [connection]
-      (let [managed (config-row "managed-slice" 10)
+      (let [managed (config-entity "managed-slice" 10)
             foreign
-            (mapv #(config-row (str "foreign-slice-" %) 10) (range 20))]
+            (mapv #(config-entity (str "foreign-slice-" %) 10) (range 20))]
         (transact-as! connection managing-process [managed])
         (transact-as! connection unmanaged-process foreign)
         (let [managed-eid
@@ -171,7 +171,7 @@
                   (swap! pulled-eids conj (last args))
                   (apply original-pull args))]
                 (reconcile/plan @connection (request [managed])))]
-          (is (empty? tx-data) "the managed row is already exact")
+          (is (empty? tx-data) "the managed entity is already exact")
           (is (= [managed-eid] @pulled-eids)
               "foreign identities are unrepresentable in the pull slice"))))))
 
@@ -198,29 +198,29 @@
         (doseq [size [1 8 12]
                 ordinals [(range size) (reverse (range size))]]
           (let [names (mapv #(str "duplicate-" %) ordinals)
-                rows (mapv #(config-row % 10) (concat names names))
+                entities (mapv #(config-entity % 10) (concat names names))
                 refusal (test-support/refusal-data
-                         #(reconcile/plan @connection (request rows)))]
+                         #(reconcile/plan @connection (request entities)))]
             (is (= ::reconcile/duplicate-identity (::reconcile/rule refusal)))
             (is (= [:seon.config/cluster (first names)]
                    (::reconcile/identity refusal))
-                "evidence follows desired-row order, never hash-map order"))))
+                "evidence follows desired-entity order, never hash-map order"))))
       (testing "an unmanaged entity already owns the desired identity"
         (transact-as! connection
                       unmanaged-process
-                      [(config-row "outside" 77)])
+                      [(config-entity "outside" 77)])
         (is (= ::reconcile/identity-outside-scope
                (::reconcile/rule
                 (test-support/refusal-data
                  #(reconcile/plan
                    @connection
-                   (request [(config-row "outside" 10)]))))))))))
+                   (request [(config-entity "outside" 10)]))))))))))
 
 (def ^:private desired-population-generator
   (gen/fmap
    (fn [entries]
      (mapv (fn [[ordinal queue-depth mode]]
-             (assoc (config-row (str "generated-" ordinal) queue-depth)
+             (assoc (config-entity (str "generated-" ordinal) queue-depth)
                     :seon.config.eval/time-limit-ms mode))
            entries))
    ;; distinct BY IDENTITY ordinal — gen/vector-distinct has no :key

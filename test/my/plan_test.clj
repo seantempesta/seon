@@ -471,7 +471,7 @@
                            (filterv :seon.call-preparation/key
                                     (:seon.config/initialization
                                      (config/compile-manifest {:seon.boot/cluster-name "default"}))))
-      ;; The environment below names this cluster; it needs its own config row.
+      ;; The environment below names this cluster; it needs its own config entity.
       (support/seed-cluster! connection "plan-map-defaults")
       (add connection "alice-work" "Alice work")
       (plan/add! {:my.plan.item/id "bob-work" :my.plan.item/title "Bob work"}

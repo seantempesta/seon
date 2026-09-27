@@ -30,7 +30,7 @@
       :seon.store/branch :current-src})}))
 
 (defn- blob-root!
-  "Reference `digest` the way error evidence does: its occurrence blob row."
+  "Reference `digest` the way error evidence does: its occurrence blob entity."
   [connection digest]
   (support/transacted!
           connection
@@ -159,7 +159,7 @@
                   (is (= second-content (blob/get connection second-digest)))))))
 
           (testing "an unreferenced blob is readable by digest until an explicit sweep collects it"
-            ;; MCP results are blob-only (owner ruling #19): no row roots them.
+            ;; MCP results are blob-only (owner ruling #19): no entity roots them.
             (let [unreferenced (blob/put! connection "an unreferenced MCP value")]
               (is (= "an unreferenced MCP value" (blob/get connection unreferenced)))
               (is (pos? (registry/collect! opened (Date.))))

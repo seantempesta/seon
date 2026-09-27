@@ -234,17 +234,17 @@
          (when retain? (is (some? (:db-after changed)) (pr-str changed)))
          (is (= retain? (boolean (:seon.config.ai/retain-reasoning settings))))
          (is (nil? recorded) (pr-str recorded))))
-     (let [rows (db/q '[:find [(pull ?attempt [*]) ...]
+     (let [entities (db/q '[:find [(pull ?attempt [*]) ...]
                         :in $ [?id ...]
                         :where [?attempt :seon.ai.attempt/id ?id]]
                       @connection (mapv #(#'turn/attempt-id "reasoning-turn" %) [0 1]))
-           by-ordinal (into {} (map (juxt :seon.ai.attempt/ordinal identity)) rows)]
+           by-ordinal (into {} (map (juxt :seon.ai.attempt/ordinal identity)) entities)]
        (is (= #{0 1} (set (keys by-ordinal))))
        (is (not-any? #(get (by-ordinal 0) %)
                      [:seon.ai.attempt/reasoning :seon.ai.attempt/reasoning-blob
                       :seon.ai.attempt/reasoning-size]))
        (is (= "A bounded provider trace." (:seon.ai.attempt/reasoning (by-ordinal 1))))
-       (is (every? #(not (get % :seon.ai.attempt/sent-body)) rows))))))
+       (is (every? #(not (get % :seon.ai.attempt/sent-body)) entities))))))
 
 (deftest attempt-usage-is-queryable
   (support/with-database
@@ -275,15 +275,15 @@
                     :seon.ai/settings (support/effective-config)
                     :seon.ai/usage usage}
                    (java.util.Date.))
-           row (db/q '[:find (pull ?a [*]) .
+           entity (db/q '[:find (pull ?a [*]) .
                         :in $ ?id
                         :where [?a :seon.ai.attempt/id ?id]]
                      (db/db connection) (#'turn/attempt-id "usage-facts-turn" 0))]
        (is (nil? result) (pr-str result))
        (is (= (ai/normalize-usage usage)
-              (select-keys row (keys (ai/normalize-usage usage)))))
+              (select-keys entity (keys (ai/normalize-usage usage)))))
        (is (= usage
-              (edn/read-string (:seon.ai.attempt/usage-edn row))))))))
+              (edn/read-string (:seon.ai.attempt/usage-edn entity))))))))
 
 (deftest attempt-settings-and-model-are-related-entities
   (support/with-database
@@ -314,18 +314,18 @@
                     :seon.ai/settings (support/effective-config)
                     :seon.ai/usage usage}
                    (java.util.Date.))
-           row (db/q '[:find (pull ?a [*]) .
+           entity (db/q '[:find (pull ?a [*]) .
                         :in $ ?id
                         :where [?a :seon.ai.attempt/id ?id]]
                      (db/db connection) (#'turn/attempt-id "usage-facts-turn" 0))]
        (is (nil? result) (pr-str result))
-       (is (= "deepseek-flash" (:seon.ai/model row))
+       (is (= "deepseek-flash" (:seon.ai/model entity))
            "the attempt keeps the model identity itself, not a descriptor ref")
-       (is (= (get-in row [:seon.ai.attempt/settings :db/id])
+       (is (= (get-in entity [:seon.ai.attempt/settings :db/id])
               (get-in (db/pull (db/db connection) [:seon.agent/settings]
                                [:seon.agent/id "usage-facts"])
                       [:seon.agent/settings :db/id])))
-       (is (some? (:seon.ai.attempt/settings row)))))))
+       (is (some? (:seon.ai.attempt/settings entity)))))))
 
 (deftest evaluation-renderer-is-a-program-reference
   (support/with-database
@@ -333,7 +333,7 @@
      (support/seed-cluster! connection "renderer-facts")
      (support/transacted! connection
               (into (support/agent-tx @connection "renderer-facts")
-                [(support/namespace-row @connection 'user)
+                [(support/namespace-entity @connection 'user)
                
                  {:seon.turn/id "renderer-facts-turn"
                   :seon.turn/agent [:seon.agent/id "renderer-facts"]
@@ -359,21 +359,21 @@
                        :seon.sci.eval/evaluation evaluation
                        :seon.turn.loop/settlement-evaluation settled})
                result (db/transact! connection (turn/receipt-settle-tx facts))
-               row (db/pull (db/db connection)
+               entity (db/pull (db/db connection)
                             [:seon.eval/shown :seon.eval/renderer
                              {:seon.eval/renderer-fn [:db/id :seon.fn/sym]}]
                             [:seon.cluster.eval/id
                              (turn/receipt-identity "renderer-facts-turn" ordinal)])]
            (is (nil? (:seon.cluster.eval/error evaluation)) (pr-str evaluation))
            (is (:db-after result) (pr-str result))
-           (is (= expected (:seon.eval/renderer row)))
+           (is (= expected (:seon.eval/renderer entity)))
            (if expected
              (do
-               (is (= expected (get-in row [:seon.eval/renderer-fn :seon.fn/sym])))
-               (is (pos-int? (get-in row [:seon.eval/renderer-fn :db/id]))))
-             (is (empty? (select-keys row [:seon.eval/renderer :seon.eval/renderer-fn]))))
+               (is (= expected (get-in entity [:seon.eval/renderer-fn :seon.fn/sym])))
+               (is (pos-int? (get-in entity [:seon.eval/renderer-fn :db/id]))))
+             (is (empty? (select-keys entity [:seon.eval/renderer :seon.eval/renderer-fn]))))
            (is (= (:seon.eval/shown evaluation)
-                  (:seon.eval/shown row)))))))))
+                  (:seon.eval/shown entity)))))))))
 
 (deftest listen-patterns-retain-optional-entity-and-logical-value
   (support/with-database
@@ -421,8 +421,8 @@
                             :seon.turn/sources [{:seon.cluster.eval/source "(+ 1 1)"
                                                  :seon.ns/name 'my.agents.system-recipient}]}))
            closed (d/with (:db-after opened) (turn/close-tx {:seon.turn/id "system-only"}))
-           row (d/pull (:db-after closed)
+           entity (d/pull (:db-after closed)
                        '[:seon.turn/_handled {:seon.message/to [:seon.agent/id]}]
                        [:seon.message/id "system-message"])]
-       (is (= "system-recipient" (get-in row [:seon.message/to :seon.agent/id])))
-       (is (nil? (:seon.turn/_handled row)))))))
+       (is (= "system-recipient" (get-in entity [:seon.message/to :seon.agent/id])))
+       (is (nil? (:seon.turn/_handled entity)))))))

@@ -60,9 +60,9 @@
   [{database :seon.db/db connection :seon.db/connection :as request}]
   (try
     (let [;; THE CALLER'S CONTEXT NAMES THE CLUSTER: a forked branch holds
-          ;; its parent's cluster rows too, so "some cluster row" observed
+          ;; its parent's cluster entities too, so "some cluster entity" observed
           ;; another cluster's commit (web-context-test unrelated-adoption).
-          ;; Without a context, a database holding one cluster row names it.
+          ;; Without a context, a database holding one cluster entity names it.
           named (:seon.boot/cluster-name (or (env/of (:seon.sci.eval/ctx request)) (env/of request)))
           ;; two reads, not a pull inside :find: Datahike plans a find-pull
           ;; as a dependency on every attribute, so any commit re-rendered
@@ -125,7 +125,7 @@
   [{database :seon.db/db connection :seon.db/connection}]
   (try
     (let [boot (inst-ms (boot-time))
-          rows (db/q '[:find [(pull ?a [:db/id :seon.agent/id
+          entities (db/q '[:find [(pull ?a [:db/id :seon.agent/id
                                       {:seon.agent/plan [{:my.plan/current-step [:my.plan.item/title]}]}]) ...]
                        :where [?a :seon.agent/id]] database)]
       (mapv
@@ -169,7 +169,7 @@
              (assoc :seon.cluster.status/last-turn-ms
                     (- (inst-ms (get-in last-turn [:seon.turn/closed-tx :db/txInstant]))
                        (inst-ms (get-in last-turn [:seon.turn/opened-tx :db/txInstant])))))))
-       (sort-by :seon.agent/id rows)))
+       (sort-by :seon.agent/id entities)))
     (catch Exception failure (unknown (ex-message failure)))))
 
 (defn render-ai

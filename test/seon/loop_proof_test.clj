@@ -129,7 +129,7 @@
                      database (db/db connection)]
                  ;; The scenario's shapes are FACTS, not a registry leak: the
                  ;; agent declares them in an ordinary turn, the writer commits
-                 ;; one :seon.schema/key row each, and the cluster's population
+                 ;; one :seon.schema/key entity each, and the cluster's population
                  ;; DERIVED AT ITS AUTHORITY is its declared population plus
                  ;; EXACTLY those keys — asserted by key, because a count
                  ;; answers "fine" for a swap.
@@ -147,13 +147,13 @@
                                          (db/pull database [:seon.schema/form]
                                                   [:seon.schema/key %]))))
                               fixture/schema-keys))
-                     "Every scenario key is backed by its own durable declaration row.")
+                     "Every scenario key is backed by its own durable declaration entity.")
                  ;; THE LIVE PROJECTION IS NOT A SEPARATE OPINION. After a
                  ;; declaration commit the context carries exactly the
                  ;; population derived at that basis. Comparing the WRITER's
                  ;; canonical printing of a storable form with the reader's
                  ;; printing dropped `:example/order` and `:example/order-row`
-                 ;; here while their rows were committed facts, and the
+                 ;; here while their entities were committed facts, and the
                  ;; runner's drift detector then read their later re-derivation
                  ;; as keys a test had added (2026-09-17). By key, both
                  ;; directions: a count answers "fine" for a swap.
@@ -196,7 +196,7 @@
                (is (empty? recorded)
                    (pr-str {:seon.test/recorded-faults
                             (mapv (fn [occurrence]
-                                    (let [row (db/pull (db/db connection)
+                                    (let [entity (db/pull (db/db connection)
                                                        [:seon.error.occurrence/message
                                                         :seon.error.occurrence/proc-fn
                                                         {:seon.error.occurrence/turn [:seon.turn/id]}
@@ -205,10 +205,10 @@
                                                         {:seon.error/_occurrences
                                                          [:seon.error/layer :seon.error/operation :seon.error/frame]}]
                                                        occurrence)
-                                          digest (get-in row [:seon.error.occurrence/data-blob
+                                          digest (get-in entity [:seon.error.occurrence/data-blob
                                                               :seon.error.occurrence/blob-digest])]
                                       ;; the evidence holds the refused query and Datahike's cause
-                                      (cond-> row digest (assoc :seon.test/evidence
+                                      (cond-> entity digest (assoc :seon.test/evidence
                                                                 (blob/get connection digest)))))
                                   recorded)})))
              (testing "a lost turn permit faults at the declared completion allowance"
@@ -384,14 +384,14 @@
                      (try
                        (support/await-event! events ::closed (fn [_] (closed?)))
                        (catch Throwable failure
-                         (let [turn-row (db/pull @connection '[*] [:seon.turn/id id])]
-                           (prn {:seon.test/unfinished-turn turn-row
+                         (let [turn-entity (db/pull @connection '[*] [:seon.turn/id id])]
+                           (prn {:seon.test/unfinished-turn turn-entity
                                  :seon.test/evaluations
                                  (mapv #(select-keys % [:seon.cluster.eval/source
                                                        :seon.cluster.eval/error
                                                        :seon.cluster.eval/ordinal
                                                        :seon.eval/shown])
-                                       (filter #(= (:db/id turn-row)
+                                       (filter #(= (:db/id turn-entity)
                                                    (get-in % [:seon.cluster.eval/run :db/id]))
                                                (evaluation/of-agent @connection "juniper")))}))
                          (throw failure))))
@@ -893,9 +893,9 @@
                  ; single-order function is fixture state, not a domain
                  ; implementation; the entry gate admits a function only with
                  ; a complete contract and a non-nilable return.
-                 (let [id (submit (str "(defn largest-customer \"The first order row.\" "
+                 (let [id (submit (str "(defn largest-customer \"The first order entity.\" "
                                        "{:malli/schema [:=> [:cat [:sequential {:min 1} :map]] :map]} "
-                                       "[rows] (first rows))"))
+                                       "[entities] (first entities))"))
                        turn-eid (:db/id (db/pull @connection [:db/id] [:seon.turn/id id]))
                        defined (filterv #(= turn-eid (get-in % [:seon.cluster.eval/run :db/id]))
                                         (evaluation/of-agent @connection "juniper"))]

@@ -209,13 +209,13 @@
         (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.problems/problems) value))))))
 
 (deftest stale-var-findings-declare-no-render-pair
-  ;; A finding row whose ONLY attribute is another family's
+  ;; A finding entity whose ONLY attribute is another family's
   ;; `:db.unique/identity` may not declare a render pair. Maps are open, so
-  ;; the pair this row used to declare was selected for every `:seon.fn`
-  ;; row an agent pulled, and the published program graph answered
-  ;; "Restart the JVM to remove stale loaded Var ..." instead of the row.
+  ;; the pair this entity used to declare was selected for every `:seon.fn`
+  ;; entity an agent pulled, and the published program graph answered
+  ;; "Restart the JVM to remove stale loaded Var ..." instead of the entity.
   ;; The producers stay — `ai-prose` and `html-report` call them directly
-  ;; on the rows `stale-vars` derived, which is the one place the staleness
+  ;; on the entities `stale-vars` derived, which is the one place the staleness
   ;; is actually known.
   (let [properties
         (-> (schema.edn/packaged-forms)
@@ -237,7 +237,7 @@
     (is (= `problems/missing-model-ai (:seon.render/ai properties)))
     (is (= `problems/missing-model-html (:seon.render/html properties)))))
 
-(deftest configured-models-without-registry-rows-are-derived
+(deftest configured-models-without-registry-entities-are-derived
   (with-db
     (fn [connection]
       (test-support/transacted!
@@ -258,7 +258,7 @@
         (is (str/includes? (problems/ai-prose value) "a-agent-model"))
         (is (str/includes?
              (hiccup/->string (problems/html-report value))
-             "no registry row"))
+             "no registry entity"))
         (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.problems/problems) value))
 
         (is (:db-after
@@ -267,9 +267,9 @@
                [{:seon.ai.model/id "a-agent-model" :seon.ai.model/provider [:seon.ai.model/provider-id "deepseek"]}
                 {:seon.ai.model/id "z-cluster-model" :seon.ai.model/provider [:seon.ai.model/provider-id "deepseek"]}])))
         (is (nil? (:seon.problems/missing-models (found connection)))
-            "adding matching registry rows makes the finding disappear")))))
+            "adding matching registry entities makes the finding disappear")))))
 
-(deftest a-matching-model-registry-row-prevents-the-finding
+(deftest a-matching-model-registry-entity-prevents-the-finding
   (with-db
     (fn [connection]
       (test-support/transacted! connection
@@ -376,8 +376,8 @@
       (let [function (symbol "my.resolution.fixture" "target")
             define! (fn [source]
                       (test-support/transacted!
-                       connection [(test-support/namespace-row @connection 'my.resolution.fixture)
-                                   (test-support/program-fn-row @connection function source)]))
+                       connection [(test-support/namespace-entity @connection 'my.resolution.fixture)
+                                   (test-support/program-fn-entity @connection function source)]))
             fault! (fn []
                      (test-support/transacted!
                       connection
@@ -502,19 +502,19 @@
                            (present :seon.problems/failed-runs)
                            (conj :seon.problems/error-signatures))
                 html (problems/html-report value)
-                rows (filter
+                entities (filter
                       (fn [node]
                         (and (vector? node)
                              (= "seon-problems-row" (:class (nth node 1 nil)))))
                       (tree-seq sequential? seq html))
-                row-count (+ (count present)
+                entity-count (+ (count present)
                              (if (present :seon.problems/failed-runs) 1 0))]
             (is (every? #(seq (get value %)) present))
             (is (= expected (set (keys value))))
             (is (= (empty? present) (= {} value)))
             (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.problems/problems) value))
             (is (= present (set/intersection present (set (keys value)))))
-            (is (= row-count (count rows)))
+            (is (= entity-count (count entities)))
             (is (hiccup/hiccup? html))
             (when (present :seon.problems/error-signatures)
               (let [signatures (:seon.problems/error-signatures value)
@@ -554,7 +554,7 @@
         (is (not (str/includes? (render-at healthy) "the model did not answer")))
         (is (str/includes? (render-at broken) "the model did not answer"))))))
 
-(deftest missing-projection-is-a-refusal-not-query-rows
+(deftest missing-projection-is-a-refusal-not-query-entities
   (test-support/with-database
    (fn [connection]
      (let [raw @connection

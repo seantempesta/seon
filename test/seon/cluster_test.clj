@@ -46,18 +46,18 @@
             refusal (db/q '[:find ?entity .
                             :where [?entity :seon.audit/poison _]]
                           database)
-            missing-process-rows
-            (#'cluster/missing-process-rows refusal)]
+            missing-process-entities
+            (#'cluster/missing-process-entities refusal)]
         (is (and (map? refusal)
                  (contains? refusal :seon.error/at)
                  (contains? refusal :seon.error/layer)
                  (contains? refusal :seon.error/operation)) (pr-str refusal))
-        (is (= refusal missing-process-rows)
+        (is (= refusal missing-process-entities)
             "process identities are not rebuilt from error-map entries")))))
 
 (deftest ^{:seon.test/long "Compare the complete canonical schema population under both namespace-map printing modes; the supplied projection removes the former 19.57 s reconstruction. Full schema comparison remains proportional to the population."
            :seon.test/long-ms 30000}
-  schema-row-convergence-uses-the-stores-own-semantics
+  schema-entity-convergence-uses-the-stores-own-semantics
   (test-support/with-database
     {::test-support/extra-schema
      [{:db/ident ordered-marker
@@ -66,8 +66,8 @@
     (fn [connection]
       (let [database @connection
             installed (:schema database)
-            converged? (ns-resolve 'seon.cluster 'schema-row-converged?)
-            changes (ns-resolve 'seon.cluster 'schema-row-changes)]
+            converged? (ns-resolve 'seon.cluster 'schema-entity-converged?)
+            changes (ns-resolve 'seon.cluster 'schema-entity-changes)]
         (is (= :db.cardinality/many
                (get-in installed [ordered-marker :db/cardinality]))
             "the synthetic attribute is genuinely installed cardinality-many")
@@ -219,7 +219,7 @@
               "every datom of it is retracted by its own [e a v], never its entity"))))))
 
 (def ^:private indexable-marker ::indexable)
-(def ^:private indexable-row-id ::indexable-row-id)
+(def ^:private indexable-entity-id ::indexable-row-id)
 
 (deftest an-added-index-adopts-in-place-instead-of-forcing-a-refork
   ;; Adding `:db/index` to an already-installed attribute is accretion, and
@@ -231,7 +231,7 @@
   ;; `docs/seon/issues/adoption-refuses-a-monotonic-index-addition-datahike-supports.md`).
   (test-support/with-database
     {::test-support/extra-schema
-     [{:db/ident indexable-row-id
+     [{:db/ident indexable-entity-id
        :db/valueType :db.type/string
        :db/cardinality :db.cardinality/one
        :db/unique :db.unique/identity}
@@ -263,11 +263,11 @@
             written (db/transact!
                      connection
                      {:tx-data (mapv (fn [index]
-                                       {indexable-row-id (str "row-" index)
+                                       {indexable-entity-id (str "row-" index)
                                         indexable-marker (str "marker-" index)})
                                      (range 3))})]
         (is (some? (:db-after written))
-            "the fixture writes its rows through the one write path")
+            "the fixture writes its entities through the one write path")
         (is (zero? (avet-count))
             "an unindexed attribute holds no AVET datoms")
         (let [adopted (db/transact!
@@ -328,18 +328,18 @@
 (deftest initialization-readiness-surfaces-a-refused-read-instead-of-absence
   ;; The readiness probe answers three states, not two. Before this, a
   ;; `seon.db/pull` REFUSAL on a lookup ref was read as "the entity is not
-  ;; there yet": every row stayed waiting, nothing was ever ready, and the
+  ;; there yet": every entity stayed waiting, nothing was ever ready, and the
   ;; boot refused with "Initialization lookup refs do not resolve." about
   ;; targets that were in the database all along (2026-09-18, republish).
   (test-support/with-database
     (fn [connection]
       (let [;; A unique lookup attribute carrying a value its installed type
             ;; rejects: the read refuses instead of answering absence.
-            row {:seon.ai.model/id "seon.cluster-test/unreadable-lookup"
+            entity {:seon.ai.model/id "seon.cluster-test/unreadable-lookup"
                  :seon.ai.model/provider [:seon.ai.model/provider-id 42]}
             before (db/basis-t (db/db connection))
             refusal (test-support/refusal-data
-                     #(#'cluster/transact-initialization! connection [row]))
+                     #(#'cluster/transact-initialization! connection [entity]))
             offense (:seon.boot/offense refusal)]
         (is (= :refused (:seon.cluster.boot/disposition refusal))
             (pr-str refusal))
@@ -358,7 +358,7 @@
         (is (= before (db/basis-t (db/db connection)))
             "a refused readiness read commits nothing")))))
 
-(deftest initialization-orders-provider-rows-before-the-models-naming-them
+(deftest initialization-orders-provider-entities-before-the-models-naming-them
   (test-support/with-database
     (fn [connection]
       (let [provider {:seon.ai.model/provider-id "seon.cluster-test/provider"
@@ -371,7 +371,7 @@
                    [:seon.ai.model/provider-id "seon.cluster-test/provider"]
                    :seon.ai.model/context-window-tokens 1000
                    :seon.ai.model/input-modalities #{:text}}]
-        ;; The model row is offered FIRST: readiness, not input order, decides.
+        ;; The model entity is offered FIRST: readiness, not input order, decides.
         (#'cluster/transact-initialization! connection [model provider])
         (let [database (db/db connection)
               pulled (db/pull database

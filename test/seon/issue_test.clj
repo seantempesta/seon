@@ -56,10 +56,10 @@
                                                      [:seon.issue/id "probe-member"])))
                                  "seon.issue-missing/absent"))
      (let [member (seon.db/pull (seon.db/db connection) '[*] [:seon.issue/id "probe-member"])
-           class-row (seon.db/pull (seon.db/db connection) '[{:seon.issue/members [:seon.issue/id]}] [:seon.issue/id "probe-class"])]
+           class-entity (seon.db/pull (seon.db/db connection) '[{:seon.issue/members [:seon.issue/id]}] [:seon.issue/id "probe-class"])]
        (clojure.test/is (= #{"abcdef123"} (set (:seon.issue/commits member))))
        (clojure.test/is (seq (:seon.issue/functions member)))
-       (clojure.test/is (some #(= "probe-member" (:seon.issue/id %)) (:seon.issue/members class-row)))
+       (clojure.test/is (some #(= "probe-member" (:seon.issue/id %)) (:seon.issue/members class-entity)))
        (clojure.test/is (clojure.string/includes? (seon.issue/render-ai member) "(my.issue/status"))
        (clojure.test/is (= :section (first (seon.issue/render-html member))))
        (clojure.test/is (= "probe-member" (:seon.issue/id (seon.issue/status {:seon.db/db (seon.db/db connection) :seon.issue/id "probe-member"}))))
@@ -93,15 +93,15 @@
               first-adoption (seon.issue/adopt! connection (seon.db/db source-connection))]
           (clojure.test/is (let [observed indexed] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str indexed))
           (clojure.test/is (let [observed first-adoption] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str first-adoption))
-          (let [row (seon.db/pull (seon.db/db connection) '[*] [:seon.issue/id "adoption-class"])]
+          (let [entity (seon.db/pull (seon.db/db connection) '[*] [:seon.issue/id "adoption-class"])]
             (doseq [attribute [:seon.issue/functions :seon.issue/namespaces :seon.issue/keys
                                :seon.issue/files :seon.issue/tests :seon.issue/members]]
-              (clojure.test/is (seq (get row attribute)) (str "Missing adoption subject " attribute))))
+              (clojure.test/is (seq (get entity attribute)) (str "Missing adoption subject " attribute))))
           (let [again (seon.issue/index! {:seon.db/connection source-connection :seon.issue/notes notes})
                 source (seon.db/db source-connection)
-                rows (#'seon.issue/identity-rows source)
-                delta (seon.issue/adopt-tx (seon.db/db connection) rows)
-                report (seon.test-support/transacted! connection [[:db.fn/call #'seon.issue/adopt-tx rows]])]
+                entities (#'seon.issue/identity-entities source)
+                delta (seon.issue/adopt-tx (seon.db/db connection) entities)
+                report (seon.test-support/transacted! connection [[:db.fn/call #'seon.issue/adopt-tx entities]])]
             (clojure.test/is (let [observed again] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str again))
             (clojure.test/is (empty? delta) (pr-str delta))
             (clojure.test/is (empty? (remove #(= :db/txInstant (:a %)) (:tx-data report)))
@@ -152,11 +152,11 @@
      (clojure.test/is (= (count converted-notes) (count selected)) (pr-str (map :seon.issue/path selected)))
      (clojure.test/is (empty? (:seon.issue/refusals report)) (pr-str (:seon.issue/refusals report)))
      (doseq [[slug attributes] converted-notes
-             :let [row (pull-issue slug)]]
+             :let [entity (pull-issue slug)]]
        (doseq [attribute attributes]
-         (clojure.test/is (seq (get row attribute))
-                          (str slug " has no " attribute " — " (pr-str row))))
-       (clojure.test/is (inst? (:seon.issue/opened row)) (str slug " has no opened instant")))
+         (clojure.test/is (seq (get entity attribute))
+                          (str slug " has no " attribute " — " (pr-str entity))))
+       (clojure.test/is (inst? (:seon.issue/opened entity)) (str slug " has no opened instant")))
      (let [adoption (pull-issue "development-adoption-can-mix-host-and-sci-generations")
            spans (filter :seon.issue.citation/row (:seon.issue/files adoption))]
        (clojure.test/is (seq spans) (pr-str (:seon.issue/files adoption)))
@@ -185,13 +185,13 @@
                                                 "java.lang.Thread/sleep seon.db/pull")}]
                         (take 20 archived))
          report (seon.issue/index! {:seon.db/connection connection :seon.issue/notes selected})
-         row (seon.db/pull (seon.db/db connection) '[:seon.issue/unresolved {:seon.issue/functions [:seon.fn/sym]}]
+         entity (seon.db/pull (seon.db/db connection) '[:seon.issue/unresolved {:seon.issue/functions [:seon.fn/sym]}]
                            [:seon.issue/id "probe-deleted"])]
      (clojure.test/is (let [observed report] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str report))
      (clojure.test/is (empty? (:seon.issue/refusals report)) (pr-str (:seon.issue/refusals report)))
      (clojure.test/is (= #{"com.cognitect/transit-clj" "java.lang.Thread/sleep" "seon.cluster.loop/settle!"}
-                        (set (:seon.issue/unresolved row))))
-     (clojure.test/is (some #(= 'seon.db/pull (:seon.fn/sym %)) (:seon.issue/functions row)))
+                        (set (:seon.issue/unresolved entity))))
+     (clojure.test/is (some #(= 'seon.db/pull (:seon.fn/sym %)) (:seon.issue/functions entity)))
      (clojure.test/is (= (count selected) (:seon.issue/count report)))
      (clojure.test/is (pos? (count (:seon.issue/unresolved report))))
      (clojure.test/is (every? #(and (string? (key %)) (pos-int? (val %))) (:seon.issue/unresolved report)))))))
@@ -211,15 +211,15 @@
                     :seon.issue/text (str "---\ntype: issue\nstatus: open\nseverity: cleanup\ntags: [issue]\n---\n"
                                           "# Ambiguous\n## Problem\n" shared)}]
          report (seon.issue/index! {:seon.db/connection connection :seon.issue/notes selected})
-         row (seon.db/pull (seon.db/db connection)
+         entity (seon.db/pull (seon.db/db connection)
                            '[{:seon.issue/functions [:seon.fn/sym]} {:seon.issue/issues [:seon.issue/id]}]
                            [:seon.issue/id "probe-ambiguous"])]
      (clojure.test/is (string? shared))
      (clojure.test/is (empty? (:seon.issue/refusals report)) (pr-str (:seon.issue/refusals report)))
      (clojure.test/is (some #(= shared (:seon.issue/value %)) (:seon.issue/ambiguous report))
                       (pr-str (:seon.issue/ambiguous report)))
-     (clojure.test/is (empty? (:seon.issue/functions row)))
-     (clojure.test/is (empty? (:seon.issue/issues row)))))))
+     (clojure.test/is (empty? (:seon.issue/functions entity)))
+     (clojure.test/is (empty? (:seon.issue/issues entity)))))))
 
 (clojure.test/deftest an-unchanged-note-set-indexes-without-a-transaction
  (seon.test-support/with-database
@@ -337,9 +337,9 @@
                        :seon.issue/detector detector :seon.issue/severity :cleanup})
            issue-id (seon.db/q '[:find ?id . :in $ ?symbol ?detector
                                 :where [?function :seon.fn/sym ?symbol]
-                                [?detector-row :seon.fn/sym ?detector]
+                                [?detector-entity :seon.fn/sym ?detector]
                                 [?issue :seon.issue/functions ?function]
-                                [?issue :seon.issue/detector ?detector-row]
+                                [?issue :seon.issue/detector ?detector-entity]
                                 [?issue :seon.issue/id ?id]]
                               (seon.db/db connection) subject detector)]
        (clojure.test/is (string? subject))
@@ -401,13 +401,13 @@
      (let [started (seon.issue/start! start)
            d (seon.db/db c)
            agent-id (seon.id/id [issue-id])
-           agent-row (seon.db/pull d '[{:seon.agent/plan [* {:my.plan/steps [*]}]}
+           agent-entity (seon.db/pull d '[{:seon.agent/plan [* {:my.plan/steps [*]}]}
                                    {:seon.agent/settings [*]}] [:seon.agent/id agent-id])
            opening (seon.db/pull d '[*] [:seon.turn/id (seon.id/id [:seon.issue/opening issue-id])])]
        (clojure.test/is (let [observed started] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str started))
-       (clojure.test/is (empty? (get-in agent-row [:seon.agent/plan :my.plan/steps])))
-       (clojure.test/is (= 1 (get-in agent-row [:seon.agent/settings :seon.config.run/max-episode-runs])))
-       (clojure.test/is (true? (get-in agent-row [:seon.agent/settings :seon.config.ai/no-provider])))
+       (clojure.test/is (empty? (get-in agent-entity [:seon.agent/plan :my.plan/steps])))
+       (clojure.test/is (= 1 (get-in agent-entity [:seon.agent/settings :seon.config.run/max-episode-runs])))
+       (clojure.test/is (true? (get-in agent-entity [:seon.agent/settings :seon.config.ai/no-provider])))
        (clojure.test/is (some? (:seon.turn/trigger opening)))
        (clojure.test/is (nil? (:seon.turn/closed-tx opening)))
        (clojure.test/is (= issue-id (:seon.issue/assigned-issue-id (seon.issue/start! start))))
@@ -415,10 +415,10 @@
        (clojure.test/is (= :seon.agent/id (:seon.issue/non-test-reference-member (seon.issue/tests! {:seon.db/connection c :seon.agent/id "issue-author"
                                                                :seon.issue/id issue-id :seon.issue/tests #{[:seon.agent/id "issue-author"]}})))))))))
 
-(clojure.test/deftest an-invalid-note-refuses-itself-and-mints-no-identity-only-row
-  ;; The class: a reader that treats an invalid input as an ordinary row. An
+(clojure.test/deftest an-invalid-note-refuses-itself-and-mints-no-identity-only-entity
+  ;; The class: a reader that treats an invalid input as an ordinary entity. An
   ;; invalid note's result carries no datoms, but its slug was still minted as
-  ;; a bare `{:seon.issue/id ...}` row; the whole-entity validator requires
+  ;; a bare `{:seon.issue/id ...}` entity; the whole-entity validator requires
   ;; `:seon.issue/title`, so ONE bad note refused the ENTIRE publication —
   ;; batch 116's base publication and every development adoption that night.
   (seon.test-support/with-database

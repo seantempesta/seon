@@ -1,4 +1,4 @@
-(ns seon.adoption-rows-test
+(ns seon.adoption-entities-test
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is]]
             [seon.cluster :as cluster]
@@ -6,20 +6,20 @@
             [seon.program :as program]))
 
 (deftest adoption-identities-carry-no-nil-member
-  ;; A scalar publication's rows carry the file-digest row and any analyzer
+  ;; A scalar publication's entities carry the file-digest entity and any analyzer
   ;; findings alongside declarations. A derivation that rosters identity
-  ;; attributes per call reads those rows as nil, and the adoption record then
+  ;; attributes per call reads those entities as nil, and the adoption record then
   ;; refuses as a `[:set :seon.db/ref]` whose member is `#{nil}`.
   (let [path (.getCanonicalPath (io/file "src/seon/cluster.clj"))
-        rows (:seon.fn.file/rows
+        entities (:seon.fn.file/rows
               (seon.fn/build-artifact
                {:seon.fn/source-path path
                 :seon.fn.file/first-party-functions []}))
-        attributes (into #{} (map #(first (program/row-identity %))) rows)
+        attributes (into #{} (map #(first (program/row-identity %))) entities)
         identities (#'cluster/adoption-identities
-                    (into [] (keep program/row-identity) rows))]
+                    (into [] (keep program/row-identity) entities))]
     (is (contains? attributes :seon.fn.file/relative-path)
-        "the file-digest row is part of a published file's rows")
+        "the file-digest entity is part of a published file's entities")
     (is (every? some? identities))
     (is (not (contains? (set identities) nil))
         "the transacted set carries no nil member")

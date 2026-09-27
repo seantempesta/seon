@@ -14,7 +14,7 @@
 
 ;; The task handle is derived from its identifying aspect, exactly as ingestion derives it.
 (def ^:private handle
-  ;; A literal, so the indexer records a row for it (a computed point-free def has none yet: P2-A); the test
+  ;; A literal, so the indexer records an entity for it (a computed point-free def has none yet: P2-A); the test
   ;; below proves it is the handle ingestion derives.
   "96ec3386e99f")
 
@@ -39,7 +39,7 @@
   (let [root (io/file "tmp" "walk-graph-test" (str (random-uuid)))]
     (try (io/make-parents (io/file root "tg/a.clj"))
          (spit (io/file root "tg/a.clj") source)
-         (support/transacted! connection (seon.fn/reconcile-tx @connection (seon.fn/rows {:seon.fn/roots [(.getPath root)]}) []))
+         (support/transacted! connection (seon.fn/reconcile-tx @connection (seon.fn/program-entities {:seon.fn/roots [(.getPath root)]}) []))
          (let [indexed (issue/index-tasks! {:seon.db/connection connection :seon.task/files {"resources/seon/tasks/tg.a.edn" task}})]
            (when-not (:seon.task/changed? indexed) (throw (ex-info "The fixture task did not index." {:seon.task/report indexed}))))
          (finally (support/delete-recursively! root)))))

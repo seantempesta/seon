@@ -135,7 +135,7 @@
                      expected-reply (:seon.turn/reply (db/pull @connection [:seon.turn/reply] [:seon.turn/id provider-id]))]
                  (is (= expected-reply (element-text reply-node)))
                  (is (= (set turns) (set (keep #(when (map? %) (:data-turn-id %)) ledger-nodes))))
-                 (is (= (mapv :seon.turn/id (#'transcript/turn-rows @connection "juniper"))
+                 (is (= (mapv :seon.turn/id (#'transcript/turn-entities @connection "juniper"))
                         (vec (keep #(when (map? %) (:data-strip-turn %)) ledger-nodes))))
                  (is (every? #(<= 0 %) (keep #(when (map? %) (:data-added-bytes %)) ledger-nodes)))
                  (is (= (alength (.getBytes ^String
@@ -156,11 +156,11 @@
                         (reduce + (keep #(when (map? %) (:data-evaluation-count %))
                                         (tree-seq coll? seq (transcript/render-ledger-turn unit))))))
                  (let [evaluations (#'transcript/ledger-evaluations unit)
-                       row (some #(when (= provider-id (:seon.turn/id %)) %)
-                                 (#'transcript/ledger-rows @connection
-                                   (#'transcript/turn-rows @connection "juniper") evaluations))]
+                       entity (some #(when (= provider-id (:seon.turn/id %)) %)
+                                 (#'transcript/ledger-entities @connection
+                                   (#'transcript/turn-entities @connection "juniper") evaluations))]
                    (doseq [source ["(my.agent/done)" "(let [finish my.agent/done] (finish))" "(do (my.agent/done))"]]
-                     (let [authored (assoc row :seon.turn/reply source)]
+                     (let [authored (assoc entity :seon.turn/reply source)]
                        (is (str/ends-with? (#'transcript/turn-story unit evaluations
                                             (assoc authored :seon.turn/disposition :wait)) "done"))
                        (is (not (str/ends-with? (#'transcript/turn-story unit evaluations
@@ -172,10 +172,10 @@
                    (is (not (str/includes? (element-text card) "AGENT REPLIED")))))
                (is (= expected (:seon.cluster.prompt/text (render/acquire-context! unit)))
                    "The acquisition owner honors the turn id even with today's database.")
-               (doseq [row (#'transcript/turn-rows @connection "juniper")
-                       :when (not= :generate (:seon.turn.work/situation row))]
-                 (let [historical (turn/opening-db @connection (:seon.turn/id row))
-                       historical-request (assoc unit :seon.turn/id (:seon.turn/id row))
+               (doseq [entity (#'transcript/turn-entities @connection "juniper")
+                       :when (not= :generate (:seon.turn.work/situation entity))]
+                 (let [historical (turn/opening-db @connection (:seon.turn/id entity))
+                       historical-request (assoc unit :seon.turn/id (:seon.turn/id entity))
                        rebuilt (render/acquire-context! historical-request)
                        folded (web/derive-context! (assoc historical-request :seon.db/db historical))]
                    (is (= (:seon.cluster.prompt/text folded) (:seon.cluster.prompt/text rebuilt))
@@ -194,10 +194,10 @@
                (is (seq (evaluation/of-agent @connection "juniper")))
                (let [snapshot #(let [database @connection
                                      evaluations (#'transcript/ledger-evaluations (assoc unit :seon.db/db database))
-                                     rows (#'transcript/ledger-rows database
-                                           (#'transcript/turn-rows database "juniper") evaluations)]
+                                     entities (#'transcript/ledger-entities database
+                                           (#'transcript/turn-entities database "juniper") evaluations)]
                                  (#'transcript/session-problems
-                                  (assoc unit :seon.db/db database) rows
+                                  (assoc unit :seon.db/db database) entities
                                   evaluations))
                      before (snapshot)
                      directory (first (filter #(= "(clojure.repl/dir my.test)" (:seon.cluster.eval/source %))
@@ -276,7 +276,7 @@
                  ;; installed attribute, so transacting the fact verbatim is
                  ;; refused — by a RETURNED error value, with nothing in the
                  ;; log. `seon.error/recording` is the seam that projects the
-                 ;; fact into rows (`src/seon/error.clj:1369`) and hands back
+                 ;; fact into entities (`src/seon/error.clj:1369`) and hands back
                  ;; the ref to point at. The fault lands first so the message
                  ;; can name an entity that already exists.
                  (let [recorded (error/recording @connection
@@ -306,7 +306,7 @@
                         (element-text
                          (transcript/render-session
                           (assoc unit :seon.db/db @connection
-                                 :seon.turn/id (:seon.turn/id (last (#'transcript/turn-rows @connection "juniper"))))))
+                                 :seon.turn/id (:seon.turn/id (last (#'transcript/turn-entities @connection "juniper"))))))
                         "re-read"))
                    (doseq [[rule added] expected]
                      (is (= (+ added (get (counts before) rule)) (get (counts after) rule)) (name rule)))
@@ -314,22 +314,22 @@
                    (is (str/includes? html "no rate on file"))
                    (is (not (str/includes? html "#inst")))
                    (is (not (str/includes? html ":db/id"))))
-                 (let [rows (vec (take-last 3 (filter #(seq (:seon.turn/attempts %))
-                                                      (#'transcript/turn-rows @connection "juniper"))))
-                       capture! (fn [row text]
+                 (let [entities (vec (take-last 3 (filter #(seq (:seon.turn/attempts %))
+                                                      (#'transcript/turn-entities @connection "juniper"))))
+                       capture! (fn [entity text]
                                   (db/transact! connection
-                                    [{:seon.context.capture/id (str "prefix-" (:seon.turn/id row))
-                                      :seon.context.capture/run [:seon.turn/id (:seon.turn/id row)]
+                                    [{:seon.context.capture/id (str "prefix-" (:seon.turn/id entity))
+                                      :seon.context.capture/run [:seon.turn/id (:seon.turn/id entity)]
                                       :seon.context.capture/basis-t (db/basis-t @connection)
                                       :seon.context.capture/prompt
-                                      (str text "\n\n" (repl/frame (turn/opening-db @connection (:seon.turn/id row)) "juniper"))}]))]
-                   (doseq [row (take 2 rows)] (is (:db-after (capture! row "café"))))
-                   (let [same (#'transcript/prefix-problem (assoc unit :seon.db/db @connection) rows)]
+                                      (str text "\n\n" (repl/frame (turn/opening-db @connection (:seon.turn/id entity)) "juniper"))}]))]
+                   (doseq [entity (take 2 entities)] (is (:db-after (capture! entity "café"))))
+                   (let [same (#'transcript/prefix-problem (assoc unit :seon.db/db @connection) entities)]
                      (is (= 1 (:seon.render.transcript/stable same))
                          "Identical captured history stays stable despite different billing counters and turn frames.")
                      (is (= 1 (:seon.render.transcript/unknown same)) "The missing capture remains unavailable."))
-                   (is (:db-after (capture! (second rows) "different")))
-                   (is (= 1 (:seon.render.transcript/count (#'transcript/prefix-problem (assoc unit :seon.db/db @connection) rows)))
+                   (is (:db-after (capture! (second entities) "different")))
+                   (is (= 1 (:seon.render.transcript/count (#'transcript/prefix-problem (assoc unit :seon.db/db @connection) entities)))
                        "Changing only captured bytes changes the verdict; counters remain identical."))
                  (is (pos? (:seon.render.transcript/unknown (#'transcript/prefix-problem (assoc unit :seon.db/db @connection) [])))
                      "No provider observations must not be reported as prefix health.")
@@ -356,7 +356,7 @@
    (fn [connection]
      (let [_ (support/transacted!
               connection
-              (into [(support/namespace-row @connection 'my.agents.history-probe)]
+              (into [(support/namespace-entity @connection 'my.agents.history-probe)]
                     (support/agent-tx @connection "history-probe" 'my.agents.history-probe)))
            ;; The runtime and plan are the agent's own components; their
            ;; identities name the owner.
@@ -377,10 +377,10 @@
               :seon.eval/shown "The component's shown text."}])
            _ (is (:db-after written) (pr-str written))
            database @connection
-           agent-row (db/pull database '[:db/id {:seon.agent/plan [:db/id]}]
+           agent-entity (db/pull database '[:db/id {:seon.agent/plan [:db/id]}]
                           [:seon.agent/id "history-probe"])
-           agent-eid (:db/id agent-row)
-           component-eid (get-in agent-row [:seon.agent/plan :db/id])
+           agent-eid (:db/id agent-entity)
+           component-eid (get-in agent-entity [:seon.agent/plan :db/id])
            request {:seon.db/db database
                     :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
                     :seon.render.walk/lookup agent-eid
@@ -428,7 +428,7 @@
            (support/transacted!
             connection
             (into
-             [(support/namespace-row @connection 'my.agents.thinking-probe)]
+             [(support/namespace-entity @connection 'my.agents.thinking-probe)]
              cat
              [(support/agent-tx @connection "thinking-probe" 'my.agents.thinking-probe)
               [{:db/id "thinking-turn" :seon.turn/id "thinking-probe-turn"
@@ -491,7 +491,7 @@
 (deftest blocks-use-the-values-schema-documentation
   (support/with-database
     (fn [connection]
-      (support/transacted! connection (support/schema-rows @connection
+      (support/transacted! connection (support/schema-entities @connection
                         [[::title [:string {:title "Notebook title"}]]
                          [::notebook [:map {:seon.db/attributes true
                                             :title "Notebook"
@@ -518,7 +518,7 @@
 (deftest every-declared-attribute-has-an-ordered-pair-even-when-absent
   (support/with-database
    (fn [connection]
-     (support/transacted! connection (support/schema-rows @connection
+     (support/transacted! connection (support/schema-entities @connection
                        [[::name :string] [::notes :string]
                         [::record [:map {:seon.db/attributes true}
                                    [::name ::name]
@@ -548,7 +548,7 @@
      {:db/ident ::right :db/valueType :db.type/ref :db/cardinality :db.cardinality/one}
      {:db/ident ::hidden :db/valueType :db.type/ref :db/cardinality :db.cardinality/one}]}
    (fn [connection]
-     (support/transacted! connection (support/schema-rows @connection
+     (support/transacted! connection (support/schema-entities @connection
                        [[::declared-concerns [:map {:seon.db/attributes true :seon.program/partition :seon.data
                                                     :seon.render/units [::_left ::_right]}
                                               [:seon.agent/id :seon.agent/id]]]]))
@@ -582,7 +582,7 @@
   (support/with-database
    (fn [connection]
      ;; The cluster is seeded through its production path: a bare
-     ;; {:seon.cluster/name …} row is refused by write admission, and
+     ;; {:seon.cluster/name …} entity is refused by write admission, and
      ;; discarding that refusal is what left this fixture inert.
      (support/seed-cluster! connection "reverse-render-fixture")
      (let [effective config/defaults
@@ -678,7 +678,7 @@
 (deftest block-reference-headers-link-identities-and-omit-unidentified-entities
   (support/with-database
    (fn [connection]
-     (support/transacted! connection (support/schema-rows @connection
+     (support/transacted! connection (support/schema-entities @connection
                                                           ;; Identity is the declaring attribute's own
                                                           ;; property: an alias of :seon.agent/id is
                                                           ;; not an upsert key (26f1f40d6).
@@ -843,7 +843,7 @@
        (with-redefs-fn
          {calibration-var (fn [& args] (swap! calibrations conj (last args)) (apply calibration args))
           #'transcript/ledger-effects (fn [& args] (swap! batches inc) (apply effects args))
-          #'transcript/turn-effects (fn [facts row] (swap! summaries conj (:seon.turn/id row)) (summary facts row))
+          #'transcript/turn-effects (fn [facts entity] (swap! summaries conj (:seon.turn/id entity)) (summary facts entity))
           #'transcript/emission-label (fn [& args] (swap! labels inc) (apply label args))}
          (fn []
            (let [ledger (transcript/render-ledger request)
@@ -887,7 +887,7 @@
   (let [agent-written
         (support/transacted!
          connection
-         (into [(support/namespace-row @connection 'my.agents.outline-probe)]
+         (into [(support/namespace-entity @connection 'my.agents.outline-probe)]
                cat
                [(support/agent-tx @connection "outline-probe" 'my.agents.outline-probe)]))
         opening

@@ -88,7 +88,7 @@
       (let [task-id "maintenance-schema-test/task"
             schedule-id "maintenance-schema-test/schedule"
             fire-id "maintenance-schema-test/fire"
-            ;; The fn row refs its namespace row, and only namespaces the
+            ;; The fn entity refs its namespace entity, and only namespaces the
             ;; canonical population already holds can be referenced.
             handler 'seon.maintenance/observe-footprint!
             receipt-id "maintenance-schema-test/receipt"
@@ -97,7 +97,7 @@
         (test-support/transacted!
                      connection
                      (into (test-support/agent-tx @connection "maintenance-schema-test-root")
-                       [(test-support/program-fn-row handler)
+                       [(test-support/program-fn-entity handler)
                         {:seon.schedule/id schedule-id
                          :seon.schedule/expression "0 2 * * *"
                          :seon.schedule/zone-id "UTC"}
@@ -212,22 +212,22 @@
       (is (empty? (db/q '[:find ?task-id
                           :where [?task :seon.schedule.task/id ?task-id]]
                         @connection))
-          "the config population does not own agent schedule rows")
+          "the config population does not own agent schedule entities")
       (test-support/transacted!
                    connection
                    (into (test-support/agent-tx @connection "root")
-                         (map (fn [row] (test-support/program-fn-row (:seon.fn/sym row))))
+                         (map (fn [entity] (test-support/program-fn-entity (:seon.fn/sym entity))))
                          portfolio))
       (let [first-result
             (db/transact!
              connection [[:db.fn/call #'schedule/root-maintenance-seed-call]])]
         (is (seq (:tx-data first-result)))
-        (is (= (set (map (fn [row]
-                           [(:seon.schedule.task/id row)
-                            (:seon.schedule/id row)
-                            (:seon.schedule/expression row)
+        (is (= (set (map (fn [entity]
+                           [(:seon.schedule.task/id entity)
+                            (:seon.schedule/id entity)
+                            (:seon.schedule/expression entity)
                             "UTC"
-                            (:seon.fn/sym row)])
+                            (:seon.fn/sym entity)])
                          portfolio))
                (db/q
                 '[:find ?task-id ?schedule-id ?expression ?zone-id ?handler
@@ -330,8 +330,8 @@
                 ["cleanup" maintenance/project-cluster-cleanup-result cleanup
                  :seon.operator.cluster-cleanup/managed-root :seon.operator.cluster-cleanup/removed]]]
          (let [result-id (str "empty-maintenance/" operation-name)
-               row (assoc (producer value) :seon.maintenance.result/id result-id)]
-           (test-support/transacted! connection [row])
+               entity (assoc (producer value) :seon.maintenance.result/id result-id)]
+           (test-support/transacted! connection [entity])
            (let [stored (db/pull @connection '[*] [:seon.maintenance.result/id result-id])]
              (is (= (get value positive) (get stored positive)))
              (is (not (contains? stored membership)))
@@ -344,9 +344,9 @@
          :seon.error/layer :seon.operator/collection
          :seon.error/operation 'seon.maintenance/collect!
                              :seon.error/message "Collection did not finish."})
-             row (assoc (maintenance/project-cluster-cleanup-result partial-result)
+             entity (assoc (maintenance/project-cluster-cleanup-result partial-result)
                         :seon.maintenance.result/id "empty-maintenance/partial")]
-         (test-support/transacted! connection [row])
+         (test-support/transacted! connection [entity])
          (let [stored (db/pull @connection '[*]
                               [:seon.maintenance.result/id "empty-maintenance/partial"])]
            (is (false? (:seon.operator.cluster-cleanup/complete? stored)))

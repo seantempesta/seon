@@ -16,7 +16,7 @@
 (deftest help-is-first-stored-data-and-tracks-its-code-version
   (support/with-database
    (fn [connection]
-     ;; The cluster and its config row through their canonical owner.
+     ;; The cluster and its config entity through their canonical owner.
      (support/seed-cluster! connection "help")
      (let [setup (db/transact! connection
                    (agent/creation-tx {:seon.agent/id "help"

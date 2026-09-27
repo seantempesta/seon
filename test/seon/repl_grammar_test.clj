@@ -37,17 +37,17 @@
 
 (deftest prompt-precedes-exact-multiline-agent-input
   (let [emission {:seon.ns/name 'my.agents.juniper
-                  :seon.cluster.eval/comment ";; I should inspect the rows.\n;; Then I can choose."
-                  :seon.cluster.eval/source "(->> rows\n     (map :total))"
+                  :seon.cluster.eval/comment ";; I should inspect the entities.\n;; Then I can choose."
+                  :seon.cluster.eval/source "(->> entities\n     (map :total))"
                   :seon.eval/shown "[40 60]"}
-        expected "my.agents.juniper=> ;; I should inspect the rows.\n;; Then I can choose.\n(->> rows\n     (map :total))\n#:seon.repl{:value [40 60]}"
+        expected "my.agents.juniper=> ;; I should inspect the entities.\n;; Then I can choose.\n(->> entities\n     (map :total))\n#:seon.repl{:value [40 60]}"
         html (repl/render-html emission)]
     (is (= expected (repl/text emission)))
     (is (= 128
            (alength (.getBytes (repl/text emission) "UTF-8"))))
     ;; The HTML pair gives the agent's comment its own block (`input-text`).
-    (is (= ";; I should inspect the rows.\n;; Then I can choose." (get-in html [2 2])))
-    (is (= "my.agents.juniper=> (->> rows\n     (map :total))"
+    (is (= ";; I should inspect the entities.\n;; Then I can choose." (get-in html [2 2])))
+    (is (= "my.agents.juniper=> (->> entities\n     (map :total))"
            (get-in html [3 1 2])))))
 
 (deftest changed-read-marker-does-not-rewrite-agent-input

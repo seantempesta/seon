@@ -14,8 +14,8 @@
 ; The live installer and loop regression share these ordinary declarations.
 ; The scenario's orders are DURABLE datoms on every cluster that seeds it, so
 ; these shapes are not a synthetic registry mutation: the agent declares them
-; in an ordinary turn, the writer commits one `:seon.schema/key` row each, and
-; the cluster's projection derives from those rows like every other
+; in an ordinary turn, the writer commits one `:seon.schema/key` entity each, and
+; the cluster's projection derives from those entities like every other
 ; declaration (`seon.schema/projection-from-database`). Declared here as data
 ; so the key set is DERIVED by everything that needs it.
 (def schema-declarations
@@ -64,8 +64,8 @@
                    [(coll? ?attributes)]
                    [(set ?attributes) ?attribute-set]
                    [(clojure.set/subset? #{:example/order :example/customer :example/amount} ?attribute-set)]]]
-         ["define" "Define `largest-customer` with a `:malli/schema` contract (rows → `{:customer :total}`)"
-          "A query finds the :seon.fn row for largest-customer with :seon.fn/spec present."
+         ["define" "Define `largest-customer` with a `:malli/schema` contract (entities → `{:customer :total}`)"
+          "A query finds the :seon.fn entity for largest-customer with :seon.fn/spec present."
           '[:find ?function :in $ ?subject
             :where [?subject :seon.agent/namespace ?namespace]
                    [?function :seon.fn/ns ?namespace]
@@ -74,7 +74,7 @@
                    [?function :seon.fn/sym ?symbol]
                    [?function :seon.fn/spec _]]]
          ["test" "Write a `deftest` over the fixture data and run it"
-          "After (my.test/run), a query finds the :seon.test row's last result with a positive :seon.test/pass-count, zero :seon.test/fail-count, and zero :seon.test/error-count."
+          "After (my.test/run), a query finds the :seon.test entity's last result with a positive :seon.test/pass-count, zero :seon.test/fail-count, and zero :seon.test/error-count."
           '[:find ?test :in $ ?subject
             :where [?subject :seon.agent/namespace ?namespace]
                    [?test :seon.test/ns ?namespace]
@@ -245,16 +245,16 @@
   (let [database (db/db (:seon.db/connection handle))
         derived (get-in (schema/projection-from-database database)
                         [:seon.schema.projection/forms])
-        row-form (fn [schema-key]
+        entity-form (fn [schema-key]
                    (:seon.schema/form
                     (db/pull database [:seon.schema/form]
                              [:seon.schema/key schema-key])))
-        missing-rows (into (sorted-set)
-                           (remove (comp string? row-form)) schema-keys)
+        missing-entities (into (sorted-set)
+                           (remove (comp string? entity-form)) schema-keys)
         missing-forms (into (sorted-set)
                             (remove #(contains? derived %)) schema-keys)]
-    (when (or (seq missing-rows) (seq missing-forms))
-      (let [evidence {:seon.schema/missing-rows missing-rows
+    (when (or (seq missing-entities) (seq missing-forms))
+      (let [evidence {:seon.schema/missing-rows missing-entities
                       :seon.schema/missing-projection-keys missing-forms}]
         (throw (ex-info (str "Juniper scenario declarations are not facts: "
                              (pr-str evidence))

@@ -39,13 +39,13 @@
                  (is (= 1 2) "first claim")
                  (is (= :a :b) "second claim"))))))
     (try
-      ;; The probe is a HOST test: `resolve-test` runs a `:core` row's compiled
+      ;; The probe is a HOST test: `resolve-test` runs a `:core` entity's compiled
       ;; Var (the one interned above, whose body follows `mode`), while an
-      ;; `:agent` row runs its interpreted source, which never changes mode.
+      ;; `:agent` entity runs its interpreted source, which never changes mode.
       (let [database (db/db connection)
             tx (db/transact! connection
-                 [(support/namespace-row database namespace-name)
-                  (support/program-row database [:seon.test/sym test-symbol]
+                 [(support/namespace-entity database namespace-name)
+                  (support/program-entity database [:seon.test/sym test-symbol]
                                        "(deftest probe (is (= 1 2)) (is (= :a :b)))"
                                        {:seon.fn/file [:seon.fn.file/relative-path path]
                                         :seon.schema.admission/source :core})])]
@@ -99,7 +99,7 @@
   (:seon.test.failure/reports result))
 
 (deftest one-failing-is-becomes-one-failure-report
-  ;; An admitted run records immutable member reports; the test row carries no
+  ;; An admitted run records immutable member reports; the test entity carries no
   ;; latest-result failure family.
   (support/with-database
     (fn [connection]
@@ -186,7 +186,7 @@
     (fn [connection]
       (with-probe connection
         (fn [s v _]
-          ;; The agent's own row: its member interprets this source in SCI.
+          ;; The agent's own entity: its member interprets this source in SCI.
           (let [source (str "(ns " (namespace s) " (:require [clojure.test :refer [deftest is]]))\n"
                             "(deftest probe (is (= 1 2)))")
                 _ (replace-declaration! connection [:seon.test/sym s] source {})
@@ -224,7 +224,7 @@
           (is (= 1 (:seon.test/pass-count (run-probe connection v))))
           (reset! mode :red)
           ;; The change that makes it red: the test now calls `reached`. Reach
-          ;; derives from the row's analyzed calls, so `reached` is a changed
+          ;; derives from the entity's analyzed calls, so `reached` is a changed
           ;; dependency, and the changed program is executed, not reused.
           (let [reached (symbol (namespace s) "reached")
                 tx (redeclare-probe! connection s
@@ -297,14 +297,14 @@
                    :seon.test.failure/line line
                    :seon.test.failure/reported-file "test/report/facts.clj"
                    :seon.test.failure/file {:db/id 1}})
-        at-10 (runner/report-row attributes s (failure 10))
-        at-12 (runner/report-row attributes s (failure 12))]
+        at-10 (runner/report-entity attributes s (failure 10))
+        at-12 (runner/report-entity attributes s (failure 12))]
     (is (not= (:seon.test.report/id at-10) (:seon.test.report/id at-12))
         "the moved claim is another report")
-    (is (= at-12 (runner/report-row attributes s (failure 12)))
+    (is (= at-12 (runner/report-entity attributes s (failure 12)))
         "an equal report is the same entity")
     (is (= 12 (:seon.test.failure/line at-12)))
-    (let [forged (runner/report-row attributes s (assoc (failure 12) :seon.test.failure/type :error))]
+    (let [forged (runner/report-entity attributes s (assoc (failure 12) :seon.test.failure/type :error))]
       (is (= (:seon.test.report/id at-12) (:seon.test.report/id forged))
           "other content under an unchanged signature at one position is that report's identity")
       (is (not= at-12 forged) "so the recorder's comparison refuses it as a report conflict"))
@@ -340,12 +340,12 @@
         namespace-name (symbol (namespace (second (first identities))))
         source (synthetic-source namespace-name forms)]
     (support/transacted! connection
-      (into [(support/namespace-row database namespace-name)]
-            (map #(support/program-row database % source))
+      (into [(support/namespace-entity database namespace-name)]
+            (map #(support/program-entity database % source))
             identities))))
 
 (defn- redeclare!
-  "Replace one declaration exactly with its row analyzed from `form`."
+  "Replace one declaration exactly with its entity analyzed from `form`."
   {:malli/schema [:=> [:cat :seon.db/connection [:tuple :keyword :qualified-symbol] :string]
                   :seon.db/transaction-report]}
   [connection declaration form]
@@ -417,9 +417,9 @@
                               [:seon.test.run/provenance :seon.test.run/branch]
                               :building-source-retired)
             _ (is (vector? (runner/commit-results! connection captured)))
-            row (db/pull (db/db connection)
+            entity (db/pull (db/db connection)
                         '[{:seon.test/run [*]}] [:seon.test/sym 'branch.facts/check])
-            run (:seon.test/run row)]
+            run (:seon.test/run entity)]
         (is (= (get-in database [:config :branch]) (:seon.test.run/branch run)))
         (is (= :building-source-retired (:seon.test.run/tested-branch run)))
         (is (:db/id (db/pull (db/db connection) [:db/id]
@@ -465,7 +465,7 @@
                                    "(defn present [] 1)" "(deftest check)")))
           (let [database (db/db connection)
                 _ (is (nil? (db/pull database [:db/id] [:seon.fn/sym deleted]))
-                      "the recording database genuinely has no row for the named symbol")
+                      "the recording database genuinely has no entity for the named symbol")
                 captured
                 (-> (completion database s 1)
                     (dissoc :seon.db/db)
@@ -482,7 +482,7 @@
                    (stored-reach recorded s))
                 "both members are recorded as the edge symbols reach holds")
             (is (nil? (db/pull recorded [:db/id] [:seon.fn/sym deleted]))
-                "recording an absent member creates no declaration row")))))))
+                "recording an absent member creates no declaration entity")))))))
 
 (defn- record-tx-data
   "Commit one completion through the writer and return its emitted datoms."
@@ -539,7 +539,7 @@
                   other (:db/id (db/pull (db/db connection) [:db/id]
                                          [:seon.test/sym t]))]
               (is (= #{other} (set (map :e datoms)))
-                  (str "only the changed result's row is touched: "
+                  (str "only the changed result's entity is touched: "
                        (pr-str datoms)))
               (is (= #{:seon.test/pass-count} (set (map :a datoms)))
                   (pr-str datoms))

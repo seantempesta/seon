@@ -124,7 +124,7 @@
               (mapcat
                (fn [caller]
                  (let [stored caller
-                       row (or (let [result (db/pull database [:db/id :seon.fn/form-span]
+                       entity-map (or (let [result (db/pull database [:db/id :seon.fn/form-span]
                                                  [:seon.fn/sym stored])]
  (if (:seon.db/invalid-read result)
 
@@ -137,15 +137,15 @@
                        tuples (let [result (db/q database
                                      '[:find [?tuple ...] :in $ ?entity
                                        :where [?entity :seon.fn/call-arities ?tuple]]
-                                     (:db/id row))]
+                                     (:db/id entity-map))]
  (if (:seon.db/invalid-read result)
 
  (throw (ex-info (:seon.error/message result) result)) result))
                        counts (keep (fn [[callee arity]]
                                       (when (= subject callee) arity)) tuples)
                        site (cond-> {:seon.fn/sym caller}
-                              (:seon.fn/form-span row)
-                              (assoc :seon.fn/form-span (:seon.fn/form-span row))
+                              (:seon.fn/form-span entity-map)
+                              (assoc :seon.fn/form-span (:seon.fn/form-span entity-map))
                               (seq declared) (assoc :seon.fn/declared-arities declared))]
                    (if (seq counts)
                      (map #(assoc site :seon.fn/call-arity %) (sort counts))
@@ -339,7 +339,7 @@
           (update :seon.program/unknown into
                   (cond->
                    [{:seon.program/gap :dispatch-not-modelled
-                     :seon.program/message "Protocol and multimethod implementations have no independent program row."}
+                     :seon.program/message "Protocol and multimethod implementations have no independent program entity."}
                     {:seon.program/gap :arity-unknown-sites
                      :seon.program/count unknown-arities
                      :seon.program/message "Calls without recorded argument counts, including apply, cannot be checked for arity."}
@@ -354,10 +354,10 @@
 (defn- entity-facts
   {:malli/schema [:=> [:cat :seon.db/database-value :int] :seon.program/definition]}
   [database entity]
-  (reduce (fn [row {:keys [a v]}]
+  (reduce (fn [entity-map {:keys [a v]}]
             (if (= :db.cardinality/many (get-in (db/schema-database database) [:schema a :db/cardinality]))
-              (update row a (fnil conj #{}) v)
-              (assoc row a v)))
+              (update entity-map a (fnil conj #{}) v)
+              (assoc entity-map a v)))
           {} (let [result (db/datoms database :eavt entity)]
  (if (:seon.db/invalid-read result)
 

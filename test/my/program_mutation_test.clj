@@ -35,7 +35,7 @@
                       :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms decisions)})]
          (is (= 'seon.turn/open? (get-in result [:seon.sci.admit/value :seon.program/blocked-subject]))
              (pr-str (select-keys result [:seon.cluster.eval/error :seon.eval/shown]))))
-       (support/transacted! connection [(support/program-fn-row (db/db connection) (symbol "my.program" "disposable") "(defn disposable [] 42)")])
+       (support/transacted! connection [(support/program-fn-entity (db/db connection) (symbol "my.program" "disposable") "(defn disposable [] 42)")])
        (doseq [target [ctx fork]]
          (sci/eval-string* target "(do (in-ns 'my.program) (defn disposable [] 42))"))
        (let [removed (program/ns-unmap! context (symbol "my.program" "disposable"))]
@@ -84,11 +84,11 @@
          :seon.ns/aliases #{{:seon.ns.alias/local 'text
                              :seon.ns.alias/target-ns 'clojure.string}}}
         :all :agent)])
-     ;; The rows digest with the namespace's stored aliases, as the writer does.
+     ;; The entities digest with the namespace's stored aliases, as the writer does.
      (support/transacted!
       connection
-      [(support/program-fn-row (db/db connection) (symbol "my.disposable.program" "target") "(defn target [] 42)")
-       (support/program-fn-row (db/db connection) (symbol "my.disposable.program" "caller") "(defn caller [] (target))"
+      [(support/program-fn-entity (db/db connection) (symbol "my.disposable.program" "target") "(defn target [] 42)")
+       (support/program-fn-entity (db/db connection) (symbol "my.disposable.program" "caller") "(defn caller [] (target))"
                                {:seon.fn/calls #{(symbol "my.disposable.program" "target")}})])
      (let [base (support/fork-cluster-ctx connection)
            fork (sci/fork base)

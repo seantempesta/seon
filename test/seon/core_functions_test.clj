@@ -27,7 +27,7 @@
       (is (:db-after (db/transact! connection
                                    [{:seon.agent/id "core-functions"
                                      :seon.agent/namespace
-                                     (support/namespace-row @connection 'fixture.core-functions)}])))
+                                     (support/namespace-entity @connection 'fixture.core-functions)}])))
       (let [ctx (support/fork-cluster-ctx connection)
             _ (doseq [[schema-key form] [[:example/order :string]
                                          [:example/customer :string]
@@ -44,15 +44,15 @@
                                :seon.sci.eval/time-limit-ms 10000
                                :seon.sci.admit/caps (config/result-caps config/defaults)})]
                   (is (= schema-key (:seon.sci.admit/value result)) (pr-str result))
-                  (when-let [row (:seon.program/row result)]
+                  (when-let [entity (:seon.program/row result)]
                     (let [written-on (db/db connection)
-                           written (db/transact! connection [(program/canonical-row row)])]
+                           written (db/transact! connection [(program/canonical-row entity)])]
                       (is (:db-after written) (pr-str written))
                       (evaluation/install-evaluated-rows!
                        {:seon.sci.eval/ctx ctx :seon.db/db (:db-after written) :seon.db/transaction-report written
                         :seon.sci.eval/written-on written-on
                         :seon.sci.eval/installations
-                        [{:seon.program/row row :seon.sci.eval/evaluation result}]})))))
+                        [{:seon.program/row entity :seon.sci.eval/evaluation result}]})))))
             check (fn [source]
                     (let [request {:seon.sci.eval/ctx ctx :seon.db/db @connection
                                    :seon.db/connection connection :seon.agent/id "core-functions"
@@ -72,7 +72,7 @@
                         :seon.sci.eval/time-limit-ms 10000
                         :seon.sci.admit/caps (config/result-caps config/defaults)})))
             original (check run-two-definition)
-            valid (check "(defn row-count {:malli/schema [:=> [:cat [:vector :example/order-row]] :int]} [rows] (count rows))")]
+            valid (check "(defn entity-count {:malli/schema [:=> [:cat [:vector :example/order-row]] :int]} [entities] (count entities))")]
         (is (= :failed (:seon.test.accretion/status original)) (pr-str original))
         (is (= [[]] (get-in original [:seon.test.accretion/failure :seon.test.accretion/arguments])))
         (is (= :passed (:seon.test.accretion/status valid)) (pr-str valid))

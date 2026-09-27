@@ -25,7 +25,7 @@
  #:seon.task{:id "a57e8b27de67"
              :name "contract-refusal-carries-wrapper-bookkeeping"
              :kind :function
-             :intent "An agent's contract refusal reaches it with the wrapper's bookkeeping beside operation/expected/offending/problems: :seon.instrument/arglists, arity, arm, caller (\"sci.lang.Var (lang.cljc:217)\", the interpreter, never the author), check, fn (= operation), malli, problem-count, :seon.error/expected-shape and data-blob digests, :seon.error/doc, shown and result-id (~2.5 KB for one refused argument). Keep operation, expected, offending, problems (fix) and member; the rest is derivable from the operation's row or is evaluation evidence. The kernel side (err-minimal-opus) already drops the evaluator's frames and the duplicated link message."
+             :intent "An agent's contract refusal reaches it with the wrapper's bookkeeping beside operation/expected/offending/problems: :seon.instrument/arglists, arity, arm, caller (\"sci.lang.Var (lang.cljc:217)\", the interpreter, never the author), check, fn (= operation), malli, problem-count, :seon.error/expected-shape and data-blob digests, :seon.error/doc, shown and result-id (~2.5 KB for one refused argument). Keep operation, expected, offending, problems (fix) and member; the rest is derivable from the operation's entity or is evaluation evidence. The kernel side (err-minimal-opus) already drops the evaluator's frames and the duplicated link message."
              :must-read #{seon.instrument/compiled-wrapper seon.sci.kernel/failure-value}
              :evidence #{"docs/research/agent-platform/landing/err-minimal-opus-2026-09-26.md"}}
  #:seon.task{:name "a-test-redefines-arming-jvm-wide"
@@ -35,6 +35,6 @@
              :evidence #{"docs/research/agent-platform/landing/instrument-scope-2026-09-27.md"}}
  #:seon.task{:name "violation-construction-is-quadratic-in-explain-errors"
              :kind :function
-             :intent "seon.instrument/violation (instrument.clj ~305-316) scans described-unions with some and all errors again with remove for every explain error, so building one refusal is quadratic in the error count: an armed call of seon.cluster/published-analyzer-digest with 5,445 malformed rows pinned a core for over 10 minutes (fix-boot-full-pass probe, 2026-09-27). A large invalid argument must refuse in time proportional to its errors (index described unions once; bound the errors examined, as the floor bounds what prints)."
+             :intent "seon.instrument/violation (instrument.clj ~305-316) scans described-unions with some and all errors again with remove for every explain error, so building one refusal is quadratic in the error count: an armed call of seon.cluster/published-analyzer-digest with 5,445 malformed entities pinned a core for over 10 minutes (fix-boot-full-pass probe, 2026-09-27). A large invalid argument must refuse in time proportional to its errors (index described unions once; bound the errors examined, as the floor bounds what prints)."
              :must-read #{seon.instrument/violation}
              :evidence #{"docs/research/agent-platform/landing/boot-ready-regression-2026-09-27.md"}}]

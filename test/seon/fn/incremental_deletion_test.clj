@@ -58,7 +58,7 @@
     (doseq [[file source] files]
       (spit (doto (io/file root directory file) io/make-parents) source))
     (support/transacted! connection
-                         (seon.fn/analyze-rows
+                         (seon.fn/analyze-entities
                           (assoc request :seon.schema/projection
                                  (declaring projection (qualify before)))))
     (let [published (db/db connection)
@@ -67,7 +67,7 @@
                                   :seon.schema/projection (declaring projection (qualify after))
                                   :seon.fn/changed-paths #{(str directory "/callee.clj")})
           result (support/refusal-data
-                  #(let [analyzed (into (seon.fn/analyze-rows selected)
+                  #(let [analyzed (into (seon.fn/analyze-entities selected)
                                         (when extra-rows (extra-rows published directory)))]
                      (schema/call-with-projection
                       projection
@@ -86,7 +86,7 @@
          (f connection root prefix (sources prefix) #(symbol (str prefix "." %1) %2))))
       (finally (support/delete-recursively! root)))))
 
-(deftest ^{:seon.test/long "Two sample-root analyses plus one incremental reconciliation on a fixture branch, as in selected-rows-reconcile-without-a-manifest."
+(deftest ^{:seon.test/long "Two sample-root analyses plus one incremental reconciliation on a fixture branch, as in selected-entities-reconcile-without-a-manifest."
            :seon.test/long-ms 15000}
   a-deletion-recomputes-its-unchanged-callers-edges
   (testing "a caller whose edge derived from the removed declaration commits without it"
@@ -148,7 +148,7 @@
 
 (deftest ^{:seon.test/long "Two sample-root analyses plus one incremental reconciliation on a fixture branch."
            :seon.test/long-ms 15000}
-  a-supplied-file-row-never-widens-the-reconciliation
+  a-supplied-file-entity-never-widens-the-reconciliation
   (in-sample
    (fn [connection root prefix source sym]
      (let [{:keys [published result after]}
@@ -157,7 +157,7 @@
                                 "other.clj" (:other source)}
                         :before ["produce"] :after ["produce"]
                         :callee (:callee-kept-edited source)
-                        ;; other.clj's complete stored file row, and nothing
+                        ;; other.clj's complete stored file entity, and nothing
                         ;; of its declarations.
                         :extra-rows (fn [database directory]
                                       [(dissoc (db/pull database '[*]
@@ -167,18 +167,18 @@
        (is (defined? published (sym "other" "stays")))
        (is (= support/committed result) (pr-str result))
        (is (defined? after (sym "other" "stays"))
-           "A file row alone is no analysis of the file's declarations.")))))
+           "A file entity alone is no analysis of the file's declarations.")))))
 
-(deftest source-rows-keep-declared-targets-outside-the-submitted-form
+(deftest source-entities-keep-declared-targets-outside-the-submitted-form
   (support/with-database
    (fn [connection]
      (let [projection (db/carried-projection (db/db connection))
            namespace-name (symbol (str "s" (id/id) ".submitted"))
-           namespace-row (program/declaration-row
+           namespace-entity (program/declaration-row
                           projection
                           {:seon.ns/name namespace-name
                            :seon.ns/source (str "(ns " namespace-name ")")} :all :agent)
-           _ (support/transacted! connection [namespace-row])
+           _ (support/transacted! connection [namespace-entity])
            database (db/db connection)
            producer (first (sort (keep (fn [[_ form]]
                                          (let [target (when (vector? form)
@@ -187,11 +187,11 @@
                                                       (defined? database target))
                                              target)))
                                        (:seon.schema.projection/forms projection))))
-           row (some #(when (= (symbol (str namespace-name) "run") (:seon.fn/sym %)) %)
+           entity (some #(when (= (symbol (str namespace-name) "run") (:seon.fn/sym %)) %)
                      (seon.fn/source-rows
-                      database (program/shapes-in projection) namespace-row
+                      database (program/shapes-in projection) namespace-entity
                       "(defn run {:seon.fn/invokes #{:seon.render/ai}} [] nil)"
                       (set (keys (:seon.schema.projection/forms projection)))))]
        (is (qualified-symbol? producer) "the fixture program declares a render producer")
-       (is (contains? (set (:seon.fn/calls row)) producer)
+       (is (contains? (set (:seon.fn/calls entity)) producer)
            "A submitted invoker reaches the population's producers, not only its own batch's.")))))

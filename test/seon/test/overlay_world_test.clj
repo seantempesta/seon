@@ -24,7 +24,7 @@
 (def ^:private victim 'seon.test.one-request-test/a-member-body-runs-on-its-own-listed-branch)
 
 (defn- admit!
-  "Evaluate one form as an agent does and write its canonical declaration row."
+  "Evaluate one form as an agent does and write its canonical declaration entity."
   {:malli/schema [:=> [:cat :seon.agent/execution-handle :string] [:maybe :seon.db/transaction-report]]}
   [handle source]
   (let [connection (:seon.db/connection handle)
@@ -40,10 +40,10 @@
                          :seon.sci.eval/time-limit-ms 5000})))
                     ::admitted)]
     (is (nil? (:seon.cluster.eval/error evaluation)) (str (:seon.cluster.eval/error evaluation)))
-    (when-let [row (:seon.program/row evaluation)]
+    (when-let [entity (:seon.program/row evaluation)]
       (support/transacted! connection [(program/declaration-row
                                         (db/carried-projection (db/db connection))
-                                        row :all :agent)]))))
+                                        entity :all :agent)]))))
 
 (deftest ^{:seon.test/long "Four agent definitions, one retraction and one nested request whose first checkpoint preparation measured 1.8 s (seon.config/apply-compiled!, issue test-world-preparation-spends-seconds-in-config-apply-and-unmemoized-reads): the request measured 7.1 s on default's JVM (root run 99a231f41221, 2026-09-24)."
            :seon.test/long-ms 15000}

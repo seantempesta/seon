@@ -194,17 +194,17 @@
              (is (not (str/includes? (pr-str (:seon.render.value/html prepared))
                                     "seon-data-capped"))))))))))
 
-(deftest a-pulled-function-row-is-its-attributes-not-steering-prose
-  ;; THE CLASS: a one-attribute finding row may not declare a render pair
+(deftest a-pulled-function-entity-is-its-attributes-not-steering-prose
+  ;; THE CLASS: a one-attribute finding entity may not declare a render pair
   ;; over another family's identity attribute. `:seon.problems/stale-var`
   ;; is `[:map [:seon.fn/sym :seon.fn/sym]]` and maps are OPEN, so the pair
-  ;; it declared was selected for EVERY function row an agent pulled and
+  ;; it declared was selected for EVERY function entity an agent pulled and
   ;; the whole published program graph answered "Restart the JVM to remove
   ;; stale loaded Var ...". The structural twin above cannot see it: that
   ;; one passes `:seon.render.value/structural? true`, which is precisely
   ;; the option an agent's own evaluation never sets. So this asserts the
   ;; agent's real path, and then the derivation behind it — no shape a bare
-  ;; `:seon.fn` row matches may carry an AI pair at all.
+  ;; `:seon.fn` entity matches may carry an AI pair at all.
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "fn-row")
@@ -230,7 +230,7 @@
        (is (empty? (filter :seon.render/ai
                            (schema/matching-shapes-in
                             (db/carried-projection database) raw)))
-           "a bare :seon.fn row must match no shape declaring an AI pair")))))
+           "a bare :seon.fn entity must match no shape declaring an AI pair")))))
 
 (deftest background-poll-keeps-identity-while-payloads-grow
   (support/with-database
@@ -346,7 +346,7 @@
           projection (schema/build-projection
                       (merge (:seon.schema.projection/forms (schema/handed-projection))
                              forms))]
-      (schema/canonical-schema-rows projection forms))}
+      (schema/canonical-schema-entities projection forms))}
    (fn [connection]
      (let [;; Selection is by declared identity, never structural
            ;; resemblance: the producer declares the value's schema.
@@ -369,7 +369,7 @@
 (deftest registered-floor-elisions-do-not-invent-a-result-handle
   (support/with-database
    (fn [connection]
-     (let [rows (mapv (fn [ordinal]
+     (let [entities (mapv (fn [ordinal]
                         {:my.message/id (str "m-" ordinal)
                          :my.message/at (java.util.Date. (* 1000 ordinal))
                          :my.message/preview (str "message " ordinal)})
@@ -382,7 +382,7 @@
                           :seon.render.profile/max-depth 8
                           :seon.render.profile/max-children 1
                           :seon.render.profile/composition :single-line)
-           floor-unit (assoc (registered-unit connection rows)
+           floor-unit (assoc (registered-unit connection entities)
                              :seon.render.value/root root
                              :seon.render/profile profile)
            projection (value/prepare floor-unit)

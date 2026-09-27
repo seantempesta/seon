@@ -333,7 +333,7 @@
      [:pre {:class "seon-context-capture-prompt"}
       (or prompt (:seon.error/message unit))]]))
 
-(defn- contribution-row
+(defn- contribution-entity
   "One durable contribution row: evidence, not content. No stored output tag
   (a prompt capture is necessarily AI), no stored text (hash + position + the prompt blob
   reconstruct it). A FAILED contribution is presence of the error keys."
@@ -400,7 +400,7 @@
               :seon.ai.tokens/characters
               (count (:seon.cluster.prompt/text rendered))
               :seon.context.capture/contributions
-              (mapv (fn [record] (contribution-row capture-id record))
+              (mapv (fn [record] (contribution-entity capture-id record))
                     (:seon.context/contributions rendered)))
        failure
        (assoc :seon.error/message (:seon.error/message failure)))]))

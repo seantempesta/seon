@@ -161,13 +161,13 @@
                        {::face ::set
                         ::items (distinct-generated-nodes identity items)})
                      (gen/vector inner 0 3))
-           (gen/fmap (fn [rows]
+           (gen/fmap (fn [entities]
                        {::face ::map
-                        ::entries (distinct-generated-nodes first rows)})
+                        ::entries (distinct-generated-nodes first entities)})
                      entries)
-           (gen/fmap (fn [[record-name rows]]
+           (gen/fmap (fn [[record-name entities]]
                        {::face ::record ::name record-name
-                        ::entries (distinct-generated-nodes first rows)})
+                        ::entries (distinct-generated-nodes first entities)})
                      (gen/tuple gen/string-alphanumeric entries))
            (gen/fmap (fn [value] {::face ::throwable ::value value}) inner)])))
      scalar)))

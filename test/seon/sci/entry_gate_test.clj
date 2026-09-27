@@ -22,15 +22,15 @@
   (support/with-database
    (fn [connection]
      (let [ctx (support/fork-cluster-ctx connection)
-           row (db/pull (db/db connection) '[{:seon.ns/aliases [*]}]
+           entity (db/pull (db/db connection) '[{:seon.ns/aliases [*]}]
                         [:seon.ns/name 'seon.note])
            stored (into {} (map (juxt :seon.ns.alias/local :seon.ns.alias/target-ns))
-                        (:seon.ns/aliases row))]
-       (is (= 'seon.db (get stored 'db)) "the fixture's seon.note row declares db")
+                        (:seon.ns/aliases entity))]
+       (is (= 'seon.db (get stored 'db)) "the fixture's seon.note entity declares db")
        (is (= stored
               (:seon.sci.admit/value
                (evaluate-in ctx "(into {} (map (fn [[k v]] [k (ns-name v)])) (ns-aliases 'seon.note))")))
-           "an uninterpreted file namespace has its row's aliases in SCI")))))
+           "an uninterpreted file namespace has its entity's aliases in SCI")))))
 
 (deftest a-contracted-definition-is-armed-before-any-commit
   (support/with-database
@@ -107,7 +107,7 @@
                                             " (defn two \"Dec.\" {:malli/schema [:=> [:cat :int] :int]} [x] (dec x)))")))]
          (is (= '[scratch.entry-gate/one scratch.entry-gate/two]
                 (:seon.sci.eval/declarations refusal))
-             "two declarations in one form refuse, naming both, rather than keep one row")
+             "two declarations in one form refuse, naming both, rather than keep one entity")
          (is (and (absent? "one") (absent? "two"))))
        (doseq [source ["(defn one \"Inc.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))"
                        "(defn two \"Dec.\" {:malli/schema [:=> [:cat :int] :int]} [x] (dec x))"]]
@@ -178,7 +178,7 @@
            "and SCI copied the Var before writing it, so the shared one never changed")
        (is (= #{(symbol stored)}
               (:seon.sci.eval/unindexed (value (str "(do (ns-unmap 'seon.note 'render-notes-ai) 1)"))))
-           "a nested unmap of a stored row's Var refuses as unindexed")
+           "a nested unmap of a stored entity's Var refuses as unindexed")
        (let [refusal (value (str "(do (defn fresh \"D.\" " contract " [x] x) "
                                  "(ns-unmap 'seon.note 'render-notes-ai))"))]
          (is (= '[scratch.entry-gate/fresh] (:seon.sci.eval/declarations refusal)))
@@ -189,7 +189,7 @@
             (value (str "(do (intern 'seon.note 'render-notes-ai (fn [x] x)) "
                         "(throw (ex-info \"boom\" {})))"))))
        (is (true? (value (str "(identical? held (var " stored "))")))
-           "every refusal and a later throw leave the stored row's Var as it was")
+           "every refusal and a later throw leave the stored entity's Var as it was")
        (let [admitted (evaluate-in ctx (str "(defn kept \"D.\" " contract " [x] (* 5 x))"))]
          (is (= 'scratch.entry-gate/kept (get-in admitted [:seon.program/row :seon.fn/sym]))
              (pr-str (:seon.sci.admit/value admitted)))
@@ -216,13 +216,13 @@
            "a root written after the definition is not the analyzed body")
        (is (absent? "rewritten"))
        (let [admitted (evaluate-in ctx (str "(do\n  ;" declaration "\n  " declaration ")"))
-             row (:seon.program/row admitted)]
-         (is (= 'scratch.entry-gate/echoed (:seon.fn/sym row))
+             entity (:seon.program/row admitted)]
+         (is (= 'scratch.entry-gate/echoed (:seon.fn/sym entity))
              (str "a comment holding the same bytes is not the declaration: "
                   (pr-str (:seon.sci.admit/value admitted))))
-         (is (= declaration (:seon.fn/source row)))
-         (is (not (contains? row :seon.fn/form-span))
-             "the span locates the row within this form only")
+         (is (= declaration (:seon.fn/source entity)))
+         (is (not (contains? entity :seon.fn/form-span))
+             "the span locates the entity within this form only")
          (is (= 1 (value "(echoed 1)"))))
        (is (= 'scratch.entry-gate/later
               (get-in (evaluate-in ctx (str "(do (def note \"é😀\")\n"
@@ -252,13 +252,13 @@
        (is (= :input (:seon.instrument/check (:seon.sci.admit/value called)))
            (str "the call inside the do meets the armed contract: " (pr-str (:seon.sci.admit/value called))))
        (is (re-find #"NOT ADMITTED.*scratch\.entry-gate/inc1" (str (:seon.cluster.eval/output called)))
-           (str "the failed form says its definition is no row: " (pr-str (:seon.cluster.eval/output called))))
+           (str "the failed form says its definition is no entity: " (pr-str (:seon.cluster.eval/output called))))
        (is (= :input (:seon.instrument/check (value "(inc1 \"a\")")))
            "the private definition a failed form left stays armed")
        (let [admitted (evaluate-in ctx (str "(do (do (defn inc2 \"Inc.\" " contract " [x] (inc x))) (inc2 1))"))]
          (is (= 2 (:seon.sci.admit/value admitted)))
          (is (= 'scratch.entry-gate/inc2 (get-in admitted [:seon.program/row :seon.fn/sym]))
-             "a nested do's definition is the form's one row")
+             "a nested do's definition is the form's one entity")
          (is (not (:seon.cluster.eval/output admitted))))
        (is (= :input (:seon.instrument/check (value "(inc2 \"a\")"))))
        (let [failed (evaluate-in ctx (str "(let [] (defn inc3 \"Inc.\" " contract " [x] (inc x)) "

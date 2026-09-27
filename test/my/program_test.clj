@@ -80,7 +80,7 @@
            source "(defn fixture-history [] :first)"
            changed-source "(defn fixture-history [] :second)"
            creation (support/transacted!
-                     connection [(support/program-fn-row (db/db connection) target source)])
+                     connection [(support/program-fn-entity (db/db connection) target source)])
            before (:db-after creation)
            old-t (db/basis-t before)
            metadata-change (support/transacted!

@@ -1,14 +1,14 @@
 [#:seon.task{:id "5188bb532195"
              :name "status-casts-a-keyword-to-a-symbol-during-boot"
              :kind :function
-             :intent "bin/seon status during boot threw ClassCastException Keyword -> Symbol in instrument/replaced-roots, reached from mcp-runtime-observation's program-function-files rows (diagnostic data/clusters/default/logs/operator-status-20260926T103046.142.edn). Not investigated."
+             :intent "bin/seon status during boot threw ClassCastException Keyword -> Symbol in instrument/replaced-roots, reached from mcp-runtime-observation's program-function-files entities (diagnostic data/clusters/default/logs/operator-status-20260926T103046.142.edn). Not investigated."
              :must-read #{seon.cluster/mcp-runtime-observation seon.instrument/replaced-roots}
              :evidence #{"docs/research/agent-platform/perf-profile-2026-09-26.md"}}
  #:seon.task{:id "1d92b52b2470"
              :name "adoption-readopts-what-the-jvm-loaded"
              :kind :function
-             :intent "A move to HEAD spends 6.4-9.9 s adopting after readiness (development-source-refresh! 5,171 ms, adopt-rows! 2,761 ms) re-adopting what the fresh JVM already loaded; boot's store->branch layer is 27-32 s whenever the commit touches analyzer reach (full-source-refresh! :all: lint ~8 s, analysis ~8 s, three transactions ~10 s); today's nuke was ready in 43 s. Both are over the 10-second start law."
-             :must-read #{seon.cluster/adopt-rows! seon.cluster/development-source-refresh! seon.cluster/full-source-refresh!}
+             :intent "A move to HEAD spends 6.4-9.9 s adopting after readiness (development-source-refresh! 5,171 ms, adopt-entities! 2,761 ms) re-adopting what the fresh JVM already loaded; boot's store->branch layer is 27-32 s whenever the commit touches analyzer reach (full-source-refresh! :all: lint ~8 s, analysis ~8 s, three transactions ~10 s); today's nuke was ready in 43 s. Both are over the 10-second start law."
+             :must-read #{seon.cluster/adopt-entities! seon.cluster/development-source-refresh! seon.cluster/full-source-refresh!}
              :evidence #{"docs/research/agent-platform/landing/inv-boot-operator-opus-2026-09-26.md"
                          "docs/research/agent-platform/perf-profile-2026-09-26.md"
                          "docs/seon/issues/move-to-head-takes-a-minute-or-more-not-seconds.md"}}

@@ -59,9 +59,9 @@
     (catch Throwable error
       {:error (deepest-ex-data error)})))
 
-(defn- row-tx
-  ([row] (row-tx {} row))
-  ([request row] [[:db.fn/call #'turn/row-tx request row]]))
+(defn- entity-tx
+  ([entity] (entity-tx {} entity))
+  ([request entity] [[:db.fn/call #'turn/row-tx request entity]]))
 
 (defn- probe-projection
   "A projection carrying the canonical declaration population PLUS this
@@ -79,12 +79,12 @@
   (schema/build-projection (merge (schema/snapshot) probe-forms)))
 
 (defn- printed
-  "`form` printed as `seon.schema/canonical-schema-rows` stores `:seon.schema/form`."
+  "`form` printed as `seon.schema/canonical-schema-entities` stores `:seon.schema/form`."
   {:malli/schema [:=> [:cat :any] :string]}
   [form]
   (binding [*print-namespace-maps* false] (pr-str form)))
 
-(defn- schema-row
+(defn- schema-entity
   "One canonical schema declaration row, as the agent's declaration path
   derives it against the fixture's current projection."
   {:malli/schema [:=> [:cat :seon.db/connection :qualified-keyword :any] :seon.program/declaration-row]}
@@ -148,7 +148,7 @@
            projection
            (schema.datahike/database-attributes-for-in
             projection selected-forms))
-          (schema/canonical-schema-rows projection selected-forms)))
+          (schema/canonical-schema-entities projection selected-forms)))
         _ (advance-fixture-projection! connection)]
     report))
 
@@ -163,7 +163,7 @@
      [?source :seon.schema/references ?target-key]]
    database))
 
-(defn- live-schema-row?
+(defn- live-schema-entity?
   [database schema-key]
   (boolean
    (:seon.schema/form
@@ -228,19 +228,19 @@
       (with-database
         (fn [connection]
           (install-forms! connection selected-forms)
-          ;; A fn row's `:seon.fn/ns` is a REF. The namespace it names has to
-          ;; be a fact before the row can resolve it; a fixture that writes
-          ;; the row alone is refused at the write, and the refusal is about
+          ;; A fn entity's `:seon.fn/ns` is a REF. The namespace it names has to
+          ;; be a fact before the entity can resolve it; a fixture that writes
+          ;; the entity alone is refused at the write, and the refusal is about
           ;; the fixture, not the behaviour under test.
           (when extra-row
             (test-support/transacted!
              connection
-             [(test-support/namespace-row @connection 'seon.schema-usage-guard)
-              (test-support/program-fn-row
+             [(test-support/namespace-entity @connection 'seon.schema-usage-guard)
+              (test-support/program-fn-entity
                (db/db connection) 'seon.schema-usage-guard/accept
                "(defn accept [value] value)"
                {:seon.fn/spec (pr-str [:=> [:cat base-key] :int])})])
-            ;; The fn contract this row declares is what BLOCKS the deletion
+            ;; The fn contract this entity declares is what BLOCKS the deletion
             ;; below. It has to be in the projection the writer compiles, not
             ;; only in the datoms.
             (advance-fixture-projection! connection))
@@ -248,7 +248,7 @@
                 result
                 (transact-result
                  connection
-                 (row-tx
+                 (entity-tx
                   {:seon.program/delete-identities
                    [[:seon.schema/key base-key]]}))]
             (is (= :seon.schema/schema-in-use
@@ -270,8 +270,8 @@
           (let [result
                 (transact-result
                  connection
-                 (row-tx
-                  (schema-row connection base-key
+                 (entity-tx
+                  (schema-entity connection base-key
                               [:string {:seon.db/index true}])))]
             (is (nil? (:error result)) (pr-str (:error result)))
             (is (= (printed [:string {:seon.db/index true}])
@@ -302,7 +302,7 @@
       (let [result
             (transact-result
              connection
-             (row-tx (schema-row connection base-key (get forms base-key))))]
+             (entity-tx (schema-entity connection base-key (get forms base-key))))]
         (is (nil? (:error result)))
         (is (= (printed (get forms base-key))
                (:seon.schema/form
@@ -320,7 +320,7 @@
       (install-forms! connection {base-key (get forms base-key)})
       (test-support/transacted!
                    connection
-                   [(schema-row connection unrelated-key [:string {:seon.db/index true}])])
+                   [(schema-entity connection unrelated-key [:string {:seon.db/index true}])])
       (is (not (contains? (:schema @connection) unrelated-key)))
       (test-support/transacted! connection [(held base-key 7)])
       (let [entity (db/q '[:find ?entity .
@@ -331,8 +331,8 @@
         (let [result
               (transact-result
                connection
-               (row-tx
-                (schema-row connection base-key
+               (entity-tx
+                (schema-entity connection base-key
                             [:int {:min 1 :seon.db/index true}])))]
           (is (nil? (:error result)))
           (test-support/transacted! connection [(held base-key 8)])
@@ -363,7 +363,7 @@
             request {:seon.turn/id run-id}]
         (install-forms! connection {base-key (get forms base-key)
                                     unrelated-key [:int {:seon.db/index true}]})
-        (test-support/transacted! connection (into [(test-support/namespace-row @connection namespace-name)]
+        (test-support/transacted! connection (into [(test-support/namespace-entity @connection namespace-name)]
                                                    cat
                                                    [(test-support/agent-tx @connection agent-id namespace-name)]))
         (test-support/transacted! connection [(held base-key 7)])
@@ -374,8 +374,8 @@
           (is (nil? (:error
                      (transact-result
                       connection
-                      (row-tx request
-                              (schema-row connection base-key [:string {:seon.db/index true}]))))))
+                      (entity-tx request
+                              (schema-entity connection base-key [:string {:seon.db/index true}]))))))
           (is (= (printed [:string {:seon.db/index true}])
                  (:seon.schema/form
                   (db/pull @connection [:seon.schema/form]
@@ -386,13 +386,13 @@
                           @connection base-key))))
         (testing "a form another writer changed since the run opened refuses"
           (test-support/transacted! connection
-                                    [(schema-row connection unrelated-key
+                                    [(schema-entity connection unrelated-key
                                                  [:string {:seon.db/index true}])])
           (let [refusal
                 (transact-result
                  connection
-                 (row-tx request
-                         (schema-row connection unrelated-key
+                 (entity-tx request
+                         (schema-entity connection unrelated-key
                                      [:boolean {:seon.db/index true}])))]
             (is (= :seon.turn/program-row-changed-after-open
                    (get-in refusal [:error :seon.turn/rule])))
@@ -422,12 +422,12 @@
         (install-forms! connection selected-forms)
         (test-support/transacted!
                      connection
-                     [(schema-row connection unrelated-key [:string {:seon.db/index true}])])
+                     [(schema-entity connection unrelated-key [:string {:seon.db/index true}])])
         (test-support/transacted! connection [{entity-id-key "child" entity-child-key 7}])
         (let [result
               (transact-result
                connection
-               (row-tx (schema-row connection entity-key replacement-form)))]
+               (entity-tx (schema-entity connection entity-key replacement-form)))]
           (is (nil? (:error result)) (pr-str (:error result)))
           (is (= (printed replacement-form)
                  (:seon.schema/form
@@ -467,8 +467,8 @@
              (:error
               (transact-result
                connection
-               (row-tx
-                (schema-row connection entity-key reduced-entity-form))))))
+               (entity-tx
+                (schema-entity connection entity-key reduced-entity-form))))))
         (is (= #{[entity-key entity-id-key]}
                (into #{}
                      (filter (fn [[source _]] (= entity-key source)))
@@ -478,16 +478,16 @@
              (:error
               (transact-result
                connection
-               (row-tx
+               (entity-tx
                 {:seon.program/delete-identities
                  [[:seon.schema/key entity-key]]})))))
-        (is (not (live-schema-row? @connection entity-key)))
+        (is (not (live-schema-entity? @connection entity-key)))
         (is (not-any? (fn [[source target]]
                         (or (= entity-key source) (= entity-key target)))
                       (schema-reference-edges @connection))
             "removal leaves no current incoming or outgoing reference edge")
         (doseq [leaf-key [entity-id-key entity-child-key]]
-          (is (live-schema-row? @connection leaf-key))
+          (is (live-schema-entity? @connection leaf-key))
           (is (contains? (:schema @connection) leaf-key)))
         (test-support/transacted! connection [{entity-id-key "survivor"
                                              entity-child-key 7}])
@@ -499,25 +499,25 @@
                       [?entity ?child-attribute ?child]]
                     @connection entity-id-key entity-child-key)))))))
 
-(deftest generic-schema-deletion-removes-unused-row-and-attribute
+(deftest generic-schema-deletion-removes-unused-entity-and-attribute
   (with-database
     (fn [connection]
       (install-forms! connection {base-key (get forms base-key)})
       (let [result
             (transact-result
              connection
-             (row-tx
+             (entity-tx
               {:seon.program/delete-identities
                [[:seon.schema/key base-key]]}))]
         (is (nil? (:error result)))
-        (is (not (live-schema-row? @connection base-key))
+        (is (not (live-schema-entity? @connection base-key))
             "the unique key may remain as an identity tombstone")
         (is (not-any? (fn [[source target]]
                         (or (= base-key source) (= base-key target)))
                       (schema-reference-edges @connection)))
         (is (not (contains? (:schema @connection) base-key)))))))
 
-(deftest retracted-data-allows-removal-and-historical-rows-restore-validation
+(deftest retracted-data-allows-removal-and-historical-entities-restore-validation
   (with-database
     (fn [connection]
       (install-forms! connection {base-key (get forms base-key)})
@@ -532,13 +532,13 @@
         (let [result
               (transact-result
                connection
-               (row-tx
+               (entity-tx
                 {:seon.program/delete-identities
                  [[:seon.schema/key base-key]]}))
               past (db/as-of @connection data-t)
               past-projection (schema/projection-from-database past)]
           (is (nil? (:error result)))
-          (is (not (live-schema-row? @connection base-key)))
+          (is (not (live-schema-entity? @connection base-key)))
           (is (not-any? (fn [[source target]]
                           (or (= base-key source) (= base-key target)))
                         (schema-reference-edges @connection)))
@@ -553,10 +553,10 @@
                  (:seon.schema/form
                   (db/pull past [:seon.schema/form]
                           [:seon.schema/key base-key])))
-              "the historical program row retains the validator source")
+              "the historical program entity retains the validator source")
           (is (true?
                ((schema/projection-validator past-projection base-key) 7))
-              "the historical row rebuilds Malli validation at that basis")
+              "the historical entity rebuilds Malli validation at that basis")
           (is (nil? (get (dbi/-schema past) base-key))
               "Datahike as-of delegates to the current schema map"))))))
 

@@ -8,7 +8,7 @@
             [seon.test-support :as support]))
 
 (deftest an-unconfigured-cluster-refuses-arming-instead-of-defaulting-its-fault-policy
-  ;; The branch's value as of the transaction before its first config row
+  ;; The branch's value as of the transaction before its first config entity
   ;; holds the installed schema and no config, so no cluster's effective
   ;; config can be read.
   (support/with-database
@@ -21,10 +21,10 @@
            ctx (eval/build-base-ctx projection)
            source "(defn ^{:malli/schema [:=> [:cat :int] :int]} unconfigured [x] x)"
            _ (sci/eval-string* ctx source)
-           row (support/program-fn-row database 'user/unconfigured source)
+           entity (support/program-fn-entity database 'user/unconfigured source)
            failure (support/refusal-data
-                    #(#'eval/install-function-contract! ctx row projection unconfigured))]
-       (is (:seon.fn/spec row) "The subject declares a contract to arm.")
+                    #(#'eval/install-function-contract! ctx entity projection unconfigured))]
+       (is (:seon.fn/spec entity) "The subject declares a contract to arm.")
        (is (= :seon.boot/cluster-name (:seon.config/error-key failure)) (pr-str failure))
        (is (= 'seon.sci.eval/database-effective-config (:seon.error/operation failure)))
        (is (not (:seon.instrument/registration-observation failure))

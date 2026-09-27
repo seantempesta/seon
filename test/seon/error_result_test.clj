@@ -61,9 +61,9 @@
         report (measured :transaction #(support/transacted! connection (:seon.db/tx-data recording)))
         elapsed-ms (/ (- (System/nanoTime) started) 1e6)
         projection (:seon.schema/projection request)
-        row (db/pull (:db-after report) (error/observation-selector projection)
+        entity (db/pull (:db-after report) (error/observation-selector projection)
                      (:seon.error/ref recording))
-        stored (error/latest-fact row)
+        stored (error/latest-fact entity)
         result-id (:seon.error/result-id stored)
         unit {:seon.render/value value
               :seon.repl/handle (admit/result-handle result-id)
@@ -80,7 +80,7 @@
     (is (map? (:seon.sci.admit/print-node artifact)))
     (is (= shown (:seon.error/shown stored)))
     (is (schema/valid-candidate-value? projection :seon.error/base stored))
-    (is (str/includes? (error/render-ai {:seon.render/value row}) shown))
+    (is (str/includes? (error/render-ai {:seon.render/value entity}) shown))
     (is (:seon.error/data-edn stored) "Legacy evidence remains written during accretion.")
     {:stored stored :complete complete :shown shown
      :stored-value (render.value/artifact-value artifact)}))

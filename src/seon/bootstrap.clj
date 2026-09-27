@@ -106,21 +106,21 @@
    [:=> [:cat :seon.db/db :seon.agent/id]
     [:or :seon.agent/situation :my.plan/agent-not-found-error]]}
   [database agent-id]
-  (let [agent-row
+  (let [agent-entity
         (db/pull database
                  '[:seon.agent/id
                    {:seon.agent/namespace
                     [:db/id :seon.ns/name
                      :seon.ns/requires]}]
                  [:seon.agent/id agent-id])]
-    (if-not (:seon.agent/id agent-row)
+    (if-not (:seon.agent/id agent-entity)
       (seon.error.refusal/diagnostic (java.util.Date.) :seon.bootstrap/opening 'seon.bootstrap/situation
        {:seon.error/message "Create the requested agent before deriving its opening."
         :seon.error/offending agent-id
         :my.plan/refused-member :seon.agent/id
         :my.plan/missing-agent-id agent-id
         :seon.error/expected :seon.agent/entity})
-      (let [namespace-row (:seon.agent/namespace agent-row)
+      (let [namespace-entity (:seon.agent/namespace agent-entity)
             run (when-let [id (turn/open-for-agent database [:seon.agent/id agent-id])]
                   (db/pull database
                            '[:seon.turn/id
@@ -146,12 +146,12 @@
         (cond->
          {:seon.agent/id agent-id
           :seon.agent/namespace-ref
-          [:seon.ns/name (:seon.ns/name namespace-row)]
+          [:seon.ns/name (:seon.ns/name namespace-entity)]
           :seon.agent/unread-message-count (long unread)
           :seon.turn/turns-remaining
           (long (max 0 (- (or turn-limit 0) turns-used)))
           :seon.agent/protocol-namespaces
-          (->> (:seon.ns/requires namespace-row)
+          (->> (:seon.ns/requires namespace-entity)
                sort
                vec)}
           run
@@ -197,7 +197,7 @@
   {:malli/schema [:=> [:cat] :seon.message/content]}
   []
   (str "Define a durable contracted function named largest that returns the "
-       "row with the greatest :example/amount, or {} for empty input. Call "
+       "entity with the greatest :example/amount, or {} for empty input. Call "
        "it once, query its stored :seon.fn/spec, then complete with a short "
        "reply naming what you built and its contract."))
 
@@ -335,9 +335,9 @@
     _opened-at :seon.turn/opened-tx}]
   (let [id (run-id agent-id)
         message-id (id/id (random-uuid) 8)
-        message-row
+        message-entity
         {:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content (task-message)}]
-    (into [message-row]
+    (into [message-entity]
           (turn/generated-run-tx
            db
            {:seon.agent/id agent-id :seon.turn/id id :seon.db.process/id process :seon.turn/opened-tx "datomic.tx" :seon.turn/trigger [:seon.message/id message-id] :seon.turn/starting-ns [:seon.ns/name namespace-name]}))))

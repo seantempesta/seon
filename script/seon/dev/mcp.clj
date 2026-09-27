@@ -100,7 +100,7 @@
   [root]
   (.getCanonicalPath (io/file (or root project-root))))
 
-(defn- advertised-rows
+(defn- advertised-entities
   "Each live advertisement under `root`, unprobed. An evaluation's endpoint
   needs only the advertised prepl; asking the JVM for health on every call cost
   a whole runtime observation (~180 ms, ~585 MB allocated on default,
@@ -117,10 +117,10 @@
           :seon.dev.mcp/advertisement advertisement :seon.dev.mcp/source :advertisement}))
      ((ns-resolve 'seon.operator 'advertisements) root))))
 
-(defn- discovery-rows
+(defn- discovery-entities
   [root]
   (mapv
-   (fn [{cluster :seon.dev.mcp/cluster advertisement :seon.dev.mcp/advertisement :as row}]
+   (fn [{cluster :seon.dev.mcp/cluster advertisement :seon.dev.mcp/advertisement :as entity}]
      (let [;; Discovery needs only health; the whole observation stays in the JVM.
            health
            (try
@@ -131,20 +131,20 @@
                          (:seon.dev.mcp/health
                           (~'seon.cluster/mcp-runtime-observation ~cluster)))))
              (catch Exception _ nil))]
-       (assoc row :seon.dev.mcp/state (if health
+       (assoc entity :seon.dev.mcp/state (if health
                                         (if (#{:observed :faulted} health) :alive :degraded)
                                         :unknown))))
-   (advertised-rows root)))
+   (advertised-entities root)))
 
 (defn- start-remedy
   [root cluster]
   (str "Start the cluster with: bin/seon --root " root " start " cluster "."))
 
 (defn- endpoint-error
-  [row]
-  (let [root (:seon.dev.mcp/root row)
-        cluster (:seon.dev.mcp/cluster row)
-        state (:seon.dev.mcp/state row)]
+  [entity]
+  (let [root (:seon.dev.mcp/root entity)
+        cluster (:seon.dev.mcp/cluster entity)
+        state (:seon.dev.mcp/state entity)]
     (ex-info
      (str "No live CLJ REPL is available for cluster '" cluster
           "'; its advertisement is " (name state) ". "
@@ -153,11 +153,11 @@
               :seon.dev.mcp/root root
               :seon.dev.mcp/cluster cluster
               :seon.dev.mcp/advertisement-state state
-              :seon.dev.mcp/advertisement-file (:seon.dev.mcp/path row)
+              :seon.dev.mcp/advertisement-file (:seon.dev.mcp/path entity)
               :seon.dev.mcp/remedy (start-remedy root cluster)}
-       (:seon.dev.mcp/error row)
+       (:seon.dev.mcp/error entity)
        (assoc :seon.dev.mcp/advertisement-error
-              (:seon.dev.mcp/error row))))))
+              (:seon.dev.mcp/error entity))))))
 
 (defn- read-clj-endpoint
   [root cluster]
@@ -166,8 +166,8 @@
                     {:seon.dev.mcp/failure :invalid-cluster
                      :seon.dev.mcp/cluster cluster})))
   (let [root (canonical-root root)
-        rows (advertised-rows root)
-        candidates (filterv #(= cluster (:seon.dev.mcp/cluster %)) rows)]
+        entities (advertised-entities root)
+        candidates (filterv #(= cluster (:seon.dev.mcp/cluster %)) entities)]
     (case (count candidates)
       1 (let [{state :seon.dev.mcp/state
                source :seon.dev.mcp/source
@@ -183,7 +183,7 @@
       0 (throw
          (endpoint-error
           (or (some #(when (= cluster (:seon.dev.mcp/cluster %)) %)
-                    rows)
+                    entities)
               {:seon.dev.mcp/root root
                :seon.dev.mcp/cluster cluster
                :seon.dev.mcp/path
@@ -689,25 +689,25 @@
 (defn- execute-runtime-status
   [{:keys [root cluster]}]
   (let [root (canonical-root root)
-        rows (discovery-rows root)
+        entities (discovery-entities root)
         selected (or cluster own-cluster)
-        selected-rows (filterv #(= selected (:seon.dev.mcp/cluster %)) rows)
-        selected-row
-        (when-let [row (first selected-rows)]
-          (cond-> row
-            (< 1 (count selected-rows))
+        selected-entities (filterv #(= selected (:seon.dev.mcp/cluster %)) entities)
+        selected-entity
+        (when-let [entity (first selected-entities)]
+          (cond-> entity
+            (< 1 (count selected-entities))
             (assoc :seon.dev.mcp/observation-count
-                   (count selected-rows))))]
+                   (count selected-entities))))]
     (mcp-success
      {:seon.dev.mcp/root root
       :seon.dev.mcp/view :cluster-health-flow
       :seon.dev.mcp/clusters
-      (if selected-row
+      (if selected-entity
         [(if (contains? #{:alive :degraded :unknown}
-                        (:seon.dev.mcp/state selected-row))
-           (assoc selected-row :seon.dev.mcp/runtime
+                        (:seon.dev.mcp/state selected-entity))
+           (assoc selected-entity :seon.dev.mcp/runtime
                   (runtime-observation root selected))
-           (assoc selected-row :seon.dev.mcp/runtime
+           (assoc selected-entity :seon.dev.mcp/runtime
                   {:seon.dev.mcp/health :unknown
                    :seon.dev.mcp/flow :unknown}))]
         [])
@@ -774,7 +774,7 @@
 
 (def tools
   [{:name "eval_clj"
-    :description "Evaluate exactly one Clojure form in a selected operator root, cluster, namespace, and mode; the returned MCP content renders directly into the calling agent/orchestrator context. JVM mode uses the live io-prepl; the session keeps no result (*1/*2/*3/*e stay nil), so bind what you need to a name. It binds no cluster custody; at a development REPL, (seon.cluster.boot/connection \"default\") supplies the explicit connection to pass to seon.db. SCI mode (`sci`) without a branch is ONE ORDINARY RUN OF ROOT on the cluster's own branch (seon.cluster.agent/evaluate-source!): the code is segmented as code (every form, several allowed), each form read and evaluated in root's context under the entry gate, settled as root's recorded evaluations, and answered as one event per evaluation with its saved shown text. A defn becomes a program row on the cluster. The run starts in root's own namespace (the run writer refuses another), so move with (in-ns ...) in the code. With a branch (made by the `branch` tool), SCI is one ordinary run of that branch's hosted agent (seon.cluster.host/host!, created as mcp/<branch> on the branch at first use, in this call's namespace, default user), answered the same way; its defs are rows on the branch, never on the cluster, until `branch` retire closes its admission and releases it. Oversized values settle into the selected cluster's blob tier and return a retrievable digest. Discovery derives from current advertisements and exact operating-system process identities on every call; the default session reconnects after JVM replacement."
+    :description "Evaluate exactly one Clojure form in a selected operator root, cluster, namespace, and mode; the returned MCP content renders directly into the calling agent/orchestrator context. JVM mode uses the live io-prepl; the session keeps no result (*1/*2/*3/*e stay nil), so bind what you need to a name. It binds no cluster custody; at a development REPL, (seon.cluster.boot/connection \"default\") supplies the explicit connection to pass to seon.db. SCI mode (`sci`) without a branch is ONE ORDINARY RUN OF ROOT on the cluster's own branch (seon.cluster.agent/evaluate-source!): the code is segmented as code (every form, several allowed), each form read and evaluated in root's context under the entry gate, settled as root's recorded evaluations, and answered as one event per evaluation with its saved shown text. A defn becomes a program entity on the cluster. The run starts in root's own namespace (the run writer refuses another), so move with (in-ns ...) in the code. With a branch (made by the `branch` tool), SCI is one ordinary run of that branch's hosted agent (seon.cluster.host/host!, created as mcp/<branch> on the branch at first use, in this call's namespace, default user), answered the same way; its defs are entities on the branch, never on the cluster, until `branch` retire closes its admission and releases it. Oversized values settle into the selected cluster's blob tier and return a retrievable digest. Discovery derives from current advertisements and exact operating-system process identities on every call; the default session reconnects after JVM replacement."
     :inputSchema {:type "object"
                   :properties {:code {:type "string" :description "Clojure code. JVM mode and SCI with a branch evaluate exactly one form (wrap a sequence in (do ...)); SCI without a branch evaluates every form in order as one run."}
                                :root {:type "string" :description "Operator root path. Defaults to the repository root used by bin/seon."}

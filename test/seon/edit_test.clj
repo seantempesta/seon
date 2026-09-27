@@ -243,7 +243,7 @@
               (str "This fixture's cluster declares no "
                    ":seon.config.fs/working-root, so no path it writes can be "
                    "inside a declared filesystem root. Seed the compiled "
-                   "config row with `seed-write-back-cluster!`.")
+                   "config entity with `seed-write-back-cluster!`.")
               {:seon.config.fs/working-root working
                :seon.config.fs/roots (:seon.config.fs/roots effective)})))
     (let [scratch (java.io.File. ^String working "tmp")]

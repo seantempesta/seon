@@ -84,10 +84,10 @@
 (defn- example-projection
   "The handed program world plus one example family. `row-properties` and
    `digest?` vary the family's comparison declaration."
-  [family row-properties digest?]
+  [family entity-properties digest?]
   (let [identity-attribute (keyword family "id")
         source-attribute (keyword family "source")
-        row-schema (keyword family "row")]
+        entity-schema (keyword family "entity")]
     (reduce (fn [projection [schema-key definition]]
               (schema/projection-with-schema
                projection schema-key definition
@@ -95,12 +95,12 @@
             (schema/handed-projection)
             [[source-attribute :string]
              [identity-attribute [:symbol {:seon.db/identity true
-                                           :seon.program/row-schema row-schema
+                                           :seon.program/row-schema entity-schema
                                            :seon.program/source-attribute source-attribute}]]
-             [row-schema
+             [entity-schema
               (cond-> [:map (merge {:seon.db/attributes true
                                     :seon.program/partition :seon.program}
-                                   row-properties)
+                                   entity-properties)
                        [identity-attribute identity-attribute]
                        [source-attribute source-attribute]]
                 digest? (conj [:seon.program/definition-digest
@@ -110,7 +110,7 @@
   "An in-memory genesis value installing the compared families' and `rows`'
    attributes and holding `rows`. A value without declaration rows reads the projection its
    construction boundary supplied (`seon.db/carried-projection`)."
-  [projection rows & [history?]]
+  [projection entities & [history?]]
   (let [configuration {:store {:backend :memory :id (random-uuid)}
                        :schema-flexibility :write :keep-history? (boolean history?)}
         storable? (requiring-resolve 'seon.schema.datahike/storable-attribute-in?)
@@ -121,12 +121,12 @@
         (d/transact connection
                     (declarations projection
                                   (sort (filter #(storable? projection %)
-                                                (into (set (mapcat keys rows))
+                                                (into (set (mapcat keys entities))
                                                       (cons :seon.program/definition-digest
                                                             (:seon.program/compared-families
                                                              (program/declaration-families
                                                               projection))))))))
-        (when (seq rows) (d/transact connection rows))
+        (when (seq entities) (d/transact connection entities))
         (vary-meta (d/db connection) assoc :seon.schema/projection projection)
         (finally
           (d/release connection)
@@ -177,7 +177,7 @@
 
 (deftest a-require-a-definition-does-not-use-leaves-its-digest-unchanged
   ;; Task 434fed5a3a67: swapping one require changed every digest in its namespace.
-  (let [row {:seon.fn/sym 'sample/f
+  (let [entity {:seon.fn/sym 'sample/f
              :seon.fn/source "(defn f [x] (c/lookup x ::s/key))"
              :seon.fn/calls #{'clojure.core/defn 'clojure.core.cache/lookup}
              :seon.fn/keywords #{:seon.schema/key}}
@@ -185,44 +185,44 @@
                  :aliases {'c 'clojure.core.cache 'str 'clojure.string 's 'seon.schema}
                  :refers {'join 'clojure.string/join}
                  :imports {}}
-        digest (program/definition-digest row context)]
+        digest (program/definition-digest entity context)]
     (is (= digest (program/definition-digest
-                   row (-> context (update :requires conj 'seon.cache)
+                   entity (-> context (update :requires conj 'seon.cache)
                            (assoc-in [:aliases 'sc] 'seon.cache)
                            (assoc-in [:refers 'lookup] 'seon.cache/lookup))))
         "Adding a require, alias and refer it does not use")
     (is (= digest (program/definition-digest
-                   row (-> context (update :requires disj 'clojure.string)
+                   entity (-> context (update :requires disj 'clojure.string)
                            (update :aliases dissoc 'str)
                            (assoc :refers {}))))
         "Removing ones it does not use")
     (is (not= digest (program/definition-digest
-                      (assoc row :seon.fn/calls #{'clojure.core/defn 'seon.cache/lookup})
+                      (assoc entity :seon.fn/calls #{'clojure.core/defn 'seon.cache/lookup})
                       (-> context (update :requires conj 'seon.cache)
                           (assoc-in [:aliases 'c] 'seon.cache))))
         "Retargeting the alias its call resolves through")
     (is (not= digest (program/definition-digest
-                      (assoc row :seon.fn/keywords #{:seon.schema.edn/key})
+                      (assoc entity :seon.fn/keywords #{:seon.schema.edn/key})
                       (-> context (update :requires conj 'seon.schema.edn)
                           (assoc-in [:aliases 's] 'seon.schema.edn))))
         "Retargeting the alias its keyword resolves through")))
 
 (deftest digest-map-is-exactly-the-stored-declarations-or-a-typed-refusal
   (let [projection (example-projection "branch.example" {} true)
-        rows (mapv (fn [n]
+        entities (mapv (fn [n]
                      {:branch.example/id (symbol "branch.example" (str "f" n))
                       :branch.example/source (str "(defn f" n " [])")
                       :seon.program/definition-digest
                       (apply str (repeat 64 (nth "abc" (mod n 3))))})
                    (range 450))
-        expected (into {} (map (fn [row]
-                                 [[:branch.example/id (:branch.example/id row)]
-                                  (:seon.program/definition-digest row)]))
-                       rows)
-        complete (example-database projection rows)
+        expected (into {} (map (fn [entity]
+                                 [[:branch.example/id (:branch.example/id entity)]
+                                  (:seon.program/definition-digest entity)]))
+                       entities)
+        complete (example-database projection entities)
         undigested (example-database
                     projection
-                    (conj rows {:branch.example/id 'branch.example/bare
+                    (conj entities {:branch.example/id 'branch.example/bare
                                 :branch.example/source "(defn bare [])"}))]
     (testing "every stored declaration, across index pages"
       (is (= expected (program/digest-map complete {:seon.program/max-datoms 900}))))
@@ -242,9 +242,9 @@
 (deftest changed-identities-scope-the-digest-maps-to-one-change
   (let [projection (schema/handed-projection)
         f #(symbol "scoped" (name %))
-        row (fn [s digest] {:seon.fn/sym (f s) :seon.program/definition-digest digest})
+        entity (fn [s digest] {:seon.fn/sym (f s) :seon.program/definition-digest digest})
         base (example-database projection
-                               (mapv #(row % digest-a) [:same :edit :head :gone :revert :conflict])
+                               (mapv #(entity % digest-a) [:same :edit :head :gone :revert :conflict])
                                true)
         with (fn [database & transactions]
                (reduce #(vary-meta (:db-after (d/with %1 %2)) assoc :seon.schema/projection projection)
@@ -255,10 +255,10 @@
                                     (program/changed-identities base head bound))]
                     (mapv #(program/digest-map % (assoc bound :seon.program/identities scope))
                           [base branch head])))
-        branch (with base [(row :edit digest-b) (row :conflict digest-b) (row :new digest-a)
+        branch (with base [(entity :edit digest-b) (entity :conflict digest-b) (entity :new digest-a)
                            [:db/retractEntity [:seon.fn/sym (f :gone)]]])
-        head (with base [(row :head digest-b) (row :conflict digest-c)]
-                   [(row :revert digest-b)] [(row :revert digest-a)])
+        head (with base [(entity :head digest-b) (entity :conflict digest-c)]
+                   [(entity :revert digest-b)] [(entity :revert digest-a)])
         maps (scoped branch head)
         refusal #(:seon.program/missing-evidence (program/changed-identities base % bound))]
     (is (= {:seon.program/unchanged #{[:seon.fn/sym (f :revert)]}
@@ -268,10 +268,10 @@
             :seon.program/retracted #{[:seon.fn/sym (f :gone)]}
             :seon.program/conflict #{[:seon.fn/sym (f :conflict)]}}
            (dissoc (apply program/three-way maps) :seon.program/conflict-digests)))
-    (is (not-any? #(contains? % [:seon.fn/sym (f :same)]) maps) "Unchanged rows are never read")
+    (is (not-any? #(contains? % [:seon.fn/sym (f :same)]) maps) "Unchanged entities are never read")
     (is (= #{[:seon.ns/name 'scoped]}
            (program/changed-identities base (with base [{:seon.ns/name 'scoped :seon.program/definition-digest digest-b}]) bound))
-        "a namespace row (its requires) is a change like any declaration")
+        "a namespace entity (its requires) is a change like any declaration")
     (is (= :seon.program/read-bound
            (:seon.program/missing-evidence
             (program/changed-identities base branch {:seon.program/max-datoms 1}))))
@@ -280,7 +280,7 @@
             (second (scoped (with base [[:db/retract [:seon.fn/sym (f :edit)]
                                           :seon.program/definition-digest digest-a]])
                              head)))))
-    (let [result (refusal (example-database projection [(row :same digest-a)]))]
+    (let [result (refusal (example-database projection [(entity :same digest-a)]))]
       (is (= :seon.program/history result)))))
 
 (deftest three-way-classifies-every-base-branch-head-state
@@ -327,10 +327,10 @@
             [branch-identity head-identity]
             (take 2 (sort-by pr-str (filter #(= :seon.fn/sym (first %)) (keys base-map))))]
         (is (every? some? [branch-identity head-identity]))
-        ;; File and lint rows are derived and carry no definition digest.
+        ;; File and lint entities are derived and carry no definition digest.
         (is (not-any? #{:seon.lint/id :seon.fn.file/relative-path}
                       (map first (keys base-map))))
-        ;; A real revision: the writer refuses a digest its row does not produce.
+        ;; A real revision: the writer refuses a digest its entity does not produce.
         (test-support/transacted!
          connection-a [(test-support/revision (db/db connection-a) branch-identity
                                               {:seon.fn/doc "Changed on the branch."})])
@@ -411,25 +411,25 @@
     (source-contract function-symbol spec forms source
                      (apply list bindings))))
 
-;; A synthetic schema row carries the digest its owner derives, as
-;; `seon.schema`'s canonical rows do (`seon.program/definition-digest`).
+;; A synthetic schema entity carries the digest its owner derives, as
+;; `seon.schema`'s canonical entities do (`seon.program/definition-digest`).
 (defn- with-definition-digest
-  [row]
-  (assoc row :seon.program/definition-digest (program/definition-digest row)))
+  [entity]
+  (assoc entity :seon.program/definition-digest (program/definition-digest entity)))
 
-(defn- analyzed-row-tx
+(defn- analyzed-entity-tx
   "Runtime settlement receives the analyzer's completed row, digested by the
   writer's digest owner as SCI's definition row is, as production does."
-  [database options row]
-  (let [source (or (:seon.fn/source row) (:seon.test/source row))
+  [database options entity]
+  (let [source (or (:seon.fn/source entity) (:seon.test/source entity))
         analyzed (if source
-                   (test-support/revised-row
+                   (test-support/revised-entity
                     database
                     (second (seon.fn/analyze-form database source
-                                                  (or (:seon.fn/ns row) (:seon.test/ns row))
-                                                  row))
+                                                  (or (:seon.fn/ns entity) (:seon.test/ns entity))
+                                                  entity))
                     {})
-                   row)]
+                   entity)]
     ((ns-resolve 'seon.turn 'row-tx) database options analyzed)))
 
 (deftest zero-argument-arity-states-no-empty-argument-set
@@ -451,7 +451,7 @@
             (:seon.schema.projection/compile-options projection)
             predicate-functions
             (:seon.schema.projection/predicate-functions projection)
-            schema-row
+            schema-entity
             (with-definition-digest
              (program/with-contract-facts
              {:seon.program/row
@@ -466,9 +466,9 @@
             map-spec
             [:=> [:cat [:map [:sample/ambient :sample/ambient]]]
              :sample/ambient]
-            row
+            entity
             (fn [function-symbol source arglists spec]
-              (test-support/program-fn-row (db/db connection) function-symbol source
+              (test-support/program-fn-entity (db/db connection) function-symbol source
                      (merge {:seon.fn/sym function-symbol
                              :seon.fn/ns [:seon.ns/name 'sample]
                              :seon.schema.admission/source :agent
@@ -479,15 +479,15 @@
                             (source-contract function-symbol spec forms source
                                              arglists))))
             positional
-            (row (quote sample/positional) "(defn positional [ambient] ambient)"
+            (entity (quote sample/positional) "(defn positional [ambient] ambient)"
                  '([ambient]) positional-spec)
             mapped
-            (row (quote sample/mapped)
+            (entity (quote sample/mapped)
                  "(defn mapped [{:sample/keys [ambient]}] ambient)"
                  '([{:sample/keys [ambient]}]) map-spec)]
         (test-support/transacted! connection
-                                  [(test-support/namespace-row (db/db connection) 'sample)
-                                   schema-row positional mapped])
+                                  [(test-support/namespace-entity (db/db connection) 'sample)
+                                   schema-entity positional mapped])
         (let [positional-address
               (db/q '[:find ?index ?binding-shape
                       :in $ ?function-symbol
@@ -670,23 +670,23 @@
                       [:=> [:cat :int] :int]
                       [:=> [:cat :int :int] :int]]
             new-spec [:=> [:cat :string] :string]
-            old-row
-            (test-support/program-fn-row (db/db connection) function-symbol
+            old-entity
+            (test-support/program-fn-entity (db/db connection) function-symbol
                        "(defn provenance-redefined ([x] x) ([x y] x))"
                    (merge {:seon.fn/sym function-symbol
                            :seon.schema.admission/source :agent
                            :seon.fn/ns [:seon.ns/name 'seon.program]
                            :seon.fn/spec (pr-str old-spec)}
                           (parsed-contract function-symbol old-spec {})))
-            new-row
-            (test-support/program-fn-row (db/db connection) function-symbol
+            new-entity
+            (test-support/program-fn-entity (db/db connection) function-symbol
                        "(defn provenance-redefined [x] x)"
                    (merge {:seon.fn/sym function-symbol
                            :seon.schema.admission/source :agent
                            :seon.fn/ns [:seon.ns/name 'seon.program]
                            :seon.fn/spec (pr-str new-spec)}
                           (parsed-contract function-symbol new-spec {})))]
-        (test-support/transacted! connection [old-row])
+        (test-support/transacted! connection [old-entity])
         (let [current
               (db/pull @connection
                        '[* {:seon.fn/arities
@@ -706,7 +706,7 @@
                              (:seon.fn.arity/arguments arity))))
                     (:seon.fn/arities current))]
           (test-support/transacted! connection
-                                  (program/exact-replacement-tx current new-row))
+                                  (program/exact-replacement-tx current new-entity))
           (let [redefined
                 (db/pull @connection
                         [:seon.fn/spec
@@ -732,12 +732,12 @@
       (let [identity [:seon.fn/sym (quote seon.test/changed-since-green)]
             database (db/db connection)
             before (db/pull database '[*] identity)
-            row-tx analyzed-row-tx
+            entity-tx analyzed-entity-tx
             result (db/transact!
                     connection
                     [[:db.fn/call
                       (fn [current]
-                        (row-tx current {} {:seon.program/delete-identities [identity]}))]])]
+                        (entity-tx current {} {:seon.program/delete-identities [identity]}))]])]
         (is (seq (:seon.fn/form-span before)))
         (is (seq (:seon.fn/call-arities before)))
         (is (some? (:seon.db.write.attempt/request-id result)) (pr-str result))
@@ -747,15 +747,15 @@
 (deftest identical-runtime-redeclaration-builds-no-datoms
   (test-support/with-database
     (fn [connection]
-      (test-support/transacted! connection [(test-support/namespace-row (db/db connection) 'sample)])
+      (test-support/transacted! connection [(test-support/namespace-entity (db/db connection) 'sample)])
       (let [function-symbol 'sample/idempotent
             source "(defn idempotent {:malli/schema [:=> [:cat :int] :int]} [x] x)"
-            row (test-support/program-fn-row (db/db connection) function-symbol source
+            entity (test-support/program-fn-entity (db/db connection) function-symbol source
                        (parsed-contract function-symbol [:=> [:cat :int] :int] {}))
-            row-tx (ns-resolve 'seon.turn 'row-tx)]
-        (test-support/transacted! connection (row-tx (db/db connection) {} row))
+            entity-tx (ns-resolve 'seon.turn 'row-tx)]
+        (test-support/transacted! connection (entity-tx (db/db connection) {} entity))
         (let [before (db/pull (db/db connection) '[*] [:seon.fn/sym function-symbol])
-              replacement (row-tx (db/db connection) {} row)]
+              replacement (entity-tx (db/db connection) {} entity)]
           (is (empty? replacement))
           (is (= before (db/pull (db/db connection) '[*] [:seon.fn/sym function-symbol]))))))))
 
@@ -777,16 +777,16 @@
             changed
             (assoc original :seon.fn/source
                    "(defn redefined {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
-            row-tx analyzed-row-tx
+            entity-tx analyzed-entity-tx
             declared-content (ns-resolve 'seon.turn 'declared-content)]
-        (test-support/transacted! connection [(test-support/namespace-row (db/db connection) 'sample)])
-        (test-support/transacted! connection (row-tx (db/db connection) {} original))
+        (test-support/transacted! connection [(test-support/namespace-entity (db/db connection) 'sample)])
+        (test-support/transacted! connection (entity-tx (db/db connection) {} original))
         (let [current (db/pull @connection '[*]
                                [:seon.fn/sym function-symbol])
-              replacement (row-tx (db/db connection) {} changed)]
+              replacement (entity-tx (db/db connection) {} changed)]
           (is (not= (declared-content (db/db connection) current)
                     (declared-content (db/db connection) changed))
-              "declared content receives the database before the row")
+              "declared content receives the database before the entity")
           (is (seq replacement))
           (test-support/transacted! connection replacement)
           (is (= (:seon.fn/source changed)
@@ -799,7 +799,7 @@
   ;; and reporting that as a concurrent definition. A pull against a run that
   ;; does not exist and a pull against a run that never declared the function
   ;; both produce nil, so the old comparison could not tell "opened on
-  ;; nothing" from "opened on no such row" and refused a redeclaration that
+  ;; nothing" from "opened on no such entity" and refused a redeclaration that
   ;; no concurrent run had touched.
   (test-support/with-database
     (fn [connection]
@@ -818,14 +818,14 @@
             changed
             (assoc original :seon.fn/source
                    "(defn unmeasured {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
-            row-tx analyzed-row-tx]
-        (test-support/transacted! connection [(test-support/namespace-row (db/db connection) 'sample)])
-        (test-support/transacted! connection (row-tx (db/db connection) {} original))
+            entity-tx analyzed-entity-tx]
+        (test-support/transacted! connection [(test-support/namespace-entity (db/db connection) 'sample)])
+        (test-support/transacted! connection (entity-tx (db/db connection) {} original))
         (testing "a request with no run opened on nothing and claims nothing"
-          (is (seq (row-tx (db/db connection) {} changed))))
+          (is (seq (entity-tx (db/db connection) {} changed))))
         (testing "a request naming a run with no opening basis says so"
           (let [data (refusal-data
-                      #(row-tx (db/db connection) {:seon.turn/id "absent"}
+                      #(entity-tx (db/db connection) {:seon.turn/id "absent"}
                                changed))]
             (is (qualified-symbol? (:seon.error/operation data)))
             (is (true? (:seon.turn/missing-opening-datom data))
@@ -836,7 +836,7 @@
                          [:seon.fn/sym function-symbol])))
             "neither derivation wrote anything")))))
 
-(deftest reader-events-have-one-canonical-declaration-row
+(deftest reader-events-have-one-canonical-declaration-entity
   (let [cases
         [{:label "contracted function"
           :source
@@ -879,28 +879,28 @@
         (let [event (one-event source)]
           ;; Expected data is literal. It is not produced by another path that
           ;; shares `seon.program`'s canonicalizer.
-          (let [row (program/declaration-row (seon.schema/handed-projection) event :all :agent)]
-            ;; A schema or namespace digest is its row alone. A function or
+          (let [entity (program/declaration-row (seon.schema/handed-projection) event :all :agent)]
+            ;; A schema or namespace digest is its entity alone. A function or
             ;; test digest needs its namespace's resolver context, which only
             ;; `seon.db/definition-digest-of` holds, so this stage mints none.
             (if (or (:seon.schema/key expected) (:seon.ns/name expected))
-              (is (= 64 (count (:seon.program/definition-digest row))))
-              (is (not (contains? row :seon.program/definition-digest))))
-            (is (= expected (dissoc row :seon.program/definition-digest))))
+              (is (= 64 (count (:seon.program/definition-digest entity))))
+              (is (not (contains? entity :seon.program/definition-digest))))
+            (is (= expected (dissoc entity :seon.program/definition-digest))))
           (if (= "private uncontracted function" label)
             (is (nil? (program/declaration-row (seon.schema/handed-projection) event :contracted :agent)))
             (is (= expected
                    (dissoc (program/declaration-row (seon.schema/handed-projection) event :contracted :agent)
                            :seon.program/definition-digest)))))))))
 
-(deftest every-declaration-row-satisfies-its-own-output-contract
-  ;; The class: `declaration-row` emitting a row its own declared output
+(deftest every-declaration-entity-satisfies-its-own-output-contract
+  ;; The class: `declaration-row` emitting an entity its own declared output
   ;; refuses. Every family REQUIRES `:seon.schema.admission/source`, and
   ;; while it was an event key a caller had to remember, three of the four
   ;; live callers forgot it — invisible until instrumentation was armed on a
   ;; cluster, where an agent's first `defn` died on an `[:or]` complaint that
   ;; named the other families' missing keys instead of the one real absence.
-  ;; It is an argument now, so a row with no admission source is not
+  ;; It is an argument now, so an entity with no admission source is not
   ;; constructable and this test cannot regress by anyone forgetting a key.
   ;;
   ;; The namespace case also pins the reader's own shape becoming the
@@ -918,17 +918,17 @@
           policy [:all :contracted]
           admission-source [:core :agent]]
     (testing (str source " " policy " " admission-source)
-      (when-let [row (program/declaration-row (seon.schema/handed-projection) (one-event source) policy admission-source)]
-        (is (= admission-source (:seon.schema.admission/source row))
-            "the row records who admitted it")
-        (is ((schema/projection-validator (schema/handed-projection) :seon.program/declaration-row) row)
-            (str "row refused by its own output contract: " (pr-str row))))))
+      (when-let [entity (program/declaration-row (seon.schema/handed-projection) (one-event source) policy admission-source)]
+        (is (= admission-source (:seon.schema.admission/source entity))
+            "the entity records who admitted it")
+        (is ((schema/projection-validator (schema/handed-projection) :seon.program/declaration-row) entity)
+            (str "entity refused by its own output contract: " (pr-str entity))))))
   (testing "a reader event preserves required namespace symbols"
     (is (= #{'clojure.set}
            (:seon.ns/requires
             (program/declaration-row (seon.schema/handed-projection) (one-event "(ns sample (:require clojure.set))") :contracted :agent))))))
 
-(deftest declaration-admission-refuses-ambiguous-or-incomplete-rows
+(deftest declaration-admission-refuses-ambiguous-or-incomplete-entities
   (testing "one event cannot claim two declaration identity families"
     (let [data
           (refusal-data
@@ -995,9 +995,9 @@
             :seon.fn/arglists "([])"
             :seon.fn/private? false
             :seon.test/subject [:seon.fn/sym (quote sample/subject)]})))
-      "function rows retain their declared test subject during canonicalization"))
+      "function entities retain their declared test subject during canonicalization"))
 
-(deftest schema-row-properties-survive-and-retract-exactly
+(deftest schema-entity-properties-survive-and-retract-exactly
   (let [current {:seon.schema/key :sample/error
                  :seon.schema/form "[:map {:seon.db/attributes false}]"
                  :seon.schema.admission/source :agent
@@ -1013,11 +1013,11 @@
     (fn [connection]
       (let [event (one-event
                    "(seon.schema/register! ::error [:map {:seon.db/attributes false :seon.render/ai seon.render.value/render-ai} [:seon.error/message :seon.error/message]])")
-            row (program/declaration-row (db/carried-projection (db/db connection))
+            entity (program/declaration-row (db/carried-projection (db/db connection))
                                          event :contracted :agent)]
-        (is (= false (:seon.db/attributes row)))
-        (is (= 'seon.render.value/render-ai (:seon.render/ai row)))
-        (is (= :agent (:seon.schema.admission/source row)))))))
+        (is (= false (:seon.db/attributes entity)))
+        (is (= 'seon.render.value/render-ai (:seon.render/ai entity)))
+        (is (= :agent (:seon.schema.admission/source entity)))))))
 
 (deftest arbitrary-qualified-deftest-is-not-a-test-declaration
   (let [source (str "(ns sample (:require [clojure.test :refer [deftest]] "
@@ -1052,17 +1052,17 @@
         (test-support/seed-cluster! connection "registration-test")
         (test-support/transacted!
          connection
-         (into [(test-support/namespace-row (db/db connection) 'my.agents.someone-else)]
+         (into [(test-support/namespace-entity (db/db connection) 'my.agents.someone-else)]
                (agent/creation-tx {:seon.agent/id "registration-test"
                                    :seon.ns/name namespace-name
                                    :seon.cluster/name "registration-test"})))
         (test-support/transacted!
          connection
-         [(test-support/program-fn-row (db/db connection) function-sym
+         [(test-support/program-fn-entity (db/db connection) function-sym
             "(defn same-name {:malli/schema [:=> [:cat] :int]} [] 1)")
-          ;; The canonical producer digests with the namespace row the
+          ;; The canonical producer digests with the namespace entity the
           ;; agent's creation stored, not a fresh one.
-          (test-support/program-row (db/db connection) [:seon.test/sym function-sym]
+          (test-support/program-entity (db/db connection) [:seon.test/sym function-sym]
                                     "(clojure.test/deftest same-name)")])
         (test-support/transacted!
                      connection
@@ -1102,22 +1102,22 @@
            (program/deletion-row event)))))
 
 ;;; ---------------------------------------------------------------------------
-;;; Program row ownership is derived from the declared entity maps
+;;; Program entity ownership is derived from the declared entity maps
 ;;; ---------------------------------------------------------------------------
 
 (defn- program-entity-map
-  "The retained row schema named by an identity attribute's declaration."
+  "The retained entity schema named by an identity attribute's declaration."
   [projection identity-attribute]
   (let [registry (:seon.schema.projection/registry projection)]
     (mr/schema registry (:seon.program/row-schema
                          (m/properties (mr/schema registry identity-attribute))))))
 
-(deftest declaring-an-attribute-on-a-program-row-schema-is-sufficient
+(deftest declaring-an-attribute-on-a-program-entity-schema-is-sufficient
   ;; The class both 7cfe02790 and 925ca19fe hit: an attribute declared on the
-  ;; row schema, emitted by the indexer, and silently dropped because a second
+  ;; entity schema, emitted by the indexer, and silently dropped because a second
   ;; literal list did not name it. Declaration is now the whole requirement.
   (let [forms (schema/registered-schemas)
-        row {:seon.fn/sym (quote sample/f)
+        entity {:seon.fn/sym (quote sample/f)
              :seon.fn/ns [:seon.ns/name 'sample]
              :seon.fn/source "(defn f [] 1)"
              :seon.fn/arglists "([])"
@@ -1126,14 +1126,14 @@
         declared (update-in forms [:seon.fn/fn 2] conj
                          [:sample/declared-schema {:optional true} :string])]
     (is (nil? (:sample/declared-schema
-               (program/canonical-row (program/shapes-in (seon.schema/build-projection forms)) row)))
-        "an undeclared attribute is not a program row attribute")
+               (program/canonical-row (program/shapes-in (seon.schema/build-projection forms)) entity)))
+        "an undeclared attribute is not a program entity attribute")
     (is (= "carried" (:sample/declared-schema
-                      (program/canonical-row (program/shapes-in (seon.schema/build-projection declared)) row)))
+                      (program/canonical-row (program/shapes-in (seon.schema/build-projection declared)) entity)))
         "declaring it on :seon.fn/fn is sufficient — no code names it")
     (is (contains? (set (program/changed-attributes
                          (program/shapes-in (seon.schema/build-projection declared))
-                         row (dissoc row :sample/declared-schema)))
+                         entity (dissoc entity :sample/declared-schema)))
                    :sample/declared-schema)
         "and an exact replacement retracts it when the source stops carrying it"))
   (testing "an entry naming another writer stays out of the indexer's hands"
@@ -1143,21 +1143,21 @@
                            {:optional true
                             :seon.program/written-by 'sample/writer}
                            :string])
-          row {:seon.fn/sym (quote sample/f)
+          entity {:seon.fn/sym (quote sample/f)
                :seon.fn/ns [:seon.ns/name 'sample]
                :seon.fn/source "(defn f [] 1)"
                :seon.fn/arglists "([])"
                :seon.fn/private? false
                :sample/outcome "written elsewhere"}]
       (is (nil? (:sample/outcome
-                 (program/canonical-row (program/shapes-in (seon.schema/build-projection foreign)) row))))
+                 (program/canonical-row (program/shapes-in (seon.schema/build-projection foreign)) entity))))
       (is (not (contains? (set (program/changed-attributes
                                 (program/shapes-in (seon.schema/build-projection foreign))
-                                row (dissoc row :sample/outcome)))
+                                entity (dissoc entity :sample/outcome)))
                           :sample/outcome))
           "so an exact re-index can never retract another writer's fact"))))
 
-(deftest every-program-row-attribute-is-owned-or-names-another-writer
+(deftest every-program-entity-attribute-is-owned-or-names-another-writer
   ;; The drift checker. It fails when a program entity map declares an
   ;; attribute that canonical-row neither keeps nor sees declared as written
   ;; elsewhere — the silent strip cannot return. It also fails LOUDLY when it
@@ -1206,7 +1206,7 @@
               program/identity-attributes)
         "at least one entry declares another writer, so the exclusion is exercised")))
 
-(deftest program-identity-attributes-are-exactly-the-declared-row-schemas
+(deftest program-identity-attributes-are-exactly-the-declared-entity-schemas
   (let [projection (schema/handed-projection)
         forms (:seon.schema.projection/forms projection)
         shapes (program/shapes-in projection)
@@ -1229,7 +1229,7 @@
     (let [database @connection
           projection (schema/handed-projection)
           attributes (program/program-attributes projection)
-          rows (set (db/q '[:find [?e ...] :in $ [?a ...] :where [?e ?a]]
+          entities (set (db/q '[:find [?e ...] :in $ [?a ...] :where [?e ?a]]
                           database attributes))
           census-attributes #{:seon.fn/sym :seon.ns/name :seon.test/sym
                               :seon.schema/key :seon.fn.file/relative-path
@@ -1242,8 +1242,8 @@
           expected (set (db/q '[:find ?a (count ?e) :in $ [?a ...] :where [?e ?a]]
                               database census-attributes))
           selected (set (db/q '[:find ?a (count ?e) :in $ [?a ...] [?e ...]
-                               :where [?e ?a]] database census-attributes rows))]
-      (is (seq rows))
+                               :where [?e ?a]] database census-attributes entities))]
+      (is (seq entities))
       (is (>= (count expected) 9) "The canonical census contains roots and components")
       (is (= expected selected) "The single program query retains the complete schema census")
       (is (every? attributes #{:seon.fn/sym :seon.ns.alias/local
@@ -1275,7 +1275,7 @@
 (deftest a-declaration-added-after-the-first-call-is-a-cache-miss
   ;; THE CLASS. `shapes` cached the authored declarations in a process-level
   ;; defonce, so an attribute declared AFTER this JVM started was stripped
-  ;; from every row the indexer built until a restart: the runner lane
+  ;; from every entity the indexer built until a restart: the runner lane
   ;; declared :seon.test/long-ms, the analyzer lifted it, canonical-row
   ;; dropped it, and the regression read that as "the indexer does not lift
   ;; it" (issue
@@ -1288,20 +1288,20 @@
         before (program/shapes)
         declared (update (schema.edn/packaged-forms) :seon.fn.file/file conj
                          [::declared-after {:optional true} :string])
-        row {:seon.fn.file/relative-path "/probe/after-start.clj"
+        entity {:seon.fn.file/relative-path "/probe/after-start.clj"
              ::declared-after "carried"}]
     (is (not (contains? (owned before) ::declared-after))
         "the attribute is genuinely absent from the authored declarations")
-    (is (nil? (::declared-after (program/canonical-row row)))
-        "so no indexed row carries it while it is undeclared")
+    (is (nil? (::declared-after (program/canonical-row entity)))
+        "so no indexed entity carries it while it is undeclared")
     (let [after (with-redefs [schema.edn/packaged-forms (constantly declared)
                               schema.edn/declaration-stamp
                               (constantly [["declared-after.edn" 1 1]])]
                   (program/shapes))]
       (is (contains? (owned after) ::declared-after)
           "a changed resource stamp re-derives, without restarting the JVM")
-      (is (= row (program/canonical-row (program/shapes-in (seon.schema/build-projection declared)) row))
-          "and the row built from that population carries the attribute"))
+      (is (= entity (program/canonical-row (program/shapes-in (seon.schema/build-projection declared)) entity))
+          "and the entity built from that population carries the attribute"))
     (is (= before (program/shapes))
         "an unchanged stamp answers the same derivation, so the per-row
          caller pays one stamp and never a resource merge")))
@@ -1316,7 +1316,7 @@
                     [:seon.fn/sym (quote sample.s1/right)]
                     [:seon.test/sym (quote sample.s1/paired)]
                     [:seon.schema/key :sample.s1/value]]
-        rows-from
+        entities-from
         (fn [connection]
           (let [database (db/db connection)
                 shapes (program/shapes-in (db/carried-projection database))
@@ -1327,7 +1327,7 @@
                            (is (some? (:db/id pulled)) (pr-str identity))
                            [identity
                             (apply dissoc
-                                   (#'seon.fn/normalized-index-row
+                                   (#'seon.fn/normalized-index-entity
                                     (assoc-in shapes [(first identity) :seon.program/owned-attributes]
                                               (vec (keys pulled)))
                                     database pulled identity-attributes
@@ -1355,7 +1355,7 @@
                                (schema/projection-with-schema projection key definition
                                                               {:seon.schema.admission/source :core}))
                              (db/carried-projection database) fixture-forms)
-                 rows (mapv
+                 entities (mapv
                        #(program/with-contract-facts
                          {:seon.program/row %
                           :seon.program/compile-options (:seon.schema.projection/compile-options projection)
@@ -1364,12 +1364,12 @@
                           :seon.program/schema-forms forms})
                        (into (:seon.fn.file/rows artifact)
                              (map #(accretion/schema-row forms %))
-                             (schema/canonical-schema-rows projection fixture-forms)))
+                             (schema/canonical-schema-entities projection fixture-forms)))
                  selected (filterv #(or (:seon.fn.file/relative-path %)
-                                        (some #{(program/row-identity %)} identities)) rows)]
+                                        (some #{(program/row-identity %)} identities)) entities)]
              (test-support/transacted!
               connection (seon.fn/reconcile-tx database selected []))
-             (rows-from connection))))
+             (entities-from connection))))
         evaluated
         (test-support/with-database
          (fn [connection]
@@ -1410,7 +1410,7 @@
                  (is (empty? (filter :seon.cluster.eval/error evaluations))
                      (pr-str (mapv #(select-keys % [:seon.cluster.eval/source
                                                    :seon.cluster.eval/error]) evaluations))))
-               (rows-from connection)
+               (entities-from connection)
                (finally
                  (agent/disarm! request)
                  (doseq [channel [(:seon.cluster.wake/channel handle)

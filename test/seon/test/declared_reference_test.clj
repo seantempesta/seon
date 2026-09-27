@@ -25,5 +25,5 @@
                      #{} @#'program/declared-reference-rules)]
        (println "indexed declared references ms=" elapsed "edges=" (count actual))
        (is (seq expected) "the canonical publication contains declared references")
-       (is (= expected actual) "capability, function-owned and data-row rules retain their identities")
-       (is (< elapsed 1000.0) "indexed acquisition reads the declared rows, not the entire program")))))
+       (is (= expected actual) "capability, function-owned and data-entity rules retain their identities")
+       (is (< elapsed 1000.0) "indexed acquisition reads the declared entities, not the entire program")))))

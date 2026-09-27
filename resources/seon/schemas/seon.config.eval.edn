@@ -25,12 +25,12 @@
                     [:seon.eval/unadmitted
                      {:optional true
                       :seon.repl/finding :not-admitted
-                      :seon.repl/fix "This form failed, so these definitions stayed private to your context with no program row (no tests, no merge): evaluate each again once its form succeeds."}
+                      :seon.repl/fix "This form failed, so these definitions stayed private to your context with no program entity (no tests, no merge): evaluate each again once its form succeeds."}
                      [:set {:max 0} :qualified-symbol]]
                     [:seon.eval/replaced
                      {:optional true
                       :seon.repl/finding :replaced-definition
-                      :seon.repl/fix "The program advanced over these definitions of yours: their changed program rows replaced them in your context. Evaluate yours again to redefine them."}
+                      :seon.repl/fix "The program advanced over these definitions of yours: their changed program entities replaced them in your context. Evaluate yours again to redefine them."}
                      [:set {:max 0} :qualified-symbol]]
                     [:seon.eval/ungeneratable
                      {:optional true

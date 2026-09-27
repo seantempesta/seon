@@ -245,10 +245,10 @@
  [:string {:min 1}]
 
  ; A refused run settlement's association of a deletion the writer named with
- ; the one form whose settled row proposed it (seon.turn/deletion-proposals).
+ ; the one form whose settled entity proposed it (seon.turn/deletion-proposals).
  ; It is an association, never a cause; ambiguity names its reason instead.
  :seon.turn/unattributed
- [:enum {:description "Why no single form is associated: several rows delete the identity, a row in the run declares it, no settled row deletes it, the named refusal schema is not in the projection, or the claimed deletion evidence does not validate against it."}
+ [:enum {:description "Why no single form is associated: several entities delete the identity, an entity in the run declares it, no settled entity deletes it, the named refusal schema is not in the projection, or the claimed deletion evidence does not validate against it."}
   :several-deletions :declared-in-run :no-deleting-form :unknown-validator-schema :invalid-deletion-evidence]
  :seon.turn/deletion-proposal
  [:or

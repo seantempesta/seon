@@ -99,7 +99,7 @@
   `seon.cluster.agent/creation-tx` recorded for the fixture's own agents."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:vector :map]]}
   [database]
-  (let [rows (db/q '[:find ?turn-t ?ordinal (pull ?evaluation [* {:seon.cluster.eval/ns [:seon.ns/name]}])
+  (let [entities (db/q '[:find ?turn-t ?ordinal (pull ?evaluation [* {:seon.cluster.eval/ns [:seon.ns/name]}])
                      :in $ ?branch
                      :where
                      [?agent :seon.agent/branch ?branch]
@@ -109,9 +109,9 @@
                      [?turn :seon.turn/id _ ?turn-t]
                      [?evaluation :seon.cluster.eval/ordinal ?ordinal]]
                    database (get-in database [:config :branch]))]
-    (when (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows))
-      (throw (ex-info "The evaluation observation was refused." rows)))
-    (mapv #(nth % 2) (sort-by #(subvec % 0 2) rows))))
+    (when (or (:seon.db/invalid-read entities) (:seon.schema/expected-value entities))
+      (throw (ex-info "The evaluation observation was refused." entities)))
+    (mapv #(nth % 2) (sort-by #(subvec % 0 2) entities))))
 
 ;;; THE REAL EVALUATOR, injected through the same seam. The one thing it
 ;;; adds is the deadline: `turn` passes source + caps only, so the time
@@ -123,13 +123,13 @@
 ;;; deadline dial, the error disposition, and the cluster's ONE live ctx.
 ;;; This is the real evaluator, injected exactly as production injects it.
 
-(defn- namespace-row
+(defn- namespace-entity
   "A namespace row absent from the fixture branch, carrying the required
   definition digest its owner derives (`seon.program/definition-digest`)."
   {:malli/schema [:=> [:cat :seon.ns/name] :map]}
   [namespace-name]
-  (let [row {:seon.ns/name namespace-name}]
-    (assoc row :seon.program/definition-digest (program/definition-digest row))))
+  (let [entity {:seon.ns/name namespace-name}]
+    (assoc entity :seon.program/definition-digest (program/definition-digest entity))))
 
 (defn- named-cluster-ctx
   "A fresh cluster context acquired from `connection`'s current value, for
@@ -241,10 +241,10 @@
           (throw (ex-info "Turn fixture cluster was refused." result))))
       (let [result
             (db/transact! connection
-                  (into [(namespace-row 'clojure.set)
-                         (namespace-row 'clojure.test)
+                  (into [(namespace-entity 'clojure.set)
+                         (namespace-entity 'clojure.test)
                          {:seon.ns/name 'seon.schema}
-                         (namespace-row 'my.agents.agent-a)]
+                         (namespace-entity 'my.agents.agent-a)]
                         cat
                         [(test-support/agent-tx @connection "agent-a")
                          [{:seon.message/id "m-1" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "count the widgets"}]]))]
@@ -553,7 +553,7 @@
                              (nil? (:seon.cluster.eval/interrupted-at %))) evaluations))
             (is (nil? (turn/next-agent-work database (request connection))))))))))
 
-;;; A receipt is an execution observation, never a program row. Settling an
+;;; A receipt is an execution observation, never a program entity. Settling an
 ;;; ordinary form used to assert its static `:seon.fn/calls` on the receipt,
 ;;; advancing a program attribute's Datahike revision
 ;;; (`reference-code/datahike/src/datahike/query.cljc:2568-2589`) and so
@@ -620,7 +620,7 @@
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)]
         (test-support/transacted! connection
-                                [(namespace-row 'my.agents.agent-a)
+                                [(namespace-entity 'my.agents.agent-a)
                                  {:seon.agent/id "agent-a"
                                   :seon.agent/namespace
                                   [:seon.ns/name 'my.agents.agent-a]}])
@@ -742,13 +742,13 @@
                  "(resolve 'String)"
                  {:ns (sci.core/create-ns 'my.agents.agent-a)})))
               "the supplied run ctx receives the exact isolated state")
-          (let [namespace-row
+          (let [namespace-entity
                 (db/pull @connection
                         '[* {:seon.ns/imports [*]}]
                         [:seon.ns/name 'my.agents.agent-a])
                 import-mask
                 (some #(when (= 'String (:seon.ns.import/local %)) %)
-                      (:seon.ns/imports namespace-row))
+                      (:seon.ns/imports namespace-entity))
                 fresh (named-cluster-ctx connection "turn-test")]
             (is (= {:seon.ns.import/local 'String}
                    (dissoc import-mask :db/id))
@@ -771,17 +771,17 @@
              {:seon.ai/text
               "(import java.lang.String)"})]
           (drive! cluster 10)
-          (let [namespace-row
+          (let [namespace-entity
                 (db/pull @connection
                         '[* {:seon.ns/imports [*]}]
                         [:seon.ns/name 'my.agents.agent-a])
-                import-row
+                import-entity
                 (some #(when (= 'String (:seon.ns.import/local %)) %)
-                      (:seon.ns/imports namespace-row))
+                      (:seon.ns/imports namespace-entity))
                 fresh (named-cluster-ctx connection "turn-test")]
             (is (= {:seon.ns.import/local 'String
                     :seon.ns.import/target-class 'java.lang.String}
-                   (dissoc import-row :db/id))
+                   (dissoc import-entity :db/id))
                 "the database stores only symbols, never a Class object")
             (is (= 'java.lang.String
                    (get-in (sci.core/namespace-bindings
@@ -807,15 +807,15 @@
                 transact! db/transact!
                 original-install! sci.eval/install-row!
                 installations (atom [])
-                ;; the deletion's subject is the stored first-party row, as
-                ;; indexed (no planted row: the writer checks its digest)
+                ;; the deletion's subject is the stored first-party entity, as
+                ;; indexed (no planted entity: the writer checks its digest)
                 stored-source (:seon.fn/source
                                (db/pull @connection [:seon.fn/source]
                                         [:seon.fn/sym 'seon.config/defaults]))]
             (let [seed (db/transact!
              connection
              (into
-              [(namespace-row 'my.agents.peer)]
+              [(namespace-entity 'my.agents.peer)]
               cat
               [(test-support/agent-tx @connection "peer")
                [{:db/id [:seon.config/cluster "turn-test"]
@@ -916,7 +916,7 @@
                         (db/pull db
                                 [:seon.fn/source]
                                 [:seon.fn/sym 'seon.config/defaults])))
-                    "commit-first leaves the program row unchanged")
+                    "commit-first leaves the program entity unchanged")
                 (test-support/transacted!
                              connection
                              [{:seon.message/id "peer-follow-up" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/from [:seon.agent/id "peer"] :seon.message/content "Try again after reading the error."}])
@@ -974,7 +974,7 @@
                        (agent-evaluations (db/db connection))))
               "each submitted source records the namespace in which it was read"))))))
 
-(deftest contracted-redefinition-exactly-replaces-the-row
+(deftest contracted-redefinition-exactly-replaces-the-entity
   (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)]
@@ -991,16 +991,16 @@
           (drive-agent! cluster "agent-a" 2)
           (is (= "3"
                  (:seon.eval/shown (nth (agent-evaluations (db/db connection)) 2))))
-          (let [row (db/pull @connection
+          (let [entity (db/pull @connection
                             '[*]
                             [:seon.fn/sym (symbol "my.agents.agent-a" "f")])]
             (is (= "(defn ^{:malli/schema [:=> [:cat :int] :int]} f [x] (+ x 2))"
-                   (:seon.fn/source row)))
-            (is (= :agent (:seon.schema.admission/source row)))
-            (is (not (contains? row :seon.fn/doc)))
-            (is (not (contains? row :seon.fn/workload)))))))))
+                   (:seon.fn/source entity)))
+            (is (= :agent (:seon.schema.admission/source entity)))
+            (is (not (contains? entity :seon.fn/doc)))
+            (is (not (contains? entity :seon.fn/workload)))))))))
 
-(deftest a-refused-contract-commits-a-receipt-and-no-row
+(deftest a-refused-contract-commits-a-receipt-and-no-entity
   (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)]
@@ -1040,9 +1040,9 @@
                "(seon.run/complete \"schemas committed\")")})]
           (drive-agent! cluster "agent-a" 2)
           (let [db @connection
-                persistent-row
+                persistent-entity
                 (db/pull db '[*] [:seon.schema/key persistent-key])
-                value-row (db/pull db '[*] [:seon.schema/key value-key])
+                value-entity (db/pull db '[*] [:seon.schema/key value-key])
                 tx-pairs
                 (db/q '[:find ?schema-tx ?receipt-tx
                        :in $ ?schema-key
@@ -1054,26 +1054,26 @@
                        [?receipt :seon.cluster.eval/author :agent]]
                      db persistent-key)]
             (is (= "[:int {:min 0, :seon.db/index true}]"
-                   (:seon.schema/form persistent-row))
-                "the row contains evaluated canonical EDN, not `(vector ...)`")
+                   (:seon.schema/form persistent-entity))
+                "the entity contains evaluated canonical EDN, not `(vector ...)`")
             (is (= "[:string {:min 1}]"
-                   (:seon.schema/form value-row)))
+                   (:seon.schema/form value-entity)))
             (is (= :agent
-                   (:seon.schema.admission/source persistent-row)
-                   (:seon.schema.admission/source value-row)))
+                   (:seon.schema.admission/source persistent-entity)
+                   (:seon.schema.admission/source value-entity)))
             (is (= :db.unique/identity
                    (get-in db [:schema :seon.schema/key :db/unique]))
                 "the schema key is its global identity")
             (is (= 'my.agents.agent-a
                    (:seon.ns/name
                     (db/pull db [:seon.ns/name]
-                             (:db/id (:seon.schema/ns persistent-row)))))
+                             (:db/id (:seon.schema/ns persistent-entity)))))
                 "the namespace ref records where the global declaration was authored")
             (is (= 1 (count tx-pairs)))
             (is (every? (fn [[schema-tx receipt-tx]]
                           (= schema-tx receipt-tx))
                         tx-pairs)
-                "the schema row and terminal receipt are one commit")
+                "the schema entity and terminal receipt are one commit")
             (is (contains? (:schema db) persistent-key)
                 "an explicit persistence property installs the Datahike attribute")
             (is (not (contains? (:schema db) value-key))
@@ -1112,9 +1112,9 @@
                "(seon.run/complete \"refined\")")})]
           (drive! cluster 10)
           (let [database @connection
-                row (db/pull database '[*] [:seon.schema/key schema-key])
+                entity (db/pull database '[*] [:seon.schema/key schema-key])
                 evaluations (agent-evaluations database)]
-            (is (= ":int" (:seon.schema/form row))
+            (is (= ":int" (:seon.schema/form entity))
                 "the run's own unconsumed key refines to its latest form")
             (is (= (pr-str schema-key) (get-in evaluations [1 :seon.eval/shown])))
             (is (= (pr-str schema-key) (get-in evaluations [2 :seon.eval/shown]))
@@ -1313,18 +1313,18 @@
                           @connection))
               "the existing peer evaluates the accepted first-party definition")
           ;; RESTORE THE INDEXED CORE ROW EXACTLY: an upsert of the pulled
-          ;; original keeps the agent row's extra attributes, so the writer
+          ;; original keeps the agent entity's extra attributes, so the writer
           ;; refuses its digest (79b6d9abd); the replacement retracts them.
           (test-support/transacted!
            connection
            (program/exact-replacement-tx
             (db/pull @connection '[*] [:seon.fn/sym function-symbol])
-            (test-support/program-fn-row function-symbol)))
+            (test-support/program-fn-entity function-symbol)))
           (is (= (:seon.program/definition-digest original)
                  (:seon.program/definition-digest
                   (db/pull @connection [:seon.program/definition-digest]
                            [:seon.fn/sym function-symbol])))
-              "the restored row is the indexed core declaration")
+              "the restored entity is the indexed core declaration")
           (sci.eval/acquire! {:seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
                              :seon.db/db @connection})
           (doseq [agent-id ["agent-a" "s3-peer"]]
@@ -1357,7 +1357,7 @@
           (drive-agent! cluster "agent-a" 2)
           (test-support/transacted!
                        connection
-                       (into [(namespace-row 'my.agents.agent-b)]
+                       (into [(namespace-entity 'my.agents.agent-b)]
                              cat
                              [(test-support/agent-tx @connection "agent-b")
                               [{:seon.message/id "m-contract-agent-b" :seon.message/to [:seon.agent/id "agent-b"] :seon.message/content "violate the published contract"}]]))
@@ -1451,7 +1451,7 @@
             namespace-result
             (test-support/transacted!
              connection
-             [(test-support/namespace-row @connection 'authored.target)
+             [(test-support/namespace-entity @connection 'authored.target)
               (program/declaration-row
                (db/carried-projection @connection)
                {:seon.ns/name 'authored.consumer
@@ -1484,15 +1484,15 @@
                   :seon.ns.alias/target-ns 'alias.cycle-a}]}
                :all :agent)])
             ;; Agent definitions analyzed through the production source path
-            ;; with their real digests (79b6d9abd refuses hand-built rows);
+            ;; with their real digests (79b6d9abd refuses hand-built entities);
             ;; `transacted!` stops here if the writer refuses them.
             function-result
             (test-support/transacted!
              connection
-             [(test-support/program-fn-row
+             [(test-support/program-fn-entity
                (db/db connection) 'authored.target/increment target-source
                {:seon.schema.admission/source :agent})
-              (test-support/program-fn-row
+              (test-support/program-fn-entity
                (db/db connection) 'authored.consumer/call-plus consumer-source
                {:seon.schema.admission/source :agent})])
             database (db/db connection)
@@ -1609,8 +1609,8 @@
             unbound-source "(inc \"x\")"]
         (test-support/transacted!
                      connection
-                     (into [(namespace-row 'my.gen.planner)
-                            (namespace-row 'my.gen.alpha)]
+                     (into [(namespace-entity 'my.gen.planner)
+                            (namespace-entity 'my.gen.alpha)]
                            cat
                            [(test-support/agent-tx @connection "agent-b" 'my.gen.alpha)
                             ;; agent-a is the cluster fixture's own agent: reassign it.
@@ -1624,7 +1624,7 @@
                      connection
                      (into
                       ;; ONE ENTITY PER (run, ordinal): the frozen source and namespace
-                      ;; ride the evaluation the start mints. There is no twin row to
+                      ;; ride the evaluation the start mints. There is no twin entity to
                       ;; assert beside it.
                       [{:seon.agent/id "agent-a"
                         }]
@@ -1790,7 +1790,7 @@
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             installed (atom [])
-            install-row! sci.eval/install-row!
+            install-entity! sci.eval/install-row!
             schema-key :shared.runtime/combined
             declaration (str "(seon.schema/register! :shared.runtime/combined "
                              "(do (println \"combined output\") :string))")
@@ -1798,7 +1798,7 @@
         (with-redefs [ai/complete (fn [_projection _] {:seon.ai/text source})
                       sci.eval/install-row!
                       (fn [request]
-                        (let [result (install-row! request)]
+                        (let [result (install-entity! request)]
                           (swap! installed conj request)
                           result))]
           (is (= [:open :call]
@@ -1885,7 +1885,7 @@
 ;;; EVERY ONE OF THESE COUNTS. "Nothing re-calls a request that may have
 ;;; been transmitted" is not a claim a test can inspect for — it is a
 ;;; NUMBER, and the number is asserted twice: once as calls this process
-;;; made, and once as durable rows the database can be asked about
+;;; made, and once as durable entities the database can be asked about
 ;;; afterwards without any logs.
 
 (def ^:private backup-target
@@ -1945,7 +1945,7 @@
       (swap! requests conj request)
       (nth answers index (last answers)))))
 
-(defn- attempt-rows
+(defn- attempt-entities
   "Every attempt this database recorded, in chain order."
   [db]
   (->> (db/q '[:find [?attempt ...]
@@ -1978,14 +1978,14 @@
   The attempt's error fact carries the evidence, and the backup role is
   the `failover-from` connection — a stored disposition would only
   restate this derivation (owner ruling 2026-07-28)."
-  [db row backup-configured?]
-  (let [fact (durable-fact db (:db/id (:seon.ai.attempt/error row)))
+  [db entity backup-configured?]
+  (let [fact (durable-fact db (:db/id (:seon.ai.attempt/error entity)))
         value (semantic-result (:seon.error/data-edn fact))]
     (ai/disposition
      {:seon.error/value value
       :seon.ai/backup? (boolean
                         (and backup-configured?
-                             (not (contains? row
+                             (not (contains? entity
                                              :seon.ai.attempt/failover-from))))})))
 
 (deftest successful-call-persists-the-providers-open-usage-document
@@ -2013,21 +2013,21 @@
                          :seon.ai/usage usage
                          :seon.ai/finish-reason "stop"}])]
           (drive-agent! cluster "agent-a" 2))
-        (let [[row :as rows] (attempt-rows @connection)]
-          (is (= 1 (count rows)))
+        (let [[entity :as entities] (attempt-entities @connection)]
+          (is (= 1 (count entities)))
           (is (= usage
-                 (edn/read-string (:seon.ai.attempt/usage-edn row)))
+                 (edn/read-string (:seon.ai.attempt/usage-edn entity)))
               "the provider-owned map survives the database round trip")
           (is (= 23
                  (:seon.ai.usage/cached-tokens
                   (ai/normalize-usage
-                   (edn/read-string (:seon.ai.attempt/usage-edn row)))))
+                   (edn/read-string (:seon.ai.attempt/usage-edn entity)))))
               "DeepSeek's cache-hit tokens normalize from the stored document")
           (is (if retain?
-                (= "private reasoning" (:seon.ai.attempt/reasoning row))
-                (not (contains? row :seon.ai.attempt/reasoning)))
-              "settled reasoning reaches the same durable attempt row")
-          (is (= "stop" (:seon.ai.attempt/finish-reason row))
+                (= "private reasoning" (:seon.ai.attempt/reasoning entity))
+                (not (contains? entity :seon.ai.attempt/reasoning)))
+              "settled reasoning reaches the same durable attempt entity")
+          (is (= "stop" (:seon.ai.attempt/finish-reason entity))
               "finish reason is its own fact, never inserted into usage")))))))
 
 (deftest a-partial-stream-truncation-is-a-durable-nonfailure-attempt-fact
@@ -2074,7 +2074,7 @@
                       [?attempt :seon.ai.attempt/truncation ?truncation]
                       [?truncation :seon.error/id ?truncation-id]]
                     database attempt-id)
-              row (db/pull database '[*]
+              entity (db/pull database '[*]
                            [:seon.ai.attempt/id attempt-id])
               fact (durable-fact database [:seon.error/id truncation-id])]
           (is (= 1 (count @requests)))
@@ -2085,7 +2085,7 @@
           (is (= truncation
                  (semantic-result (:seon.error/data-edn fact)))
               "the durable fact retains why and where the stream ended")
-          (is (not (contains? row :seon.ai.attempt/error))
+          (is (not (contains? entity :seon.ai.attempt/error))
               "partial output remains an ordinary completion, not a failure")
           (is (some? (db/q '[:find ?digest .
                             :where
@@ -2123,16 +2123,16 @@
                                       {:seon.config.ai/retain-reasoning true}}])))))
         (with-redefs [ai/complete (recording-completer requests [failure])]
           (drive-agent! cluster "agent-a" 2))
-        (let [[row :as rows] (attempt-rows @connection)
+        (let [[entity :as entities] (attempt-entities @connection)
               error-fact (db/pull @connection '[*]
-                                 (:db/id (:seon.ai.attempt/error row)))]
-          (is (= 1 (count rows)))
+                                 (:db/id (:seon.ai.attempt/error entity)))]
+          (is (= 1 (count entities)))
           (is (= usage
-                 (edn/read-string (:seon.ai.attempt/usage-edn row))))
-          (is (= "length" (:seon.ai.attempt/finish-reason row)))
+                 (edn/read-string (:seon.ai.attempt/usage-edn entity))))
+          (is (= "length" (:seon.ai.attempt/finish-reason entity)))
           (is (if retain?
-                (= "all reasoning" (:seon.ai.attempt/reasoning row))
-                (not (contains? row :seon.ai.attempt/reasoning)))
+                (= "all reasoning" (:seon.ai.attempt/reasoning entity))
+                (not (contains? entity :seon.ai.attempt/reasoning)))
               "reasoning-only starvation still persists the settled trace")
           (is (string? (:seon.ai/exhausted-finish-reason error-fact))
               "the attempt points at the named starvation error fact")))))))
@@ -2153,8 +2153,8 @@
                      :seon.sci.admit/value (seon.run/complete "backed up")}]
             (drive! cluster 10)))
         (let [[primary-request backup-request] @requests
-              rows (attempt-rows @connection)
-              [primary-row backup-row] rows]
+              entities (attempt-entities @connection)
+              [primary-entity backup-entity] entities]
           (testing "EXACTLY two request builds — the backup is one call,
           not a retry loop that happens to stop"
             (is (= 2 (count @requests))))
@@ -2181,24 +2181,24 @@
                       (error/notice {:seon.error/fact fact
                                      :seon.error/reason :failover}))
                      (:seon.ai/system backup-request)))))
-          (testing "two attempt rows tell the whole story"
-            (is (= 2 (count rows)))
+          (testing "two attempt entities tell the whole story"
+            (is (= 2 (count entities)))
             (is (= [true false]
-                   (mapv #(contains? % :seon.ai.attempt/error) rows))
+                   (mapv #(contains? % :seon.ai.attempt/error) entities))
                 "the error ref's presence IS the outcome")
             (is (= :failover-now
-                   (derived-disposition @connection primary-row true))
+                   (derived-disposition @connection primary-entity true))
                 "and WHY the second call was allowed is derivable from
                  the durable evidence alone — never a stored label")
-            (is (false? (:seon.ai/request-transmitted? primary-row))
-                "the evidence that made it allowed is on the row too")
-            (is (some? (:seon.ai.attempt/error primary-row))
+            (is (false? (:seon.ai/request-transmitted? primary-entity))
+                "the evidence that made it allowed is on the entity too")
+            (is (some? (:seon.ai.attempt/error primary-entity))
                 "the failed attempt points at its error fact")
-            (is (= (:db/id primary-row)
-                   (:db/id (:seon.ai.attempt/failover-from backup-row)))
+            (is (= (:db/id primary-entity)
+                   (:db/id (:seon.ai.attempt/failover-from backup-entity)))
                 "and the backup points at the attempt it replaced —
                  role by connection, never a :primary/:backup stamp")
-            (is (not (contains? backup-row :seon.ai.attempt/delay-ms))
+            (is (not (contains? backup-entity :seon.ai.attempt/delay-ms))
                 "a failover waits for nothing"))
           (testing "the run proceeded on the backup's answer"
             (is (some? (db/q '[:find ?d . :where
@@ -2295,10 +2295,10 @@
            trace []]
       (let [{::keys [outcome] :as generated} (answer ordinal)
             failed? (= :failure outcome)
-            row (cond-> {::model target ::failed? failed?}
+            entity (cond-> {::model target ::failed? failed?}
                   failover? (assoc ::failover? true)
                   delay (assoc ::delay-ms delay))
-            trace (conj trace row)
+            trace (conj trace entity)
             disposition (when failed?
                           (oracle-disposition generated
                                               (and backup?
@@ -2313,15 +2313,15 @@
           :else {::attempts trace ::succeeded? false})))))
 
 (defn- actual-attempt-shape
-  [row]
-  (cond-> {::model (if (= "backup-probe" (:seon.ai/model row))
+  [entity]
+  (cond-> {::model (if (= "backup-probe" (:seon.ai/model entity))
                      :backup
                      :primary)
-           ::failed? (contains? row :seon.ai.attempt/error)}
-    (contains? row :seon.ai.attempt/failover-from)
+           ::failed? (contains? entity :seon.ai.attempt/error)}
+    (contains? entity :seon.ai.attempt/failover-from)
     (assoc ::failover? true)
-    (contains? row :seon.ai.attempt/delay-ms)
-    (assoc ::delay-ms (:seon.ai.attempt/delay-ms row))))
+    (contains? entity :seon.ai.attempt/delay-ms)
+    (assoc ::delay-ms (:seon.ai.attempt/delay-ms entity))))
 
 (defn- generated-turn-agrees-with-durable-facts?
   {:malli/schema [:=> [:cat :map] :boolean]}
@@ -2345,7 +2345,7 @@
                         (swap! committed-prefixes
                                conj
                                (mapv actual-attempt-shape
-                                     (attempt-rows @connection)))
+                                     (attempt-entities @connection)))
                         (let [ordinal (count @requests)]
                           (swap! requests conj request)
                           (nth completions ordinal (last completions))))]
@@ -2377,9 +2377,9 @@
             (throw (ex-info "The generated scenario seed was refused." report))))
         (with-redefs [ai/complete complete!]
           (drive! cluster 12))
-        (let [rows (attempt-rows @connection)
-              actual (mapv actual-attempt-shape rows)
-              run-row (db/q '[:find (pull ?run [*]) .
+        (let [entities (attempt-entities @connection)
+              actual (mapv actual-attempt-shape entities)
+              run-entity (db/q '[:find (pull ?run [*]) .
                              :where [?run :seon.turn/attempts _]]
                            @connection)]
           (and
@@ -2392,13 +2392,13 @@
                        :backup
                        :primary)
                     @requests))
-           (= (vec (range (count rows)))
-              (mapv :seon.ai.attempt/ordinal rows))
-           (every? #(not (contains? % :seon.ai/disposition)) rows)
-           (contains? run-row :seon.turn/closed-tx)
+           (= (vec (range (count entities)))
+              (mapv :seon.ai.attempt/ordinal entities))
+           (every? #(not (contains? % :seon.ai/disposition)) entities)
+           (contains? run-entity :seon.turn/closed-tx)
            (= 1 (turn/episode-runs @connection "agent-a"))
            (= succeeded?
-              (contains? run-row :seon.turn/reply-size))))))))
+              (contains? run-entity :seon.turn/reply-size))))))))
 
 (deftest generated-model-attempt-traces-preserve-presence-and-episode-laws
   (test-support/assert-check!
@@ -2418,7 +2418,7 @@
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             requests (atom [])]
-        (is (some? (:db-after (db/transact! connection (into [(namespace-row 'my.agents.agent-b)] (test-support/agent-tx @connection "agent-b"))))))
+        (is (some? (:db-after (db/transact! connection (into [(namespace-entity 'my.agents.agent-b)] (test-support/agent-tx @connection "agent-b"))))))
         (with-redefs [ai/complete
                       (recording-completer
                        requests
@@ -2549,12 +2549,12 @@
                           outcome)))]
                    (turn/turn {:seon.turn.loop/cluster cluster
                                :seon.turn.work/next call-work} now))))
-            (let [row (db/pull @connection
+            (let [entity (db/pull @connection
                                '[:seon.turn/reply
                                  {:seon.turn/trigger [:seon.message/id]}]
                                [:seon.turn/id run-id])]
-              (is (= source (:seon.turn/reply row)))
-              (is (= "m-1" (get-in row [:seon.turn/trigger :seon.message/id]))))
+              (is (= source (:seon.turn/reply entity)))
+              (is (= "m-1" (get-in entity [:seon.turn/trigger :seon.message/id]))))
             (is (zero? @evaluations))
             (is (= [0 1 2] (unsettled-ordinals @connection run-id)))
             ;; Execute a real prefix without invoking the settlement writer.
@@ -2589,10 +2589,10 @@
             (is (= [0 1 2] (unsettled-ordinals @connection run-id)))
             (is (some? (:db-after (recover-cut-run! connection run-id))))
             (is (empty? (unsettled-ordinals @connection run-id)))
-            (let [row (db/pull @connection [:seon.turn/closed-tx]
+            (let [entity (db/pull @connection [:seon.turn/closed-tx]
                                [:seon.turn/id run-id])
                   work (turn/next-agent-work @connection (request connection))]
-              (is (some? (:seon.turn/closed-tx row)))
+              (is (some? (:seon.turn/closed-tx entity)))
               (is (= :open (:seon.turn.work/situation work))
                   "an interrupted turn has not answered the wake")
               (is (not= run-id (:seon.turn/id work))
@@ -2714,7 +2714,7 @@
               (is (empty? (:seon.fn/calls
                            (db/pull (db/db connection) [:seon.fn/calls]
                                     (:db/id (nth evaluations 2)))))
-                  "a receipt asserts no program call edge; the definition row owns its edges")
+                  "a receipt asserts no program call edge; the definition entity owns its edges")
               (is (pos? @install-nanos) "the definition install was observed")
               ;; WANTED (55b5b580f, 8cedbee81): the intent is the one
               ;; `db/transact!` write; each form then settles through the
@@ -2780,7 +2780,7 @@
               function-symbol (symbol "my.agents.agent-a" "extract-id")
               test-symbol (symbol "my.agents.agent-a" "extract-id-test")
               ;; Call edges are symbols (0e8f7d323), not refs: pulled plainly.
-              function-row
+              function-entity
               (db/pull database
                        '[:seon.fn/sym :seon.fn/spec :seon.fn/calls]
                        [:seon.fn/sym function-symbol])
@@ -2810,9 +2810,9 @@
               "every form of a batched turn settles its own result")
           (is (= [test-symbol]
                  (seon.fn/tests-reaching database function-symbol)))
-          (is (contains? (set (:seon.fn/calls function-row))
+          (is (contains? (set (:seon.fn/calls function-entity))
                          'clojure.core/inc)
-              "the function row carries its kondo-resolved population call")
+              "the function entity carries its kondo-resolved population call")
           (is (= #{:my.agents.agent-a/item} (set direct-contract-keys)))
           (is (= #{:my.agents.agent-a/item-id} (set child-schema-keys))
               "the stored contract and registry references expose child keys")
@@ -2820,8 +2820,8 @@
                           :where [?entity :seon.db/read-result _]]
                         database)))
               "the removed attribute cannot admit a read-result datom")
-          (is (not (contains? function-row :seon.cluster.eval/source))
-              "program facts and eval facts remain separate row families"))))))
+          (is (not (contains? function-entity :seon.cluster.eval/source))
+              "program facts and eval facts remain separate entity families"))))))
 
 (deftest singleton-enum-uses-are-members-of-their-declared-enums
   (let [forms (schema.edn/packaged-forms)
@@ -2919,7 +2919,7 @@
             sequence-number (atom 0)
             cluster (assoc cluster :seon.config.error/escalate-to "root")
             run-phases (schema/enum-members (schema/handed-projection) :seon.turn.loop/phase)]
-        (test-support/transacted! connection (into [(namespace-row 'my.agents.root)] (test-support/agent-tx @connection "root")))
+        (test-support/transacted! connection (into [(namespace-entity 'my.agents.root)] (test-support/agent-tx @connection "root")))
         (test-support/assert-check!
          (tc/quick-check
           24
@@ -3167,7 +3167,7 @@
 (deftest streaming-writes-zero-datoms-test
   ;; ORACLE: a stubbed STREAMED :call through the real turn, with the
   ;; real channel sink. The datom census over the whole turn contains
-  ;; only the attempt row, the capture and the terminal facts — ZERO
+  ;; only the attempt entity, the capture and the terminal facts — ZERO
   ;; streaming datoms, because the registry no longer contains any
   ;; `:seon.ai.stream/*` attribute to write. The render proc's ping
   ;; shows no partial after the terminal FACT repaints, and
@@ -3212,7 +3212,7 @@
                   ;; the census that matters is over the attributes that
                   ;; EXIST: nothing can have been written under a family
                   ;; the registry does not install, so the class is dead
-                  ;; by construction rather than by counting rows
+                  ;; by construction rather than by counting entities
                   (is (empty?
                        (db/q '[:find [?ident ...]
                               :where [_ :db/ident ?ident]
@@ -3225,11 +3225,11 @@
                   (is (pos? (- (:max-tx db) basis-before))
                       "while the turn's OWN facts did commit")))
 
-              (testing "the attempt row and the terminal facts are what landed"
+              (testing "the attempt entity and the terminal facts are what landed"
                 (is (= 1 (count (db/q '[:find ?e :where
                                        [?e :seon.ai.attempt/ordinal _]]
                                      @connection)))
-                    "ONE attempt row for the one paid call")
+                    "ONE attempt entity for the one paid call")
                 (is (= (pr-str (seon.run/complete "streamed home"))
                        (:seon.eval/shown (first (agent-evaluations @connection))))
                     "the terminal evaluation saved the exact completion"))

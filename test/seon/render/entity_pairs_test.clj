@@ -19,11 +19,11 @@
      (let [report
            (support/transacted! connection
              (into (support/agent-tx @connection "entity-pairs-agent")
-               [(support/namespace-row @connection 'entity-pairs.fixture)
+               [(support/namespace-entity @connection 'entity-pairs.fixture)
               
-                (support/program-fn-row (db/db connection) 'entity-pairs.fixture/function
+                (support/program-fn-entity (db/db connection) 'entity-pairs.fixture/function
                                         "(defn function [] true)")
-                (support/program-row (db/db connection) [:seon.test/sym 'entity-pairs.fixture/test]
+                (support/program-entity (db/db connection) [:seon.test/sym 'entity-pairs.fixture/test]
                                      "(clojure.test/deftest test (clojure.test/is true))"
                                      {:seon.fn/calls #{'entity-pairs.fixture/function}})
                 {:seon.issue/id "entity-pairs-issue"
@@ -153,14 +153,14 @@
 
 (deftest ^{:seon/tasks #{"15a0784f82d5"}} declared-identity-and-producer-lookups-name-their-owners
   ;; Slices 0a/0b of the one render path: ownership is the identity
-  ;; attribute's declared row schema over a closed key set, and an error's
+  ;; attribute's declared entity schema over a closed key set, and an error's
   ;; renderer follows the schema its producer declared.
   (let [projection (schema/handed-projection)
         owner #(#'render/entity-owner projection % nil)
         ambiguous (#'render/ambiguity 'entity-pairs.fixture :seon.render/ai
                                       ['entity-pairs.fixture/a 'entity-pairs.fixture/b])]
     ;; A partial map stays a partial map (M5 958bf0ed6, task 135d92ea1308):
-    ;; owning is satisfying the row. A complete row is owned in
+    ;; owning is satisfying the entity. A complete entity is owned in
     ;; an-inline-face-overrides-the-schema-default-for-just-that-face.
     (is (nil? (owner {:seon.agent/id "root"})) "a partial entity is not owned")
     (is (nil? (owner {:seon.agent/id "root" :seon.render/output :seon.render/ai}))
@@ -194,7 +194,7 @@
   ;; itself, each face independent of the other and of the schema default.
   (support/with-database
    (fn [connection]
-     ;; A complete agent row (canonical writer, pulled): a partial map is not
+     ;; A complete agent entity (canonical writer, pulled): a partial map is not
      ;; an agent (M5 958bf0ed6).
      (support/transacted! connection (support/agent-tx @connection "inline-face"))
      (let [database (db/db connection)
@@ -240,7 +240,7 @@
      (support/transacted! connection (support/agent-tx @connection "someone"))
      (support/transacted!
       connection
-      [(support/program-fn-row
+      [(support/program-fn-entity
         (db/db connection) 'my.agents.viewer/agent-view
         "(defn agent-view {:malli/schema [:=> [:cat [:map [:seon.agent/id :seon.agent/id]]] :seon.render/ai]} [unit] \"viewer's view\")")])
      (let [database (db/db connection)
@@ -254,7 +254,7 @@
                                  :seon.sci.admit/caps (config/result-caps config/defaults)
                                  :seon.sci.eval/time-limit-ms 5000}
                           viewer (assoc :seon.agent/id viewer)))))
-           ;; a complete row: a partial map is not an agent (M5 958bf0ed6)
+           ;; a complete entity: a partial map is not an agent (M5 958bf0ed6)
            agent-value (db/pull database '[*] [:seon.agent/id "someone"])]
        (is (= 'seon.cluster.agent/render-identity-ai (selected nil agent-value :seon.render/ai))
            "with no viewing agent the schema default renders")
@@ -277,7 +277,7 @@
      (let [earlier (db/db connection)]
        (support/transacted!
         connection
-        [(support/program-fn-row
+        [(support/program-fn-entity
           (db/db connection) 'my.agents.db-viewer/probe-view
           "(defn probe-view {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/ai]} [unit] (str \"db:\" (some-> (:seon.db/db unit) :max-tx)))")])
        (let [database (db/db connection)

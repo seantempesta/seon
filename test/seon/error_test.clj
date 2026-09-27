@@ -48,18 +48,18 @@
        (is (:seon.error/signature
             (db/pull (:db-after report) '[*] (:seon.error/ref recording))))))))
 
-(deftest row-acquisition-observations-have-no-program-digest-promise
+(deftest entity-acquisition-observations-have-no-program-digest-promise
   (test-support/with-database
    (fn [connection]
      (doseq [lookup [[:seon.fn/sym 'seon.id/id] [:seon.ns/name 'seon.id]]]
       (let [database (db/db connection)
            projection (schema/handed-projection)
-           row (db/pull database '[*] lookup)
+           entity (db/pull database '[*] lookup)
            observation (test-support/refusal-data
-                        #(@#'sci.eval/acquisition-refusal row
-                          (ex-info "row installation failed" {:seon.error-test/cause 42})))]
+                        #(@#'sci.eval/acquisition-refusal entity
+                          (ex-info "entity installation failed" {:seon.error-test/cause 42})))]
        (is (= (second lookup) (:seon.sci.eval/row-symbol observation)))
-       (is (= "row installation failed"
+       (is (= "entity installation failed"
               (get-in observation [:seon.sci.eval/acquisition-observation
                                    :seon.error.evidence/value])))
        (is (not (contains? observation :seon.sci.eval/requested-program)))
@@ -97,14 +97,14 @@
             _ (test-support/seed-cluster! connection "error-graph")
             _ (is (:db-after (db/transact! connection
                                           ;; The steward is written by its writer (`steward-call`, through
-                                          ;; the steward agent's creation), never on the declaration row,
+                                          ;; the steward agent's creation), never on the declaration entity,
                                           ;; which does not own it (seon.ns.edn `:seon.program/written-by`).
                                           (-> (test-support/agents-tx @connection ["error-graph-a" "error-graph-b"])
                                               (into [(program/declaration-row
                                                       (db/carried-projection @connection)
                                                       {:seon.ns/name 'my.error-graph :seon.ns/source "(ns my.error-graph)"}
                                                       :all :agent)
-                                                     (test-support/program-fn-row
+                                                     (test-support/program-fn-entity
                                                       (db/db connection) 'my.error-graph/raise
                                                       "(defn raise [] nil)")
                                                      {:seon.turn/id "error-graph-turn" :seon.turn/agent [:seon.agent/id "error-graph-a"] :seon.turn/opened-tx "datomic.tx"}])
@@ -118,18 +118,18 @@
         (is (not= (:seon.error.occurrence/ref a) (:seon.error.occurrence/ref b)))
         (let [written (db/transact! connection (:seon.db/tx-data a))] (is (:db-after written) (pr-str (dissoc written :db-before :db-after)) ))
         (is (:db-after (db/transact! connection (:seon.db/tx-data b))))
-        (let [row (read-error)]
+        (let [entity (read-error)]
           (is (= 1 (count (db/q '[:find ?e :where [?e :seon.error/signature]] (db/db connection)))))
-          (is (= [1 1] (sort (map :seon.error.occurrence/count (:seon.error/occurrences row)))))
-          (is (= 'my.error-graph/raise (:seon.instrument/fn row)))
-          (is (= "error-graph-steward" (error/steward (db/db connection) row)))
-          (is (nil? (:seon.error/steward row))))
+          (is (= [1 1] (sort (map :seon.error.occurrence/count (:seon.error/occurrences entity)))))
+          (is (= 'my.error-graph/raise (:seon.instrument/fn entity)))
+          (is (= "error-graph-steward" (error/steward (db/db connection) entity)))
+          (is (nil? (:seon.error/steward entity))))
         (let [again (error/recording (db/db connection) (request "error-graph-a" "error-graph-process-1" later))]
           (is (:db-after (db/transact! connection (:seon.db/tx-data again))))
-          (let [row (db/pull (db/db connection) '[*] (:seon.error.occurrence/ref again))]
-            (is (= 2 (:seon.error.occurrence/count row)))
-            (is (= at (:seon.error.occurrence/first-at row)))
-            (is (= later (:seon.error.occurrence/last-at row)))))
+          (let [entity (db/pull (db/db connection) '[*] (:seon.error.occurrence/ref again))]
+            (is (= 2 (:seon.error.occurrence/count entity)))
+            (is (= at (:seon.error.occurrence/first-at entity)))
+            (is (= later (:seon.error.occurrence/last-at entity)))))
         (let [restarted (error/recording (db/db connection)
                                        (dissoc (request "error-graph-a" "error-graph-process-2" later) :seon.turn/id))]
           (is (= (:seon.error/ref a) (:seon.error/ref restarted)))
@@ -140,12 +140,12 @@
               second-call (error/recording before (request "error-graph-a" "error-graph-process-1" later))]
           (is (:db-after (db/transact! connection (into (:seon.db/tx-data first-call) (:seon.db/tx-data second-call)))))
           (is (= 4 (:seon.error.occurrence/count (db/pull (db/db connection) '[*] (:seon.error.occurrence/ref a))))))
-        (let [row (read-error)
+        (let [entity (read-error)
               database (db/db connection)
               summary (first (#'seon.problems/error-signatures database))
               unit {:seon.db/db database :seon.render/value [:seon.agent/id "error-graph-steward"]}
               read-form (:seon.repl/form (error/faults-form unit))]
-          (is (= 6 (:seon.error/occurrence-count (error/latest-fact row))))
+          (is (= 6 (:seon.error/occurrence-count (error/latest-fact entity))))
           (is (= 6 (:seon.problems/occurrences summary)))
           (let [status (seon.cluster.status/snapshot {:seon.db/db database :seon.db/connection connection})]
             (is (= 6 (get (into {} (:seon.cluster.status/faults status))
@@ -154,8 +154,8 @@
             (is (str/includes? (:seon.error/message (:seon.cluster.status/store-bytes status))
                                "not scanned")))
           (is (str/includes? (pr-str (#'seon.render.transcript/fault-problems database "error-graph-steward" [])) "occurrences: 6"))
-          (is (str/includes? (error/render-ai row) "Occurrences: 6"))
-          (is (str/includes? (pr-str (error/render-html {:seon.db/db database :seon.render/value row})) "Open"))
+          (is (str/includes? (error/render-ai entity) "Occurrences: 6"))
+          (is (str/includes? (pr-str (error/render-html {:seon.db/db database :seon.render/value entity})) "Open"))
           (is (= '(seon.error/for-agent (seon.db/db) "error-graph-steward") read-form))
           (let [observed (error/for-agent database "error-graph-steward")]
             (is (= 1 (count observed)) (pr-str observed)))
@@ -220,11 +220,11 @@
             _ (test-support/transacted! connection (:seon.db/tx-data recorded))
             _ (test-support/transacted! connection [[:db/add (:seon.error/ref recorded)
                                                      :seon.error/resolved-tx "datomic.tx"]])
-            row (db/pull (db/db connection) '[*] (:seon.error/ref recorded))]
+            entity (db/pull (db/db connection) '[*] (:seon.error/ref recorded))]
         (is (= (:max-tx (db/db connection))
                (:max-tx (:seon.db/db (instrument/calling-environment)))))
-        (is (str/includes? (pr-str (error/render-html row)) "Resolved")
-            (pr-str (error/render-html row)))))))
+        (is (str/includes? (pr-str (error/render-html entity)) "Resolved")
+            (pr-str (error/render-html entity)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Fixtures — the three families, plus arbitrary observed values
@@ -808,7 +808,7 @@
   (let [db (db/db connection)]
     [(count (db/q '[:find ?e :where [?e :seon.error/id _]] db))
      ;; ?message is bound so two messages to one recipient are two
-     ;; rows: a `[?to ...]` find returns a SET and would have counted
+     ;; entities: a `[?to ...]` find returns a SET and would have counted
      ;; a four-message storm as one
      (frequencies
       (map second
@@ -910,7 +910,7 @@
   ;; did not return an observation.") had no exception class and no steward,
   ;; so it was recorded and told to nobody.
   ;; Counted by this fault's own occurrence: a test world inherits the live
-  ;; cluster's error rows and messages. Escalation is set by `commit-request`.
+  ;; cluster's error entities and messages. Escalation is set by `commit-request`.
   (with-db
     (fn [connection]
       (let [text (str "The selected renderer did not return an observation. " (random-uuid))]
@@ -936,7 +936,7 @@
   ;; The shipped config names root; a cluster that decides the dial absent
   ;; still records the fault and mails nobody.
   ;; Each arm has its own operation, hence its own signature, and counts only
-  ;; its own rows: the test branch inherits the cluster's live faults.
+  ;; its own entities: the test branch inherits the cluster's live faults.
   (with-db
     (fn [connection]
       (let [shipped (select-keys (config/effective (db/db connection) "error-test")
@@ -1089,11 +1089,11 @@
      (fn [connection]
        (db/carry-connection-projection-state!
         connection (sci.eval/projection-state (db/db connection) projection))
-       ;; The writer derives its projection from stored schema rows, so the
-       ;; synthetic manifest schemas are declared as rows, not only carried.
+       ;; The writer derives its projection from stored schema entities, so the
+       ;; synthetic manifest schemas are declared as entities, not only carried.
        (test-support/transacted!
         connection
-        (test-support/schema-rows
+        (test-support/schema-entities
          (db/db connection)
          (mapv #(vector % (get forms %))
                [::manifest-id ::manifest-location ::manifest-observation
@@ -1408,7 +1408,7 @@
 
 (deftest an-unstored-error-renders-its-own-message
   ;; A refusal carries its signature before, or without, its recording: the
-  ;; database holds no row for it, and both faces show the value itself,
+  ;; database holds no entity for it, and both faces show the value itself,
   ;; with no appended contract finding (whether a return is declared is the
   ;; producer's armed output contract's decision, not the renderer's).
   (test-support/with-database

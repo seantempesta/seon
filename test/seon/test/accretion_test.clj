@@ -13,8 +13,8 @@
             [seon.test.accretion :as accretion]))
 
 (defn- admit!
-  [connection rows]
-  (let [result (db/transact! connection rows)]
+  [connection entities]
+  (let [result (db/transact! connection entities)]
     (when-not (:db-after result)
       (throw (ex-info "Auto-check fixture admission failed." result)))
     result))
@@ -84,7 +84,7 @@
          (:malli/schema (meta #'accretion/render-html)))))
 
 (deftest source-harvest-keeps-refusal-render-contracts-coherent
-  (let [rows (seon.fn/rows {:seon.fn/roots seon.fn/source-roots})
+  (let [entities (seon.fn/program-entities {:seon.fn/roots seon.fn/source-roots})
         contracts
         (into {}
               (keep (fn [{function-symbol :seon.fn/sym
@@ -92,7 +92,7 @@
                       (when contract
                         [(symbol function-symbol)
                          (edn/read-string contract)])))
-              rows)
+              entities)
         projection
         (schema/build-projection
          (schema.edn/packaged-forms)
@@ -116,7 +116,7 @@
     (is (false? (accretion/generatable?
                  [:fn {:error/message "must be an integer"} int?])))))
 
-(deftest schema-rows-record-the-derived-generatable-fact
+(deftest schema-entities-record-the-derived-generatable-fact
   (let [generatable
         (accretion/schema-row
          {:fixture/token [:re #"[a-z]+"]}
@@ -137,21 +137,21 @@
     (fn [connection]
       (admit!
        connection
-       [(test-support/namespace-row @connection 'fixture.gate)])
+       [(test-support/namespace-entity @connection 'fixture.gate)])
       (let [source "(defn target [] 1)\n(defn caller [] (target))"]
         (admit! connection
-                [(test-support/program-fn-row @connection 'fixture.gate/target source)
-                 (test-support/program-fn-row @connection 'fixture.gate/caller source)]))
-      (let [test-row (fn [test-symbol source overrides]
-                       (test-support/program-row @connection [:seon.test/sym test-symbol] source overrides))]
+                [(test-support/program-fn-entity @connection 'fixture.gate/target source)
+                 (test-support/program-fn-entity @connection 'fixture.gate/caller source)]))
+      (let [test-entity (fn [test-symbol source overrides]
+                       (test-support/program-entity @connection [:seon.test/sym test-symbol] source overrides))]
         (admit! connection
-                [(test-row 'fixture.gate/direct-test "(clojure.test/deftest direct-test (target))" {})
-                 (test-row 'fixture.gate/caller-test "(clojure.test/deftest caller-test (caller))" {})
-                 (test-row 'fixture.gate/subject-test "(clojure.test/deftest subject-test)"
+                [(test-entity 'fixture.gate/direct-test "(clojure.test/deftest direct-test (target))" {})
+                 (test-entity 'fixture.gate/caller-test "(clojure.test/deftest caller-test (caller))" {})
+                 (test-entity 'fixture.gate/subject-test "(clojure.test/deftest subject-test)"
                            {:seon.test/subject 'fixture.gate/target})
-                 (test-row 'fixture.gate/pending-test "(clojure.test/deftest pending-test)"
+                 (test-entity 'fixture.gate/pending-test "(clojure.test/deftest pending-test)"
                            {:seon.test/subject 'fixture.gate/future})]))
-      ;; The branch also holds this test's own row, which quotes the fixture symbols.
+      ;; The branch also holds this test's own entity, which quotes the fixture symbols.
       (is (= ['fixture.gate/caller-test
               'fixture.gate/direct-test
               'fixture.gate/subject-test]
@@ -176,9 +176,9 @@
                         "(clojure.test/deftest green-test (clojure.test/is (= 2 (target 1))))\n"
                         "(clojure.test/deftest red-test (clojure.test/is (= 3 (target 1))))")]
         (admit! connection
-                [(test-support/program-fn-row @connection 'fixture.candidate/target source)
-                 (test-support/program-row @connection [:seon.test/sym 'fixture.candidate/green-test] source {})
-                 (test-support/program-row @connection [:seon.test/sym 'fixture.candidate/red-test] source {})]))
+                [(test-support/program-fn-entity @connection 'fixture.candidate/target source)
+                 (test-support/program-entity @connection [:seon.test/sym 'fixture.candidate/green-test] source {})
+                 (test-support/program-entity @connection [:seon.test/sym 'fixture.candidate/red-test] source {})]))
       (let [parent (test-support/fork-cluster-ctx connection)
             _ (sci.eval/acquire! {:seon.sci.eval/ctx parent :seon.db/db @connection})
             request (fn [source]
@@ -235,7 +235,7 @@
        connection
        (test-support/agent-tx @connection "custody-author" 'fixture.custody))
       (admit! connection
-              [(test-support/program-row
+              [(test-support/program-entity
                 @connection [:seon.test/sym 'fixture.custody/reads-its-own-cluster]
                 (str "(clojure.test/deftest reads-its-own-cluster "
                      "(clojure.test/is (int? (seon.db/basis-t (seon.db/db)))))")
@@ -275,7 +275,7 @@
        connection
        (test-support/agent-tx @connection "auto-check-author" 'fixture.auto-check))
       (admit! connection
-              [(test-support/program-fn-row @connection 'fixture.auto-check/capability
+              [(test-support/program-fn-entity @connection 'fixture.auto-check/capability
                                             "(defn capability [] nil)"
                                             {:seon.effect/capability 'fixture.auto-check/handler})])
       (let [parent (test-support/fork-cluster-ctx connection)
@@ -292,10 +292,10 @@
                 :seon.sci.admit/caps
                 (config/result-caps config/defaults)}))
             check-request
-            (fn [candidate row]
+            (fn [candidate entity]
               {:seon.sci.eval/ctx candidate
                :seon.db/db @connection
-               :seon.program/row row
+               :seon.program/row entity
                :seon.config.test/auto-check-cases 25
                :seon.test.accretion/seed 424242
                :seon.sci.eval/time-limit-ms 2000
@@ -305,31 +305,31 @@
             (candidate-request
              (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
                   "bad [x] \"wrong\")"))
-            bad-row
+            bad-entity
             (get-in bad [:seon.test.accretion/evaluation :seon.program/row])
-            _ (when-not (schema/valid-candidate-value? (schema/handed-projection) :seon.program/row bad-row)
+            _ (when-not (schema/valid-candidate-value? (schema/handed-projection) :seon.program/row bad-entity)
                 (throw (ex-info "The candidate did not return an admissible function." bad)))
             bad-request
-            (check-request (:seon.test.accretion/candidate-ctx bad) bad-row)
+            (check-request (:seon.test.accretion/candidate-ctx bad) bad-entity)
             first-failure (sci.eval/auto-check-candidate bad-request)
             reproduced (sci.eval/auto-check-candidate bad-request)
             shape-only
             (candidate-request
              (str "(defn ^{:malli/schema "
                   "[:=> [:cat :int :int] :int]} add [a b] 1)"))
-            shape-only-row
+            shape-only-entity
             (get-in shape-only
                     [:seon.test.accretion/evaluation :seon.program/row])
             shape-only-check
             (sci.eval/auto-check-candidate
              (check-request
               (:seon.test.accretion/candidate-ctx shape-only)
-              shape-only-row))
+              shape-only-entity))
             effectful-check
             (sci.eval/auto-check-candidate
              (check-request
               (:seon.test.accretion/candidate-ctx bad)
-              (assoc bad-row
+              (assoc bad-entity
                      :seon.fn/calls
                      #{'fixture.auto-check/capability})))]
         (testing "the same seed reproduces the shrunk failure"

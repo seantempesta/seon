@@ -1,7 +1,7 @@
 [#:seon.task{:id "3d1e36226ec4"
              :name "a-deleted-functions-fault-never-resolves"
              :kind :function
-             :intent "resolution needs the fault's function row, so a fault naming a deleted function can never resolve: the seon.flow/release-admission! ClassCastException fault stays open after 69229772b deleted the function and its cause."
+             :intent "resolution needs the fault's function entity, so a fault naming a deleted function can never resolve: the seon.flow/release-admission! ClassCastException fault stays open after 69229772b deleted the function and its cause."
              :must-read #{seon.error/resolution}
              :evidence #{"docs/research/agent-platform/landing/inv-lifecycle-storage-opus-2026-09-26.md"
                          "docs/seon/issues/a-fault-whose-function-is-deleted-never-resolves.md"}}

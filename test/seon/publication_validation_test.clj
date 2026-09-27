@@ -24,7 +24,7 @@
      (let [checks '[seon.db/report-arity-comparison seon.db/write-render-target-error]
            before (armed-calls checks)
            ;; A doc is an owned attribute: the revision carries the digest of
-           ;; the row it leaves.
+           ;; the entity it leaves.
            report (support/transacted!
                    connection
                    [(support/revision (db/db connection) '[:seon.fn/sym seon.id/id]

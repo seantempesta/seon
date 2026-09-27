@@ -5,7 +5,7 @@
             [seon.test-support :as support]))
 
 (defn- admit!
-  "Evaluate `source` in `my.catalog` as an agent does and write its declaration row."
+  "Evaluate `source` in `my.catalog` as an agent does and write its declaration entity."
   [{connection :seon.db/connection ctx :seon.sci.eval/ctx} source]
   (let [evaluation (support/await-event!
                     (future (db/call-with-custody {:seon.db/connection connection}
@@ -22,14 +22,14 @@
   "(seon.db/q '[:find ?o ?c ?q ?r :where [?e :seon.effect/owner ?of] [?of :seon.fn/sym ?o]
      [?e :seon.effect/capability ?c] [?e :seon.effect/request-edn ?q] [?e :seon.effect/result-edn ?r]] (seon.db/db))")
 
-(deftest ^{:seon.test/long "One nested request over four agent rows; unmeasured here, the same shape in one-request-test measured 10.0-23.2 s (routed per-request acquisition)."
+(deftest ^{:seon.test/long "One nested request over four agent entities; unmeasured here, the same shape in one-request-test measured 10.0-23.2 s (routed per-request acquisition)."
            :seon.test/long-ms 30000}
   an-agent-capability-stub-settles-a-receipt-only-in-an-effect-reaching-attempt
   (support/with-database
    (fn [connection]
      (let [handle (support/execution-handle connection)
            tests #{'my.catalog/reads-canned-label 'my.catalog/a-hidden-call-refuses-without-an-evaluation}]
-       (support/transacted! connection [(support/namespace-row (db/db connection) 'my.catalog)])
+       (support/transacted! connection [(support/namespace-entity (db/db connection) 'my.catalog)])
        (doseq [source ["(defn canned-label {:malli/schema [:=> [:cat :string :seon.config/effective] :string]} [_request _effective] \"fixture label\")"
                        "(defn label {:seon.effect/capability my.catalog/canned-label :malli/schema [:=> [:cat :string] :seon.effect/request-result]} [request] (seon.effect/request! #'label request))"
                        ;; The body reads its own attempt branch: owner, handler, request, settled result.

@@ -91,7 +91,7 @@
   (get-in occurrence [:seon.error.occurrence/data-blob :seon.error/data-blob]))
 
 (defn- published-blob-digests
-  "Every blob row this branch holds, as the store-global deduplication fact."
+  "Every blob entity this branch holds, as the store-global deduplication fact."
   [connection]
   (db/q '[:find [?digest ...]
           :where [?blob :seon.error.occurrence/blob-digest ?digest]]
@@ -184,7 +184,7 @@
                 "every fault of the class is counted on that occurrence")
             (is (<= inline-max 4096))
             (is (= 1 (count blob-digests))
-                "500 identical payloads publish exactly one blob row")
+                "500 identical payloads publish exactly one blob entity")
             (is (string? (when (string? retained-digest)
                            (blob/get connection retained-digest)))
                 "the referenced blob survives collection")

@@ -211,7 +211,7 @@
                                        (:seon.print/entries node))))))
                 samples))
         offenders
-        (fn [rows] (into [] (remove #(= (count %) (count (set %)))) rows))
+        (fn [entities] (into [] (remove #(= (count %) (count (set %)))) entities))
         set-rows (container-items :seon.print/set identity)
         map-rows (container-items :seon.print/map first)]
     (is (pos? (count set-rows)) "the sample genuinely contains set nodes")

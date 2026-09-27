@@ -64,7 +64,7 @@
   (get-in (store/datahike-configuration dir) [:store :id]))
 
 (defn- with-populated-store
-  "Call `body` with an open store carrying `:db` rows and one more branch."
+  "Call `body` with an open store carrying `:db` entities and one more branch."
   [body]
   (let [root (str "tmp/export-test/" (random-uuid))
         dir (str root "/source/store")]

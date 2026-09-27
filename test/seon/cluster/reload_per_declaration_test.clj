@@ -23,7 +23,7 @@
       (support/with-database
        (fn [connection]
          (support/transacted! connection
-                              (source/rows {:seon.fn/root (.getCanonicalPath root)
+                              (source/program-entities {:seon.fn/root (.getCanonicalPath root)
                                             :seon.fn/roots ["src"]}))
          (is (= 'clojure.core/defn
                 (db/q '[:find ?head . :where
@@ -108,7 +108,7 @@
         (support/transacted! connection
                              [[:db/retract [:seon.fn/sym 'sample.reload.base/value]
                                :seon.fn/inline? false]
-                              ;; An edited declaration whose new row lacks the fact.
+                              ;; An edited declaration whose new entity lacks the fact.
                               [:db/add [:seon.fn/sym 'sample.reload.base/value]
                                :seon.program/definition-digest (apply str (repeat 64 "e"))]])
         (is (= '#{sample.reload.base sample.reload.impl sample.reload.caller}

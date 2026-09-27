@@ -43,7 +43,7 @@
                      :seon.cluster/name "test"
                      :seon.ns/name 'my.agents.alice}))
       (test-support/transacted! connection
-                              [(test-support/namespace-row @connection 'my.agents.reassigned)
+                              [(test-support/namespace-entity @connection 'my.agents.reassigned)
                                {:seon.agent/id "alice"
                                 :seon.agent/namespace
                                 [:seon.ns/name 'my.agents.reassigned]}])
@@ -130,9 +130,9 @@
     (fn [connection]
       (test-support/seed-cluster! connection "test")
       (test-support/transacted! connection
-                              (into [(test-support/namespace-row @connection 'example.unowned)
-                                     (test-support/namespace-row @connection 'example.assigned)
-                                     (test-support/namespace-row @connection 'example.owned)]
+                              (into [(test-support/namespace-entity @connection 'example.unowned)
+                                     (test-support/namespace-entity @connection 'example.assigned)
+                                     (test-support/namespace-entity @connection 'example.owned)]
                                     (test-support/agents-tx @connection ["owner" "worker"])))
       ;; An agent that works in a namespace it did not create stewards nothing.
       (test-support/transacted! connection
@@ -145,7 +145,7 @@
                                 [:seon.agent/id "owner"]]])
       (let [value (found connection)
             html (pr-str (problems/html-report value))
-            ;; The test world also carries default's agent namespace rows
+            ;; The test world also carries default's agent namespace entities
             ;; without their agents (S2c); judge the fixture's own names.
             own #{'example.unowned 'example.assigned 'example.owned}]
         (is (= [{:seon.ns/name 'example.assigned}

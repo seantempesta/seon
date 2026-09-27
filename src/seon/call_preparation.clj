@@ -77,10 +77,10 @@
 (def ^:private error-declared-schema-keys (delay (requiring-resolve 'seon.error/declared-schema-keys)))
 
 ;;; ---------------------------------------------------------------------------
-;;; The declared row attributes — a query over the declaration, not a list
+;;; The declared entity attributes — a query over the declaration, not a list
 ;;; ---------------------------------------------------------------------------
 
-(def ^:private declared-row-attributes
+(def ^:private declared-entity-attributes
   ;; Read the declaration ONCE, for the reason `seon.env/declared-members`
   ;; records: with no projection in hand `schema/schema-definition` re-reads
   ;; and re-merges every schema resource (152 reads, ~14 ms), and the basis
@@ -94,7 +94,7 @@
                     (filter vector? (rest definition)))]
       (into [] (map first) entries))))
 
-(defn row-attributes
+(defn entity-attributes
   "The attributes a supplied-default row is made of.
 
   Read from the one `:seon.call-preparation/row` declaration, so the
@@ -102,20 +102,20 @@
   schema. This is the fact that replaces an embedded attribute list."
   {:malli/schema [:=> [:cat] [:vector :qualified-keyword]]}
   []
-  @declared-row-attributes)
+  @declared-entity-attributes)
 
 ;;; ---------------------------------------------------------------------------
 ;;; The acquired snapshot
 ;;; ---------------------------------------------------------------------------
 
-(def ^:private row-query
+(def ^:private entity-query
   '[:find ?key ?schema-key ?supplier
     :in $
     :where
-    [?row :seon.call-preparation/key ?key]
-    [?row :seon.call-preparation/schema ?schema]
+    [?entity :seon.call-preparation/key ?key]
+    [?entity :seon.call-preparation/schema ?schema]
     [?schema :seon.schema/key ?schema-key]
-    [?row :seon.call-preparation/supplier ?function]
+    [?entity :seon.call-preparation/supplier ?function]
     [?function :seon.fn/sym ?supplier]])
 
 ;;; ---------------------------------------------------------------------------
@@ -237,13 +237,13 @@
                 (every? error-keys (disj arms schema-key))))
       (incoherent candidate
                   (str supplier "'s declared return does not agree with "
-                       "the row's value schema " schema-key ".")
+                       "the entity's value schema " schema-key ".")
                   {:seon.call-preparation/supplier-symbol supplier
                    :seon.call-preparation/schema-key schema-key})
 
       :else nil)))
 
-(defn- newest-row-transaction
+(defn- newest-entity-transaction
   "The newest transaction that asserted OR retracted any row fact.
 
   Derived, never a stored counter. The history view is what makes a
@@ -259,7 +259,7 @@
   [database attributes]
   ;; This basis keeps the process-local plan cache coherent. It is not a
   ;; semantic read performed by the prepared call: the surrounding snapshot
-  ;; queries already retain the precise row, schema, and supplier attributes
+  ;; queries already retain the precise entity, schema, and supplier attributes
   ;; whose change can affect preparation, so it is kept out of the sink.
   (binding [db/*read-evidence-sink* nil]
     (let [history (db/history database)
@@ -293,10 +293,10 @@
    [:=> [:cat :seon.db/database-value :seon.schema/projection]
     [:or :map :seon.db/error-result]]}
   [database projection]
-  (let [rows (db/q database row-query)]
-    (if (db/read-refusal? rows)
+  (let [entities (db/q database entity-query)]
+    (if (db/read-refusal? entities)
 
-      rows
+      entities
       (let [contracts (contract-arities (db/carried-projection database))
             ;; debt: seon.db supplied-database-value and supplied-connection still declare :seon.error/value.
             error-keys (conj (set (@error-declared-schema-keys projection)) :seon.error/value)
@@ -305,14 +305,14 @@
                     {:seon.call-preparation/key default-key
                      :seon.call-preparation/schema-key schema-key
                      :seon.call-preparation/supplier-symbol (symbol supplier)})
-                  rows)
+                  entities)
             proved
             (mapv (fn [candidate]
                     [candidate (coherent-supplier contracts candidate error-keys)])
                   candidates)
-            ;; Compiling the value validator is part of proving the row: a
+            ;; Compiling the value validator is part of proving the entity: a
             ;; value schema the acquired projection cannot compile is an
-            ;; incoherent row, not an exception thrown at acquisition.
+            ;; incoherent entity, not an exception thrown at acquisition.
             compiled
             (mapv (fn [[candidate refusal]]
                     (if refusal
@@ -339,7 +339,7 @@
                                [(:seon.call-preparation/key candidate)
                                 candidate])))
                   compiled)
-            basis (newest-row-transaction database (row-attributes))]
+            basis (newest-entity-transaction database (entity-attributes))]
         (if (db/read-refusal? basis)
           basis
           {:seon.call-preparation/supplied-defaults admitted
@@ -359,12 +359,12 @@
 (def ^:private snapshot-queries
   ;; Every query `derive-snapshot` issues. The read set below is derived from
   ;; these forms by Datahike itself, so a query added here widens the key.
-  [row-query])
+  [entity-query])
 
 (def ^:private snapshot-read-attributes
   ;; `datahike.query/query-attribute-dependencies` (query.cljc:2923) is the
   ;; projection Datahike's own query cache compares, pure over the query form.
-  ;; The row attributes add the basis ranges, and `schema/projection-attributes`
+  ;; The entity attributes add the basis ranges, and `schema/projection-attributes`
   ;; the carried projection's, whose contracts the derivation reads. `:all`
   ;; from any query means no revision can prove the key, and the revision tier
   ;; is not used.
@@ -374,7 +374,7 @@
                 (if (or (= :all attributes) (= :all dependencies))
                   :all
                   (into attributes dependencies))))
-            (into (set (row-attributes)) schema/projection-attributes)
+            (into (set (entity-attributes)) schema/projection-attributes)
             snapshot-queries)))
 
 (def snapshot-cache-policy
@@ -599,9 +599,9 @@
    [:=> [:cat :seon.db/database-value :seon.fn/sym]
     [:or [:vector [:tuple :int :int :qualified-keyword]] :seon.db/error-result]]}
   [database sym]
-  (let [rows (db/q database row-query)
-        current (when-not (db/read-refusal? rows) (snapshot database (db/carried-projection database)))]
-    (or (first (filter db/read-refusal? [rows current]))
+  (let [entities (db/q database entity-query)
+        current (when-not (db/read-refusal? entities) (snapshot database (db/carried-projection database)))]
+    (or (first (filter db/read-refusal? [entities current]))
         (->> (for [{order :seon.fn.arity/order entries :seon.call-preparation/entries} (planned-arities database current sym)
                    {index :seon.fn.argument/index entry-key :seon.call-preparation/entry-key} entries]
                [order index entry-key])
@@ -688,10 +688,10 @@
          :seon.fn/sym]
     [:or :seon.call-preparation/plan :nil :seon.db/error-result]]}
   [database current sym]
-  ;; The plan is a function of the supplied-default rows and this contract.
+  ;; The plan is a function of the supplied-default entities and this contract.
   ;; The snapshot memo and the projection's index record no read, so these
   ;; two reads are what enter the caller's evidence.
-  (let [reads [(db/q database row-query)
+  (let [reads [(db/q database entity-query)
                (db/q database '[:find ?spec . :in $ ?sym
                                 :where [?function :seon.fn/sym ?sym] [?function :seon.fn/spec ?spec]]
                      sym)]

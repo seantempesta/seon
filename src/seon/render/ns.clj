@@ -165,7 +165,7 @@
   (let [{:seon.task/keys [id kind intent must-read evidence] task-name :seon.task/name task-ns :seon.task/ns}
         (or (:seon.render/value unit) unit)
         edges (when (pos? (node-distance unit)) (issue/task-edges (:seon.db/db unit) id))
-        row (fn [label items]
+        entity (fn [label items]
               [:div [:dt label] [:dd (if (seq items) (into [:ul] (map #(vector :li [:code (str %)])) (sort-by str items)) "None")]])]
     (if (db/read-refusal? edges)
       edges
@@ -173,11 +173,11 @@
        [:header [:p {:class "seon-kicker"} (str "Task · " (name kind) " · " task-ns)] [:h3 task-name " " [:code id]]]
        [:p {:class "seon-task-intent"} intent]
        (when edges
-         [:dl (row "Done when these proofs pass" (:seon.task/proofs edges)) (row "Subjects" (:seon.task/subjects edges))
-          (row "Must read" must-read) (row "Evidence" evidence)])])))
+         [:dl (entity "Done when these proofs pass" (:seon.task/proofs edges)) (entity "Subjects" (:seon.task/subjects edges))
+          (entity "Must read" must-read) (entity "Evidence" evidence)])])))
 
 (defn- schema-parts
-  "A schema row's key, its stored form read as data, and the form's description."
+  "A schema entity's key, its stored form read as data, and the form's description."
   {:malli/schema [:=> [:cat :seon.render/unit] [:tuple :qualified-keyword [:or [:vector :any] :keyword :symbol] [:maybe :string]]]}
   [unit]
   (let [{schema-key :seon.schema/key text :seon.schema/form} (or (:seon.render/value unit) unit)
@@ -254,7 +254,7 @@
   (let [{function-name :seon.fn/sym doc :seon.fn/doc source :seon.fn/source calls :seon.fn/calls} (or (:seon.render/value unit) unit)
         neighbours (when (pos? (node-distance unit)) (function-neighbours unit function-name calls))
         [callees callers] neighbours
-        row (fn [label items]
+        entity (fn [label items]
               [:div [:dt label] [:dd (if (seq items) (into [:ul] (map #(vector :li [:code (str %)])) (sort-by str items)) "None")]])]
     (if (db/read-refusal? neighbours)
       neighbours
@@ -264,7 +264,7 @@
        (when-let [line (first-doc-line doc)] [:p line])
        (when neighbours
          (list (when source [:pre [:code source]])
-               [:dl (row "Calls" callees) (row "Called by" callers)]))])))
+               [:dl (entity "Calls" callees) (entity "Called by" callers)]))])))
 
 (defn- public-functions
   "The public functions a namespace declares, by name: one reverse pull from
@@ -317,12 +317,12 @@
   (let [{namespace-name :seon.ns/name doc :seon.ns/doc requires :seon.ns/requires} (or (:seon.render/value unit) unit)
         members (when (pos? (node-distance unit)) (public-functions unit namespace-name))
         link #(vector :a {:href (route/path ::route/namespace {:namespace (str %)})} [:code (str %)])
-        row (fn [label items] [:div [:dt label] [:dd (if (seq items) (into [:ul] (map #(vector :li %)) items) "None")]])]
+        entity (fn [label items] [:div [:dt label] [:dd (if (seq items) (into [:ul] (map #(vector :li %)) items) "None")]])]
     (if (db/read-refusal? members)
       members
       [:article {:class "seon-family-entry seon-namespace-entry"}
        [:header [:p {:class "seon-kicker"} "Namespace"] [:h3 (link namespace-name)]]
        (when-let [line (first-doc-line doc)] [:p {:class "seon-namespace-description"} line])
        (when members
-         [:dl (row "Requires" (map link (sort-by str requires)))
-          (row "Public functions" (map #(vector :code (str %)) (sort-by str members)))])])))
+         [:dl (entity "Requires" (map link (sort-by str requires)))
+          (entity "Public functions" (map #(vector :code (str %)) (sort-by str members)))])])))

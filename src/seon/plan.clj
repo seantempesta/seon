@@ -230,10 +230,10 @@
               (cond
                 (db/read-refusal? entity) (reduced entity)
                 (nil? entity) (assoc result item-id true)
-                :else (let [row (db/pull database step-selector entity)]
-                        (if (db/read-refusal? row)
-                          (reduced row)
-                          (assoc result item-id (open-work? row)))))))
+                :else (let [entity-map (db/pull database step-selector entity)]
+                        (if (db/read-refusal? entity-map)
+                          (reduced entity-map)
+                          (assoc result item-id (open-work? entity-map)))))))
           {}
           item-ids))
 
@@ -336,13 +336,13 @@
 (defn- agent-plan-pull
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or :nil :seon.db/pulled-entity :seon.db/error-result]]}
   [database agent-id]
-  (let [row (db/pull database
+  (let [entity (db/pull database
                      [{:seon.agent/plan
                        [:my.plan/objective
                         {:my.plan/current-step [:my.plan.item/id]}
                         {:my.plan/steps step-selector}]}]
                      [:seon.agent/id agent-id])]
-    (if (db/read-refusal? row) row (:seon.agent/plan row))))
+    (if (db/read-refusal? entity) entity (:seon.agent/plan entity))))
 
 (defn plan
   "Read this agent's whole plan as one derived current value.
@@ -820,9 +820,9 @@
                  :my.plan/unowned-item-id (get {:my.plan.item/id item-id
                 :seon.agent/id agent-id} :my.plan.item/id)
                  :seon.error/expected "a step owned by the requesting agent"}))
-    (let [row (db/pull database step-selector step)]
-      (when-let [query (:my.plan.item/done-query row)]
-        (let [result (done-query-result database row (query-deadline database agent-id))]
+    (let [entity (db/pull database step-selector step)]
+      (when-let [query (:my.plan.item/done-query entity)]
+        (let [result (done-query-result database entity (query-deadline database agent-id))]
           (when-not (query-satisfied? result)
             (refuse! {:seon.error/at (java.util.Date.)
                  :seon.error/layer :my.plan/constraint
@@ -1102,30 +1102,30 @@
 (defn- stored-comparables
   "The current authored content of each owned step, keyed by identity."
   [database ids]
-  (let [rows (db/pull-many database comparable-selector
+  (let [entities (db/pull-many database comparable-selector
                            (mapv (fn [id] [:my.plan.item/id id]) (sort ids)))
-        rows (read-result! rows)
+        entities (read-result! entities)
         plan-parents (into {}
-                      (mapcat (fn [row]
+                      (mapcat (fn [entity]
                                 (map (fn [child]
                                        [(:my.plan.item/id child)
-                                        (:my.plan.item/id row)])
-                                     (:my.plan.item/steps row))))
-                      rows)]
+                                        (:my.plan.item/id entity)])
+                                     (:my.plan.item/steps entity))))
+                      entities)]
     (into {}
-          (map (fn [row]
-                 [(:my.plan.item/id row)
-                  (comparable (:my.plan.item/position row)
-                              (:my.plan.item/title row)
-                              (:my.plan.item/description row)
-                              (:my.plan.item/done-when row)
-                              (:my.plan.item/completed-tx row)
-                              (:my.plan.item/about row)
-                              (get plan-parents (:my.plan.item/id row))
-                              (set (:my.plan.item/needs row))
-                              (:my.plan.item/done-query row)
-                              (get-in row [:my.plan.item/subject :db/id]))]))
-          rows)))
+          (map (fn [entity]
+                 [(:my.plan.item/id entity)
+                  (comparable (:my.plan.item/position entity)
+                              (:my.plan.item/title entity)
+                              (:my.plan.item/description entity)
+                              (:my.plan.item/done-when entity)
+                              (:my.plan.item/completed-tx entity)
+                              (:my.plan.item/about entity)
+                              (get plan-parents (:my.plan.item/id entity))
+                              (set (:my.plan.item/needs entity))
+                              (:my.plan.item/done-query entity)
+                              (get-in entity [:my.plan.item/subject :db/id]))]))
+          entities)))
 
 (defn- entry-comparable
   [database entry needs-by-id]

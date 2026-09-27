@@ -35,9 +35,9 @@
           ;; door asks a projection with no function contracts and refuses
           ;; every capability request.
           ;;
-          ;; SEED THE CLUSTER, not just its config row. `seon.fs.jvm` and the
+          ;; SEED THE CLUSTER, not just its config entity. `seon.fs.jvm` and the
           ;; effect door read their dials through the cluster's own facts, so a
-          ;; branch carrying a config row and no cluster entity answers nil for
+          ;; branch carrying a config entity and no cluster entity answers nil for
           ;; every dial and the handler dereferences it.
           (support/seed-cluster!
            connection "default"

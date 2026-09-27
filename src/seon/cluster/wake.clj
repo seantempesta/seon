@@ -108,8 +108,8 @@
   (into #{}
         (d/q '[:find [?key ...]
                :where
-               [?row :seon.wake/listen true]
-               [?row :seon.schema/key ?key]]
+               [?entity :seon.wake/listen true]
+               [?entity :seon.schema/key ?key]]
              database)))
 
 (defn arming-attributes
@@ -135,8 +135,8 @@
   (into #{}
         (d/q '[:find [?key ...]
                :where
-               [?row :seon.wake/arms true]
-               [?row :seon.schema/key ?key]]
+               [?entity :seon.wake/arms true]
+               [?entity :seon.schema/key ?key]]
              database)))
 
 (defn inert-attributes
@@ -146,8 +146,8 @@
   [database]
   (into #{}
         (d/q '[:find [?attribute ...]
-               :where [?row :seon.wake/context-inert true]
-                      [?row :seon.schema/key ?attribute]]
+               :where [?entity :seon.wake/context-inert true]
+                      [?entity :seon.schema/key ?attribute]]
              database)))
 
 (defn turn-opening-attributes
@@ -165,9 +165,9 @@
   (into #{}
         (d/q '[:find [?key ...]
                :where
-               [?row :seon.wake/listen true]
-               [?row :seon.wake/opens-turn? true]
-               [?row :seon.schema/key ?key]]
+               [?entity :seon.wake/listen true]
+               [?entity :seon.wake/opens-turn? true]
+               [?entity :seon.schema/key ?key]]
              database)))
 
 (defn inside-attributes
@@ -186,8 +186,8 @@
   (into #{}
         (d/q '[:find [?key ...]
                :where
-               [?row :seon.wake/inside true]
-               [?row :seon.schema/key ?key]]
+               [?entity :seon.wake/inside true]
+               [?entity :seon.schema/key ?key]]
              database)))
 
 (defn unindexed-listened-attributes

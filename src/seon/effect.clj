@@ -735,12 +735,12 @@
              ;; have.
              dials (admission requesting-context)
              effect-ordinal (swap! (:seon.effect/counter *request-context*) inc)
-             owner-row
+             owner-entity
              (db/pull database
                       [:db/id :seon.fn/sym :seon.fn/spec
                        :seon.effect/capability]
                       [:seon.fn/sym owner-sym])
-             handler-symbol (:seon.effect/capability owner-row)
+             handler-symbol (:seon.effect/capability owner-entity)
              resolved (when handler-symbol
                         (context-handler (:seon.sci.eval/ctx *request-context*) database handler-symbol))
              handler (:seon.effect/handler resolved)
@@ -757,7 +757,7 @@
            (nil? handler-symbol)
            (seon.error.refusal/diagnostic (Date.) :seon.effect/execution 'seon.effect/request*
             {:seon.error/message "Declare a capability handler on the owner function."
-        :seon.error/offending owner-row
+        :seon.error/offending owner-entity
         :seon.effect/owner-without-handler owner-sym
         :seon.error/member :seon.effect/capability
         :seon.error/expected "a declared capability handler"})

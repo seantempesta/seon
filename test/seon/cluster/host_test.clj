@@ -131,14 +131,14 @@
 (deftest a-hosted-run-lands-on-its-branch-and-the-parent-head-is-unchanged
   (with-host-world {}
     (fn [{:keys [handle connection branch!]}]
-      ;; Hosting writes the agent's home row on the cluster by design
+      ;; Hosting writes the agent's home entity on the cluster by design
       ;; (dba08a8ab); the runs must not move the parent head after it.
       (let [branch (branch!)
             hosted (host-on! handle branch "mcp/solo")
             parent-commit (db/commit-id (db/db connection))
             probe [:seon.fn/sym (symbol (str host-ns) "host-probe")]]
         (is (= branch (:seon.agent/branch (db/pull (db/db connection) [:seon.agent/branch] [:seon.agent/id "mcp/solo"])))
-            "hosting's one allowed parent write: the agent's home row names its branch")
+            "hosting's one allowed parent write: the agent's home entity names its branch")
         (is (= ["#'my.agents.host-probe/host-probe"]
                (hosted-run! hosted "(defn host-probe \"Add one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")))
         (is (= ["2"] (hosted-run! hosted "(host-probe 1)")) "the agent's next run calls its def")
@@ -154,9 +154,9 @@
                 "and never on the parent")))
         (let [database @(get-in hosted [:seon.turn.loop/cluster :seon.db/connection])]
           (is (= branch (get-in database [:config :branch])))
-          (is (some? (:db/id (db/pull database [:db/id] probe))) "the row is on the branch"))
+          (is (some? (:db/id (db/pull database [:db/id] probe))) "the entity is on the branch"))
         (is (= parent-commit (db/commit-id (db/db connection))) "the parent head did not move")
-        (is (nil? (:db/id (db/pull (db/db connection) [:db/id] probe))) "the parent never sees the row")
+        (is (nil? (:db/id (db/pull (db/db connection) [:db/id] probe))) "the parent never sees the entity")
         (is (identical? (:seon.agent/routing hosted)
                         (get-in @(:seon.agent/routing handle) [:seon.agent/children branch]))
             "the host lives in the child roster the parent records")))))
@@ -177,7 +177,7 @@
 
 (deftest one-identity-is-homed-on-one-branch-decided-by-the-writer
   ;; Astra H2: two hosts of one new agent on sibling branches both pre-read an
-  ;; absent cluster row; the cluster writer now decides, so exactly one homes it.
+  ;; absent cluster entity; the cluster writer now decides, so exactly one homes it.
   (with-host-world {}
     (fn [{:keys [handle branch! connection]}]
       (let [branches [(branch!) (branch!)]
@@ -196,7 +196,7 @@
         (is (some? winner) (pr-str (mapv #(select-keys % [:seon.agent/id :seon.agent/branch :seon.error/member :seon.error/message]) outcomes)))
         (is (= :seon.agent/branch (:seon.error/member loser)) (pr-str (#(select-keys % [:seon.agent/id :seon.agent/branch :seon.error/member :seon.error/message]) loser)))
         (is (= home (get-in winner [:seon.turn.loop/cluster :seon.agent/branch]))
-            "the cluster row names the branch whose host was admitted")
+            "the cluster entity names the branch whose host was admitted")
         (is (= ["1"] (hosted-run! winner "1")))
         (host/retire! winner)
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"admission is closed"
@@ -299,22 +299,22 @@
 
 (deftest a-namespace-switch-declares-nothing
   ;; SCI's in-ns only switches the namespace. Before the fix an agent's
-  ;; (in-ns 'seon.id) settled a declaration row replacing seon.id's file row,
+  ;; (in-ns 'seon.id) settled a declaration entity replacing seon.id's file entity,
   ;; retracting its file, doc and source (default, tx 536871848).
   (with-host-world {}
     (fn [{:keys [handle branch!]}]
       (let [hosted (host-on! handle (branch!) "mcp/switcher")
             database #(db/db (get-in hosted [:seon.turn.loop/cluster :seon.db/connection]))
-            file-row #(db/pull (database) [:seon.ns/source :seon.ns/doc :seon.program/definition-digest
+            file-entity #(db/pull (database) [:seon.ns/source :seon.ns/doc :seon.program/definition-digest
                                            {:seon.fn/file [:seon.fn.file/relative-path]}]
                                [:seon.ns/name 'seon.id])
             namespace-of #(get-in (db/pull (database) [{:seon.fn/ns [:seon.ns/name]}] [:seon.fn/sym %])
                                   [:seon.fn/ns :seon.ns/name])
-            before (file-row)]
+            before (file-entity)]
         (is (= "src/seon/id.clj" (get-in before [:seon.fn/file :seon.fn.file/relative-path])) (pr-str before))
         (is (= "#'seon.id/switch-probe"
                (last (hosted-run! hosted "(in-ns 'seon.id)\n(defn switch-probe \"Add one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))"))))
-        (is (= before (file-row)) "the file namespace's row is unchanged")
+        (is (= before (file-entity)) "the file namespace's entity is unchanged")
         (is (= 'seon.id (namespace-of 'seon.id/switch-probe)) "the definition references the namespace")
         (testing "a namespace the switch brings into being exists for the definitions made in it"
           (is (= "#'my.agents.switch-fresh/fresh-probe"
@@ -335,7 +335,7 @@
 (deftest a-run-reads-its-earlier-declarations
   ;; Before the run's working value, a redefinition that broke a test defined
   ;; earlier in the same run installed ungated: the gate read the connection,
-  ;; where the run's rows land only at settlement. The bounded input keeps the
+  ;; where the run's entities land only at settlement. The bounded input keeps the
   ;; seeded auto-check from overflowing (* x x x), so the only refusal is the test's.
   (with-host-world {}
     (fn [{:keys [handle branch!]}]
@@ -462,7 +462,7 @@
   ;; refusal; a refusal for a value the receipt could not store left the run open.
   ;; Each form keeps its value (the deletion returned nil) and its own body
   ;; error; the deletion the writer named is associated, as recorded data, with
-  ;; the one evaluation whose settled row proposed it.
+  ;; the one evaluation whose settled entity proposed it.
   (with-host-world {}
     (fn [{:keys [handle branch!]}]
       (let [hosted (host-on! handle (branch!) "mcp/refused")
@@ -503,7 +503,7 @@
            :seon.test/long-ms 10000}
   a-refused-deletion-is-associated-only-with-the-one-evaluation-proposing-it
   ;; An association, never a cause: the writer names broken final relations,
-  ;; so a deletion is associated only when exactly one settled row deletes the
+  ;; so a deletion is associated only when exactly one settled entity deletes the
   ;; named identity and none declares it; otherwise the reason is named.
   (with-host-world {}
     (fn [{:keys [handle branch!]}]
@@ -550,7 +550,7 @@
             (is (= #{[:seon.fn/sym (named "h")] [:seon.fn/sym (named "k")]}
                    (set (map :seon.program/identity (:seon.program/referrers refusal))))))
           ;; The refusal is a value: the program may move on before the
-          ;; association is judged over rows evaluated below.
+          ;; association is judged over entities evaluated below.
           (testing "a complete repair in one run commits: neither the helper nor its callers remain"
             (let [shown (hosted-run! hosted (str/join "\n" [(unmap "h") (unmap "c1") (unmap "c2")]))]
               (is (= ["nil" "nil" "nil"] shown) (pr-str shown))
@@ -560,7 +560,7 @@
             (is (= [5] (mapv :seon.cluster.eval/ordinal unmapped)) "the run's evaluation ordinals, not from zero")
             (is (= [[:seon.fn/sym (named "h")] [:seon.test/sym (named "h")]]
                    (get-in (first unmapped) [:seon.sci.eval/evaluation :seon.program/row :seon.program/delete-identities]))
-                "the settled row deletes both typed identities; only the one the writer names is associated")
+                "the settled entity deletes both typed identities; only the one the writer names is associated")
             (let [proposals (proposals-of refusal unmapped)]
               (is (= [{:seon.program/identity [:seon.fn/sym (named "h")] :seon.cluster.eval/ordinal 5}
                       {:seon.program/identity [:seon.fn/sym (named "k")] :seon.turn/unattributed :no-deleting-form}]
@@ -585,27 +585,27 @@
                    (:seon.turn/unattributed
                     (first (proposals-of refusal (evaluate 9 [(fn-source "h" "(inc x)") (unmap "h")
                                                               (fn-source "h" "(inc x)") (unmap "h")])))))))
-          (testing "a form declaring and removing in one is judged by the row that reached settlement"
+          (testing "a form declaring and removing in one is judged by the entity that reached settlement"
             (let [both (evaluate 13 [(str "(do " (fn-source "h" "(inc x)") " " (unmap "h") ")")])]
               (is (not-any? #(= 13 (:seon.cluster.eval/ordinal %)) (proposals-of refusal both))
                   (pr-str (get-in (first both) [:seon.sci.eval/evaluation :seon.program/row]))))))))))
 
 (deftest a-branch-behind-the-loaded-program-runs-the-loaded-definitions
-  ;; Before, every file-derived row a branch held at another digest than the
+  ;; Before, every file-derived entity a branch held at another digest than the
   ;; loaded program counted as the branch's override, so a branch forked before
   ;; an adoption refused every form ("Host-bound declaration … must change
-  ;; through the loaded source files"). Only an agent-authored row overrides.
+  ;; through the loaded source files"). Only an agent-authored entity overrides.
   (with-host-world {}
     (fn [{:keys [handle branch!]}]
       (let [branch (branch!)
             execution (agent/acquire-context! handle nil {:seon.agent/branch branch})
             connection (:seon.db/connection execution)]
         (try
-          ;; The file row as a publication the loaded program has moved past left it.
+          ;; The file entity as a publication the loaded program has moved past left it.
           (db/call-with-custody {:seon.db/connection connection}
             #(support/transacted!
               connection
-              [(support/program-fn-row
+              [(support/program-fn-entity
                 (db/db connection) 'seon.id/digest
                 "(defn digest \"An older digest.\" {:malli/schema [:=> [:cat [:int {:min 1, :max 64}] [:sequential :any]] [:string {:min 1, :max 64}]]} [length parts] \"stale\")"
                 {:seon.schema.admission/source :core :seon.fn/host-bound? true})]))
@@ -613,7 +613,7 @@
         (let [hosted (host-on! handle branch "mcp/behind")]
           (is (= ["3"] (hosted-run! hosted "(+ 1 2)")))
           (is (= [(pr-str (seon.id/digest 8 [:x]))] (hosted-run! hosted "(seon.id/digest 8 [:x])"))
-              "the row the branch did not author runs the loaded Var"))))))
+              "the entity the branch did not author runs the loaded Var"))))))
 
 (deftest a-named-change-reached-only-by-an-ineligible-test-refuses-by-name
   ;; Before, the eligibility filter dropped the reaching test and the request
@@ -625,13 +625,13 @@
             connection (:seon.db/connection execution)]
         (try
           (db/call-with-custody {:seon.db/connection connection}
-            #(do (support/transacted! connection [(support/namespace-row (db/db connection) host-ns)])
+            #(do (support/transacted! connection [(support/namespace-entity (db/db connection) host-ns)])
                  (support/transacted! connection
-                   [(support/program-fn-row (db/db connection) 'my.agents.host-probe/dropped-callee
+                   [(support/program-fn-entity (db/db connection) 'my.agents.host-probe/dropped-callee
                                             "(defn dropped-callee \"Add one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")])
                  ;; A file-less core test: neither agent-authored, under a test root, nor named.
                  (support/transacted! connection
-                   [(support/program-row (db/db connection) [:seon.test/sym 'my.agents.host-probe/dropped-check]
+                   [(support/program-entity (db/db connection) [:seon.test/sym 'my.agents.host-probe/dropped-check]
                                          "(clojure.test/deftest dropped-check (clojure.test/is (= 2 (dropped-callee 1))))"
                                          {:seon.schema.admission/source :core})])))
           (finally (agent/release-context! execution)))

@@ -135,7 +135,7 @@
     {:seon.maintenance.receipt/result [*]}
     {:seon.maintenance.receipt/error [*]}])
 
-(defn- task-rows
+(defn- task-entities
   [database]
   (->> (db/q '[:find ?task ?task-id ?function
                :in $
@@ -143,8 +143,8 @@
                [?owner :seon.agent/id "root"]
                [?task :seon.schedule.task/owner ?owner]
                [?task :seon.schedule.task/id ?task-id]
-               [?task :seon.schedule.task/function ?function-row]
-               [?function-row :seon.fn/sym ?function]]
+               [?task :seon.schedule.task/function ?function-entity]
+               [?function-entity :seon.fn/sym ?function]]
              database)
        (sort-by second)))
 
@@ -182,7 +182,7 @@
                (:seon.maintenance.receipt/error receipt)
                (assoc :seon.maintenance/error-facts
                       (:seon.maintenance.receipt/error receipt)))))
-         (task-rows database))})
+         (task-entities database))})
 
 (defn report
   "Derive root's latest maintenance receipt for every declared task."
@@ -216,7 +216,7 @@
                   [:or :seon.maintenance/collection-record
                    :seon.maintenance/root-never-collected-error]]}
   [database managed-root]
-  (let [rows
+  (let [entities
         (db/q '[:find ?completed-at ?receipt-id ?collection
                 :in $ ?root
                 :where
@@ -236,7 +236,7 @@
     (if-let [[completed-at receipt-id collection]
              (last (sort-by (fn [[completed-at receipt-id]]
                               [completed-at receipt-id])
-                            rows))]
+                            entities))]
       (merge {:seon.operator/managed-root managed-root
               :seon.maintenance.receipt/id receipt-id
               :seon.maintenance.receipt/completed-at completed-at}
@@ -560,7 +560,7 @@
 (defn- digest-attributes
   {:malli/schema [:=> [:cat :seon.db/db] [:vector :qualified-keyword]]}
   [database]
-  (let [rows
+  (let [entities
         (d/q '[:find ?attribute ?form
                :where
                [?schema :seon.schema/key ?attribute]
@@ -568,12 +568,12 @@
              database)
         forms (into {} (map (fn [[schema-key form]]
                               [schema-key (edn/read-string form)]))
-                    rows)]
+                    entities)]
     (into []
           (keep (fn [[attribute form]]
                   (when (resolves-to-digest? forms (edn/read-string form))
                     attribute)))
-          rows)))
+          entities)))
 
 (defn- branch-digests
   {:malli/schema [:=> [:cat :seon.store/store :seon.store/branch] [:set :seon.blob/digest]]}

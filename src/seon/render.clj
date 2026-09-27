@@ -141,7 +141,7 @@
                               (schema/handed-projection))]
         ;; The caller names the cluster, on the request or through its
         ;; context's environment: a forked branch carries its parent's
-        ;; cluster rows, so no row can.
+        ;; cluster entities, so no entity can.
         (let [database (:seon.db/db request)
               cluster-name (or (:seon.boot/cluster-name request)
                                (:seon.boot/cluster-name (env/of (:seon.sci.eval/ctx request))))
@@ -316,31 +316,31 @@
    projection ::entity-owners
    (fn []
      (let [registry (:seon.schema.projection/registry projection)
-           rows (into {} (keep (fn [attribute]
-                                 (when-let [row (some-> (mr/schema registry attribute)
+           entities (into {} (keep (fn [attribute]
+                                 (when-let [entity (some-> (mr/schema registry attribute)
                                                         m/properties :seon.program/row-schema)]
-                                   [attribute row])))
+                                   [attribute entity])))
                       (keys (:seon.schema.projection/forms projection)))]
-       {::identity-rows rows
-        ::owned-keys (into {} (keep (fn [row]
-                                      (when-let [definition (mr/schema registry row)]
-                                        [row (into #{:db/id} (map first)
+       {::identity-rows entities
+        ::owned-keys (into {} (keep (fn [entity]
+                                      (when-let [definition (mr/schema registry entity)]
+                                        [entity (into #{:db/id} (map first)
                                                    (internal/entity-entries definition))])))
-                           (set (vals rows)))}))))
+                           (set (vals entities)))}))))
 
-(defn- row-satisfied?
+(defn- entity-satisfied?
   "Does `value` satisfy row schema `row`? The value is restored to its
   transaction shape and its collections to the row's declared kinds (Malli's
   collection transformer, malli/transform.cljc), since a pull returns every
   cardinality-many attribute as a vector. Decoder and validator once per row
   and projection."
   {:malli/schema [:=> [:cat :seon.schema/projection :qualified-keyword :map [:maybe :seon.db/database-value]] :boolean]}
-  [projection row value database]
+  [projection entity value database]
   (let [[decode valid?] (schema/projection-cache-value
-                         projection [::row-check row]
+                         projection [::row-check entity]
                          (fn []
-                           (let [row-schema (m/schema row {:registry (:seon.schema.projection/registry projection)})]
-                             [(m/decoder row-schema (mt/collection-transformer)) (m/validator row-schema)])))]
+                           (let [entity-schema (m/schema entity {:registry (:seon.schema.projection/registry projection)})]
+                             [(m/decoder entity-schema (mt/collection-transformer)) (m/validator entity-schema)])))]
     (valid? (decode (if database (render.value/transacted value database) (render.value/transacted value))))))
 
 (defn- entity-owner
@@ -350,14 +350,14 @@
   its entities: a partial map stays a partial map (task 135d92ea1308)."
   {:malli/schema [:=> [:cat :seon.schema/projection :map [:maybe :seon.db/database-value]] [:maybe :qualified-keyword]]}
   [projection value database]
-  (let [{rows ::identity-rows owned ::owned-keys} (entity-owners projection)
-        named (into #{} (keep rows) (keys value))
-        row (first named)]
+  (let [{entities ::identity-rows owned ::owned-keys} (entity-owners projection)
+        named (into #{} (keep entities) (keys value))
+        entity (first named)]
     ;; A value's inline face keys are render data, not entity attributes.
     (when (and (= 1 (count named))
-               (every? #(or ((get owned row #{}) %) (#{:seon.render/ai :seon.render/html} %)) (keys value))
-               (row-satisfied? projection row value database))
-      row)))
+               (every? #(or ((get owned entity #{}) %) (#{:seon.render/ai :seon.render/html} %)) (keys value))
+               (entity-satisfied? projection entity value database))
+      entity)))
 
 (defn- named-alternatives
   "The named schemas `form` admits, flattened through `:or`/`:maybe`/`:and`
@@ -825,9 +825,9 @@
 (defn- program-evidence-current?
   [snapshot evidence]
   (and (some? evidence)
-       (every? (fn [[section rows]]
-                 (every? (fn [[member row]]
-                           (= row (get-in snapshot [section member]))) rows))
+       (every? (fn [[section entities]]
+                 (every? (fn [[member entity]]
+                           (= entity (get-in snapshot [section member]))) entities))
                evidence)))
 
 (defn- call-reach
@@ -857,7 +857,7 @@
       (db/stored-call-reach database selected))))
 
 (defn- render-program-evidence
-  "The program rows a retained call reaches over recorded call edges."
+  "The program entities a retained call reaches over recorded call edges."
   {:malli/schema [:=> [:cat :seon.db/database-value [:or :nil :map] :seon.fn/sym] :map]}
   [database snapshot selected]
   (let [symbols (call-reach database selected)
@@ -884,7 +884,7 @@
     {:seon.db/db (:seon.db/db request)
      ::program-snapshot snapshot
      ::program-evidence program
-     ;; Private SCI definitions have no durable row. Their actual callable
+     ;; Private SCI definitions have no durable entity. Their actual callable
      ;; identity changes on redefinition and never pretends to be program data.
      ::private-callable (when-not (get-in snapshot [:functions selected])
                           (some-> (sci/resolve ctx selected) deref))
@@ -996,7 +996,7 @@
                  (:seon.render.call/read-evidence previous))))))
 
 (defn- cost-shape-key
-  "The row schema owning the rendered value, else the generic value schema."
+  "The entity schema owning the rendered value, else the generic value schema."
   [projection request]
   (let [value (render-value request)]
     (or (when (and projection (render.value/keyword-lookup? value))

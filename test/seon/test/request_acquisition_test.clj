@@ -18,10 +18,10 @@
   (support/with-database
    {:seon.test-support/extra-schema (support/file-store-probe-schema marker)}
    (fn [connection]
-     (support/transacted! connection [(support/namespace-row (db/db connection) 'seon.test.request-acquisition-test)])
+     (support/transacted! connection [(support/namespace-entity (db/db connection) 'seon.test.request-acquisition-test)])
      (support/transacted!
       connection
-      (mapv #(support/program-row (db/db connection)
+      (mapv #(support/program-entity (db/db connection)
                                   [:seon.test/sym (symbol "seon.test.request-acquisition-test" (str "writes-" %))]
                                   (marker-test %))
             ["a" "b" "c"]))
