@@ -166,7 +166,8 @@ Sequence (owner-approved "safety now, then one core rewrite"):
 **1. Supporting cuts (design done / running):** entity vocabulary sweep (running: entity-vocabulary-opus; excludes the 9
 eval-path files) + the intentional Malli→Datahike mapping section in the data-modeling guide; first-class vectors
 (`vector-storage-design-2026-09-27.md`, 67b982219: cell entities with position, element keeps its declared kind — Astra
-review after the eval redesign); adoption member validation LANDED (bd3d35b19).
+review after the eval redesign; owner: conversion is transparent — an agent puts a vector in and gets the same vector back;
+skills and the guide are updated only once the vector type is implemented and fully tested); adoption member validation LANDED (bd3d35b19).
 **2. THE AGENT DATA MODEL — after 0.** Authority `repl-session-entity-design-2026-09-27.md` (4400c9c47 → e9877da0f/a2fd4676c
 §5d one context assembly), review `repl-session-entity-review-2026-09-27.md` (REVISE, 12 findings folded). Demo on branch
 design-1: http://127.0.0.1:7994/agent/root/debug?n=3&branch=design-1&root=[:seon.agent/id%20"demo"] (loaded via the

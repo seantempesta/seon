@@ -23,6 +23,11 @@ exactly its declared type and relationship kind. Cells hang off the parent throu
 peer-ref and component elements. Order is a storage concern, and ownership stays the author's (owner
 rulings 2026-09-27).
 
+**Requirement (owner, 2026-09-27).** Conversion is transparent. An agent puts a vector in and gets the same vector
+back, with its order and its duplicates, from every read it ordinarily uses. It never sees a cell, a position or an
+ordinal, and it never writes one. Cells appear only in raw-datom views, which show the true storage. Skills and the
+data-modeling guide are updated after the type is implemented and fully tested, not before.
+
 ## 0. Facts this design rests on (live `default`, HEAD a2fd4676c)
 
 `default` has 28 installed attributes that are cardinality-many and declared `[:vector …]`. The table
@@ -355,6 +360,11 @@ Root runs the focused list: `seon.schema.vector-storage-test` plus those namespa
 2. The `q` clause rewrite (+25 lines, correct for every future author) against hand conversion of 9 sites
    (+9 lines).
 3. Should `:sequential` share this encoding? It has 0 live attributes.
+4. Transparency (the owner's requirement). Which read surfaces an agent can reach still expose cells? The
+   candidates are raw `d/datoms` or entity access, `history`/`as-of`/`since` values passed through `seon.db`,
+   transaction reports seen by listeners and wake matching, read evidence, and `[:db/add e a v]` on a vector
+   attribute (refused, with the fix named). Each one either decodes through the one bridge decoder or is
+   named as a raw-storage view.
 
 Probe hygiene: all measurements used memory stores created and deleted inside the probe. Two runs that
 failed on probe syntax left two small memory stores unreleased in `default`'s JVM, up to 2000 parents.
