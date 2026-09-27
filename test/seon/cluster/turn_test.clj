@@ -1394,16 +1394,11 @@
                       (str
                        "(seon.run/complete "
                        "(str (my.agents.agent-a/refused-live 41)))")])
-            transact! db/transact!]
-        (with-redefs
-          [ai/complete
-           (fn [_projection _]
-             {:seon.ai/text
-              (let [reply (first @replies)]
-                (swap! replies subvec 1)
-                reply)})
-           db/transact!
-           (fn [target transaction]
+            transact! db/transact!
+            transact-applied! db/transact-applied!
+            ;; Since fcee85161 a form's settlement is written through
+            ;; `transact-applied!`; both writers refuse the definition.
+            injected (fn [transaction]
              (let [tx-data (if (map? transaction)
                              (:tx-data transaction)
                              transaction)
@@ -1418,11 +1413,23 @@
                                       [2 :seon.program/row
                                        :seon.fn/sym]))))
                     tx-data)]
-               (if refused-definition?
+               (when refused-definition?
                  {:seon.db.write.attempt/request-id "definition-refusal" :seon.error/at (java.util.Date.) :seon.error/layer :seon.db/invocation :seon.error/operation 'seon.db/transact!
                   :seon.error/message "injected definition refusal"
-                  :seon.error/data {:error :transact/program}}
-                 (transact! target transaction))))]
+                  :seon.error/data {:error :transact/program}})))]
+        (with-redefs
+          [ai/complete
+           (fn [_projection _]
+             {:seon.ai/text
+              (let [reply (first @replies)]
+                (swap! replies subvec 1)
+                reply)})
+           db/transact!
+           (fn [target transaction]
+             (or (injected transaction) (transact! target transaction)))
+           db/transact-applied!
+           (fn [target transaction durable-failed!]
+             (or (injected transaction) (transact-applied! target transaction durable-failed!)))]
           (drive-agent! cluster "agent-a" 2)
           (is (nil? (:seon.fn/source
                      (db/pull @connection [:seon.fn/source]
@@ -1437,7 +1444,8 @@
                        connection
                        [{:seon.message/id "m-agent-a-after-refusal" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "call the refused definition"}])
           (drive-agent! cluster "agent-a" 2)
-          (is (= (pr-str (seon.run/complete "42"))
+          ;; a completed disposition shows where it was delivered (e915d2de0)
+          (is (= (pr-str (assoc (seon.run/complete "42") :my.turn/delivered-to :outside))
                  (:seon.eval/shown (last (agent-evaluations @connection))))
               "the next turn calls the same private definition"))))))
 

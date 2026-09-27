@@ -2572,8 +2572,8 @@
 (defn red-receipt?
   "True when a terminal receipt is red: error or interruption.
 
-  An unbound result is red through the error its settlement records
-  ([[evaluation-facts]]); shown text is never read back to decide."
+  Shown text is never read back to decide; an unbound Var's value is a value,
+  as in Clojure, so it settles green."
   {:malli/schema [:=> [:cat :map] :boolean]}
   [receipt]
   (boolean

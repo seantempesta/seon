@@ -1264,13 +1264,15 @@
                  (:seon.config.agent/turn-completion-backstop-ms
                   (ex-data failure)))))))))
 
-(deftest failed-turn-transform-keeps-a-live-backstop-after-releasing-its-permit
+(deftest a-failed-turn-transform-releases-its-permit-and-retires-its-backstop
   (with-connection
     (fn [connection ctx]
       (let [agent-id "quiescent-failed-transform"
             timeout-ms 100
             completion (async/chan 1)
             backstop-state (atom nil)
+            armed (async/promise-chan)
+            _ (add-watch backstop-state ::armed (fn [_ _ _ backstop] (when backstop (async/offer! armed backstop))))
             ;; the cluster's config entity exists before its handle reads
             ;; `config/effective` of that cluster (4d163db4b)
             _ (test-support/transacted!
@@ -1309,27 +1311,23 @@
                   (catch clojure.lang.ExceptionInfo failure failure)))
               _ (is (= "turn transform escaped" (ex-message escaped)))
               _ (is (= :seon.agent/ready (async/poll! completion))
-                    "the failed transform released its lifecycle permit")
-              ;; the live backstop fires after the permit is released and
-              ;; hands its failure to the channel disarm joins
-              terminal
-              (test-support/await-event!
-               (:seon.agent/failure-channel @backstop-state)
-               ::quiescent-transform-backstop)
-              ;; under `:panic` the channel carries the panic whole: its
-              ;; receipt, caused by the declared failure (review R2)
-              receipt (:seon.fault/recorded (ex-data terminal))
-              failure (if receipt (ex-cause terminal) terminal)]
-          (is (or (nil? receipt) (true? (:seon.fault/committed? receipt)))
-              (pr-str (ex-data terminal)))
-          (is (string? (:seon.agent/turn-completion-backstop (ex-data failure))))
-          (is (= :seon.agent/turn-transform
-                 (:seon.error/operation (ex-data failure))))
-          (is (seq (db/q '[:find ?o :in $ ?agent
-                           :where [?o :seon.error.occurrence/message ?m]
-                                  [(clojure.string/includes? ?m ?agent)]]
-                         (db/db connection) agent-id))
-              "the fired bound is one stored core fault, not a channel message"))))))
+                    "the failed transform released its lifecycle permit")]
+          ;; Since cc1f681b5 the escaped throw is the turn's one fault (it
+          ;; rides Flow's fault route), so its bound retires with the
+          ;; permit and never fires a second, false fault after it.
+          (is (nil? @backstop-state) "the escaped transform's bound is cancelled")
+          (let [failure-channel (:seon.agent/failure-channel (async/poll! armed))]
+            (is (some? failure-channel) "the transform armed its bound")
+            (when failure-channel
+              (is (thrown-with-msg? clojure.lang.ExceptionInfo #"closed before"
+                                    (test-support/await-event! failure-channel ::backstop-retired
+                                                               (constantly true) (* 10 timeout-ms)))
+                  "the bound's failure channel closes without a failure")))
+          (is (empty? (db/q '[:find ?o :in $ ?agent
+                              :where [?o :seon.error.occurrence/message ?m]
+                                     [(clojure.string/includes? ?m ?agent)]]
+                            (db/db connection) agent-id))
+              "no backstop fault follows the escaped transform"))))))
 
 (deftest install-gate-failure-closes-with-a-durable-diagnostic
   (with-connection
@@ -1627,7 +1625,12 @@
         (test-support/transacted! connection
                                 [(agent-entity connection "alice")
                                  (agent-entity connection "bob")
-                                 (config-entity "cap-2026072814"
+                                 ;; Since fe5dcc072 the member's world carries its
+                                 ;; cluster's config; the cap goes on that one config
+                                 ;; (a second config entity left the dial ambiguous).
+                                 (config-entity (or (db/q '[:find ?cluster . :where [_ :seon.config/cluster ?cluster]]
+                                                          @connection)
+                                                    "cap-2026072814")
                                              {:seon.config.run/max-episode-runs 3})])
         ;; episode 1: a human asks
         (outside-trigger! connection "alice" "h1" "human asks")
