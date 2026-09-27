@@ -1539,8 +1539,9 @@
   edge as it is in the file. Prelude declarations resolve calls but never
   become submitted rows. A submitted form has no file; each row's
   `:seon.fn/form-span` is the analyzer's exact byte span within `source`,
-  transient provenance a caller drops before storing the row. A contracted
-  function carries its parsed `:seon.fn/arities`, as a file row does."
+  transient provenance a caller drops before storing the row. Its contract's
+  parsed facts are the finalizer's: [[contract-facts-row]] under the
+  projection the definition is admitted in."
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/database-value :seon.program/shapes
@@ -1586,16 +1587,6 @@
     (into []
           (comp
            (filter #(or (:seon.fn/sym %) (:seon.test/sym %)))
-           ;; The contract's parsed arities join the row before its digest, as
-           ;; `add-contract-facts` does for file publication.
-           (map #(program/with-contract-facts
-                  {:seon.program/row %
-                   :seon.program/compile-options (:seon.schema.projection/compile-options projection)
-                   :seon.program/predicate-functions (schema/predicate-functions-in projection)
-                   :seon.program/schema-keys (set (keys (:seon.schema.projection/forms projection)))
-                   :seon.program/reader-aliases
-                   (into {} (map (juxt :seon.ns.alias/local :seon.ns.alias/target-ns))
-                         (:seon.ns/aliases namespace-row))}))
            ;; The one digest owner: the namespace's own facts, never the
            ;; analysis `ns` form widened by interpreter refers.
            (map #(assoc % :seon.program/definition-digest
@@ -3112,6 +3103,26 @@
         (str "Source indexing produced no " identity-attr
              " rows; refusing a partial program graph.")
         {::missing-population identity-attr :seon.fn/index-refused true})))))
+
+(defn contract-facts-row
+  "`row` with the parsed facts of its `:seon.fn/spec` (its `:seon.fn/arities`)
+  under `projection`, the one the definition is admitted in, reading its
+  source with `resolver-namespace`'s aliases. A row without a contract is
+  unchanged.
+
+  # Costs
+  About 0.65 ms for a one-arity contract (default, 2026-09-26, unarmed REPL)."
+  {:malli/schema [:=> [:cat :seon.schema/projection :map :seon.program/declaration-row]
+                  :seon.program/declaration-row]}
+  [projection resolver-namespace row]
+  (program/with-contract-facts
+   {:seon.program/row row
+    :seon.program/compile-options (:seon.schema.projection/compile-options projection)
+    :seon.program/predicate-functions (schema/predicate-functions-in projection)
+    :seon.program/schema-keys (set (keys (:seon.schema.projection/forms projection)))
+    :seon.program/reader-aliases
+    (into {} (map (juxt :seon.ns.alias/local :seon.ns.alias/target-ns))
+          (:seon.ns/aliases resolver-namespace))}))
 
 (defn- add-contract-facts
   ([rows progress!] (add-contract-facts rows progress! nil))

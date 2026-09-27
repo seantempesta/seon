@@ -952,14 +952,7 @@
                 (schema/projection-with-function-contract
                  projection qualified definition
                  {:seon.schema.admission/source :agent})
-                (program/with-contract-facts
-                 {:seon.program/row row
-                  :seon.program/compile-options
-                  (:seon.schema.projection/compile-options projection)
-                  :seon.program/predicate-functions
-                  (schema/predicate-functions-in projection)
-                  :seon.program/schema-keys
-                  (set (keys (:seon.schema.projection/forms projection)))}))
+                (seon.fn/contract-facts-row projection namespace-row row))
               row)]
     (assoc row :seon.program/definition-digest
            (db/definition-digest-of projection row digest-namespace))))
