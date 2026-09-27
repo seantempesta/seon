@@ -492,7 +492,7 @@
     (let [text (:seon.render.value/text projection)]
       ;; One cut face carrying the form that reads the rest (owner 2026-09-27).
       (is (str/includes? text (str "…" (- (count raw) kept) " (drop " kept " result/e0123456789ab)]")) text)
-      (is (str/includes? text "the form after each cut reads the rest") text)
+      (is (not (str/includes? text ";;")) "no legend: the cut's own form says how to read on")
       (is (= '(seon.print/value-at result/e0123456789ab [])
              (:seon.print/requery-form elision))))
     (is (str/includes? html "seon-print-elision")
@@ -1106,12 +1106,14 @@
         valid? (schema/projection-validator (schema/handed-projection)
                                             :seon.render.value/insufficient-floor-budget-error)
         root (at-budget 1 "abcdefghijklmnop")
-        member (at-budget 20 {:a 1 :b 2})]
+        ;; 8 tokens (25 chars) holds the root with its cut and continuation
+        ;; (25) but not its first member too (31): the member refusal.
+        member (at-budget 8 {:a 1 :b 2})]
     (is (valid? root) (pr-str root))
     (is (= [(tokens/estimate-chars 1) 18] ((juxt :seon.render.value/budget :seon.render.value/needed) root)))
     (is (valid? member) (pr-str member))
     (is (< (:seon.render.value/budget member) (:seon.render.value/needed member)))
-    (is (= "42" (:seon.render.value/text (at-budget 1 42))) "a root that fits whole needs no legend")))
+    (is (= "42" (:seon.render.value/text (at-budget 1 42))) "a root that fits whole prints whole")))
 
 (deftest a-stored-value-continues-over-the-backing-its-first-page-selected
   ;; Astra F3 (2026-09-26): MCP selected the held value but continued over
@@ -1174,3 +1176,34 @@
         (is (:seon.render.value/full? whole))
         (is (zero? (:seon.render.value/elisions whole)))
         (is (str/includes? (:seon.render.value/text whole) " 99]"))))))
+
+(deftest a-renderer-that-throws-still-prints-through-the-floor-and-says-large-value
+  ;; Owner 2026-09-27: a failed render falls back to the floor, still bounded
+  ;; at the value budget, and keeps the floor's whole-size estimate, so the
+  ;; reply shows the bounded print, one renderer-failed diagnostic and the
+  ;; LARGE VALUE line, and the evaluation records whole and shown tokens.
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "large-render" {})
+     (let [ctx (support/fork-cluster-ctx connection)
+           handle 'result/elargerender1
+           source (str "{:seon.render/ai (fn [_] (throw (ex-info \"boom\" {})))"
+                       " :rows (mapv (fn [i] {:id i :title \"a title that takes some room\"}) (range 300))}")
+           evaluation (evaluation/evaluate
+                       {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
+                        :seon.db/connection connection :seon.agent/id "large-render"
+                        :seon.cluster.eval/source source :seon.repl/handle handle
+                        :seon.sci.admit/caps (config/result-caps config/defaults)
+                        :seon.sci.eval/time-limit-ms 10000})
+           shown (:seon.eval/shown evaluation)
+           reply (repl/response (assoc (select-keys evaluation [:seon.eval/shown :seon.eval/value-tokens
+                                                                 :seon.eval/shown-tokens :seon.eval/duration-ms
+                                                                 :seon.cluster.eval/diagnostics])
+                                       :seon.cluster.eval/source source :seon.repl/handle handle))]
+       (is (not (:seon.cluster.eval/error evaluation)) (pr-str (dissoc evaluation :seon.sci.admit/value)))
+       (is (< 1000 (:seon.eval/value-tokens evaluation)) "the whole value's estimate is recorded")
+       (is (<= (:seon.eval/shown-tokens evaluation) 1100) "the print stays within the value budget")
+       (is (str/includes? shown "(drop 32 (get-in result/elargerender1 [:rows]))") shown)
+       (is (= 1 (count (re-seq #":seon.error/at" (str (:seon.cluster.eval/diagnostics evaluation)))))
+           "one renderer-failed diagnostic, beside the value")
+       (is (str/starts-with? reply ";; LARGE VALUE: result/elargerender1 is ~") reply)))))

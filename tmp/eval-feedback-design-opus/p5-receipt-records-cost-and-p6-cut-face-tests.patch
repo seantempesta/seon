@@ -1,0 +1,103 @@
+diff --git a/src/seon/turn.clj b/src/seon/turn.clj
+index 885028cb9..3a43bdc8b 100644
+--- a/src/seon/turn.clj
++++ b/src/seon/turn.clj
+@@ -1437,6 +1437,14 @@
+    :seon.cluster.eval/ns
+    :seon.sci.eval/ending-ns
+    :seon.eval/duration-ms
++   ;; The evaluation's recorded cost: queryable, shown only past a declared
++   ;; bound (:seon.config.eval/bounds). Missing here, settlement dropped them.
++   :seon.eval/acquisition-ms
++   :seon.eval/allocated-bytes
++   :seon.eval/value-tokens
++   :seon.eval/shown-tokens
++   :seon.eval/elisions
++   :seon.eval/full
+    :seon.print/length
+    :seon.print/level
+    :seon.test.accretion/gate-test-count
+diff --git a/test/seon/loop_proof_test.clj b/test/seon/loop_proof_test.clj
+index 8caebaa44..6ca5e4f99 100644
+--- a/test/seon/loop_proof_test.clj
++++ b/test/seon/loop_proof_test.clj
+@@ -660,10 +660,11 @@
+                      handle (:seon.repl/handle emission)
+                      raw @(sci/resolve ctx handle)
+                      shown (:seon.eval/shown entry)]
+-                 ;; One cut face and one legend (one-render-path §3d): the
+-                 ;; legend's form reads the retained result.
++                 ;; One cut face carrying its continuation (owner 2026-09-27):
++                 ;; the form after the cut reads the retained result.
+                  (is (re-find #"\"…\+\d+" shown) "the stored shown value must actually exercise elision")
+-                 (is (str/includes? shown (str "(get-in " handle " [...])")) shown)
++                 (is (str/includes? shown (str "(subs ")) shown)
++                 (is (str/includes? shown (str handle)) shown)
+                  (is (= raw (sci/eval-form ctx (list 'get-in handle []))))))
+              (agent/disarm! {:seon.agent/routing routing
+                              :seon.agent/id "juniper"})
+diff --git a/test/seon/problems_test.clj b/test/seon/problems_test.clj
+index 06f04704e..286f01f0c 100644
+--- a/test/seon/problems_test.clj
++++ b/test/seon/problems_test.clj
+@@ -594,5 +594,5 @@
+     (is (<= (tokens/estimate text) 15000) "the prose fits the profile's token budget")
+     (is (pos? shown) "whole failed-test lines are shown")
+     (is (= 600 (+ shown (or omitted 0))) "the elision names every omitted test")
+-    (is (str/includes? text "(seon.print/value-at (seon.problems/problems (seon.db/db) {}) [...])")
+-        "the legend names the requery for the full failed-test list")))
++    (is (str/includes? text "(seon.problems/problems (seon.db/db) {})")
++        "the cut's continuation reads the full failed-test list")))
+diff --git a/test/seon/render/transcript_test.clj b/test/seon/render/transcript_test.clj
+index 571ba3501..296537348 100644
+--- a/test/seon/render/transcript_test.clj
++++ b/test/seon/render/transcript_test.clj
+@@ -491,15 +491,12 @@
+             (is (< (count cut) (count ai))
+                 "the AI projection is bounded by the render profile")
+             ;; ONE CUT FACE (one-render-path §3e): the characters that fit,
+-            ;; then `…+N`, and one legend naming how to read the rest. The
+-            ;; cut's coordinates stay on the tree node, not in the text.
++            ;; then `…+N` and, when the value has a source, the form that
++            ;; reads the rest; no legend (owner 2026-09-27).
+             (is (re-find #"\"…\+\d+" cut)
+                 (str "the cut shows its prefix and counts the rest: "
+                      (subs cut 0 (min 400 (count cut)))))
+-            (is (str/includes? cut ";; …N = N more")
+-                "and one legend says what a cut means")
+-            (is (str/includes? cut "transcript-cut")
+-                "carrying the identity the legend's form requeries")))
++            (is (not (str/includes? cut ";; …N")) "no legend line")))
+         (assert-no-session-narration ai)))))
+ 
+ (defn- seed-pinned-bootstrap-history!
+diff --git a/test/seon/render/web_test.clj b/test/seon/render/web_test.clj
+index 754263beb..1c9cb547a 100644
+--- a/test/seon/render/web_test.clj
++++ b/test/seon/render/web_test.clj
+@@ -1960,7 +1960,7 @@ handle))}}
+          (let [[_ prefix omitted] (re-find #"^\"([^\"]*)\"…\+(\d+)" ai)]
+            (is (pos? (count prefix)) ai)
+            (is (= (count huge) (+ (count (edn/read-string (str "\"" prefix "\""))) (parse-long omitted)))))
+-         (is (str/includes? ai "(seon.print/value-at ") "and one legend names the requery")
++         (is (not (str/includes? ai ";; …N")) "no legend: each cut carries its own continuation")
+          (is (< (count html-string) (count huge))
+              "the HTML projection is the same bounded selection")
+          ;; THE STRUCTURAL HALF. A wide collection's cut is minted by
+@@ -1980,12 +1980,11 @@ handle))}}
+            (is (< (count wide-ai) (count (pr-str wide)))
+                "a wide collection is cut for AI under the same profile")
+            (let [shown (edn/read-string wide-ai)
+-                 cut (peek shown)]
+-             ;; `[0 1 … …N]` reads back as numbers ending in the cut symbol.
++                 cut (first (filter #(and (symbol? %) (str/starts-with? (str %) "…")) shown))]
++             ;; `[0 1 … …N (drop n source)]` reads back as numbers, the cut
++             ;; symbol and, when the value has a source, its continuation.
+              (is (= (count wide)
+-                    (+ (dec (count shown)) (parse-long (subs (str cut) 1))))))
+-           (is (str/includes? wide-ai "(seon.print/value-at ")
+-               "and one legend names the requery")
++                    (+ (count (filter number? shown)) (parse-long (subs (str cut) 1))))))
+            (is (not (str/includes? wide-html ">4999<"))
+                "and HTML shows the same cut collection")))))))
+ 

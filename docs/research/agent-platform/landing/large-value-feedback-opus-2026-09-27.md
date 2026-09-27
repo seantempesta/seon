@@ -166,3 +166,49 @@ Size: +255 / −80 across 9 files.
 
 **RESET NEEDED.** A live store holding a `:seon.print/rendered-token-ceiling` config fact must accept the attribute's
 deletion at adoption. The dial was optional and had no known stored value.
+
+## Round 2 (after root loaded 132d94015 + P2 on pid 50733)
+
+Broken first:
+- **LARGE VALUE did not fire live, and P1 had never recorded either.** The receipt writer copies a hand list,
+  `seon.turn/receipt-terminal-attributes`, and neither P1 (acquisition-ms, allocated-bytes) nor P2 (value/shown
+  tokens, elisions, full) added its keys to it.
+  - Probe on branch `efd-11`: after `(vec (range 3000))`, run `2882bd7dd074`, the receipt held only
+    `{:seon.eval/duration-ms 9}`.
+  - Fix, **P5** (turn.clj, held): add the six keys to the list.
+  - The list duplicates the receipt schema. CLAUDE.md says to declare that partition on entity schemas and not in a
+    hand list; deriving it is the follow-up.
+- **The legend printed on every elided reply** (about 30 tokens) and is deleted. Each cut's continuation says how to
+  read on. The floor reserves nothing for it, and the budget-refusal test's member case moves from 20 to 8 tokens to
+  stay a member refusal.
+- **Why only 32 members were shown under a 1,000-token budget:** the member bound cut first, not tokens. The cut's
+  `:seon.print/bound-by` is `:seon.render.profile/max-children`, from dial `:seon.config.render.agent/max-children 32`.
+  That dial is the intended floor rule as configured. With a 1,000-token budget it is the binding bound for flat
+  collections of small scalars. Whether 32 stays is an owner call on the dial.
+- **A failed render prints through the floor.** When the floor throws outside a declared pair, `prepare` now selects
+  again structurally (no render pairs) under the same budget, and adds the failure as the one diagnostic. This is the
+  same call and the same estimator, so whole-characters survives. Only a floor that also fails structurally prints
+  plain text.
+  - A declared renderer that throws was already caught per node (`declared`) with the estimate intact. The scratch
+    probe gave 14,222 whole characters, 680 shown tokens and one diagnostic line.
+  - Regression: `a-renderer-that-throws-still-prints-through-the-floor-and-says-large-value`, an end-to-end SCI
+    evaluation. It checks:
+    - the recorded value/shown tokens;
+    - the bounded print with its continuation;
+    - one diagnostic;
+    - the LARGE VALUE line from `seon.repl/response`.
+
+    It needs the `seon.test/run` harness, so root runs it.
+- **Task c7bc0c506aa4 is patch P4** (cluster.clj and profile.clj, both held):
+  - JVM-mode MCP replies no longer attach a JVM-wide profile window. Its counters include every lane's concurrent
+    work; the event's own `ms` is the time.
+  - `explain-slow`'s headline no longer says "this is your defect".
+
+Patches:
+- `tmp/eval-feedback-design-opus/p4-no-jvm-wide-blame.patch`
+- `tmp/eval-feedback-design-opus/p5-receipt-records-cost-and-p6-cut-face-tests.patch`: P5 plus the expectations in
+  loop_proof_test, problems_test, web_test and transcript_test that named the old legend. Some were red since
+  ad0f8dab2.
+
+Both pass `git apply --check`. Contracts compile over all patched sources with 0 findings. Scratch value_test: 99 pass;
+2 fail, the same pre-existing failures as before; the errors are fixtures that need `seon.test/run`.

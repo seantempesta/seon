@@ -959,7 +959,7 @@
           {:seon.error/message (str "The floor budget of " (:budget context) " characters cannot show this value's "
                                     "first part, which needs " needed ".")
            :seon.error/member :seon.render.profile/token-budget
-           :seon.error/expected "a budget covering the root, its first member and the legend"
+           :seon.error/expected "a budget covering the root and its first member"
            :seon.error/offending (:budget context)
            :seon.error/data {:seon.render.data/path (:root-path context [])}
            :seon.error/fix "Raise :seon.render.profile/token-budget, or read a deeper path."})
@@ -988,10 +988,10 @@
                (-> (assoc :base offset) (update :pending #(seq (drop offset %))))
                true (as-> node (assoc node :flat (flat-width node))))
         state {:nodes {0 root} :queue (sorted-map) :seq 0 :next-id 1 :extras 0
-               :rendered (if (:rendered? root) (:width root) 0) :reserve (:legend context)}
+               :rendered (if (:rendered? root) (:width root) 0) :reserve 0}
         state (settle {:nodes {}} state 0 (:width context))
-        ;; The root is mandatory: with its cut it needs the legend too.
-        root-charge (- (charge state) (if (more? root) 0 (:legend context)))]
+        ;; The root is mandatory.
+        root-charge (charge state)]
     (if (> root-charge (:budget context))
       (insufficient-budget context root-charge)
       (let [state (loop [state (schedule state root 0 context)]
@@ -1110,16 +1110,6 @@
                        (pr-str (nth path index)) "seon-data-crumb"))
           (range (count path)))]))
 
-(defn- legend-text
-  "The one line that follows a cut text: what the markers mean. Each cut
-  carries its own continuation form, so the legend names no second route."
-  {:malli/schema [:=> [:cat :map] :string]}
-  [profile]
-  (str ";; …N = N more, …+N = N more characters, …? = not yet realized"
-       (if (some? (:seon.print/requery-id profile))
-         "; the form after each cut reads the rest."
-         (str ". Not retrievable: " (or (:seon.print/requery-refusal profile) "no source identity") "."))))
-
 (defn- plain-projection
   "The total floor's last answer: `value` as plain bounded Clojure text, with
   the one diagnostic naming the failure that stopped the structural floor."
@@ -1171,7 +1161,6 @@
                                     :seon.print/level nil)
                        (= :single-line (:seon.render.profile/composition profile))
                        (assoc :seon.print/width 0))
-             legend (legend-text profile)
              database (:seon.db/db unit)
              ;; Nested selection reads the one profile this value prints
              ;; under and the one viewer, derived here once per value.
@@ -1184,7 +1173,6 @@
                       :identity-attributes (if database (set (db/identity-attributes database)) #{})
                       :width (:seon.print/width options)
                       :budget (tokens/estimate-chars (:seon.render.profile/token-budget profile))
-                      :legend (inc (count legend))
                       :max-children (:seon.render.profile/max-children profile)
                       :max-depth (:seon.render.profile/max-depth profile)
                       :max-string (or (:seon.render.profile/max-string-length profile) Long/MAX_VALUE)
@@ -1208,8 +1196,10 @@
              failed (sort-by :id (filter :diagnostic (vals (:nodes state))))
              selected (tree (:nodes state) context)
              emitted (print/emit-both selected options)
-             text (cond-> (:seon.print/text emitted) cut? (str "\n" legend))
-             limit (- (charge state) (if cut? 0 (:legend context)))
+             ;; NO LEGEND (owner 2026-09-27): each cut carries the form that
+             ;; reads its rest, which says what `…N` means at every cut.
+             text (:seon.print/text emitted)
+             limit (charge state)
              ;; Shown once, beside the value and outside its budget.
              diagnostic (when-let [node (first failed)]
                           (diagnostic-line (:path node) (:diagnostic node) (dec (count failed))))]
@@ -1245,7 +1235,25 @@
            (:seon.render.call/source-output? selected)
            (assoc :seon.render.call/source-output? true)))))))
        (catch Throwable failure
-         (plain-projection (:seon.render/value unit) failure path))))))
+         (if (get-in unit [:seon.render.value/options :seon.render.value/structural?])
+           (plain-projection (:seon.render/value unit) failure path)
+           ;; A FAILED RENDER STILL PRINTS THROUGH THE FLOOR: the same
+           ;; selection, without the render pairs, under the same budget, so
+           ;; the value keeps its cuts and its whole-size estimate (LARGE
+           ;; VALUE reads it). The failure is the one diagnostic beside it;
+           ;; only a floor that fails structurally too prints plain text.
+           (let [projection (prepare (assoc-in unit [:seon.render.value/options
+                                                     :seon.render.value/structural?] true)
+                                     output)
+                 line (diagnostic-line path failure 0)]
+             (if-not (:seon.render.value/text projection)
+               (plain-projection (:seon.render/value unit) failure path)
+               (-> projection
+                   (assoc :seon.render.value/value-text
+                          (or (:seon.render.value/value-text projection)
+                              (:seon.render.value/text projection)))
+                   (update :seon.render.value/text str "\n" line)
+                   (update :seon.render.value/diagnostics (fnil conj []) failure))))))))))
 
 (defn render-ai-data
   "Return the text sink result from one already prepared projection."
