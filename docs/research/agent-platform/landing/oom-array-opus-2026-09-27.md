@@ -76,6 +76,24 @@
   members 103 onward) and 713 (a newline inside the AI cut). Both are render
   owners' problems (triage suspects 09fe1d064 and 132d94015/33f700f37).
 
+### transcript-test fault-window reds (patch to shrink-web, unproven)
+
+- `an-evaluations-branch-errors-read-in-its-own-response-once` (the message
+  appears 3 times). Producer: `seon.render.transcript/branch-errors` shows each
+  fault as `error/latest-fact` whole. That map carries the message as
+  `:seon.error/message`, again as `:seon.error.occurrence/message` (the
+  member it was renamed from), and a third time inside the capped
+  `:seon.error/data-edn` print of the chain. It also prints the 73 KB
+  evidence inline. The patch shows `error/value` (message once, evidence by
+  `:seon.error/data-blob` reference, reachable by `:seon.error/id`) plus
+  `:seon.error.occurrence/count`, `:seon.error.occurrence/branch` and the
+  resolution.
+- `a-cluster-copy-of-another-branchs-fault…`: stale fixture. Since 6afc9415e
+  every settlement is its own run with ordinal 0, so responses keyed by
+  ordinal collapse to one. The test now keys by form.
+- Both changes are in `tmp/oom-array-opus/transcript-branch-errors.patch`
+  (transcript.clj and its test are held by shrink-web; applies cleanly).
+
 ## Evidence
 
 - Heap dump: `data/heap/java_pid12212.hprof`, 6,964,021,613 bytes (6.5 GiB on
