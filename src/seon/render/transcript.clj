@@ -744,11 +744,16 @@
                           :in $ ?agent
                           :where
                           [?agent :seon.agent/id ?agent-id]]
-                        db agent-ref))]
-    {::selected-run-id (:seon.turn/id unit)
+                        db agent-ref))
+        ;; A run the database does not hold is not selected: its turn would
+        ;; pull a nil opened-tx.
+        run (when (and db (:seon.turn/id unit))
+              (db/q '[:find ?run . :in $ ?id :where [?run :seon.turn/id ?id]]
+                    db (:seon.turn/id unit)))]
+    {::selected-run-id (when (integer? run) (:seon.turn/id unit))
      ::selected-agent-id
      (or supplied-agent-id (when-not (db/read-refusal? queried) queried))
-     ::selected-run-error (when (db/read-refusal? queried) queried)}))
+     ::selected-run-error (some #(when (db/read-refusal? %) %) [queried run])}))
 
 (defn- missing-selected-run
 
