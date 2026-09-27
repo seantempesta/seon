@@ -180,10 +180,13 @@ root.
 - **Pass the world explicitly.** Carry database/connection, projection, environment, render profile, proc and
   settlement inputs, including profiling and test ownership. Custody elides only the agent's db/conn; it authorizes
   no other ambient service.
-- **Supply defaults by declared schema name.** REQUIRED inputs a function declares but the caller omits (the database,
-  the unit) are supplied by declared schema name; an omitted optional input stays absent, because its absence has
-  meaning; a call already matching a declared arity is never prefixed; caller arguments always win; structural
-  resemblance is not identity.
+- **Supply defaults by declared schema name, from the world.** The armed wrapper plans each function's supply once at
+  arm time and fills omitted inputs at call time, never from the parse (a call's target is known only when it runs).
+  Any input, required or optional, whose declared schema is a member of the evaluation's world (database, connection,
+  writer, agent, task, profile, call sink, SCI context) comes from that evaluation's own world, never a global or
+  another world. Other omitted optional inputs stay absent. A function whose meaning needs a world member to be absent
+  (no custody) declares a different schema name. A missing required member refuses by name. A call already matching a
+  declared arity is never prefixed; caller arguments always win; structural resemblance is not identity.
   See the [data guide](docs/seon/architecture/data-modeling-guide.md).
 - **Decide at the authority.** Derive at the writer or supply its decision; validate a pre-read's basis there if it
   could change. Mirrors are derived, drift-checked or explicitly historical, never silently current state.
