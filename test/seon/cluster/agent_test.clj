@@ -1022,13 +1022,12 @@
                     (test-support/await-event!
                      stopped
                      ::declared-turn-completion-backstop)
-                    ;; one stored, delivered core fault (`seon.fault/fault!`):
-                    ;; under `:panic` the panic carries the receipt and its
-                    ;; cause is the declared failure
-                    receipt (:seon.fault/recorded (ex-data thrown))
-                    failure (if receipt (ex-cause thrown) thrown)]
-                (is (true? (:seon.fault/committed? receipt)) (pr-str (ex-data thrown)))
-                (is (= `agent/disarm! (:seon.error/operation receipt)))
+                    ;; `seon.fault/fault!` stores the core fault and returns its
+                    ;; receipt (0cbf4336f deleted the :panic policy); disarm!
+                    ;; throws the declared failure itself
+                    failure thrown]
+                (is (nil? (:seon.fault/recorded (ex-data thrown))) (pr-str (ex-data thrown)))
+                (is (= :seon.agent/disarm (get-in (ex-data failure) [:seon.error/data :seon.error/operation])))
                 (is (string? (:seon.agent/turn-completion-backstop (ex-data failure))))
                 (is (= turn-completion-backstop-ms
                        (:seon.config.agent/turn-completion-backstop-ms
@@ -1139,6 +1138,8 @@
                                  :seon.cluster.registry/from (db/commit-id @connection)})
             child (:seon.db/connection attempt)
             routing (armory child)
+            ;; the cluster's config entity before the handle reads it (4d163db4b)
+            _ (test-support/transacted! child [(config-entity "arm-release" {})])
             cluster-handle (handle child (test-support/fork-cluster-ctx child "arm-release") "arm-release")
             start (CountDownLatch. 1)
             arm #(agent/arm! {:seon.turn.loop/cluster cluster-handle
@@ -1256,9 +1257,11 @@
                    (catch clojure.lang.ExceptionInfo caught caught)))
                ::missing-permit-refused)]
           (is (string? (:seon.agent/turn-completion-backstop (ex-data failure))))
+          ;; the diagnostic's operation is its producer; the waiting
+          ;; operation is data (55f2a989a)
           (is (= :seon.agent/turn-start
                  (get-in (ex-data failure)
-                         [:seon.error/operation])))
+                         [:seon.error/data :seon.error/operation])))
           (is (= agent-id (:seon.agent/id (ex-data failure))))
           (is (= timeout-ms
                  (:seon.config.agent/turn-completion-backstop-ms

@@ -1071,7 +1071,9 @@
            text #(:seon.render.value/text (value/prepare (registered-unit connection %)))]
        (is (instance? datahike.java.QueryResult empty-result) (pr-str (class empty-result)))
        (is (= "#{}" (text empty-result)))
-       (is (instance? datahike.java.QueryResult rows) (pr-str (class rows)))
+       ;; Datahike answers a non-empty relation here with a plain set; only
+       ;; the empty relation is a QueryResult (measured on default, 2026-09-27)
+       (is (set? rows) (pr-str (class rows)))
        (is (= rows (edn/read-string (text rows))))))))
 
 (deftest a-cut-costs-less-than-it-hides-and-never-lands-in-a-tuple
@@ -1163,7 +1165,9 @@
   ;; step, which `at` read as the map key 0 and so continued another value.
   (support/with-database
    (fn [connection]
-     (let [value (array-map (vec (range 50)) :x 0 :zero #{[1] [2] [3] [4]} :set)
+     ;; the set key hides enough to be cut: a tail no costlier than its cut
+     ;; is shown whole (46be90e36), as a four-member set now is
+     (let [value (array-map (vec (range 50)) :x 0 :zero (set (map #(vector % %) (range 50))) :set)
            ctx (:seon.sci.eval/ctx
                 (evaluation/fork-for-turn {:seon.sci.eval/ctx (support/fork-cluster-ctx connection)
                                            :seon.db/db (db/db connection) :seon.agent/id "root"}))
@@ -1179,7 +1183,7 @@
        (is (= (vec (range 50)) (print/value-at value (:seon.render.data/path key-cut))) (pr-str cuts))
        (is (= 50 (:seon.render.data/total key-cut)))
        (is (str/starts-with? (value/render-ai-data next-page) "[3 4 5") (pr-str next-page))
-       (is (= 4 (count (print/value-at value (:seon.render.data/path set-cut)))) (pr-str cuts))
+       (is (= 50 (count (print/value-at value (:seon.render.data/path set-cut)))) (pr-str cuts))
        (is (= :zero (print/value-at value [0])) "a plain step keeps get-in's meaning")))))
 
 (deftest an-unaffordable-root-or-first-member-is-the-declared-refusal

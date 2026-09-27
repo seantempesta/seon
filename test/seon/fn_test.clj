@@ -690,8 +690,12 @@
           (is (= (set arities) (set complete-arities))))
         (testing "spec and every parsed root assert atomically"
           (is (seq first-assertion-transactions))
+          ;; A retained store keeps a declaration's history across adoptions:
+          ;; a function first published without a contract gains spec and
+          ;; arities together later (seon.turn/previous-ending-namespace,
+          ;; 85b459845 then c83911c82), after its first analysis.
           (is (every? (fn [[_ spec-tx arities-tx analysis-tx]]
-                        (= spec-tx arities-tx analysis-tx))
+                        (and (= spec-tx arities-tx) (<= analysis-tx spec-tx)))
                       first-assertion-transactions))
           (is (every? (fn [[_ arity-tx count-tx]] (= arity-tx count-tx))
                       arity-assertion-transactions))

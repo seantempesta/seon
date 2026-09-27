@@ -73,7 +73,12 @@
             (is (= ["\"seon.id\""]
                    (shown connection (agent/evaluate-source! (assoc request :seon.cluster.reply/text "(str *ns*)"
                                                                     :seon.turn/starting-ns [:seon.ns/name 'seon.id]))))
-                "a requested starting namespace is where the run starts (85b459845: no starting-namespace refusal)"))
+                "a requested starting namespace is where the run starts (85b459845: no starting-namespace refusal)")
+            ;; that run ended in seon.id, so the next one starts there: move the
+            ;; agent back before the sections below define in its own namespace
+            (is (= [(pr-str (str "my.agents." agent-id))]
+                   (rest (shown connection (code (str "(in-ns 'my.agents." agent-id ")\n(str *ns*)")))))
+                "the agent is back in its own namespace"))
           (testing "a defn then a require in one run settles: its entity digests against the namespace entity the run stores"
             (let [namespace-name (str "my.agents." agent-id)
                   defn-source "(defn run-inc \"Adds one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))"

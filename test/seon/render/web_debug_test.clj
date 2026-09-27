@@ -230,7 +230,8 @@
                                                      :seon.cluster.eval/at (java.util.Date.)
                                                      :seon.cluster.eval/ns [:seon.ns/name 'my.agents.juniper]
                                                      :seon.cluster.eval/read-basis-transaction (db/basis-t database)} form)) forms))]
-                         (is (:db-after (db/transact! connection tx)))
+                         ;; a refused seed stops setup with the writer's refusal
+                         (support/transacted! connection tx)
                          id))
                      attempt (fn [id prompt hit miss]
                                {:seon.ai.attempt/id id :seon.ai.attempt/ordinal 0
@@ -506,8 +507,12 @@
           (is (= "Notebook title"
                  (#'transcript/emission-label projection
                    {:seon.eval/renderer renderer :seon.cluster.eval/source "unrelated source"
+                    ;; the attributes the read depended on, from Datahike's
+                    ;; dependency plan (779d50604 retired the stored pull arguments)
                     :seon.cluster.eval/read-evidence
-                    [{:seon.db/read-request {:seon.db/pull-arguments [[::title] 1]}}]}))))
+                    [{:datahike.read/dependency-plan
+                      {:datahike.query.dependency/sources
+                       [{:datahike.query.source/attributes #{::title}}]}}]}))))
         (is (= ::notebook (:seon.schema/key metadata)))
         (is (= "Notebook" (:seon.render.web/block-title metadata)))
         (is (= "Notes for this concern."
@@ -668,13 +673,17 @@
        (is (str/includes? (pr-str html) "seon.cluster.agent/render-identity-html"))))))
 
 (deftest a-refused-selection-is-not-reported-as-an-empty-render
-  (let [refusal {:seon.error/at (java.util.Date. 0) :seon.error/layer :seon.render.web-debug-test/fixture :seon.error/operation 'seon.render.web-debug-test/a-refused-selection-is-not-reported-as-an-empty-render :seon.render/refused-member :seon.render/output
-                 :seon.error/message "The render profile is unavailable."}
-        html (#'web/experiment-preview-html
-              :seon.render/html
-              {:seon.render/selection {:seon.render.selection/selected refusal}})]
-    (is (str/includes? (pr-str html) "The render profile is unavailable."))
-    (is (not (str/includes? (pr-str html) "No render function produced")))))
+  ;; the preview renders against the page's database (a6ec14a8c)
+  (support/with-database
+   (fn [connection]
+     (let [refusal {:seon.error/at (java.util.Date. 0) :seon.error/layer :seon.render.web-debug-test/fixture :seon.error/operation 'seon.render.web-debug-test/a-refused-selection-is-not-reported-as-an-empty-render :seon.render/refused-member :seon.render/output
+                    :seon.error/message "The render profile is unavailable."}
+           html (#'web/experiment-preview-html
+                 :seon.render/html
+                 {:seon.render/selection {:seon.render.selection/selected refusal}}
+                 (db/db connection))]
+       (is (str/includes? (pr-str html) "The render profile is unavailable."))
+       (is (not (str/includes? (pr-str html) "No render function produced")))))))
 
 (deftest block-reference-headers-link-identities-and-omit-unidentified-entities
   (support/with-database
@@ -1155,7 +1164,8 @@
                                                           :seon.ns/name 'my.agents.design}))
           ;; A branch no connection holds: only its head is stored.
           (let [unopened :seon.render.web-debug-test/unopened
-                branch (name unopened)
+                ;; the page reads `(keyword branch)`: the query names the whole keyword
+                branch (subs (str unopened) 1)
                 page #(hiccup/->string (#'web/graph-debug-html service "root" (merge {"n" "1" "root" "[:seon.agent/id \"design-agent\"]"} %)))]
             (d/branch! design (d/commit-id @design) unopened)
             (try

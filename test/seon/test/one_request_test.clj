@@ -44,7 +44,12 @@
         entity (program/declaration-row (db/carried-projection (db/db connection))
                                      (:seon.program/row evaluation) :all :agent)]
     (is (nil? (:seon.cluster.eval/error evaluation)) (pr-str evaluation))
-    (support/transacted! connection [entity]))))
+    ;; A redefinition replaces the stored declaration exactly: an upsert keeps
+    ;; the owned attributes the new entity drops, and the writer refuses its digest.
+    (support/transacted! connection
+                         (if-let [stored (db/pull (db/db connection) '[*] [:seon.test/sym (:seon.test/sym entity)])]
+                           (program/exact-replacement-tx stored entity)
+                           [entity])))))
 
 (def ^:private marker
   (support/file-store-probe-schema :seon.test.one-request-test/marker))
@@ -143,7 +148,7 @@
          (is (= ['seon.id/c4-short] (map :seon.test/sym (:seon.test/results result))))
          (is (false? (:seon.test/passed? result))
              "a skipped declared-long obligation is unfulfilled")
-         (is (str/includes? (sut/tally result) "long seon.id/c4-long")))))))
+         (is (str/includes? (sut/tally result) "excluded (declared long; include-long runs it) seon.id/c4-long")))))))
 
 (deftest a-body-outliving-its-bound-is-released-only-after-it-exits
   ;; A timeout is not termination: the request answers at the bound, and the

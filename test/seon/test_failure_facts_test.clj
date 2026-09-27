@@ -97,7 +97,8 @@
   "The failure reports a recorded result carries."
   {:malli/schema [:=> [:cat :map] [:sequential :map]]}
   [result]
-  (:seon.test.failure/reports result))
+  ;; a green result carries no reports key
+  (:seon.test.failure/reports result []))
 
 (deftest one-failing-is-becomes-one-failure-report
   ;; An admitted run records immutable member reports; the test entity carries no
@@ -208,8 +209,12 @@
                 content (when digest (blob/get connection digest))]
             (is (string? digest))
             (is (nil? (:seon.test.failure/actual failure)))
-            (is (> (:seon.test.failure/actual-size failure 0) 10000))
-            (is (str/includes? (or content "") (apply str (repeat 5000 "é"))))
+            ;; The stored actual is its bounded shown text, never a whole-value
+            ;; print (aa00e58fc); text over the blob threshold settles there.
+            (is (> (:seon.test.failure/actual-size failure 0)
+                   (db/q '[:find ?n . :where [_ :seon.config.eval.result/blob-threshold ?n]]
+                         (db/db connection))))
+            (is (str/includes? (or content "") (apply str (repeat 100 "é"))))
             (when digest
               (is (= content (sci/eval-string* (support/fork-cluster-ctx connection)
                                 (pr-str (list 'seon.blob/get digest))))

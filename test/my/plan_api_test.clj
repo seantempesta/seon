@@ -72,17 +72,21 @@
 (deftest item-and-plan-agree-on-state-depth-and-parent
   (support/with-database
     (fn [connection]
-      (is (:db-after
-           (db/transact! connection
-                         [{:seon.agent/id "plan-reader"
-                           :seon.agent/plan
-                           {:my.plan/agent [:seon.agent/id "plan-reader"]
-                            :my.plan/steps
-                            [{:my.plan.item/id "parent" :my.plan.item/title "Parent"
-                              :my.plan.item/steps
-                              [{:my.plan.item/id "first" :my.plan.item/title "First"}
-                               {:my.plan.item/id "second" :my.plan.item/title "Second"
-                                :my.plan.item/needs [[:my.plan.item/id "first"]]}]}]}}])))
+      ;; The agent through its canonical writer; prerequisites are value
+      ;; edges naming step ids (71c6d1fb6), never lookup refs.
+      (support/transacted! connection
+                           (agent/creation-tx {:seon.agent/id "plan-reader"
+                                               :seon.ns/name 'my.agents.plan-reader
+                                               :seon.cluster/name (:seon.cluster/name
+                                                                   (support/execution-handle connection))}))
+      (support/transacted! connection
+                           [{:my.plan/agent [:seon.agent/id "plan-reader"]
+                             :my.plan/steps
+                             [{:my.plan.item/id "parent" :my.plan.item/title "Parent"
+                               :my.plan.item/steps
+                               [{:my.plan.item/id "first" :my.plan.item/title "First"}
+                                {:my.plan.item/id "second" :my.plan.item/title "Second"
+                                 :my.plan.item/needs #{"first"}}]}]}])
       (let [database @connection
             view (plan/plan {:seon.db/db database :seon.agent/id "plan-reader"})]
         (is (= #{:open :ready :blocked} (set (map :my.plan/state (:my.plan/steps view)))))
