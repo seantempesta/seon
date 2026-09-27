@@ -436,10 +436,10 @@
   (let [entity (cond-> (::entity entry)
                  (::content entry)
                  (assoc :seon.message/content (::content entry)))
-        ; History already holds the message facts. The source renderer emits
-        ; a read form for a future evaluation; the terminal formatter shows
-        ; the content here without executing or fitting that source again.
-        sentence (str (message/render-ai entity) "\n"
+        ; History already holds the message facts. The entry names the
+        ; ordinary read form for a future evaluation; the terminal formatter
+        ; shows the content here without executing that form.
+        sentence (str (pr-str (list 'my.message/read {:my.message/id (:seon.message/id entity)})) "\n"
                       (message/format-ai (assoc entity :seon.db/db (:seon.db/db unit))))
         extra (cond-> {}
                 (::about entry)
