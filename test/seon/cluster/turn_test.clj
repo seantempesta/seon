@@ -131,6 +131,19 @@
   (let [row {:seon.ns/name namespace-name}]
     (assoc row :seon.program/definition-digest (program/definition-digest row))))
 
+(defn- named-cluster-ctx
+  "A fresh cluster context acquired from `connection`'s current value, for
+  the cluster `cluster-name`. The fixture branch holds its parent's cluster
+  row beside its own, so the world names no single cluster and the caller
+  names it (6db5b2451, `seon.sci.eval/projection-state`)."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.boot/cluster-name] :seon.sci.eval/ctx]}
+  [connection cluster-name]
+  (let [database (db/db connection)
+        projection (or (db/carried-projection database)
+                       (schema/projection-from-database database))]
+    (sci.eval/cluster-ctx database connection
+                          (sci.eval/projection-state database projection cluster-name))))
+
 (defn- with-render-context-proc
   [_connection cluster-handle body]
   (let [context-channel (async/chan)
@@ -324,6 +337,17 @@
           (turn/next-agent-work @connection (request connection agent-id)))
         (agent-ids @connection)))
 
+(defn- settled!
+  "`report` once its settlement has committed. `seon.turn/turn` answers when
+  the settlement is applied (`seon.db/transact-applied!`); the connection
+  sees it only after the commit, so a driver that derives the next pass or
+  reads the connection first waits as production `step` does
+  (`seon.turn/await-settled!`), never re-running the applied forms."
+  {:malli/schema [:=> [:cat :map :map] :map]}
+  [cluster report]
+  (#'turn/await-settled! cluster report)
+  report)
+
 (defn- drive!
   "Run passes until the loop says idle, or `limit` passes have run."
   [cluster limit]
@@ -335,10 +359,11 @@
           reports
           (recur (inc passes)
                  (conj reports
-                       (turn/turn
-                        {:seon.turn.loop/cluster cluster
-                         :seon.turn.work/next work}
-                        (:seon.turn.work/now request)))))))))
+                       (settled! cluster
+                                 (turn/turn
+                                  {:seon.turn.loop/cluster cluster
+                                   :seon.turn.work/next work}
+                                  (:seon.turn.work/now request))))))))))
 
 (defn- drive-agent!
   "Run one agent's passes until that agent is idle, or `limit` is reached."
@@ -352,10 +377,11 @@
           reports
           (recur (inc passes)
                  (conj reports
-                       (turn/turn
-                        {:seon.turn.loop/cluster cluster
-                         :seon.turn.work/next work}
-                        (:seon.turn.work/now request)))))))))
+                       (settled! cluster
+                                 (turn/turn
+                                  {:seon.turn.loop/cluster cluster
+                                   :seon.turn.work/next work}
+                                  (:seon.turn.work/now request))))))))))
 
 (defn- with-provider!
   "Name a local OpenAI-compatible provider answering `text` in the cluster's
@@ -723,7 +749,7 @@
                 import-mask
                 (some #(when (= 'String (:seon.ns.import/local %)) %)
                       (:seon.ns/imports namespace-row))
-                fresh (sci.eval/cluster-ctx (db/db connection) connection)]
+                fresh (named-cluster-ctx connection "turn-test")]
             (is (= {:seon.ns.import/local 'String}
                    (dissoc import-mask :db/id))
                 "the database stores the import mask as ordinary data")
@@ -752,7 +778,7 @@
                 import-row
                 (some #(when (= 'String (:seon.ns.import/local %)) %)
                       (:seon.ns/imports namespace-row))
-                fresh (sci.eval/cluster-ctx @connection)]
+                fresh (named-cluster-ctx connection "turn-test")]
             (is (= {:seon.ns.import/local 'String
                     :seon.ns.import/target-class 'java.lang.String}
                    (dissoc import-row :db/id))
@@ -780,7 +806,12 @@
                 calls (atom [])
                 transact! db/transact!
                 original-install! sci.eval/install-row!
-                installations (atom [])]
+                installations (atom [])
+                ;; the deletion's subject is the stored first-party row, as
+                ;; indexed (no planted row: the writer checks its digest)
+                stored-source (:seon.fn/source
+                               (db/pull @connection [:seon.fn/source]
+                                        [:seon.fn/sym 'seon.config/defaults]))]
             (let [seed (db/transact!
              connection
              (into
@@ -788,20 +819,9 @@
               cat
               [(test-support/agent-tx @connection "peer")
                [{:db/id [:seon.config/cluster "turn-test"]
-               :seon.config.run/max-episode-runs cap}
-              {:seon.ns/name 'seon.config}
-              {:db/id [:seon.fn/sym 'seon.config/defaults]
-               :seon.fn/ns [:seon.ns/name 'seon.config]
-               :seon.fn/source "(defn defaults [] {})"
-               :seon.fn/spec "[:=> [:cat] :map]"}]]))]
+               :seon.config.run/max-episode-runs cap}]]))]
               (when (:seon.db.write.attempt/request-id seed)
                 (throw (ex-info "Terminal refusal fixture seed was refused." seed))))
-            ;; This test plants a pre-existing program row directly rather
-            ;; than producing it through eval. Finish that cold fixture setup
-            ;; before the first turn; live turns never reacquire facts.
-            (sci.eval/acquire!
-             {:seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
-              :seon.db/db @connection})
             (with-redefs
               [ai/complete
                (fn [_projection request]
@@ -890,7 +910,8 @@
                                       :seon.program/delete-identities]))
                      @installations)
                     "the refused deletion never installs")
-                (is (= "(defn defaults [] {})"
+                (is (string? stored-source))
+                (is (= stored-source
                        (:seon.fn/source
                         (db/pull db
                                 [:seon.fn/source]
@@ -1203,7 +1224,7 @@
               (let [acquire
                     (fn [connection]
                       (:seon.schema/projection
-                       (sci.eval/cluster-ctx @connection)))
+                       (named-cluster-ctx connection "turn-test")))
                     projection-a-1 (acquire connection-a)
                     projection-b (acquire connection-b)
                     projection-a-2 (acquire connection-a)
@@ -1291,7 +1312,19 @@
                             [?evaluation :seon.cluster.eval/author :agent]]
                           @connection))
               "the existing peer evaluates the accepted first-party definition")
-          (test-support/transacted! connection [original])
+          ;; RESTORE THE INDEXED CORE ROW EXACTLY: an upsert of the pulled
+          ;; original keeps the agent row's extra attributes, so the writer
+          ;; refuses its digest (79b6d9abd); the replacement retracts them.
+          (test-support/transacted!
+           connection
+           (program/exact-replacement-tx
+            (db/pull @connection '[*] [:seon.fn/sym function-symbol])
+            (test-support/program-fn-row function-symbol)))
+          (is (= (:seon.program/definition-digest original)
+                 (:seon.program/definition-digest
+                  (db/pull @connection [:seon.program/definition-digest]
+                           [:seon.fn/sym function-symbol])))
+              "the restored row is the indexed core declaration")
           (sci.eval/acquire! {:seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
                              :seon.db/db @connection})
           (doseq [agent-id ["agent-a" "s3-peer"]]
@@ -1416,7 +1449,7 @@
             consumer-source
             "(defn ^{:malli/schema [:=> [:cat :int] :int]} call-plus [x] (plus (target/increment x)))"
             namespace-result
-            (db/transact!
+            (test-support/transacted!
              connection
              [(test-support/namespace-row @connection 'authored.target)
               (program/declaration-row
@@ -1450,23 +1483,18 @@
                 [{:seon.ns.alias/local 'a
                   :seon.ns.alias/target-ns 'alias.cycle-a}]}
                :all :agent)])
+            ;; Agent definitions analyzed through the production source path
+            ;; with their real digests (79b6d9abd refuses hand-built rows);
+            ;; `transacted!` stops here if the writer refuses them.
             function-result
-            (db/transact!
+            (test-support/transacted!
              connection
-             [{:seon.fn/sym 'authored.target/increment
-               :seon.schema.admission/source :agent
-               :seon.fn/ns [:seon.ns/name 'authored.target]
-               :seon.fn/source target-source
-               :seon.fn/arglists "([x])"
-               :seon.fn/private? false
-               :seon.fn/spec "[:=> [:cat :int] :int]"}
-              {:seon.fn/sym 'authored.consumer/call-plus
-               :seon.schema.admission/source :agent
-               :seon.fn/ns [:seon.ns/name 'authored.consumer]
-               :seon.fn/source consumer-source
-               :seon.fn/arglists "([x])"
-               :seon.fn/private? false
-               :seon.fn/spec "[:=> [:cat :int] :int]"}])
+             [(test-support/program-fn-row
+               (db/db connection) 'authored.target/increment target-source
+               {:seon.schema.admission/source :agent})
+              (test-support/program-fn-row
+               (db/db connection) 'authored.consumer/call-plus consumer-source
+               {:seon.schema.admission/source :agent})])
             database (db/db connection)
             ctx (sci.eval/build-base-ctx (seon.schema/handed-projection))
             acquired
@@ -1502,10 +1530,14 @@
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)]
         (with-redefs [ai/complete
-                      (fn [_projection _] {:seon.ai/missing-credential-variable "DEEPSEEK_API_KEY" :seon.error/at (java.util.Date.) :seon.error/layer :seon.ai/invocation :seon.error/operation 'seon.ai/complete
-                               :seon.error/message
-                               "The environment variable DEEPSEEK_API_KEY is not set."
-                               :seon.error/data {}})]
+                      (fn [_projection _]
+                        ;; the identity `seon.ai/complete` declares for this refusal
+                        (vary-meta
+                         {:seon.ai/missing-credential-variable "DEEPSEEK_API_KEY" :seon.error/at (java.util.Date.) :seon.error/layer :seon.ai/invocation :seon.error/operation 'seon.ai/complete
+                          :seon.error/message
+                          "The environment variable DEEPSEEK_API_KEY is not set."
+                          :seon.error/data {}}
+                         assoc :seon.error/declared-schema :seon.ai/no-credential-error))]
           (drive! cluster 4))
         (testing "the run closed rather than sitting claimed"
           (is (some? (db/q '[:find ?c . :where
@@ -1610,14 +1642,15 @@
                          :seon.cluster.eval/source "42"
                          :seon.cluster.eval/ns [:seon.ns/name 'my.gen.alpha]})]))
         (let [report
-              (turn/turn
-               {:seon.turn.loop/cluster cluster
-                :seon.turn.work/next
-                {:seon.turn.work/situation :resume
-                 :seon.turn/id route-run
-                 :seon.agent/id "agent-a"
-                 :seon.cluster.eval/ordinal 0}}
-               now)
+              (settled! cluster
+                        (turn/turn
+                         {:seon.turn.loop/cluster cluster
+                          :seon.turn.work/next
+                          {:seon.turn.work/situation :resume
+                           :seon.turn/id route-run
+                           :seon.agent/id "agent-a"
+                           :seon.cluster.eval/ordinal 0}}
+                         now))
               receipts
               (->> (db/q '[:find [(pull ?receipt [*]) ...]
                           :in $ ?run-id
@@ -1731,6 +1764,7 @@
                       (turn/step {:seon.agent/id "agent-a"
                                   :seon.turn.loop/cluster handle}
                                  :seon.agent/episode :seon.agent/wake)
+                      _ (settled! handle state)
                       database (db/db connection)
                       evaluation (first (agent-evaluations database))]
                   (is (int? (:db/id evaluation)) (pr-str report))
@@ -1878,20 +1912,24 @@
     report))
 
 (defn- failure
-  "One model failure value carrying the evidence the leaf would record."
-  {:malli/schema [:=> [:cat :map :map] :seon.ai/completion]}
-  [members evidence]
-  (merge {:seon.error/at now
-          :seon.error/layer :seon.ai/request
-          :seon.error/operation 'seon.ai/complete
-          :seon.error/message "probe provider refusal"
-          :seon.error/data evidence}
-         members))
+  "One model failure value carrying the evidence the leaf would record and
+  the identity its producer declares (`seon.ai`, `:seon.error/declared-schema`
+  metadata), which the attempt recording reads."
+  {:malli/schema [:=> [:cat :qualified-keyword :map :map] :seon.ai/completion]}
+  [declared-schema members evidence]
+  (vary-meta (merge {:seon.error/at now
+                     :seon.error/layer :seon.ai/request
+                     :seon.error/operation 'seon.ai/complete
+                     :seon.error/message "probe provider refusal"
+                     :seon.error/data evidence}
+                    members)
+             assoc :seon.error/declared-schema declared-schema))
 
 (def ^:private unpaid
   "A connection the JDK PROVED never left this machine — the one case
   the no-retry ruling leaves open."
-  (failure {:seon.ai/transport-failure "https://provider.invalid"}
+  (failure :seon.ai/transport-failure-error
+           {:seon.ai/transport-failure "https://provider.invalid"}
            {:seon.ai/error-class :transport-before-send
             :seon.ai/request-transmitted? false
             :seon.ai/response-started? false
@@ -2064,17 +2102,19 @@
             usage {"prompt_tokens" 104
                    "completion_tokens" 8
                    "completion_tokens_details" {"reasoning_tokens" 8}}
-            failure {:seon.ai/exhausted-finish-reason "length" :seon.error/at (java.util.Date.) :seon.error/layer :seon.ai/invocation :seon.error/operation 'seon.ai/complete
-                     :seon.error/message
-                     "The provider exhausted the completion budget before replying."
-                     :seon.error/data
+            failure (failure
+                     :seon.ai/token-starvation-error
+                     {:seon.ai/exhausted-finish-reason "length"
+                      :seon.error/layer :seon.ai/invocation
+                      :seon.error/message
+                      "The provider exhausted the completion budget before replying."}
                      {:seon.ai/finish-reason "length"
                       :seon.ai/usage usage
                       :seon.ai/reasoning-content "all reasoning"
                       :seon.ai/error-class :response
                       :seon.ai/request-transmitted? true
                       :seon.ai/response-started? true
-                      :seon.ai/output-observed? true}}]
+                      :seon.ai/output-observed? true})]
         (when retain?
           (is (some? (:db-after
                       (db/transact! connection
@@ -2166,25 +2206,25 @@
                             @connection)))))))))
 
 (def ^:private turn-evidence-partitions
-  [{::error-class :credential :seon.error/value {:seon.ai/missing-credential-variable "SEON_TEST_PROVIDER_KEY"}
+  [{::error-class :credential ::declared-schema :seon.ai/no-credential-error :seon.error/value {:seon.ai/missing-credential-variable "SEON_TEST_PROVIDER_KEY"}
     ::transmitted? false}
-   {::error-class :transport-before-send :seon.error/value {:seon.ai/transport-failure "https://provider.invalid"}
+   {::error-class :transport-before-send ::declared-schema :seon.ai/transport-failure-error :seon.error/value {:seon.ai/transport-failure "https://provider.invalid"}
     ::transmitted? false}
-   {::error-class :transport-unknown :seon.error/value {:seon.ai/transport-failure "https://provider.invalid"}
+   {::error-class :transport-unknown ::declared-schema :seon.ai/transport-failure-error :seon.error/value {:seon.ai/transport-failure "https://provider.invalid"}
     ::transmitted? true}
-   {::error-class :timeout :seon.error/value {:seon.ai/timeout 1000} ::transmitted? true}
-   {::error-class :rate-limit :seon.error/value {:seon.ai/provider-error 503}
+   {::error-class :timeout ::declared-schema :seon.ai/timeout-error :seon.error/value {:seon.ai/timeout 1000} ::transmitted? true}
+   {::error-class :rate-limit ::declared-schema :seon.ai/provider-error-error :seon.error/value {:seon.ai/provider-error 503}
     ::transmitted? true}
-   {::error-class :server :seon.error/value {:seon.ai/provider-error 503} ::transmitted? true}
-   {::error-class :authentication :seon.error/value {:seon.ai/provider-error 503}
+   {::error-class :server ::declared-schema :seon.ai/provider-error-error :seon.error/value {:seon.ai/provider-error 503} ::transmitted? true}
+   {::error-class :authentication ::declared-schema :seon.ai/provider-error-error :seon.error/value {:seon.ai/provider-error 503}
     ::transmitted? true}
-   {::error-class :authorization :seon.error/value {:seon.ai/provider-error 503}
+   {::error-class :authorization ::declared-schema :seon.ai/provider-error-error :seon.error/value {:seon.ai/provider-error 503}
     ::transmitted? true}
-   {::error-class :model :seon.error/value {:seon.ai/provider-error 503} ::transmitted? true}
-   {::error-class :request :seon.error/value {:seon.ai/provider-error 503} ::transmitted? true}
-   {::error-class :response :seon.error/value {:seon.ai/unreadable-response-member "body"}
+   {::error-class :model ::declared-schema :seon.ai/provider-error-error :seon.error/value {:seon.ai/provider-error 503} ::transmitted? true}
+   {::error-class :request ::declared-schema :seon.ai/provider-error-error :seon.error/value {:seon.ai/provider-error 503} ::transmitted? true}
+   {::error-class :response ::declared-schema :seon.ai/unparseable-body-error :seon.error/value {:seon.ai/unreadable-response-member "body"}
     ::transmitted? true}
-   {::error-class :response :seon.error/value {:seon.ai/unreadable-response-member "body"}
+   {::error-class :response ::declared-schema :seon.ai/unparseable-body-error :seon.error/value {:seon.ai/unreadable-response-member "body"}
     ::transmitted? true ::output? true}])
 
 (def ^:private turn-outcome-generator
@@ -2203,13 +2243,14 @@
 
 (defn- turn-failure-value
   {:malli/schema [:=> [:cat [:map [:seon.error/value :map]
+                            [::declared-schema :qualified-keyword]
                             [::error-class :keyword]
                             [::transmitted? :boolean]
                             [::output? {:optional true} :boolean]]]
                   :seon.ai/completion]}
-  [{::keys [error-class transmitted? output?]
+  [{::keys [declared-schema error-class transmitted? output?]
     members :seon.error/value}]
-  (failure members
+  (failure declared-schema members
            (cond-> {:seon.ai/error-class error-class
                     :seon.ai/request-transmitted? transmitted?
                     :seon.ai/response-started?
@@ -2299,7 +2340,8 @@
             completions (mapv turn-completion (::outcomes scenario))
             requests (atom [])
             committed-prefixes (atom [])
-            complete! (fn [request]
+            ;; `ai/complete` takes the projection and the request (0f5f849bd).
+            complete! (fn [_projection request]
                         (swap! committed-prefixes
                                conj
                                (mapv actual-attempt-shape
@@ -2479,8 +2521,9 @@
           (let [connection (:seon.db/connection cluster)
                 source "(+ 1 1)\n(+ 2 2)\n(+ 3 3)"
                 open-work (turn/next-agent-work @connection (request connection))
-                _ (turn/turn {:seon.turn.loop/cluster cluster
-                              :seon.turn.work/next open-work} now)
+                _ (settled! cluster
+                            (turn/turn {:seon.turn.loop/cluster cluster
+                                        :seon.turn.work/next open-work} now))
                 call-work (turn/next-agent-work @connection (request connection))
                 run-id (:seon.turn/id call-work)
                 evaluations (atom 0)
@@ -2593,11 +2636,12 @@
               test-thread (Thread/currentThread)
               reply-arrived (atom nil)
               read-sources reply/sources]
-          (turn/turn
-           {:seon.turn.loop/cluster cluster
-            :seon.turn.work/next
-            (turn/next-agent-work @connection (request connection))}
-           now)
+          (settled! cluster
+                    (turn/turn
+                     {:seon.turn.loop/cluster cluster
+                      :seon.turn.work/next
+                      (turn/next-agent-work @connection (request connection))}
+                     now))
           (let [call-work (turn/next-agent-work @connection
                                                 (request connection))]
             (with-redefs-fn
@@ -2626,10 +2670,11 @@
                                      (when measure?
                                        (swap! write-count inc)
                                        (swap! write-nanos + (- (System/nanoTime) started)))))))]
-              (turn/turn
-               {:seon.turn.loop/cluster cluster
-                :seon.turn.work/next call-work}
-               now))))
+              (settled! cluster
+                        (turn/turn
+                         {:seon.turn.loop/cluster cluster
+                          :seon.turn.work/next call-work}
+                         now)))))
             (let [bookkeeping-ms (/ (double @write-nanos) 1000000.0)
                   install-ms (/ (double @install-nanos) 1000000.0)
                   ;; THE SUBJECT IS THE AGENT'S OWN SIX FORMS. System turn 0
@@ -2671,7 +2716,10 @@
                                     (:db/id (nth evaluations 2)))))
                   "a receipt asserts no program call edge; the definition row owns its edges")
               (is (pos? @install-nanos) "the definition install was observed")
-              (is (>= @write-count 2) "intent and settlement writes were observed")
+              ;; WANTED (55b5b580f, 8cedbee81): the intent is the one
+              ;; `db/transact!` write; each form then settles through the
+              ;; applied writer (`seon.db/transact-applied!`), not this Var.
+              (is (pos? @write-count) "the intent write was observed")
               (is (< install-ms 300.0)
                   (str "definition installation took " install-ms " ms"))
               (is (< bookkeeping-ms 300.0)
@@ -2697,8 +2745,11 @@
           (let [evaluations (agent-evaluations @connection)]
             (is (= "{:a 1 :b}\n"
                    (:seon.cluster.eval/source (first evaluations))))
-            (is (str/includes? (:seon.eval/shown (first evaluations))
-                               "seon.sci.reader/read refused source")
+            ;; WANTED (737fe0a5d): the failure shows as the flat error map,
+            ;; naming the reader's member rather than prose.
+            (is (= :seon.sci.reader/form
+                   (:seon.error/member
+                    (edn/read-string (:seon.eval/shown (first evaluations)))))
                 "the unreadable form keeps the reader's own refusal")
             (is (str/includes? (:seon.cluster.eval/error (first evaluations))
                                "Map literals must contain an even number of forms"))
@@ -2728,10 +2779,10 @@
               ;; run it nested inside its fixture (install refused).
               function-symbol (symbol "my.agents.agent-a" "extract-id")
               test-symbol (symbol "my.agents.agent-a" "extract-id-test")
+              ;; Call edges are symbols (0e8f7d323), not refs: pulled plainly.
               function-row
               (db/pull database
-                       '[:seon.fn/sym :seon.fn/spec
-                         {:seon.fn/calls [:seon.fn/sym]}]
+                       '[:seon.fn/sym :seon.fn/spec :seon.fn/calls]
                        [:seon.fn/sym function-symbol])
               result
               (db/q '[:find ?result .
@@ -2745,25 +2796,22 @@
                       :where
                       [?function :seon.fn/sym ?function-symbol]
                       [?function :seon.fn/arities ?arity]
-                      [?arity :seon.fn.arity/input-refs ?schema]
-                      [?schema :seon.schema/key ?key]]
+                      ;; input-refs and references hold schema keys, not refs
+                      [?arity :seon.fn.arity/input-refs ?key]]
                     database function-symbol)
               child-schema-keys
               (db/q '[:find [?child-key ...]
                       :in $ ?schema-key
                       :where
                       [?schema :seon.schema/key ?schema-key]
-                      [?schema :seon.schema/references ?child]
-                      [?child :seon.schema/key ?child-key]]
+                      [?schema :seon.schema/references ?child-key]]
                     database :my.agents.agent-a/item)]
           (is (= "43" result)
               "every form of a batched turn settles its own result")
           (is (= [test-symbol]
                  (seon.fn/tests-reaching database function-symbol)))
-          (is (contains?
-               (into #{} (map :seon.fn/sym)
-                     (:seon.fn/calls function-row))
-               'clojure.core/inc)
+          (is (contains? (set (:seon.fn/calls function-row))
+                         'clojure.core/inc)
               "the function row carries its kondo-resolved population call")
           (is (= #{:my.agents.agent-a/item} (set direct-contract-keys)))
           (is (= #{:my.agents.agent-a/item-id} (set child-schema-keys))
@@ -2832,21 +2880,26 @@
         (let [request {:seon.agent/id "agent-a"
                        :seon.db.process/id process}
               generated (turn/next-agent-work @connection request)
+              ;; the identity `seon.render.walk/graph` declares for a
+              ;; lookup with no entity, which the run's recording reads
               failure
-              {:seon.render.walk/missing-lookup [:seon.agent/id "agent-a"]
-               :seon.error/at now
-               :seon.error/layer :seon.render.walk/neighborhood
-               :seon.error/operation 'seon.render.walk/neighborhood
-               :seon.error/message
-               "The generated opening root pull returned no membership data."
-               :seon.error/data
-               {:seon.render.walk/lookup [:seon.agent/id "agent-a"]}}
+              (vary-meta
+               {:seon.render.walk/missing-lookup [:seon.agent/id "agent-a"]
+                :seon.error/at now
+                :seon.error/layer :seon.render.walk/neighborhood
+                :seon.error/operation 'seon.render.walk/neighborhood
+                :seon.error/message
+                "The generated opening root pull returned no membership data."
+                :seon.error/data
+                {:seon.render.walk/lookup [:seon.agent/id "agent-a"]}}
+               assoc :seon.error/declared-schema :seon.render.walk/no-such-entity-error)
               report
-              (with-redefs-fn {#'turn/declared-sources (constantly failure)}
-                #(turn/turn
-                 {:seon.turn.loop/cluster cluster
-                  :seon.turn.work/next generated}
-                 now))
+              (settled! cluster
+                        (with-redefs-fn {#'turn/declared-sources (constantly failure)}
+                          #(turn/turn
+                            {:seon.turn.loop/cluster cluster
+                             :seon.turn.work/next generated}
+                            now)))
               run-state
               (db/pull @connection
                        [:seon.turn.work/situation
@@ -2874,15 +2927,20 @@
             (let [sample (swap! sequence-number inc)
                   run-id (str "phase-failure-" sample)
                   evaluation? (= :evaluate failed-phase)
-                  failure {
-    :seon.turn.loop/phase-failed true
-    :seon.error/at (java.util.Date.)
-    :seon.error/layer :seon.turn/phase
-    :seon.error/operation 'seon.turn/phase
-                           :seon.error/message
-                           (str "injected " (name failed-phase) " failure")
-                           :seon.error/data {:seon.turn.loop/phase
-                                             failed-phase}}]
+                  ;; the phase failure `seon.turn` produces, with the
+                  ;; identity it declares (`:seon.turn.loop/phase-failed-error`)
+                  failure (with-meta
+                           {:seon.turn.loop/phase-failed true
+                            :seon.turn.loop/failed-step 'seon.turn/phase
+                            :seon.error/at (java.util.Date.)
+                            :seon.error/layer :seon.turn/phase
+                            :seon.error/operation 'seon.turn/phase
+                            :seon.error/message
+                            (str "injected " (name failed-phase) " failure")
+                            :seon.error/data {:seon.turn.loop/phase
+                                              failed-phase}}
+                           {:seon.error/declared-schema
+                            :seon.turn.loop/phase-failed-error})]
               (test-support/transacted!
                            connection
                            (into (test-support/agent-tx @connection "agent-a")
@@ -2986,9 +3044,7 @@
             requests (atom [])]
         (let [work (turn/next-agent-work @connection (request connection))]
           (is (= :open (:seon.turn.work/situation work)))
-          (turn/turn {:seon.turn.loop/cluster cluster
-                              :seon.turn.work/next work}
-                             (Date.)))
+          (settled! cluster (turn/turn {:seon.turn.loop/cluster cluster :seon.turn.work/next work} (Date.))))
         (test-support/transacted! connection
                                   [{:seon.message/id "m-2" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "message B"}])
         (with-redefs [ai/complete
@@ -2999,9 +3055,7 @@
           (let [call-a (turn/next-agent-work @connection
                                              (request connection))]
             (is (= :call (:seon.turn.work/situation call-a)))
-            (turn/turn {:seon.turn.loop/cluster cluster
-                                :seon.turn.work/next call-a}
-                               (Date.)))
+            (settled! cluster (turn/turn {:seon.turn.loop/cluster cluster :seon.turn.work/next call-a} (Date.))))
           (let [prompt-a (:seon.ai/prompt (first @requests))]
             (is (str/includes? prompt-a "count the widgets"))
             (is (str/includes? prompt-a ":seon.message/_to")
@@ -3014,15 +3068,11 @@
             (is (= :open (:seon.turn.work/situation open-b)))
             (is (= "m-2" (:seon.message/id open-b))
                 "the next derived work is the run triggered by B")
-            (turn/turn {:seon.turn.loop/cluster cluster
-                                :seon.turn.work/next open-b}
-                               (Date.)))
+            (settled! cluster (turn/turn {:seon.turn.loop/cluster cluster :seon.turn.work/next open-b} (Date.))))
           (let [call-b (turn/next-agent-work @connection
                                              (request connection))]
             (is (= :call (:seon.turn.work/situation call-b)))
-            (turn/turn {:seon.turn.loop/cluster cluster
-                                :seon.turn.work/next call-b}
-                               (Date.)))
+            (settled! cluster (turn/turn {:seon.turn.loop/cluster cluster :seon.turn.work/next call-b} (Date.))))
           (is (= 2 (count @requests)))
           (let [prompt-b (:seon.ai/prompt (second @requests))]
             (is (str/includes? prompt-b "message B")
