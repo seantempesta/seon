@@ -59,18 +59,12 @@
            :seon.boot/cluster-connection connection)))
 
 (defn- running-instance
+  "The fixture cluster's instance: boot's listening instance over the fixture
+  connection, holding a real SCI context forked onto that connection through
+  the production fork (an instance's context is an SCI context, never a map)."
   [connection cluster-name]
-  (let [projection (schema/projection-from-database (db/db connection))
-        environment
-        (env/environment
-         {:seon.boot/cluster-name cluster-name
-          :seon.db/connection connection
-          :seon.db/basis-t (db/basis-t (db/db connection))
-          :seon.schema/projection projection})]
-    (assoc (listening-instance connection cluster-name)
-     :seon.turn.loop/cluster (env/carry-state {} (env/environment-state environment))
-     :seon.sci.eval/ctx
-     (env/carry-state {} (env/environment-state environment)))))
+  (assoc (listening-instance connection cluster-name)
+         :seon.sci.eval/ctx (support/fork-cluster-ctx connection cluster-name)))
 
 (defn- sci-evaluation
   [effective source]
@@ -415,8 +409,12 @@
             first-page (cluster/mcp-get-value cluster-name digest [] 0)
             next-page
             (cluster/mcp-get-value cluster-name digest [] page-size)
+            last-page
+            (cluster/mcp-get-value cluster-name digest [] (- (count value) 10))
             past-end
-            (cluster/mcp-get-value cluster-name digest [] (count value))]
+            (cluster/mcp-get-value cluster-name digest [] (count value))
+            far-past-end
+            (cluster/mcp-get-value cluster-name digest [] 9000)]
         ;; A string pages by absolute character offset: each page is the
         ;; floor's selection of the characters from that offset.
         (is (str/starts-with? (:seon.dev.mcp/text first-page) (str "\"" (subs value 0 page-size))))
@@ -425,7 +423,12 @@
         (is (= (count value) (:seon.render.data/total first-page)))
         (is (= "\"\"" (:seon.dev.mcp/text past-end))
             "past the end the page is the empty remainder, named beyond the end")
-        (is (true? (:seon.render.value/beyond-end? past-end))))
+        (is (true? (:seon.render.value/beyond-end? past-end)))
+        ;; An uncut page is the whole remainder: it names the value's end
+        ;; and is not past it, and any page past the end says so.
+        (is (= [(count value) false]
+               ((juxt :seon.render.data/total :seon.render.value/beyond-end?) last-page)))
+        (is (true? (:seon.render.value/beyond-end? far-past-end))))
       (finally
         (swap! running-instances dissoc cluster-name)))))
 

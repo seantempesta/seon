@@ -545,13 +545,23 @@
                                     (= path (:seon.render.data/path %)))
                            %)
                         (tree-seq coll? seq tree))
-              total (or (:seon.render.data/total tree) (:seon.render.data/total cut))]
+              ;; An uncut string page is the whole remainder from `offset`
+              ;; (the floor names a string's length only on its cut): its end
+              ;; is the offset plus what it shows, and an empty remainder at
+              ;; a positive offset is at or past the end.
+              remainder (when (and (nil? cut) (= :seon.print/string (:seon.print/face tree)))
+                          (count (:seon.print/value tree)))
+              total (or (:seon.render.data/total tree) (:seon.render.data/total cut)
+                        (when (and remainder (pos? remainder)) (+ offset remainder)))
+              beyond-end? (if total
+                            (and (>= offset total) (pos? total))
+                            (and (some? remainder) (pos? offset)))]
           (if (:seon.error/at projection)
             (assoc projection :seon.blob/digest content-digest)
             (cond-> {:seon.dev.mcp/text (:seon.render.value/text projection)
                      :seon.render.data/path path
                      :seon.render.data/offset offset
-                     :seon.render.value/beyond-end? (boolean (and total (>= offset total) (pos? total)))}
+                     :seon.render.value/beyond-end? (boolean beyond-end?)}
               total (assoc :seon.render.data/total total)
               cut (assoc :seon.render.data/next-offset (:seon.render.data/next-offset cut)))))))
     {:seon.dev.mcp/remainder-not-retrievable content-digest
