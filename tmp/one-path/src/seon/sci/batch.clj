@@ -23,13 +23,13 @@
 (defn read-next
   "One read step at the live cursor, through the forgiving input stage."
   {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/read-state] :seon.batch/read-step]}
-  [{ctx :seon.sci.eval/ctx mode :seon.batch/mode} state]
+  [{{ctx :seon.sci.eval/ctx} :seon.batch/world mode :seon.batch/mode} state]
   (forgive/next-form ctx (parse-options ctx) mode state))
 
 (defn read-code
   "One read step with no repair: acquisition and file entrants read code."
   {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/read-state] :seon.batch/read-step]}
-  [{ctx :seon.sci.eval/ctx} state]
+  [{{ctx :seon.sci.eval/ctx} :seon.batch/world} state]
   (forgive/next-form ctx (parse-options ctx) :code state))
 
 (defn evaluate
@@ -39,8 +39,8 @@
   registration delta over `working`'s projection. A failure throws with its
   complete error value (`kernel/failure-value` under the arm's record) as
   `:seon.batch/error-value`, the thrown cause kept."
-  {:malli/schema [:=> [:cat :seon.batch/request :any :seon.db/database-value] :any]}
-  [{ctx :seon.sci.eval/ctx limit :seon.sci.eval/time-limit-ms delta :seon.sci.batch/delta} form working]
+  {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/form :seon.db/database-value] :seon.batch/value]}
+  [{{ctx :seon.sci.eval/ctx limit :seon.sci.eval/time-limit-ms} :seon.batch/world delta :seon.sci.batch/delta} form working]
   (kernel/with-arm
    ctx (or limit 30000)
    (fn [armed]
@@ -67,7 +67,7 @@
 
 (defn around
   "The batch runs in its start namespace."
-  {:malli/schema [:=> [:cat :seon.batch/request [:=> [:cat] :any]] :any]}
+  {:malli/schema [:=> [:cat :seon.batch/request [:=> [:cat] :seon.batch/batch]] :seon.batch/batch]}
   [{start-ns :seon.batch/start-ns} body]
   (sci/with-bindings {sci/ns (sci/create-ns start-ns)}
     (body)))

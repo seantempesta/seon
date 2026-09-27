@@ -9,7 +9,7 @@
             [seon.sci.kernel :as kernel]))
 
 (defn- var-symbol
-  {:malli/schema [:=> [:cat :any] [:maybe :qualified-symbol]]}
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary :seon.schema.admission/reason "A host Var or an SCI Var: both name themselves by :ns and :name metadata; anything else names nothing." :gen/elements [nil false 0 "" :k [] {}]}]] [:maybe :qualified-symbol]]}
   [v]
   (let [m (meta v)]
     (when (and (:ns m) (:name m))
@@ -51,7 +51,7 @@
   the definition still answers its Var. Answers the write with what arming
   did."
   {:malli/schema [:=> [:cat :map :seon.db/database-value :map] :map]}
-  [{ctx :seon.sci.eval/ctx :as request} working {v :var :as write}]
+  [{{ctx :seon.sci.eval/ctx} :seon.batch/world :as request} working {v :var :as write}]
   (let [sym (var-symbol v)
         contract (:malli/schema (meta v))
         function? (fn? @v)]

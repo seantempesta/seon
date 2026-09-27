@@ -36,6 +36,47 @@
   in order."
   (:require [clojure.string :as str]))
 
+(def ^:dynamic *world*
+  "The world of the evaluation running on this thread: the entrant's world
+  value with its database the batch's working value. The fold binds it around
+  each evaluation and its print; `seon.turn.batch/with-world` binds it again
+  after a thread hop. It is the one source a called function's omitted
+  world-member inputs are supplied from."
+  nil)
+
+(def world-members
+  "Each world member by the schema name a function declares it under: an
+  omitted input declared under one of these names is supplied from the
+  calling evaluation's world, required or optional. A function whose meaning
+  needs the member absent declares another name."
+  {:seon.db/database-value :seon.db/db
+   :seon.db/connection :seon.db/connection
+   :seon.db/writer :seon.db/writer
+   :seon.agent/id :seon.agent/id
+   :seon.task/id :seon.task/id
+   :seon.render/profile :seon.render/profile
+   :seon.batch/sink :seon.batch/sink
+   :seon.sci.eval/ctx :seon.sci.eval/ctx})
+
+(defn sink?
+  "True for a call sink."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary :seon.schema.admission/reason "A predicate answers for any value." :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
+  [x]
+  (instance? java.util.concurrent.ConcurrentHashMap x))
+
+(defn sink
+  "A new call sink: the per-world count of armed calls, by symbol. Concurrent
+  calls from the world's evaluations and the futures they start add to it."
+  {:malli/schema [:=> [:cat] :seon.batch/sink]}
+  []
+  (java.util.concurrent.ConcurrentHashMap.))
+
+(defn calls
+  "A sink's counts as a value: symbol -> calls."
+  {:malli/schema [:=> [:cat :seon.batch/sink] [:map-of :qualified-symbol nat-int?]]}
+  [^java.util.concurrent.ConcurrentHashMap s]
+  (into {} (map (fn [[k ^java.util.concurrent.atomic.LongAdder a]] [k (.sum a)])) s))
+
 (defn- ms-since
   {:malli/schema [:=> [:cat :int] :double]}
   [t0]
@@ -106,58 +147,137 @@
                    :seon.batch/stage :read :seon.batch/ordinal (:seon.batch/ordinal batch)})
           (assoc-in [:seon.batch/step :seon.batch/span-invalid?] true)))))
 
+(defn- source-of
+  "Where the read form came from: its source text and position, known before
+  it is evaluated."
+  {:malli/schema [:=> [:cat :seon.batch/read-step] :map]}
+  [r]
+  (let [text (:seon.batch/text (:seon.batch/version r))]
+    (if (:seon.batch/span-invalid? r)
+      ;; a span the read stage misreported: the form's own print is its source
+      {:seon.batch/source (binding [*print-length* 100 *print-level* 10] (pr-str (:seon.batch/form r)))}
+      (let [[l c] (line-column text (:seon.batch/start r))]
+        {:seon.batch/source (str/trimr (subs text (:seon.batch/start r) (:seon.batch/end r)))
+         :seon.batch/line l :seon.batch/column c}))))
+
+(defn- allocated-bytes
+  "The calling thread's allocated bytes so far (HotSpot's ThreadMXBean)."
+  {:malli/schema [:=> [:cat] :int]}
+  []
+  (.getCurrentThreadAllocatedBytes
+   ^com.sun.management.ThreadMXBean (java.lang.management.ManagementFactory/getThreadMXBean)))
+
+(defn- unprintable
+  "The minimal shown text of an entry whose print failed; total, nil included."
+  {:malli/schema [:=> [:cat :seon.batch/entry] :string]}
+  [e]
+  (str "#<unprintable "
+       (if (contains? e :seon.batch/value)
+         (if-some [v (:seon.batch/value e)] (.getName (class v)) "nil")
+         "error")
+       ">"))
+
+(defn- print-into
+  "`entry` with its shown text from the show stage (its text, or its text and
+  the printer's own diagnostics); a failed print is the minimal text plus the
+  failure."
+  {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/entry]
+                  [:tuple :seon.batch/entry [:maybe :seon.error/throwable] [:maybe :string]]]}
+  [request entry]
+  (try (let [p ((:seon.batch/show request) request entry)]
+         (if (string? p)
+           [(assoc entry :seon.batch/shown p) nil nil]
+           [(assoc entry :seon.batch/shown (:seon.batch/shown p)) nil (:seon.batch/print-diagnostics p)]))
+       (catch Throwable t [(assoc entry :seon.batch/shown (unprintable entry)) t nil])))
+
 (defn- evaluate-step
-  "Evaluate the read form once and publish its outcome at once. Never throws."
+  "Evaluate the read form once, and print its value, under one observation
+  scope, then publish the outcome. Never throws.
+
+  The observation's writes accumulate in a per-call concurrent queue (writes
+  may come from futures the form starts); the scope completes when the
+  observer stage returns, after the value was printed, so a definition made
+  while realizing a lazy value is observed. A write offered after completion
+  is refused to its writer. A write that is not a map is a diagnostic."
   {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/batch] :seon.batch/batch]}
   [request batch]
   (let [r (:seon.batch/step batch)
         n (:seon.batch/ordinal batch)
         t0 (System/nanoTime)
-        writes (volatile! [])
-        returned (volatile! ::none)
+        base (merge {:seon.batch/ordinal n} (source-of r))
+        ;; the world as this form sees it: its database is the working value
+        world (assoc (:seon.batch/world request) :seon.db/db (:seon.batch/working batch))
+        request (assoc request :seon.batch/world world)
+        none (Object.)
+        writes (java.util.concurrent.ConcurrentLinkedQueue.)
+        open (java.util.concurrent.atomic.AtomicBoolean. true)
+        on-write (fn [w]
+                   (when-not (.get open)
+                     (throw (ex-info "The evaluation that owned this observation has completed."
+                                     {:seon.batch/ordinal n :seon.batch/write w})))
+                   (.add writes (if (nil? w) ::nil-write w)))
+        returned (volatile! none)
+        printed (volatile! nil)
+        bytes0 (allocated-bytes)
+        measured (volatile! nil)
+        measure! (fn [] (vreset! measured {:seon.batch/duration-ms (ms-since t0)
+                                           :seon.batch/allocated-bytes (- (allocated-bytes) bytes0)}))
         run (fn []
-              (vreset! returned ((:seon.batch/evaluate request) request (:seon.batch/form r) (:seon.batch/working batch))))
-        [outcome failure]
-        (try
-          (if (:seon.batch/refused r)
-            [{:seon.batch/error (ex-info "Only the REPL writes responses: this map was not evaluated."
-                                         {:seon.batch/refused (:seon.batch/refused r)})}]
-            [{:seon.batch/value (if-let [observe (:seon.batch/observe request)]
-                                  (observe request (:seon.batch/working batch) #(vswap! writes conj %) run)
-                                  (run))}])
-          (catch Throwable t
-            ;; the observer's own failure after the form returned keeps the value
-            (if (identical? ::none @returned)
-              [{:seon.batch/error t}]
-              [{:seon.batch/value @returned} t])))]
+              (let [v (binding [*world* world]
+                        ((:seon.batch/evaluate request) request (:seon.batch/form r) (:seon.batch/working batch)))]
+                (vreset! returned v)
+                (measure!)
+                (when (:seon.batch/show request)
+                  (vreset! printed (binding [*world* world]
+                                     (print-into request (merge base @measured {:seon.batch/value v})))))
+                v))
+        refused (:seon.batch/refused r)
+        failure (try
+                  (cond
+                    refused nil
+                    (:seon.batch/observe request)
+                    ((:seon.batch/observe request) request (:seon.batch/working batch) on-write run)
+                    :else
+                    (run))
+                  nil
+                  (catch Throwable t t))
+        _ (.set open false)
+        _ (when-not @measured (measure!))
+        base (merge base @measured)
+        observed (vec writes)
+        value? (not (identical? none @returned))
+        entry (cond
+                refused (assoc base :seon.batch/error (ex-info "Only the REPL writes responses: this map was not evaluated."
+                                                               {:seon.batch/refused refused}))
+                (and value? @printed) (first @printed)
+                value? (assoc base :seon.batch/value @returned)
+                :else (assoc base :seon.batch/error failure))
+        [entry print-failure print-notes] (if (or (contains? entry :seon.batch/shown) (not (:seon.batch/show request)))
+                                            [entry (second @printed) (nth @printed 2 nil)]
+                                            (print-into request entry))
+        {good true bad false} (group-by map? observed)
+        diagnostics (cond-> []
+                      (and value? failure) (conj (diagnostic :observe n failure))
+                      print-failure (conj (diagnostic :show n print-failure))
+                      print-notes (conj {:seon.error/message (str "show: " print-notes) :seon.batch/stage :show
+                                         :seon.batch/ordinal n})
+                      (seq bad) (conj {:seon.error/message (str "observe: " (count bad) " observed writes were not maps and were dropped")
+                                       :seon.batch/stage :observe :seon.batch/ordinal n
+                                       :seon.error/data {:seon.batch/writes (vec (take 3 (map #(if (= ::nil-write %) nil %) bad)))}}))]
     (-> batch
-        (update :seon.batch/entries conj
-                (assoc outcome :seon.batch/ordinal n
-                       :seon.batch/duration-ms (ms-since t0)))
-        (cond-> failure (update :seon.batch/diagnostics conj (diagnostic :observe n failure)))
-        (update :seon.batch/writes into (map #(assoc % :seon.batch/ordinal n)) @writes)
-        (assoc :seon.batch/form-writes @writes)
+        (update :seon.batch/entries conj (assoc entry :seon.batch/total-ms (ms-since t0)))
+        (update :seon.batch/diagnostics into diagnostics)
+        (update :seon.batch/writes into (map #(assoc % :seon.batch/ordinal n)) good)
+        (assoc :seon.batch/form-writes (vec good))
         (clock :evaluate t0))))
 
 (defn- place-step
-  "Where the published entry came from: its source, position and namespaces."
+  "The namespace the published entry ran in and ended in."
   {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/batch] :seon.batch/batch]}
   [request batch]
-  (let [r (:seon.batch/step batch)
-        text (:seon.batch/text (:seon.batch/version r))
-        ns-after ((:seon.batch/ns-name request) request)]
-    (last-entry batch
-                (fn [e]
-                  (cond-> (assoc e :seon.batch/ns-before (:seon.batch/ns-before batch)
-                                 :seon.batch/ns-after ns-after)
-                    ;; a span the read stage misreported: the form's own print is its source
-                    (:seon.batch/span-invalid? r)
-                    (assoc :seon.batch/source (binding [*print-length* 100 *print-level* 10]
-                                                (pr-str (:seon.batch/form r))))
-                    (not (:seon.batch/span-invalid? r))
-                    (merge (let [[l c] (line-column text (:seon.batch/start r))]
-                             {:seon.batch/source (str/trimr (subs text (:seon.batch/start r) (:seon.batch/end r)))
-                              :seon.batch/line l :seon.batch/column c})))))))
+  (let [ns-after ((:seon.batch/ns-name request) request)]
+    (last-entry batch #(assoc % :seon.batch/ns-before (:seon.batch/ns-before batch)
+                              :seon.batch/ns-after ns-after))))
 
 (defn- derive-step
   "The form's program change from its observed writes, validated onto the
@@ -176,7 +296,7 @@
       (let [t1 (System/nanoTime)
             working (:seon.batch/working batch)
             tx ((:seon.batch/facts request) request working change)
-            {after :seon.batch/working refusal :seon.batch/refusal}
+            {after :seon.batch/working refusal :seon.batch/refusal gates :seon.batch/gates}
             ((:seon.batch/apply request) request working tx change)]
         (-> batch
             (cond-> (not refusal)
@@ -185,27 +305,9 @@
             (last-entry #(cond-> (merge % (select-keys change [:seon.batch/notes :seon.batch/private
                                                                :seon.batch/uncontracted]))
                            refusal (assoc :seon.batch/facts-error refusal)
+                           (seq gates) (assoc :seon.batch/gates gates)
                            (not refusal) (assoc :seon.batch/change change)))
             (clock :apply t1))))))
-
-(defn- show-last
-  "The last entry's shown text, printed once; a failed print is a diagnostic
-  and a minimal text naming the value's class."
-  {:malli/schema [:=> [:cat :seon.batch/batch :seon.batch/request] :seon.batch/batch]}
-  [batch request]
-  (let [t0 (System/nanoTime)
-        e (peek (:seon.batch/entries batch))]
-    (-> (try (last-entry batch #(assoc % :seon.batch/shown ((:seon.batch/show request) request %)))
-             (catch Throwable t
-               (-> batch
-                   (update :seon.batch/diagnostics conj (diagnostic :show (:seon.batch/ordinal e) t))
-                   (last-entry #(assoc % :seon.batch/shown
-                                       (str "#<unprintable "
-                                            (if (contains? e :seon.batch/value)
-                                              (.getName (class (:seon.batch/value e)))
-                                              "error")
-                                            ">"))))))
-        (clock :show t0))))
 
 (defn- form-step
   "Read, evaluate and record one form. Answers the batch with :seon.batch/done
@@ -225,9 +327,6 @@
                                             :seon.batch/reason :read-stage-failed}))
       (-> (evaluate-step request batch)
           (guard :place #(place-step request %))
-          ;; printed at once, as a REPL prints: a lazy value is realized before
-          ;; the next form runs (seon.sci.eval prints inside the arm, 9e61340b2)
-          (cond-> (:seon.batch/show request) (show-last request))
           (cond-> (:seon.batch/derive request) (guard :derive #(derive-step request %)))
           (update :seon.batch/ordinal inc)))))
 
@@ -262,7 +361,7 @@
   {:malli/schema [:=> [:cat :seon.batch/request] :seon.batch/batch]}
   [request]
   (let [t0 (System/nanoTime)
-        basis (:seon.batch/database request)
+        basis (get-in request [:seon.batch/world :seon.db/db])
         start {:seon.batch/entries [] :seon.batch/writes [] :seon.batch/diagnostics []
                :seon.batch/ordinal 0 :seon.batch/working basis :seon.batch/basis basis
                :seon.batch/program {}
@@ -296,11 +395,20 @@
                   (cond-> (:seon.batch/settle request)
                     (guard :settle #(let [t1 (System/nanoTime)
                                           commit ((:seon.batch/settle request) request %)]
-                                      ;; a settlement that re-derived facts on a moved head
-                                      ;; answers the entries with their new facts errors
-                                      (clock (cond-> (assoc % :seon.batch/commit (dissoc commit :seon.batch/rebased-entries))
-                                               (:seon.batch/rebased-entries commit)
-                                               (assoc :seon.batch/entries (:seon.batch/rebased-entries commit)))
+                                      (clock (cond-> (-> %
+                                                             ;; a settlement that rebased answers the state it committed
+                                                             (merge (:seon.batch/rebased commit))
+                                                             (assoc :seon.batch/commit (dissoc commit :seon.batch/rebased)))
+                                               ;; a refusal or storage failure stays beside the values and
+                                               ;; reaches the fault stage
+                                               (or (:seon.batch/writer-refusal commit) (:seon.batch/storage-error commit))
+                                               (update :seon.batch/diagnostics conj
+                                                       (cond-> {:seon.error/message (str "settle: the recording was not committed: "
+                                                                                         (or (:seon.error/message (:seon.batch/writer-refusal commit))
+                                                                                             (:seon.batch/storage-error commit)))
+                                                                :seon.batch/stage :settle}
+                                                         (:seon.batch/writer-refusal commit)
+                                                         (assoc :seon.error/data (:seon.batch/writer-refusal commit)))))
                                              :settle t1)))))
         batch (guard batch :fault #(record-faults request %))]
     (assoc batch :seon.batch/total-ms (ms-since t0))))

@@ -1,0 +1,52 @@
+--- a/src/seon/profile.clj
++++ b/src/seon/profile.clj
+@@ -22,7 +22,8 @@
+   and is not counted again. Counting each re-entry inflated calls and totals
+   (`seon.cluster/refresh-source!` showed x3 and three inclusive totals for one
+   call)."
+-  (:require [seon.schema.edn :as schema.edn])
++  (:require [seon.batch]
++            [seon.schema.edn :as schema.edn])
+   (:import [java.util Collections IdentityHashMap WeakHashMap]
+            [java.util.concurrent.atomic LongAccumulator LongAdder]
+            [java.util.function LongBinaryOperator]))
+@@ -117,9 +118,21 @@
+          ~(with-meta '__profile-throws {:tag 'java.util.concurrent.atomic.LongAdder})
+          (:seon.profile/throw-counter cell#)
+          ~(with-meta '__profile-entered {:tag 'java.lang.ThreadLocal})
+-         (:seon.profile/entered cell#)]
++         (:seon.profile/entered cell#)
++         ~'__profile-sym (:seon.profile/sym cell#)]
+      ~@body))
+ 
++(defmacro count-into-world!
++  "Count one call of `sym` in the calling evaluation's world's sink
++  (`seon.batch/*world*`, its `:seon.batch/sink`): a dynamic read and a
++  LongAdder increment, calling no armed function."
++  [sym]
++  `(when-some [sink# (:seon.batch/sink seon.batch/*world*)]
++     (.increment ^java.util.concurrent.atomic.LongAdder
++                 (.computeIfAbsent ^java.util.concurrent.ConcurrentHashMap sink# ~sym
++                                   (reify java.util.function.Function
++                                     (apply [_# _#] (java.util.concurrent.atomic.LongAdder.)))))))
++
+ (defmacro timed
+   "Evaluate `body` inside `with-cell`, counting its completion and elapsed time
+   once per outermost entry on this thread.
+@@ -135,12 +148,16 @@
+        (try
+          (let [value# (do ~@body)
+                elapsed# (- (System/nanoTime) started#)]
++           ;; the calling evaluation's own count (its world's sink): a test
++           ;; agent's counters see only its own calls
++           (count-into-world! ~'__profile-sym)
+            (.increment ~'__profile-calls)
+            (.add ~'__profile-total elapsed#)
+            (.accumulate ~'__profile-max elapsed#)
+            value#)
+          (catch Throwable failure#
+            (let [elapsed# (- (System/nanoTime) started#)]
++             (count-into-world! ~'__profile-sym)
+              (.increment ~'__profile-calls)
+              (.add ~'__profile-total elapsed#)
+              (.accumulate ~'__profile-max elapsed#)

@@ -18,7 +18,7 @@
 
 (defn observe
   "Run `thunk` under an env watch, handing each revealed write to `on-write`."
-  [{ctx :seon.sci.eval/ctx roots :seon.sci.pinned/roots :as request} working on-write thunk]
+  [{{ctx :seon.sci.eval/ctx} :seon.batch/world roots :seon.sci.pinned/roots :as request} working on-write thunk]
   (let [env (:env ctx)
         before (:namespaces @env)
         roots (or roots (volatile! {}))

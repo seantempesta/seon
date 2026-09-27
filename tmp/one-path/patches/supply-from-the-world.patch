@@ -1,0 +1,100 @@
+--- a/src/seon/instrument.clj
++++ b/src/seon/instrument.clj
+@@ -18,6 +18,7 @@
+             [clojure.test.check.generators :as gen]
+             [seon.call-preparation :as call-preparation]
+             [seon.config :as config]
++            [seon.batch]
+             [seon.db :as db]
+             [seon.effect :as effect]
+             [seon.env :as env]
+@@ -664,14 +665,15 @@
+                :seon.error/location {:seon.error.location/length 0})))))
+ 
+ (defn calling-environment
+-  "The world of the evaluation calling now: its context's environment, naming
+-  that context for suppliers that act on it, or nil when none runs.
++  "The world of the evaluation calling now, as the environment suppliers
++  read, or nil when no evaluation runs on this thread.
+ 
+-  Its database is the custody in force at the call (`seon.db/db`: the
+-  evaluation's scoped read basis, else the custody connection's current
+-  value), so a call inside `seon.db/call-with-custody` — a fixture branch, a
+-  deliberate write elsewhere — is supplied that custody's database, never the
+-  value its world was scoped with. Without custody the world stands as it is.
++  Its one source is that evaluation's world value (`seon.batch/*world*`,
++  bound by the fold around each evaluation and its print, and by
++  `seon.turn.batch/with-world` after a thread hop): the world's environment
++  scoped with the world's database (the batch's working value), agent and SCI
++  context. No global, no other cluster's connection and no binding another
++  caller set is read.
+ 
+   # Costs
+   Unarmed, measured at default 2026-09-27: ~0.9 us without custody, ~1.0 us
+@@ -679,15 +681,16 @@
+   current value (a host test body)."
+   {:malli/schema [:=> [:cat] [:or :nil :seon.env/environment]]}
+   []
+-  ;; Called on every prepared call, so it reads the arm and scopes unarmed.
+-  (when-let [ctx ((mi/-f->original kernel/world-ctx))]
+-    (when-let [environment ((mi/-f->original env/of) ctx)]
+-      (let [database (when (or db/*read-database* db/*conn*)
+-                       ((mi/-f->original db/db)))]
+-        ((mi/-f->original env/scope)
+-         environment
+-         (cond-> {:my.program/executing-ctx ctx}
+-           ((mi/-f->original db/database-value?) database) (assoc :seon.db/db database)))))))
++  ;; Called on every prepared call, so it scopes unarmed.
++  (when-let [{environment :seon.env/environment database :seon.db/db agent-id :seon.agent/id
++              ctx :seon.sci.eval/ctx} seon.batch/*world*]
++    (when environment
++      ((mi/-f->original env/scope)
++       environment
++       (cond-> {}
++         ctx (assoc :my.program/executing-ctx ctx)
++         agent-id (assoc :seon.agent/id agent-id)
++         ((mi/-f->original db/database-value?) database) (assoc :seon.db/db database))))))
+ 
+ (defn- compiled-wrapper
+   {:seon/tasks #{"a57e8b27de67"}
+--- a/src/seon/call_preparation.clj
++++ b/src/seon/call_preparation.clj
+@@ -34,7 +34,8 @@
+   Full arities and the all-default shape retain precedence; other shorter
+   calls require a unique placement under the declared slot schemas before any
+   missing value is supplied."
+-  (:require [clojure.core.cache.wrapped :as cache]
++  (:require [seon.batch]
++            [clojure.core.cache.wrapped :as cache]
+             [clojure.test.check.generators :as gen]
+             [datahike.api :as d]
+             [datahike.db]
+@@ -548,6 +549,13 @@
+    :seon.call-preparation/supplier-symbol
+    (:seon.call-preparation/supplier-symbol candidate)})
+ 
++(defn- world-member?
++  "Whether `schema-key` names a member of an evaluation's world
++  (`seon.batch/world-members`)."
++  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
++  [schema-key]
++  (contains? seon.batch/world-members schema-key))
++
+ (defn- arity-plan
+   "One compiled arity joined to the supplied defaults by declared schema name:
+   a slot by its schema name, a map entry by its key AND value schema name, and
+@@ -556,9 +564,11 @@
+   (let [entries (vec (for [{position :seon.fn.argument/index map-entries ::map-entries} arguments
+                            [entry-key optional? value] map-entries
+                            :let [candidate (get index value)]
+-                           ;; Only a REQUIRED entry is supplied: an optional one's
+-                           ;; absence is the caller's meaning, never a gap to fill.
+-                           :when (and (not optional?)
++                           ;; A required entry, or an optional one whose schema is a
++                           ;; world member, is supplied when missing: a function whose
++                           ;; meaning needs the member absent declares another name.
++                           ;; Any other optional entry's absence is the caller's meaning.
++                           :when (and (or (not optional?) (world-member? value))
+                                       (= entry-key (:seon.call-preparation/key candidate)))]
+                        (assoc (slot-of candidate position) :seon.call-preparation/entry-key entry-key)))
+         slots (vec (for [{position :seon.fn.argument/index rest? :seon.fn.argument/rest?

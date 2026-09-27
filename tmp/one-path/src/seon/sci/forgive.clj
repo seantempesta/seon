@@ -112,7 +112,7 @@
 (defn- structural-forms
   "Every top-level form of `text` read structurally, or nil when the text has
   a structural error. Invokes no tag reader and resolves no alias."
-  {:malli/schema [:=> [:cat :string] [:maybe [:vector :any]]]}
+  {:malli/schema [:=> [:cat :string] [:maybe [:vector :seon.batch/form]]]}
   [^String text]
   (try
     (let [r (edamame/reader text)]
@@ -120,6 +120,14 @@
         (let [f (edamame/parse-next r structural-options)]
           (if (= ::eof f) out (recur (conj out f))))))
     (catch Throwable _ nil)))
+
+(defn- first-form-structural?
+  "Whether the first form of `text` (or its end) reads structurally: no tag
+  reader invoked, no alias resolved."
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [^String text]
+  (try (edamame/parse-next (edamame/reader text) structural-options) true
+       (catch Throwable _ false)))
 
 (defn- code-suffix
   "The offset, within `tail`, of a suffix whose every form is a collection
@@ -174,7 +182,10 @@
   [line]
   (boolean (re-find #"^[\(\[\{\#'`~@^]" (str/triml line))))
 
-(defn- structured? [form ^String source]
+(defn- structured?
+  "Whether a read form is code by its shape: a collection, or a dispatch form."
+  {:malli/schema [:=> [:cat :seon.batch/form :string] :boolean]}
+  [form ^String source]
   (or (coll? form) (str/starts-with? source "#")))
 
 (defn next-form
@@ -199,6 +210,8 @@
                              (not (str/includes? (subs text last-code-end start) "\n")))
           marker (when begins-line? (re-find prompt (subs text start le)))
           done (fn [m] (assoc m :seon.batch/version v :seon.batch/repairs repairs))
+          fixed (delay (when (and (< start (count text)) (not (first-form-structural? (subs text start))))
+                         (delimiter-repair text start)))
           step
           (cond
             (> guard 64) (done {:seon.batch/unread-from start :seon.batch/reason :too-many-repairs})
@@ -206,6 +219,11 @@
             marker
             [:redo (str (subs text 0 start) (subs text (+ start (count marker)))) start
              {:seon.batch/repair-kind :prompt-marker}]
+            ;; the delimiter decision is structural and comes first, so the one
+            ;; semantic read (tag readers, alias resolution) runs once, on the
+            ;; accepted form
+            @fixed
+            [:redo (:text @fixed) start (:repair @fixed)]
             :else
             (let [r (read-one ctx opts v)
                   source (when (contains? r :form) (subs text start (:end r)))]
@@ -226,13 +244,8 @@
                   (let [{t :text rep :repair} (comment-rest-of-line text start)]
                     [:redo t start rep]))
                 :else
-                (let [msg (str (ex-message (:error r)))
-                      ;; a structural error in the rest (not the live reader's message,
-                      ;; which can name an alias or tag past an unclosed form)
-                      fixed (when (nil? (structural-forms (subs text start)))
-                              (delimiter-repair text start))]
+                (let [msg (str (ex-message (:error r)))]
                   (cond
-                    fixed [:redo (:text fixed) start (:repair fixed)]
                     (and (= :reply mode) (re-find prose-read-failure msg)
                          (not (code-line? (subs text ls le))))
                     (let [{t :text rep :repair} (comment-rest-of-line text start)]

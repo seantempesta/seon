@@ -1,8 +1,8 @@
 (ns one-path-proof
-  "The one-path proof suite: every row runs the implementation in
+  "The one-path proof suite: every proof runs the implementation in
   tmp/one-path/src against default's live database, in an agent world on a
-  disposable branch (commits through `seon.db/with`, the writer's own
-  validation), or reads the scratch-JVM results of the SCI fork rows.
+  disposable branch (its writes land there through the branch's own writer),
+  or reads the scratch-JVM results of the SCI fork proofs.
 
   (load-file \"/Users/sean/src/seon/tmp/one-path/load.clj\")
   (load-file \"/Users/sean/src/seon/tmp/one-path/one_path_proof.clj\")
@@ -11,7 +11,8 @@
             [clj-kondo.core]
             [clojure.walk]
             [clojure.edn :as edn]
-            [clojure.java.shell]
+            [clojure.java.io :as io]
+            [clojure.java.shell :as sh]
             [clojure.pprint :as pprint]
             [clojure.string :as str]
             [datahike.api :as d]
@@ -21,6 +22,8 @@
             [seon.batch :as batch]
             [seon.cluster.agent :as agent]
             [seon.db :as db]
+            [seon.env]
+            [seon.schema]
             [seon.sci.batch :as sci.batch]
             [seon.sci.eval :as eval]
             [seon.sci.forgive :as forgive]
@@ -48,16 +51,38 @@
 
 (def ^:dynamic *exec* nil)
 
+(defn- without-native-guard
+  "The landing deletes native-mutation (S9: removals are observed writes); its
+  guard reads this flag, so a proof world runs without it."
+  [world]
+  (update world :seon.sci.eval/ctx assoc :seon.sci.eval/native-operation? true))
+
+(defn live-process
+  "The live default root's process identity (a world's fault context)."
+  []
+  (:seon.db.process/id (:seon.turn.loop/cluster (get @@(requiring-resolve 'seon.operator.runtime/running-instances) "default"))))
+
 (defn world
-  "A fresh agent world forked from the suite's execution, reading `db` (its
-  branch head by default)."
-  ([] (world (:seon.db/db *exec*)))
-  ([db]
-   {:db db :conn (:seon.db/connection *exec*)
-    ;; the landing deletes native-mutation (S12: removals are observed writes);
-    ;; its guard reads this flag, so the world runs without it
-    :ctx (assoc (eval/fork-cluster-ctx (:seon.sci.eval/base-ctx *exec*) db (:seon.db/connection *exec*))
-                :seon.sci.eval/native-operation? true)}))
+  "A fresh agent world (`seon.turn.batch/agent-world`) on the suite's
+  disposable branch, reading that branch's head now. Writes land there
+  through `seon.db/transact!`."
+  ([] (world {}))
+  ([opts]
+   (without-native-guard
+    (turn.batch/agent-world *exec* (merge {:seon.agent/id "root"
+                                           :seon.turn/id (str "op3-" (subs (str (random-uuid)) 0 8))
+                                           :seon.db.process/id (live-process)}
+                                          opts)))))
+
+(defn on-fresh-branch
+  "Call `f` with *exec* bound to a new disposable execution (a branch no other
+  proof has written), released after."
+  [f]
+  (let [exec (acquire!)]
+    (try (binding [*exec* exec] (f)) (finally (release! exec)))))
+
+(defn wdb [w] (:seon.db/db w))
+(defn wctx [w] (:seon.sci.eval/ctx w))
 
 (def turn-stages
   "What seon.turn supplies to the program stages (it owns these writers)."
@@ -65,18 +90,14 @@
    :seon.turn.batch/record-call (requiring-resolve 'seon.turn/record-evaluated-call)})
 
 (defn request
-  "A program request over `text` in `w`, committing to a `with` value."
+  "A request over `text` in world `w` (`:writer` replaces the world's writer)."
   [w text opts]
-  (let [{:keys [db ctx]} w
-        head (or (:head opts) db)]
-    (merge turn-stages
-           {:seon.batch/text text :seon.batch/database db :seon.sci.eval/ctx ctx
-            :seon.batch/observe pinned/observe :seon.sci.pinned/roots (pinned/observer-state)
-            :seon.agent/id "root" :seon.turn/id (str "op3-" (subs (str (random-uuid)) 0 8))
-            :seon.cluster/name "default"
-            :seon.batch/commit! (fn [tx] (db/with head tx))
-            :seon.batch/head (fn [_] head)}
-           (dissoc opts :head :mode))))
+  (merge turn-stages
+         {:seon.batch/text text
+          :seon.batch/world (cond-> (assoc w :seon.turn/id (str "op3-" (subs (str (random-uuid)) 0 8)))
+                              (:writer opts) (assoc :seon.db/writer (:writer opts)))
+          :seon.batch/observe pinned/observe :seon.sci.pinned/roots (pinned/observer-state)}
+         (dissoc opts :writer :mode)))
 
 (defn run
   "Evaluate `text` as an MCP code batch, or a product turn with :mode :reply."
@@ -151,10 +172,10 @@
 
 (defproof :oq1-head-moved :owner
   "OQ1 writer failure: a concurrent write changed the checked basis; forms re-derive on the new head; only the form it now refuses loses its facts (logged); the rest commit"
-  (let [w (world)
-        a0 (after (run w "(defn hm1 [x] x)"))
-        head (after (run (assoc w :db a0) "(defn hmref [x] (hm1 x))"))
-        b (run (assoc w :db a0) "(defn hm3 [x] x)\n(ns-unmap *ns* 'hm1)\n(hm3 9)" {:head head})
+  (let [_ (run (world) "(defn hm1 [x] x)")
+        w (world)                                   ; its basis holds hm1
+        _ (run (world) "(defn hmref [x] (hm1 x))")  ; a concurrent write moves the head
+        b (run w "(defn hm3 [x] x)\n(ns-unmap *ns* 'hm1)\n(hm3 9)")
         a (after b)]
     {:pass? (and (applied? b) (= 9 (last (values b))) (stored? a 'user/hm3) (stored? a 'user/hm1) (stored? a 'user/hmref)
                  (= 1 (count (facts-errors b))) (some? (get-in b [:seon.batch/commit :seon.batch/first-refusal])))
@@ -162,7 +183,7 @@
 
 (defproof :oq1-storage-failure :owner
   "OQ1 writer failure: storage fails at commit; every value is kept and the batch answers the storage error"
-  (let [b (run (world) "(defn sf1 [x] x)\n(sf1 7)" {:seon.batch/commit! (fn [_] (throw (ex-info "storage unavailable" {})))})]
+  (let [b (run (world) "(defn sf1 [x] x)\n(sf1 7)" {:writer (fn [_ _] (throw (ex-info "storage unavailable" {})))})]
     {:pass? (and (= 7 (last (values b))) (= "storage unavailable" (get-in b [:seon.batch/commit :seon.batch/storage-error])))
      :commit (:seon.batch/commit b)}))
 
@@ -180,7 +201,7 @@
 (defproof :q2-recorded-replies :owner
   "Q2: the 52 recorded replies read through the forgiving stage exactly as revision 2 recorded them; no read fails to advance"
   (let [inputs (edn/read-string (slurp (str dir "forgive-results.edn")))
-        ctx (:ctx (world))
+        ctx (wctx (world))
         opts (sci.batch/parse-options ctx)
         t0 (System/nanoTime)
         outs (mapv (fn [{:keys [text ours]}]
@@ -214,29 +235,163 @@
      :notes (vec (mapcat :seon.batch/notes (:seon.batch/entries b)))}))
 
 (defproof :q5-def-edges :owner
-  "Q5: def/defonce are program rows with dependency edges, acquired in edge order into a fresh context (acquisition entrant)"
-  (let [b (run (world) "(def base-v 41)\n(def dep-v {:k base-v})\n(defonce once-v (inc base-v))")
+  "Q5: def/defonce are program entities with dependency edges, acquired in edge order into a fresh context (acquisition entrant)"
+  (let [fresh (world)                ; acquired before these definitions existed
+        b (run (world) "(def base-v 41)\n(def dep-v {:k base-v})\n(defonce once-v (inc base-v))")
         a (after b)
         rs (for [s '[user/base-v user/dep-v user/once-v]] (db/pull a '[:seon.fn/sym :seon.fn/source :seon.fn/calls] [:seon.fn/sym s]))
-        fresh (world)
         acq (batch/evaluate-batch (turn.batch/acquire-request
                                    {:seon.batch/text (str/join "\n" (map :seon.fn/source rs))
-                                    :seon.batch/database a :seon.sci.eval/ctx (:ctx fresh)}))
+                                    :seon.batch/world fresh}))
         got (values (batch/evaluate-batch (turn.batch/acquire-request
-                                           {:seon.batch/text "[once-v dep-v]" :seon.batch/database a :seon.sci.eval/ctx (:ctx fresh)})))]
+                                           {:seon.batch/text "[once-v dep-v]" :seon.batch/world fresh})))]
     {:pass? (and (applied? b) (every? :seon.fn/source rs)
                  (contains? (set (:seon.fn/calls (second rs))) 'user/base-v)
                  (= [[42 {:k 41}]] got) (empty? (diags acq)))
      :calls (mapv (comp vec :seon.fn/calls) rs) :acquired got}))
 
 (defproof :contract-warning :owner
-  "Contract coverage: one uncontracted function gives the note; two give the growing warning; nothing is refused"
-  (let [b1 (run (world) "(defn nc1 [x] x)")
-        b2 (run (world) "(defn nc2 [x] x)\n(defn nc3 [x] x)")]
+  "Contract coverage, on a branch with no agent definitions yet: one uncontracted function gives the note; two more give the growing warning naming all three; nothing is refused"
+  (on-fresh-branch
+   #(let [b1 (run (world) "(defn nc1 [x] x)")
+          b2 (run (world) "(defn nc2 [x] x)\n(defn nc3 [x] x)")]
     {:pass? (and (str/includes? (str (:seon.eval/contract-note b1)) "user/nc1")
-                 (every? (set (:seon.eval/contract-warning b2)) '[user/nc2 user/nc3])
+                 (= #{'user/nc1 'user/nc2 'user/nc3} (set (:seon.eval/contract-warning b2)))
                  (applied? b1) (applied? b2))
-     :note (:seon.eval/contract-note b1) :warning (:seon.eval/contract-warning b2)}))
+     :note (:seon.eval/contract-note b1) :warning (:seon.eval/contract-warning b2)})))
+
+;;; --- The world ------------------------------------------------------------------
+
+(defn- branch-of [conn] (:seon.agent/branch (meta conn) (get-in @conn [:config :branch])))
+
+(defn- world-members
+  "What the world says of itself, checked against its own members."
+  [w]
+  (let [conn (:seon.db/connection w)
+        ctx (:seon.sci.eval/ctx w)
+        env-conn (some-> ctx seon.env/of :seon.db/connection)]
+    {:db-is-connections (if conn (= (db/commit-id (:seon.db/db w)) (db/commit-id (db/db conn))) :no-connection)
+     :ctx-custody-is-connection (cond (nil? ctx) :no-context
+                                      (nil? conn) :read-only
+                                      :else (identical? env-conn conn))
+     :writer-takes-connection (if conn (fn? (:seon.db/writer w)) (nil? (:seon.db/writer w)))}))
+
+(defn world-errors
+  "`w` validated against :seon.batch/world (the landing schema resource over
+  the live projection): {:schema-errors [...]}, empty when valid (B5: no
+  member installed as nil)."
+  [w]
+  (let [forms (update-keys (edn/read-string (slurp (str dir "resources/seon/schemas/seon.batch.edn")))
+                           #(keyword "seon.batch" (name %)))
+        registry (mr/composite-registry forms (:seon.schema.projection/registry (db/carried-projection (wdb w))))]
+    {:schema-errors (mapv #(select-keys % [:in :value]) (:errors (m/explain :seon.batch/world w {:registry registry})))}))
+
+(defproof :world-members-agree :world
+  "For every entrant's world (agent turn, MCP SCI, MCP JVM, test agent, render, install gate, register!, merge), the world validates against :seon.batch/world with no nil member, and every member agrees: its value is its connection's, its SCI fork's custody is that same connection, and a write through its writer lands on its branch (a test agent's on its requester's); read-only worlds have no connection and refuse a write"
+  (let [conn (:seon.db/connection *exec*)
+        agent (world {:seon.agent/id "root"})
+        mcp (world {:seon.agent/id "mcp/op3"})
+        requester conn
+        texec (acquire!)
+        results
+        (try
+          (let [test-agent (without-native-guard (turn.batch/test-agent-world texec requester {:seon.agent/id "root"}))
+                worlds {:agent-turn agent :mcp-sci mcp
+                        :mcp-jvm (turn.batch/jvm-world "default" conn {:seon.agent/id "root"})
+                        :test-agent test-agent
+                        :render (turn.batch/read-only-world agent (wdb agent))
+                        :gate (turn.batch/read-only-world agent (wdb agent))
+                        :register (world {:seon.agent/id "root"})
+                        :merge (without-native-guard (turn.batch/merge-world *exec* {}))}
+                members (update-vals worlds world-members)
+                ;; a write through each writable world: a fresh namespace entity, found only where it should land
+                wrote (into {} (for [[k w] worlds
+                                     :let [n (symbol (str "op3.world." (name k) "." (subs (str (random-uuid)) 0 6)))
+                                           target (turn.batch/settlement-connection w)]]
+                                 [k (if-let [writer (:seon.db/writer w)]
+                                      (let [r (writer target [{:seon.ns/name n}])]
+                                        {:landed (boolean (db/pull (db/db target) [:db/id] [:seon.ns/name n]))
+                                         :own-branch? (identical? target (:seon.db/connection w))
+                                         :elsewhere (boolean (when-not (identical? target conn)
+                                                               (db/pull (db/db conn) [:db/id] [:seon.ns/name n])))})
+                                      {:refused (let [b (batch/evaluate-batch (turn.batch/render-request
+                                                                               (request w (str "(seon.db/transact! [{:seon.ns/name '" n "}])") {})))]
+                                                  (= 'seon.db/missing-connection-error (:seon.error/operation (first (values b)))))})]))]
+            (into {} (for [[k w] worlds] [k (merge (get members k) (get wrote k) (world-errors w))])))
+          (finally (release! texec)))
+        ok? (fn [[k m]]
+              (and (empty? (:schema-errors m))
+                   (#{true :no-connection} (:db-is-connections m))
+                   (#{true :no-context :read-only} (:ctx-custody-is-connection m))
+                   (:writer-takes-connection m)
+                   (or (:refused m) (and (:landed m) (not (:elsewhere m))))
+                   (if (= k :test-agent) (false? (:own-branch? m)) true)))]
+    {:pass? (every? ok? results) :worlds results}))
+
+(defproof :worlds-never-cross :world
+  "Two agent worlds on two branches (two executions) and two concurrent test agents: databases, writes and SCI state stay separate"
+  (let [ea (acquire!) eb (acquire!)]
+    (try
+      (let [wa (without-native-guard (turn.batch/agent-world ea {:seon.agent/id "root"}))
+            wb (without-native-guard (turn.batch/agent-world eb {:seon.agent/id "root"}))
+            ba (future (batch/evaluate-batch (turn.batch/code-request (request wa "(def op3-cross :a)\nop3-cross" {}))))
+            bb (future (batch/evaluate-batch (turn.batch/code-request (request wb "(def op3-cross :b)\nop3-cross" {}))))
+            [ra rb] [@ba @bb]
+            src (fn [e] (:seon.fn/source (db/pull (db/db (:seon.db/connection e)) [:seon.fn/source] [:seon.fn/sym 'user/op3-cross])))]
+        {:pass? (and (= [:a] (rest (values ra))) (= [:b] (rest (values rb)))
+                     (= "(def op3-cross :a)" (src ea)) (= "(def op3-cross :b)" (src eb))
+                     (= :a (sci/eval-string* (wctx wa) "op3-cross")) (= :b (sci/eval-string* (wctx wb) "op3-cross"))
+                     (not (identical? (:seon.db/connection ea) (:seon.db/connection eb))))
+         :sources [(src ea) (src eb)]})
+      (finally (release! ea) (release! eb)))))
+
+(defproof :world-survives-compute-hop :world
+  "A form evaluated on another thread (a compute-pool hop) loses the submitting thread's bindings; carrying the world as a value and re-establishing them from it (seon.turn.batch/with-world) gives the same custody, read basis and context"
+  (let [w (world)
+        pool (java.util.concurrent.Executors/newFixedThreadPool 1)]
+    (try
+      (let [probe #(db/pull [:seon.agent/id] [:seon.agent/id "root"])
+            ;; on the submitting thread, under the world
+            here (turn.batch/with-world w probe)
+            bare (.get (.submit pool ^Callable (fn [] (try (probe) (catch Throwable t [:refused (ex-message t)])))))
+            carried (.get (.submit pool ^Callable (fn [] (turn.batch/with-world w probe))))
+            ;; a whole batch whose evaluate stage hops to the pool, carrying the world
+            hop-req (assoc (turn.batch/code-request (request w "(defn hopf [x] x)\n(:seon.fn/sym (seon.db/pull [:seon.fn/sym] [:seon.fn/sym 'user/hopf]))" {}))
+                           :seon.batch/evaluate (fn [req form working]
+                                                  (.get (.submit pool ^Callable
+                                                                 (fn [] (turn.batch/with-world (:seon.batch/world req)
+                                                                          #(seon.sci.batch/evaluate req form working)))))))
+            b (batch/evaluate-batch hop-req)]
+        {:pass? (and (= "root" (:seon.agent/id here)) (= here carried)
+                     (not= here bare)
+                     (= 'user/hopf (last (values b))) (applied? b))
+         :here here :bare bare :hop-values (mapv str (values b))})
+      (finally (.shutdown pool)))))
+
+(defproof :speculative-batch-keeps-committed-projection :schema
+  "Ruling B: a speculative value's projection derived from its own basis's projection (never through the committed projection cache) costs the same after a 22-registration batch as before; the landed seon.db path at HEAD does not, which is what S-B changes"
+ (on-fresh-branch
+   (fn [] (let [w (world)
+        conn (:seon.db/connection *exec*)
+        tx-of (fn [nm] (let [b (run (world) (str "(defn " nm " [x] x)") {:seon.batch/settle nil})]
+                         (turn.batch/form-facts (turn.batch/code-request (request (world) "" {}))
+                                                (:seon.db/db (world))
+                                                (get-in b [:seon.batch/entries 0 :seon.batch/change]))))
+        t (fn [f] (let [t0 (System/nanoTime)] (f) (ms-since t0)))
+        speculative (fn [tx] (let [basis (db/db conn)
+                                   prepared (#'db/prepared-write (db/carried-projection basis) basis tx)]
+                               [basis (db/carry-projection-state (:db-after (d/with basis (update prepared :tx-meta dissoc :datahike/validate-report)))
+                                                                 (:seon.sci.eval/projection-state (meta basis)))]))
+        from-basis (fn [[basis v]] (t #(seon.schema/load-projection v (db/carried-projection basis))))
+        through-cache (fn [[_ v]] (t #(db/carried-projection v)))
+        before-b (from-basis (speculative (tx-of "spb1")))
+        before-c (through-cache (speculative (tx-of "spc1")))
+        _ (run (world) (slurp "/Users/sean/src/seon/tmp/valid-clojure-corpus/items/h36-register-22.clj"))
+        after-b (from-basis (speculative (tx-of "spb2")))
+        after-c (through-cache (speculative (tx-of "spc2")))]
+    {:pass? (< after-b 100)
+     :ruling-b-ms {:before before-b :after after-b}
+     :head-path-ms {:before before-c :after after-c}}))))
 
 ;;; --- Both entrants: an MCP eval and a Seon agent turn ---------------------------
 
@@ -260,10 +415,13 @@
 
 (defn- transport-free
   "A reply as the MCP transport leaves it (JSON keys and symbols as strings),
-  without its nondeterministic timings."
+  without its nondeterministic timings and fault occurrence identities."
   [r]
   (-> (cheshire.core/parse-string (cheshire.core/generate-string r) true)
-      (update :seon.batch/evaluations (fn [es] (mapv #(dissoc % :seon.batch/duration-ms) es)))))
+      (update :seon.batch/faults (fn [fs] (mapv #(dissoc % :seon.error.occurrence/id) fs)))
+      ;; a diagnostic's printed error names the instant it occurred
+      (update :seon.batch/diagnostics (fn [ds] (mapv #(str/replace % #"#inst [^,}]*" "#inst") ds)))
+      (update :seon.batch/evaluations (fn [es] (mapv #(dissoc % :seon.batch/duration-ms :seon.batch/total-ms) es)))))
 
 (def owner-behaviors
   "Each owner behavior's input, run through both entrants."
@@ -274,24 +432,28 @@
    :contract "(defn be-nc1 [x] x)\n(defn be-nc2 [x] x)"
    :gate "(defn be-gt {:malli/schema [:=> [:cat :int] :int]} [x] (str x))\n(be-gt 1)"
    :feedback "(require '[clojure.test :refer [deftest is]])\n(defn be-f [x] x)\n(deftest be-t (is (= 1 (be-f 1))))"
-   :removal "(defn be-r [x] x)\n(ns-unmap *ns* 'be-r)"})
+   :removal "(defn be-r [x] x)\n(ns-unmap *ns* 'be-r)"
+   ;; dogfood 6: a render that refuses is a diagnostic beside the value; the run still commits
+   :render-refusal "{:seon.render/ai 'no.such/renderer :x 1}\n(defn be-after-render [x] x)"})
 
 (defproof :mcp-equals-agent-turn :entrant
   "MCP is a thin wrapper: every owner behavior run as an MCP eval and as a Seon agent turn (scripted local provider stub) answers the same reply, transport aside"
   (let [pairs (for [[k text] owner-behaviors]
-                [k (transport-free (mcp-eval (world) text)) (transport-free (agent-turn (world) text))])
+                ;; each side on its own fresh branch: the same world, built twice
+                [k (on-fresh-branch #(transport-free (mcp-eval (world {:seon.agent/id "root"}) text)))
+                   (on-fresh-branch #(transport-free (agent-turn (world {:seon.agent/id "root"}) text)))])
         differ (vec (for [[k a b] pairs :when (not= a b)] [k (brief a) (brief b)]))]
     {:pass? (empty? differ) :behaviors (count pairs) :differ differ}))
 
 ;;; --- Feedback from facts ---------------------------------------------------
 
 (defproof :feedback-from-facts :owner
-  "The reply's :seon.eval/feedback is queried from the batch's validated working value, scoped by the definitions it changed: those still missing a contract, and the tests reaching each (never run here); the growing warning rides beside it"
+  "The reply's :seon.eval/feedback is queried from the batch's validated working value, scoped by the definitions it changed: those still missing a contract, and the tests reaching them (never run here); the growing warning rides beside it"
   (let [b (run (world) "(require '[clojure.test :refer [deftest is]])\n(defn fb-f [x] x)\n(defn fb-g {:malli/schema [:=> [:cat :int] :int]} [x] (fb-f x))\n(deftest fb-t (is (= 1 (fb-g 1))))")
         fb (:seon.eval/feedback b)]
     {:pass? (and (applied? b)
                  (= ['user/fb-f] (:seon.feedback/missing-contracts fb))
-                 (= [{:seon.test/sym 'user/fb-t :seon.feedback/status :never-run}] (get-in fb [:seon.feedback/reaching-tests 'user/fb-g]))
+                 (= {'user/fb-t :never-run} (:seon.feedback/tests fb))
                  (some? (or (:seon.eval/contract-note b) (:seon.eval/contract-warning b))))
      :feedback fb :contract (or (:seon.eval/contract-note b) (:seon.eval/contract-warning b))}))
 
@@ -318,6 +480,331 @@
         a (after b)]
     {:pass? (and (= :here (last (values b))) (applied? b) (stored? a 'op3.elsewhere/there))
      :values (mapv str (values b))}))
+
+;;; --- The install gate judges the change (REPL dogfood items 2-4) -------------------
+
+(defproof :gate-callee-contract-is-feedback :gate
+  "Dogfood 4: a callee's contract refusing a generated argument does not block the changed function; it is a contract finding in the reply's feedback, with its arguments"
+  (on-fresh-branch
+   #(let [b (run (world) "(defn cal2 {:malli/schema [:=> [:cat [:int {:min 0}]] :int]} [x] x)\n(defn usr2 {:malli/schema [:=> [:cat :int] :int]} [x] (cal2 x))")
+          a (after b)
+          findings (get-in b [:seon.eval/feedback :seon.feedback/contract-findings])]
+      {:pass? (and (applied? b) (stored? a 'user/usr2) (empty? (facts-errors b))
+                   (= 'user/cal2 (:seon.gate/contract (first findings))))
+       :findings findings})))
+
+(defproof :gate-judges-the-change :gate
+  "Dogfood 2-3: a reaching test red before the change and still red after does not block (it is named as still red); a change that turns a green reaching test red blocks, and the refusal names the test and its counts as data"
+  (on-fresh-branch
+   #(let [_ (run (world) "(require '[clojure.test :refer [deftest is]])\n(defn gj {:malli/schema [:=> [:cat :int] :int]} [x] x)\n(deftest gj-red (is (= 99 (gj 1))))\n(deftest gj-green (is (= 1 (gj 1))))")
+          still (run (world) "(defn gj {:malli/schema [:=> [:cat :int] :int]} [x] (identity x))")
+          broke (run (world) "(defn gj {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
+          still-gate (first (get-in still [:seon.batch/entries 0 :seon.batch/gates]))
+          refusal (get-in broke [:seon.batch/entries 0 :seon.batch/facts-error])]
+      {:pass? (and (applied? still) (empty? (facts-errors still))
+                   (= ['user/gj-red] (mapv :seon.test/sym (:seon.gate/still-red still-gate)))
+                   (some? refusal)
+                   (= ['user/gj-green] (mapv :seon.test/sym (:seon.gate/newly-red refusal)))
+                   (= ['user/gj-red] (mapv :seon.test/sym (:seon.gate/still-red refusal))))
+       :still-red-gate still-gate
+       :refusal (dissoc refusal :seon.error/operation)})))
+
+;; Dogfood 1: the reaching test lives in its own namespace with its own
+;; aliases (as a FILE test does); the change comes from another namespace.
+(defproof :gate-runs-tests-in-their-namespace :gate
+  "Dogfood 1: a reaching test in its own namespace, calling through aliases, runs as a test agent in that namespace with its aliases acquired: an unchanged behaviour passes the gate from user, a broken one is refused naming the test"
+  (on-fresh-branch
+   #(let [_ (run (world) "(ns gjf.core)\n(defn f {:malli/schema [:=> [:cat :string] :string]} [x] x)\n(ns gjf.core-test (:require [clojure.test :refer [deftest is]] [clojure.string :as s] [gjf.core :as c]))\n(deftest upper (is (= \"A\" (s/upper-case (c/f \"a\")))))")
+          same (run (world) "(in-ns 'gjf.core)\n(defn f {:malli/schema [:=> [:cat :string] :string]} [x] (str x))")
+          broke (run (world) "(in-ns 'gjf.core)\n(defn f {:malli/schema [:=> [:cat :string] :string]} [x] (str x x))")
+          gate (first (get-in same [:seon.batch/entries 1 :seon.batch/gates]))
+          refusal (get-in broke [:seon.batch/entries 1 :seon.batch/facts-error])]
+      {:pass? (and (applied? same) (empty? (facts-errors same))
+                   (= 1 (:seon.gate/tests gate)) (false? (:seon.gate/blocks? gate))
+                   (= ['gjf.core-test/upper] (mapv :seon.test/sym (:seon.gate/newly-red refusal))))
+       :gate gate
+       :refusal (dissoc refusal :seon.error/operation)})))
+
+;;; --- Astra revision-3 execution blockers (review f3c1db347) -----------------
+;; Each imported from tmp/one-path-review/proof.clj, stated against these
+;; namespaces; each failed on the reviewed prototype.
+
+(defn- throw-stage [& _] (throw (ex-info "review injected failure" {})))
+
+(defn- tiny-request
+  "One form read, whose evaluation answers `value`."
+  [value]
+  {:seon.batch/text "nil"
+   :seon.batch/read-state (fn [text] {:seon.batch/version {:seon.batch/text text :seon.batch/pos 0}})
+   :seon.batch/read-next (fn [_ {v :seon.batch/version}]
+                           (if (zero? (:seon.batch/pos v))
+                             {:seon.batch/form nil :seon.batch/start 0 :seon.batch/end 3
+                              :seon.batch/version (assoc v :seon.batch/pos 3)}
+                             {:seon.batch/eof true :seon.batch/version v}))
+   :seon.batch/ns-name (constantly 'user)
+   :seon.batch/evaluate (fn [& _] value)})
+
+(defn- kept? [b v] (let [e (first (:seon.batch/entries b))]
+                     (and e (contains? e :seon.batch/value) (= v (:seon.batch/value e)))))
+
+(defproof :b1-nil-print-failure :totality
+  "B1: a nil value followed by a throwing show keeps the entry and its value (contains? :seon.batch/value), with one show diagnostic"
+  (let [b (batch/evaluate-batch (assoc (tiny-request nil) :seon.batch/show throw-stage))]
+    {:pass? (and (kept? b nil) (= ["show: review injected failure"] (diags b))
+                 (= "#<unprintable nil>" (:seon.batch/shown (first (:seon.batch/entries b)))))
+     :entries (mapv #(dissoc % :seon.batch/duration-ms :seon.batch/total-ms :seon.batch/allocated-bytes) (:seon.batch/entries b)) :diagnostics (diags b)}))
+
+(defproof :b1-value-equal-to-sentinel :totality
+  "B1: an evaluated value equal to any keyword the fold might use as a sentinel is kept when the observer throws after the evaluation"
+  (let [vs [:seon.batch/none :seon.batch/nil-write (keyword "seon.batch" "none")]
+        bs (mapv #(batch/evaluate-batch (assoc (tiny-request %) :seon.batch/observe (fn [_ _ _ thunk] (thunk) (throw-stage)))) vs)]
+    {:pass? (every? true? (map kept? bs vs)) :diagnostics (mapv diags bs)}))
+
+(defproof :b1-malformed-observation :totality
+  "B1: an observer handing a write that is not a map keeps the value, with one observe diagnostic"
+  (let [b (batch/evaluate-batch (assoc (tiny-request 42) :seon.batch/observe (fn [_ _ on-write thunk] (on-write 42) (on-write nil) (thunk))))]
+    {:pass? (and (kept? b 42) (= 1 (count (diags b))) (str/starts-with? (first (diags b)) "observe: 2 observed writes"))
+     :diagnostics (diags b)}))
+
+(defproof :b7-concurrent-observation :effects
+  "B7: eight futures each handing 1,000 writes to one evaluation's observer, all awaited before it returns: all 8,000 are observed; a write after the evaluation completed is refused to its writer"
+  (let [late (promise)
+        b (batch/evaluate-batch
+           (assoc (tiny-request 42) :seon.batch/observe
+                  (fn [_ _ on-write thunk]
+                    (let [ready (java.util.concurrent.CountDownLatch. 8)
+                          start (java.util.concurrent.CountDownLatch. 1)
+                          jobs (mapv (fn [i] (future (.countDown ready) (.await start)
+                                                    (dotimes [j 1000]
+                                                      (on-write {:seon.batch/op :namespace :seon.batch/ns (symbol (str "review." i "." j))}))))
+                                     (range 8))]
+                      (.await ready) (.countDown start) (run! deref jobs)
+                      (deliver late on-write)
+                      (thunk)))))
+        refused (try (@late {:seon.batch/op :namespace :seon.batch/ns 'review.late}) :accepted
+                     (catch clojure.lang.ExceptionInfo e (ex-message e)))]
+    {:pass? (and (= 8000 (count (:seon.batch/writes b))) (kept? b 42)
+                 (= "The evaluation that owned this observation has completed." refused))
+     :observed (count (:seon.batch/writes b)) :late refused}))
+
+(defproof :b7-lazy-definition :effects
+  "B7: a definition made while the form's value is realized by its print is observed and stored: (lazy-seq (def late-root 42) (list late-root))"
+  (on-fresh-branch
+   #(let [b (run (world) "(lazy-seq (def late-root 42) (list late-root))")]
+      {:pass? (and (= ["(42)"] (shown b)) (applied? b) (stored? (after b) 'user/late-root)
+                   (not (turn.batch/read-only? b (first (:seon.batch/entries b)))))
+       :shown (shown b) :diagnostics (diags b)})))
+
+(defproof :b4-writer-refusal-reply :totality
+  "B4: a writer refusing the recording keeps 42; the reply carries the refusal as data and the settle diagnostic, recorded as a core fault by seon.fault (its receipt in the reply), for both entrants"
+  (on-fresh-branch
+   #(let [refusing (constantly {:seon.error/message "review writer refusal"})
+          code (run (world) "42" {:writer refusing})
+          agent (run (world) "(+ 40 2)" {:writer refusing :mode :reply})
+          ok? (fn [b] (let [r (turn.batch/reply b)]
+                        (and (= [42] (values b))
+                             (= "review writer refusal" (get-in r [:seon.batch/commit :seon.batch/writer-refusal :seon.error/message]))
+                             (some (fn [d] (str/includes? d "review writer refusal")) (:seon.batch/diagnostics r))
+                             (some (fn [f] (and (:seon.fault/committed? f) (= :seon.batch/settle (:seon.error/layer f)))) (:seon.batch/faults r)))))]
+      {:pass? (boolean (and (ok? code) (ok? agent)))
+       :reply (select-keys (turn.batch/reply code) [:seon.batch/commit :seon.batch/diagnostics :seon.batch/faults])})))
+
+(defproof :b4-moved-head-feedback :effects
+  "B4: settlement on a moved head that refuses a deletion answers the committed state: the feedback names no removal the head refused"
+  (on-fresh-branch
+   #(let [w (world)
+          _ (run w "(defn review-base [x] x)")
+          old (wdb (world))
+          _ (run (world) "(defn review-dep [x] (review-base x))")
+          b (run (assoc w :seon.db/db old) "(defn review-new [x] x)\n(ns-unmap *ns* 'review-base)\n(review-new 9)")
+          fb (:seon.eval/feedback b)]
+      {:pass? (and (applied? b) (stored? (after b) 'user/review-base) (stored? (after b) 'user/review-new)
+                   (= 9 (last (values b)))
+                   (= ['user/review-new] (:seon.feedback/changed fb))
+                   (empty? (:seon.feedback/removed fb)))
+       :errors (facts-errors b) :feedback fb})))
+
+(defn- jvm-run [text]
+  (let [w (world)]
+    (batch/evaluate-batch (turn.batch/jvm-request (request w text {:seon.batch/start-ns 'one-path-proof.host})))))
+
+(defproof :b6-jvm-floor :entrant
+  "B6: MCP JVM mode shows through the same floor as SCI: a 12,000-character string is cut by the floor's budget (with its requery), identically bounded in both entrants"
+  (let [text "(apply str (repeat 12000 \"x\"))"
+        j (jvm-run text)
+        c (run (world) text)
+        js (first (shown j)) cs (first (shown c))]
+    {:pass? (and (= 12000 (count (first (values j)))) (< (count js) 4000) (= (count js) (count cs)))
+     :jvm-shown-chars (count js) :sci-shown-chars (count cs) :jvm-tail (subs js (max 0 (- (count js) 160)))}))
+
+(defproof :b6-jvm-throwing-print-and-error :entrant
+  "B6: in JVM mode a value whose print throws and a thrown error both show through the floor (the error as the one error value), never a second printer"
+  (let [j (jvm-run "(reify Object (toString [_] (throw (ex-info \"print failed\" {}))))\n(throw (ex-info \"jvm boom\" {:k 1}))")
+        [a e] (shown j)]
+    {:pass? (and (= 2 (count (:seon.batch/entries j))) (string? a) (str/includes? e "jvm boom") (not (str/starts-with? e "ERR ")))
+     :shown (shown j) :diagnostics (diags j)}))
+
+(defproof :b3-repair-reads-tag-once :reader
+  "B3: a delimiter repair is decided structurally before the one semantic read: \"[#review/tag 1\" invokes its tag reader once and yields the one repaired form"
+  (let [calls (atom 0)
+        ctx (sci/init {})
+        opts {:readers {'review/tag (fn [x] (swap! calls inc) x)}}
+        r (forgive/forms ctx opts :code "[#review/tag 1")]
+    {:pass? (and (= 1 @calls) (= 1 (count (:forms r))) (= [:delimiters] (mapv :seon.batch/repair-kind (:repairs r))))
+     :reader-calls @calls :result r}))
+
+(defproof :b3-malformed-tag-read-once :reader
+  "B3: a structurally whole form whose tag reader throws is read once and answers its read error, never retried"
+  (let [calls (atom 0)
+        ctx (sci/init {})
+        opts {:readers {'review/tag (fn [_] (swap! calls inc) (throw (ex-info "bad tag" {})))}}
+        r (forgive/forms ctx opts :code "[#review/tag 1]")]
+    {:pass? (and (= 1 @calls) (= 0 (:unread-from r)) (str/includes? (str (:reason r)) "bad tag"))
+     :reader-calls @calls :reason (:reason r)}))
+
+(defproof :b2-exact-span-no-fallback :join
+  "B2: an authored definition whose producer span [1 1 1 12] differs from the analyzed definition's [1 1 1 30] joins nothing (no start-position or containment fallback)"
+  (let [j (turn.batch/join-write
+           {:seon.fn/analysis
+            {:seon.fn.analyzer/var-definitions
+             [{:seon.fn.analyzer/name 'f :seon.fn.analyzer/ns 'user
+               :seon.fn.analyzer/row 1 :seon.fn.analyzer/col 1
+               :seon.fn.analyzer/end-row 1 :seon.fn.analyzer/end-col 30}]}}
+           {:first-row 1 :line 1 :column 1}
+           {:seon.batch/sym 'user/f :seon.batch/origin {:line 1 :column 1 :end-line 1 :end-column 12}})]
+    {:pass? (= :unanalyzed (:seon.batch/join j)) :join j}))
+
+(defproof :b2-generated-definition-hook :join
+  "B2 (mechanism; stored entity and reacquisition wait on root's analyzer patch): the expansion observed at the call occurrence (single) at [2 1 2 9], carried into clj-kondo as an :analyze-call hook keyed by that occurrence, makes the analysis define user/made at the call, and a second call elsewhere is left as written"
+  (let [src "(defmacro single [] (list 'def 'made 7))\n(single)\n(comment (single))"
+        events [{:seon.batch/op :expansion :seon.batch/macro 'user/single
+                 :seon.batch/call-span [2 1 2 9] :seon.batch/expansion '(def made 7)}]
+        hooks (turn.batch/expansion-hooks events 1)
+        a (:analysis (with-in-str src (clj-kondo.core/run! {:lint ["-"] :cache false
+                                                            :config {:output {:format :none} :hooks hooks :analysis true}})))
+        made (filterv #(= 'made (:name %)) (:var-definitions a))]
+    {:pass? (and (= 1 (count made)) (= [2 1] ((juxt :row :col) (first made))))
+     :made (mapv #(select-keys % [:name :row :col :end-row :end-col]) made)}))
+
+;;; --- red-triage r6 (docs/research/agent-platform/red-triage-r6-2026-09-27.md) ---
+
+(defproof :r6-shown-by-the-one-print-owner :print
+  "r6: every shown text EQUALS the one print owner's rendering (seon.sci.eval/shown-result, shown-failure, through seon.turn.batch/show) of the value that settles: an error, a value naming its own renderer, a map; never pr-str"
+  (let [w (world)
+        b (run w "(throw (ex-info \"owner\" {:k 1}))\n{:seon.render/ai \"(+ 1 2)\" :x 1}\n{:a (range 3)}")
+        req (request w "" {})
+        owner (mapv #(:seon.batch/shown (turn.batch/show (assoc-in req [:seon.batch/world :seon.db/db] (after b)) %)) (:seon.batch/entries b))]
+    {:pass? (and (= 3 (count owner)) (= owner (shown b))
+                 (not= (pr-str (second (values b))) (second (shown b))))
+     :shown (shown b)}))
+
+(defproof :r6-unresolved-names-kept-as-values :effects
+  "r6: a definition's call into a namespace with no program entity is kept in :seon.fn/calls as a symbol value, and a required namespace with no program entity is kept in :seon.ns/requires as a symbol; neither mints an identity"
+  (on-fresh-branch
+   #(let [b (run (world) "(require 'clojure.set)\n(defn set-caller [] (clojure.set/union #{} #{}))")
+          a (after b)
+          calls (set (:seon.fn/calls (db/pull a [:seon.fn/calls] [:seon.fn/sym 'user/set-caller])))
+          requires (set (:seon.ns/requires (db/pull a [:seon.ns/requires] [:seon.ns/name 'user])))]
+      {:pass? (and (applied? b) (contains? calls 'clojure.set/union) (not (stored? a 'clojure.set/union))
+                   (contains? requires 'clojure.set) (not (ns-stored? a 'clojure.set)))
+       :calls calls :requires requires})))
+
+(defproof :r6-e1-opening-reads-the-inbox :parity
+  "r6 E1: the agent's opening records its inbox read ((my.message/inbox ...), unread only, 5d95c4913), so a changed message is a changed read refreshed into the next context; MCP runs of that agent read the same opening. Needs the JVM to run 5d95c4913 or later"
+  (let [instance (get @@(requiring-resolve 'seon.operator.runtime/running-instances) "default")
+        h (:seon.turn.loop/cluster instance)
+        forms (mapv :seon.cluster.eval/source (:seon.turn/forms (#'seon.turn/declared-sources h (db/db (:seon.db/connection h)) "root" 'user)))
+        inbox (filterv #(str/includes? % "my.message/inbox") forms)
+        duplicates (into {} (filter (fn [[_ n]] (< 1 n))) (frequencies forms))]
+    ;; two walk units render the same runtime pull; the system plan keeps one per source
+    {:pass? (= 1 (count inbox))
+     :inbox-reads inbox :walk-duplicates (count duplicates) :opening-forms (count forms)}))
+
+;;; --- Dogfood 6: parity -------------------------------------------------------
+
+(defproof :parity-faults-in-both-replies :parity
+  "Dogfood 6: a later stage's failure is a diagnostic recorded as a core fault, and its receipt is in the reply of an MCP eval and of a Seon agent turn alike (the agent's next context reads the same saved reply)"
+  (let [text (:render-refusal owner-behaviors)
+        m (on-fresh-branch #(mcp-eval (world) text))
+        a (on-fresh-branch #(agent-turn (world) text))
+        faulted? (fn [r] (and (seq (:seon.batch/faults r)) (seq (:seon.batch/diagnostics r))))]
+    {:pass? (and (faulted? m) (faulted? a) (= (count (:seon.batch/faults m)) (count (:seon.batch/faults a))))
+     :mcp-faults (count (:seon.batch/faults m)) :agent-faults (count (:seon.batch/faults a))
+     :diagnostics (:seon.batch/diagnostics a)}))
+
+(defproof :parity-render-refusal-never-parks :parity
+  "Dogfood 6: a value whose renderer refuses is shown by the floor with one diagnostic; its run still commits and the next form runs, for both entrants (it parked the agent's turn loop before)"
+  (let [text (:render-refusal owner-behaviors)
+        go (fn [mode] (on-fresh-branch #(let [b (run (world) text (if (= mode :agent) {:mode :reply} {}))]
+                                          {:applied? (applied? b) :stored? (stored? (after b) 'user/be-after-render)
+                                           :values (count (:seon.batch/entries b)) :shown (first (shown b))})))
+        m (go :mcp) a (go :agent)]
+    {:pass? (and (= m a) (:applied? m) (:stored? m) (= 2 (:values m)) (string? (:shown m))) :mcp m :agent a}))
+
+;;; --- Per-world call sink (root: test ownership in the world) -----------------
+
+(defn- patched-sink-macro!
+  "The count seon.profile's armed wrapper makes at each call under the
+  profile-world-sink patch, loaded from the patch text into its own scratch
+  namespace (no existing Var is redefined)."
+  []
+  (let [patch (slurp (str dir "patches/profile-world-sink.patch"))
+        body (->> (str/split-lines patch)
+                  (drop-while #(not (str/starts-with? % "+(defmacro count-into-world!")))
+                  (take-while #(str/starts-with? % "+"))
+                  (map #(subs % 1))
+                  (str/join "\n"))]
+    (binding [*ns* (create-ns 'one-path-proof.profile-sink)]
+      (refer-clojure)
+      (load-string body))
+    (load-string "(fn [sym] (one-path-proof.profile-sink/count-into-world! sym))")))
+
+(defproof :sink-per-world :world
+  "Two concurrent test agents in two worlds call the same counted function; each world's sink counts only its own calls (1,000 and 1,500), where the JVM-wide armed counter counts both (the profile-world-sink patch's count, loaded from the patch)"
+  (let [count! (patched-sink-macro!)
+        ea (acquire!) eb (acquire!)]
+    (try
+      (let [requester (:seon.db/connection *exec*)
+            wa (turn.batch/test-agent-world ea requester {:seon.agent/id "root"})
+            wb (turn.batch/test-agent-world eb requester {:seon.agent/id "root"})
+            jvm-wide (java.util.concurrent.atomic.LongAdder.)
+            f (fn [] (.increment jvm-wide) (count! 'user/counted))
+            go (fn [w n] (future (turn.batch/with-world w #(dotimes [_ n] (f)))))
+            [a b] [(go wa 1000) (go wb 1500)]]
+        @a @b
+        (let [ca (batch/calls (:seon.batch/sink wa)) cb (batch/calls (:seon.batch/sink wb))]
+          {:pass? (and (= {'user/counted 1000} ca) (= {'user/counted 1500} cb) (= 2500 (.sum jvm-wide)))
+           :a ca :b cb :jvm-wide (.sum jvm-wide)}))
+      (finally (release! ea) (release! eb)))))
+
+(def landing-files
+  "The six namespaces and the schema resource step S3 copies into the tree."
+  ["src/seon/batch.clj" "src/seon/sci/forgive.clj" "src/seon/sci/batch.clj" "src/seon/sci/arm.clj"
+   "src/seon/sci/observe.clj" "src/seon/turn/batch.clj" "resources/seon/schemas/seon.batch.edn"])
+
+(defn gate-root!
+  "A disposable root: `git archive HEAD` with the landing files copied in."
+  []
+  (let [root (str (System/getProperty "java.io.tmpdir") "one-path-gate-" (System/nanoTime))
+        sh (fn [& args] (let [p (.start (doto (ProcessBuilder. ^java.util.List (vec args)) (.redirectErrorStream true)))]
+                          (when-not (zero? (.waitFor p)) (throw (ex-info (slurp (.getInputStream p)) {:args args})))))]
+    (sh "sh" "-c" (str "mkdir -p " root " && cd /Users/sean/src/seon && git archive HEAD | tar -x -C " root))
+    (doseq [f landing-files]
+      (io/make-parents (io/file root f))
+      (io/copy (io/file dir f) (io/file root f)))
+    root))
+
+(defproof :b5-contracts-gate :landing
+  "B5: the installed landing gate seon.contracts-compile-test/check, over git archive HEAD plus the six namespaces and the schema, with empty baselines for the new files, finds nothing"
+  (let [root (gate-root!)
+        paths (mapv #(str root "/" %) (butlast landing-files))
+        check (requiring-resolve 'seon.contracts-compile-test/check)
+        t0 (System/nanoTime)
+        r (try (check {:seon.contracts-compile-test/root root :seon.contracts-compile-test/paths paths
+                       :seon.contracts-compile-test/baselines (zipmap paths (repeat ""))})
+               (finally (sh/sh "rm" "-rf" root)))]
+    {:pass? (empty? r) :ms (ms-since t0) :findings (count r)
+     :each (mapv (fn [f] (into {} (keep (fn [[k v]] (when-not (= "chain" (name k)) [(keyword (name k)) (if (string? v) (subs v 0 (min 160 (count v))) v)]))) f)) r)}))
 
 ;;; --- Astra revision-2 counterexamples ---------------------------------------
 
@@ -399,9 +886,8 @@
 (defproof :r4-new-then-removed :effects
   "R4: a definition removed in the same batch proposes nothing; a stored definition removed is retracted"
   (let [b (run (world) "(defn rr1 [x] x)\n(ns-unmap *ns* 'rr1)")
-        w (world)
-        a0 (after (run w "(defn rr2 [x] x)"))
-        b2 (run (assoc w :db a0) "(ns-unmap *ns* 'rr2)")]
+        a0 (after (run (world) "(defn rr2 [x] x)"))
+        b2 (run (world) "(ns-unmap *ns* 'rr2)")]
     {:pass? (and (applied? b) (not (stored? (after b) 'user/rr1)) (stored? a0 'user/rr2) (not (stored? (after b2) 'user/rr2)))}))
 
 (defproof :v2-5-read-only-evidence :effects
@@ -413,7 +899,7 @@
 (defproof :v2-6-tag-once :input
   "V2-6: accepting a structured suffix after prose invokes its tag reader once"
   (let [calls (atom 0)
-        ctx (:ctx (world))
+        ctx (wctx (world))
         opts (assoc (sci.batch/parse-options ctx) :readers {'review/tag (fn [x] (swap! calls inc) x)})
         r (forgive/forms ctx opts :reply "Answer: [#review/tag 1]")]
     {:pass? (and (= 1 @calls) (= ["[#review/tag 1]"] (:forms r))) :reader-calls @calls}))
@@ -448,46 +934,47 @@
      :private (private-reasons b)}))
 
 (defproof :record-acquires-once :observer
-  "V2-2: a record's rows acquire into a fresh context by evaluating its declaration once; the constructor works"
-  (let [b (run (world) "(defrecord OpR [a])\n(:a (->OpR 1))")
+  "V2-2: a record's entities acquire into a fresh context by evaluating its declaration once; the constructor works"
+  (let [fresh (world)                ; acquired before the record existed
+        b (run (world) "(defrecord OpR [a])\n(:a (->OpR 1))")
         a (after b)
         srcs (distinct (keep #(:seon.fn/source (db/pull a [:seon.fn/source] [:seon.fn/sym %])) '[user/->OpR user/map->OpR]))
-        fresh (world)
         acq (batch/evaluate-batch (turn.batch/acquire-request
-                                   {:seon.batch/text (str/join "\n" srcs) :seon.batch/database a :seon.sci.eval/ctx (:ctx fresh)}))
+                                   {:seon.batch/text (str/join "\n" srcs) :seon.batch/world fresh}))
         got (values (batch/evaluate-batch (turn.batch/acquire-request
-                                           {:seon.batch/text "(:a (->OpR 7))" :seon.batch/database a :seon.sci.eval/ctx (:ctx fresh)})))]
+                                           {:seon.batch/text "(:a (->OpR 7))" :seon.batch/world fresh})))]
     {:pass? (and (= 1 (last (values b))) (= 1 (count srcs)) (= [7] got) (empty? (diags acq)))
      :sources srcs :acquired got}))
 
 (defproof :r8-render-read-only :entrant
   "R8 (render/context-assembly entrant): a render batch's def is discarded with its fork and its write refuses (no connection); a shared atom it mutates is the stated limit"
   (let [w (world)
-        _ (sci/eval-string* (:ctx w) "(def shared (atom 0))")
+        _ (sci/eval-string* (wctx w) "(def shared (atom 0))")
         b (batch/evaluate-batch (turn.batch/render-request
-                                 (merge (request w "(def leaked 1)\n(seon.db/transact! [{:db/id \"x\" :seon.ns/name 'render.leak}])\n(swap! shared inc)" {})
-                                        {:seon.sci.eval/ctx (:ctx w)})))]
-    {:pass? (and (nil? (sci/resolve (:ctx w) 'user/leaked))
+                                 (request (turn.batch/read-only-world w (wdb w))
+                                          "(def leaked 1)\n(seon.db/transact! [{:db/id \"x\" :seon.ns/name 'render.leak}])\n(swap! shared inc)" {})))]
+    {:pass? (and (nil? (sci/resolve (wctx w) 'user/leaked))
                  (= 'seon.db/missing-connection-error (:seon.error/operation (second (values b))))
                  (= 1 (last (values b))))
-     :values (mapv str (values b)) :viewer-shared (sci/eval-string* (:ctx w) "@shared")}))
+     :values (mapv str (values b)) :viewer-shared (sci/eval-string* (wctx w) "@shared")}))
 
 (defproof :v2-8-nested-render-one-tx :entrant
   "V2-8: a form that renders (a nested read-only batch) contributes to its run's one transaction: one commit for the batch"
   (let [w (world)
         commits (atom 0)
-        render! (fn [text] (shown (batch/evaluate-batch (turn.batch/render-request (merge (request w text {}) {:seon.sci.eval/ctx (:ctx w)})))))
-        _ (sci/intern (:ctx w) (sci/find-ns (:ctx w) 'user) 'render! render!)
-        b (run w "(defn nr [x] x)\n(render! \"(+ 1 2)\")" {:seon.batch/commit! (fn [tx] (swap! commits inc) (db/with (:db w) tx))})]
+        render! (fn [text] (shown (batch/evaluate-batch (turn.batch/render-request (request (turn.batch/read-only-world w (wdb w)) text {})))))
+        _ (sci/intern (wctx w) (sci/find-ns (wctx w) 'user) 'render! render!)
+        b (run w "(defn nr [x] x)\n(render! \"(+ 1 2)\")" {:writer (fn [conn tx] (swap! commits inc) (db/transact! conn tx))})]
     {:pass? (and (= ["3"] (second (values b))) (= 1 @commits) (applied? b)) :commits @commits :values (mapv str (values b))}))
 
 (defproof :v2-8-jvm-recorded :entrant
   "V2-8 (MCP JVM entrant): host reader and eval, several forms with an alias, an error kept beside later values, the run recorded in one transaction"
-  (let [w (world)
+  (let [conn (:seon.db/connection *exec*)
         commits (atom 0)
+        w (turn.batch/jvm-world "default" conn {:seon.agent/id "root"
+                                               :seon.db/writer (fn [c tx] (swap! commits inc) (db/transact! c tx))})
         b (batch/evaluate-batch
-           (turn.batch/jvm-request (merge (request w "(ns op3.jvm (:require [clojure.string :as s]))\n(s/upper-case \"a\")\n(/ 1 0)\n(+ 1 2)" {})
-                                          {:seon.batch/commit! (fn [tx] (swap! commits inc) (db/with (:db w) tx))})))
+           (turn.batch/jvm-request (request w "(ns op3.jvm (:require [clojure.string :as s]))\n(s/upper-case \"a\")\n(/ 1 0)\n(+ 1 2)" {})))
         a (after b)]
     {:pass? (and (= [nil "A"] (take 2 (values b))) (vector? (nth (values b) 2)) (= 3 (last (values b)))
                  (applied? b) (= 1 @commits))
@@ -502,13 +989,12 @@
   (let [exec (acquire!)]
     (try
       (binding [*exec* exec]
-        (let [w (world)
-              req (request w body {:seon.batch/commit! (fn [tx] (db/transact! requester tx))
-                                   :seon.batch/head (fn [_] (db/db requester))
-                                   :seon.sci.eval/time-limit-ms 5000})
+        (let [w (without-native-guard
+                 (turn.batch/test-agent-world exec requester {:seon.agent/id "root" :seon.sci.eval/time-limit-ms 5000}))
+              req (request w body {})
               b (batch/evaluate-batch (turn.batch/code-request req))
               recorded (count (d/q '[:find [?e ...] :in $ ?id :where [?r :seon.turn/id ?id] [?e :seon.cluster.eval/run ?r]]
-                                   (db/db requester) (:seon.turn/id req)))]
+                                   (db/db requester) (get-in req [:seon.batch/world :seon.turn/id])))]
           {:values (values b) :recorded recorded :applied? (applied? b) :branch (str (:seon.agent/branch exec))}))
       (finally (release! exec)))))
 
@@ -534,7 +1020,7 @@
         req (request w "(defn mcp1 [x] x)\n(mcp1 1)" {})
         b (batch/evaluate-batch (turn.batch/code-request req))
         a (after b)
-        evals (d/q '[:find [?e ...] :in $ ?id :where [?r :seon.turn/id ?id] [?e :seon.cluster.eval/run ?r]] a (:seon.turn/id req))]
+        evals (d/q '[:find [?e ...] :in $ ?id :where [?r :seon.turn/id ?id] [?e :seon.cluster.eval/run ?r]] a (get-in req [:seon.batch/world :seon.turn/id]))]
     {:pass? (and (applied? b) (stored? a 'user/mcp1) (= 2 (count evals)))
      :evaluations (count evals) :commit (commit-of b)}))
 
@@ -553,13 +1039,13 @@
         stored (fn [database s] (db/pull database [:seon.fn/source :seon.program/definition-digest] [:seon.fn/sym s]))
         reindexed (for [s '[wb1 wb2]
                         :let [{src :seon.fn/source dg :seon.program/definition-digest} (stored a (symbol "user" (str s)))
-                              {:keys [entities]} (#'turn.batch/analyze-form (:ctx w) a 'user src '[user/wb1 user/wb2])]]
+                              {:keys [entities]} (#'turn.batch/analyze-form (wctx w) a 'user src '[user/wb1 user/wb2] [])]]
                     (= dg (:seon.program/definition-digest (first (vals entities)))))
         ]
     {:pass? (and (applied? b) (= [true true] (vec reindexed)))
      :reindexed (vec reindexed)}))
 
-;;; --- Static rows: the cut's names and requires --------------------------------
+;;; --- Static proofs: the cut's names and requires --------------------------------
 
 (defn- new-contracts []
   (for [n '[seon.batch seon.sci.batch seon.sci.arm seon.sci.forgive seon.turn.batch]
@@ -569,9 +1055,11 @@
 (defproof :v2-7-schema-names :static
   "V2-7: every new :seon.batch name is free in the live registry; every new form and every new contract compiles against the live registry plus the new forms (an undeclared reference fails to compile)"
   (let [forms (edn/read-string (slurp (str dir "resources/seon/schemas/seon.batch.edn")))
-        proj (db/carried-projection (:db (world)))
+        proj (db/carried-projection (wdb (world)))
         taken (filter #(contains? (:seon.schema.projection/forms proj) %) (keys forms))
-        registry (mr/composite-registry forms (:seon.schema.projection/registry proj))
+        ;; :seon.db/writer is declared at HEAD (6eadf4b62) but not in this JVM's older registry
+        head-db-forms (edn/read-string (:out (clojure.java.shell/sh "git" "-C" "/Users/sean/src/seon" "show" "HEAD:resources/seon/schemas/seon.db.edn")))
+        registry (mr/composite-registry forms (select-keys head-db-forms [:seon.db/writer]) (:seon.schema.projection/registry proj))
         compile (fn [[s c]] (try (m/schema c {:registry registry}) nil (catch Throwable t [s (ex-message t) (:data (ex-data t))])))
         form-failures (keep compile forms)
         contract-failures (keep compile (new-contracts))]
@@ -625,7 +1113,7 @@
    "h30-require-import" "Seon supplies java.util.UUID to import"
    "h36-register-22" "Seon supplies seon.schema/register!"
    "h37-register-22-in-do" "Seon supplies seon.schema/register!"
-   "h13-program-ns-unmap" "plain SCI has no my.program; at HEAD my.program/ns-unmap! answers its refusal for a name no stored row holds. S12 makes it SCI's unmap, observed (rows v2-5-remove-rebind and r4-new-then-removed prove the removal)"})
+   "h13-program-ns-unmap" "plain SCI has no my.program; at HEAD my.program/ns-unmap! answers its refusal for a name no stored entity holds. S9 makes it SCI's unmap, observed (proofs v2-5-remove-rebind and r4-new-then-removed prove the removal)"})
 
 (def designed-facts-errors
   "Items one of whose forms' facts are refused by design, with the reason."
@@ -636,9 +1124,8 @@
 (defn corpus-item [{:keys [id source]}]
   (let [show (ns-resolve 'runner 'show)
         plain (mapv plain-outcome ((ns-resolve 'runner 'sci-run) source))
-        t0 (System/nanoTime)
-        b (run (world) source)
-        ms (ms-since t0)
+        ;; each item is its own program on its own fresh branch
+        [b ms] (on-fresh-branch #(let [w (world) t0 (System/nanoTime) b (run w source)] [b (ms-since t0)]))
         ours (mapv #(our-outcome @show %) (:seon.batch/entries b))
         unread (:seon.batch/unread b)]
     {:id id :ms ms
@@ -686,7 +1173,7 @@
 (defproof :corpus-join :observer
   "Every corpus definition write the SCI fork observed (origins.edn, scratch JVM) joins exactly one analyzed definition through seon.turn.batch/join-write, is its declaration's member, or is generated by an agent macro whose expansion only Q1 supplies (q1-single-def-kondo); none is ambiguous"
   (let [origins (edn/read-string (slurp (str dir "origins.edn")))
-        {:keys [db ctx]} (world)
+        db (wdb (world))
         results
         (for [[id {:keys [writes forms source]}] origins
               [form-ix ws] (group-by :form writes)
@@ -711,7 +1198,7 @@
      :agent-macro (vec (distinct (keep #(when (agent-generated %) [(:id %) (:sym %)]) results)))
      :bad (vec (take 8 bad))}))
 
-;;; --- Formerly unproven, now rows or recorded decisions ------------------------
+;;; --- Formerly unproven, now proofs or recorded decisions ------------------------
 
 (defproof :extension-replay :decision
   "Extension entities (defmethod, extend-*): DEFERRED (S16 not in this cut). No extension is persisted, so none is claimed; a defmethod in a false branch is not reported as present"
@@ -724,65 +1211,163 @@
 
 (defn- timed [n f] (let [xs (vec (repeatedly n #(let [t0 (System/nanoTime) r (f)] [(ms-since t0) r])))] xs))
 
+;; Dogfood 5: a Seon agent turn's overhead, profiled on default (read only).
+(defn- live-db []
+  (let [instance (get @@(requiring-resolve 'seon.operator.runtime/running-instances) "default")]
+    (db/db (:seon.db/connection (:seon.turn.loop/cluster instance)))))
+
+(defn- latest-by-kept-evidence
+  "The turn prelude's history read as the one path does it: every evaluation
+  pulled with only its read-evidence ids, the latest per source kept by
+  seon.turn's own fold, then the kept evaluations' evidence pulled whole."
+  [database agent-id]
+  (let [q '[:find ?t ?ordinal
+            (pull ?evaluation [* {:seon.cluster.eval/ns [:seon.ns/name]}
+                               {:seon.cluster.eval/run [:db/id :seon.turn.work/situation]}
+                               {:seon.cluster.eval/read-evidence [:db/id]}])
+            :in $ ?id
+            :where [?agent :seon.agent/id ?id] [?agent :seon.agent/runtime ?runtime]
+            [?runtime :seon.runtime/turns ?turn] [?turn :seon.turn/id _ ?t]
+            [?evaluation :seon.cluster.eval/run ?turn] [?evaluation :seon.cluster.eval/ordinal ?ordinal]
+            [?evaluation :seon.cluster.eval/source]]
+        rows (sort-by (juxt first second) (db/q q database agent-id))
+        source-key #'seon.turn/source-key
+        latest (reduce (fn [m [basis _ e]]
+                         (let [s (assoc e :seon.ns/name (get-in e [:seon.cluster.eval/ns :seon.ns/name]) :seon.turn/basis-t basis)
+                               shown (seon.repl/shown-value (:seon.eval/shown e ""))
+                               previous (get m (source-key s))
+                               shown (if (and previous (map? shown) (:seon.repl/changes shown)
+                                              (= :system (:seon.cluster.eval/author e))
+                                              (not= :call (get-in e [:seon.cluster.eval/run :seon.turn.work/situation])))
+                                       (db/apply-diff (:seon.repl/shown-value previous) (:seon.repl/changes shown))
+                                       shown)]
+                           (assoc m (source-key s) (assoc s :seon.repl/shown-value shown))))
+                       {} rows)
+        ids (vec (distinct (for [e (vals latest) r (:seon.cluster.eval/read-evidence e)] (:db/id r))))
+        whole (zipmap ids (db/pull-many database '[*] ids))]
+    (update-vals latest (fn [e] (cond-> e (contains? e :seon.cluster.eval/read-evidence)
+                                  (update :seon.cluster.eval/read-evidence #(mapv (comp whole :db/id) %)))))))
+
+(defproof :turn-overhead :timing
+  "Dogfood 5: the agent turn prelude on default, profiled. Wake-to-open is seon.turn/system-turn, dominated by seon.turn/latest-evaluations decoding every stored read plan of the agent's history; the one path reads the evidence of the kept evaluations only, with the same result, in under a fifth of the time (the rest is one producer's 4.5 M-char plan). The remainder is named (the largest stored plan, seon.eval/of-agent and per-render call reach: root-owned patches); the 300 ms target is judged after they land"
+  (let [database (live-db)
+        tm (fn [f] (let [t (System/nanoTime) r (f)] [(ms-since t) r]))
+        [old-ms old] (tm #(#'seon.turn/latest-evaluations database "root"))
+        [new-ms new] (tm #(latest-by-kept-evidence database "root"))
+        strip identity
+        plans (for [e (vals new) r (:seon.cluster.eval/read-evidence e)] (count (pr-str (:datahike.read/dependency-plan r))))
+        [sys-ms _] (tm #(seon.turn/system-turn {:seon.turn.loop/cluster (:seon.turn.loop/cluster (get @@(requiring-resolve 'seon.operator.runtime/running-instances) "default"))
+                                               :seon.agent/id "root" :seon.turn/write? false}))]
+    {:pass? (and (= (set (keys old)) (set (keys new))) (= (strip old) (strip new)) (< (* 5 new-ms) old-ms))
+     :equal? (= (strip old) (strip new))
+     :system-turn-preview-ms sys-ms
+     :latest-evaluations-ms {:current old-ms :one-path new-ms}
+     :kept (count new) :kept-plan-chars (vec (sort > plans))
+     :remaining {:largest-plan "seon.error/for-agent's read stores one whole vector in :datahike.query.dependency/sources (4.5 M chars, ~400 ms to decode)"
+                 :prompt-cold "seon.cluster.prompt/prompt 7.6 s: seon.eval/of-agent 3.7 s (the same decode), seon.db/call-reach x143 3.1 s"
+                 :tasks ["a-trivial-agent-turn-takes-eleven-seconds" "history-acquisition-decodes-stored-read-plans" "call-reach-is-recomputed-per-render"]}}))
+
+(defproof :feedback-hub-fresh :timing
+  "Reaching-test feedback for a changed hub (10 and 22 reaching tests) on a freshly committed head, from the batch's changed definition and digest (no reach digest re-derived): under 50 ms fresh; a 150-test hub reported"
+  (on-fresh-branch
+   #(let [_ (run (world) "(def feedback-fresh-head 1)")
+          db (wdb (world))
+          reaching @#'turn.batch/reaching-tests
+          time (fn [hub] (let [t0 (System/nanoTime)
+                               r (reaching db db {hub "a moved digest"})]
+                           {:fresh-ms (ms-since t0) :tests (count (:seon.feedback/tests r)) :counts (:seon.feedback/counts r)}))
+          small (time 'seon.render.value/bounded-text)
+          mid (time 'seon.repl/shown-value)
+          big (time 'seon.config/effective)
+          ;; on default's own head its recorded results count (a branch's never certify it)
+          head (live-db)
+          t0 (System/nanoTime)
+          on-head (reaching head head {'seon.repl/shown-value "a moved digest"})
+          head-ms (ms-since t0)]
+      {:pass? (and (< (:fresh-ms small) 50) (< (:fresh-ms mid) 50) (pos? (:tests mid))
+                   (pos? (get-in on-head [:seon.feedback/counts :stale] 0)) (< head-ms 50))
+       :bounded-text small :shown-value mid :config-effective big
+       :default-head {:ms head-ms :counts (:seon.feedback/counts on-head)}})))
+
+(defn- used-heap []
+  (System/gc) (System/gc)
+  (.getUsed (.getHeapMemoryUsage (java.lang.management.ManagementFactory/getMemoryMXBean))))
+
+(defn retained-mb
+  "[value retained-MB]: the heap still used, after full collections, while
+  `f`'s value (a batch) is held, over the heap used before it ran. Other
+  threads' allocation is included, so it is an upper bound."
+  [f]
+  (let [before (used-heap)
+        v (f)
+        held (used-heap)]
+    [v (/ (Math/round (/ (- held before) 1e4)) 100.0) (identity v)]))
+
 (defproof :time-one-defn :timing
   "One contracted defn, warm: read, evaluate, derive, validated apply, gate, recorded commit"
-  (let [w (world)
+ (on-fresh-branch
+   (fn [] (let [w (world)
         n (atom 0)
         runs (timed 5 #(run w (str "(defn t1f" (swap! n inc) " {:malli/schema [:=> [:cat :int] :int]} [x] x)")))
-        [ms b] (last runs)]
-    {:pass? (and (applied? b) (< ms 1000) (= 1 (count (get-in b [:seon.batch/program :entities]))))
-     :ms (mapv first runs) :timings (:seon.batch/timings b)}))
+        [ms b] (last runs)
+        [kept mb] (retained-mb #(run w "(defn t1f-held {:malli/schema [:=> [:cat :int] :int]} [x] x)"))]
+    {:pass? (and (applied? b) (< ms 1000) (= 1 (count (get-in b [:seon.batch/program :entities]))) (applied? kept))
+     :ms (mapv first runs) :timings (:seon.batch/timings b) :batch-retained-mb mb}))))
 
 (defproof :time-chained-40 :timing
   "Astra's chained input: 40 contracted defns with 39 pulls of the preceding definition's facts (79 forms)"
-  (let [text (:text (edn/read-string (slurp "/Users/sean/src/seon/tmp/review-one-repl-v2-20260927/chained.edn")))
+ (on-fresh-branch
+   (fn [] (let [text (:text (edn/read-string (slurp "/Users/sean/src/seon/tmp/review-one-repl-v2-20260927/chained.edn")))
         w (world)
         _ (run w "(+ 1 1)")
         t0 (System/nanoTime)
         b (run w text)
-        ms (ms-since t0)]
+        ms (ms-since t0)
+        [held mb] (retained-mb #(run (world) text))]
     {:pass? (and (applied? b) (every? some? (keep-indexed (fn [i v] (when (odd? i) v)) (values b))))
-     :ms ms :forms (count (:seon.batch/entries b)) :timings (:seon.batch/timings b)}))
+     :ms ms :forms (count (:seon.batch/entries b)) :timings (:seon.batch/timings b)
+     :batch-retained-mb mb :retained-forms (count (:seon.batch/entries held))}))))
 
 (defproof :time-h36 :timing
   "h36: 22 top-level register! calls, each version applied to the working value before the next form"
-  (let [text (slurp "/Users/sean/src/seon/tmp/valid-clojure-corpus/items/h36-register-22.clj")
+ (on-fresh-branch
+   (fn [] (let [text (slurp "/Users/sean/src/seon/tmp/valid-clojure-corpus/items/h36-register-22.clj")
         w (world)
         t0 (System/nanoTime)
         b (run w text)
         ms (ms-since t0)]
-    {:pass? (applied? b) :ms ms :timings (:seon.batch/timings b)}))
+    {:pass? (applied? b) :ms ms :timings (:seon.batch/timings b)}))))
 
 (defproof :time-acquisition :timing
   "Acquisition through the one function: 100 stored definitions' sources evaluated into a fresh world (code reader, no observation, derivation or recording)"
-  (let [w (world)
+ (on-fresh-branch
+   (fn [] (let [w (world)
+        fresh (world)                       ; its context was acquired before these definitions existed
         text (str/join "\n" (for [i (range 100)] (str "(defn acq" i " [x] (+ x " i "))")))
         a (after (run w text))
         srcs (vec (for [i (range 100)] (:seon.fn/source (db/pull a [:seon.fn/source] [:seon.fn/sym (symbol "user" (str "acq" i))]))))
-        fresh (world)
         t0 (System/nanoTime)
         b (batch/evaluate-batch (turn.batch/acquire-request {:seon.batch/text (str/join "\n" srcs)
-                                                             :seon.batch/database a :seon.sci.eval/ctx (:ctx fresh)}))
+                                                             :seon.batch/world fresh}))
         ms (ms-since t0)
-        got (values (batch/evaluate-batch (turn.batch/acquire-request {:seon.batch/text "(acq99 1)" :seon.batch/database a
-                                                                       :seon.sci.eval/ctx (:ctx fresh)})))]
+        got (values (batch/evaluate-batch (turn.batch/acquire-request {:seon.batch/text "(acq99 1)" :seon.batch/world fresh})))]
     {:pass? (and (every? some? srcs) (= 100 (count (:seon.batch/entries b))) (= [100] got))
-     :entities 100 :ms ms :us-per-entity (Math/round (/ (* 1000.0 ms) 100))}))
+     :entities 100 :ms ms :us-per-entity (Math/round (/ (* 1000.0 ms) 100))}))))
 
 (defproof :write-after-schema-batch :timing
   "After a 22-registration batch has run anywhere in the JVM, an ordinary contracted defn in a fresh world stays under 1 s (it was 214 ms before)"
-  (let [_ (run (world) (slurp "/Users/sean/src/seon/tmp/valid-clojure-corpus/items/h36-register-22.clj"))
+ (on-fresh-branch
+   (fn [] (let [_ (run (world) (slurp "/Users/sean/src/seon/tmp/valid-clojure-corpus/items/h36-register-22.clj"))
         w (world)
         runs (vec (for [i (range 3)] (let [t0 (System/nanoTime)
                                            b (run w (str "(defn wasb" i " {:malli/schema [:=> [:cat :int] :int]} [x] x)"))]
                                        [(ms-since t0) (:seon.batch/timings b)])))]
     {:pass? (< (first (last runs)) 1000) :ms (mapv first runs) :timings (second (last runs))
-     :cause "seon.db/nearest-base: the 24-entry projection-cache's committed revision entries are evicted by the batch's 22 speculative schema values; each later speculative value then derives its projection from a far base (642-659 ms against 30-31 ms)"}))
+     :cause "seon.db/nearest-base: the 24-entry projection-cache's committed revision entries are evicted by the batch's 22 speculative schema values; each later speculative value then derives its projection from a far base (642-659 ms against 30-31 ms)"}))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The table
 ;;; ---------------------------------------------------------------------------
-
 
 (defn- relieve-pressure!
   "The shared JVM refuses new evaluations above its old-generation bound; this
@@ -867,10 +1452,10 @@
                       (for [[text ks] cases]
                         (let [req (turn.batch/code-request (request w text {}))
                               b (batch/evaluate-batch (assoc req :seon.batch/derive nil :seon.batch/settle nil))
-                              db (:db w) current (db/carried-projection db)
+                              db (wdb w) current (db/carried-projection db)
                               candidate ((requiring-resolve 'seon.sci.arm/arming-projection) req db)]
                           (= (full db current candidate ks) (turn.batch/attribute-change-tx db current candidate ks))))
-                      (let [req (turn.batch/code-request (request (assoc w :db stored) "(seon.schema/register! :ace.v3/r :string)" {}))
+                      (let [req (turn.batch/code-request (request (world) "(seon.schema/register! :ace.v3/r :string)" {}))
                             _ (batch/evaluate-batch (assoc req :seon.batch/derive nil :seon.batch/settle nil))
                             current (db/carried-projection stored)
                             candidate ((requiring-resolve 'seon.sci.arm/arming-projection) req stored)]
