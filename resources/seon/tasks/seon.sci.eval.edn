@@ -184,4 +184,14 @@
              :kind :function
              :intent "After a refused run the agent's SCI context still carries that run's uncommitted program and projection until the next run replaces them; bounded but a stale world between runs (probe-i, cc91a1e62)."
              :must-read #{seon.sci.eval/fork-cluster-ctx}
-             :evidence #{"docs/research/agent-platform/landing/program-test-candidate-projection-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/program-test-candidate-projection-2026-09-27.md"}}
+ #:seon.task{:name "interpreted-rows-lack-own-namespace-class-imports"
+             :kind :function
+             :intent "A deftype/defrecord imports its class into its own namespace implicitly, but no :seon.ns/imports fact names it, so SCI cannot resolve its short class name: seon.cluster.agent/graph-definition (CountedSlidingBuffer., agent.clj:596) fails to interpret in any branch whose change reaches it and, since the root-applied probe-acq fix, refuses by name when called instead of running. install-caller-host-bindings! (eval.clj ~2320) also carries the loaded namespace's own-class imports; then update the graph-definition assertion in branch_execution_test (an-unoverridden-host-bound...)."
+             :must-read #{seon.sci.eval/install-caller-host-bindings!}
+             :evidence #{"docs/research/agent-platform/landing/whole-acquisition-refusal-2026-09-27.md"}}
+ #:seon.task{:name "agent-defn-of-core-row-refused-by-install-gate"
+             :kind :function
+             :intent "An agent-REPL defn of seon.render.value/datum through MCP sci mode on a branch was refused at entry with {:seon.error/member :seon.test.accretion/install? :expected true}. Judge whether the gate refusing this revision is intended (the tests reaching datum fail on the revised body) or a false refusal; if intended, the refusal names the failing tests as data."
+             :must-read #{seon.sci.eval/gate-function-install}
+             :evidence #{"docs/research/agent-platform/landing/whole-acquisition-refusal-2026-09-27.md"}}]
