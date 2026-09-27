@@ -2,13 +2,45 @@
 type: design
 lane: shrink-eval-opus
 date: 2026-09-27
-status: design revision 2, for Astra review; no source edits
+status: option A built (e522324c2) and REVERTED; slice 2 closed. Revision-2 design kept below as the record
 responds-to: docs/research/agent-platform/review-eval-shrink-plan-2026-09-26.md, verdict "slice-2 design at 987a90b62 — REVISE" (ca792f0b4)
 owning task: d215b1ebde7c acquisition-rebuilds-the-whole-program
 source: HEAD 056abea62. eval.clj line numbers are the review's (7e8043de1) unless marked
 ---
 
 # Slice 2 design (revision 2): a shared loaded base, and receiving acquisition by complete delta
+
+## Outcome (2026-09-27): option A was built and reverted
+
+**What was built.** Option A landed as e522324c2:
+
+- a shared base per `[store, loaded commit]`;
+- only agent-namespace and agent-test additions installed on the receiving fork;
+- a whole derivation otherwise.
+
+**Why it was reverted, in the same session.**
+
+- **It was incorrect.** On the shared-base path, the install gate's context had no
+  `::kernel/program-snapshot`. `install-function-contract!` (eval.clj:1358) dereferenced it, so the reply closed
+  with no answer, recorded as a turn-step fault. The B lane found this through a host-test
+  (`a-run-reads…`) and a new association test.
+- **The payoff was small for its size.** Measured on default, it saved about 40-70 ms per new branch: a warm
+  whole derivation is now 102 ms, against a 33-62 ms delta read plus a 4 ms receive. It removed at most one of
+  the two branch derivations per first defn. It added +221/−54 lines.
+- **2b is ruled out.** The planned deletion slice would have added 15-20 ms per form, because the function
+  population query is 12 ms per new commit. That fails "simple and correct first" and "add complexity only for a
+  measured, large win".
+
+**What would have to be true to revisit.**
+
+- The common path must pay a much larger acquisition cost than it does now. For example, whole derivations on
+  ordinary agent, MCP or test branches back above ~0.5-1 s each, measured as branch-keyed derivations in a quiet
+  window, not JVM-wide profile totals.
+- The receiving path must also reuse the existing receiving-world composition (`fork-cluster-ctx`: custody,
+  snapshot, recorder, arming) instead of a partial `copy-base-ctx`. That is the review's own requirement, and
+  the reverted defect is exactly what happens when it is missing.
+- Until then, acquisition keeps today's per-branch derivation. `acquired-database?` keeps its revision fast path,
+  at 0.06-3.6 ms per form.
 
 **What exists.** `base-ctx` memoizes one whole interpreted program per `base-ctx-key`, and that key is
 connection-scoped. So every agent, MCP and test branch derives the whole program again: 235 ms mean, and 1-3 s

@@ -499,37 +499,3 @@
             (is (contains? (loaded-digests after) 'seon.sci.eval-test/loaded-digest-probe)
                 "another commit is another key, never the first commit's map")
             (is (not (contains? (loaded-digests before) 'seon.sci.eval-test/loaded-digest-probe))))))))))
-
-(deftest ^{:seon.test/long "One loaded-base derivation of the canonical fixture program (shared thereafter), two receiving forks and one whole derivation after an analyzed declaration."
-           :seon.test/long-ms 12000}
-  a-value-that-only-adds-agent-namespaces-receives-the-shared-loaded-base
-  (support/with-database
-   (fn [connection]
-     (db/call-with-custody {:seon.db/connection connection}
-      (fn []
-        (let [delta (fn [database]
-                      (let [loaded (#'eval/loaded-program database)]
-                        (#'eval/additive-delta database loaded
-                         (:seon.schema/projection (#'eval/loaded-base loaded)))))
-              misses #(get-in (seon.cache/status)
-                              [:seon.cache/kinds :seon.sci.eval/loaded-base :seon.cache/misses] 0)
-              _ (support/transacted! connection (support/agent-tx @connection "base-share-a"))
-              a-db (db/db connection)
-              a (eval/base-ctx a-db)
-              after-a (misses)
-              _ (support/transacted! connection (support/agent-tx @connection "base-share-b"))
-              b-db (db/db connection)
-              b (eval/base-ctx b-db)]
-          (is (map? (delta b-db)) "an added agent namespace is an additive delta")
-          (is (= after-a (misses)) "a second such value reuses the loaded base: no new derivation")
-          (is (some? (sci/find-ns b 'my.agents.base-share-b)) "the receiver installs its own addition")
-          (is (nil? (sci/find-ns a 'my.agents.base-share-b)) "and only its own")
-          (is (some? (sci/find-ns b 'my.agents.base-share-a)))
-          (declared! connection 'seon.sci.eval-test/base-share-probe
-                     "(defn ^{:malli/schema [:=> [:cat] :int]} base-share-probe [] 3)")
-          (let [c-db (db/db connection)
-                c (eval/base-ctx c-db)]
-            (is (nil? (delta c-db)) "a function the loaded program lacks is not additive")
-            (is (= 3 (sci/eval-string* c "(seon.sci.eval-test/base-share-probe)"))
-                "that value is derived whole and holds its function")
-            (is (some? (sci/find-ns c 'my.agents.base-share-b))))))))))
