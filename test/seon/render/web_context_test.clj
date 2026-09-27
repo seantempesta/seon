@@ -99,9 +99,10 @@
                  ;; path (peer issue
                  ;; an-unrelated-fixture-transaction-mints-a-half-agent). A
                  ;; `:db/doc` probe entity carries no identity and joins
-                 ;; nothing.
+                 ;; nothing. It sits on the transaction entity: a bare entity
+                 ;; is refused as unowned by the writer's component check.
                  (support/transacted! connection
-                          [{:db/doc "An unrelated fact on an entity nothing derives interest in."}])
+                          [{:db/id "datomic.tx" :db/doc "An unrelated fact on an entity nothing derives interest in."}])
                  (let [unrelated (render/acquire-context! (assoc request :seon.db/db @connection))]
                    (is (= 1 @walks) "an unrelated transaction preserves the acquired history")
                    (is (identical? @connection (:seon.db/db unrelated)))
