@@ -84,6 +84,26 @@
          (is (= #{"root"} (:seon.fault/delivered-to receipt))))
        (is (< elapsed-ms 1000.0) (str "one synchronous fault write took " elapsed-ms " ms"))))))
 
+(deftest a-fault-that-happens-to-the-escalation-owner-wakes-nobody-and-reaches-its-own-faults
+  ;; The writer never mails the agent a fault happened to (a message is a
+  ;; wake: the 2026-08-08 self-feeding loop). When that agent is the
+  ;; escalation owner, root, no other agent can act, so the fault reaches root
+  ;; through its own faults (`seon.error/for-agent`, its next context) and the
+  ;; outside root through the MCP reply; a parked root answers a submission
+  ;; with the park error (9f4f43443).
+  (test-support/with-database
+   (fn [connection]
+     (let [receipt (fault/fault! (world connection "fault-escalation-owner" {})
+                                 (nested-failure) (assoc context :seon.agent/id "root"))]
+       (is (true? (:seon.fault/committed? receipt)) (pr-str receipt))
+       (is (= "root" (:seon.config.error/escalate-to
+                      (config/effective (db/db connection) "fault-escalation-owner"))))
+       (is (= #{} (:woken (stored connection (:seon.error/signature receipt)))) "no wake to itself")
+       (is (empty? (:seon.fault/delivered-to receipt)))
+       (is (contains? (set (map :seon.error/signature (error/for-agent (db/db connection) "root")))
+                      (:seon.error/signature receipt))
+           "root reads it in its own faults")))))
+
 (deftest the-boundary-names-the-site-of-a-failure-that-declares-none
   ;; Two boundaries catching the same undeclared class from one thrower are
   ;; two observed sites: the stored fact and its signature carry each
@@ -247,6 +267,11 @@
                  (is (= [#{origin}] (branches-seen attempt since))))
                (testing "and copies it to the cluster branch naming its origin"
                  (is (= [#{origin}] (branches-seen cluster since))))
+               (testing "both occurrences name the agent it happened to, so its own faults carry it
+               (fault! hands the context's agent to the recording; sweep 2026-09-27 item 7)"
+                 (doseq [connection [attempt cluster]]
+                   (is (contains? (set (map :seon.error/signature (error/for-agent (db/db connection) "worker")))
+                                  (:seon.error/signature receipt)))))
                  [store cluster origin since])
                (catch Throwable failure
                  (store/release-branch! cluster)
