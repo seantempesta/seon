@@ -380,6 +380,10 @@
       (support/apply-config! connection
                              (:seon.cluster/name (support/execution-handle connection))
                              {:seon.config.eval.result/blob-threshold 65536})
+      ;; The handle, settings and target come from the canonical owners
+      ;; (`cluster-handle`, `ai/settings`, `ai/targets`), so the request is
+      ;; the declared one: a hand-listed target lacked the required
+      ;; :seon.ai/max-tokens.
       (support/transacted! connection
                          (into (support/agent-tx @connection "reasoning-agent")
                            [{:seon.turn/id "reasoning-run" :seon.turn/agent [:seon.agent/id "reasoning-agent"] :seon.turn/opened-tx "datomic.tx"}]))
@@ -389,16 +393,16 @@
           "record-attempt! reads the one configured threshold")
       (let [inline-reasoning "private reasoning"
             large (apply str (repeat 65537 "x"))
-            cluster {:seon.db/connection connection
-                     :seon.db.process/id "process/reasoning-test"
-                     :seon.config.error/recurrence-limit 3
-              :seon.config.error/max-evidence-bytes 16384
-                     :seon.sci.admit/caps caps}
+            cluster-name (:seon.cluster/name (support/execution-handle connection))
+            cluster (support/cluster-handle
+                     {:seon.db/connection connection
+                      :seon.cluster/name cluster-name
+                      :seon.db.process/id "process/reasoning-test"})
+            settings (assoc (ai/settings (config/effective @connection cluster-name) {})
+                            :seon.config.ai/retain-reasoning true)
             base-request {:seon.ai/target
-                          {:seon.ai/endpoint "http://provider.invalid"
-                           :seon.ai/model "fixture"}
-                          :seon.ai/settings
-                          (assoc (ai/settings (support/effective-config) {}) :seon.config.ai/retain-reasoning true)
+                          (:seon.ai/primary (ai/targets (schema/handed-projection) settings))
+                          :seon.ai/settings settings
                           :seon.turn/id "reasoning-run"
                           :seon.agent/id "reasoning-agent"}]
         (doseq [[ordinal reasoning] [[0 inline-reasoning] [1 large]]]
