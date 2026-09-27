@@ -348,13 +348,11 @@
                              forms))]
       (schema/canonical-schema-rows projection forms))}
    (fn [connection]
-     (let [failure {:my.message/no-recipient true
-                    :seon.error/message "A recipient is required."
-                    ;; An error names its operation; an uncontracted one
-                    ;; composes the error base pair (design §1 rule 1).
-                    :seon.error/at (java.util.Date.)
-                    :seon.error/layer :seon.render.value-test/fixture
-                    :seon.error/operation 'seon.render.value-test/no-such-operation}
+     (let [;; Selection is by declared identity, never structural
+           ;; resemblance: the producer declares the value's schema.
+           failure (with-meta {:my.message/no-recipient true
+                               :seon.error/message "A recipient is required."}
+                     {:seon.error/declared-schema :fixture/declared-producer})
            request (render-request connection failure)
            projection (schema/projection-from-database (db/db connection))]
        (is (some? (mr/schema (:seon.schema.projection/registry projection)
@@ -543,13 +541,19 @@
            (value/render-ai (unit (atom {:private/value 42}))))
         "a live reference is named even when no serialization exists")))
 
-(deftest a-lazy-result-that-throws-while-printing-throws-as-clojure-prints-it
+(deftest a-lazy-result-that-throws-while-printing-is-shown-with-its-failure
   ;; The printer realizes a lazy result as far as it prints (root, dogfood
-  ;; cycle 1), as Clojure's printer does: a member that throws is that
-  ;; evaluation's failure, never a silent pending tail.
-  (let [poison (fn [] (map (fn [_] (throw (ex-info "poison" {}))) [1]))]
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"poison"
-                          (value/render-ai (unit (poison)))))))
+  ;; cycle 1), as Clojure's printer does. The floor is total (AGENTS, the
+  ;; REPL path is total): a member that throws never escapes the render and
+  ;; is never a silent pending tail; it is the one diagnostic shown beside
+  ;; the value and returned for the caller to record.
+  (let [poison (fn [] (map (fn [_] (throw (ex-info "poison" {}))) [1]))
+        projection (value/prepare (unit (poison)))
+        text (:seon.render.value/text projection)]
+    (is (string? (value/render-ai (unit (poison)))))
+    (is (= ["poison"] (map ex-message (:seon.render.value/diagnostics projection))))
+    (is (= 1 (count (re-seq #"renderer failed" text))) text)
+    (is (str/includes? text "poison") text)))
 
 (def ^:private probe-profile
   {:seon.render.profile/id :seon.render.profile/test
@@ -724,7 +728,12 @@
       (is (< ai-ms 100.0) (str label " AI took " ai-ms " ms"))
       (is (< html-ms 100.0) (str label " HTML took " html-ms " ms"))
       (is (re-find #"\((drop|subs) .*result/e0123456789ab" ai) ai)
-      (is (not (str/includes? (hiccup/->string html) (or terminal (subs raw 0 1000))))))))
+      ;; HTML is the same selection under the same 1,000-token budget: its
+      ;; text is the AI text, cut and continuation included, never more.
+      (is (= ai (lexical-hiccup-text html)))
+      (is (<= (count ai) (tokens/estimate-chars (:seon.render.profile/token-budget probe-profile))) ai)
+      (when terminal
+        (is (not (str/includes? (hiccup/->string html) terminal)))))))
 
 (deftest elision-forms-execute-in-the-real-sci-context
   (support/with-database
@@ -925,6 +934,25 @@
     (is (= "(2 3)" (text (map inc [1 2]))))
     (is (re-find #"(?s)^\(0 1 2 .*…\?\)" (text (iterate inc 0))))))
 
+(deftest a-seq-past-the-member-bound-is-cut-never-shortened
+  ;; A seq holding more members than max-children shows a named cut, as a
+  ;; vector does: a counted seq names its remaining count and bound, and an
+  ;; uncounted one (a cons) its pending tail. Dropping members silently
+  ;; showed agents `(0 0 0)` for `(0 0 0 0)` (red triage 3, defect 1).
+  (let [text #(value/render-ai (probe-unit %))
+        cut #(first (tree-cuts (value/prepare (probe-unit %))))]
+    (doseq [[raw shown] [['(0 0 0 0) "(0 0 0 …1 (drop 3 result/e0123456789ab))"]
+                         [(range 5) "(0 1 2 …2 (drop 3 result/e0123456789ab))"]
+                         [[0 0 0 0] "[0 0 0 …1 (drop 3 result/e0123456789ab)]"]]]
+      (is (= shown (text raw)))
+      (is (= {:seon.render.data/total (count raw) :seon.render.data/next-offset 3
+              :seon.print/omitted (- (count raw) 3)
+              :seon.print/bound-by :seon.render.profile/max-children}
+             (select-keys (cut raw) [:seon.render.data/total :seon.render.data/next-offset
+                                     :seon.print/omitted :seon.print/bound-by]))))
+    (is (= "(9 1 2 …? (drop 3 result/e0123456789ab))" (text (cons 9 [1 2 3]))))
+    (is (= "(1 2 3)" (text '(1 2 3))) "a seq within the bound is whole")))
+
 (deftest a-value-s-own-rendered-data-is-its-ai-face
   ;; The master override (AGENTS render law): a value's own :seon.render/ai
   ;; key may be the rendered data itself. Only a named producer has indexed
@@ -933,7 +961,7 @@
    (fn [connection]
      (is (= "just text"
             (:seon.render.value/text
-             (value/prepare (registered-unit connection {:seon.render/ai "just text" :x 1}))))))))
+             (value/prepare (render-request connection {:seon.render/ai "just text" :x 1}))))))))
 
 (deftest a-value-s-own-inline-function-renders-it
   ;; The master override's third form (AGENTS render law): an inline function
@@ -955,10 +983,14 @@
                                                    [{:seon.render/ai boom :a 1}
                                                     {:b {:seon.render/ai boom :c 2}}]))
            shown (:seon.render.value/text prepared)
-           diagnostics (filter #(str/starts-with? % ";; renderer failed") (str/split-lines shown))]
-       (is (str/starts-with? shown "[{:seon.render/ai #object[") shown)
-       (is (str/includes? shown ":a 1}") shown)
-       (is (str/includes? shown ":c 2}}]") shown)
+           {diagnostics true value-lines false}
+           (group-by #(str/starts-with? % ";; renderer failed") (str/split-lines shown))
+           ;; Where the value breaks depends on its compiled fn class name's
+           ;; width; the value printed as data is what matters, not its layout.
+           value-text (str/replace (str/join " " value-lines) #"\s+" " ")]
+       (is (str/starts-with? value-text "[{:seon.render/ai #object[") shown)
+       (is (str/includes? value-text ":a 1}") shown)
+       (is (str/includes? value-text ":c 2}}]") shown)
        (is (= 1 (count diagnostics)) shown)
        (is (str/starts-with? (first diagnostics) ";; renderer failed at [0]") shown)
        (is (str/ends-with? shown "(and 1 further renderer failures)") shown)
@@ -1009,9 +1041,13 @@
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "ref-floor")
-     (let [[eid id] (db/q '[:find [?e ?id] :where [?e :seon.agent/id ?id]] (db/db connection))
+     ;; A test world holds only the agents its seeds create: make the referent.
+     (support/transacted! connection (support/agent-tx (db/db connection) "ref-floor-agent"))
+     (let [id "ref-floor-agent"
+           eid (db/q '[:find ?e . :in $ ?id :where [?e :seon.agent/id ?id]] (db/db connection) id)
            expected (str "{:seon.turn/agent [:seon.agent/id " (pr-str id) "]}")
-           text #(:seon.render.value/text (value/prepare (registered-unit connection %)))]
+           text #(:seon.render.value/text (value/prepare (render-request connection %)))]
+       (is (int? eid))
        (is (= expected (text {:seon.turn/agent eid})))
        (is (= expected (text {:seon.turn/agent {:db/id eid}})))))))
 

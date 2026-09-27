@@ -537,8 +537,9 @@
   (`:seon.error/declared-schema`, the producers' declaration key), else the
   most specific return alternative of the root call's contracted function it
   satisfies, else the one its reaching attribute names, else its owning row
-  schema at any depth. A value nobody declared is data for the floor; its
-  members never select. Distinct producers."
+  schema at any depth. Only a map `keyword-lookup?` permits, or a record, is
+  asked. A value nobody declared is data for the floor; its members never
+  select. Distinct producers."
   {:malli/schema [:=> [:cat [:maybe :seon.schema/projection] :map :seon.schema/value :seon.render/output]
                   [:vector :qualified-symbol]]}
   [projection request value output]
@@ -555,7 +556,9 @@
       (nil? projection) []
       ;; An attribute request stays about that attribute: its own pair.
       (attribute-scoped? request) (into [] (keep identity) [(attribute-producer projection request output)])
-      (not (render.value/keyword-lookup? value)) []
+      ;; A record's ILookup is its generated field `case`, so it runs no
+      ;; foreign code: a declared record (a Datahike TxReport) selects too.
+      (not (or (render.value/keyword-lookup? value) (instance? clojure.lang.IRecord value))) []
       :else
       (or (some-> (:seon.error/declared-schema (meta value)) vector pairs)
           (when (and function (identical? value (render-value request)))

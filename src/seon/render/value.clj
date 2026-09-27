@@ -653,7 +653,10 @@
   [node]
   (case (:kind node)
     (:string :name) (< (:shown node) (:total node))
-    (:map :coll) (boolean (or (:pending? node) (seq (:pending node))))
+    ;; A counted seq is stepped only to its member limit, so members past it
+    ;; were never pending: its total, not its queue, names the cut.
+    (:map :coll) (boolean (or (:pending? node) (seq (:pending node))
+                              (< (+ (:base node 0) (:n node)) (:total node))))
     false))
 
 (defn- flat-width
