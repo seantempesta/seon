@@ -108,9 +108,13 @@
              (= :and t)
              (assoc child ::properties properties)
 
+             ;; A vector keeps the installed cardinality-many attribute; its
+             ;; order, duplicates and presence live in bridge cells
+             ;; (`seon.db.vector.edn`), so `::vector?` names the shape only.
              (#{:set :vector :sequential} t)
              (assoc child ::cardinality :db.cardinality/many
                           ::properties properties ::edn? false ::collection? true
+                          ::vector? (contains? #{:vector :sequential} t)
                           ::value-type (when-not (::collection? child) (::value-type child)))
 
              (and (= :or t)
@@ -313,12 +317,54 @@
    (when-let [compiled (mr/schema (:seon.schema.projection/registry projection) attr)]
      (::edn? (compiled-storage compiled)))))
 
+(defn vector-shaped-attr-in?
+  "Whether `attr` is declared `[:vector T]` or `[:sequential T]` in `projection`.
+
+   The declared shape alone: a vector attribute read from storage that has no
+   bridge cells (an as-of value older than the cells) is still a vector in
+   datom order. [[vector-attribute-in?]] answers whether it is stored in cells."
+  {:malli/schema [:=> [:cat :seon.schema/projection :keyword] :boolean]}
+  [projection attr]
+  (schema/projection-cache-value
+   projection [::vector-shaped attr]
+   #(boolean
+     (when-let [compiled (mr/schema (:seon.schema.projection/registry projection) attr)]
+       (::vector? (compiled-storage compiled))))))
+
+(defn vector-attribute-in?
+  "Whether `attr` stores its elements in bridge cells under `projection`.
+
+   True for a vector-shaped attribute when the projection also declares
+   `:seon.db.vector/cells`. The second condition is temporal, not a staging
+   flag: a value older than the cells carries a projection without them
+   (`seon.db/carried-projection`) and reads its members as they were stored."
+  {:malli/schema [:=> [:cat :seon.schema/projection :keyword] :boolean]}
+  [projection attr]
+  (and (contains? (:seon.schema.projection/forms projection) :seon.db.vector/cells)
+       (vector-shaped-attr-in? projection attr)))
+
+(defn logical-collection
+  "`values` of a cardinality-many attribute in its declared collection:
+   a vector for a vector-shaped attribute, otherwise a set."
+  {:malli/schema [:=> [:cat :seon.schema/projection :keyword
+                       [:or [:sequential :seon.schema/value] [:set :seon.schema/value]]]
+                  [:or [:vector :seon.schema/value] [:set :seon.schema/value]]]}
+  [projection attr values]
+  (if (vector-shaped-attr-in? projection attr) (vec values) (set values)))
+
 (defn- refuse-slot!
   {:malli/schema [:=> [:cat :qualified-keyword :qualified-keyword :seon.schema/value] :nil]}
   [rule attr value]
   (throw
    (ex-info
-    (str "The EDN-backed attribute " attr " has an invalid logical value.")
+    (case rule
+      ::vector-tempid-operation
+      (str "A raw operation on vector attribute " attr " names a new entity. "
+           "Assert a new entity's vector in its entity map.")
+      ::vector-value-not-sequential
+      (str "Vector attribute " attr " takes the whole sequence, e.g. [x y]; "
+           "append one element with [:db/add e " attr " x].")
+      (str "The EDN-backed attribute " attr " has an invalid logical value."))
     {::rule rule
      ::attr attr
      ::value value
@@ -431,11 +477,161 @@
    entity))
 
 (defn- encode-call-output-in
-  "Encode transaction data returned by one Datahike transaction function."
-  [db projection f & args]
+  "Encode transaction data returned by one Datahike transaction function.
+   `vectors-fn` is the writer's vector transaction function, so vector writes
+   in the output batch into one call after it (nil when none is supplied)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection
+                       [:or :nil :seon.instrument/callable] :seon.instrument/callable
+                       [:* :seon.schema/value]]
+                  :seon.store/transaction-data]}
+  [db projection vectors-fn f & args]
   (encode-transaction-data-in
-   projection
+   projection vectors-fn
    (apply f db args)))
+
+;;; ---------------------------------------------------------------------------
+;;; Vectors: a `[:vector T]` attribute's elements live in bridge cells
+;;; ---------------------------------------------------------------------------
+;;; Each element is one identity-less cell owned by its parent through
+;;; `:seon.db.vector/cells`, holding `:seon.db.vector/position` and exactly one
+;;; value of the attribute itself; the parent names every present vector in
+;;; `:seon.db.vector/present` (vector-storage design §2). A new entity's
+;;; vectors become inline cells here. Every other vector write becomes a
+;;; request the writer's transaction function applies on the in-transaction
+;;; value, all of one transaction in ONE call at its end: each `:db.fn/call`
+;;; costs O(effective datoms so far) in the pinned fork (design §5.2).
+
+(defn- identity-attr-in?
+  "Whether `attr` is declared an upsert identity in `projection`."
+  {:malli/schema [:=> [:cat :seon.schema/projection :keyword] :boolean]}
+  [projection attr]
+  (schema/projection-cache-value
+   projection [::identity attr]
+   #(boolean
+     (when-let [compiled (mr/schema (:seon.schema.projection/registry projection) attr)]
+       (:seon.db/identity (::properties (compiled-storage compiled)))))))
+
+(defn- new-entity-id?
+  "True for an entity id Datahike allocates in this transaction."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [id]
+  (boolean (or (nil? id) (string? id) (and (number? id) (neg? id)))))
+
+(defn- vector-handle
+  "How the writer finds `entity` after its map ran, or nil when the map always
+   makes a new entity (no id or a tempid, and no identity attribute)."
+  {:malli/schema [:=> [:cat :seon.schema/projection :map] :seon.schema/value]}
+  [projection entity]
+  (let [id (:db/id entity)]
+    (if-not (new-entity-id? id)
+      id
+      (some (fn [[attr value]] (when (identity-attr-in? projection attr) [attr value])) entity))))
+
+(defn- vector-request
+  "One vector write for the writer's transaction function."
+  {:malli/schema [:=> [:cat :seon.schema/value :qualified-keyword [:enum :assert :add :retract :clear]
+                       :seon.schema/value]
+                  [:vector :seon.schema/value]]}
+  [handle attr operation argument]
+  [::vector-request handle attr operation argument])
+
+(defn- vector-request?
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [operation]
+  (and (vector? operation) (= ::vector-request (first operation))))
+
+(declare encode-vector-map)
+
+(defn- encode-vector-value
+  "`value` with every nested entity map encoded: [value operations]."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.schema/value]
+                  [:tuple :seon.schema/value :seon.store/transaction-data]]}
+  [projection value]
+  (cond
+    (map? value) (encode-vector-map projection value)
+    (and (coll? value) (some map? value))
+    (let [pairs (map #(encode-vector-value projection %) value)]
+      [(if (set? value) (into #{} (map first) pairs) (mapv first pairs))
+       (into [] (mapcat second) pairs)])
+    :else [value []]))
+
+(defn- inline-cells
+  "A new entity's vector `elements` of `attr` as cells: [cells operations]."
+  {:malli/schema [:=> [:cat :seon.schema/projection :qualified-keyword [:sequential :seon.schema/value]]
+                  [:tuple [:vector :map] :seon.store/transaction-data]]}
+  [projection attr elements]
+  (reduce (fn [[cells operations] [position element]]
+            (let [[value more] (encode-vector-value projection element)]
+              [(conj cells {:seon.db.vector/position position attr [value]})
+               (into operations more)]))
+          [[] []] (map-indexed vector elements)))
+
+(defn- encode-vector-map
+  "`entity` with its vectors encoded: [entity operations]. A new entity's
+   vectors become inline cells and presence; a possibly existing entity's
+   become requests. A map carrying `:seon.db.vector/position` is a cell: its
+   vector attribute holds its one element."
+  {:malli/schema [:=> [:cat :seon.schema/projection :map] [:tuple :map :seon.store/transaction-data]]}
+  [projection entity]
+  (let [cell? (contains? entity :seon.db.vector/position)
+        handle (when-not cell? (vector-handle projection entity))]
+    (reduce-kv
+     (fn [[encoded operations] attr value]
+       (cond
+         (or cell? (not (vector-attribute-in? projection attr)))
+         (let [[value more] (encode-vector-value projection value)]
+           [(assoc encoded attr value) (into operations more)])
+
+         (not (sequential? value))
+         (refuse-slot! ::vector-value-not-sequential attr value)
+
+         handle
+         [encoded (conj operations (vector-request handle attr :assert (vec value)))]
+
+         :else
+         (let [[cells more] (inline-cells projection attr value)]
+           [(-> encoded
+                (update :seon.db.vector/present (fnil conj #{}) attr)
+                (update :seon.db.vector/cells (fnil into []) cells))
+            (into operations more)])))
+     [{} []] entity)))
+
+(defn- raw-vector-operation
+  "A raw operation on a vector attribute as its request, or nil for any other
+   operation: `:db/add` appends, `[:db/retract e a v]` removes every
+   occurrence, `[:db/retract e a]` and retractAttribute make it absent."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.store/transaction-operation]
+                  [:or :nil [:vector :seon.schema/value]]]}
+  [projection operation]
+  (when (and (vector? operation)
+             (#{:db/add :db/retract :db.fn/retractAttribute :db/retractAttribute} (first operation))
+             (keyword? (nth operation 2 nil))
+             (vector-attribute-in? projection (nth operation 2)))
+    (let [[f entity attr value] operation]
+      (when (new-entity-id? entity)
+        (refuse-slot! ::vector-tempid-operation attr operation))
+      (case f
+        :db/add (vector-request entity attr :add value)
+        :db/retract (if (= 4 (count operation))
+                      (vector-request entity attr :retract value)
+                      (vector-request entity attr :clear nil))
+        (vector-request entity attr :clear nil)))))
+
+(defn- batched-vector-requests
+  "`operations` with every vector request moved into ONE call of `vectors-fn`
+   at the end, routed through this codec so its output is encoded too."
+  {:malli/schema [:=> [:cat :seon.schema/projection [:or :nil :seon.instrument/callable]
+                       :seon.store/transaction-data]
+                  :seon.store/transaction-data]}
+  [projection vectors-fn operations]
+  (let [requests (into [] (comp (filter vector-request?) (map #(subvec % 1))) operations)]
+    (cond-> (into [] (remove vector-request?) operations)
+      (seq requests)
+      (conj (if vectors-fn
+              (mark-encoded [:db.fn/call #'encode-call-output-in projection vectors-fn
+                             vectors-fn projection requests])
+              (throw (ex-info "Vector writes need the writer's vector transaction function."
+                              {::vector-requests requests})))))))
 
 (defn- explicit-value-members
   "Avoid Datahike treating two keyword members as one identity lookup ref."
@@ -468,59 +664,80 @@
     (into [(mark-encoded entity)] @operations)))
 
 (defn- encode-transaction-data-in
-  [projection transaction-data]
-  (into [] (mapcat
-   (fn [operation]
-     (cond
-       (encoded-operation? operation)
-       [operation]
+  "Encode one transaction's operations: EDN slots, vector cells and requests
+   (batched into one `vectors-fn` call), and transaction-function output."
+  {:malli/schema [:=> [:cat :seon.schema/projection [:or :nil :seon.instrument/callable]
+                       :seon.store/transaction-data]
+                  :seon.store/transaction-data]}
+  [projection vectors-fn transaction-data]
+  (batched-vector-requests
+   projection vectors-fn
+   (into [] (mapcat
+    (fn [operation]
+      (cond
+        (encoded-operation? operation)
+        [operation]
 
-       (map? operation)
-       (explicit-value-members projection (encode-entity-in projection operation))
+        (map? operation)
+        (let [[entity requests] (encode-vector-map projection operation)]
+          (into (explicit-value-members projection (encode-entity-in projection entity))
+                requests))
 
-       (and (vector? operation)
-            (= :db/add (first operation))
-            (edn-encoded-attr-in? projection (nth operation 2 nil)))
-       [(mark-encoded
-        (update operation 3
-                #(storage-string
-                  (validate-logical-slot-in!
-                   projection (nth operation 2) %))))]
+        (raw-vector-operation projection operation)
+        [(raw-vector-operation projection operation)]
 
-       (and (vector? operation)
-            (= :db.fn/call (first operation)))
-       ;; Datahike invokes the transaction function after this outer encoder
-       ;; has run, then splices its returned transaction data into the same
-       ;; transaction. Route that returned data through this same codec before
-       ;; Datahike interprets it. The metadata marker is process-local and
-       ;; prevents a nested owner that already called this codec from being
-       ;; encoded twice; Datahike stores only the operation's ordinary data.
-       [(mark-encoded
-        (into [:db.fn/call #'encode-call-output-in
-               projection (second operation)]
-              (nnext operation)))]
+        (and (vector? operation)
+             (= :db/add (first operation))
+             (edn-encoded-attr-in? projection (nth operation 2 nil)))
+        [(mark-encoded
+          (update operation 3
+                  #(storage-string
+                    (validate-logical-slot-in!
+                     projection (nth operation 2) %))))]
 
-       :else [operation])))
-   transaction-data))
+        (and (vector? operation)
+             (= :db.fn/call (first operation)))
+        ;; Datahike invokes the transaction function after this outer encoder
+        ;; has run, then splices its returned transaction data into the same
+        ;; transaction. Route that returned data through this same codec before
+        ;; Datahike interprets it. The metadata marker is process-local and
+        ;; prevents a nested owner that already called this codec from being
+        ;; encoded twice; Datahike stores only the operation's ordinary data.
+        [(mark-encoded
+          (into [:db.fn/call #'encode-call-output-in
+                 projection vectors-fn (second operation)]
+                (nnext operation)))]
+
+        :else [operation])))
+    transaction-data)))
 
 (defn encode-transaction-in
-  "Encode heterogeneous union slots against exactly one projection."
-  {:malli/schema [:=> [:cat :map :seon.store/transaction]
-                  :seon.store/transaction]}
-  [projection transaction]
-  ;; Passing the projection answers this bridge's explicit lookups. Supplying
-  ;; the same forms answers registered predicates such as `malli-form?`, which
-  ;; Malli invokes with the candidate value alone while encoding each
-  ;; attribute. The fault committer runs on a Flow thread with no ambient
-  ;; projection, so passing without supplying made valid scalar forms such as
-  ;; `:boolean` fail instrumentation before a core fault could be recorded.
-  (schema/call-with-forms
-   (:seon.schema.projection/forms projection)
-   #(if (map? transaction)
-      (update transaction :tx-data
-              (fn [transaction-data]
-                (encode-transaction-data-in projection transaction-data)))
-      (encode-transaction-data-in projection transaction))))
+  "Encode heterogeneous union slots and vectors against exactly one projection.
+
+   `vectors-fn` is the writer's transaction function applying vector requests
+   (`seon.db/vectors-tx`); without it a vector write on a possibly existing
+   entity refuses."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.schema/projection :seon.store/transaction]
+                   :seon.store/transaction]
+                  [:=> [:cat :seon.schema/projection [:or :nil :seon.instrument/callable]
+                        :seon.store/transaction]
+                   :seon.store/transaction]]}
+  ([projection transaction] (encode-transaction-in projection nil transaction))
+  ([projection vectors-fn transaction]
+   ;; Passing the projection answers this bridge's explicit lookups. Supplying
+   ;; the same forms answers registered predicates such as `malli-form?`, which
+   ;; Malli invokes with the candidate value alone while encoding each
+   ;; attribute. The fault committer runs on a Flow thread with no ambient
+   ;; projection, so passing without supplying made valid scalar forms such as
+   ;; `:boolean` fail instrumentation before a core fault could be recorded.
+   (schema/call-with-forms
+    (:seon.schema.projection/forms projection)
+    #(if (map? transaction)
+       (update transaction :tx-data
+               (fn [transaction-data]
+                 (encode-transaction-data-in projection vectors-fn transaction-data)))
+       (encode-transaction-data-in projection vectors-fn transaction)))))
 
 (defn encode-transaction
   "Encode heterogeneous union slots once at the Datahike transaction seam.

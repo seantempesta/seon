@@ -18,6 +18,17 @@
  :seon.schema.datahike/malformed-edn-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify an EDN-backed attribute containing unreadable data"} [:seon.schema.datahike/malformed-edn :seon.schema.datahike/malformed-edn] [:seon.error/message :seon.error/message]]
  :seon.schema.datahike/noncanonical-edn :qualified-keyword
  :seon.schema.datahike/noncanonical-edn-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify an EDN-backed attribute containing a noncanonical value"} [:seon.schema.datahike/noncanonical-edn :seon.schema.datahike/noncanonical-edn] [:seon.error/message :seon.error/message]]
+ :seon.schema.datahike/vector-tempid-operation [:= true]
+ :seon.schema.datahike/vector-tempid-operation-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a raw operation on a vector attribute of a new entity; assert a new entity's vector in its entity map"} [:seon.schema.datahike/vector-tempid-operation :seon.schema.datahike/vector-tempid-operation] [:seon.error/message :seon.error/message]]
+ :seon.schema.datahike/vector-value-not-sequential [:= true]
+ :seon.schema.datahike/vector-value-not-sequential-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a vector attribute given a value that is not the whole sequence"} [:seon.schema.datahike/vector-value-not-sequential :seon.schema.datahike/vector-value-not-sequential] [:seon.error/message :seon.error/message]]
+ ; A vector write the encoder hands the writer's transaction function:
+ ; [entity-handle attribute operation argument]. `:assert` replaces the
+ ; vector, `:add` appends, `:retract` removes every occurrence, `:clear`
+ ; makes it absent (argument nil).
+ :seon.schema.datahike/vector-request
+ [:tuple :seon.schema/value :qualified-keyword [:enum :assert :add :retract :clear] :seon.schema/value]
+ :seon.schema.datahike/vector-requests [:vector :seon.schema.datahike/vector-request]
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.schema.datahike/declared-form
