@@ -1,0 +1,23 @@
+--- a/src/seon/db.clj
++++ b/src/seon/db.clj
+@@ -3029,11 +3029,17 @@
+       ;; Realize both layers here so no process-local cursor escapes to SCI.
+       (with-declarations database 'seon.db/datoms
+        (fn [declarations]
+-        (let [result (mapv #(datom->data declarations database %)
+-                           (apply d/datoms database arguments))
+-              options (first arguments)
++        (let [options (first arguments)
+               index (if (map? options) (:index options) options)
+               components (if (map? options) (:components options) (rest arguments))
++              ;; Datahike answers an AVET read of an attribute it does not
++              ;; index with no datoms, which a reader takes for absence.
++              _ (when (and (= :avet index) (keyword? (first components))
++                           (not (db.utils/indexing? database (first components))))
++                  (throw (ex-info (str "An AVET read of " (first components) " finds nothing: the attribute is not indexed.")
++                                  {:seon.error/expected :db/index :seon.error/offending (first components)})))
++              result (mapv #(datom->data declarations database %)
++                           (apply d/datoms database arguments))
+               {plan :datahike.read/dependency-plan pattern :seon.db/read-index-pattern}
+               (index-read-dependencies database index components)]
+           (append-read-evidence!

@@ -20,48 +20,55 @@
          (is (string? after) (pr-str after))
          (is (not= before after)))))))
 
-(deftest indexed-reach-entities-retain-the-pulled-facts
-  (support/with-database
-   (fn [connection]
-     (let [current (db/db connection)
-           database (db/as-of current (db/basis-t current))
-           index (#'runner/reach-refresh database nil
-                   ['seon.id/id 'seon.id-test/data-shape-and-explicit-length-determine-identity
-                    :seon.fn/calls])
-           identities [[:seon.fn/sym 'seon.id/id]
-                       [:seon.test/sym 'seon.id-test/data-shape-and-explicit-length-determine-identity]
-                       [:seon.schema/key :seon.fn/calls]]
-           entities (db/pull-many database
-                 '[:db/id :seon.fn/sym :seon.fn/source :seon.fn/spec :seon.fn/keywords
-                   (limit :seon.fn/calls nil) (limit :seon.fn/references nil)
-                   :seon.test/sym :seon.test/source :seon.test/subject
-                   :seon.schema/key :seon.schema/form] identities)]
-       (is (= (count identities) (count (filter :db/id entities))))
-       (is (< (count (::runner/reach-rows index))
-              (db/q '[:find (count ?entity) . :where [?entity :seon.fn/sym]] database))
-           "A scoped reach acquisition does not collect the whole program.")
-       (doseq [entity entities :when (:db/id entity)]
-         (let [normalized (reduce-kv
-                           (fn [result attribute value]
-                             (assoc result attribute
-                                    (if (= :db.cardinality/many
-                                           (get-in (db/schema-database database)
-                                                   [:schema attribute :db/cardinality]))
-                                      (set value) value)))
-                           {} entity)]
-           (is (= (#'runner/reach-entity normalized)
-                  (get-in index [::runner/reach-rows (:db/id entity)])))))))))
+(defn- oracle-closure
+  "A test's reach recomputed from each row's own pulled facts: calls,
+  references and subject, walked to their fixed point."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/sym] [:set :symbol]]}
+  [database test-symbol]
+  (loop [pending [test-symbol] seen #{}]
+    (if-let [target (peek pending)]
+      (if (seen target)
+        (recur (pop pending) seen)
+        (let [row (or (db/pull database '[:seon.fn/calls :seon.fn/references] [:seon.fn/sym target])
+                      (db/pull database '[:seon.fn/calls :seon.fn/references :seon.test/subject]
+                               [:seon.test/sym target]))]
+          (recur (into (pop pending) (concat (:seon.fn/calls row) (:seon.fn/references row)
+                                             (some-> (:seon.test/subject row) vector)))
+                 (conj seen target))))
+      (disj seen test-symbol))))
 
-(deftest result-only-writes-do-not-read-the-reachable-program-again
+(deftest reach-is-the-closure-of-each-rows-own-facts
   (support/with-database
    (fn [connection]
-     (let [target 'seon.id-test/data-shape-and-explicit-length-determine-identity
-           before (runner/reach-digests (db/db connection) [target])]
-       (is (string? (get before target)))
+     (let [database (db/db connection)
+           tests ['seon.id-test/data-shape-and-explicit-length-determine-identity
+                  'seon.id-test/an-evaluation-id-is-stable-short-and-a-symbol]
+           reaches (runner/reach-memberships database tests)]
+       (is (contains? (get reaches (first tests)) 'seon.id/id) "the subject is reached")
+       (doseq [t tests]
+         (is (= (oracle-closure database t) (get reaches t))
+             (str t " reaches exactly the closure its rows name")))))))
+
+(deftest a-digest-follows-its-closures-content-and-nothing-else
+  (support/with-database
+   (fn [connection]
+     (let [reaching 'seon.id-test/data-shape-and-explicit-length-determine-identity
+           elsewhere 'seon.db-test/semantic-replay-declines-opaque-and-lazy-values-without-realizing
+           symbols [reaching elsewhere]
+           before (runner/reach-digests (db/db connection) symbols)]
+       (is (every? string? (map before symbols)) (pr-str before))
+       (is (not (contains? (get (runner/reach-memberships (db/db connection) [elsewhere]) elsewhere)
+                           'seon.id/id))
+           "the other test does not reach the changed definition")
        (support/transacted! connection
-         [[:db/add [:seon.test/sym target] :seon.test/pass-count 1]])
-       (is (= before
-              (with-redefs-fn
-                {#'runner/reach-facts
-                 (fn [& _] (throw (ex-info "Result-only write reread program entities." {})))}
-                #(runner/reach-digests (db/db connection) [target]))))))))
+         [[:db/add [:seon.test/sym reaching] :seon.test/pass-count 1]])
+       (is (= before (runner/reach-digests (db/db connection) symbols))
+           "a result-only write changes no reach")
+       (support/transacted!
+        connection
+        [(support/revision (db/db connection) [:seon.fn/sym 'seon.id/id] {:seon.fn/doc "A changed reached definition."})])
+       (let [after (runner/reach-digests (db/db connection) symbols)]
+         (is (not= (get before reaching) (get after reaching))
+             "a changed definition in the closure changes the digest")
+         (is (= (get before elsewhere) (get after elsewhere))
+             "a test that does not reach it keeps its digest"))))))

@@ -38,7 +38,7 @@
  #:seon.task{:id "e4c8eac6a69a"
              :name "mention-closure-survives-beside-call-reach"
              :kind :function
-             :intent "Selection is call reach (20a87b1d1), but the positional gate-sets arity and gate-sets-in's union mode still walk calls, references and file mentions to full depth, only because seon.test/destructive-reach reads them; the analyst's documented bulk positional gate-sets over all function symbols timed out at 60,265 ms. test-reach-rules (currently-failing-functions, functions-without-tests) still reach through references transitively, so coverage and selection disagree. Move destructive-reach to reverse-closure, delete the positional arity and the union branch (about -15 lines), and align the coverage rules."
+             :intent "Selection is call reach (20a87b1d1), but the positional gate-sets arity and gate-sets-in's union mode still walk calls, references and file mentions to full depth, only because seon.test/destructive-reach reads them; the analyst's documented bulk positional gate-sets over all function symbols timed out at 60,265 ms. test-reach-rules (functions-without-tests) still reach through references transitively, so coverage and selection disagree. Move destructive-reach to reverse-closure, delete the positional arity and the union branch (about -15 lines), and align the coverage rules."
              :must-read #{seon.fn/gate-sets seon.fn/gate-sets-in seon.fn/test-reach-rules seon.test/destructive-reach}
              :evidence #{"docs/research/agent-platform/dogfood-dogfood-analyst-astra-2026-09-26.md"
                          "docs/research/agent-platform/landing/inv-test-selection-cost-opus-2026-09-26.md"
@@ -81,4 +81,14 @@
              :kind :function
              :intent "seon.fn/build-artifact is a second indexing path beside the production one. It analyzes with no cache root (seon.fn.analyzer/analyze turns the cache off outside the checkout, analyzer.clj:818-822) and takes a hand-written first-party list, while the production path seon.fn/program-entities and analyzed-artifacts (fn.clj:2641) read the checkout cache and derive first-party from the database's entities. It has no src caller. Its test callers (fn_test ~881, 2071, 2080, 2132, 2431, 2843; program_test 1348; reset_edges_test 188; adoption_entities_test 15; edit_test 261; test/runner_test 163) mostly pass an empty first-party list and carry the same latent 'no analysis of seon.db' refusal since a9449b7c3. Delete it and convert its callers to seon.fn/program-entities in the same commit."
              :must-read #{seon.fn/build-artifact seon.fn/program-entities}
-             :evidence #{"docs/research/agent-platform/red-triage-3-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/red-triage-3-2026-09-27.md"}}
+ #:seon.task{:name "declared-render-targets-select-no-tests"
+             :kind :function
+             :intent "The declared-edge rules name a target by a stored symbol ([(symbol? ?v)] on the raw datom), but :seon.render/ai and :seon.render/html are stored as strings that name render functions: seon.render/invoke-selected invokes seon.sci.kernel/render-ai and nine others through them, and selection never reaches their callers' tests. Read on default 2026-09-27: seon.db/datoms decodes these values to symbols and finds 127 declared targets where the stored-symbol rule finds 19. seon.fn/declared-callers keeps the stored-symbol rule so selection is unchanged; decide whether a decoded symbol names a target and change it with its regression."
+             :must-read #{seon.fn/declared-callers seon.fn/call-reach seon.render/invoke-selected}
+             :evidence #{"tmp/test-feedback-perf/proof.clj"}}
+ #:seon.task{:name "functions-without-tests-is-the-last-datalog-reach"
+             :kind :function
+             :intent "seon.fn/functions-without-tests has no caller outside fn_test and is the last reader of test-reach-rules and declared-reference-rules, a second statement of the declared-invocation relation beside seon.fn/declared-callers that can drift from it (111 s on default when measured 2026-09-17). Delete it with both rule sets, or derive coverage from call-reach."
+             :must-read #{seon.fn/functions-without-tests seon.fn/declared-callers}
+             :evidence #{"tmp/test-feedback-perf/proof.clj"}}]

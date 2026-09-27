@@ -1773,34 +1773,60 @@
        [?target :seon.fn/sym ?target-symbol]]
       [(tested ?target)
        (tested ?caller)
-       (call-edge ?caller ?target)]
-      [(test-currently-failing ?test)
-       [?test :seon.test/fail-count ?count]
-       [(pos? ?count)]]
-      [(test-currently-failing ?test)
-       [?test :seon.test/error-count ?count]
-       [(pos? ?count)]]
-      [(failing-function ?target)
-       (test-currently-failing ?test)
-       (call-edge ?test ?target)]
-      [(failing-function ?target)
-       (test-currently-failing ?test)
-       [?test :seon.test/subject ?target-symbol]
-       [?target :seon.fn/sym ?target-symbol]]
-      [(failing-function ?target)
-       (failing-function ?caller)
        (call-edge ?caller ?target)]]))
 
-(defn- declared-reference-edges
-  "Owned handlers and explicit invokers reach their current declared targets.
-  Data rows may name a target by symbol or reference; keyword readers do not
-  become invokers. The indexed walk and Datalog consumers share these rules."
-  {:malli/schema [:=> [:cat :seon.db/database-value]
-                  [:or [:set [:tuple :int :int]] :seon.db/invalid-read-error]]}
-  [database]
-  (db/q '[:find ?caller ?target :in $ %
-          :where (declared-edge ?caller ?target)]
-        database declared-reference-rules))
+(defn- read-or-throw!
+  "`value`, or a throw carrying it when it is a read refusal; a walk's reads
+  stop at the first refusal and its catch answers that refusal."
+  {:malli/schema [:=> [:cat :seon.schema/value] :seon.schema/value]}
+  [value]
+  (if (db/read-refusal? value) (throw (ex-info "Call reach unavailable." value)) value))
+
+(defn- declared-callers
+  "The caller entities of each declared invocation target, keyed by the
+  target's symbol: the relation `declared-reference-rules` states, read from
+  the datoms of the few attributes that declare it (capabilities, attributes
+  declared `:seon.fn/reference-to :seon.fn/sym`, `:seon.fn/invokes` and the
+  attributes it names), never the whole program. A data row names a target
+  by a stored symbol or by a reference to its function row.
+
+  ## Costs
+
+  Proportional to those attributes' datoms (about 700 on default,
+  2026-09-27), where the whole-program Datalog took 55-303 ms on a fresh head."
+  {:malli/schema [:=> [:cat [:fn clojure.core/ifn?] :seon.db/database-value]
+                  [:map-of :qualified-symbol [:set :int]]]}
+  [read! database]
+  (let [datoms (fn [& arguments] (read! (apply db/datoms database arguments)))
+        installed (:schema (db/schema-database database))
+        function-symbol #(:v (first (datoms :eavt % :seon.fn/sym)))
+        function-named? #(seq (datoms :avet :seon.fn/sym %))
+        ;; Datalog's `[(symbol? ?v)]` saw the stored value, so only a stored
+        ;; symbol names a target, and an entity id names its function row: an
+        ;; attribute storing neither (a string render form) declares no edge.
+        naming? #(#{:db.type/symbol :db.type/ref :db.type/long} (get-in installed [% :db/valueType]))
+        target (fn [v] (if (int? v) (function-symbol v) (when (and (symbol? v) (function-named? v)) v)))
+        referring (for [{declaration :e v :v} (datoms :aevt :seon.fn/reference-to)
+                        :when (= :seon.fn/sym v)
+                        {attribute :v} (datoms :eavt declaration :seon.schema/key)]
+                    attribute)
+        edges (concat
+               (for [{caller :e named :v} (datoms :aevt :seon.effect/capability)
+                     :when (and (function-symbol caller) (function-named? named))]
+                 [caller named])
+               (for [attribute referring
+                     {caller :e v :v} (datoms :aevt attribute)
+                     :let [target-symbol (when (int? v) (function-symbol v))]
+                     :when (and target-symbol (function-symbol caller))]
+                 [caller target-symbol])
+               (for [{caller :e attribute :v} (datoms :aevt :seon.fn/invokes)
+                     :when (naming? attribute)
+                     {v :v} (datoms :aevt attribute)
+                     :let [target-symbol (target v)]
+                     :when target-symbol]
+                 [caller target-symbol]))]
+    (reduce (fn [incoming [caller target-symbol]] (update incoming target-symbol (fnil conj #{}) caller))
+            {} edges)))
 
 (defn- gate-set-in
   "Reverse-walk names, including a seed whose definition has been removed."
@@ -1840,7 +1866,9 @@
                                         [?entity :seon.test/sym ?symbol])] database)
         test-symbols (db/q '[:find [?symbol ...]
                             :where [_ :seon.test/sym ?symbol]] database)
-        declared (declared-reference-edges database)
+        declared (try (declared-callers read-or-throw! database)
+                      (catch clojure.lang.ExceptionInfo failure
+                        (if (db/read-refusal? (ex-data failure)) (ex-data failure) (throw failure))))
         file-references (db/q '[:find ?test ?symbol
                                 :where [?file :seon.fn/unresolved-references ?symbol]
                                        [?test :seon.fn/file ?file]
@@ -1857,8 +1885,7 @@
                                (if-let [caller-symbol (get identities caller)]
                                  (update result target (fnil conj #{}) caller-symbol)
                                  result))
-                             {} (concat (map (fn [[caller target]]
-                                               [caller (get identities target)]) declared)
+                             {} (concat (for [[target callers] declared caller callers] [caller target])
                                         file-references handlers))]
         (reduce (fn [result function-symbol]
                   (let [selected (gate-set-in database identities (set test-symbols)
@@ -1867,13 +1894,6 @@
                       (reduced selected)
                       (assoc result function-symbol selected))))
                 {} (distinct function-symbols))))))
-
-(defn- read-or-throw!
-  "`value`, or a throw carrying it when it is a read refusal; a walk's reads
-  stop at the first refusal and its catch answers that refusal."
-  {:malli/schema [:=> [:cat :seon.schema/value] :seon.schema/value]}
-  [value]
-  (if (db/read-refusal? value) (throw (ex-info "Call reach unavailable." value)) value))
 
 (defn- identity-names
   "`[attribute symbol]` of each identity entity in `entities`, in one bound query."
@@ -1885,23 +1905,12 @@
                        :where [?entity ?attribute ?symbol]]
                      database (vec entities) [:seon.fn/sym :seon.test/sym]))))
 
-(defn- declared-callers
-  "The caller entities of each declared invocation target, keyed by its symbol."
-  {:malli/schema [:=> [:cat [:fn clojure.core/ifn?] :seon.db/database-value]
-                  [:map-of :qualified-symbol [:set :int]]]}
-  [read! database]
-  (let [edges (read! (declared-reference-edges database))
-        names (identity-names read! database (into #{} cat edges))]
-    (reduce (fn [incoming [caller target]]
-              (update incoming (second (names target)) (fnil conj #{}) caller))
-            {} edges)))
-
 (defn- call-reach
   "The tests exercising `seeds`: each test calling a seed or calling a function
   that calls one (owner 2026-09-26: the tests of A and of A's callers), and a
   seed that is itself a test. The edges are `:seon.fn/calls` (a capability
   owner's handler is one, `var-row`), the declared invocation edges
-  (`declared-reference-edges`) and `:seon.test/subject`. A symbol mention
+  ([[declared-callers]]) and `:seon.test/subject`. A symbol mention
   (`:seon.fn/references`, a file's unresolved references) calls nothing, so it
   selects nothing: a test quoting `'a/b` is not a test of `a/b`."
   {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :seon.fn/sym]]
@@ -2046,23 +2055,6 @@
                   [:or [:vector :seon.test/sym] :seon.db/invalid-read-error]]}
   [database function-symbol]
   (gate-set database function-symbol))
-
-(defn currently-failing-functions
-  "Function symbols reached by a test whose latest committed result is red.
-
-  A rerun replaces the test row's result facts, so this query answers current
-  state without choosing a latest run from a separate history graph."
-  {:malli/schema [:=> [:cat :seon.db/database-value]
-                  [:vector :seon.fn/sym]]}
-  [database]
-  (->> (db/q '[:find [?function-symbol ...]
-               :in $ %
-               :where
-               (failing-function ?function)
-               [?function :seon.fn/sym ?function-symbol]]
-             database test-reach-rules)
-       sort
-       vec))
 
 (defn functions-without-tests
   "Indexed public functions reached by no indexed test.

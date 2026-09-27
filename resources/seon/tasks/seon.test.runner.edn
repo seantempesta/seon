@@ -17,7 +17,7 @@
              :evidence #{"docs/research/agent-platform/landing/stability-opus-2026-09-27.md"}}
  #:seon.task{:name "reach-over-every-test-takes-thirty-seconds"
              :kind :function
-             :intent "seon.test.runner/reach-memberships over all 2,377 test entities took 31.6 s on default (2026-09-27, warm, one call): over the ten-second bound. Any whole-suite selection or classification (e.g. deriving which tests redefine JVM-global Vars) pays it. Done when the whole-suite reach answers in under one second warm, or the cost is proportional to changed tests only."
+             :intent "seon.test.runner/reach-memberships over all 2,377 test entities took 31.6 s on default (2026-09-27, warm, one call): over the ten-second bound. Since test-feedback-perf (2026-09-27) every requested test's closure is derived together and each digest is cached under its closure's fingerprint: all 2,378 digests answer in 951 ms when cached, but the first derivation in a JVM took 17 s, about 5 ms a test printing its closure for seon.id/digest. Done when the first whole-suite derivation is under one second: stream each closure's printed parts into the digest instead of printing the whole vector (seon.id owns the printed form)."
              :must-read #{seon.test.runner/reach-memberships seon.test.runner/reach-digests}
              :evidence #{"docs/research/agent-platform/test-agents-concurrency-2026-09-27.md"}}
  #:seon.task{:name "drift-prints-unbounded"

@@ -1,7 +1,6 @@
 (ns seon.test.runner
   "Capture test Var results in this JVM and commit them as per-member facts."
   (:require [seon.error.refusal]
-            [clojure.core.cache.wrapped :as cache]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.set :as set]
@@ -14,6 +13,7 @@
             [sci.core :as sci]
             [sci.impl.utils :as sci.utils]
             [seon.blob :as blob]
+            [seon.cache :as cache]
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
@@ -26,7 +26,8 @@
             [seon.sci.admit :as admit]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn])
-  (:import (java.nio.charset StandardCharsets)))
+  (:import (java.nio.charset StandardCharsets)
+           (java.util BitSet)))
 
 (defn var-reference?
   "True for a host or SCI Var reference."
@@ -748,273 +749,280 @@
                   (when (seq drift) [member drift]))))
         drift-directions))
 
-(def ^:private reach-attributes
- [:seon.fn/sym :seon.fn/source :seon.fn/spec :seon.fn/calls :seon.fn/references :seon.fn/keywords
-  :seon.test/sym :seon.test/source :seon.test/subject :seon.program/definition-digest
-  :seon.schema/key :seon.schema/form])
-(defn- reach-keywords [form]
- (into #{} (filter qualified-keyword?) (tree-seq coll? seq form)))
-(defn- reach-canonical [value]
- (walk/postwalk (fn [v] (cond
-  (map? v) (into (sorted-map-by #(compare (pr-str %1) (pr-str %2))) v)
-  (set? v) (into (sorted-set-by #(compare (pr-str %1) (pr-str %2))) v)
-  :else v)) value))
-(defn- reach-entity [entity]
- (let [sym (or (:seon.test/sym entity) (:seon.fn/sym entity))
-       schema-key (:seon.schema/key entity)
-       spec (some-> (:seon.fn/spec entity) edn/read-string)
-       form (some-> (:seon.schema/form entity) edn/read-string)]
-  (cond-> entity
-   sym (assoc ::reach-symbol sym
-              ;; The producer's stored digest (`seon.program/definition-digest`)
-              ;; covers source, spec, effective metadata and resolver context.
-              ::reach-leaf (:seon.program/definition-digest entity :seon.error/unknown)
-              ::reach-keys (into (set (:seon.fn/keywords entity)) (reach-keywords spec)))
-   schema-key (assoc ::reach-leaf (id/digest 64 [schema-key (reach-canonical form)])
-                     ::reach-keys (reach-keywords form)))))
-(defn- reach-schema-keys [entities schemas seeds]
-  (loop [pending (vec seeds) seen #{}]
-    (if-let [k (peek pending)]
-      (if (seen k)
-        (recur (pop pending) seen)
-        (recur (into (pop pending) (get-in entities [(get schemas k) ::reach-keys]))
-               (conj seen k)))
-      seen)))
+;;; Reach: what a test's reach digest covers, read from the tested database value.
+;;; A declaration's node (its leaf, the names it reaches, the keywords it names)
+;;; is a function of its content and lives in the central cache under that
+;;; content, and so does each test's digest, under its closure's fingerprint.
+;;; No index is held between calls: a call reads the declarations' identities
+;;; once and derives every requested test's closure together.
 
-(defn- reach-facts
-  "Read only requested declarations and their transitive call/schema references."
-  {:malli/schema
-   [:=> [:cat :seon.db/database-value
-         [:sequential [:or :qualified-symbol :qualified-keyword]]]
-    [:map-of :int [:map-of :qualified-keyword :seon.schema/value]]]}
-  [database test-symbols]
-  (let [installed-schema (:schema (db/schema-database database))
-        identities (fn [tokens]
-                     (mapcat (fn [token]
-                               (if (keyword? token)
-                                 [[:seon.schema/key token]]
-                                 [[:seon.fn/sym token] [:seon.test/sym token]])) tokens))]
-    (loop [pending (set (identities test-symbols)) seen #{} entity-maps {}]
-      (if (empty? pending)
-        entity-maps
-        (let [entities (mapcat
-                        (fn [[attribute pairs]]
-                          (let [result (db/q '[:find [?entity ...]
-                                               :in $ ?identity [?token ...]
-                                               :where [?entity ?identity ?token]]
-                                             database attribute (mapv second pairs))]
-                            (when (map? result)
-                              (throw (ex-info "Reach identities unavailable." result)))
-                            result))
-                        (group-by first pending))
-              facts (if (seq entities)
-                      (db/q '[:find ?entity ?attribute ?value
-                              :in $ [?entity ...] ?attributes
-                              :where [?entity ?attribute ?value]
-                                     [(contains? ?attributes ?attribute)]]
-                            database (vec (distinct entities)) (set reach-attributes))
-                      [])
-              _ (when (map? facts)
-                  (throw (ex-info "Reach entities unavailable." facts)))
-              acquired (reduce (fn [result [entity attribute value]]
-                                 (if (= :db.cardinality/many
-                                        (get-in installed-schema [attribute :db/cardinality]))
-                                   (update-in result [entity attribute] (fnil conj #{}) value)
-                                   (assoc-in result [entity attribute] value)))
-                               {} facts)
-              tokens (mapcat (fn [[_ entity-map]]
-                               (concat (:seon.fn/calls entity-map) (:seon.fn/references entity-map)
-                                       (when-let [subject (:seon.test/subject entity-map)] [subject])
-                                       (:seon.fn/keywords entity-map)
-                                       (reach-keywords (some-> (:seon.fn/spec entity-map) edn/read-string))
-                                       (reach-keywords (some-> (:seon.schema/form entity-map) edn/read-string))))
-                             acquired)
-              seen (into seen pending)]
-          (recur (into #{} (remove seen) (identities tokens)) seen (merge entity-maps acquired)))))))
+(defn- reach-read!
+  "`value`, or a throw carrying the read refusal it is; [[reach-entries]]
+  answers the refusal as its diagnostic."
+  {:malli/schema [:=> [:cat :seon.schema/value] :seon.schema/value]}
+  [value]
+  (if (db/read-refusal? value) (throw (ex-info "Reach unavailable." value)) value))
 
-(defn- reach-revisions
-  "Datahike's revisions of the attributes reach reads (`datahike.db/advance-cache-context`,
-  `reference-code/datahike/src/datahike/db.cljc:423`): equal revisions mean no reach
-  datom changed, so a moved head costs one map comparison, not a history scan."
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil [:vector :seon.schema/value]]]}
+(defn- reach-keywords
+  {:malli/schema [:=> [:cat :seon.schema/value] [:set :qualified-keyword]]}
+  [form]
+  (into #{} (filter qualified-keyword?) (tree-seq coll? seq form)))
+
+(defn- reach-canonical
+  {:malli/schema [:=> [:cat :seon.schema/value] :seon.schema/value]}
+  [value]
+  (walk/postwalk (fn [v] (cond
+                           (map? v) (into (sorted-map-by #(compare (pr-str %1) (pr-str %2))) v)
+                           (set? v) (into (sorted-set-by #(compare (pr-str %1) (pr-str %2))) v)
+                           :else v)) value))
+
+(defn- reach-row
+  "The reach facts of one declaration, from its EAVT range."
+  {:malli/schema [:=> [:cat :seon.db/database-value :int] [:map-of :qualified-keyword :seon.schema/value]]}
+  [database entity]
+  (reduce (fn [row {:keys [a v]}]
+            (case a
+              (:seon.fn/calls :seon.fn/references :seon.fn/keywords) (update row a (fnil conj #{}) v)
+              (:seon.fn/spec :seon.test/subject :seon.program/definition-digest) (assoc row a v)
+              row))
+          {} (reach-read! (db/datoms database :eavt entity))))
+
+(defn- reach-bits
+  "A leaf digest's first 128 bits, two longs: its share of a closure's fingerprint."
+  {:malli/schema [:=> [:cat :seon.schema/value] [:tuple :int :int]]}
+  [leaf]
+  (if (and (string? leaf) (<= 32 (count leaf)))
+    [(Long/parseUnsignedLong (subs leaf 0 16) 16) (Long/parseUnsignedLong (subs leaf 16 32) 16)]
+    [0 0]))
+
+(defn- reach-node
+  "One declaration's contribution to reach: its leaf (the producer's
+  `:seon.program/definition-digest`), the names it reaches (calls, references,
+  subject) and the keywords it names (its own and its contract's)."
+  {:malli/schema [:=> [:cat [:map-of :qualified-keyword :seon.schema/value]] :map]}
+  [row]
+  {::leaf (:seon.program/definition-digest row :seon.error/unknown)
+   ::bits (reach-bits (:seon.program/definition-digest row))
+   ::out (cond-> (into (vec (:seon.fn/calls row)) (:seon.fn/references row))
+           (:seon.test/subject row) (conj (:seon.test/subject row)))
+   ::keys (into (set (:seon.fn/keywords row))
+                (reach-keywords (some-> (:seon.fn/spec row) edn/read-string)))})
+
+(defn- reach-schema-node
+  "One schema declaration's leaf and the keywords its form names."
+  {:malli/schema [:=> [:cat :keyword :string] :map]}
+  [schema-key form]
+  (let [value (edn/read-string form)
+        leaf (id/digest 64 [schema-key (reach-canonical value)])]
+    {::leaf leaf ::bits (reach-bits leaf) ::keys (reach-keywords value)}))
+
+(defn- reach-weight
+  "A node's estimated retained bytes, from the counts it already has."
+  {:malli/schema [:=> [:cat :map] :int]}
+  [node]
+  (* 48 (+ 8 (count (::out node)) (count (::keys node)))))
+
+(defn- reach-declarations
+  "Every function, test and schema declaration on `database`: symbol to row,
+  row to definition digest, schema key to form. Five attribute reads, about
+  15 ms on default whatever the request (2026-09-27), where resolving a hub's
+  3,568 reached names frontier by frontier took 79 ms; a committed value's
+  answer is cached under its commit."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:map-of :keyword :map]]}
   [database]
-  (let [context (:cache-context database)]
-    (when (:datahike.cache/committed? context)
-      [(:datahike.cache/connection-id context) (:datahike.cache/generation context)
-       (:datahike.cache/conservative-revision context)
-       (select-keys (:datahike.cache/attribute-revisions context) reach-attributes)])))
+  (let [pairs (fn [attribute k v] (into {} (map (juxt k v)) (reach-read! (db/datoms database :aevt attribute))))
+        derive-declarations
+        #(let [schema-keys (pairs :seon.schema/key :e :v)]
+           {::rows (merge (pairs :seon.fn/sym :v :e) (pairs :seon.test/sym :v :e))
+            ::digests (pairs :seon.program/definition-digest :e :v)
+            ::forms (into {} (keep (fn [[e form]] (when-let [k (schema-keys e)] [k form])))
+                          (pairs :seon.schema/form :e :v))})]
+    (if-let [commit (:datahike.value/commit-id (db/committed-value-identity database))]
+      (cache/lookup ::reach-declarations commit #(* 96 (+ (count (::rows %)) (count (::digests %)) (count (::forms %))))
+                    derive-declarations)
+      (derive-declarations))))
 
-(defn- reach-refresh [database previous test-symbols]
- (let [basis (db/basis-t database)
-       revisions (reach-revisions database)
-       changed-entities (when (and previous (not (and revisions (= revisions (::reach-revisions previous)))))
-                          (db/q '[:find [?entity ...] :in $ [?attribute ...]
-                                  :where [?entity ?attribute]]
-                                (db/since (db/history database) (::reach-basis previous))
-                                reach-attributes))]
-   (when (map? changed-entities)
-     (throw (ex-info "Reach changes unavailable." changed-entities)))
-   (if (and previous (empty? changed-entities)
-            (every? #(get-in previous [::reach-symbols %]) test-symbols))
-     (assoc previous ::reach-basis basis ::reach-revisions revisions ::reach-updated 0 ::reach-invalidated 0)
- (let [by-entity (reach-facts database test-symbols)
-       ;; Entities re-read for these tests, and retained entities a write since the
-       ;; previous basis touched; every other retained entity is kept as it is.
-       ids (into (set (keys by-entity)) (filter (::reach-rows previous {})) changed-entities)
-       old-entities (::reach-rows previous {})
-       pulled (mapv (fn [entity] (assoc (get by-entity entity {}) :db/id entity)) ids)
-       changed (filterv #(not= (dissoc (get old-entities (:db/id %)) ::reach-symbol ::reach-leaf ::reach-keys) %) pulled)
-       entities (reduce (fn [rs r] (assoc rs (:db/id r) (reach-entity r))) old-entities changed)
-       schemas (if (seq changed)
-                 (into {} (keep (fn [[e entity-map]] (when-let [k (:seon.schema/key entity-map)] [k e]))) entities)
-                 (::reach-schemas previous {}))
-       tokens (into (set (map :db/id changed))
-                    (mapcat (fn [r] (for [v [r (get old-entities (:db/id r))]
-                                         :let [s (or (:seon.test/sym v) (:seon.fn/sym v))
-                                               k (:seon.schema/key v)]
-                                         token (cond-> [] s (conj [::reach-symbol s]) k (conj [::reach-schema k]))]
-                                     token))) changed)
-       kept (if (seq tokens)
-              (into {} (remove (fn [[_ entry]] (some (::reach-dependencies entry) tokens)))
-                    (::reach-digests previous {}))
-              (::reach-digests previous {}))]
-  (assoc (or previous {})
-    ::reach-basis basis ::reach-revisions revisions ::reach-rows entities
-    ::reach-symbols (if (seq changed) (into {} (keep (fn [[e r]] (when-let [s (::reach-symbol r)] [s e]))) entities) (::reach-symbols previous {}))
-    ::reach-schemas schemas
-    ::reach-digests kept
-    ::reach-updated (count changed) ::reach-invalidated (- (count (::reach-digests previous)) (count kept)))))))
-(defn- reach-entry [index test-symbol]
-  (let [entity-maps (::reach-rows index)
-        symbols (::reach-symbols index)
-        schemas (::reach-schemas index)
-        start (get symbols test-symbol)
-        names (loop [pending (if start [test-symbol] []) seen #{}]
-                (if-let [target (peek pending)]
-                  (if (seen target)
-                    (recur (pop pending) seen)
-                    (let [entity (get entity-maps (get symbols target))]
-                      (recur (into (pop pending)
-                                   (concat (:seon.fn/calls entity)
-                                           (:seon.fn/references entity)
-                                           (when-let [subject (:seon.test/subject entity)] [subject])))
-                             (conj seen target))))
-                  seen))
-        entities (into #{} (keep symbols) names)
-        keyword-seeds (reduce into #{} (map #(get-in entity-maps [% ::reach-keys]) entities))
-        schema-keys (reach-schema-keys entity-maps schemas keyword-seeds)
+(defn- reach-fixed-point
+  "Every name reachable from `start` through each node's `edges`, by name:
+  its node, or nil for a name `node-of` does not find."
+  {:malli/schema [:=> [:cat [:fn clojure.core/ifn?] :keyword [:set :seon.schema/value]]
+                  [:map-of :seon.schema/value [:maybe :map]]]}
+  [node-of edges start]
+  (loop [pending (vec start) resolved (transient {})]
+    (if-let [item (peek pending)]
+      (if (contains? resolved item)
+        (recur (pop pending) resolved)
+        (let [node (node-of item)]
+          (recur (into (pop pending) (edges node)) (assoc! resolved item node))))
+      (persistent! resolved))))
+
+(defn- reach-graph
+  "The nodes and schema nodes the requested tests reach. Calls, references and
+  keywords are the analysis of what the definition digest hashes (source and
+  resolver context, `seon.program/definition-digest`), so a node is cached
+  under that digest and read only on a miss; an undigested row is read every
+  time. A schema node is cached under its form."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]] :map]}
+  [database test-symbols]
+  (let [{::keys [rows digests forms]} (reach-declarations database)
+        node-of (fn [s]
+                  (when-let [e (get rows s)]
+                    (let [derive-node #(reach-node (reach-row database e))]
+                      (if-let [digest (get digests e)]
+                        (cache/lookup ::reach-node digest reach-weight derive-node)
+                        (derive-node)))))
+        schema-node-of (fn [k]
+                         (when-let [form (get forms k)]
+                           (cache/lookup ::reach-schema-node [k form] reach-weight #(reach-schema-node k form))))
+        nodes (reach-fixed-point node-of ::out (set test-symbols))]
+    {::nodes nodes
+     ::schemas (reach-fixed-point schema-node-of ::keys (into #{} (mapcat ::keys) (keep val nodes)))}))
+
+(defn- reach-successors
+  "Each of `items`' successors as positions in `items`, one int array per item."
+  {:malli/schema [:=> [:cat [:vector :seon.schema/value] [:map-of :seon.schema/value :int] [:fn clojure.core/ifn?]]
+                  [:vector [:fn clojure.core/some?]]]}
+  [items positions edges-of]
+  (mapv (fn [item] (int-array (keep positions (edges-of item)))) items))
+
+(defn- reach-postorder
+  "Every vertex in depth-first postorder: after every vertex it reaches, but for cycles."
+  {:malli/schema [:=> [:cat [:vector [:fn clojure.core/some?]]] [:vector :int]]}
+  [successors]
+  (let [visited (boolean-array (count successors))
+        order (java.util.ArrayList.)
+        stack (java.util.ArrayDeque.)]
+    (dotimes [root (count successors)]
+      (when-not (aget visited root)
+        (aset visited root true)
+        (.push stack (long-array [root 0]))
+        (while (not (.isEmpty stack))
+          (let [^longs frame (.peek stack)
+                v (aget frame 0)
+                i (aget frame 1)
+                ^ints following (nth successors v)]
+            (if (< i (alength following))
+              (let [w (aget following i)]
+                (aset frame 1 (inc i))
+                (when-not (aget visited w)
+                  (aset visited w true)
+                  (.push stack (long-array [w 0]))))
+              (do (.pop stack) (.add order v)))))))
+    (vec order)))
+
+(defn- reach-closures
+  "Each vertex's closure as a bitset: its own position and every position its
+  successors reach. Passes run in postorder until nothing grows, so an acyclic
+  graph settles in one pass and a cycle in a few."
+  {:malli/schema [:=> [:cat [:vector [:fn clojure.core/some?]]] [:vector [:fn clojure.core/some?]]]}
+  [successors]
+  (let [n (count successors)
+        order (reach-postorder successors)
+        closures (object-array n)]
+    (dotimes [v n] (aset closures v (doto (BitSet. n) (.set v))))
+    (loop []
+      (when (reduce (fn [grew v]
+                      (let [^BitSet closure (aget closures (int v))
+                            before (.cardinality closure)
+                            ^ints following (nth successors v)]
+                        (dotimes [i (alength following)]
+                          (.or closure ^BitSet (aget closures (aget following i))))
+                        (or grew (not= before (.cardinality closure)))))
+                    false order)
+        (recur)))
+    (vec closures)))
+
+(defn- reach-entry
+  "One test's reach: the names its closure holds, the declarations there with
+  no digest, and its digest over each name's leaf and the schema forms their
+  keywords name. The digest is cached under the closure's fingerprint, the
+  count and summed leaf bits of its names and of its schema keys: each leaf
+  digests its declaration's identity and content, and the names a closure
+  holds without a node follow from its nodes' edges."
+  {:malli/schema [:=> [:cat :map :seon.test/sym] :map]}
+  [{::keys [nodes schemas names schema-keys name-index name-closures own-keys]} test-symbol]
+  (let [members (fn [items ^BitSet closure]
+                  (loop [i (.nextSetBit closure 0) found (transient [])]
+                    (if (neg? i) (persistent! found) (recur (.nextSetBit closure (inc i)) (conj! found (nth items i))))))
+        fingerprint (fn [held items]
+                      (reduce (fn [[n a b] item]
+                                (let [[x y] (::bits (get held item) [0 0])]
+                                  [(inc n) (unchecked-add (long a) (long x)) (unchecked-add (long b) (long y))]))
+                              [0 0 0] items))
+        start (when (get nodes test-symbol) (get name-index test-symbol))
+        reached (if start (members names (nth name-closures start)) [])
+        reached-keys (if start
+                       (let [closure (BitSet. (count schema-keys))
+                             ^BitSet reaching (nth name-closures start)]
+                         (loop [i (.nextSetBit reaching 0)]
+                           (when-not (neg? i)
+                             (when-let [keys-closure (nth own-keys i)] (.or closure ^BitSet keys-closure))
+                             (recur (.nextSetBit reaching (inc i)))))
+                         (members schema-keys closure))
+                       [])
         ;; A name with no program entity is host code (`clojure.core/=`); a
         ;; declared entity without its stored digest is unknown evidence.
-        node-parts (mapv (fn [name] [name (get-in entity-maps [(get symbols name) ::reach-leaf]
-                                                  :seon.error/unknown)]) (sort names))
-        undigested (into [] (comp (filter (fn [[name leaf]] (and (get symbols name) (not (string? leaf)))))
-                                  (map first)) node-parts)
-        schema-parts (mapv (fn [key] [key (get-in entity-maps [(get schemas key) ::reach-leaf])])
-                           (sort schema-keys))]
-    {::reach-digest (when (empty? undigested) (id/digest 64 [test-symbol node-parts schema-parts]))
+        undigested (filterv #(when-let [node (get nodes %)] (not (string? (::leaf node)))) reached)]
+    {::reach-names reached
+     ::reach-start? (some? start)
      ::reach-undigested undigested
-     ::reach-refs (when start
-                    (into #{} (remove #(= % test-symbol)) names))
-     ::reach-dependencies (into entities
-                                (concat (map #(vector ::reach-symbol %) names)
-                                        (map #(vector ::reach-schema %) schema-keys)))
-     ::reach-function-count (count names)}))
-(defonce ^:private reach-holders
-  ;; Keyed by the program content reach reads (each entity's definition digest or
-  ;; schema form, with its entity): every branch with equal program entities shares
-  ;; one index, whatever else it wrote. LRU bounds retention.
-  (cache/lru-cache-factory {} :threshold 16))
-(defonce ^:private reach-lineage
-  ;; The holder a commit or connection last read, with that value's basis, so a
-  ;; later value on the same lineage derives incrementally since that basis.
-  (cache/lru-cache-factory {} :threshold 64))
-(defn- reach-commit
-  "The store and commit a committed database value is, or nil."
-  [database]
-  (let [value (db/committed-value-identity database)]
-    (when (:datahike.value/commit-id value)
-      [(first (:datahike.value/connection-id value)) (:datahike.value/commit-id value)])))
-(defn- reach-content
-  "What every reach entity derives from: each definition digest and schema form by entity."
-  [database]
-  (let [definitions (db/q '[:find ?e ?d :where [?e :seon.program/definition-digest ?d]] database)
-        forms (db/q '[:find ?e ?f :where [?e :seon.schema/form ?f]] database)]
-    (doseq [result [definitions forms] :when (map? result)]
-      (throw (ex-info "Reach content unavailable." result)))
-    [definitions forms]))
-(defn- lineage-keys [database]
-  (let [{:datahike.cache/keys [connection-id generation]} (:cache-context database)]
-    [[connection-id generation] (reach-commit database)]))
-(defn- reach-ancestor
- "What this connection or a parent commit last read: its holder and the basis it
- was read at. Since that basis this value holds only its lineage's own writes."
- [database]
- (let [[store] (reach-commit database)
-       basis (db/basis-t database)]
-  (some #(when-let [entry (cache/lookup reach-lineage %)]
-           (when (<= (::basis entry) basis) entry))
-        (cons (first (lineage-keys database))
-              (map #(vector store %) (:datahike/parents (:meta database)))))))
-(defn- ancestor-index
- "The ancestor holder's index, re-based on the basis the ancestor was read at."
- [{holder ::holder basis ::basis}]
- (some-> holder deref deref (assoc ::reach-basis basis)))
-(defn- reach-cache
- "The reach index's holder for the database's program content, or nil when uncommitted."
- [database]
- (when-let [[store] (reach-commit database)]
-  (cache/lookup-or-miss reach-holders [store (reach-content database)] (fn [_] (atom nil)))))
+     ::reach-digest
+     (when (empty? undigested)
+       (cache/lookup ::reach-digest
+                     [test-symbol (fingerprint nodes reached) (fingerprint schemas reached-keys)]
+                     (constantly 128)
+                     #(id/digest 64 [test-symbol
+                                     (mapv (fn [n] [n (if-let [node (get nodes n)] (::leaf node) :seon.error/unknown)]) reached)
+                                     (mapv (fn [k] [k (::leaf (get schemas k))]) reached-keys)])))}))
+
 (defn- reach-entries
- "Derive selected reach digests from the index of equal program content, else
- incrementally from a parent commit's. Uncommitted values derive independently."
- [database test-symbols]
- (if (empty? test-symbols)
-   {}
- (try
- (let [ancestor (reach-ancestor database)
-       holder (reach-cache database)
-       derive-index (fn [previous]
-                (let [index (if (and (= (db/basis-t database) (::reach-basis previous))
-                                    (every? #(get-in previous [::reach-symbols %]) test-symbols))
-                              previous (reach-refresh database previous test-symbols))
-                      missing (remove #(get-in index [::reach-digests % ::reach-refs]) test-symbols)
-                      index (reduce (fn [i s] (assoc-in i [::reach-digests s] (reach-entry i s))) index missing)]
-                 (assoc index ::reach-attributes reach-attributes ::reach-computed (count missing))))]
-  (when holder
-   (doseq [k (lineage-keys database)]
-    (cache/miss reach-lineage k {::holder holder ::basis (db/basis-t database)})))
-  (if holder
-   ;; The holder's value is a delay of the newest index for this content: equal
-   ;; content derefs one derivation, a wider request claims by compare-and-set,
-   ;; and a failed claim is withdrawn so its exception never becomes the cache.
-   (loop []
-    (let [claimed @holder
-          own (some-> claimed deref)
-          previous (or own (some-> ancestor ancestor-index))
-          ;; An index read with other attributes (code before a reload) is not reused.
-          usable (= reach-attributes (::reach-attributes previous))]
-     (if (and own usable (every? #(get-in own [::reach-digests % ::reach-refs]) test-symbols))
-      (select-keys (::reach-digests own) test-symbols)
-      (let [claim (delay (assoc (derive-index (when usable previous))
-                                ::reach-derivations (inc (::reach-derivations previous 0))))]
-       (if (compare-and-set! holder claimed claim)
-        (try (select-keys (::reach-digests @claim) test-symbols)
-             (catch Exception failure
-              (compare-and-set! holder claim claimed)
-              (throw failure)))
-        (recur))))))
-   (select-keys (::reach-digests (derive-index nil)) test-symbols)))
- (catch Exception failure
-  (seon.error.refusal/diagnostic (java.util.Date.) :seon.test/recording `reach-entries
-   {:seon.error/message (str "Reach digest unavailable: " (ex-message failure))
-    :seon.test/unknown "reach digest"
-    :seon.error/member :seon.test/reach-digests
-    :seon.error/expected "derived reach digests for the requested tests"
-    :seon.error/offending test-symbols
-    :seon.error/data {:seon.test/syms test-symbols}})))))
+  "Each requested test's reach entry on this database value, committed or not.
+  Every test's closure is derived at once over the graph the tests reach:
+  names and schema keys are bit positions in their sorted order, and each
+  vertex's closure is propagated from its successors'.
+
+  ## Costs
+
+  Armed (Malli over the live registry) on default 2026-09-27, the 12 recorded
+  tests reaching `seon.fn/gate-set` (3,568 names, 4,241 schema keys): 36 ms
+  on a freshly committed head beside the 16 ms declaration read, 49 ms
+  warm; 199 tests 120-180 ms; all 2,378 tests 951 ms when their digests are
+  cached. A digest miss costs about 5 ms a test, its print: the first
+  derivation of every test's digest in a JVM took 17 s."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]] :map]}
+  [database test-symbols]
+  (if (empty? test-symbols)
+    {}
+    (try
+      (let [{::keys [nodes schemas] :as graph} (reach-graph database test-symbols)
+            names (vec (sort (keys nodes)))
+            schema-keys (vec (sort (keys schemas)))
+            name-index (zipmap names (range))
+            key-index (zipmap schema-keys (range))
+            schema-closures (reach-closures (reach-successors schema-keys key-index #(::keys (get schemas %))))
+            index (assoc graph
+                         ::names names ::schema-keys schema-keys ::name-index name-index
+                         ::name-closures (reach-closures (reach-successors names name-index #(::out (get nodes %))))
+                         ;; Each name's own keywords with the schema keys they reach.
+                         ::own-keys (mapv (fn [n]
+                                            (when-let [node-keys (seq (::keys (get nodes n)))]
+                                              (let [closure (BitSet. (count schema-keys))]
+                                                (doseq [k node-keys]
+                                                  (.or closure ^BitSet (nth schema-closures (key-index k))))
+                                                closure)))
+                                          names))]
+        (into {} (map (fn [s] [s (reach-entry index s)])) test-symbols))
+      (catch Exception failure
+        (seon.error.refusal/diagnostic (java.util.Date.) :seon.test/recording `reach-entries
+         {:seon.error/message (str "Reach digest unavailable: " (ex-message failure))
+          :seon.test/unknown "reach digest"
+          :seon.error/member :seon.test/reach-digests
+          :seon.error/expected "derived reach digests for the requested tests"
+          :seon.error/offending test-symbols
+          :seon.error/data {:seon.test/syms test-symbols}})))))
 
 (defn reach-digests
-  "Derive equality keys from the tested database's incremental reach index."
+  "Each test's reach digest: the content of its static closure on `database`."
   {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]]
                   [:or :seon.test/reach-digests :seon.test/unknown-error]]}
   [database test-symbols]
@@ -1051,8 +1059,8 @@
   [database test-symbols]
   (let [entries (reach-entries database test-symbols)]
     (if (contains? entries :seon.test/unknown) entries
-        (into {} (keep (fn [[s entry]] (when (set? (::reach-refs entry))
-                                       [s (::reach-refs entry)]))) entries))))
+        (into {} (keep (fn [[s entry]] (when (::reach-start? entry)
+                                       [s (disj (set (::reach-names entry)) s)]))) entries))))
 
 (defn- program-digest-read-attributes
   "Every attribute the digest reads: the source seal and the program rows' own
@@ -1371,7 +1379,11 @@
         previous-by-id (into {} (map (juxt :seon.test.failure/id identity)) (:seon.test/failures previous))
         retained (set (map :seon.test.failure/id failures))]
     (into
-      (mapv (fn [old] [:db.fn/retractEntity (:db/id old)])
+      ;; A dropped failure leaves the test's failures vector through that
+      ;; vector: the writer retracts its cell, and the cell's component with
+      ;; it. Retracting the entity alone left the cell empty, and the next
+      ;; read refused the vector (`vector-element-swept`, red-triage r6 E4).
+      (mapv (fn [old] [:db/retract test-entity-id :seon.test/failures (:db/id old)])
             (remove #(retained (:seon.test.failure/id %)) (:seon.test/failures previous)))
       (mapcat
         (fn [{failure-id :seon.test.failure/id :as failure}]
@@ -1968,25 +1980,42 @@
   "Read the latest native admitted execution of each requested test.
   Missing executions are absent; an incomplete latest execution is that test's
   `:seon.test/result-unknown`, never an older green. A failed read refuses the
-  whole answer. Snapshot evidence never certifies this branch."
+  whole answer. Snapshot evidence never certifies this branch.
+
+  ## Costs
+
+  An index walk from each name (`:seon.test.member/symbol` AVET, then the
+  runs holding the member) and one query over those runs: proportional to
+  the requested tests' executions, never every member. Measured unarmed on
+  default 2026-09-27: the executions of 14 tests (148) in 3.9 ms where the
+  unbound Datalog took 152 ms; 595 tests (377 results) in 60 ms where it took
+  4.7 s."
   {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :qualified-symbol]]
                   [:or :seon.test/latest-results :seon.test/execution-error]]}
   [database test-symbols]
   (try
-    (let [entities (execution-read
-                (db/q '[:find ?symbol ?id ?selected
-                        :in $ [?symbol ...] ?branch
-                        :where [?member :seon.test.member/symbol ?symbol]
-                               [?run :seon.test.run/members ?member]
-                               [?run :seon.test.run/id ?id]
-                               [?run :seon.test.run/branch ?branch]
-                               [?run :seon.test.run/selection-tx ?selected]
-                               (not [?run :seon.test.run/published-base-digest])]
-                      database test-symbols
-                      (get-in (db/schema-database database) [:config :branch])))
+    (let [datoms #(execution-read (apply db/datoms database %&))
+          runs (for [test-symbol (distinct test-symbols)
+                     {member :e} (datoms :avet :seon.test.member/symbol test-symbol)
+                     {run :e} (datoms :avet :seon.test.run/members member)]
+                 [test-symbol run])
+          admitted (when (seq runs)
+                     (into {} (map (fn [[run id selected]] [run [id selected]]))
+                           (execution-read
+                            (db/q '[:find ?run ?id ?selected
+                                    :in $ [?run ...] ?branch
+                                    :where [?run :seon.test.run/branch ?branch]
+                                           [?run :seon.test.run/id ?id]
+                                           [?run :seon.test.run/selection-tx ?selected]
+                                           (not [?run :seon.test.run/published-base-digest])]
+                                  database (vec (distinct (map second runs)))
+                                  (get-in (db/schema-database database) [:config :branch])))))
+          entities (into #{} (keep (fn [[test-symbol run]]
+                                     (when-let [[id selected] (get admitted run)] [test-symbol id selected])))
+                         runs)
           latest (vals (reduce (fn [result [sym :as entity]] (assoc result sym entity))
                                (sorted-map) (sort-by #(nth % 2) entities)))
-          results (recorded-member-results database (mapv (fn [[sym id]] [id sym]) latest))]
+          results (if (seq latest) (recorded-member-results database (mapv (fn [[sym id]] [id sym]) latest)) {})]
       ;; One batch of reads for every run, never one per run or per test.
       (->> latest
            (map (comp results first))

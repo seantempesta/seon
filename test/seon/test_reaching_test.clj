@@ -3,6 +3,7 @@
             [clojure.string :as str]
             [clojure.test :as t :refer [deftest is]]
             [malli.instrument]
+            [seon.cache]
             [seon.db :as db]
             [seon.config]
             [seon.sci.eval]
@@ -64,79 +65,74 @@
            '[:seon.test/sym reach.fixture/a-test] "(deftest a-test (is (= 'x (a 'x))))"
            '[:seon.test/sym reach.fixture/b-test] "(deftest b-test (is (= 1 (b 1))))"))
 
-(defn- reach-index
-  "The newest reach index the database's carried cache holds."
-  [connection]
-  (some-> (#'runner/reach-cache (db/db connection)) deref deref))
+(defn- derived-digests
+  "The reach digests the central cache holds for `test-symbol`, one per
+  distinct closure content it was derived for."
+  {:malli/schema [:=> [:cat :seon.test/sym] :int]}
+  [test-symbol]
+  (count (filter #(= test-symbol (first %)) (keys (seon.cache/retained :seon.test.runner/reach-digest)))))
 
 (deftest reach-digests-follow-only-changed-closures
  (support/with-database
   (fn [connection]
    (seed-reach-fixture! connection)
    (let [ta 'reach.fixture/a-test tb 'reach.fixture/b-test
-         initial (runner/reach-digests (db/db connection) [ta tb])
-         stats (fn [] (select-keys (reach-index connection)
-                                   [:seon.test.runner/reach-updated :seon.test.runner/reach-computed]))
-         derived (:seon.test.runner/reach-derivations (reach-index connection))]
+         initial (runner/reach-digests (db/db connection) [ta tb])]
     (is (= 2 (count initial)) (pr-str initial))
     (is (= initial (runner/reach-digests (db/db connection) [ta tb])))
-    (is (= derived (:seon.test.runner/reach-derivations (reach-index connection))))
-    ;; Source, contract and schema writes each recompute only the test they reach.
+    ;; Source, contract and schema writes each derive a digest only for the
+    ;; test they reach; the other test's closure content is unchanged.
     (doseq [write! [#(define! % '[:seon.fn/sym reach.fixture/a]
                               "(defn a {:malli/schema [:=> [:cat :seon.test/sym] :seon.test/sym]} [x] (identity x))")
                     #(define! % '[:seon.fn/sym reach.fixture/a]
                               "(defn a {:malli/schema [:=> [:cat :seon.test/sym] :any]} [x] (identity x))")
                     #(support/transacted! % [[:db/add [:seon.schema/key :seon.test/sym]
                                               :seon.schema/form "[:qualified-symbol {:min 2}]"]])]]
-     (let [before (runner/reach-digests (db/db connection) [ta tb])]
+     (let [before (runner/reach-digests (db/db connection) [ta tb])
+           b-derived (derived-digests tb)]
       (write! connection)
       (let [after (runner/reach-digests (db/db connection) [ta tb])]
        (is (not= (get before ta) (get after ta)))
        (is (= (get before tb) (get after tb)))
-       (is (= 1 (:seon.test.runner/reach-computed (stats)))))))
-    ;; A data write leaves the program content equal, so the index of that
-    ;; content answers with no derivation (7154084b9: keyed by content).
+       (is (= b-derived (derived-digests tb)) "the unchanged closure derives no digest"))))
+    ;; A data write leaves every closure's content equal.
     (let [before (runner/reach-digests (db/db connection) [ta tb])
-          derivations (:seon.test.runner/reach-derivations (reach-index connection))]
+          derived (map derived-digests [ta tb])]
      (support/transacted! connection [[:db/add [:seon.test/sym ta] :seon.test/pass-count 1]])
      (is (= before (runner/reach-digests (db/db connection) [ta tb])))
-     (is (= derivations (:seon.test.runner/reach-derivations (reach-index connection)))))))))
+     (is (= derived (map derived-digests [ta tb]))))))))
 
 (deftest concurrent-reach-reads-of-one-value-derive-once
- ;; The index is a delay held as the cache's value: equal database values
- ;; share one derivation, a changed value derives again.
+ ;; A digest is cached under its closure's content: equal values share one
+ ;; derivation, a changed closure derives again.
  (support/with-database
   (fn [connection]
    (seed-reach-fixture! connection)
    (let [ta 'reach.fixture/a-test
-         derivations #(:seon.test.runner/reach-derivations (reach-index connection) 0)
          database (db/db connection)
-         before (derivations)
+         before (derived-digests ta)
          start (java.util.concurrent.CountDownLatch. 1)
          readers (mapv (fn [_] (future (.await start) (runner/reach-digests database [ta]))) (range 4))
          _ (.countDown start)
          results (mapv deref readers)]
     (is (apply = results))
     (is (string? (get-in results [0 ta])) (pr-str (first results)))
-    ;; Equal program content already derived (an earlier run) derives nothing.
-    (is (contains? #{before (inc before)} (derivations)))
+    ;; Equal content already derived (an earlier run) derives nothing.
+    (is (contains? #{before (inc before)} (derived-digests ta)))
     (define! connection '[:seon.fn/sym reach.fixture/a]
              "(defn a {:malli/schema [:=> [:cat :seon.test/sym] :seon.test/sym]} [x] (identity x))")
     (is (not= (first results) (runner/reach-digests (db/db connection) [ta])))))))
 
 (deftest a-fresh-branch-with-unchanged-program-entities-derives-nothing
  ;; A nested request runs on a fresh branch that writes only non-program facts;
- ;; the index is keyed by the program content it reads, so it hits.
+ ;; the digest is keyed by the closure content it reads, so it hits.
  (let [s 'seon.id-test/data-shape-and-explicit-length-determine-identity
        read-reach (fn [write?]
               (support/with-database
                (fn [connection]
                 (when write?
                  (support/transacted! connection [[:db/add [:seon.test/sym s] :seon.test/pass-count 1]]))
-                (let [database (db/db connection)]
-                 [(runner/reach-digests database [s])
-                  (:seon.test.runner/reach-derivations
-                   (some-> (#'runner/reach-cache database) deref deref))]))))
+                [(runner/reach-digests (db/db connection) [s]) (derived-digests s)])))
        [digests derivations] (read-reach false)
        [again again-derivations] (read-reach true)]
   (is (string? (get digests s)) (pr-str digests))
@@ -268,11 +264,8 @@
         (let [database (db/db connection)
               s 'my.agents.reach-digest/largest-customer-test
               f 'my.agents.reach-digest/largest-customer
-              before (sut/reach-digest database s)
-              index (#'runner/reach-refresh database nil [s])
-              entry (#'runner/reach-entry index s)
-              target (:db/id (db/pull database [:db/id] [:seon.fn/sym f]))]
-          (is (contains? (:seon.test.runner/reach-dependencies entry) target)
+              before (sut/reach-digest database s)]
+          (is (contains? (get (runner/reach-memberships database [s]) s) f)
               (pr-str (db/pull database
                         '[:seon.test/source :seon.fn/calls
                           {:seon.test/subject [:seon.fn/sym]}]

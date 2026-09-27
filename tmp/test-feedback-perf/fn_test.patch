@@ -1,0 +1,133 @@
+--- a/test/seon/fn_test.clj
++++ b/test/seon/fn_test.clj
+@@ -1252,10 +1252,6 @@
+                        (db/pull @connection [:seon.fn/calls]
+                                 [:seon.test/sym (quote sample.reach/property)])))
+             "the schema-property test reaches its subject without a call edge")
+-        (is (= [(quote sample.reach/target)]
+-               (filterv #(= "sample.reach" (namespace %))
+-                        (seon.fn/currently-failing-functions @connection)))
+-            "red latest-result facts derive failing functions through calls")
+         (is (= [(quote sample.reach/direct) (quote sample.reach/untested)]
+                (filterv #(= "sample.reach" (namespace %))
+                         (seon.fn/functions-without-tests @connection)))
+@@ -1356,6 +1352,7 @@
+       (let [database (db/db connection)
+             queries (atom [])
+             scan-counts (atom [])
++            invokes-reads (atom [])
+             scans (atom [])
+             query db/q
+             datoms db/datoms
+@@ -1374,15 +1371,19 @@
+                            (apply datoms arguments))]
+               (mapv (fn [s]
+                       (reset! scans [])
+-                      (let [result (seon.fn/gate-set database s)]
+-                        (swap! scan-counts conj (count @scans))
+-                        (is (= (count @scans) (count (distinct @scans)))
++                      (let [result (seon.fn/gate-set database s)
++                            ;; The declared-invocation relation reads its own
++                            ;; declaring attributes; every other read is reverse.
++                            declared-read? (fn [[_ attribute]]
++                                             (not (#{:seon.fn/calls :seon.fn/references :seon.test/subject} attribute)))
++                            reverse-reads (remove declared-read? @scans)]
++                        (swap! scan-counts conj (count reverse-reads))
++                        (swap! invokes-reads conj (count (filter #(= [:aevt :seon.fn/invokes] (vec (take 2 %))) @scans)))
++                        (is (= (count reverse-reads) (count (distinct reverse-reads)))
+                             "a cycle never repeats an incoming-edge lookup")
+-                        (is (every? (fn [[index attribute target]]
+-                                      (and (= :avet index)
+-                                           (#{:seon.fn/calls :seon.fn/references :seon.test/subject} attribute)
+-                                           (qualified-symbol? target)))
+-                                    @scans)
++                        (is (every? (fn [[index _ target]]
++                                      (and (= :avet index) (qualified-symbol? target)))
++                                    reverse-reads)
+                             "reverse reads use the declared symbol indexes")
+                         result))
+                     symbols))]
+@@ -1392,10 +1393,7 @@
+                results))
+         (is (every? pos? @scan-counts)
+             "even an absent definition can have surviving value referrers")
+-        (is (= (count symbols)
+-               (count (filter (fn [query]
+-                                (some #{'(declared-edge ?caller ?target)} query))
+-                              @queries)))
++        (is (= (repeat (count symbols) 1) @invokes-reads)
+             "each operation acquires its declared-reference relation once")
+         (doseq [seeds [#{(symbol "sample.gates" "a")}
+                         #{(symbol "sample.gates" "a") (symbol "sample.gates" "b")}
+@@ -1471,18 +1469,18 @@
+         ;; The class: a flat database refusal concatenated into the selection
+         ;; splices its map entries, and each entry reads as a two-element
+         ;; vector the declared element schema refuses.
+-        (let [query db/q
++        (let [datoms db/datoms
+               thread (Thread/currentThread)
+               ;; A degrading cluster hands a read this flat value; the dev
+               ;; dial throws the same diagnostic, so the selection must never
+               ;; concatenate it either way.
+               refusal (db/projection-fallback 'seon.db/q)
+               refused (with-redefs
+-                        [db/q (fn [& arguments]
+-                                (if (and (identical? thread (Thread/currentThread))
+-                                         (some #{'(declared-edge ?caller ?target)} (first arguments)))
+-                                  refusal
+-                                  (apply query arguments)))]
++                        [db/datoms (fn [& arguments]
++                                     (if (and (identical? thread (Thread/currentThread))
++                                              (= [:aevt :seon.fn/invokes] (vec (take 2 (rest arguments)))))
++                                       refusal
++                                       (apply datoms arguments)))]
+                         [(seon.fn/tests-reaching database (symbol "sample.shape" "many"))
+                          (seon.fn/gate-set database (symbol "sample.shape" "many"))
+                          (seon.fn/gate-sets database [(symbol "sample.shape" "many")])
+@@ -2667,11 +2665,13 @@
+               handler (:db/id (db/pull database [:db/id]
+                                        [:seon.fn/sym (symbol "sample.call-declarations" "handler")]))
+               declared-only (:db-after (d/with database [[:db/retract owner :seon.fn/calls (symbol "sample.call-declarations" "handler")]]))]
+-          (is (contains? (#'seon.fn/declared-reference-edges declared-only) [owner handler])
++          (is (contains? (get (#'seon.fn/declared-callers @#'seon.fn/read-or-throw! declared-only)
++                              (symbol "sample.call-declarations" "handler"))
++                         owner)
+               "The owning capability preserves its handler without a lexical call.")
+-          (is (= (into #{} (comp (filter #(= handler (second %)))
+-                                 (map #(vector (first %))))
+-                       (#'seon.fn/declared-reference-edges declared-only))
++          (is (= (into #{} (map vector)
++                       (get (#'seon.fn/declared-callers @#'seon.fn/read-or-throw! declared-only)
++                            (symbol "sample.call-declarations" "handler")))
+                  (db/q '[:find ?caller :in $ % ?target
+                          :where (call-edge ?caller ?target)]
+                        declared-only @#'seon.fn/test-reach-rules handler)))
+@@ -2864,7 +2864,9 @@
+                 "a file's unresolved mention calls nothing, so it selects nothing"))))
+       (finally (test-support/delete-recursively! root)))))
+ 
+-(defn- assert-scoped-reference-selection [database]
++(defn- assert-scoped-reference-selection
++  {:malli/schema [:=> [:cat :seon.db/database-value] [:maybe :seon.schema/value]]}
++  [database]
+   (let [root (fixture-root)]
+     (try
+       (doseq [[path source] (edn/read-string
+@@ -2882,13 +2884,13 @@
+                       (quote sample.scoped-missing/absent) []}
+             queries (atom 0)
+             thread (Thread/currentThread)
+-            derive-edges @#'seon.fn/declared-reference-edges
++            derive-callers @#'seon.fn/declared-callers
+             selected (with-redefs-fn
+-                       {#'seon.fn/declared-reference-edges
+-                        (fn [db]
++                       {#'seon.fn/declared-callers
++                        (fn [read! db]
+                           (when (identical? thread (Thread/currentThread))
+                             (swap! queries inc))
+-                          (derive-edges db))}
++                          (derive-callers read! db))}
+                        #(seon.fn/gate-sets projected (keys expected)))]
+         (is (= #{(quote sample.scoped-tests/direct) (quote sample.scoped-tests/indirect)}
+                (set (db/q '[:find [?symbol ...]

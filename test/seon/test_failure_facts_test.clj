@@ -424,6 +424,30 @@
           (is (vector? (runner/commit-results! connection (completion (db/db connection) s 0))))
           (is (= #{b} (stored-reach (db/db connection) s))))))))
 
+;; Class (red-triage r6 E4): a green re-record after a red one retracted the
+;; stored failure entity while the test's `:seon.test/failures` cell still
+;; named it, and the writer refused `vector-element-swept`. A dropped failure
+;; leaves through the vector, so the writer removes its cell and the component.
+(deftest a-green-re-record-drops-the-red-failures
+  (support/with-database
+    (fn [connection]
+      (let [s 'failure.clears/check]
+        (is (:db-after (declare! connection [[:seon.test/sym s]] "(deftest check)")))
+        (let [report {:seon.test/failure-identity (id/digest 64 [::red-claim]) :seon.test.failure/type :fail
+                      :seon.test.failure/message "expected red" :seon.test.failure/expected "1"
+                      :seon.test.failure/actual "2"}
+              red (assoc-in (completion (db/db connection) s 1)
+                            [:seon.test.runner/results 0 :seon.test.failure/reports] [report])
+              _ (is (vector? (runner/commit-results! connection red)))
+              stored (db/pull (db/db connection) '[{:seon.test/failures [:seon.test.failure/id]}] [:seon.test/sym s])
+              failure-id (get-in stored [:seon.test/failures 0 :seon.test.failure/id])]
+          (is (string? failure-id) (pr-str stored))
+          (is (vector? (runner/commit-results! connection (completion (db/db connection) s 0)))
+              "the green re-record is accepted")
+          (is (empty? (:seon.test/failures (db/pull (db/db connection) '[:seon.test/failures] [:seon.test/sym s]))))
+          (is (nil? (:db/id (db/pull (db/db connection) [:db/id] [:seon.test.failure/id failure-id])))
+              "the dropped failure is removed with its cell"))))))
+
 (deftest what-made-it-red-names-changed-functions
   ;; `changed-since-green` reads the member records of an admitted run, so each
   ;; green here is a real nested run of the host probe.
