@@ -788,20 +788,25 @@
                                         [(list `logical-attribute? a)])]))]))))
 
 (defn- lower-branch
-  {:malli/schema [:=> [:cat :seon.schema/projection [:map-of :symbol [:set :seon.schema/value]] :seon.schema/value]
+  {:malli/schema [:=> [:cat :seon.schema/projection [:map-of :symbol [:set :seon.schema/value]]
+                       [:set :symbol] :seon.schema/value]
                   :seon.schema/value]}
-  [projection bound clause]
-  (let [lowered (lower-clauses projection bound [clause])]
+  [projection bound outer clause]
+  (let [lowered (lower-clauses projection bound outer [clause])]
     (if (= 1 (count lowered)) (first lowered) (list* 'and lowered))))
 
 (defn- lower-clause
   "One where clause lowered; `not`/`or` become `not-join`/`or-join` over their
-   original variables, so a cell variable stays local to its branch. `missing?`
+   original variables, so a cell variable stays local to its branch. A `not`
+   joins only the variables `outer` binds (its sibling clauses, enclosing
+   clauses and inputs), as Datahike's `not` does: a variable local to its body
+   stays local, never a join on an unbound variable. `missing?`
    of an attribute that may be a vector asks `seon.db/logical-missing?`, which
    reads presence (an empty vector is not missing) and any other attribute alike."
-  {:malli/schema [:=> [:cat :seon.schema/projection [:map-of :symbol [:set :seon.schema/value]] :seon.schema/value]
+  {:malli/schema [:=> [:cat :seon.schema/projection [:map-of :symbol [:set :seon.schema/value]]
+                       [:set :symbol] :seon.schema/value]
                   [:vector :seon.schema/value]]}
-  [projection bound clause]
+  [projection bound outer clause]
   (cond
     (and (vector? clause) (seq? (first clause)))
     (let [[[f & arguments]] clause]
@@ -823,20 +828,33 @@
           [source operator body] (if (query-source? head) [head (first body) (rest body)] [nil head body])
           with-source #(if source (cons source %) %)]
       (case operator
-        not [(with-source (list* 'not-join (clause-variables body) (lower-clauses projection bound body)))]
-        not-join [(with-source (list* 'not-join (first body) (lower-clauses projection bound (rest body))))]
-        or [(with-source (list* 'or-join (clause-variables body) (map #(lower-branch projection bound %) body)))]
-        or-join [(with-source (list* 'or-join (first body) (map #(lower-branch projection bound %) (rest body))))]
-        and [(list* 'and (lower-clauses projection bound body))]
+        not [(with-source (list* 'not-join (filterv outer (clause-variables body))
+                                 (lower-clauses projection bound outer body)))]
+        not-join [(with-source (list* 'not-join (first body) (lower-clauses projection bound (set (first body)) (rest body))))]
+        or [(with-source (list* 'or-join (clause-variables body) (map #(lower-branch projection bound outer %) body)))]
+        or-join [(with-source (list* 'or-join (first body) (map #(lower-branch projection bound (set (first body)) %) (rest body))))]
+        and [(list* 'and (lower-clauses projection bound outer body))]
         [clause]))
 
     :else [clause]))
 
 (defn- lower-clauses
-  {:malli/schema [:=> [:cat :seon.schema/projection [:map-of :symbol [:set :seon.schema/value]] [:sequential :seon.schema/value]]
+  "Each clause lowered with the variables bound outside it: `outer` plus every
+   variable its sibling clauses name."
+  {:malli/schema [:=> [:cat :seon.schema/projection [:map-of :symbol [:set :seon.schema/value]]
+                       [:set :symbol] [:sequential :seon.schema/value]]
                   [:vector :seon.schema/value]]}
-  [projection bound clauses]
-  (into [] (mapcat #(lower-clause projection bound %)) clauses))
+  [projection bound outer clauses]
+  (let [clauses (vec clauses)]
+    (into []
+          (comp (map-indexed
+                 (fn [index clause]
+                   (lower-clause projection bound
+                                 (into outer (clause-variables (concat (subvec clauses 0 index)
+                                                                       (subvec clauses (inc index)))))
+                                 clause)))
+                cat)
+          clauses)))
 
 (defn lower-where
   "`clauses` (a query's `:where`, or a rule body with no inputs) with every
@@ -849,7 +867,7 @@
   {:malli/schema [:=> [:cat :seon.schema/projection [:map-of :symbol [:set :seon.schema/value]] [:sequential :seon.schema/value]]
                   [:sequential :seon.schema/value]]}
   [projection bound clauses]
-  (let [lowered (lower-clauses projection bound clauses)]
+  (let [lowered (lower-clauses projection bound (set (keys bound)) clauses)]
     (if (= lowered clauses)
       clauses
       (let [used (into (set (keys bound)) (filter symbol?) (tree-seq coll? seq clauses))

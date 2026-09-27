@@ -543,6 +543,12 @@
        (testing "not, or, rules and missing? (an empty vector is not missing)"
          (is (= #{"q" "e" "r"} (set (db/q '[:find [?id ...] :where [?e :seon.vector-test.p/id ?id] (not [?e :seon.vector-test.p/items "b"])]
                                           database))))
+         (is (= #{"e" "r"} (set (db/q '[:find [?id ...] :where [?e :seon.vector-test.p/id ?id]
+                                        (not [?e :seon.vector-test.p/items ?item]
+                                             [?other :seon.vector-test.p/items ?item]
+                                             [(not= ?e ?other)])]
+                                      database)))
+             "a not joins only what its siblings bind; ?item and ?other stay local (it lowered to a not-join on them: a Datahike NPE, r6)")
          (is (= #{"p" "r"} (set (db/q '[:find [?id ...] :where [?e :seon.vector-test.p/id ?id]
                                         (or [?e :seon.vector-test.p/items "b"] [?e :seon.vector-test.p/id "r"])]
                                       database))))
