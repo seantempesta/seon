@@ -2586,6 +2586,7 @@
                         (str "\nexcluded " (:seon.test/sym entry) " — run "
                              (str/join " " (:seon.test/command entry)))))
            (apply str (for [entry (:seon.test/long-excluded result)]
-                        (str "\nlong " (:seon.test/sym entry) ": " (:seon.test/long entry))))
+                        (str "\nexcluded (declared long; include-long runs it) "
+                             (:seon.test/sym entry) ": " (:seon.test/long entry))))
            (when-let [refusal (:seon.test/recording-refusal result)]
              (str "\nrecording refused: " (:seon.error/message refusal)))))))
