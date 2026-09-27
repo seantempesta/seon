@@ -9,4 +9,9 @@
              :kind :function
              :intent "seon.fault/carried-receipt never returns on a cyclic cause chain and cannot be cancelled (a probe held one core at 99% for ~7 minutes); seon.render.value/floor walks the same chain safely. Walk causes with a visited set at the one normalization owner."
              :must-read #{seon.fault/carried-receipt}
-             :evidence #{"docs/research/agent-platform/docs-exploration-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/docs-exploration-2026-09-26.md"}}
+ #:seon.task{:name "fault-write-bound-is-wall-clock-under-contention"
+             :kind :function
+             :intent "seon.fault-test/a-fault-stores-the-whole-fault-and-wakes-the-responsible-agent asserts (< elapsed-ms 1000.0) for one synchronous fault write; serial it passes, at six concurrent test requests it measured 1,026 and 1,040 ms (CPU and store I/O contention; transact-call averaged 149 ms against 95 ms serial). Done when the write's cost is proportional to the fault (measure where the ~1 s goes) and the bound holds under the declared test admission bound."
+             :must-read #{seon.fault/fault!}
+             :evidence #{"docs/research/agent-platform/test-agents-concurrency-2026-09-27.md"}}]

@@ -36,7 +36,7 @@ afterwards.
   1. Members inside a request run strictly one after another (`src/seon/test.clj:2421`).
   2. Every request pays about 2.8 s of fixed cost before its first body.
   3. Tests mutate JVM-global state, so concurrent worlds contaminate each other. This is the one true blocker.
-     - Tests use `with-redefs` 263 times in 85 test files.
+     - Tests redefine Vars JVM-wide at 303 call sites (404 bindings, 96 files; §8).
      - Tests re-arm instrumentation.
      - The runner restores every live cluster's schema after each member.
 - **Recommended: option B (§6).**
@@ -71,7 +71,7 @@ afterwards.
 | S15 | Per-cluster work launcher (`src/seon/flow.clj:554-620`, io concurrency 64, queue 64 from config) | Effect submissions | Real bound, per cluster | Not on the test path |
 | S16 | Dynamic bindings `seon.db/*conn*` (`db.clj:146`), `seon.test/*member*` (`test.clj:122`), `effect/*request-context*` (`effect.clj:43`), schema `*projection*` family (`schema.clj:1041-1045`) | Thread-local custody | Real. They do not serialize because they are thread-local | — |
 | S17 | **JVM-global test state:** `ambient-snapshot`/`ambient-drift` (`src/seon/test/runner.clj:641-750`) on every `run-vars!` (`:396-437`); `restore-live-cluster-schema!` (`:543-629`) after every member (`test.clj:2064`) | They detect a test leaking global state after the fact, and restore every live cluster's projection | **Artifact.** They exist because tests mutate the JVM, and the checks assume nothing else runs meanwhile | 6.4 ms per snapshot (2,428 armed Vars). **False reds under concurrency (§3.3).** Each member advances every live cluster's projection, which is a JVM-global write |
-| S18 | JVM-global mutation by tests: `with-redefs` 263 uses in 85 files, `with-redefs-fn` 48 in 32, `alter-var-root` 26 in 13, `intern` 29 in 14, `load-file` 14 in 11, `:reload` in 7; `preserving-instrumentation-state` in 15; direct `instrument/apply!`/`restore!` in 9; cluster boot in 13 | — | **Artifact, and a law violation** (AGENTS "Test the real system…": never `with-redefs`, `alter-var-root`, `intern`, `load-file`) | This is the one thing that makes concurrent members incorrect rather than merely slow |
+| S18 | JVM-global mutation by tests (clj-kondo call sites, §8): `with-redefs` 208, `with-redefs-fn` 47, `intern` 23, `alter-var-root` 17, `load-file` 8, together 404 bindings in 96 files; `:reload` in 7; `preserving-instrumentation-state` in 15; direct `instrument/apply!`/`restore!` in 9; cluster boot in 13 | — | **Artifact, and a law violation** (AGENTS "Test the real system…": never `with-redefs`, `alter-var-root`, `intern`, `load-file`) | This is the one thing that makes concurrent members incorrect rather than merely slow |
 | S19 | Isolated members (`test.clj` `isolated-members`, `host-exclusions` `:1927`) → `bin/test --platform`, a fresh JVM (`bin/test:29-72`) | Process, file and store-global subjects: 16 files declare `:seon.test/platform`, 32 declare `:seon.test/fixture-observation`, plus `:seon.fn/destroys` reach | Real (flock, process lifetime, store deletion) | A cold boot per platform run. Not measured here |
 
 The machine pinning that motivated `bin/_test-slot` came from eight worker JVMs. One JVM with several requests does
@@ -391,30 +391,33 @@ once. Classify host-global members from direct analysis into the isolated host. 
 B is recommended. It is the owner's "test agents, the one path". Its first slice is exactly A, so A lands value
 immediately. C is deferred until measurements of B show S2 or S6 dominating.
 
-## 7. Findings (for root to file; this lane edits no task files)
+## 7. Findings, filed as tasks
 
-1. **F1.** Selection of 8 all-green members with 0 executions takes 1.2 s: `selection-admission` 1,178 ms,
-   `selection-facts` 1,015 ms.
-2. **F2.** `seon.test.runner/reach-memberships` over all 2,377 tests takes 31.6 s, over the ten-second bound.
-3. **F3.** `runner.clj:435` prints drift through `pr-str`, unbounded. One failure message measured 14,262 characters.
-   This violates "nothing prints unbounded".
-4. **F4.** `ambient-drift` and `restore-live-cluster-schema!` misattribute concurrent requests' instrumentation
-   changes: 486 Vars in one case, and false reds in 2 of 5 concurrent runs. Each member also writes every live
-   cluster's projection.
-5. **F5.** `seon.instrument-test/a-root-replaced-outside-a-reload-is-named` is persistently red: a replaced root
-   `seon.instrument-test/doubled` from `NO_SOURCE_PATH` leaks in the JVM.
-6. **F6.** `seon.fault-test/a-fault-stores-the-whole-fault-and-wakes-the-responsible-agent` asserts `< 1000 ms` wall
-   time. It measured 1,026 and 1,040 ms under 6× concurrency.
-7. **F7.** The Datahike `gc-guard` `:roster` permit serializes branch creation store-wide: 23 ms rises to 66 ms at N=6.
-8. **F8.** The process-root `:compute` executor is unused (active 0), and `:seon.config.flow.compute/concurrency` is a
-   dead dial (existing task, `seon.config.edn:9`).
-9. **F9.** Tests break the law against JVM-global test state (S18): 263 `with-redefs` uses in 85 test files.
-10. **F10.** Default's health is `:faulted`, with 12 open faults, including 8 `seon.sci.kernel/acquire-arm` at 21:44.
-    Not examined here.
-11. **F11.** The auto-memory entry "bin/_test-slot caps at 2" is stale. The launcher and its slots were deleted on
-    2026-09-22 (`8bc917872`).
-12. **F12.** A branch `:agent-8072af9fb04a`, held by agent `"root"` under default's roster (last transaction
-    21:59:45), is not this lane's and was left in place.
+Filed by this lane (root's follow-up). Each was searched against the existing tasks first. Every `:seon.task/must-read`
+symbol was checked against clj-kondo's analysis of `src`.
+
+| # | Finding | Task (file, name) |
+|---|---|---|
+| F1 | Selection of 8 all-green members with 0 executions takes 1.2 s (`selection-admission` 1,178 ms, `selection-facts` 1,015) | `seon.test.edn` `reuse-only-selection-costs-a-second` (new) |
+| F2 | `seon.test.runner/reach-memberships` over all 2,377 tests takes 31.6 s | `seon.test.runner.edn` `reach-over-every-test-takes-thirty-seconds` (new) |
+| F3 | `runner.clj:435` prints drift through `pr-str`, unbounded (14,262 characters) | `seon.test.runner.edn` `drift-prints-unbounded` (new) |
+| F4 | `ambient-drift` and `restore-live-cluster-schema!` blame concurrent requests (486 Vars; false reds in 2 of 5 concurrent runs) | `seon.test.runner.edn` `drift-is-blamed-on-concurrent-requests` (new; its class is `f985bfc97116` `instrumentation-is-jvm-global`) |
+| F5 | `seon.instrument-test/re-evaluating-a-defn-silently-strips-instrumentation` `eval`s `doubled` and never restores it, so `a-root-replaced-outside-a-reload-is-named` is red for the rest of the JVM's life | `seon.instrument.edn` `a-re-evaluation-test-leaves-a-replaced-root` (new) |
+| F6 | The fault-write test's `< 1000 ms` wall bound fails under 6× concurrency (1,026 and 1,040 ms) | `seon.fault.edn` `fault-write-bound-is-wall-clock-under-contention` (new) |
+| F7 | The store-wide `:roster` permit serializes branch creation (23 ms → 66 ms at N=6) | `seon.cluster.registry.edn` `branch-creation-is-serialized-store-wide` (new) |
+| F8 | The process-root `:compute` executor is unused, and so is the compute dial | `seon.config.edn` `compute-concurrency-dial-has-no-executor` (existing; the executor sentence and this evidence were added) |
+| F9 | 303 JVM-global redefinition sites in tests | `seon.test.edn` `b9933ca067dc` `tests-redefine-default-vars` (existing; the census numbers and this evidence were added) |
+| F10 | 8 open `seon.sci.kernel/acquire-arm` faults: heap-pressure refusals (layer `:seon.sci.kernel/arming`) in the live default (pid 53665, last at 21:44Z) during test rounds. Old gen read 44% after GC later that session | `seon.sci.kernel.edn` `memory-pressure-crossed-during-test-rounds` (new) |
+
+Not filed, per root:
+
+- F11: root corrected the stale memory note ("bin/_test-slot caps at 2"; the launcher was deleted on 2026-09-22 in
+  `8bc917872`).
+- F12: `:agent-8072af9fb04a` is root's own branch.
+
+Related existing task: `seon.cluster.registry.edn` `4e824da5bfb7`. It reports that each branch connection decodes its
+own index nodes (about 350 MB per branch under load). That is the likely per-member heap cost of option B, so the heap
+bound of §5.3 must be judged with it.
 
 **Verification limits.**
 
@@ -423,3 +426,80 @@ immediately. C is deferred until measurements of B show S2 or S6 dominating.
 - The runs were not isolated per request from other cluster activity.
 - §5's line counts for additions are estimates.
 - No design here was tried as code; option B's scaling estimate is not measured.
+
+## 8. Seam census: what tests replace JVM-wide, and the seam that removes each
+
+**Method.**
+
+- clj-kondo analysis, not text search: `clj-kondo --lint test --cache false` with `:analysis {:var-usages true}`.
+- The call sites are the `clojure.core` var-usages named `with-redefs`, `with-redefs-fn`, `alter-var-root`, `intern`
+  and `load-file`, with their enclosing `:from-var`.
+- Each binding target is resolved by the var-usage clj-kondo records at that symbol's exact row and column. rewrite-clj
+  is used only to locate the binding vector or map at the call's position.
+- Scripts: `census.clj` and `report.clj` in the lane scratchpad. The resolved census has 404 entries.
+
+**Totals.**
+
+- **303 call sites:** `with-redefs` 208, `with-redefs-fn` 47, `intern` 23, `alter-var-root` 17, `load-file` 8.
+  - A text search counts 263 `with-redefs` occurrences because it includes comments and strings; clj-kondo counts 208
+    calls.
+- **404 bindings in 96 files, 265 enclosing definitions** (tests and helpers), **188 distinct targets.**
+- **26 targets are unresolved:** a Var held in a local, such as `?candidate` or `?gate-var`, or a map built at run
+  time.
+- **23 targets are the test file's own Vars.**
+- **36 targets are third-party:** `clojure.core`, `clojure.java.io`, `datahike`, `org.httpkit`, `babashka`.
+- **By production namespace:** `seon.ai` 71, `seon.db` 53, `seon.schema` 17, `seon.turn` 16, `seon.sci.eval` 14,
+  `seon.sci.kernel` 13, `seon.render` 11, `seon.schema.edn` 9, `seon.blob` 6, `seon.render.walk` 6,
+  `seon.cluster.prompt` 5, `seon.fn.analyzer` 5, `seon.render.web` 5, `seon.config` 5.
+- **92 of the 404 bindings are marked "one-path rewrite supplies the seam":** they replace a Var in `turn.clj`,
+  `sci/eval.clj`, `sci/reader.cljc` or `cluster/reply.clj`, or a Var whose only caller lives there (`seon.ai/complete`
+  ← `seon.turn/call-turn`; `seon.cluster.prompt/prompt` ← turn).
+- **Seams S1–S10 below cover 190 of the 404 bindings.** S11–S12 cover the 48 `intern`/`alter-var-root`/`load-file`
+  sites on test-owned Vars and scripts. The remainder is a tail of targets with at most three sites each.
+
+### 8.1 Top targets and the smallest seam for each
+
+The precedent is `89add17ce`: `seon.cluster.source/publish!` takes its writer as `:seon.source/transact!`, which
+defaults to `seon.db/transact!`. The refusal test then passes a refusing writer instead of redefining the Var.
+
+| Seam | Replaced Var (sites / tests / files) | Production caller | Smallest seam: the dependency as an explicit value | Owning file |
+|---|---|---|---|---|
+| S1 | `seon.ai/complete` (56 / 50 / 9) | only `seon.turn/call-turn` (`turn.clj:4917`) | The turn reads the provider call from its cluster handle, e.g. `:seon.ai/complete!` defaulting to `seon.ai/complete`. Tests that need only a reply text already have `seon.turn/virtual-turn!` (`turn.clj:2462`) with no seam | `turn.clj`: **one-path rewrite supplies the seam** |
+| S2 | `seon.cluster.prompt/prompt` (5 / 5 / 2) | the turn's opening/prompt step | The prompt builder is a stage value of the turn | turn: **one-path rewrite supplies the seam**. This is the ledger's "agent-test prompt redefs blocked on turn.clj seam" |
+| S3 | turn and evaluation internals (31 bindings): `seon.sci.eval/evaluate` 10, `seon.turn/next-agent-work` 5, `seon.sci.eval/install-row!` 3, `seon.turn/step` 2, `declared-sources` 2, and one each of `preview-sources`, `generate-turn`, `receipt-settle-tx`, `turn`, `evaluate-sources`, `more-agent-work?`, `opening-db`, `seon.cluster.reply/sources`, `seon.sci.eval/directory-value` | internal | The one-path request's stage values (`:seon.eval/read-next`, `:seon.eval/evaluate`, `:seon.eval/settle?`). A test that makes evaluation throw supplies a throwing `:seon.eval/evaluate` | `sci/eval.clj`, `turn.clj`, `cluster/reply.clj`: **one-path rewrite supplies the seam** |
+| S4 | the HTTP leaf and credential: `seon.ai/credential` 6, `seon.ai/send-request` 5, `seon.ai/agent-overlay` 2 | only `seon.ai/complete` | `complete`'s target map carries the leaf, `:seon.ai/send!` (defaulting to `send-request`), and the environment it resolves credential names from, `:seon.ai/environment` (defaulting to the process environment). Credentials stay environment-variable names | `src/seon/ai.clj` |
+| S5 | `seon.db/transact!` (14 / 13 / 9) | 73 callers | Each owner under test takes its writer as a value, as `publish!` does. **One declared writer key**, not one per owner: `:seon.source/transact!` and `:seon.test/recording-writer` already declare the same identity twice, so fold them into one before adding a third | per caller: `fn.clj` (3 tests; **held by vector-shrink-opus**), `render/web.clj` (2), `reconcile.clj` (1), `render.clj` preview (1), `cluster/source.clj` (2; verify whether `89add17ce` already covers them), `turn.clj` (5: **one-path rewrite supplies the seam**) |
+| S6 | refused or counted read: `seon.db/q` 10, `pull` 6, `datoms` 4, `pull-many` 2 | 333 / 191 / 15 callers | (a) **Counting** reads: the existing read-evidence sink `seon.db/*read-evidence-sink*` (`db.clj:169`) observes every read. This needs no production change. (b) **Injecting a refusal** into one query: no seam exists. The candidate is a database value whose read genuinely refuses (not verified). Otherwise the propagation is the declared error alternative of the caller's contract, proved by its producer's regression | `src/seon/db.clj` (**held by vector-shrink-opus**; class (a) needs no edit there) |
+| S7 | counted invocation or derivation: `seon.sci.kernel/invoke` 10, `seon.schema/projection-from-database` 6, `seon.schema/load-projection` 4, `seon.render/acquire-context!` 6 | render, schema | Observe with the existing per-Var call counters (`seon.profile/begin` + `explain`, `profile.clj:205,230`) or the cache's per-kind statistics (`seon.cache`, `cache.clj:50`). This needs no production change. A test that injects an `acquire-context!` failure needs a real failing world | tests only; `render.clj` for the failure case |
+| S8 | resource reader: `seon.schema.edn/read-schema-resource` 5, `clojure.java.io/resource` 5 | `seon.schema.edn/resource-population`; config's shipped document | `resource-population` takes the resource set as a value; config's default document is passed as a value | `src/seon/schema/edn.clj`, `src/seon/config.clj` |
+| S9 | `seon.fn.analyzer/analyze` (5 / 4 / 2) | `seon.fn/build-artifact`, `analyzed-artifacts`, `runtime-analysis-batch` | These take the analyzer as `:seon.fn/analyze`, defaulting to the clj-kondo analyzer | `src/seon/fn.clj` (**held by vector-shrink-opus**) |
+| S10 | `clojure.core/ns-resolve` (8 / 7 / 5) | late-bound resolution in `effect.clj`, `web/jvm.clj`, `blob.clj`, `render/web.clj`, `fn/analyzer.clj` | The request carries the resolved function (the search transport, the effect handler) instead of resolving a symbol at call time | per caller |
+| S11 | `intern` 23 and `alter-var-root` on test-owned Vars (about 12): the instrumentation and runner probes in `instrument_test`, `profile_test`, `test_runner_test`, `test/runner_test`, `test/duration_test`, `test/seed_preparation_test`, `test/one_request_test`, `program_change_test`, `test_failure_facts_test`, `registry_isolation_test`, `mcp_test`, `sci/eval_test`, `agent_test` (`hot-reload-var-test`) | — | Their subject is JVM-global instrumentation itself (`f985bfc97116`). They are **host-global** until wrappers are per context, and run on the isolated host (§5.4). Probes of test-body behaviour define their probe in an SCI scratch namespace instead of interning a host Var | `src/seon/instrument.clj` |
+| S12 | `load-file` 8: `bin/seon-hook` ×3, `help_trial_2026_09_09.clj` ×2, the bridge source, `script/seon/dev/docstring.clj`, and an absolute-path namespace | — | Put the hook and bridge code on the classpath as namespaces and `require` them, or run them in their own process as production does. The PRD `help_trial` script is out of place: its tests belong with the PRD or are deleted | `bin/seon-hook`, `script/seon/dev/*` |
+
+### 8.2 Tests that convert once each seam exists
+
+Paths are shown as `test/<path>` without the `_test.clj` suffix. A name is the enclosing definition clj-kondo records;
+some are helpers such as `with-cluster`, `exercise-selection!` and `with-default-document`.
+
+- **S1 provider call** (56 sites): `seon/cluster/agent` prompt-refusal-closes-without-answering-and-stops-at-the-agent-bound; `seon/cluster/armed` a-message-committed-during-boot-arming-is-conserved, booting-spends-no-model-call, the-first-cluster-proc-fault-at-resume-becomes-a-fact; `seon/cluster/program_restart` an-agent-definition-survives-restart-and-another-agent-calls-it; `seon/cluster/turn` a-combined-evaluation-projects-every-terminal-receipt-datom, a-lost-model-call-leaves-a-durable-readable-reason, a-partial-stream-truncation-is-a-durable-nonfailure-attempt-fact, a-prose-only-provider-reply-settles-without-parking-the-turn-proc, a-real-evaluation-that-runs-away-is-stopped-and-recorded, a-refused-contract-commits-a-receipt-and-no-entity, a-refused-definition-stays-in-its-agents-defs, a-refused-delivery-becomes-a-durable-error-fact, a-run-prompts-from-its-opening-database-value, a-turn-delivers-what-a-form-asks-to-send-and-still-finishes, a-turn-hands-its-clusters-projection-to-every-database-call, a-waiting-disposition-frees-the-agent-and-keeps-its-note, a-whole-turn-runs-a-REAL-sci-evaluation-end-to-end, accepted-first-party-definition-reaches-an-existing-agent-next-turn, agent-code-with-defn-and-println-folds-green-without-in-ns, an-ordinary-turn-advances-no-program-attribute-revision, an-unpaid-failure-with-a-backup-makes-exactly-two-calls, an-unreadable-reply-is-a-settled-form-with-paid-attempt-evidence, another-agent-sees-a-flat-contract-violation-after-live-install, contracted-redefinition-exactly-replaces-the-entity, delimiter-repair-is-span-local-and-precedes-intent, evaluation-follows-the-readers-parse-time-namespace, function-install-reads-the-case-count-from-cluster-facts, generated-opening-preserves-one-provider-turn-budget, generated-turn-agrees-with-durable-facts?, import-addition-is-ordinary-data-and-reacquires-exactly, import-only-ns-unmap-installs-exactly-after-its-context-commit, incompatible-clusters-alternate-runtime-schema-validation-without-bleed, mixed-plan-publishes-only-the-contracted-function, ns-unmap-retracts-the-owned-function-after-the-terminal-commit, reasoning-starvation-persists-usage-finish-and-the-named-error, refused-terminal-program-transactions-settle-and-do-not-refire, reply-reading-follows-evaluated-alias-and-dynamic-require-state, runtime-schema-key-changes-pass-the-one-usage-guarded-decision, runtime-schema-registration-commits-the-evaluated-form-and-attribute, runtime-schema-unregister-removes-one-unused-global-schema, runtime-tests-install-run-redefine-and-delete-exactly, streaming-writes-zero-datoms-test, successful-call-persists-the-providers-open-usage-document, turn-intent-is-the-complete-crash-falsifier; `seon/concurrency_independence` n-agents-fold-independently-on-one-live-cluster; `seon/gen/loop` completion-prose-does-not-erase-failed-evaluations; `seon/sci/eval_instrumentation` an-instrumented-dev-cluster-builds-an-attempt-ready-prompt; `seon/turn_continue` prove-session; `seon/turn_loop` prompt-and-call-resolve-once-record-settings-and-see-next-turn-config.
+- **S2 prompt build** (5 sites): `seon/cluster/agent` disarm-has-a-declared-loud-turn-completion-backstop, disarm-interrupts-an-in-flight-turn-and-records-it-interrupted, prompt-refusal-closes-without-answering-and-stops-at-the-agent-bound, release-joins-every-owned-graph-before-it-closes-the-branch; `seon/turn_loop` refused-generated-opening-captures-evidence-before-close.
+- **S3 turn and evaluation stages** (31 sites): `seon/cluster/acquisition` acquisition-owns-only-its-isolated-resources; `seon/cluster/agent` a-failed-turn-transform-releases-its-permit-and-retires-its-backstop, hot-reload-var-test; `seon/cluster/armed` a-message-committed-during-boot-arming-is-conserved, an-escaped-throwable-becomes-a-fact-and-a-message, booting-spends-no-model-call; `seon/cluster/bootstrap_resume_child` -main; `seon/cluster/evaluate_sources` ordered-evaluation-retains-one-explicit-basis-without-publication; `seon/cluster/turn` a-combined-evaluation-projects-every-terminal-receipt-datom, a-refused-delivery-becomes-a-durable-error-fact, delimiter-repair-is-span-local-and-precedes-intent, generated-membership-failure-never-advances-the-run-to-call, import-only-ns-unmap-installs-exactly-after-its-context-commit, refused-terminal-program-transactions-settle-and-do-not-refire, turn-intent-is-the-complete-crash-falsifier, with-cluster; `seon/error_recording` root-first-turn-records-its-producers-declaration; `seon/help` help-is-first-stored-data-and-tracks-its-code-version; `seon/render/web_debug` passive-ledger-never-reconstructs-directory; `seon/render_simplification` authored-source-invocation-reuses-one-stored-run-across-presentations; `seon/render_source` preview-cache-is-memory-only-and-invalidates-on-read-changes, source-contracts-execute-in-memory-and-terminal-transcripts-never-reexecute; `seon/turn_loop` install-gate-failure-settles-the-started-receipt-as-a-failure; `seon/turn` a-history-read-refusal-cannot-suppress-declaration-divergence, a-refused-turn-write-is-bounded-and-commits-exactly-one-fault.
+- **S4 HTTP leaf and credential** (13 sites): `seon/ai` a-missing-credential-is-loud-in-the-value, a-no-auth-config-entity-assembles-and-sends-without-authorization, a-provider-that-hangs-up-mid-body-settles-what-it-already-sent, an-extra-body-conflict-refuses-before-the-http-leaf, explicit-credential-selection-survives-provider-resolution, explicit-no-auth-omits-the-authorization-header, one-attempt-means-one-attempt, one-client-serves-concurrent-streams, payment-required-primary-is-terminal-with-a-configured-backup, the-deadline-fires-as-an-outcome-not-a-bug-report, transport-failure-is-an-ordinary-value; `seon/turn_loop` prompt-and-call-resolve-once-record-settings-and-see-next-turn-config; `seon/turn_work_cost` generated-state-agrees-with-the-writer.
+- **S5 owner writer** (14 sites): `seon/cluster/evaluate_sources` ordered-evaluation-retains-one-explicit-basis-without-publication; `seon/cluster/publication_adoption` freshly-forked-host-already-has-its-published-source; `seon/cluster/source_nochange` unchanged-digest-keeps-the-published-commit-without-a-transaction; `seon/cluster/turn` a-refused-definition-stays-in-its-agents-defs, delimiter-repair-is-span-local-and-precedes-intent, refused-terminal-program-transactions-settle-and-do-not-refire, turn-intent-is-the-complete-crash-falsifier; `seon/fn/publication` incremental-indexing-reconciles-only-selected-file-entities; `seon/fn` progress-observation-cannot-change-index-transaction-shapes, refused-index-reads-never-become-publication-entities; `seon/reconcile` a-flat-write-refusal-is-the-reconcile-result; `seon/render/web` start-refuses-a-flat-process-write-before-binding, transaction-refusals-map-to-http-without-success; `seon/render_source` preview-cache-is-memory-only-and-invalidates-on-read-changes.
+- **S6 refused or counted read** (22 sites): `my/plan` plan-reads-and-ownership-refuse-an-unreadable-database; `seon/cluster` boot-recovery-refuses-an-unreadable-open-turn-query; `seon/fn` a-refused-reference-read-refuses-gate-set-derivation, gate-set-walks-only-indexed-callers-once, refused-index-reads-never-become-publication-entities; `seon/reconcile` planning-pulls-only-the-provenance-managed-slice; `seon/render/root_pull` root-selector-is-concrete-and-declared-reverse-evidence-bearing, supplied-root-acquisition-is-the-only-membership-read, unrelated-entity-change-keeps-root-read-current; `seon/render/web` start-refuses-a-flat-process-write-before-binding; `seon/test/selection` exercise-selection!; `seon/test_provenance` verified-requires-the-subject-positive-assertions-and-exact-program; `seon/test` recording-distinguishes-run-replay-from-a-new-event; `seon/turn` an-episode-budget-read-refusal-reaches-next-work-verbatim.
+- **S7 counted invocation or derivation** (26 sites): `seon/cluster/prompt` a-replay-under-a-selecting-budget-reconstructs-its-own-capture, provider-calibration-reports-over-budget-without-refusing, the-prompt-budget-selects-and-still-reports-its-verdict; `seon/cluster/publication_host` live-init-keeps-the-host-process-and-launches-no-jvm; `seon/cluster/turn` a-turn-hands-its-clusters-projection-to-every-database-call; `seon/config` converged-apply-uses-carried-projection-and-remains-exact; `seon/core_functions` auto-check-checks-the-function-instead-of-refusing-its-own-arguments; `seon/db/declaration_population` reads-require-their-carried-projection-including-transaction-results; `seon/db` counting-derivations; `seon/render/retained` adoption-of-an-unrelated-namespace-re-renders-zero-evaluations, equal-committed-database-skips-read-replay; `seon/render/walk` one-basis-projection-covers-the-complete-walk; `seon/render/web_context` a-new-message-does-not-reinvoke-the-identity-pair, context-and-page-do-not-demand-the-render-proc, read-only-mcp-return-preserves-root-page, selected-session-defers-prompt-acquisition, unrelated-adoption-preserves-pages-with-an-unchanged-sci-snapshot; `seon/render/web` session-acquisition-failure-replaces-the-loading-panel, unrelated-transaction-reuses-debug-observation-and-render-call; `seon/render_simplification` shared-invocation-cache-reuses-identical-entity-inputs-across-call-ids, unchanged-retained-call-skips-discovery-and-invocation; `seon/schema/projection_writer` a-speculative-value-reuses-its-basis-projection-unless-it-writes-a-declaration, committed-reads-derive-once-per-declaration-population, speculative-values-derive-without-committed-identity; `seon/turn_loop` read-evidence-settlement-reuses-the-outer-transaction-codec.
+- **S8 resource reader** (10 sites): `seon/config` packaged-defaults-use-the-same-shipped-document-authority, with-default-document; `seon/db/declaration_population` reads-require-their-carried-projection-including-transaction-results; `seon/incremental_publication` non-program-inputs-have-their-own-publication-owner; `seon/render/walk` one-basis-projection-covers-the-complete-walk; `seon/schema/declaration_population` an-unhanded-declaration-projection-refuses-without-reading-resources, resource-reads; `seon/schema/edn` one-resource-is-one-population, with-temporary-resources; `seon/sci/admit/declaration_population` reads-of.
+- **S9 analyzer** (5 sites): `seon/cluster/publication_inputs` publication-inputs-are-file-facts-but-not-analysis-inputs; `seon/fn` defining-forms-share-one-form-local-kondo-batch, my-web-cascade-class-warns-without-vetoing-publication, publication-veto-is-exactly-the-cant-load-finding-classes.
+- **S10 late-bound resolution** (8 sites): `seon/blob` large-binary-write-and-small-chunk-have-bounded-allocation; `seon/effect` interrupted-handlers-mark-the-open-receipt-without-a-result; `seon/fn/analyzer` canonical-analysis-rejects-obsolete-cache-authorities; `seon/render/web` runtime-evaluation-cannot-be-displaced-by-a-database-wake, runtime-evaluation-drops-a-closed-debug-pages-package; `seon/web/jvm` public-search-settles-one-receipt-with-provider-credits, search-projects-the-live-serper-shape-and-blobs-the-raw-response.
+- **S11 and S12:** the test names listed with each row of §8.1.
+
+**Order.**
+
+1. S6(a) and S7 need no production change, so those tests can convert now.
+2. S4, S8 and S10 are small owner slices, each named by its file.
+3. S5 needs the one writer key decided first.
+4. S9 and S6(b) wait for vector-shrink-opus to release `fn.clj` and `db.clj`.
+5. S1–S3 come from the one-path rewrite: 92 bindings, including 45 of turn_test's 56 `seon.ai/complete` sites.
+6. Until then those tests are host-global under §5.4 and run on the isolated host, never concurrently in the
+   development JVM.

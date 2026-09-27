@@ -6,5 +6,6 @@
              :evidence #{"docs/research/agent-platform/landing/perf-eval-overhead-2026-09-26.md"}}
  #:seon.task{:name "compute-concurrency-dial-has-no-executor"
              :kind :function
-             :intent "After d2604ede9 removed the launcher's compute half, :seon.config.flow.compute/concurrency is read only by seon.config's status display and its available-processors default; nothing executes with it. Retire it as 13387dc38 retired its sibling queue-depth, or name the executor that consumes it."
-             :evidence #{"docs/prds/agent-platform/plan/lane-b3-errors-tasks-dials.md"}}]
+             :intent "After d2604ede9 removed the launcher's compute half, :seon.config.flow.compute/concurrency is read only by seon.config's status display and its available-processors default; nothing executes with it. Retire it as 13387dc38 retired its sibling queue-depth, or name the executor that consumes it. The process root's :compute executor (resources/seon/operator/runtime.clj:17-22, availableProcessors platform threads) is likewise unused (active 0, 2026-09-27); test agents (option B) name it as the JVM-wide CPU bound for test bodies."
+             :evidence #{"docs/prds/agent-platform/plan/lane-b3-errors-tasks-dials.md"
+                         "docs/research/agent-platform/test-agents-concurrency-2026-09-27.md"}}]

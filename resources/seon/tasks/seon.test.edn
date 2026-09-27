@@ -39,13 +39,19 @@
  #:seon.task{:id "b9933ca067dc"
              :name "tests-redefine-default-vars"
              :kind :namespace
-             :intent "About 300 with-redefs / alter-var-root sites in test/ redefine default's Vars JVM-wide; e.g. fn_test.clj:1067's with-redefs of analyzer/analyze made a concurrent read-only analyze-entities throw 'analysis must not run', and a concurrent publication or write-back fails the same way. Substitute effects as explicit values in injected worlds."
+             :intent "About 300 with-redefs / alter-var-root sites in test/ redefine default's Vars JVM-wide; e.g. fn_test.clj:1067's with-redefs of analyzer/analyze made a concurrent read-only analyze-entities throw 'analysis must not run', and a concurrent publication or write-back fails the same way. Substitute effects as explicit values in injected worlds. Census by clj-kondo analysis (2026-09-27): 303 call sites (with-redefs 208, with-redefs-fn 47, intern 23, alter-var-root 17, load-file 8) binding 404 Var replacements across 96 files; top targets seon.ai/complete 56, seon.db/transact! 14, seon.sci.kernel/invoke 10, seon.sci.eval/evaluate 10, seon.db/q 10. The seam per target and the tests each converts are in the evidence note's seam census."
              :must-read #{seon.test/run}
              :evidence #{"docs/research/agent-platform/landing/merge-ns-rows-2026-09-26.md"
+                         "docs/research/agent-platform/test-agents-concurrency-2026-09-27.md"
                          "docs/seon/issues/eval-test-with-redefs-of-packaged-forms-breaks-concurrent-publication.md"}}
  #:seon.task{:id "d6fa80e274ac"
              :name "checks-write-into-live-custody"
              :kind :function
              :intent "The auto-check and gate bodies write into the agent's live branch; functions keep their creation context's connection, so forking alone cannot move their calls (Astra M2; owner decision on gate world pending)."
              :must-read #{seon.test/run}
-             :evidence #{"docs/research/agent-platform/landing/agent-path-2-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/agent-path-2-2026-09-26.md"}}
+ #:seon.task{:name "reuse-only-selection-costs-a-second"
+             :kind :function
+             :intent "A named request whose members are all reusable greens still pays about 1.2 s before answering: seon.fault-test on default, 8 members, 0 executed, 1,223 ms wall; profiled, selection-admission 1,178 ms of which selection-facts 1,015 ms (4 calls), with-declarations x1,363. At six concurrent requests selection averaged 2,483 ms. Done when a request answering only recorded greens answers in time proportional to its members (tens of ms), measured by the same probe."
+             :must-read #{seon.test/selection-admission seon.test/selection-facts}
+             :evidence #{"docs/research/agent-platform/test-agents-concurrency-2026-09-27.md"}}]

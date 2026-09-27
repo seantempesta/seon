@@ -3,4 +3,9 @@
              :kind :function
              :intent "Datahike's CachedStorage is one per connection: at idle 347 MB + 24 MB + 1.2 MB, each a 1,000-node LRU of ~347 KB decoded leaves; a branch decodes its own copy of shared nodes, so under load each test branch can grow toward ~350 MB, the likely mechanism of the ~10 GB OOMs. Node addresses are store-global: make the node cache one per physical store in the Datahike fork (~20 lines; port upstream d2b9e525)."
              :must-read #{seon.cluster.registry/active-branch-connection seon.db/branch-connection}
-             :evidence #{"docs/research/agent-platform/landing/mem-idle-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/mem-idle-2026-09-26.md"}}
+ #:seon.task{:name "branch-creation-is-serialized-store-wide"
+             :kind :function
+             :intent "Every branch! takes Datahike's store-wide :roster reachability permit (gc_guard.cljc:99, exclusive among roster publishers) for the read-modify-write of :branches; each test member creates a branch. registry/branch! averaged 23 ms serial and 66 ms at six concurrent requests (105 calls). Done when member branch creation does not serialize concurrent requests: batch roster publication per request, or a compare-and-set roster update in the fork, measured by the same N=6 probe."
+             :must-read #{seon.cluster.registry/branch! seon.cluster.registry/retire-branch!}
+             :evidence #{"docs/research/agent-platform/test-agents-concurrency-2026-09-27.md"}}]

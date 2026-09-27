@@ -10,4 +10,9 @@
              :kind :function
              :intent "At default pid 63809's OOM the memory-pressure refusal said 'In flight when it began: no open run' while a hosted branch agent's run was open: seon.cluster.boot/open-runs queries only each running instance's own connection, and running-instances holds only the cluster, so hosted-branch runs are never listed. The gate refuses new SCI arms only, which is its honest contract, but seon.sci.eval's namespace docstring claims the heap watermark covers what the interrupt cannot; unarmed work (post-admission turn phases, JVM prepl evaluations, web requests) runs on to OOM. List open runs across hosted branches, state the gate as 'refuses new arms; neither stops nor names unarmed work', and delete the false docstring sentence."
              :must-read #{seon.cluster.boot/memory-pressure-crossed! seon.sci.kernel/memory-pressure-error seon.sci.kernel/enter-memory-pressure!}
-             :evidence #{"docs/research/agent-platform/landing/oom-63809-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/oom-63809-2026-09-27.md"}}
+ #:seon.task{:name "memory-pressure-crossed-during-test-rounds"
+             :kind :function
+             :intent "Default pid 53665 (booted 21:18Z 2026-09-27) holds 8 open seon.sci.kernel/acquire-arm faults (layer :seon.sci.kernel/arming, last 21:44Z): the tenured-pool pressure admission refused new arms in the live process during test rounds, although old gen after GC read 4,601 of 10,488 MB (44%) later that session. Which work pushed tenured past 70% is unrecorded. Test agents take this admission as their heap bound, so the crossing needs its cause: record the in-flight runs and test requests at the crossing and the per-branch cache growth (task 4e824da5bfb7)."
+             :must-read #{seon.sci.kernel/memory-pressure seon.sci.kernel/enter-memory-pressure!}
+             :evidence #{"docs/research/agent-platform/test-agents-concurrency-2026-09-27.md"}}]

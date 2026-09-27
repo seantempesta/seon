@@ -42,4 +42,9 @@
              :kind :function
              :intent "An armed call whose [:sequential :map] argument receives a map throws ClassCastException (clojure.lang.Keyword cannot be cast to java.util.Map$Entry) inside the refusal builder, so the caller gets only 'X :malli.core/invalid-input: the refusal could not be built' (instrument.clj:789 fallback) with no path, expected or offending member. Repro at default 441988b49, JVM mode: (#'seon.render.transcript/ledger-effects (seon.db/db (seon.cluster.boot/connection \"default\")) \"root\" {:seon.error/message \"x\"}). Reached in r5 by web-debug-test (ledger-derives-shared-data-once, passive-ledger-never-reconstructs-directory) and turn-test virtual-turns..., where a refused read's error map arrived as the evaluations argument. Done when that call refuses with the member, path [2], expected [:sequential :map] and the map as offending, and a regression covers a map-for-sequential argument."
              :must-read #{seon.instrument/compiled-wrapper}
-             :evidence #{"test/seon/render/web_debug_test.clj"}}]
+             :evidence #{"test/seon/render/web_debug_test.clj"}}
+ #:seon.task{:name "a-re-evaluation-test-leaves-a-replaced-root"
+             :kind :function
+             :intent "seon.instrument-test/re-evaluating-a-defn-silently-strips-instrumentation evals (defn doubled ...) into seon.instrument-test with the JVM compiler and never restores the file's root, so seon.instrument-test/doubled keeps a NO_SOURCE_PATH class for the JVM's life: seon.instrument-test/a-root-replaced-outside-a-reload-is-named is red in every later run (serial included), and runtime_status reports replaced-roots 1. Done when the re-evaluation probe uses its own interned Var (or an SCI context) and both tests pass in either order in one JVM."
+             :must-read #{seon.instrument/replaced-roots}
+             :evidence #{"docs/research/agent-platform/test-agents-concurrency-2026-09-27.md"}}]
