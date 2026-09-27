@@ -16,4 +16,9 @@
              :kind :function
              :intent "pr-str outside the floor printer copies whole values. clojure.test evaluates an is message even when the assertion passes, so (is ... (pr-str outcomes)) printed hosted agents (their cluster handle's roster atom holds every context's projection) and a candidate result with its SCI context: seon.cluster.host-test/one-identity-is-homed-on-one-branch-decided-by-the-writer and seon.test.accretion-test/a-gate-test-runs-with-its-authors-cluster-custody each died after 20 s with OutOfMemoryError in a StringWriter. Test messages and failure-path text print through bounded-text (or name the fields they assert); production sites that print arbitrary values: web.clj create-owner-response and context-action-response 422 bodies, db.clj value-type-error and pull-call messages, problems.clj ai-prose offending, cluster.clj mcp-plain."
              :must-read #{seon.render.value/bounded-text}
-             :evidence #{"docs/research/agent-platform/landing/oom-array-opus-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/oom-array-opus-2026-09-27.md"}}
+ #:seon.task{:name "a-lazy-seq-that-throws-shows-as-empty"
+             :kind :function
+             :intent "When realizing a lazy seq throws while the floor prints it, prepare's retry prints the same seq again; Clojure 1.12.5 leaves a LazySeq empty after its body throws, so the agent sees () beside the diagnostic, a wrong value. The diagnostic also names the renderer when the floor itself failed, and it is a ;; comment line, not data. Show the realized prefix and the failure as data (probed by fix-a-floor-opus, c32b272f9)."
+             :must-read #{seon.render.value/prepare}
+             :evidence #{"docs/research/agent-platform/red-triage-3-2026-09-27.md"}}]
