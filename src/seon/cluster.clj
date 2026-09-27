@@ -2108,7 +2108,8 @@
   A throw keeps the unknown mark, with its cause. A member or evaluation that
   read another identity at its start refuses its own result
   (`seon.sci.eval/call-detecting-program-change`)."
-  {:malli/schema [:=> [:cat :seon.sci.eval/loaded-identity :seon.source/commit-id
+  {:seon/tasks #{"431c6e828256"}
+   :malli/schema [:=> [:cat :seon.sci.eval/loaded-identity :seon.source/commit-id
                        [:=> [:cat] :seon.source/adoption-result]]
                   :seon.source/adoption-result]}
   [identity-atom commit-id change]

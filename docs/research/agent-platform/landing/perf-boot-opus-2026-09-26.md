@@ -803,3 +803,15 @@ from other lanes' render changes. Re-run them first.
 **Root runs:** `seon.render.web-test`, `seon.render.web-context-test`, `seon.render.entity-pairs-test`,
 `seon.render.transcript-test`, `seon.render.value-test`, `seon.render-test`, `seon.problems-test`,
 `seon.cluster.mcp-test`.
+
+## Resume 19 — loaded identity naming an older commit: not reproduced; defect class logged
+
+- **Pid 50733 now:** the loaded identity, `current-src` and the cluster record all name `6ab862bf`.
+- **Timing:** the JVM started at 18:26:24 CST, so shrink-test's requests at 18:20:59 and 18:24:08 ran on the JVM
+  before it, not on 50733.
+- **Boot naming** (fa6f8e8b0 / F10) cannot name an older commit. It names the `current-src` head read after the boot
+  publication, and only when the loaded bytes match.
+- **Defect class logged:** task `431c6e828256`, `a-test-adoption-moves-the-jvms-loaded-identity` (seon.cluster).
+  `seon.sci.eval/loaded-identity` is process-wide, so a test adopting on its own store (e.g.
+  adoption-contract-freshness-test's development `refresh-source!`) renames the JVM's loaded program. The unconfirmed
+  6ab855c9 observation is recorded in the task. The subject mark is on `seon.cluster/call-with-program-change`.
