@@ -5,7 +5,8 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [seon.dev.dependency-digest :as dependency-digest]
-            [seon.error.refusal :as refusal])
+            [seon.error.refusal :as refusal]
+            [seon.fs])
   (:import [java.net Socket ServerSocket InetSocketAddress SocketTimeoutException]
            [java.io PushbackReader]
            [java.util.concurrent CompletableFuture TimeUnit]
@@ -18,13 +19,17 @@
 (def shipped-default-decisions
   (delay (edn/read-string (slurp (io/file (repository-root) "config/default.edn")))))
 
-(defn operator-silence-backstop-ms [manifest]
+(defn operator-silence-backstop-ms
+  {:malli/schema [:=> [:cat [:maybe :seon.config/manifest]] [:int {:min 1}]]}
+  [manifest]
   (let [value (get manifest :seon.config.operator/event-silence-backstop-ms
                    (:seon.config.operator/event-silence-backstop-ms @shipped-default-decisions))]
     (when-not (pos-int? value) (throw (ex-info "Missing operator silence bound." manifest)))
     value))
 
-(defn operator-boot-bound-ms [manifest]
+(defn operator-boot-bound-ms
+  {:malli/schema [:=> [:cat [:maybe :seon.config/manifest]] [:int {:min 1}]]}
+  [manifest]
   (let [value (get manifest :seon.config.operator/boot-bound-ms
                    (:seon.config.operator/boot-bound-ms @shipped-default-decisions))]
     (when-not (pos-int? value) (throw (ex-info "Missing operator boot bound." manifest)))
@@ -493,13 +498,13 @@
 
 (defn- read-edn-file
   "The EDN value of `file`, or nothing when it does not exist."
-  {:malli/schema [:=> [:cat [:fn #(instance? java.io.File %)]] [:maybe :map]]}
+  {:malli/schema [:=> [:cat [:fn seon.fs/file?]] [:maybe :map]]}
   [^java.io.File file]
   (when (.isFile file) (edn/read-string (slurp file))))
 
 (defn- cache-candidates
   "Immutable cache directories under `repository`, the selected one first."
-  {:malli/schema [:=> [:cat :string] [:vector [:fn #(instance? java.io.File %)]]]}
+  {:malli/schema [:=> [:cat :string] [:vector [:fn seon.fs/file?]]]}
   [repository]
   (let [root (io/file repository dependency-cache-root)
         selected (some-> (read-edn-file (io/file repository dependency-cache-selection))
@@ -511,8 +516,8 @@
                                    (or (.listFiles root) [])))))))
 
 (defn- loader-class
-  {:malli/schema [:=> [:cat [:fn #(instance? java.io.File %)] :symbol]
-                  [:fn #(instance? java.io.File %)]]}
+  {:malli/schema [:=> [:cat [:fn seon.fs/file?] :symbol]
+                  [:fn seon.fs/file?]]}
   [directory namespace-name]
   (io/file directory (str (str/replace (munge (str namespace-name)) "." "/") "__init.class")))
 

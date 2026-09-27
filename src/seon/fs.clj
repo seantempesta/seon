@@ -75,6 +75,17 @@
                   (assoc data :seon.cluster.store/refused rule
                          :seon.cluster.store/rule rule))))
 
+(defn file?
+  "True for a `java.io.File`. A named predicate for contracts naming files:
+  a durable contract names its predicate; an anonymous `#(instance? ...)`
+  refuses canonicalization (`seon.schema/canonical-definition`)."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                                    :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they are not files."
+                                    :gen/elements [nil false 0 "" :k [] {}]}]]
+                  :boolean]}
+  [value]
+  (instance? java.io.File value))
+
 (defn- path-string
   [value]
   (cond
