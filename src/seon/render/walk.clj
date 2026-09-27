@@ -763,8 +763,17 @@
                            ;; AI output is text and HTML is hiccup: a map
                            ;; is a refusal or a declared error the pair
                            ;; returned (e.g. a bounded read's
-                           ;; `:seon.db/invalid-read`), never output.
-                           failure (when (map? rendered) rendered)
+                           ;; `:seon.db/invalid-read`), never output. Form
+                           ;; output also admits a REPL entry map
+                           ;; (`{:seon.repl/comment .. :seon.repl/form ..}`,
+                           ;; e.g. seon.error/faults-form), which is output.
+                           failure (when (and (map? rendered)
+                                              (not (and (= output :seon.render/form)
+                                                        ((schema/projection-validator
+                                                          (db/carried-projection database)
+                                                          :seon.render/form)
+                                                         rendered))))
+                                     rendered)
                            failure-outcome
                            (when (and failure owner)
                              (render/renderer-failure
