@@ -68,8 +68,13 @@
              :intent "seon.db/q threw a raw NullPointerException from Datahike's post-filter-not-joins instead of answering an error value (lowering fixed in f7a664c2f, E3). Catch the dependency's throw at the owner and answer the declared read refusal carrying the whole cause chain."
              :must-read #{seon.db/q}
              :evidence #{"docs/research/agent-platform/red-triage-r6-2026-09-27.md"}}
- #:seon.task{:name "first-population-into-a-fresh-store-refuses-carried-projection"
+ #:seon.task{:name "read-evidence-carries-result-digests"
              :kind :function
-             :intent "seon.fn/index!'s population phase into a fresh store refused 'This operation requires a carried schema projection' (construction-projection): the value the writer judges has no declaration rows and no construction metadata (fn-test fresh-population-flattens-with-its-supplied-declarations, cluster.source-test flat-scratch-write-refusal-retires-the-candidate and incremental-publication-does-not-change-an-existing-cluster; E5). Pass the construction projection to the writer explicitly (the cold-owner table) and prove a cold nuke of HEAD."
-             :must-read #{seon.db/carried-projection seon.fn/index!}
-             :evidence #{"docs/research/agent-platform/red-triage-r6-2026-09-27.md"}}]
+             :intent "Per-file derivation keys (seon.cluster/derivation-keys) name the deriving code but not the database owner's read path: a read-path change that alters logical read results would leave reused entities derived from the old results. Retain a result digest in the read evidence a publication's derivation captures (seon.db/read-evidence with :seon.db/retain-read-results?) and replay it at the next publication, so such a change re-derives exactly the files whose reads answer differently."
+             :must-read #{seon.db/read-evidence seon.db/read-evidence-current? seon.cluster/derivation-keys}
+             :evidence #{"tmp/boot-source-perf/evidence.md"}}
+ #:seon.task{:name "encoding-only-storage-changes-migrate-reused-entities"
+             :kind :function
+             :intent "A publication reuses every file entity whose derivation key is unchanged (seon.cluster/derivation-keys), so a storage encoding change without a schema change (seon.schema.datahike's codec, vector cells) leaves reused entities in the old encoding. Storage migration owns it: an encoding change ships its migration transaction (as seon.db/vector-migration-tx did), never a re-derivation."
+             :must-read #{seon.db/vector-migration-tx seon.cluster/derivation-keys}
+             :evidence #{"tmp/boot-source-perf/evidence.md"}}]

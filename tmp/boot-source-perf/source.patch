@@ -1,0 +1,43 @@
+diff --git a/src/seon/cluster/source.clj b/src/seon/cluster/source.clj
+index dce6a9c94..b5651559f 100644
+--- a/src/seon/cluster/source.clj
++++ b/src/seon/cluster/source.clj
+@@ -34,7 +34,7 @@
+   :current-src)
+ 
+ (def ^:private source-attributes
+-  [:seon.source/digest :seon.source/test-input-digest :seon.source/analyzer-digest :seon.source/built-at])
++  [:seon.source/digest :seon.source/test-input-digest :seon.source/built-at])
+ 
+ (defn- refuse!
+   {:malli/schema [:=> [:cat :keyword :string :map] :nil]}
+@@ -577,7 +577,6 @@
+     directory :seon.fn/root
+     source-digest :seon.source/digest
+     test-input-digest :seon.source/test-input-digest
+-    analyzer-digest :seon.source/analyzer-digest
+     input-digests :seon.source/relative-file-digests
+     changed-paths :seon.source/changed-paths
+     requested-commit :seon.source/expected-commit-id
+@@ -600,13 +599,6 @@
+         unchanged? (when committed
+                      (try
+                        (cond
+-                         ;; Entities analyzed by other code are changed even when
+-                         ;; every input's bytes are equal.
+-                         (and analyzer-digest
+-                              (not= analyzer-digest
+-                                    (d/q '[:find ?digest . :where [_ :seon.source/analyzer-digest ?digest]]
+-                                         committed)))
+-                         false
+                          input-digests
+                          (= (select-keys input-digests changed-paths)
+                             (stored-path-digests committed changed-paths))
+@@ -691,7 +683,6 @@
+                   (cond-> {:seon.source/digest source-digest
+                            :seon.source/built-at (java.util.Date.)
+                            :seon.source/test-input-digest input-digest}
+-                    analyzer-digest (assoc :seon.source/analyzer-digest analyzer-digest)
+                     prior-id (assoc :db/id prior-id)))]}
+                 process (assoc :tx-meta {:seon.db/process process})))
+              ::source-seal-refused

@@ -91,4 +91,9 @@
              :kind :function
              :intent "seon.fn/functions-without-tests has no caller outside fn_test and is the last reader of test-reach-rules and declared-reference-rules, a second statement of the declared-invocation relation beside seon.fn/declared-callers that can drift from it (111 s on default when measured 2026-09-17). Delete it with both rule sets, or derive coverage from call-reach."
              :must-read #{seon.fn/functions-without-tests seon.fn/declared-callers}
-             :evidence #{"tmp/test-feedback-perf/proof.clj"}}]
+             :evidence #{"tmp/test-feedback-perf/proof.clj"}}
+ #:seon.task{:name "cross-file-derivation-inputs-rely-on-dependent-relint"
+             :kind :function
+             :intent "A file's derived entities also read other files' facts: the symbols its calls resolve to, a callee's host-bound flag, an invoked attribute's targets, and clj-kondo findings over another namespace's signatures. The per-file derivation key (seon.cluster/derivation-keys) holds none of them; the dependent and caller re-lint selection must re-derive those files when the facts change. Prove the selection covers each class with a regression, or add the facts' digests to the key."
+             :must-read #{seon.fn/dependent-paths seon.cluster/derivation-keys}
+             :evidence #{"tmp/boot-source-perf/evidence.md"}}]

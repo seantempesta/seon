@@ -2014,18 +2014,98 @@
              :seon.source/digest digest :seon.source/built? false}))
         (finally (when database (d/release-materialized-db database)))))))
 
-(declare selected-analyzer-digest)
+(declare selected-analyzer-digest launched-source-digests)
+
+(defn- derivation-schema-keys
+  "Per derivation input, the schema keys its entities' derivation reads: the
+  declared keywords they hold (`:seon.fn/keywords`) and those their contracts
+  name. `entities` are rows or stored entities, each naming its `:seon.fn/file`."
+  {:malli/schema [:=> [:cat [:set :keyword] [:sequential :map]] [:map-of :string [:set :keyword]]]}
+  [declared entities]
+  (reduce (fn [by-path {file :seon.fn/file keywords :seon.fn/keywords spec :seon.fn/spec}]
+            (if-let [path (if (map? file) (:seon.fn.file/relative-path file) (second file))]
+              (update by-path path (fnil into #{})
+                      (filter declared)
+                      (concat keywords (when spec (tree-seq coll? seq (edn/read-string spec)))))
+              by-path))
+          {} entities))
+
+(defn- stored-derivation-schema-keys
+  "`derivation-schema-keys` of every stored entity in `database`."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:set :keyword]] [:map-of :string [:set :keyword]]]}
+  [database declared]
+  (let [held (db/q '[:find ?path ?keyword
+                     :where [?entity :seon.fn/keywords ?keyword] [?entity :seon.fn/file ?file]
+                            [?file :seon.fn.file/relative-path ?path]] database)
+        specs (db/q '[:find ?path ?spec
+                      :where [?entity :seon.fn/spec ?spec] [?entity :seon.fn/file ?file]
+                             [?file :seon.fn.file/relative-path ?path]] database)]
+    (when-let [refusal (some #(when (map? %) %) [held specs])]
+      (refused! "Stored derivation inputs could not be read." refusal))
+    (derivation-schema-keys
+     declared
+     (concat (map (fn [[path keyword]] {:seon.fn/file [:seon.fn.file/relative-path path] :seon.fn/keywords [keyword]}) held)
+             (map (fn [[path spec]] {:seon.fn/file [:seon.fn.file/relative-path path] :seon.fn/spec spec}) specs)))))
+
+(defn- derivation-keys
+  "Each derivation input's key, stored as `:seon.fn.file/derivation-digest`:
+  its bytes, the identity of the code deriving it (`selected-analyzer-digest`),
+  clj-kondo's pin and configuration, and the forms of the schema keys its
+  derivation reads (`derivation-schema-keys`) with the program row shapes',
+  each closed over `:seon.schema.projection/schema-dependencies`. A publication
+  re-derives exactly the inputs whose stored key differs.
+
+  # Known issues
+  - Cross-file inputs (the symbols a file's calls resolve to, a callee's
+    host-bound flag, an invoked attribute's targets, clj-kondo findings over
+    another namespace's signatures) are not in the key: the dependent and caller
+    re-lint selection (`seon.fn/dependent-paths`) re-derives those files (task
+    aca1b25fa16a).
+  - The database owner's read path is not in the key: a read-path change that
+    alters logical read results is covered by the owner's own tests, not by
+    re-derivation (task 50a6a9afcb64).
+  - An encoding-only storage change leaves reused entities in their old
+    encoding; storage migration owns it (task 52875b443ef0)."
+  {:seon/tasks #{"aca1b25fa16a" "50a6a9afcb64" "52875b443ef0"}
+   :malli/schema [:=> [:cat :seon.source/analyzer-digest :seon.schema/projection
+                       :seon.source/relative-file-digests [:map-of :string [:set :keyword]] [:set :string]]
+                  [:map-of :string :seon.source/digest]]}
+  [code projection inputs schema-keys paths]
+  (let [forms (:seon.schema.projection/forms projection)
+        dependencies (:seon.schema.projection/schema-dependencies projection)
+        closure (fn [start]
+                  (loop [pending (vec start) reached #{}]
+                    (if-let [k (peek pending)]
+                      (if (reached k)
+                        (recur (pop pending) reached)
+                        (recur (into (pop pending) (get dependencies k)) (conj reached k)))
+                      reached)))
+        shapes (closure (into #{} (filter #(contains? forms %))
+                              (tree-seq coll? seq (program/shapes-in projection))))
+        closures (into {} (map (fn [path] [path (into shapes (closure (get schema-keys path #{})))])) paths)
+        form-digests (into {} (map (fn [k] [k (id/digest 64 [(get forms k)])]))
+                           (reduce into #{} (vals closures)))
+        kondo [(get (source/loaded-dependencies) "reference-code/clj-kondo")
+               (into (sorted-map) (filter #(str/starts-with? (key %) ".clj-kondo/")) inputs)]]
+    (into {} (map (fn [path]
+                    [path (id/digest 64 [code kondo (get inputs path)
+                                         (into (sorted-map) (map (fn [k] [k (get form-digests k)])) (get closures path))])]))
+          paths)))
+
 
 (defn- full-source-refresh!
-  "Capture, compare, classify and analyze selected entities on the current lineage."
+  "Capture, compare, classify and analyze selected entities on the current lineage.
+
+  The changed inputs are analyzed; every other derivation input whose stored
+  key (`derivation-keys`) differs from its key under the code that analyzed
+  them is then added (`::rederive`) and the analysis repeated once over both."
   {:malli/schema
    [:=> [:cat :seon.boot/root :seon.store/store
          [:map [:seon.fn/root :string] [:seon.source/roots :seon.source/roots]
           [:seon.source/changed-paths [:vector :string]]
           [:seon.source/analyzer-digest {:optional true} :seon.source/analyzer-digest]
-          [::launched-analyzer {:optional true} :seon.source/relative-file-digests]
           [::loaded-files {:optional true} :seon.source/relative-file-digests]
-          [::reanalyze? {:optional true} :boolean]]]
+          [::rederive {:optional true} [:set :string]]]]
     :seon.source/publish-result]}
   [root store roots]
   (let [published (current-publication store nil)
@@ -2054,20 +2134,14 @@
                 (refused! "Changed paths are neither in the JVM's source directory nor published."
                           {:seon.fn/root directory :seon.source/changed-paths (vec unknown)}))
             changed (into #{} (filter #(not= (get prior %) (get observed %))) paths)
-            analyzer (:seon.source/analyzer-digest roots)
-            ;; Entities derive from the analyzer as well as the bytes: entities another
-            ;; analyzer produced are all stale, whatever file changed.
-            stored-analyzer (when (and committed (contains? (:schema committed) :seon.source/analyzer-digest))
-                              (db/q '[:find ?digest . :where [_ :seon.source/analyzer-digest ?digest]] committed))
-            analyzer-changed? (and committed analyzer (not= analyzer stored-analyzer))
-            launched (::launched-analyzer roots)
-            loaded (::loaded-files roots {})
-            ;; Launch loaded analyzer files as bytes the head did not publish:
-            ;; those files are changed inputs, so the selected entities decide below
-            ;; whether any reached definition changed.
-            settle? (and analyzer-changed? launched (not (::reanalyze? roots)))
+            ;; The bytes the deriving code came from (`loaded-analyzer-digest`);
+            ;; before any publication, the files this JVM launched on.
+            loaded (if (:seon.source/analyzer-digest roots)
+                     (::loaded-files roots {})
+                     launched-source-digests)
+            rederive (::rederive roots #{})
             classification (cond
-                             (or (nil? committed) (and analyzer-changed? (not settle?))) :all
+                             (nil? committed) :all
                              (empty? changed) :selected
                              ;; A changed directory input is a gitlink: capture digests
                              ;; directories only through their recorded pins.
@@ -2078,11 +2152,11 @@
                              (into changed (if partial?
                                              (source/discover-paths directory (:seon.source/roots roots))
                                              inventory))
-                             changed)
+                             (into changed rederive))
             [additional additional-sources]
             (source/capture-paths directory (vec (remove (set inventory) analysis-paths)))
             captured (merge captured additional-sources)]
-    (if (and committed (empty? changed) (not analyzer-changed?)
+    (if (and committed (empty? changed) (empty? rederive)
              (not-any? (requiring-resolve 'seon.issue/note-path?) requested-paths))
       published
       (let [stored (when partial?
@@ -2116,11 +2190,37 @@
                                    :seon.fn.analyzer/sources captured
                                    :seon.source/relative-file-digests inputs}
                             database (assoc :seon.source/previous-database database)))
-                sealed? (and launched (= launched (select-keys inputs (keys launched))))
-                sealed (when analyzer (selected-analyzer-digest database selected analyzed inputs loaded))
-                settled (when (and settle? sealed?) sealed)]
-          (if (and settle? (not= settled stored-analyzer))
-            (full-source-refresh! root store (assoc roots ::reanalyze? true))
+                projection (schema/handed-projection)
+                declared (set (keys (:seon.schema.projection/forms projection)))
+                ;; The identity of the code that derived `analyzed`.
+                code (selected-analyzer-digest database selected analyzed inputs loaded)
+                derivation-inputs (into #{} (filter #(and (some (fn [root] (str/starts-with? % (str root "/")))
+                                                                (:seon.fn/roots roots))
+                                                          (some (partial str/ends-with? %) [".clj" ".cljc"])
+                                                          (contains? inputs %)))
+                                        (concat (keys inputs) selected))
+                keyed (derivation-keys code projection inputs
+                                       (merge (when database (stored-derivation-schema-keys database declared))
+                                              (derivation-schema-keys declared analyzed))
+                                       derivation-inputs)
+                stale (when (and database (empty? rederive))
+                        (let [stored-keys (into {} (db/q '[:find ?path ?key
+                                                           :where [?file :seon.fn.file/relative-path ?path]
+                                                                  [?file :seon.fn.file/derivation-digest ?key]]
+                                                         database))]
+                          (when (map? stored-keys)
+                            (refused! "Stored derivation keys could not be read." stored-keys))
+                          (into #{} (filter #(and (not (contains? selected %))
+                                                  (not= (get stored-keys %) (get keyed %))))
+                                derivation-inputs)))
+                analyzed (mapv #(if-let [path (:seon.fn.file/relative-path %)]
+                                  (cond-> % (contains? keyed path)
+                                    (assoc :seon.fn.file/derivation-digest (get keyed path)))
+                                  %)
+                               analyzed)]
+          (if (seq stale)
+            (do (report-source-progress! (str "re-deriving " (count stale) " inputs whose derivation key changed"))
+                (full-source-refresh! root store (assoc roots ::rederive stale)))
             (let [previous-findings (when database
                                       (seon.fn/file-entities database (vec paths) :seon.lint/file))
                   _ (when (:seon.error/at previous-findings)
@@ -2138,7 +2238,7 @@
                           {:seon.store/store store :seon.fn/root (:seon.fn/root roots)
                            :seon.source/digest digest :seon.source/populate `populate-source!
                            :seon.source/test-input-digest (:seon.source/test-input-digest snapshot)
-                           :seon.source/changed-paths (vec (into changed requested-paths))
+                           :seon.source/changed-paths (vec (into (into changed rederive) requested-paths))
                            :seon.source/relative-file-digests inputs
                            :seon.source/progress! report-source-progress!
                            :seon.source/populate-request
@@ -2151,12 +2251,7 @@
                             ;; The analysis above derives from this head; the
                             ;; publisher refuses if another publication moved it.
                             published (assoc :seon.source/expected-commit-id
-                                             (:seon.source/commit-id published))
-                            ;; The seal names the analyzer that produced these
-                            ;; entities, read from them as adoption will read it
-                            ;; (`selected-analyzer-digest`): one identity from
-                            ;; launch through adoption.
-                            sealed (assoc :seon.source/analyzer-digest sealed)))]
+                                             (:seon.source/commit-id published))))]
               (report-source-progress! "branch publication complete")
               result)))
           (finally (when database (d/release-materialized-db database))))))))
@@ -2528,14 +2623,27 @@
         (finally (d/release-materialized-db database))))))
 
 (defn- analyzer-reach
-  "The declarations reached from `seon.fn/analyze-entities` through `calls`."
+  "The declarations that determine a derived entity's value: reached through
+  `calls` from its two producers, `seon.fn/analyze-entities` (the rows) and
+  `seon.fn/desired-entities` (the stored entity; `index!` writes only the
+  difference), without entering the database owner (`seon.db`,
+  `seon.schema.datahike`) or the error owner (`seon.error.*`). Their values
+  reach an entity only as read results or refusals: across two measured change
+  sets, 35 and 325 changed definitions, none of them in this reach, left every
+  re-derived entity equal (tmp/boot-source-perf/evidence.md)."
   {:malli/schema [:=> [:cat [:map-of :qualified-symbol [:sequential :qualified-symbol]]]
                   [:set :qualified-symbol]]}
   [calls]
-  (loop [reached #{} pending (list `seon.fn/analyze-entities)]
-    (if-let [[function & more] (seq pending)]
-      (recur (conj reached function) (into more (remove reached) (get calls function)))
-      reached)))
+  (let [plumbing? (fn [function]
+                    (let [owner (namespace function)]
+                      (or (#{"seon.db" "seon.schema.datahike" "seon.error"} owner)
+                          (str/starts-with? owner "seon.error."))))]
+    (loop [reached #{} pending (list `seon.fn/analyze-entities `seon.fn/desired-entities)]
+      (if-let [[function & more] (seq pending)]
+        (if (or (reached function) (plumbing? function))
+          (recur reached more)
+          (recur (conj reached function) (into more (remove reached) (get calls function))))
+        reached))))
 
 (defn- analyzer-declarations
   "The reached declarations in `database`, each `[symbol digest path file-digest]`."
@@ -2553,14 +2661,14 @@
                                      database))))))
 
 (defn- analyzer-digest
-  "The analyzer's identity in `database`: the digest of the definition digests
-  reached from `seon.fn/analyze-rows` through stored calls."
+  "The derivation code's identity in `database`: the digest of the definition
+  digests `analyzer-reach` reaches through stored calls."
   {:malli/schema [:=> [:cat :seon.db/database-value] :seon.source/analyzer-digest]}
   [database]
   (id/digest 64 [(into (sorted-map) (map (juxt first second)) (analyzer-declarations database))]))
 
 (defn- selected-analyzer-digest
-  "The analyzer a publication's seal names, before its entities are stored:
+  "The identity of the code that derived `entities`, which their derivation keys name:
   `analyzer-digest` of `database` with the files at `paths`, and every file
   `entities` analyzed, replaced by `entities`.
 

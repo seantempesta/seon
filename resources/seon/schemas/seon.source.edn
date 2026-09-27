@@ -33,7 +33,7 @@
               :test-input-digest
               [:and {:seon.db/identity false :description "Digest of the sorted publication input inventory outside the program graph, including pinned gitlink identities. Observed value survives its input files."} :seon.source/digest],
               :analyzer-digest
-              [:and {:seon.db/identity false :description "Digest of the definition digests reached from seon.fn/analyze-entities in the program this JVM loaded when it analyzed the published entities. Entities derive from that code as well as from their file bytes."} :seon.source/digest],
+              [:and {:seon.db/identity false :description "The identity of the code that derives program entities: the digest of the definition digests seon.cluster/analyzer-reach reaches (from seon.fn/analyze-entities and seon.fn/desired-entities, outside the database and error owners) in the program this JVM loaded. Each file's derivation key names it (:seon.fn.file/derivation-digest)."} :seon.source/digest],
               :test-input-digests [:map-of :string :seon.source/digest],
               :digest-request
               [:map [:seon.source/roots :seon.source/roots]

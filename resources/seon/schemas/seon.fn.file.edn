@@ -2,6 +2,10 @@
                              :seon.program/row-schema :seon.fn.file/file
                              :seon.program/source-attribute :seon.fn.file/digest}]
  :seon.fn.file/digest [:string {:min 64 :max 64}]
+ :seon.fn.file/derivation-digest
+ [:string {:min 64 :max 64
+           :description
+           "The key this file's entities were derived under: its bytes, the deriving code's identity, clj-kondo's pin and configuration, and the schema forms its derivation reads (seon.cluster/derivation-keys). A publication re-derives exactly the files whose key changed."}]
  :seon.fn.file/relative-root
  [:string {:min 1
            :description
@@ -11,6 +15,7 @@
         :seon.program/recomputed true}
   [:seon.fn.file/relative-path :seon.fn.file/relative-path]
   [:seon.fn.file/digest :seon.fn.file/digest]
+  [:seon.fn.file/derivation-digest {:optional true} :seon.fn.file/derivation-digest]
   [:seon.fn/unresolved-references {:optional true} :seon.fn/unresolved-references]
   [:seon.fn.file/relative-root {:optional true} :seon.fn.file/relative-root]
   [:seon.schema.admission/source {:optional true}

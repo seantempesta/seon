@@ -405,9 +405,35 @@
       (is ((schema/projection-validator (schema/handed-projection)
                                        :seon.cluster.boot/operation-error) refusal)))))
 
+(deftest a-derivation-key-follows-what-its-file-derivation-reads
+  ;; CLASS: a whole-program stamp over derivations. One seal over every
+  ;; analyzer definition re-derived all 827 inputs when any of them changed
+  ;; (43.4 s of a 47 s restart), writing exactly what re-deriving the changed
+  ;; files wrote. A file's key names its bytes, the deriving code and the
+  ;; schema forms its derivation reads, so a change re-derives what it reaches.
+  (let [probe :seon.cluster-test/derivation-probe
+        projection (update (schema/declaration-projection (schema.edn/packaged-forms))
+                           :seon.schema.projection/forms assoc probe [:string])
+        code (apply str (repeat 64 "a"))
+        inputs {"src/a.clj" (apply str (repeat 64 "1")) "src/b.clj" (apply str (repeat 64 "2"))}
+        schema-keys {"src/a.clj" #{probe}}
+        paths #{"src/a.clj" "src/b.clj"}
+        keys-of #(#'cluster/derivation-keys %1 %2 %3 schema-keys paths)
+        before (keys-of code projection inputs)]
+    (is (= before (keys-of code projection inputs)) "equal inputs, equal keys")
+    (let [after (keys-of code (update projection :seon.schema.projection/forms assoc probe [:int]) inputs)]
+      (is (not= (get before "src/a.clj") (get after "src/a.clj")) "a read schema form re-derives its reader")
+      (is (= (get before "src/b.clj") (get after "src/b.clj")) "and no file that does not read it"))
+    (let [after (keys-of code projection (assoc inputs "src/b.clj" (apply str (repeat 64 "3"))))]
+      (is (= (get before "src/a.clj") (get after "src/a.clj")) "another file's bytes re-derive nothing here")
+      (is (not= (get before "src/b.clj") (get after "src/b.clj"))))
+    (is (every? #(not= (get before %) (get (keys-of (apply str (repeat 64 "b")) projection inputs) %)) paths)
+        "other deriving code re-derives every file")))
+
 (deftest the-analyzer-digest-follows-the-analyzing-declarations-only
-  ;; Publication reanalyzes every file when the loaded analyzer's digest
-  ;; differs from the seal's, and nothing when it is equal.
+  ;; A file's derivation key (`derivation-keys`) names the deriving code's
+  ;; identity: a changed declaration in its reach changes every key, and a
+  ;; declaration outside it none.
   (test-support/with-database
     (fn [connection]
       (let [digest #(#'cluster/analyzer-digest (db/db connection))
@@ -416,8 +442,8 @@
                         connection [(test-support/revision (db/db connection) [:seon.fn/sym function-symbol]
                                                            {:seon.fn/doc (str "Restamped " (random-uuid))})]))
             before (digest)]
-        (is (= before (digest)) "an unchanged analyzer reanalyzes nothing")
+        (is (= before (digest)) "an unchanged analyzer re-derives nothing")
         (restamp! `cluster/serve!)
         (is (= before (digest)) "a declaration outside the analyzer's reach changes no analysis")
         (restamp! 'seon.fn/host-bound-callers)
-        (is (not= before (digest)) "a changed analyzing declaration makes every file's analysis stale")))))
+        (is (not= before (digest)) "a changed analyzing declaration changes every file's derivation key")))))
