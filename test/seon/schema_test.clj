@@ -550,6 +550,19 @@
        (is (nil? (find-ns 'seon.schema-test.no-such-probe))
            "and asking the question did not load it either")))))
 
+(deftest canonical-definition-refuses-a-function-schema-without-output
+  ;; Before: `[:=> [:cat :int]]` came back unchanged and only this function's
+  ;; own output contract caught it, naming the wrong producer.
+  (let [refused (try (schema/canonical-definition [:=> [:cat :int]]) nil
+                     (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+    (is (= :seon.schema/missing-output-schema
+           (:seon.schema/noncanonical-definition refused)) (pr-str refused))
+    (is (= [:=> [:cat :int]] (:seon.schema/value refused)))
+    (is (str/includes? (:seon.error/message refused) "declares no output schema")))
+  (testing "a complete function schema, properties included, passes"
+    (is (= [:=> {:description "d"} [:cat :int] :int]
+           (schema/canonical-definition [:=> {:description "d"} [:cat :int] :int])))))
+
 (deftest an-incremental-build-resolves-against-the-projection-in-hand
   ;; CLASS: a definition contract that pre-reads the AMBIENT declaration
   ;; population while the authority holds the projection being extended. The

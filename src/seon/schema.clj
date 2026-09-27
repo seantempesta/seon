@@ -33,8 +33,7 @@
             [seon.schema.internal :as internal]
             [seon.error.refusal :as refusal]
             [clojure.string :as str]
-            [clojure.edn :as edn]
-            [clojure.java.io :as io]))
+            [clojure.edn :as edn]))
 
 ;;; LOAD-CYCLE BOUNDARIES. `seon.schema.edn`, `seon.error` and
 ;;; `seon.schema.datahike` all require `seon.schema`, so this namespace
@@ -639,7 +638,11 @@
    nothing and is refused instead of printed as an unreadable `#object`. The
    compiled direction is never inverted: a refusal carries its producer's
    declared identity (`seon.instrument/boundary-refusal`), not a name read
-   back off a compiled predicate."
+   back off a compiled predicate. A `:=>` without an output schema is refused
+   as `::missing-output-schema`, naming the form.
+
+   Example:
+   (canonical-definition [:=> [:cat :int] :int])"
   {:malli/schema
    [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.schema/definition]}
   [definition]
@@ -669,6 +672,22 @@
                       (if reference-kind
                         predicate
                         [:fn predicate]))
+
+                    ;; A function schema without its output is not a contract:
+                    ;; refuse it here by name, not one hop later as an invalid
+                    ;; return of this function.
+                    (and (vector? value) (= :=> (first value))
+                         (< (count (remove map? (rest value))) 2))
+                    (throw
+                     (ex-info
+                      (str "A function schema needs an input :cat and an output schema; "
+                           (pr-str value) " declares no output. Name the returned shape: "
+                           "[:=> [:cat :my.ns/request] :my.ns/result].")
+                      {:seon.schema/error :seon.schema/noncanonical-definition
+                       :seon.schema/noncanonical-definition ::missing-output-schema
+                       :seon.error/message (str "The function schema " (pr-str value)
+                                                " declares no output schema.")
+                       :seon.schema/value value}))
 
                     (vector? value)
                     (let [predicate-index
@@ -1059,112 +1078,34 @@
 (defonce ^:private !fallback-counts (atom {}))
 
 (defn- frame-namespace
-  [^StackTraceElement frame]
-  (let [demunged (clojure.lang.Compiler/demunge (.getClassName frame))
+  "The namespace part of a stack frame's demunged class name."
+  {:malli/schema [:=> [:cat :seon.error/frame] :string]}
+  [[class-name]]
+  (let [demunged (clojure.lang.Compiler/demunge (str class-name))
         separator (.indexOf demunged "/")]
     (if (neg? separator) demunged (subs demunged 0 separator))))
 
 ;; The warning is only worth printing if its advice is ACTIONABLE, and the
-;; reader can only act on first-party code. Naming the nearest non-`clojure.`
-;; frame did not do that: `seon.schema/malli-form?` is a registered core
-;; predicate, so Malli invokes it through `-safe-pred` and the resolution
-;; escaped with `malli.core (core.cljc:209)` as its nearest outside frame —
-;; a dependency line nobody can thread a population through
-;; (`docs/seon/issues/malli-form-predicate-resolves-the-declaration-population-itself.md`).
-;;
-;; "First party" is DERIVED, never a namespace-prefix rule. The Clojure CLI
-;; already recorded the distinction in the basis it wrote for this process: a
-;; `:classpath` entry carrying a `:lib-name` belongs to a dependency, and an
-;; entry without one is a source root this project declared for itself. The
-;; only correction that judgement needs is dropping an entry that CONTAINS
-;; another entry — the repository root a test alias adds as `"."`, which also
-;; holds every vendored fork under `reference-code/`. A frame is actionable
-;; when its source file resolves on the classpath under one of the survivors.
+;; reader can only act on code we wrote. Which frames those are is the refusal
+;; owner's one classpath-derived rule (`seon.error.refusal/first-party-frame?`);
+;; the resolution owners themselves are the callee, never the caller.
 (def ^:private resolution-owner-namespaces #{"seon.schema" "seon.schema.edn" "seon.instrument"})
 
-(defn- canonical-directory
-  [path]
-  (str (.getCanonicalPath (java.io.File. ^String path)) java.io.File/separator))
-
-(def ^:private first-party-source-roots
-  (delay
-    (let [basis (try
-                  (some-> (System/getProperty "clojure.basis")
-                          slurp
-                          edn/read-string)
-                  (catch Throwable _ nil))
-          declared (into {}
-                         (keep (fn [[root descriptor]]
-                                 (when-not (:lib-name descriptor)
-                                   (try [root (canonical-directory root)]
-                                        (catch Throwable _ nil)))))
-                         (:classpath basis))]
-      (into #{}
-            (keep (fn [[root path]]
-                    (when-not (some (fn [[other other-path]]
-                                      (and (not= root other)
-                                           (.startsWith ^String other-path
-                                                        ^String path)))
-                                    declared)
-                      path)))
-            declared))))
-
-(defn- frame-source-path
-  "Where the frame's source file sits on the classpath, or nil.
-
-   The namespace-to-resource mapping is Clojure's own munging, not a Seon
-   convention: the loaded file is the frame's own file name inside the
-   namespace's directory."
-  [^StackTraceElement frame ^String frame-ns]
-  (when-let [file-name (.getFileName frame)]
-    (let [directory (.replace (.replace frame-ns "-" "_") \. \/)
-          package (subs directory 0 (inc (.lastIndexOf directory "/")))]
-      (when-let [url (io/resource (str package file-name))]
-        (when (= "file" (.getProtocol url))
-          (.getPath url))))))
-
-(defn- first-party-frame?
-  [^StackTraceElement frame ^String frame-ns]
-  (and (not (contains? resolution-owner-namespaces frame-ns))
-       (boolean
-        (when-let [path (frame-source-path frame frame-ns)]
-          (some #(.startsWith ^String path ^String %)
-                @first-party-source-roots)))))
-
-(defn- frame-description
-  [^StackTraceElement frame frame-ns]
-  (str frame-ns " (" (.getFileName frame) ":" (.getLineNumber frame) ")"))
-
 (defn- fallback-caller
-  "The nearest frame under a declared first-party source root.
-   Stack introspection is a diagnostic and runs only on the fallback path.
-
-   When no frame resolves to a declared source root — a bare REPL form, a
-   dynamically evaluated namespace, a host thread entry — the nearest frame
-   outside resolution is named instead and marked as a best-effort guess
-   rather than a place to go and edit."
+  "The nearest first-party frame outside resolution, as `ns (file:line)`.
+   Stack introspection is a diagnostic and runs only on the fallback path."
+  {:malli/schema [:=> [:cat] :string]}
   []
-  (let [frames (.getStackTrace (Thread/currentThread))]
-    (or (some (fn [^StackTraceElement frame]
-                (let [frame-ns (frame-namespace frame)]
-                  (when (first-party-frame? frame frame-ns)
-                    (frame-description frame frame-ns))))
-              frames)
-        (some (fn [^StackTraceElement frame]
-                (let [frame-ns (frame-namespace frame)]
-                  (when-not (or (contains? resolution-owner-namespaces frame-ns)
-                                (.startsWith ^String frame-ns "clojure.")
-                                ;; instrumentation plumbing is never a
-                                ;; caller: with contracts armed, malli's
-                                ;; wrapper sits between the caller and the
-                                ;; refusal and would otherwise be named as
-                                ;; the place to go and edit
-                                (.startsWith ^String frame-ns "malli.")
-                                (.startsWith ^String frame-ns "java."))
-                    (str (frame-description frame frame-ns)
-                         " [no declared source root — nearest frame]"))))
-              frames)
-        "an unidentified caller")))
+  (or (some (fn [^StackTraceElement element]
+              (when-let [file (.getFileName element)]
+                (let [frame [(symbol (.getClassName element)) (symbol (.getMethodName element))
+                             file (long (.getLineNumber element))]
+                      frame-ns (frame-namespace frame)]
+                  (when (and (not (contains? resolution-owner-namespaces frame-ns))
+                             (refusal/first-party-frame? frame))
+                    (str frame-ns " (" file ":" (.getLineNumber element) ")")))))
+            (.getStackTrace (Thread/currentThread)))
+      "an unidentified caller"))
 
 (defn- decade?
   [n]
