@@ -1548,7 +1548,9 @@
                          (fn [_] (cache/lookup-or-miss
                                   value-projection-cache
                                   [::declaration-content builder (declaration-content-key database)]
-                                  (fn [_] (delay (schema/load-projection database (nearest-base builder database))))))))
+                                  (fn [content-key]
+                                    (or (cache/lookup projection-cache content-key)
+                                        (delay (schema/load-projection database (nearest-base builder database)))))))))
 
 (defn- as-of-key
   "An as-of view's exact identity: its committed origin's commit and its time
