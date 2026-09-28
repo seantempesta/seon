@@ -79,3 +79,35 @@ On branch `boot-perf-edit` (e999fdd1b, 2026-09-27), the gate refused REPL instal
   with "Unable to resolve symbol: with-vector-world".
 - `seon.schema.datahike/reads-cells?`: refused in the same way.
 - `seon.fn.analyzer/literal-value?` has no gating test and installed.
+
+## Cold-boot attribution and restart readiness (2026-09-27, disposable root `tmp/boot-source-perf/work-root`)
+
+Recorded with JFR (`JAVA_TOOL_OPTIONS=-XX:FlightRecorderOptions=stackdepth=1024 -XX:StartFlightRecording=...settings=fast.jfc`,
+2 ms Java sampling), start after changed files, classes hit.
+
+| boot | changed inputs | source layer | ready |
+|---|---|---|---|
+| e686980fa move (before cd769af69) | 5 large src files | 52.2 s | 60.1 s |
+| cd769af69 move | the same 5 + db_test | 6.8 s | 10.6 s |
+| cd769af69, 18 files (20,896 lines incl. db.clj, fn_test) | 18 | 19.0 s (first), 5.5 s, then 7.9 s ready | 26.2 s, 8.26 s, 7.98 s |
+
+- Before cd769af69 the writer thread spent ~25 s in `reconcile-tx-in`. Each
+  stored-collection comparison read `carried-projection` of the transaction's
+  value. That derived `loaded-builder`'s reach query on every read during boot
+  (298 of 581 writer samples), and read `declaration-content-key` before the
+  revision lookup (182 samples). This is the 4x cold multiplier.
+- In the 5.5 s source layer of an 18-file boot:
+  - keys + code identity: 31%. Most of it is `loaded-analyzer-digest`
+    materializing the published database's projection (112 samples) and
+    `analyzer-declarations` (132).
+  - clj-kondo: 28%.
+  - seon analysis: 26%.
+  - populate: 9%.
+- The first 18-file boot after the move took 26.2 s. Repeats of the same set
+  took 8.3 s and 8.0 s. The cause is unmeasured; a stale kondo cache entry
+  forcing a rerun is suspected.
+- A work root moved by `start` after a nuke analyzed every dependency jar
+  (`ensure-dependency-analysis!`, about 30 s on pool threads), because the
+  nuke's archive kept a private `.clj-kondo/.cache` while the next archive linked
+  the root's shared analysis cache. default keeps the shared cache and does not
+  pay this.

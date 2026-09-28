@@ -96,4 +96,9 @@
              :kind :function
              :intent "A file's derived entities also read other files' facts: the symbols its calls resolve to, a callee's host-bound flag, an invoked attribute's targets, and clj-kondo findings over another namespace's signatures. The per-file derivation key (seon.cluster/derivation-keys) holds none of them; the dependent and caller re-lint selection must re-derive those files when the facts change. Prove the selection covers each class with a regression, or add the facts' digests to the key."
              :must-read #{seon.fn/dependent-paths seon.cluster/derivation-keys}
+             :evidence #{"tmp/boot-source-perf/evidence.md"}}
+ #:seon.task{:name "an-armed-first-population-takes-a-hundred-seconds"
+             :kind :function
+             :intent "An armed first population of the whole program into a memory store (seon.fn/index! with the source manifest after accrete-schema-population!, as seon.fn-test/fresh-population-flattens-with-its-supplied-declarations does) took 102.5 s and admitted 13,372 operations (disposable root at 866eef6f5, 2026-09-27); a nuke's unarmed first population is about 128 s of its 136 s ready. cd769af69 removed one per-read whole-program derivation from the writer (an uncommitted value's builder identity); re-measure after it and profile the writer thread (JFR stackdepth 1024, tmp/boot-source-perf/evidence.md) before choosing a fix. Over the ten-second rule."
+             :must-read #{seon.fn/index! seon.fn/reconcile-tx-in seon.db/carried-projection}
              :evidence #{"tmp/boot-source-perf/evidence.md"}}]
