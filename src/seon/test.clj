@@ -570,11 +570,12 @@
   (reduce (fn [facts [entity attribute value]]
             (update-in facts [entity attribute] (fnil conj #{}) value))
           {} (selection-read!
+              ;; Both bound: an unbound attribute filtered by predicate cost
+              ;; ~200 ms per call on any entity count, bound 2 ms (2026-09-28).
               (db/q '[:find ?entity ?attribute ?value
-                      :in $ [?entity ...] ?attributes
-                      :where [?entity ?attribute ?value]
-                             [(contains? ?attributes ?attribute)]]
-                    database entities (set attributes)))))
+                      :in $ [?entity ...] [?attribute ...]
+                      :where [?entity ?attribute ?value]]
+                    database entities attributes))))
 
 (defn- definition-digests
   "Read the canonical declaration identity stored by the producer."
