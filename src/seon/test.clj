@@ -735,10 +735,14 @@
             policy (or (:seon.test.run/policy request)
                        (when (or (seq namespaces) (seq identities)) :named) :incremental)
             include-long? (or (= :full policy) (true? (:seon.test/include-long? request)))
+            ;; Only this branch's runs: every reader below drops another
+            ;; branch's, and an agent branch inherits all of its cluster's
+            ;; (11.8k member facts read to select one test, 2026-09-28).
             run-ids (selection-read!
                      (if cluster
-                       (db/q '[:find [?run ...] :in $ ?cluster
-                               :where [?run :seon.test.run/cluster ?cluster]] database cluster-id)
+                       (db/q '[:find [?run ...] :in $ ?cluster ?branch
+                               :where [?run :seon.test.run/cluster ?cluster]
+                                      [?run :seon.test.run/branch ?branch]] database cluster-id branch)
                        (db/q '[:find [?run ...] :in $ ?branch
                                :where [?run :seon.test.run/branch ?branch]
                                       (not [?run :seon.test.run/cluster])]
@@ -1824,8 +1828,9 @@
   request with equal inputs shares its preparation. A checkpoint another caller
   is still preparing refuses this request. The request then owns a private
   branch off the checkpoint's head, which roots that commit for its members,
-  and writes `program-overlay-tx`'s rows there. Older checkpoints of the
-  cluster are retired once no connection holds them."
+  and writes `program-overlay-tx`'s rows there. Checkpoints of every base in
+  use coexist (an agent branch records the commit it was forked at); boot
+  retires them all (`registry/retire-unclaimed!`), as the name holds the process."
   {:seon/tasks #{"c86d834ab695" "845e1bce2592"}
    :malli/schema [:=> [:cat :seon.agent/context-source :seon.db/connection
                        :seon.cluster/name :seon.config/effective]
@@ -1839,8 +1844,7 @@
         overlay (program-overlay-tx (source/database store base) candidate)
         _ (when (:seon.error/at overlay) (throw (world-refusal "program overlay read" overlay)))
         process (cluster.process/id (cluster.process/current-identity))
-        prefix (str "checkpoint-" cluster "-")
-        branch (keyword (str prefix (id/digest 24 [base cluster (sort effective) process])))
+        branch (keyword (str "checkpoint-" cluster "-" (id/digest 24 [base cluster (sort effective) process])))
         at {:seon.store/store store :seon.store/branch branch}
         head (or (checkpoint-head store branch cluster base)
                  (when (:seon.cluster/created? (registry/branch! (assoc at :seon.cluster.registry/from base)))
@@ -1857,8 +1861,7 @@
         ;; shared store (`store/open-overlay!`), which they never write; the
         ;; checkpoint above is shared by digest and stays durable. Only the
         ;; recorded results reach the store, on the recording connection.
-        shared store
-        store (store/open-overlay! shared)
+        store (store/open-overlay! store)
         ;; The request branch holds the overlay and roots its commit for the members.
         request-branch (keyword (str "agent-" (id/id)))
         release! (fn [^Throwable failure steps]
@@ -1881,15 +1884,6 @@
     (when (and report (not (:db-after report)))
       (throw (release! (world-refusal (str "program overlay (" (count overlay) " entries)") report)
                        [#(store/release-branch! connection) retire! drop!])))
-    (doseq [other (registry/roster shared)
-            :when (and (not= other branch) (str/starts-with? (name other) prefix))]
-      ;; Datahike refuses a connected branch. A request between reading an old
-      ;; head and branching from it holds that commit by id; retirement only
-      ;; removes the roster name, so the commit stays until collection.
-      (try (registry/retire-branch! {:seon.store/store shared :seon.store/branch other})
-           (catch clojure.lang.ExceptionInfo refusal
-             (when-not (= ::registry/cluster-connected (::registry/refused (ex-data refusal)))
-               (throw refusal)))))
     (let [database (db/db connection)
           source (or (:seon.sci.eval/base-ctx execution) (:my.program/base-ctx execution)
                      (:seon.sci.eval/ctx execution))
