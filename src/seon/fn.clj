@@ -3683,25 +3683,24 @@
                 refusal refusal
                 (= normalized-current normalized-desired)
                 (recur (next pending) changes)
+                (nil? current)
+                (recur (next pending) (conj changes {:seon.program/row entity-map :seon.fn/retractions []}))
                 :else
+                (let [replacement (program/exact-replacement-tx-in
+                                   entity-shapes (assoc normalized-current :db/id (:db/id current)) normalized-desired)
+                      set-attributes (get-in entity-shapes [(first (program/row-identity entity-map))
+                                                            :seon.program/set-attributes])]
                 (recur
                  (next pending)
                  (conj changes
                        {:seon.program/row
-                        (if current
+                        (merge
                           (select-keys entity-map
                             (conj (program/changed-attributes entity-shapes normalized-current normalized-desired)
                                   (first (program/row-identity entity-map))))
-                          entity-map)
+                          (select-keys (last replacement) set-attributes))
                         :seon.fn/retractions
-                        (if-let [entity-id (:db/id current)]
-                          (vec
-                           (butlast
-                            (program/exact-replacement-tx-in
-                             entity-shapes
-                             (assoc normalized-current :db/id entity-id)
-                             normalized-desired)))
-                          [])}))))))
+                        (vec (butlast replacement))})))))))
         (let [{entities :seon.fn/index-entities
                identity-operations :seon.fn/index-identity-operations
                keyword-operations :seon.fn/index-keyword-operations}

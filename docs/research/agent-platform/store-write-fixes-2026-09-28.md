@@ -91,3 +91,89 @@ members. Keeping one result for every historical reach/input digest would
 still keep 15,100 members. Historical run reports and live reservations are
 separate consumers: pruning must preserve their historical query route and
 must not retire a body whose exit remains unobserved.
+
+The retention unit is the admitted run, not an individual component member:
+`admitted-members` verifies its historical membership refs. Keep latest
+per-test owners, live reservations, the last green selection baseline and
+subsequent outstanding obligations, and the transitive owners reached by
+`covered-by`. Historical run reports must read an as-of value from before
+retirement. Do not keep one copy for every historical digest.
+
+A disposable prototype retired 543 runs and 9,947 members in one transaction
+(122,022 effective datoms, 7.355 s, 108,273,059 new external index bytes).
+An old run's as-of results were exactly equal and the second pass selected
+no further removals. This proves the cascade/history mechanism, not the
+final retention policy: the prototype did not yet preserve selection's last
+green baseline and subsequent obligations. It is not installed. History is
+still retained; retracting current rows does not itself shrink disk history.
+
+## Publication set differences
+
+`program/derived-shape` now carries the bridge's declared many attributes
+without component ownership or ordered-vector storage. It derives them once per projection, using
+`malli->datahike-schema-in`; no reader guesses cardinality from a set-shaped
+EDN value. `replacement-tx` computes removed and added members in O(old + new)
+and emits O(difference) writes. Components retain their existing cascade.
+`fn/reconcile-tx-in` passes the returned set additions through the index
+compiler instead of rebuilding whole-set assertions from the source row.
+The existing new-entity path remains a complete canonical declaration.
+
+MCP JVM pid 66988, loaded `c4628c22b`, scratch functions only. Each pair starts
+from the same committed value on an owned branch. The real
+`seon.render/invoke-selected` row supplied the source, resolver context and
+157 observed calls. Each probe retains N calls and removes one; both paths
+use `db/definition-digest-of` and the normal writer checks. Fully published
+declarations compare equal after each pair. This is a storage probe, not a
+claim that the deliberately reduced graph is executable analysis evidence.
+
+| Set size | Before/after commits | Before/after call datoms | Before index bytes | After index bytes | Before ms | After ms |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 1 / 1 | 1 / 1 | 561,874 | 561,874 | 138.639 | 30.486 |
+| 10 | 1 / 1 | 19 / 1 | 1,070,256 | 561,681 | 164.410 | 40.501 |
+| 100 | 1 / 1 | 199 / 1 | 2,314,307 | 568,453 | 99.378 | 30.645 |
+
+Same node-file measurement as above; seed commits are excluded. The
+single-member paths write identical bytes, so their timing difference is
+warm-up/noise, not an algorithmic claim. At 100 members the change removes
+198 unnecessary call datoms and 75% of node bytes for this edit. Heap
+allocation was not measured. Probe source and data are
+`tmp/astra-store-fixes-20260928/publication-{probe.clj,measurements.edn}`.
+
+Focused tests for root, not run here:
+
+- `seon.program-replacement-test/a-set-edit-writes-two-datoms-at-one-ten-and-one-hundred-members`
+- `seon.program-replacement-test/ordered-many-attributes-do-not-use-set-differences`
+- `seon.program-test/function-contract-redefinition-replaces-component-facts-exactly`
+- `seon.fn-test/invocation-metadata-survives-admission-and-exact-replacement`
+- `seon.fn-test/publication-writes-one-definition-digest-per-declaration-family`
+
+Archive `c4628c22b` plus the four owned files: final lint 0 errors, 1,673 warnings,
+7.259 s. Contracts: 494 files, 16.586 s under concurrent boot load, the same
+ten foreign documentation-script errors and no new findings. Source, test
+and schema delta: +94/−20 lines. The first publication drill passed; final
+review added the ordered-vector guard and its regression, then the final
+drill passed too (`cf491c78b39d`, base `c4628c22b`): base from-scratch
+158.965 s, move 79.115 s, candidate from-scratch 145.674 s, total 464.595 s.
+Foreign `test/seon/fn_test.clj` edits were not included;
+the new work-count test lives in its own file.
+
+## Analysis digest investigation
+
+The audit's 8,332 figure is **datoms**, not 8,332 changed function entities.
+Transaction 536880175 at 2026-09-27T18:35:28.075Z has 4,166 assertions and
+4,166 retractions, with 3,951 entity ids on both sides (deletions/additions
+account for the remainder). All 4,166 asserted digests exactly equal their
+owning file's digest, over 234 files. There is no shared global hash here.
+
+231 of those files were touched by `799cd62a7`, the entity-vocabulary sweep.
+232 file hashes match `4dea3b95a`; the other two (runner and failure-facts
+tests) match that commit's parent, before its report-identity change. Thus
+the wide event is an adoption of a broad source sweep. The remaining waste
+is the file-level stamp changing on unchanged declarations and lint ids
+including absolute row/column. Analysis provenance stays a file/content
+observation; an already analyzed, otherwise identical row need not be
+rewritten solely to carry the newer file stamp.
+
+The history count fold took 151 ms; the as-of file join took 4.083 s and
+is an audit of the historical publication, not an ordinary request path.
+The file-hash comparison took 5 ms after obtaining the held results.

@@ -1,0 +1,9 @@
+{:pid 66988 :source "c4628c22ba0a17697d68ad4b9cc0764f753c2029"
+ :subject seon.render/invoke-selected :same-declarations? true
+ :rows
+ [{:n 1 :candidate? false :commits 1 :ms 138.639416 :datoms 2 :call-datoms 1 :bytes 561874}
+  {:n 1 :candidate? true :commits 1 :ms 30.485666 :datoms 2 :call-datoms 1 :bytes 561874}
+  {:n 10 :candidate? false :commits 1 :ms 164.410458 :datoms 20 :call-datoms 19 :bytes 1070256}
+  {:n 10 :candidate? true :commits 1 :ms 40.501417 :datoms 2 :call-datoms 1 :bytes 561681}
+  {:n 100 :candidate? false :commits 1 :ms 99.377958 :datoms 200 :call-datoms 199 :bytes 2314307}
+  {:n 100 :candidate? true :commits 1 :ms 30.644709 :datoms 2 :call-datoms 1 :bytes 568453}]}

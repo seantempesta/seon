@@ -149,7 +149,10 @@
  [:map
   [:seon.program/identity-attribute :seon.program/identity-attribute]
   [:seon.program/source-attribute :seon.program/source-attribute]
-  [:seon.program/owned-attributes :seon.program/owned-attributes]]
+  [:seon.program/owned-attributes :seon.program/owned-attributes]
+  [:seon.program/set-attributes {:optional true} :seon.program/set-attributes]]
+ :seon.program/set-attributes
+ [:set {:description "Declared cardinality-many attributes without component ownership; exact replacement uses member differences."} :qualified-keyword]
  :seon.program/shapes
  [:map-of
   {:description

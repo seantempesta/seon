@@ -1,6 +1,7 @@
 (ns seon.program
   "Pure declaration identities and exact-entity ownership for program entities."
   (:require [malli.core :as m]
+            [clojure.set :as set]
             [seon.error.refusal :as error]
             [seon.fn.signature :as signature]
             [seon.id :as id]
@@ -184,6 +185,8 @@
   an empty shape: each absence refuses, naming the identity and the member,
   because an empty owned set would silently strip every attribute of the
   family it describes."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.program/identity-attribute]
+                  :seon.program/shape]}
   [projection identity-attribute]
   (let [refuse!
         (fn [message data]
@@ -215,6 +218,15 @@
                {:seon.program/row-schema entity-schema}))
     {:seon.program/identity-attribute identity-attribute
      :seon.program/source-attribute source-attribute
+     :seon.program/set-attributes
+     #?(:clj (let [vector-shaped? (requiring-resolve 'seon.schema.datahike/vector-shaped-attr-in?)]
+               (into #{}
+                   (keep (fn [{:db/keys [ident cardinality isComponent]}]
+                           (when (and (= :db.cardinality/many cardinality) (not isComponent)
+                                      (not (vector-shaped? projection ident))) ident)))
+                   ((requiring-resolve 'seon.schema.datahike/malli->datahike-schema-in)
+                    projection owned)))
+        :cljs #{})
      :seon.program/owned-attributes
      (if (true? (:seon.program/projected-properties
                  (internal/entity-properties definition)))
@@ -1358,24 +1370,35 @@
    (changed-attributes-in entity-shapes current desired)))
 
 (defn- replacement-tx
+  "Retract removed set members, preserving unchanged members and component cascades."
+  {:malli/schema [:=> [:cat :seon.program/shapes [:map [:db/id :int]] :map]
+                  [:vector :seon.schema/value]]}
   [entity-shapes current desired]
   (let [entity-id (:db/id current)
-        changed (changed-attributes-in entity-shapes current desired)]
-    (into
-     []
-     (concat
-      (map (fn [attribute]
+        changed (changed-attributes-in entity-shapes current desired)
+        many (get-in entity-shapes [(first (row-identity desired)) :seon.program/set-attributes] #{})]
+    (conj
+     (vec
+      (mapcat (fn [attribute]
+              (if (many attribute)
+                (map #(vector :db/retract entity-id attribute %)
+                     (set/difference (set (get current attribute)) (set (get desired attribute))))
+                (when (contains? current attribute)
              ;; Datahike validates tuple values before dispatching retraction.
              ;; Cardinality-many values are sets; validate one existing tuple,
              ;; not the set. retractAttribute still removes the entire attribute.
              ;; The current entity comes from the writer's transaction database.
              (let [value (get current attribute)]
-               [:db.fn/retractAttribute entity-id attribute
+               [[:db.fn/retractAttribute entity-id attribute
                 (if (or (set? value)
                         (and (sequential? value) (sequential? (first value))))
-                  (first value) value)]))
-           (sort (filter #(contains? current %) changed)))
-      [(assoc desired :db/id entity-id)]))))
+                  (first value) value)]]))))
+              (sort changed)))
+     (reduce (fn [row attribute]
+               (let [old (set (get current attribute)) new (set (get desired attribute))]
+                 (if (= old new) (dissoc row attribute)
+                     (assoc row attribute (set/difference new old)))))
+             (assoc desired :db/id entity-id) many))))
 
 (defn exact-replacement-tx-in
   "Replace one declaration row, owning it by the shapes `row-shapes` carries.
