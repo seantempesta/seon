@@ -87,7 +87,8 @@ happens anyway costs ~0 bytes (+240 B) and +2–4 ms per 100 upserts.
 2. **The recent window is free:** keep the bucket counts as of the last write; current minus those is "since the last
    update". No rolling machinery, nothing reset, and a lifetime total never hides a recent regression.
 3. **Store judgments in stable buckets**, not raw numbers: p50/p99 bucket (`[8 ms, 16 ms)`), error-ratio class
-   (none/rare/frequent), over-bound yes/no. They move only on ~2× changes, so noise never writes.
+   (none/rare/frequent), over-bound yes/no; a named warning schema over these attributes (e.g. over the bound) is what
+   makes a function "slow", never a stored label. They move only on ~2× changes, so noise never writes.
 4. **Write on significance, only on existing commits:** at a settle or test-batch commit, for the functions that
    evaluation ran (the per-world call sink already lists them: work ∝ executed functions), compare the window's
    buckets with the stored ones; upsert noHistory only when a bucket moved and the window has ≥ N calls (≈20). Most
@@ -120,13 +121,20 @@ test `:seon.test/sym`, namespace `:seon.ns/name`, agent `:seon.agent/id`, branch
 member, task. New subjects: a Flow proc (`:seon.proc/id` = graph + pid, ref to its agent or cluster) and an operator
 record (boot, adoption, publication: phases with durations and what each was proportional to).
 
-**Signature — "this kind of problem" (the error entity, one per `:seon.error/signature`), stable across occurrences:**
+**No kind field, no "error" type (owner, 2026-09-28; AGENTS.md "no discriminator stamp").** What a problem *is* is the
+named Malli schema its attributes satisfy: an input violation is a value satisfying, say,
+`:seon.instrument/input-violation-error` (a named extension of `:seon.error/base`); a slow function satisfies a named
+warning schema such as `:seon.profile/over-bound-warning`. Nothing writes "this is an error" or a kind: the entity
+carries the attributes, and all of them together are that named error because they satisfy its schema. Severity and
+the task threshold are properties of the named schema's declaration, not per-entity data. "All X" is a query derived
+from the named schema (the attributes it requires, as Datalog patterns, then Malli validation of the pulled entities),
+so a new named error or warning is queryable the moment its schema is registered.
+
+**Signature — "this problem" (one entity per `:seon.error/signature`), stable across occurrences:**
 
 | Attribute | Kind | Status |
 |---|---|---|
 | `:seon.error/signature`, `/layer`, `/exception-class`, `/message` | values | declared, written |
-| `:seon.error/kind` — violation, throw, slow, warning, stale, missing-contract… | enum | new |
-| `:seon.error/severity` — error, warning, info | enum | new |
 | `:seon.error/producer` → function entity (the blame rule) | ref | new; replaces the `:seon.instrument/fn` name and the `/operation` guess |
 | `:seon.error/producer-digest` | value | new (declared `digest-then`/`digest-now` exist, unwritten) |
 | `:seon.error/schema` → schema entity, `:seon.error/path` (Malli path) | ref, value | `path` declared; ref new |
@@ -332,7 +340,8 @@ which already restores the previous commit on failure.
 ## 10. Warnings, and what the armed wrapper can capture
 
 **Warnings use the same path.** A warning is a finding that does not change the value: the same constructor, the same
-supplied context, the same links and blob references, a kind and a severity. It is recorded only when its measurement
+supplied context, the same links and blob references, identified by the named warning schema its attributes satisfy
+(no kind or severity field; severity is declared on the schema). It is recorded only when its measurement
 crosses a significance threshold (§2), deduplicated by signature, delivered beside the value of the evaluation that
 triggered it (as the contract warning is today), and shown in the health view. A task is created only above a declared
 severity. Nothing is a string in a log.
