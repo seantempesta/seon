@@ -1,6 +1,6 @@
 ---
 type: spec
-status: revision 4 — the prototype is the implementation; the proof map (§9) run at default's REPL, the SCI fork proofs in a scratch clone; the supply stage and four root-owned patches (§7.2, tmp/one-path/patches) wait on their owners
+status: revision 5 — owner ruling: the Var render replaces the feedback stage and the REPL install gate (§7); S1–S3b landed; the proof map (§9) run at default's REPL, the SCI fork proofs in a scratch clone; the supply stage and four root-owned patches (§7.2, tmp/one-path/patches) wait on their owners
 created: 2026-09-27
 revised: 2026-09-27 (rev 4: Astra's rev-3 execution blockers B1-B7 (f3c1db347); the world value; §12 ruling B; REPL dogfood items 1-6; red-triage r6; feedback from the batch's digests (39d94eef0); the per-world call sink; the supply stage ruling)
 lane: one-path-spec-opus
@@ -196,38 +196,49 @@ JVM-global test state (263 `with-redefs` uses). This path supplies the agent's s
   branch (`test-agents-concurrent`).
 - Open for that lane: how an assertion reports as data (a failing `is` reports through `clojure.test` today).
 
-## 7. Feedback from facts: the interface
+## 7. The Var render: what a definition's reply says (owner ruling, rev 5)
 
-The feedback lane (docs/research/agent-platform/feedback-from-facts-2026-09-27.md, 785f28f1e) owns the queries' design and
-the reaching-test speed (the test-feedback-perf lane, not duplicated here).
+**What replaces feedback and the REPL install gate.** A `defn` returns its Var; the Var's declared render pair says
+what matters about it, and says nothing when nothing changed. The AI render (REPL entries) and the HTML render (hiccup)
+share one selection, one set of facts and one query; only the final output differs. There is no feedback stage, no
+reply key for it, no special uncontracted-defn warning and no REPL install gate: the REPL always admits, and merge
+acceptance stays the single refusal point (red reaching tests, missing contracts).
 
-**The reply keys.** `:seon.eval/feedback` (schema `:seon.batch/feedback`): `:seon.feedback/changed` (the definitions the
-batch changed), `:seon.feedback/removed`, `:seon.feedback/missing-contracts` (changed functions without a contract),
-`:seon.feedback/contract-findings` (a callee's contract refusing a generated argument), `:seon.feedback/tests` (each test
-reaching a definition whose digest moved: `:never-run`, `:unknown` or `:stale`) and `:seon.feedback/counts`. The batch
-hands `conclude` its changed definitions with their definition digests; one digest read per definition on the basis
-decides which moved; one `gate-sets` walk and one `latest-results` read follow; no reach digest is re-derived. A
-freshly committed head: 10 tests 27-41 ms, 22 tests 9 ms, 150 tests 10-15 ms (`feedback-hub-fresh`).
-Beside it `:seon.eval/contract-note` or `:seon.eval/contract-warning` (the growing warning over the branch's agent
-definitions). Computed by `seon.turn.batch/conclude` over the batch's validated working value, **before** the one
-settlement, so its shown text rides that settlement on the batch's last evaluation. Every entrant's reply carries it,
-MCP JVM mode included (`jvm-gets-feedback`); MCP projects it in the final batch event, a Seon agent reads it in its next
-context.
+**What the Var render shows**, each only when it has something to say:
 
-**Facts the batch writes so feedback is only a query** (one transaction): each definition's entity, uncontracted ones
-included, with `:seon.schema.admission/source :agent` (G1 closed: never refused), `:seon.fn/spec` when contracted,
-`:seon.program/definition-digest`, `:seon.program/analyzed-source-digest`, `:seon.fn/calls` and `:seon.fn/call-arities`;
-its namespace's entity with its resolver bindings; each schema declaration and attribute; the run and each evaluation.
-
-**Facts added at landing (S7)**, each with its consumer:
-
-| Attribute | Written by | Consumer |
+| Part | Source | Shown when |
 |---|---|---|
-| `:seon.cluster.eval/changed` (refs to the definitions the evaluation changed) and `:seon.cluster.eval/removed` (symbols) | `record-facts`, from the evaluation's change | feedback scope from history; `read-only?` over stored facts |
-| `:seon.cluster.eval/registered-keys` | same | the same |
-| `:seon.eval/feedback-shown` on the batch's last evaluation | `record-facts`, from `conclude` | the agent's next context and the MCP final event read the same saved text |
-| `:seon.fn/malformed-spec` and its explanation (G11) | `form-facts`, when arming finds the authored contract malformed | "malformed contracts" feedback; the definition's entity is stored without `:seon.fn/spec` and its Var refuses by name |
-| Install-gate test results as `:seon.test.member/*` facts (G5) | the gate's reaching tests run as test agents recording on the requester's branch | a failing redefinition names its test |
+| Contract | the definition's entity: `:seon.fn/spec`, or none, or `:seon.fn/malformed-spec` | missing (with an example form) or malformed |
+| Reaching tests at this digest | test results as a **derived value keyed by exercised digests**: a read with a stored result for the function's current digest is a pure read; a read with none starts test agents for the reaching tests (the cache-miss compute, recording on the requester's branch, §6) and answers pending | a result exists or is pending |
+| Delta | this digest's results against the previous digest's | a test turned red or green; nothing changed shows nothing |
+
+**Late results.** A render made before the tests finish shows them pending. The render's read of the results is
+ordinary read evidence, so when the test agents record, the changed-read refresh delivers the results in the next
+context. No new delivery mechanism.
+
+**Deleted by this ruling** (measured at 2fbaf89c6): `seon.turn.gate` (135 lines: the change-judging gate,
+`gate-deferred`, `test-outcomes`), `apply-facts`' gate calls and the deferred-callee tracking in `derive-form`,
+`conclude` with `reaching-tests` (75 lines), the `:seon.eval/feedback`, `:seon.eval/contract-note` and
+`:seon.eval/contract-warning` reply keys and their schemas (`:seon.batch/feedback`, `:seon.batch/gate`), and in the old
+path `seon.sci.eval/missing-contract`'s refusal (the live refusal of an uncontracted defn) and `gate-function-install`.
+The proofs of the gate and the feedback stage (`gate-*`, `entrant-gate`, `feedback-*`, `jvm-gets-feedback`,
+`contract-warning`, `c4-deferred-gates`) are replaced by the render proofs below.
+
+**The same mechanism elsewhere** (render pairs over values, each a follow-up with its owner):
+
+| Value | Its render shows | Owner |
+|---|---|---|
+| `ns-unmap` / `remove-ns` result | the callers the removal breaks | `my.program` |
+| `register!` result | the schema's users and how many stored entities would fail it | `seon.schema` |
+| `in-ns` result | the namespace's `dir` with contracts, tasks and the missing-contract count | `seon.repl` |
+| an error value | its linked task, prior occurrences, the contract and the fix | `seon.error` |
+| a `deftest` Var | its latest result | `seon.test` |
+| a task | its done-when as a live check | `seon.task` |
+| a merge proposal | its diff and the reaching results | `my.program` |
+
+**Proofs, armed, through both entrants and the HTML render:** a defn with no contract shows the missing contract in AI
+and HTML; a defn whose change turns a reaching test red shows that test, and an unchanged one shows nothing; pending
+results arrive in the next context through refresh; an uncontracted defn is admitted.
 
 ### 7.1 The world
 
@@ -426,9 +437,11 @@ definition plus every `(:require [seon.cluster.reply …])`, each assigned to th
 | **S3b** call sink | Apply `profile-world-sink.patch`; tests that count calls read their own world's sink | the JVM-wide exact-count assertions (task 5b1b9776f) | the counting tests | `sink-per-world` armed |
 | **S3c** host bindings (F1) | `eval.clj` `install-caller-host-bindings!` skips analyzer forms and special symbols, so a namespace with stored facts never shadows `import*` | — | — | a regression from the corpus on one branch |
 | **S4** product turn | `turn.clj:5056` `evaluate-sources` becomes `evaluate-batch` over `turn-request`, supplying `row-tx` :1285 and `record-evaluated-call` :1569 as values; `resume-turn` :5297 answers the reply | `evaluate-sources` 164, `restore-evaluations!` 19, `with-settled` 8, `settled-value` 10, `settlement-form` 10, `analyze-settlement` 23, `namespace-rows` 20, `evaluated-namespaces` 17, `schema-attribute-change-tx` 43, `affected-schema-attributes` 9 | manifest rows naming these (turn.clj, turn_test, cluster/turn_test, turn_loop_test) | `seon.turn-test`, `seon.cluster.turn-test`, `evaluate-source-test` |
-| **S5** gate | the install gate is `apply-facts`' (deferred to settlement for a function calling a declared-only Var); its reaching tests run as test agents whose results are `:seon.test.member/*` facts on the requester's branch (G5) | `gate-function-install` 73 and `eval.clj`'s candidate family (7 defns, 193) | accretion_test, core_functions_test, restoration_test | `seon.test.accretion-test`, from `entrant-gate` |
+| **V1** the Var render (rev 5) | The Var render pair (AI REPL entries, HTML hiccup, one selection) over the definition's entity and its digest-keyed test results; a results read with no result for the digest starts test agents (the cache-miss compute) and answers pending; its read evidence refreshes the next context | the REPL install gate: `seon.turn.gate` 135, `apply-facts`' gate calls and deferred tracking ~40, `conclude`/`reaching-tests` 75 and the feedback/gate reply keys and schemas ~45; old path `missing-contract`'s refusal and `gate-function-install` 73 | the proofs and tests of the gate and feedback (repl_test, cluster_test, cluster/agent_test assert the refusal) | the four §7 render proofs, armed, both entrants and HTML |
+| **V2..V8** render pairs | ns-unmap/remove-ns, register!, in-ns, error, deftest, task, merge proposal (§7 table), one per owner | — | — | one render proof each |
 | **S6** refresh | `read-only-evaluation?` :2075 reads the evaluation's observed writes; `source-key` :1980 keys by `[ns source]` | `source-events` 6, `evaluable-source?` 7 | — | `seon.turn-test` refresh case (from `v2-5-read-only-evidence`) |
 | **S7** MCP | `mcp.clj` `run-form` :391, `run-events` :440, `jvm-evaluation-form` :376 become `code-request`/`jvm-request` → `reply` → JSON; `branch-form` :477's body becomes one `my.agent` entrance both call; `cluster.clj:352` `mcp-project` and `:279` `project-next-prepl-value!` move their floor/blob selection into the show stage. Add the §7 landing attributes (`:seon.cluster.eval/changed`, `removed`, `registered-keys`, `:seon.eval/feedback-shown`, `:seon.fn/malformed-spec`) with their writers | ~180 (range) | mcp bridge tests | `seon.dev.mcp-bridge-test`, a regression from `mcp-equals-agent-turn` |
+| **P1** turn prelude (rev 5, owner) | Context = the opening (rendered once, cached by content digest, re-rendered only when a read's evidence changed) + the stored shown text of prior evaluations; a refresh check per distinct read (~0.1 ms) re-renders only the changed ones; `declared-sources`' walk only for a changed opening unit. Targets: wake → provider request under 50 ms with no changed read, under 100 ms with one, a per-stage breakdown as data | the per-turn history re-render path, `:seon.turn/changes` (no consumer) | turn/prompt tests | armed timing proofs on root's real history (149 evaluations) |
 | **S7a** turn prelude | `turn.clj` `latest-evaluations` :2041 pulls the read evidence of the kept evaluations only (`turn-overhead`: 3.5 s → 0.46 s on root's history); root's patches for the stored-plan producer, `of-agent` and per-render `call-reach` follow the task | — | — | `seon.turn-test` refresh cases, `turn-overhead` |
 | **S8** input and render | `agent.clj:659` `segmenter`, `turn.clj` `declared-sources`, `call-turn`, `system-turn` :2230, `web.clj:1384` `render-source-call`, `eval.clj:4059` `evaluated-source` use `seon.sci.forgive` / `render-request` | `reply.clj` (426), `turn.clj` `read-source`…`planned-sources` and `preview-sources` (8 defns, 140) | `(:require [seon.cluster.reply …])` in `turn.clj:16`, `ai_test`, `cluster/turn_test`, `repl_parity_test`; `reply_test` deleted (481) | `seon.render.transcript-test`, `prompt_test`, `loop_proof_test` |
 | **S8a** analyzer hooks | Apply `analyzer-expansion-hooks.patch`; `expansion-hooks` moves into `seon.fn.analyzer` | the prototype's copy | — | `b2-generated-definition-hook` becomes the stored-entity and reacquisition proof |
@@ -454,7 +467,9 @@ callable (it is not a compatibility delegate: nothing new calls it).
 | `my.program` removal path | ~30 | 0 | estimate |
 | Caller conversions (46 src references), publicised privates, the §7 attributes' writers | 0 | ~120 | estimate |
 | Root-owned patches (§7.2) | ≈ 15 | ≈ 105 | measured |
-| **src + script** | **≈ 2,711** | **≈ 2,336** | **≈ −375** |
+| Rev 5: the gate and feedback stage deleted (V1) | ≈ 370 | 0 | measured |
+| Rev 5: the Var render pair and digest-keyed results read (V1) | 0 | ≈ 150 | estimate |
+| **src + script** | **≈ 3,081** | **≈ 2,486** | **≈ −595** |
 | Resources | ≈ 130 | 228 + ~20 | ≈ +120 |
 | Tests: `reply_test` 481, `restoration_test` 132, reader facts ~110, eval/accretion ~130 / proofs as tests ~500, conversions ~60 | ≈ 853 | ≈ 560 | ≈ −290 |
 | SCI fork | 32 | 107 (+139 test) | measured |
