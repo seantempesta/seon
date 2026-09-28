@@ -1,0 +1,9 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "#:seon.repl{:value {:publication\n   {:published 7,\n    :adopted 7,\n    :identities\n      [[:seon.fn/sym seon.fn.analyzer/classpath-source]\n       [:seon.fn/sym seon.fn.analyzer/source-container]\n       [:seon.fn/sym seon.fn.analyzer/record-entry-digests!]\n       [:seon.fn/sym seon.fn.analyzer/stale-cache-entries]\n       [:seon.fn/sym seon.fn.analyzer/invoke-kondo]\n       [:seon.fn/sym seon.fn.analyzer/analyze-dependencies!]\n       [:seon.fn/sym seon.fn.analyzer/ensure-dependency-analysis!]]},\n :jar\n   {:recording\n      [{:namespaces 1, :hashes 1}\n       {:namespaces 10, :hashes 1}\n       {:namespaces 100, :hashes 1}],\n    :checking\n      [{:namespaces 1,\n        :parent-stale 0,\n        :candidate-stale 1,\n        :hashes 1,\n        :ms 13.766291}\n       {:namespaces 10,\n        :parent-stale 0,\n        :candidate-stale 10,\n        :hashes 1,\n        :ms 13.04175}\n       {:namespaces 100,\n        :parent-stale 0,\n        :candidate-stale 100,\n        :hashes 1,\n        :ms 17.041792}]}}, :findings [{:seon.repl/finding :slow, :seon.eval/duration-ms 1436, :seon.repl/fix \"Over one second in the evaluation you asked for: find what the work is proportional to (the store? the program? the call count?) and remove it; (seon.profile/summary (seon.profile/cells) 5) ranks the armed functions by time.\"}], :result result/e2003480b82df, :ms 1436}"
+    }
+  ],
+  "isError": false
+}

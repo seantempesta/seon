@@ -1,0 +1,9 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "#:seon.repl{:value {:rebuild\n   {:parent-ms 5.100042,\n    :candidate-ms 53.16175,\n    :parent-stale-entry? true,\n    :candidate-stale-entry? false,\n    :same-caller-facts? true,\n    :rebuilt\n      [\"/Users/sean/src/seon/data/source/pins/reference-code-datahike/05a02804e06bb5fef922b32ab6ba5818957664ea/src/datahike/writer.cljc\"]},\n :warm\n   [[{:label :parent, :ms 4.060667, :rebuilt []}\n     {:label :candidate, :ms 3.765417, :rebuilt []}]\n    [{:label :parent, :ms 3.72725, :rebuilt []}\n     {:label :candidate, :ms 3.321208, :rebuilt []}]\n    [{:label :parent, :ms 3.507667, :rebuilt []}\n     {:label :candidate, :ms 3.485291, :rebuilt []}]]}, :result result/e8e32719a8e3f, :ms 220}"
+    }
+  ],
+  "isError": false
+}

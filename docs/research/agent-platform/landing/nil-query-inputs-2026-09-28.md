@@ -1,6 +1,8 @@
 ---
 title: Refuse nil query bindings before index work
 date: 2026-09-28
+type: research
+status: complete
 ---
 
 # Refuse nil query bindings before index work
@@ -36,8 +38,11 @@ nested installed owners remained armed. Valid-input timings are single paired
 samples, not a claimed throughput gain. No probe transaction or store bytes were
 added by the read itself; ordinary MCP evaluation recording is separate.
 Exact probes and complete recorded envelopes are in tmp/astra-analysis-nil-20260928.
-No default Var was replaced. A later 1/10/100 profiling attempt was interrupted
-by root's restart and is not claimed as evidence.
+No default Var was replaced. After the restart, the 1/10/100-input probe
+completed: parent index executions were one per query and candidate executions
+were zero, with both refusing the nil binding. Collector-inclusive parent times
+were 14.326/11.962/11.394 ms, candidate 9.685/8.394/8.461 ms. The complete
+envelope is nil-count-result.json beside the probe.
 
 ## Verification and foreign boundary
 

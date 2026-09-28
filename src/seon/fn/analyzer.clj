@@ -277,19 +277,23 @@
 (defn- classpath-source
   "The directory file this JVM's classpath loads for `namespace-name`: a
   first-party file (the `:test` alias's `.` puts `dev_cache.clj` there) or a
-  directory dependency's (`:local/root`, a git dep), never a list. A jar entry
-  answers nil: kondo's skip mark owns jars (`ensure-dependency-analysis!`),
-  while a directory carries no mark and is re-read from its current bytes
-  (clj_kondo/impl/core.clj:489-506 marks only `.jar` paths). The system loader
-  answers, not a thread's context loader (`seon.sci.eval`)."
-  {:malli/schema [:=> [:cat :symbol] [:maybe :string]]}
+  directory dependency's (`:local/root`, a git dep), or the jar containing
+  the namespace. The system loader answers, not a thread's context loader
+  (`seon.sci.eval`). Content checks cover jars as well as directory files;
+  clj-kondo's path-only skip mark is not proof of their bytes. Returns an
+  empty vector when the namespace has no source on this classpath."
+  {:malli/schema [:=> [:cat :symbol] [:vector :string]]}
   [namespace-name]
   (let [base (-> (str namespace-name) (str/replace "-" "_") (str/replace "." "/"))]
-    (some (fn [extension]
+    (into [] (take 1)
+          (keep (fn [extension]
             (when-let [url (.getResource (ClassLoader/getSystemClassLoader) (str base extension))]
-              (when (= "file" (.getProtocol url))
-                (.getCanonicalPath (io/file (.toURI url))))))
-          [".clj" ".cljc"])))
+              (case (.getProtocol url)
+                "file" (.getCanonicalPath (io/file (.toURI url)))
+                "jar" (.getCanonicalPath
+                       (io/file (.toURI (.getJarFileURL ^java.net.JarURLConnection (.openConnection url)))))
+                nil)))
+          [".clj" ".cljc"]))))
 
 (defn- file-digest
   "The SHA-256 hex digest of `path`'s bytes."
@@ -308,21 +312,34 @@
   [cache-file]
   (str cache-file ".sha256"))
 
+(defn- source-container
+  "The file whose bytes own an analysis: the source file, or its containing jar."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [filename]
+  (if-let [jar-end (str/index-of filename ".jar:")]
+    (subs filename 0 (+ jar-end 4))
+    filename))
+
 (defn- record-entry-digests!
-  "Record, beside each cache entry this run wrote, the digest of the bytes it
-  was built from: the file clj-kondo linted (a mirror carries the captured
-  text). A later analysis judges the entry by content, so a commit that moves
-  the checkout (a new archive path) invalidates no unchanged namespace."
+  "Record each namespace's content proof beside kondo's entry. Hash each
+  distinct source or jar once, including when it defines many namespaces."
   {:malli/schema [:=> [:cat :string :map] :nil]}
   [root result]
-  (kondo.cache/with-thread-lock
-    (kondo.cache/with-cache root 6
-      (doseq [{namespace-name :name filename :filename} (:namespace-definitions (:analysis result))
-              :when (and (symbol? namespace-name) (string? filename) (.isFile (io/file filename)))
-              :let [language (if (str/ends-with? filename ".cljc") :cljc :clj)
-                    cache-file (kondo.cache/cache-file root language namespace-name)]
-              :when (.isFile ^java.io.File cache-file)]
-        (spit (entry-digest-file (.getPath ^java.io.File cache-file)) (file-digest filename)))))
+  (let [entries (into #{}
+                      (keep (fn [{namespace-name :name filename :filename}]
+                              (when (and (symbol? namespace-name) (string? filename))
+                                [(kondo.cache/cache-file root
+                                   (if (str/ends-with? filename ".cljc") :cljc :clj) namespace-name)
+                                 (source-container filename)])))
+                      (:namespace-definitions (:analysis result)))
+        digests (into {} (comp (map second) (distinct)
+                              (filter #(.isFile (io/file %)))
+                              (map #(vector % (file-digest %)))) entries)]
+    (kondo.cache/with-thread-lock
+      (kondo.cache/with-cache root 6
+        (doseq [[^java.io.File cache-file source] entries
+                :when (and (.isFile cache-file) (contains? digests source))]
+          (spit (entry-digest-file (.getPath cache-file)) (get digests source))))))
   nil)
 
 (defn- stale-cache-entries
@@ -334,14 +351,14 @@
   `load-when-missing`), and only for namespaces the linted files use, so
   only those entries are examined — the work is proportional to the analysis,
   not to the cache. An entry is stale when it was built from other bytes than
-  its source now holds (the source was modified after the entry was written:
-  the file's own modification time is the stat check), when its source is gone
-  or is the stdin buffer, when a namespace this analysis defines now lives in
-  another file, or when its source sits inside the checkout outside every
-  declared source and dependency root and this analysis does not define it. Jar entries are immutable by
-  coordinate; kondo names one `<jar>:<entry>` only under canonical paths
-  (clj_kondo/impl/core.clj:289-291), so `seon.fn/dependency-analysis-command`
-  writes them that way — a bare entry name reads as an absent source. Each stale entry names its checkout source when it has one, and a
+  its source now holds, or has no recorded content proof for its current
+  source. Timestamps never override a differing digest. Also stale when its source is gone
+  or is the stdin buffer. In the shared cache, a namespace absent from both
+  this analysis and the current classpath is foreign; an old cache entry is
+  not authority to restore a dependency the classpath no longer loads.
+  Kondo names jar sources `<jar>:<entry>` under canonical paths
+  (clj_kondo/impl/core.clj:289-291); hash the containing jar once, not once per
+  namespace. Each stale entry names its current source when it has one, and a
   namespace this run does not define (first-party or a directory dependency's)
   names the file this classpath loads (`classpath-source`), so the caller can rebuild it.
 
@@ -354,18 +371,15 @@
      [::examined :int]
      [::stale [:vector [:map [::cache-file :string] [::namespace :symbol]
                         [::language [:enum :clj :cljc :cljs]]
-                        [::reason [:enum ::stdin ::source-absent ::moved ::foreign ::modified]]
+                        [::reason [:enum ::stdin ::source-absent ::foreign ::modified]]
                         [::source {:optional true} :string]]]]]]}
   [root shared? result]
-  (let [checkout (.getCanonicalFile (io/file "."))
-        {::keys [source-roots dependency-roots]} (roots-of (.getPath checkout))
-        prefix (str (.getPath checkout) java.io.File/separator)
-        analysis (:analysis result)
+  (let [analysis (:analysis result)
         defined (into {}
                       (keep (fn [{namespace-name :name filename :filename}]
                               (when (string? filename)
                                 [namespace-name
-                                 (.getCanonicalPath (io/file (analyzed-source-path filename)))])))
+                                 (.getCanonicalPath (io/file filename))])))
                       (:namespace-definitions analysis))
         used (into (set (keep :to (:namespace-usages analysis)))
                    (keep :to (:var-usages analysis)))
@@ -376,56 +390,44 @@
               :let [file (kondo.cache/cache-file root language namespace-name)]
               :when (and (.isFile file)
                          (not (java.nio.file.Files/isSymbolicLink (.toPath file))))]
-          [namespace-name language file])]
+          [namespace-name language file
+           (:filename (with-open [input (io/input-stream file)]
+                        (transit/read (transit/reader input :json))))])
+        cached-sources (into {} (keep (fn [[namespace-name _ _ filename]]
+                                        (when (string? filename)
+                                          [namespace-name (analyzed-source-path (source-container filename))]))) examined)
+        current-files (into {} (map (fn [namespace-name]
+                                     [namespace-name
+                                      (or (some-> (get defined namespace-name) source-container)
+                                          (first (classpath-source namespace-name))
+                                          (when-not shared? (get cached-sources namespace-name)))]))
+                            (distinct (map first examined)))
+        digests (into {} (comp (filter some?) (distinct)
+                              (filter #(.isFile (io/file %)))
+                              (map #(vector % (file-digest %))))
+                      (vals current-files))]
     {::examined (count examined)
      ::stale
      (into []
-        (for [[namespace-name language ^java.io.File file] examined
-              :let [filename (:filename (with-open [input (io/input-stream file)]
-                                          (transit/read (transit/reader input :json))))]
-              :when (and (string? filename) (not (str/includes? filename ".jar:")))
-              :let [source (io/file (analyzed-source-path filename))
-                    path (.getCanonicalPath source)
-                    current (get defined namespace-name)
-                    ;; Content decides first: an entry built from the bytes
-                    ;; its namespace's current file holds answers for them,
-                    ;; wherever that file now lives (a new commit archive)
-                    ;; and whatever its modification time.
-                    current-file (or current (classpath-source namespace-name))
+        (for [[namespace-name language ^java.io.File file filename] examined
+              :when (string? filename)
+              :let [current-file (get current-files namespace-name)
                     recorded (io/file (entry-digest-file (.getPath file)))
-                    same-bytes? (and current-file (.isFile recorded) (.isFile (io/file current-file))
-                                     (= (slurp recorded) (file-digest current-file)))
+                    current-source? (contains? digests current-file)
+                    same-bytes? (and current-source? (.isFile recorded)
+                                     (= (slurp recorded) (get digests current-file)))
                     reason (cond
                              same-bytes? nil
                              (= "<stdin>" filename) ::stdin
-                             (not (.isFile source)) ::source-absent
-                             (and current (not= current path)) ::moved
-                             ;; Foreign is a checkout file this run did not
-                             ;; lint: the entry for a namespace this run defines
-                             ;; at this path was just written from its bytes.
-                             (and shared? (nil? current)
-                                  (str/starts-with? path prefix)
-                                  (not (under? source-roots path))
-                                  (not (under? dependency-roots path))
-                                  (not= path (classpath-source namespace-name))) ::foreign
-                             (> (.lastModified source) (.lastModified file)) ::modified)
-                    ;; A namespace this run does not define rebuilds from the
-                    ;; file this classpath loads: the shared cache outlives the
-                    ;; checkout, mirror and dependency revision that wrote it.
-                    ;; A directory dependency's entry older than its source (a
-                    ;; submodule bump) was deleted unrebuilt before, so boot
-                    ;; refused every call into it (start --head 5bed888d0).
-                    rebuilt (if (and (#{::modified ::moved} reason)
-                                     (or (not shared?) (under? source-roots path)))
-                              path
-                              (when (nil? current)
-                                (classpath-source namespace-name)))]
+                             current-source? ::modified
+                             (and shared? (nil? current-file)) ::foreign
+                             :else ::source-absent)]
               :when reason]
           (cond-> {::cache-file (.getPath file)
                    ::namespace namespace-name
                    ::language language
                    ::reason reason}
-            rebuilt (assoc ::source rebuilt))))}))
+            current-source? (assoc ::source current-file))))}))
 
 (declare unanalyzed-namespaces)
 
@@ -473,7 +475,7 @@
         ;; publication roots, or a directory dependency's) is analyzed from
         ;; the file the classpath loads.
         classpath-files (when root
-                      (into [] (keep classpath-source)
+                      (into [] (comp (mapcat classpath-source) (distinct))
                             (unanalyzed-namespaces root (:analysis first-run))))
         result (if (seq classpath-files)
                  (do (kondo-run! (assoc options :lint classpath-files))
@@ -545,15 +547,17 @@
 
 (defn analyze-dependencies!
   "Fill the checkout's clj-kondo cache from `dependency-entries`. Kondo
-  skip-marks each jar (clj_kondo/impl/core.clj:489-506). `--skip-lint` would
-  only copy configs (clj_kondo/core.clj:126-129); canonical paths name a jar
-  entry `<jar>:<entry>` (impl/core.clj:289-291), which `stale-cache-entries` keeps."
+  skip-marks each jar (clj_kondo/impl/core.clj:489-506). Record content digests
+  for the entries it actually writes; ordinary analysis validates reached
+  entries against current source or jar bytes, even when a skip mark exists."
   {:malli/schema [:=> [:cat] :map]}
   []
-  (select-keys (clj-kondo/run! {:lint (dependency-entries) :dependencies true :parallel true :copy-configs true
-                                :config-dir config-directory :cache-dir cache-directory
-                                :config {:output {:canonical-paths true}}})
-               [:summary]))
+  (let [result (clj-kondo/run! {:lint (dependency-entries) :dependencies true :parallel true :copy-configs true
+                               :config-dir config-directory :cache-dir cache-directory
+                               :config (assoc-in analysis-config [:output :canonical-paths] true)})]
+    (record-entry-digests! (.getPath ^java.io.File
+                           (kondo.core/resolve-cache-dir config-directory true cache-directory)) result)
+    (select-keys result [:summary])))
 
 (defn- unanalyzed-jars
   "Classpath jars kondo holds no skip mark for. A mark is named
@@ -574,16 +578,18 @@
 (defn ensure-dependency-analysis!
   "Boot's fill of the dependency analysis program analysis reads: run
   `analyze-dependencies!` in this JVM when any classpath jar is unmarked (an
-  empty cache after a nuke, a fresh root, a new coordinate); nil when every jar
+  empty cache after a nuke, a fresh root, a new coordinate); an empty report when every jar
   is marked. A directory entry carries no mark: an analysis reaching one of
   its namespaces with no current entry rebuilds it from the file the classpath
-  loads (`classpath-source`)."
+  loads (`classpath-source`). Existing entries, including jars, are checked
+  by content when analysis reaches them; a skip mark only avoids an eager fill."
   {:seon/tasks #{"547fc42c47a5"}
-   :malli/schema [:=> [:cat] [:maybe [:map [::unanalyzed-jars [:vector :string]] [:summary :map]]]]}
+   :malli/schema [:=> [:cat] [:map [::unanalyzed-jars {:optional true} [:vector :string]] [:summary {:optional true} :map]]]}
   []
   (let [missing (unanalyzed-jars cache-directory (dependency-entries))]
-    (when (seq missing)
-      (assoc (analyze-dependencies!) ::unanalyzed-jars missing))))
+    (if (seq missing)
+      (assoc (analyze-dependencies!) ::unanalyzed-jars missing)
+      {})))
 
 (defn forget-namespaces!
   "Remove superseded declarations from one explicitly owned resolver cache."
