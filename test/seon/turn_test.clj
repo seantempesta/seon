@@ -1023,17 +1023,6 @@
                       [:seon.cluster.eval/id
                        (turn/receipt-identity "generated-run" 0)]))
           "the durable generated form and running evaluation are atomic")
-      (is (= ::turn/generated-prefix-unsettled
-             (::turn/rule
-              (transact-or-refusal
-               connection
-               (turn/append-generated-tx
-                {::turn/id "generated-run"
-                 :seon.db.process/id "generated-process"
-                 :seon.cluster.eval/at t0
-                 :seon.cluster.eval/ordinal 1
-                 :seon.cluster.eval/source "(dir 'my.turn)"
-                 :seon.ns/name 'my.agents.generated})))))
       (support/transacted!
               connection
               (turn/receipt-settle-tx

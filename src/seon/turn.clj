@@ -805,13 +805,12 @@
          (if (::rule (ex-data refused)) [] (throw refused)))))
 
 (defn append-generated-call
-  "Append exactly one system-authored form to an open generated turn.
+  "Append one system-authored form to an open generated turn.
 
-  The requested ordinal must equal the number of forms already present. For
-  every noninitial append, the preceding ordinal must already have a terminal
-  receipt. Initial and successor forms use the same `:generate` transition;
-  those facts make prefix growth atomic and prevent both gaps and generation
-  ahead of execution. A digest-backed run cannot enter this path."
+  The requested ordinal must equal the number of forms already present, so
+  forms append without gaps. An opening appends all its forms in the one
+  transaction that settles them (`generate-turn`). A digest-backed run cannot
+  enter this path."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.turn/generated-form-request]
                   :seon.store/transaction-data]}
@@ -829,27 +828,13 @@
                           :in $ ?run
                           :where [?form :seon.cluster.eval/run ?run]]
                         db run-eid)
-                  0))
-        prior-terminal?
-        (or (zero? ordinal)
-            (some?
-             (db/q '[:find ?receipt .
-                    :in $ ?run ?ordinal
-                    :where
-                    [?receipt :seon.cluster.eval/run ?run]
-                    [?receipt :seon.cluster.eval/ordinal ?ordinal]
-                    (or [?receipt :seon.eval/shown _]
-                        [?receipt :seon.cluster.eval/error _]
-                        [?receipt :seon.cluster.eval/interrupted-at _])]
-                  db run-eid (dec ordinal))))]
+                  0))]
     (when (some? (::reply-size held))
       (refuse! `append-generated-call ::plan-frozen request))
     (when-not (= :generate (:seon.turn.work/situation held))
       (refuse! `append-generated-call ::not-generate-situation request))
     (when-not (= expected ordinal)
       (refuse! `append-generated-call ::generated-ordinal request))
-    (when-not prior-terminal?
-      (refuse! `append-generated-call ::generated-prefix-unsettled request))
     (receipt-start-call
      db
      (cond-> {::id id
@@ -2398,17 +2383,17 @@
 
 
 (defn close-folded-call
-  "Close a replied run inside the settlement that gave its last form a terminal
-  fact, decided at the writer on the value after the batch's receipts, so a
-  trivial run commits twice rather than three times. A generated run (no reply
-  size), a run with a form still to evaluate, and an agent holding an issue keep
-  the separate close pass: the issue's tests must see the settled rows first."
+  "Close a replied or generated run inside the settlement that gave its last
+  form a terminal fact, decided at the writer on the value after the batch's
+  receipts, so the run is one transaction. A run with a form still to
+  evaluate, and an agent holding an issue, keep the separate close pass: the
+  issue's tests must see the settled rows first."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        [:map [::id ::id] [:seon.agent/id :seon.agent/id]]]
                   :seon.store/transaction-data]}
   [database {run-id ::id agent-id :seon.agent/id}]
-  (let [run (db/pull database [::reply-size ::closed-tx] [::id run-id])]
-    (if (or (not (::reply-size run))
+  (let [run (db/pull database [::reply-size ::closed-tx :seon.turn.work/situation] [::id run-id])]
+    (if (or (not (or (::reply-size run) (= :generate (:seon.turn.work/situation run))))
             (::closed-tx run)
             (next-ordinal database run-id)
             (db/q '[:find ?issue . :in $ ?id :where [?agent :seon.agent/id ?id]
@@ -5262,10 +5247,11 @@
             ;; starting namespace are the submission's, as its open writes them.
             evaluations (if submission
                           (into [] (map-indexed
-                                    (fn [ordinal form]
-                                      {:seon.cluster.eval/ordinal ordinal
-                                       :seon.cluster.eval/source (:seon.cluster.eval/source form)
-                                       :seon.cluster.eval/ns {:seon.ns/name (or (:seon.ns/name form) (:seon.ns/name submission))}}))
+                                    (fn [i form]
+                                      (cond-> {:seon.cluster.eval/ordinal (+ first-ordinal i)
+                                               :seon.cluster.eval/source (:seon.cluster.eval/source form)
+                                               :seon.cluster.eval/ns {:seon.ns/name (or (:seon.ns/name form) (:seon.ns/name submission))}}
+                                        (:seon.eval/origin form) (assoc :seon.eval/origin (:seon.eval/origin form)))))
                                 (:seon.turn/sources submission))
                           (fold-evaluations database run-id))
             evaluated
@@ -5418,7 +5404,9 @@
         (report :closed 0)))))
 
 (defn- generate-turn
-  "Append one opening form from the shared system-turn source generator."
+  "Run the opening the shared system-turn source generator declares: every
+  remaining form appended, evaluated and settled in one transaction that
+  closes the run."
   {:malli/schema
    [:=> [:cat [:map
                [:seon.turn.loop/cluster :seon.turn.loop/cluster]
@@ -5461,7 +5449,10 @@
           (:seon.db/invalid-read declared)
           (:seon.schema/expected-value declared))
               declared
-              (nth (system-plan database (:seon.turn/forms declared) {}) ordinal nil))))]
+              ;; every form the opening has left: they append and settle in
+              ;; the run's one transaction
+              (let [plan (vec (system-plan database (:seon.turn/forms declared) {}))]
+                (subvec plan (min ordinal (count plan)))))))]
     (cond
       (or (:seon.turn.loop/phase-failed entry) (or (:seon.cluster.reply/no-forms entry)
           (:seon.render.walk/missing-lookup entry)
@@ -5484,7 +5475,7 @@
       ;; Creation and later system turns derive their sources from the same
       ;; record walk. resume-turn below enters evaluate-sources, which captures
       ;; read evidence before the ordinary settlement writer persists it.
-      (nil? entry)
+      (empty? entry)
       (let [terminal
             (db/transact!
              connection
@@ -5503,42 +5494,36 @@
           (report :closed 0)))
 
       :else
-      (let [appended
-            (db/transact!
-             connection
-             (append-generated-tx
-              (cond-> {:seon.turn/id run-id
-                       :seon.db.process/id process
-                       :seon.cluster.eval/at now
-                       :seon.cluster.eval/ordinal ordinal
-                       ;; THE COMMENT AND THE FORM ARE TWO FIELDS. A generated
-                       ;; opening reads back through the one REPL grammar, so
-                       ;; its prose sits above the prompt exactly like an
-                       ;; agent's own.
-                       :seon.cluster.eval/source
-                       (:seon.cluster.eval/source entry)
-                       :seon.ns/name
-                       (sci.eval/agent-namespace (db/db connection) agent-id)}
-                (:seon.eval/origin entry)
-                (assoc :seon.eval/origin (:seon.eval/origin entry))
-                (:seon.cluster.eval/comment entry)
-                (assoc :seon.cluster.eval/comment
-                       (:seon.cluster.eval/comment entry)))))]
-        (if (or (:seon.db.write.attempt/request-id appended)
-          (:seon.db/invalid-read appended)
-          (:seon.schema/expected-value appended))
-          (do
-            (settle! {:seon.turn.loop/cluster cluster
-                      :seon.turn.loop/now now
-                      :seon.agent/id agent-id
-                      :seon.turn/id run-id
-                      :seon.error/value appended})
-            (report :error 0 appended))
-          (resume-turn
-           (assoc request :seon.turn.loop/work
-                  (assoc work
-                         :seon.turn.work/situation :resume
-                         :seon.cluster.eval/ordinal ordinal))))))))
+      ;; THE OPENING IS ONE RUN, ONE TRANSACTION: its forms append in the
+      ;; settlement that records their values and closes the run
+      ;; (`with-submission`, `close-folded-call`), the fold's one path.
+      (let [namespace-name (sci.eval/agent-namespace (db/db connection) agent-id)
+            forms (map-indexed (fn [i form] [(+ ordinal i) form]) entry)]
+        (resume-turn
+         (assoc request
+                :seon.turn.loop/cluster
+                (assoc cluster :seon.turn.loop/submission
+                       {:seon.db/tx-data
+                        (into [] (mapcat
+                                  (fn [[n form]]
+                                    (append-generated-tx
+                                     (cond-> {:seon.turn/id run-id
+                                              :seon.db.process/id process
+                                              :seon.cluster.eval/at now
+                                              :seon.cluster.eval/ordinal n
+                                              ;; the comment and the form are two fields: a
+                                              ;; generated opening reads back through the one
+                                              ;; REPL grammar, its prose above the prompt
+                                              :seon.cluster.eval/source (:seon.cluster.eval/source form)
+                                              :seon.ns/name namespace-name}
+                                       (:seon.eval/origin form) (assoc :seon.eval/origin (:seon.eval/origin form))
+                                       (:seon.cluster.eval/comment form)
+                                       (assoc :seon.cluster.eval/comment (:seon.cluster.eval/comment form))))))
+                              forms)
+                        :seon.turn/sources (mapv (fn [[_ form]] (select-keys form [:seon.cluster.eval/source :seon.eval/origin])) forms)
+                        :seon.ns/name namespace-name})
+                :seon.turn.loop/work
+                (assoc work :seon.turn.work/situation :resume :seon.cluster.eval/ordinal ordinal)))))))
 
 (defn- episode-exhausted!
   "Store and deliver the fault of a pass that spent the agent's last episode run.
