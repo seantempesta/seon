@@ -14,6 +14,7 @@
             [seon.profile :as profile]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
+            [seon.schema.edn :as schema.edn]
             [seon.schema.internal :as internal]
             [seon.test-support :as support]))
 
@@ -329,6 +330,32 @@
     (is (= ::absent (:seon.schema/missing-reference refusal)))
     (is (= {:seon.config/dial true}
            (schema.datahike/storable-properties-in projection ::present)))))
+
+(deftest a-reference-property-is-stored-as-its-effective-function
+  ;; CLASS: the lift stored a schema row's ROOT properties only: a property
+  ;; declared on an :and arm or inherited through a reference was absent from
+  ;; its row, and a property naming a function was a value no writer could
+  ;; check. A property whose attribute declares :seon.fn/reference-to is now
+  ;; the nearest declaration along Malli's reference chain, stored as a ref to
+  ;; that function by identity; every other property stays the row's own.
+  (let [named (fn [f] {:seon.fn/sym f})
+        projection (schema/build-projection
+                    (merge (schema.edn/packaged-forms)
+                           {::renders [:and {:seon.fn/reference-to :seon.fn/sym} :seon.db/ref]
+                            ::shown [:and {:seon.fn/reference-to :seon.fn/sym} :seon.db/ref]
+                            ::base [:map {::renders 'probe.render/base ::shown 'probe.render/base-shown}
+                                    [::x ::x]]
+                            ::x :int
+                            ::inherits [:and ::base [:map [::x ::x]]]
+                            ::arm [:and ::base [:map {::renders 'probe.render/arm} [::x ::x]]]
+                            ::alias ::arm
+                            ::plain [:map [::x ::x]]}))
+        lifted #(select-keys (schema.datahike/storable-properties-in projection %) [::renders ::shown])]
+    (is (= {::renders (named 'probe.render/base) ::shown (named 'probe.render/base-shown)} (lifted ::inherits)))
+    (is (= {::renders (named 'probe.render/arm) ::shown (named 'probe.render/base-shown)}
+           (lifted ::arm) (lifted ::alias))
+        "the later :and arm wins per property; an alias reads its target")
+    (is (= {} (lifted ::plain)))))
 
 (deftest compiled-storage-navigation-reuses-retained-roots
   ;; Navigation reads the projection's retained compiled roots: every lookup

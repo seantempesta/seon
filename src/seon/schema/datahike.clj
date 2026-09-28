@@ -271,14 +271,46 @@
    (when (contains? (:seon.schema.projection/forms projection) attr)
      (declared-storable? projection attr))))
 
+(defn- chain-properties
+  "Property maps along Malli's reference chain, nearest first: the schema's
+  own, its type's, then a registry pointer's or `:ref`'s target
+  (`m/deref`, malli/core.cljc:2864-2870) and an `:and`'s arms with the later
+  arm first, as `mu/merge` lets the later arm win (malli/util.cljc:77, 96)."
+  {:malli/schema [:=> [:cat [:fn malli.core/schema?]] [:vector [:maybe :map]]]}
+  [compiled]
+  (into [(m/properties compiled) (m/type-properties compiled)]
+        (cond
+          (m/-ref-schema? compiled) (chain-properties (m/deref compiled))
+          (= :and (m/type compiled)) (into [] (mapcat chain-properties) (rseq (vec (m/children compiled))))
+          :else [])))
+
+(defn declared-reference
+  "The function `property` names for `compiled`'s values, own or inherited.
+
+  The nearest value along Malli's reference chain (`chain-properties`), when
+  it is a qualified symbol, else nil. A render pair resolves this way, so a
+  derived error takes its own arm's pair before `:seon.error/base`'s."
+  {:malli/schema [:=> [:cat [:fn malli.core/schema?] :qualified-keyword] [:maybe :qualified-symbol]]}
+  [compiled property]
+  (let [found (some #(get % property) (chain-properties compiled))]
+    (when (qualified-symbol? found) found)))
+
 (defn storable-properties-in
   "Namespaced properties whose own declarations are database-storable.
+
+   A property whose attribute declares `:seon.fn/reference-to` names a
+   function: it is stored as its EFFECTIVE value along the reference chain
+   (`declared-reference`), a ref to the entity that identity attribute
+   names, so the writer refuses a declaration whose function is absent and
+   \"which schemas render with f\" is one AVET read. Every other property is
+   the schema's own.
 
    A key absent from the projection refuses by name: `mr/schema` answers nil
    for it, which Malli then reported as an anonymous invalid nil schema."
   {:malli/schema [:=> [:cat :map :keyword] :map]}
   [projection schema-key]
-  (let [compiled (mr/schema (:seon.schema.projection/registry projection) schema-key)]
+  (let [registry (:seon.schema.projection/registry projection)
+        compiled (mr/schema registry schema-key)]
     (when-not compiled
       (throw (ex-info (str "Missing schema declaration " schema-key
                            ": the supplied projection does not declare it.")
@@ -286,11 +318,20 @@
                        :seon.schema/key schema-key
                        :seon.schema/missing-reference schema-key
                        :seon.schema/missing-reference-namespace (namespace schema-key)})))
-    (into {}
-          (filter (fn [[property v]]
-                    (and (qualified-keyword? property) (some? v)
-                         (storable-attribute-in? projection property))))
-          (m/properties compiled))))
+    (let [storable? #(and (qualified-keyword? %) (storable-attribute-in? projection %))
+          identity-of #(when-let [identity-attribute (and (qualified-keyword? %)
+                                                          (:seon.fn/reference-to (some-> (mr/schema registry %) m/properties)))]
+                         (when (storable? %) identity-attribute))
+          references (into {}
+                           (keep (fn [property]
+                                   (when-let [identity-attribute (identity-of property)]
+                                     (when-let [function (declared-reference compiled property)]
+                                       [property {identity-attribute function}]))))
+                           (distinct (mapcat keys (chain-properties compiled))))]
+      (into references
+            (filter (fn [[property v]]
+                      (and (some? v) (storable? property) (not (identity-of property)))))
+            (m/properties compiled)))))
 
 (defn database-attributes-core-in
   "Entity members and independently persisted attributes, without metadata properties."
@@ -403,27 +444,16 @@
    (fn [[namespace-name local-name]]
      (symbol namespace-name local-name))})
 
-(defn- canonical-print-string
-  {:seon/tasks #{"befc26639ad0"}}
-  [value]
-  (binding [*print-length* nil
-            *print-level* nil
-            *print-meta* false
-            *print-readably* true
-            *print-dup* false
-            *print-namespace-maps* true]
-    (pr-str value)))
-
 (defn- storage-compare
   {:seon/tasks #{"befc26639ad0"}}
   [left right]
-  (compare (canonical-print-string left)
-           (canonical-print-string right)))
+  (compare (id/printed left)
+           (id/printed right)))
 
 (defn- reader-round-trips?
   [value]
   (try
-    (= value (edn/read-string (canonical-print-string value)))
+    (= value (edn/read-string (id/printed value)))
     ;; clojure.edn declares "not readable EDN" as a RuntimeException (EdnReader.java:130, :174-177); every other failure propagates.
     (catch RuntimeException _ false)))
 
@@ -452,7 +482,7 @@
 
 (defn- storage-string
   [value]
-  (canonical-print-string (storage-data value)))
+  (id/printed (storage-data value)))
 
 (defn- encode-call-output-in
   "Encode transaction data returned by one Datahike transaction function.

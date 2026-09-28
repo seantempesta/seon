@@ -11,6 +11,7 @@
             [clojure.set :as set]
             [seon.error :as error]
             [seon.fn :as function]
+            [seon.render.value :as render.value]
             [seon.issue :as issue]
             [seon.cluster.branch :as cluster.branch]
             [seon.cluster.message :as message]
@@ -275,7 +276,7 @@
                :seon.issue/problem
                (str "Repair the caller before retrying the retraction. Preserve its gate set. "
                     "Done condition: seon.program/unresolved-callers no longer names the caller. "
-                    (pr-str (filterv #(= caller (:seon.fn/sym %)) sites)))
+                    (render.value/bounded-text (filterv #(= caller (:seon.fn/sym %)) sites)))
                :seon.issue/status :open :seon.issue/severity :friction
                :seon.issue/functions #{[:seon.fn/sym value]}
                :seon.issue/detector [:seon.fn/sym detector]}

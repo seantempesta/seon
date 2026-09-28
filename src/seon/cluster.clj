@@ -1432,6 +1432,14 @@
   (or (schema-lookup-ref? value)
       (and (set? value) (seq value) (every? schema-lookup-ref? value))))
 
+(defn- identity-reference?
+  "Is `value`, under installed ref `attribute`, a nested entity map naming its
+  target by one identity attribute alone?"
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword :seon.schema/value] :boolean]}
+  [database attribute value]
+  (and (map? value) (= 1 (count value)) (qualified-keyword? (key (first value)))
+       (= :db.type/ref (get-in (:schema database) [attribute :db/valueType]))))
+
 (defn- as-schema-lookup-refs
   "Normalize a pulled ref value into the canonical lookup-ref shape.
 
@@ -1489,9 +1497,14 @@
    (keep
     (fn [{schema-key :seon.schema/key :as desired}]
       (let [selector (mapv (fn [[attribute value]]
-                             (if (schema-reference-valued? value)
-                               {attribute [:seon.schema/key]}
-                               attribute))
+                             (cond
+                               (schema-reference-valued? value) {attribute [:seon.schema/key]}
+                               ;; A ref the bridge writes as a nested identity
+                               ;; map (a render pair's `{:seon.fn/sym f}`) reads
+                               ;; back through that identity, so a converged
+                               ;; row compares equal.
+                               (identity-reference? db attribute value) {attribute (vec (keys value))}
+                               :else attribute))
                            desired)
             pulled (some-> (db/pull db selector
                                     [:seon.schema/key schema-key])
@@ -1984,7 +1997,7 @@
 
               (> (count (:seon.source/recorded-digests currentness)) 1)
               (str "incoherent (multiple recorded source digests "
-                   (pr-str (:seon.source/recorded-digests currentness))
+                   (render.value/bounded-text (:seon.source/recorded-digests currentness))
                    ")")
 
               :else
