@@ -1730,16 +1730,20 @@
   cache in its own environment reference. A fixture branch cannot replace the
   parent's `::packages`, and the fork's entries die with its context. Forks
   on the same branch share one cache. No registry beside the context holds
-  it. Publication never holds a lock while deriving."
+  it. Publication never holds a lock while deriving. A ctx carrying no
+  projection state (a program base from `seon.sci.eval/base-ctx`, never
+  forked into a world) has nowhere to share one: its call gets a cache of its
+  own, as a fork on another branch does."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx] :seon.render/cache]}
   [ctx]
   (let [state (:seon.sci.eval/projection-state ctx)
         scope (branch-scope ctx)
         own? (fn [cache]
-               (and cache (= scope (select-keys @cache branch-scope-keys))))
-        current (:seon.render/cache @state)]
-    (if (own? current)
-      current
+               (and cache (= scope (select-keys @cache branch-scope-keys))))]
+    (cond
+      (nil? state) (atom scope)
+      (own? (:seon.render/cache @state)) (:seon.render/cache @state)
+      :else
       (:seon.render/cache
        (swap! state #(if (own? (:seon.render/cache %))
                        %

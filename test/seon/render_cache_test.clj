@@ -7,6 +7,7 @@
             [seon.env :as env]
             [seon.render :as render]
             [seon.render.web :as web]
+            [seon.sci.eval :as sci.eval]
             [seon.test-support :as support]))
 
 (defn- root-render-state
@@ -96,3 +97,16 @@
             (is (not-any? #(= fork-basis (:seon.render.package/basis-transaction %))
                           (vals (::web/packages @parent-cache))))))
         (finally (agent/release-context! fork))))))
+
+(deftest a-base-context-renders-with-a-cache-of-its-own
+  ;; Class regression: `shared-cache` dereferenced a nil projection state for
+  ;; a program base from seon.sci.eval/base-ctx and threw a
+  ;; NullPointerException out of the render walk (default, 2026-09-27).
+  (support/with-database
+    (fn [connection]
+      (let [base (sci.eval/base-ctx @connection)
+            cache (render/shared-cache base)]
+        (is (nil? (:seon.sci.eval/projection-state base)))
+        (is (map? @cache) "a cache atom holding its branch scope")
+        (is (not (identical? cache (render/shared-cache base)))
+            "nothing is shared through a context with no state")))))
