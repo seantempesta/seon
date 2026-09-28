@@ -323,3 +323,53 @@ this attribution slice does not fix that separately measured boot cost.
 Source/resource/test delta +94/−15 lines. Foreign boundary: turn/SCI, schema
 and MCP work is excluded; no central test run was started. `db.clj` remains
 held for the requested transaction-report data patch.
+
+## Branching factor: measured, configuration unchanged
+
+The dependency's existing `load-entities` seam imports real datoms
+(`datahike/writer.cljc:459`, `core.cljc:142`; migration examples in
+`test/datahike/test/migrate_test.clj:226`). Three disposable file stores used
+exactly the same 208,000 current datoms from default, sorted by their original
+transaction. They used Seon's actual creation settings: retained history,
+self writer, fused index roots and deferred immutable fsync; only branching
+factor varied. Each received the same 1/10/100 function-doc updates in three
+successive single commits. Pulled answers matched the expected values and
+their digests matched across all factors. Stores were released and deleted.
+
+| Factor | Import ms | Baseline index nodes | Baseline total file bytes | 1-update bytes / ms | 10-update bytes / ms | 100-update bytes / ms |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 4096 | 2,313.670 | 253 | 41,009,395 | 58,550 / 15.999 | 125,674 / 16.064 | 686,996 / 20.176 |
+| 512 | 2,638.374 | 2,146 | 42,048,906 | 136,340 / 17.340 | 203,580 / 17.179 | 769,328 / 19.222 |
+| 128 | 5,347.919 | 9,057 | 44,947,705 | 33,020 / 15.328 | 103,384 / 16.251 | 642,937 / 20.742 |
+
+Each operation committed once; effective datoms were 2/11/101 at all factors.
+Readback queries took 0.517–1.212 ms. Import/build cost is separate from those
+ordinary writes. Factor 128 saves 43.6%/17.7%/6.4% of written bytes here, at
+2.31× import time, 35.8× initial index nodes and 9.6% more baseline file bytes.
+Factor 512 writes more bytes for every sampled operation. No latency gain is
+established, and the bulk cost argues against changing the global setting on
+this evidence alone.
+
+Measurement correction: fused root changes can reside inside the commit record.
+The first node-only observation reported zero external node bytes for these
+buffered writes. The table instead sums the full sizes of new or changed store
+files, detected by path, size and modification time around each isolated
+commit. This includes commit/head records and external nodes; it is not the
+number of physical device sectors written. Earlier sections explicitly measured
+external index-node bytes, so their absolute figures must not be compared to
+this table's total-file figures.
+
+Limits: this is a bounded physical storage experiment, not a Seon publication
+or legal test-recording request. It imports a current-data sample, not default's
+1.526 million historical datoms, and does not recreate mature diff buffers.
+A production decision would need the same comparison on full test-batch/history
+replay; the small-tree results cannot predict the audit's full-store median.
+No store dial or creation default changed. Evidence and executable assertions:
+`tmp/astra-store-fixes-20260928/branching-factor-probe.clj` and
+`branching-factor-{4096,512,128}.json`. No new focused product test is required
+for this report; the experiment itself asserts all 1/10/100 readbacks.
+
+Report archive `155ebf98c` plus the report/probe files: lint 0 errors, 1,665
+warnings, 7.031 s; contracts 498 files, 4.786 s, the same ten foreign
+script findings. No publication, boot or store configuration changed in this
+measurement-only slice. The foreign MCP/turn/schema work remains outside it.
