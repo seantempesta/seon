@@ -1,0 +1,141 @@
+--- a/src/seon/profile/measurement.clj	2026-09-28 14:15:19.729417623 -0600
++++ b/src/seon/profile/measurement.clj	2026-09-28 14:15:19.785782763 -0600
+@@ -23,6 +23,7 @@
+   the first window of each definition is compared with what the database
+   stored before it."
+   (:require [seon.db :as db]
++            [seon.error.refusal :as error.refusal]
+             [seon.id :as id]
+             [seon.profile :as profile]
+             [seon.schema.edn :as schema.edn])
+@@ -149,8 +150,14 @@
+   Measuring a window advances its cells' marks, written or not, so the next
+   window starts there. A definition with no digest, no cells or too few calls
+   is left accumulating. A store without the measurement attribute (not yet
+-  adopted) or a refused read answers no data: the commit never waits for or
+-  fails on this.
++  adopted) answers no data.
++
++  # Errors
++  A refused read of the stored measurements, or any failure measuring, is
++  returned as one error value (`seon.error.refusal/diagnostic`, operation
++  `seon.profile.measurement/significant-tx`, the cause chain whole): the
++  settle writers commit without measurements and deliver it beside the
++  settlement as a diagnostic, so measuring never fails a settlement.
+ 
+   # Costs
+   Proportional to `executed-keys`: 41 counter sums per cell and, when a window
+@@ -158,8 +165,9 @@
+   2026-09-28: 10 definitions 28 us to 3.9 ms, 1,000 definitions 2.2 ms (all
+   under `min-calls`) to 289 ms (all measured, 1,000 ids in one query)."
+   {:malli/schema [:=> [:cat :seon.db/database-value [:or [:set :seon.batch/executed-key] [:sequential :seon.batch/executed-key]]]
+-                  :seon.store/transaction-data]}
++                  [:or :seon.store/transaction-data :seon.error/base]]}
+   [database executed-keys]
++  (try
+   (if-not (get (:schema database) :seon.profile.measurement/id)
+     []
+     (let [measured (into []
+@@ -175,7 +183,7 @@
+           at (java.util.Date.)]
+       (run! advance! measured)
+       (if (:seon.error/at stored)
+-        []
++        stored
+         (into []
+               (keep (fn [{[sym digest] ::key i ::id calls :seon.profile/calls counted :seon.profile/window-counts}]
+                       (let [now (measure counted calls)]
+@@ -187,4 +195,9 @@
+                                   :seon.profile.measurement/at at}
+                                  (select-keys now [:seon.profile.measurement/p50 :seon.profile.measurement/p99
+                                                    :seon.profile.measurement/errors]))))))
+-              measured)))))
++              measured))))
++  (catch Throwable failure
++    (error.refusal/diagnostic {:seon.error/at (java.util.Date.)
++                               :seon.error/layer ::measurement
++                               :seon.error/operation `significant-tx
++                               :seon.error/throwable failure}))))
+--- a/src/seon/turn.clj	2026-09-28 14:15:19.739613069 -0600
++++ b/src/seon/turn.clj	2026-09-28 14:15:19.786447851 -0600
+@@ -3530,7 +3530,7 @@
+   "`receipt` with `error` delivered beside its value: appended to its
+   :seon.cluster.eval/diagnostics as bounded data (a later stage's failure
+   never replaces the value)."
+-  {:malli/schema [:=> [:cat :map [:maybe :seon.plan/refusal]] :map]}
++  {:malli/schema [:=> [:cat :map [:maybe [:or :seon.plan/refusal :seon.error/base]]] :map]}
+   [receipt error]
+   (cond-> receipt
+     error (update :seon.cluster.eval/diagnostics
+@@ -3796,6 +3796,11 @@
+         measured (measurement/significant-tx
+                   (db/db connection)
+                   (into #{} (mapcat #(get-in % [:seon.sci.eval/evaluation :seon.cluster.eval/executed])) requests))
++        ;; a measuring failure is delivered beside the values, never fails the settlement
++        prepared (if (:seon.error/at measured)
++                   (mapv #(update % :seon.turn.loop/receipt with-diagnostic measured) prepared)
++                   prepared)
++        measured (if (:seon.error/at measured) [] measured)
+         ;; Built inside the committed phase: a refused read of the fault
+         ;; window is a refused settlement the arm below closes, never an escape.
+         transaction
+--- a/src/seon/turn/batch.clj	2026-09-28 14:15:19.749552513 -0600
++++ b/src/seon/turn/batch.clj	2026-09-28 14:15:19.786667228 -0600
+@@ -680,8 +680,10 @@
+         writer (:seon.db/writer world)
+         head (db/db conn)
+         ;; once for every attempt: measuring advances the cells' marks
+-        measured (measurement/significant-tx
+-                  head (into #{} (mapcat (comp keys :seon.batch/executed)) (:seon.batch/entries batch)))
++        measuring (measurement/significant-tx
++                   head (into #{} (mapcat (comp keys :seon.batch/executed)) (:seon.batch/entries batch)))
++        ;; a measuring failure rides the answer as a diagnostic; the commit proceeds without it
++        measured (if (:seon.error/at measuring) [] measuring)
+         commit! (fn [tx] (let [r (writer conn tx)]
+                            (if (and (map? r) (:seon.error/message r)) r (:db-after r))))
+         attempt (fn [b]
+@@ -698,7 +700,7 @@
+                                 {:seon.batch/applied true :seon.batch/tx-count (count tx) :seon.batch/after r})))))
+         settled (fn [b] (select-keys b [:seon.batch/entries :seon.batch/program :seon.batch/working]))
+         first-try (try (attempt batch) (catch Throwable t {:seon.batch/storage-error (ex-message t)}))]
+-    (if-not (:seon.batch/writer-refusal first-try)
++    (cond-> (if-not (:seon.batch/writer-refusal first-try)
+       ;; every path answers the state it settled
+       (assoc first-try :seon.batch/settled (settled batch))
+       ;; the head moved: re-derive on it; the settled state is what commits
+@@ -706,7 +708,8 @@
+             second-try (try (attempt rebased) (catch Throwable t {:seon.batch/storage-error (ex-message t)}))]
+         (assoc second-try
+                :seon.batch/settled (settled rebased)
+-               :seon.batch/first-refusal (:seon.batch/writer-refusal first-try))))))
++               :seon.batch/first-refusal (:seon.batch/writer-refusal first-try))))
++      (:seon.error/at measuring) (assoc :seon.batch/measurement-error measuring))))
+ 
+ (defn- printed
+   "The show stage's answer from the one printer's shown value, kept whole:
+--- a/src/seon/batch.clj	2026-09-28 14:15:19.759177288 -0600
++++ b/src/seon/batch.clj	2026-09-28 14:15:19.786826770 -0600
+@@ -651,6 +651,13 @@
+                                                              ;; never replaces or drops a published entry
+                                                              (settled-into (:seon.batch/settled commit))
+                                                              (assoc :seon.batch/commit (dissoc commit :seon.batch/settled)))
++                                               ;; a measuring failure stays beside the values and reaches the fault stage
++                                               (:seon.batch/measurement-error commit)
++                                               (update :seon.batch/diagnostics conj
++                                                       {:seon.error/message (str "settle: measurements not recorded: "
++                                                                                 (:seon.error/message (:seon.batch/measurement-error commit)))
++                                                        :seon.batch/stage :settle
++                                                        :seon.error/data (:seon.batch/measurement-error commit)})
+                                                ;; a refusal or storage failure stays beside the values and
+                                                ;; reaches the fault stage
+                                                (or (:seon.batch/writer-refusal commit) (:seon.batch/storage-error commit))
+--- a/resources/seon/schemas/seon.batch.edn	2026-09-28 14:15:19.768258934 -0600
++++ b/resources/seon/schemas/seon.batch.edn	2026-09-28 14:15:19.786947688 -0600
+@@ -197,6 +197,7 @@
+            [:seon.batch/working {:optional true} :seon.db/database-value]]
+  :commit [:or
+           [:map [:seon.batch/applied :seon.batch/applied] [:seon.batch/tx-count :seon.batch/tx-count]
++           [:seon.batch/measurement-error {:optional true :description "The settle's measuring failed (seon.profile.measurement/significant-tx); the commit went on without measurements."} :seon.error/base]
+            [:seon.batch/after {:optional true} :seon.db/database-value]
+            [:seon.batch/first-refusal {:optional true} :map]
+            [:seon.batch/settled {:optional true} :seon.batch/settled]]
