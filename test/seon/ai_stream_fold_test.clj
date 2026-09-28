@@ -319,8 +319,8 @@
       (let [completion (ai/complete (seon.schema/handed-projection) (request endpoint {:seon.ai/stream? true}))]
         (is ((schema/projection-validator (schema/handed-projection) :seon.ai/provider-error-error) completion))
         (is (= 429 (:seon.ai/http-status (:seon.error/data completion))))
-        (is (str/includes? (str (:seon.ai/body (:seon.error/data completion)))
-                           "slow down"))))))
+        (is (= "slow down" (:seon.ai/body (:seon.error/data completion)))
+            "the error carries the provider's body")))))
 
 (defn- recorded-attempt [database turn-id ordinal]
   (db/q '[:find (pull ?attempt [*]) . :in $ ?id ?ordinal
