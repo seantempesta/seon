@@ -153,7 +153,7 @@ EXISTING store (prove adoption on a branch of the live store, never only on a fr
      in the spec, the ledger and committed proofs, never in a transcript.
 
 ### The order (rewritten in place 2026-09-28)
-**d0. Stability tooling, first:**
+**d0. Stability tooling: DONE except the commit helper (2026-09-28).** `bin/seon drill` (63a5674eb) runs a move plus a from-scratch build, armed. From scratch is green on HEAD, and nuke's fallback chain boots. The class-cache race is fixed. The 21:07 OOM was an `is` message printing a projection (ac2e100e4; test messages become prose via test-data-assertions). Still open: the ledger-aware commit helper; first population 139–200 s (task 50134301bf4e). Was:
 - a scripted armed boot drill (move and from scratch, on a disposable root) that every schema, publication or boot
   commit runs;
 - re-drill from scratch on HEAD, which proves nuke has a fallback;
