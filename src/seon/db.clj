@@ -3833,6 +3833,7 @@
                    (write-attribute-plan projection attribute (db.utils/multival? database attribute))))
         entity-datoms (d/datoms database :eavt entity-id)
         cell? (some #(= :seon.db.vector/position (:a %)) entity-datoms)
+        cell-attribute? (when (and refuse! (not cell?)) (schema.datahike/vector-attributes-in projection))
         stored
         (reduce
          (fn [entity-map {:keys [a v]}]
@@ -3840,7 +3841,7 @@
              :seon.db.vector/cells (update entity-map ::cells (fnil conj []) v)
              :seon.db.vector/present (update entity-map ::present (fnil conj #{}) v)
              (let [value ((::decode (plan a)) v)]
-               (when (and refuse! (not cell?) (schema.datahike/vector-attribute-in? projection a))
+               (when (and cell-attribute? (cell-attribute? a))
                  (refuse! ::vector-member-outside-cell {::entity entity-id ::attribute a}))
                (when (and visit-child (:db/isComponent (get (dbi/-schema database) a)))
                  (visit-child value))
@@ -4019,9 +4020,10 @@
         ;; charges through a callback (`write-entity-value`) that no loop owns.
         traversal (volatile! {::seen #{} ::rows {} ::owners {}})
         ;; Cell -> the vector attribute a sweep retracted from it in this report.
-        swept (into {} (keep #(when (and (not (:added %)) (schema.datahike/vector-attribute-in? projection (:a %)))
-                                [(:e %) (:a %)]))
-                    (:tx-data report))
+        swept (let [cell-attribute? (schema.datahike/vector-attributes-in projection)]
+                (into {} (keep #(when (and (not (:added %)) (cell-attribute? (:a %)))
+                                  [(:e %) (:a %)]))
+                      (:tx-data report)))
         fail! (fn [cause data]
                 (throw (ex-info "Owned entity validation refused."
                                 {::owned-refusal
@@ -4282,17 +4284,19 @@
    (if-not (contains? (:seon.schema.projection/forms projection) :seon.db.vector/cells)
      tx-data
      (let [owner #(or (cell-owner after %) (cell-owner before %))
+           ;; Asked once: a per-datom question is a cache lookup per datom.
+           cell-attribute? (schema.datahike/vector-attributes-in projection)
            ;; A cell whose element this report wrote is new: its element datom says it all.
-           written (into #{} (comp (filter #(schema.datahike/vector-attribute-in? projection (:a %))) (map :e)) tx-data)
+           written (into #{} (comp (filter #(cell-attribute? (:a %))) (map :e)) tx-data)
            element (fn [cell]
-                     (some #(when (schema.datahike/vector-attribute-in? projection (:a %)) %)
+                     (some #(when (cell-attribute? (:a %)) %)
                            (concat (d/datoms after :eavt cell) (d/datoms before :eavt cell))))]
        (into []
              (keep (fn [datom]
                      (let [attribute (:a datom)]
                        (cond
                          ;; A cell no value owns (made and removed within one report) says nothing.
-                         (schema.datahike/vector-attribute-in? projection attribute)
+                         (cell-attribute? attribute)
                          (when-let [parent (owner (:e datom))]
                            {:e parent :a attribute :v (:v datom) :tx (:tx datom) :added (:added datom)})
 

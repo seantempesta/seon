@@ -106,6 +106,13 @@
          (is (schema.datahike/vector-attribute-in? with items))
          (is (not (schema.datahike/vector-attribute-in? with :seon.vector-test.p/tags)))
          (is (not (schema.datahike/vector-attribute-in? with :seon.vector-test.p/id))))
+       (testing "the set a per-datom loop tests is exactly the attributes the question answers true for"
+         (doseq [projection [without with (schema/handed-projection)]]
+           (is (= (into #{} (filter #(and (keyword? %) (schema.datahike/vector-attribute-in? projection %)))
+                        (keys (:seon.schema.projection/forms projection)))
+                  (schema.datahike/vector-attributes-in projection))))
+         (is (contains? (schema.datahike/vector-attributes-in with) items))
+         (is (= #{} (schema.datahike/vector-attributes-in without))))
        (testing "every bridge attribute is a database attribute, so the population installs all three"
          (is (every? (set (schema.datahike/database-attributes-in with))
                      [:seon.db.vector/cells :seon.db.vector/position :seon.db.vector/present]))

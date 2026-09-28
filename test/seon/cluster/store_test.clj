@@ -707,6 +707,13 @@
                        "secondary-idx-agg not applicable:"))
     (is (nil? (store/datahike-log! "datahike.query" [4314 nil] :debug "fused-scan-rel not applicable:"
                                    {:msg "no index"})))
+    ;; The installed log-fn answers a :trace or :debug call on its level alone.
+    (let [installed (#'store/datahike-log-fn)]
+      (is (= "" (with-out-str (binding [*err* *out* trove/*log-fn* installed]
+                                (replikativ.logging/debug "fused-scan-rel not applicable:" "no index")))))
+      (is (str/includes? (with-out-str (binding [*err* *out* trove/*log-fn* installed]
+                                         (replikativ.logging/warn :datahike/secondary-index-require-failed {:ns 'x})))
+                         ":datahike/secondary-index-require-failed")))
     (let [line (logged #(replikativ.logging/error :datahike/listener-error large))]
       (is (str/includes? line "ERROR"))
       (is (str/includes? line ":datahike/listener-error"))

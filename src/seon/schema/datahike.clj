@@ -425,6 +425,23 @@
            (true? (::cells-installed? projection)))
        (vector-shaped-attr-in? projection attr)))
 
+(defn vector-attributes-in
+  "The attributes `projection` stores in bridge cells, as one set: exactly
+   those for which [[vector-attribute-in?]] answers true (every such attribute
+   is a declared form). A loop over a report's datoms tests membership once per
+   datom instead of asking per datom: the per-attribute question costs a
+   projection cache lookup (1.2 us unarmed), asked 3.0 M times by a first
+   population's 92,504-operation index transaction (2026-09-28)."
+  {:malli/schema [:=> [:cat :seon.schema/projection] [:set :keyword]]}
+  [projection]
+  (if (or (contains? (:seon.schema.projection/forms projection) :seon.db.vector/cells)
+          (true? (::cells-installed? projection)))
+    (schema/projection-cache-value
+     projection [::vector-shaped-attributes]
+     #(into #{} (filter (fn [attribute] (and (keyword? attribute) (vector-shaped-attr-in? projection attribute))))
+            (keys (:seon.schema.projection/forms projection))))
+    #{}))
+
 (defn logical-collection
   "`values` of a cardinality-many attribute in its declared collection:
    a vector for a vector-shaped attribute, otherwise a set."

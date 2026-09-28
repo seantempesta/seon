@@ -468,6 +468,19 @@
                                 [(some-> id str) (print.value/bounded-text event)])})))
     nil))
 
+(defn- datahike-log-fn
+  "trove's log-fn for Datahike: a call below `:info` returns on its level alone,
+  before any armed call; the rest reach [[datahike-log!]] through its Var (its
+  armed, reloaded root). trove calls its log-fn for every `log!`
+  (taoensso/trove.cljc:99-104), and Datahike's are mostly `:trace` and `:debug`:
+  1,417,824 per wide publication, 2.8 s through the armed hook (2026-09-28),
+  none of which it prints (`datahike-log-level`)."
+  {:malli/schema [:=> [:cat] [:fn clojure.core/ifn?]]}
+  []
+  (fn [callsite-ns coords level id lazy_]
+    (when-not (#{:trace :debug} level)
+      (datahike-log! callsite-ns coords level id lazy_))))
+
 (defn open-store!
   "Open the one fenced physical store this process owns.
   Creates it when absent and opens its main branch. B2 revision: one map argument;
@@ -493,8 +506,7 @@
                   :seon.store/store]}
   [{store-dir :seon.store/dir :as request}]
   ;; Before Datahike's first call: its logging goes through Seon's logger.
-  ;; The Var, so a call reaches its armed and reloaded root.
-  (trove/set-log-fn! #'datahike-log!)
+  (trove/set-log-fn! (datahike-log-fn))
   ; one physical spelling for the whole lifecycle: the fence, the store
   ; id, the genesis probe, and the returned value all name one directory
   (let [dir (canonical-path store-dir)
