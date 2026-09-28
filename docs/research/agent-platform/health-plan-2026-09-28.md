@@ -26,7 +26,9 @@ occurrences name their evaluation or turn (entities research).
 2. **Transactions describe the work that produced them.** At `stamp-transaction`, from the world's call sink (its delta
    since that world's previous transaction), beside the existing `:seon.db.transaction/process`, `/operation`,
    `/agent`: `/ms` (the work's elapsed time), `/calls`, `/hot` (top 5 `[sym digest calls self-ms]` by self time),
-   `/repeated` (`[sym digest calls]` over the repeat threshold). A handful of datoms on a commit that happens anyway.
+   `/repeated` (`[sym digest calls]` over the repeat threshold). 10–12 datoms, ~1 KB, on a commit that happens anyway
+   (measured ~0 extra store bytes); only `/ms` and `/calls` are indexed (each indexed stamp attribute added ~0.6 files
+   per commit). History from before the stamp has none, so joins on it use `get-else`.
 3. **Measurements on subjects, per definition version, written only on significant change** (noHistory): a function's
    p50/p99 bucket (log₂ ns), error-ratio class, calls class; a test member's duration; an operator phase's duration
    and what it was proportional to (files, changed files, cache hits); a cache kind's byte share and hit class.
@@ -61,9 +63,17 @@ an entrant (an evaluation's value, a reply, a proc step, a test body). An error 
 - **One error pipeline:** detect (wrapper, entrant boundary) → build (`seon.error.refusal/diagnostic`: the common part
   from the world and the armed refusal, specifics from the producer, bulk to one blob) → store (one recorder: upsert the
   signature, add an occurrence under the cap, else bump its count).
-- **Refs without reads:** every ref is a lookup ref or identity map in the transaction data, resolved by the writer by
-  index seek; the identities are already in hand (the cell key `[sym digest]`, the world's ids, the schema key, the
-  hashed signature). A program entity that may be absent on the branch keeps its `[sym digest]` value; no placeholders.
+- **Refs, measured (model proof):** a lookup ref to a missing entity fails the whole transaction and an identity map
+  silently creates a placeholder, while an index seek costs 1.6 µs whether or not the entity exists. So links to
+  subjects that may be absent on a branch — the producer and caller functions — are stored as `[sym digest]` values and
+  joined at read time (only `:seon.fn/sym` is a unique identity); refs are used where the target is written in the
+  same transaction or certainly exists (signature, occurrence, evaluation, agent, task, schema by key). The cap
+  ("first K occurrences, then the count") is decided by a transaction function at the writer, the only place that
+  sees the current count (1,000 identical failures → 5 occurrences, one count, ~73 datoms, +1.6 ms per commit);
+  repeated failures inside one evaluation are folded in memory first.
+- **Blame needs authorship on the definition:** the 12,423 current definition digests came from only 92 transactions
+  (one bulk adoption asserted 4,540), so "which change introduced this" reads the definition's own task, proposal or
+  source commit, not the transaction that happened to assert it.
 - **Cost:** the success path is counter increments (a LongAdder ~6.6 ns; the bracket reuses its two clock reads —
   never add one: 382 ns at 16 threads); build and store run only on failure or a moved bucket; the context read is
   32 B; every fact rides a commit already happening (~0 extra bytes; a separate commit keeps ≥1.15 MB). A function
@@ -73,7 +83,9 @@ an entrant (an evaluation's value, a reply, a proc step, a test body). An error 
 
 - **Everything is a query over the graph.** "What is slow or doing too much": transactions with `/ms` or `/calls` over
   a bound, with their operation, agent and hot functions. "What is failing": signatures by occurrence count and
-  recency, joined to producer, schema, callers and reaching tests. "What regressed": a producer digest whose bucket
+  recency, joined to producer, schema and callers (first-run 7.4 ms for the top 20); reaching tests are a transitive walk
+  (692 ms for 20 producers, core functions reached by ~1,700 tests), so the report shows a count and the direct
+  `:seon.test/subject` tests, and "hot and untested" is computed once per program version. "What regressed": a producer digest whose bucket
   moved, joined to the transaction and agent that wrote it. Named warning and error schemas compile to their queries,
   so a new one is queryable when registered.
 - **The health report** (`:seon.health/report`) is those queries ranked (severity declared on each named schema ×
