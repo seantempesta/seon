@@ -297,6 +297,8 @@ root.
     operations and dig or requery forms are part of that data, shown so the agent may run them, and never run by the
     render step.
   - The HTML face returns hiccup: a thing with a look and its operations.
+  - The form face (`:seon.render/form`) returns the form that shows how this data can be found again, e.g. its
+    requery. It is shown as data beside the value and is never executed by the render step.
   - A render runs once, when the reply that shows it is built, inside the viewer's world. It is READ-ONLY: it gets a
     database value, and no connection or writer. Its database reads are captured as read evidence on the shown unit, so
     the refresh before a turn re-renders it when they change.
