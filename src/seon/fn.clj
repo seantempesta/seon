@@ -1008,7 +1008,9 @@
         ;; the expansions each form's evaluation observed, placed at that
         ;; form's first row: a generated definition is analyzed at its call
         hooks (reduce (fn [acc [request [first-row _]]]
-                        (merge-with merge acc (analyzer/expansion-hooks (:seon.batch/expansions request) first-row)))
+                        (if-let [expansions (seq (:seon.batch/expansions request))]
+                          (merge-with merge acc (analyzer/expansion-hooks (vec expansions) first-row))
+                          acc))
                       nil
                       (map vector requests spans))
         analysis
