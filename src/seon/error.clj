@@ -33,8 +33,7 @@
             [seon.schema.datahike :as schema.datahike]
             [malli.registry :as mr]
             [seon.schema.internal :as internal]
-            [seon.sci.admit :as admit])
-  (:import [java.nio.charset StandardCharsets]))
+            [seon.sci.admit :as admit]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
@@ -228,12 +227,6 @@
   (if (and (map? source) (instance? Throwable (::flow/ex source)))
     (dissoc source ::flow/state)
     source))
-
-(defn- utf8-size
-  {:malli/schema [:=> [:cat :string]
-                  [:int {:min 0}]]}
-  [value]
-  (alength (.getBytes ^String value StandardCharsets/UTF_8)))
 
 (defn- evidence-caps
   "The caps one fault's INLINE evidence is admitted under.
@@ -450,7 +443,7 @@
   (let [admitted (bounded-admission value caps projection)]
     (if-some [marker (::marker admitted)]
       (:seon.sci.admit/bytes marker)
-      (utf8-size (value-edn admitted)))))
+      (blob/utf8-size (value-edn admitted)))))
 
 (defn- fit-fact-payload
   "Bound every payload field of one fact so the WHOLE fact fits inline.
@@ -470,7 +463,7 @@
         arguments (or (:seon.instrument/args instrument-data)
                       (:seon.error/offending instrument-data))
         payload-count (+ 2 (if expected 1 0) (if arguments 1 0) (if actual 1 0))
-        available (max 1 (- inline-limit (utf8-size (pr-str base-fact))))]
+        available (max 1 (- inline-limit (blob/utf8-size (pr-str base-fact))))]
     (loop [field-limit (max 1 (quot available payload-count))]
       (let [field-caps (evidence-caps caps field-limit)
             fact
@@ -478,7 +471,7 @@
                            :seon.error/message
                            (bounded-text message-value field-caps projection)
                            :seon.error/data-edn
-                           (if (<= (utf8-size full-edn) field-limit)
+                           (if (<= (blob/utf8-size full-edn) field-limit)
                              full-edn
                              (value-edn (bounded-error-admission
                                          source (throwable source) field-caps projection))))
@@ -491,7 +484,7 @@
               actual
               (assoc :seon.instrument/actual
                      (bounded-text (val actual) field-caps projection)))]
-        (if (or (<= (utf8-size (pr-str fact)) inline-limit)
+        (if (or (<= (blob/utf8-size (pr-str fact)) inline-limit)
                 (= 1 field-limit))
           fact
           (recur (max 1 (quot field-limit 2))))))))
@@ -510,7 +503,7 @@
   (let [whole (bounded-admission value caps projection)]
     (:seon.sci.admit/value
      (if (and (not (::marker whole))
-              (<= (utf8-size (value-edn whole)) evidence-bytes))
+              (<= (blob/utf8-size (value-edn whole)) evidence-bytes))
        whole
        (bounded-admission value field-caps projection)))))
 
@@ -722,7 +715,7 @@
                    (:seon.sci.admit/remainder admitted))
         data-size (if marker
                     (:seon.sci.admit/bytes marker)
-                    (utf8-size full-edn))
+                    (blob/utf8-size full-edn))
         base-fact
         (cond-> {:seon.error/id signature
                  :seon.error/at at
