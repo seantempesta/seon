@@ -117,8 +117,11 @@
     (cond
       (nil? edges) named
       (db/read-refusal? edges) edges
-      :else (merge named (select-keys task [:seon.task/intent :seon.task/must-read])
-                   (select-keys edges [:seon.task/proofs :seon.task/subjects])))))
+      ;; A pulled cardinality-many value is a vector (Datahike's pull
+      ;; shape); must-read is declared a set, so it is shown as one.
+      :else (cond-> (merge named (select-keys task [:seon.task/intent])
+                           (select-keys edges [:seon.task/proofs :seon.task/subjects]))
+              (seq (:seon.task/must-read task)) (assoc :seon.task/must-read (set (:seon.task/must-read task)))))))
 
 (defn task-form
   "The read of a task's edges. Shown, never executed."

@@ -43,7 +43,7 @@
 
 (defn render-ai
   "A test's result as data: its state, where it runs, its failed assertions
-  and, unless green, the definitions changed since it last passed."
+  and, when red, the definitions changed since it last passed."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render.test/view]}
   [unit]
   (let [entity (evidence unit) test-name (:seon.test/sym entity) database (:seon.db/db unit)
@@ -57,7 +57,8 @@
                                             (cond-> host (map? host) (dissoc :seon.test/sym))))
       (seq (:seon.test.failure/reports entity))
       (assoc :seon.test.failure/reports (mapv #(select-keys % failure-keys) (failures entity)))
-      (and read? (not= "pass" shown-state))
+      ;; only a red test has definitions changed since it last passed
+      (and read? (#{"fail" "error"} shown-state))
       (assoc :seon.render.test/changed-since-green (test/changed-since-green database test-name)))))
 
 (defn render-form
