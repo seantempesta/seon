@@ -42,12 +42,13 @@
               [:or :seon.schema/projection :seon.schema/validation-refusal],
               :definition :seon.schema/malli-form,
               :registration
-              [:map {:description "What seon.schema/register! returns: the key and the form it registered. Its pair renders what the registration means for the program and its stored data (seon.render.schema/usage)."
+              [:map {:description "What seon.schema/register! returns: the key, the form it registered and, when it changed a stored attribute's form inside an evaluation, the stored-data check (seon.db/registration-check). Its pair renders what the registration means for the program and its stored data (seon.render.schema/usage)."
                      :seon.render/ai seon.render.schema/render-ai
                      :seon.render/html seon.render.schema/render-html
                      :seon.render/form seon.render.schema/render-form}
                [:seon.schema/key :seon.schema/registry-key]
-               [:seon.schema/definition :seon.schema/definition]],
+               [:seon.schema/definition :seon.schema/definition]
+               [:seon.schema.usage/check {:optional true} :seon.schema.usage/check]],
               :value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
                             :seon.schema.admission/reason "The shared value schema represents arbitrary in-memory Clojure values, including nil and host objects; callers declaring concrete data must use their own shape."
                             :gen/elements [nil false 0 "" :k [] {}]}],

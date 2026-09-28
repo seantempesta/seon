@@ -397,17 +397,14 @@
  :seon.error/normalization-error
  [:and :seon.error/base [:map [:seon.error/data-edn :seon.error/data-edn]]]
 
- :seon.error/fix-form
- [:and {:description "The refused call rewritten so its contract admits it: each failing value decoded from the offending one or generated (seon.error/fix-form). Shown, never stored."}
-  :seon.repl/expression]
  :seon.error/in-namespace
  [:map-of {:description "When a name was not found: its namespace and the names declared there nearest to it by spelling, at most eight (seon.error/reply-value). Shown, never stored."}
-  :symbol [:vector :symbol]]
+  :symbol [:or [:vector :symbol] :seon.db/error-result]]
  :seon.error/sources
  [:map-of {:description "For each function a refusal names (at most three), the lines of its source that mention the blocked subject, numbered within the definition (seon.error/reply-value). Shown, never stored."}
-  :qualified-symbol [:vector :string]]
+  :qualified-symbol [:or [:vector :string] :seon.db/error-result]]
  :seon.error/reply
- [:map {:description "An error as the agent acts on it (seon.error/reply-value): the message, the failing paths with expected schema and offending value, a runnable fix, what was refused and the context to repair it, and the agent's frames. The whole error stays one read away through the result handle."}
+ [:map {:description "An error as the agent acts on it (seon.error/reply-value): the message, the failing paths with expected schema, offending value and one generated example, what was refused and the context to repair it, and the agent's frames. The whole error stays one read away through the result handle."}
   [:seon.error/message {:optional true} :seon.error/message]
   [:seon.error/exception-class {:optional true} :seon.error/exception-class]
   [:seon.error/problems {:optional true}
@@ -415,9 +412,9 @@
              [:seon.error/path {:optional true} :seon.render.data/path]
              [:seon.error/expected {:optional true} :seon.schema/value]
              [:seon.error/offending {:optional true} :seon.error/source]
+             [:seon.error/example {:optional true} :seon.error/source]
              [:seon.error/input {:optional true} :seon.error/source]
              [:seon.error/result-contract {:optional true} :seon.schema/value]]]]
-  [:seon.error/fix-form {:optional true} :seon.error/fix-form]
   [:seon.error/offending {:optional true} :seon.error/source]
   [:seon.error/expected {:optional true} :seon.schema/value]
   [:seon.error/member {:optional true} :seon.error/source]
@@ -427,5 +424,7 @@
   [:seon.error/fix {:optional true} :seon.error/fix]
   [:seon.error/in-namespace {:optional true} :seon.error/in-namespace]
   [:seon.error/sources {:optional true} :seon.error/sources]
-  [:seon.sci.eval/stacktrace {:optional true} :seon.sci.eval/stacktrace]]
+  [:seon.sci.eval/stacktrace {:optional true} :seon.sci.eval/stacktrace]
+  [:seon.error/occurrence-count {:optional true} [:int {:min 1}]]
+  [:seon.error/shown {:optional true} :seon.error/shown]]
 }

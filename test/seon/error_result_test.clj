@@ -80,7 +80,7 @@
     (is (map? (:seon.sci.admit/print-node artifact)))
     (is (= shown (:seon.error/shown stored)))
     (is (schema/valid-candidate-value? projection :seon.error/base stored))
-    (is (str/includes? (error/render-ai {:seon.render/value entity}) shown))
+    (is (= shown (:seon.error/shown (error/render-ai {:seon.render/value entity}))))
     (is (:seon.error/data-edn stored) "Legacy evidence remains written during accretion.")
     {:stored stored :complete complete :shown shown
      :stored-value (render.value/artifact-value artifact)}))

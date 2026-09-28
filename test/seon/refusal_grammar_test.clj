@@ -82,9 +82,9 @@
         ;; deleted in b1f291fbc (printing no longer enriches errors).
         ;; The reply is data (seon.error/reply-value): what was refused,
         ;; what was expected, and the member.
-        (doseq [fragment [":offending 42" ":expected :string" ":member :selector"]]
-          (is (str/includes? shown fragment) shown))
-        (is (not (str/includes? shown "seon.error/data")) shown)
+        (is (= {:seon.error/message "Invalid selector." :seon.error/offending 42
+                :seon.error/expected :string :seon.error/member :selector}
+               shown))
         (let [refusal (db/transact! connection
                                     [{:seon.fn/sym "seon.refusal-grammar-test/incomplete"
                                       :seon.fn/doc "incomplete"}])]
@@ -119,13 +119,13 @@
           (is (= [7] (:seon.error/input description)))
           (is (= :int (:seon.error/expected description)))
           (is (= "wrong" (:seon.error/offending description)))
-          (is (str/includes? text ":input (7)") text)
-          (is (not (str/includes? text "AFunction")) text))
+          (is (= [7] (get-in text [:seon.error/problems 0 :seon.error/input])) (pr-str text))
+          (is (not (str/includes? (pr-str text) "AFunction")) (pr-str text)))
         (let [wrapped (instrument/wrap-interpreted
                        'example/guard
                        "[:=> [:cat :int] :int [:fn {:error/message \"arguments and result must agree\"} clojure.core/map?]]"
                        (schema/handed-projection) (config/result-caps config/defaults) identity)
               refusal (support/refusal-data #(wrapped 7))
               text (error/render-ai (assoc unit :seon.render/value refusal))]
-          (is (str/includes? text ":input [7]") text)
-          (is (str/includes? text ":result-contract :int") text))))))
+          (is (= [7] (get-in text [:seon.error/problems 0 :seon.error/input])) (pr-str text))
+          (is (= :int (get-in text [:seon.error/problems 0 :seon.error/result-contract])) (pr-str text)))))))

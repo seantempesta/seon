@@ -149,12 +149,12 @@
       (is (every? #(str/starts-with? % ";; ")
                   (str/split-lines (kernel/render-ai {:seon.render/value divide})))))))
 
-(deftest a-contract-refusals-reply-is-the-failing-path-and-a-fix-as-data
+(deftest a-contract-refusals-reply-is-the-failing-path-and-an-example
   ;; A program function resolves in an acquired agent context (a bare
   ;; interpreter holds no program namespaces): the member's, forked. The reply
   ;; (seon.error/reply-value) is data the agent fixes the call from: the
-  ;; failing path with its expectation and value, the call rewritten so its
-  ;; contract admits it (the string decoded to the symbol), and its frames.
+  ;; producer's message, the failing path with its expectation, value and one
+  ;; generated example, and its frames.
   (let [ctx (test-support/fork-cluster-ctx
              (:seon.db/connection (test-support/execution-handle nil)))
         refusal (failure ctx "(seon.error.refusal/frame-function \"x\")")
@@ -164,8 +164,10 @@
                           "seon.error.refusal/frame-function refused argument 0")
         (pr-str reply))
     (is (= [{:seon.error/path [] :seon.error/expected :symbol :seon.error/offending "x"}]
-           (:seon.error/problems reply)))
-    (is (= '(seon.error.refusal/frame-function (quote x)) (:seon.error/fix-form reply)))
+           (mapv #(dissoc % :seon.error/example) (:seon.error/problems reply))))
+    (is (symbol? (get-in reply [:seon.error/problems 0 :seon.error/example]))
+        "one generated example of the expectation, labelled as an example")
+    (is (not (contains? reply :seon.error/fix-form)) "no call is synthesized from the caller's input")
     (is (= (:seon.sci.eval/stacktrace refusal) (:seon.sci.eval/stacktrace reply)) "the author's location")
     (is (not-any? #(contains? reply %) [:seon.error/expected-shape :seon.error/chain :seon.instrument/malli])
         "instrument bookkeeping stays on the value, unshown")))

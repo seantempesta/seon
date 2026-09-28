@@ -3919,6 +3919,86 @@
                           ::entity identities ::entity-value entity-map ::path (into [entity-id] in)})))))
        schema-keys))))
 
+(def ^:private stored-check-limit
+  "Distinct stored entities a registration's stored-data check judges."
+  200)
+
+(defn stored-value-check
+  "What `definition`, registered in place of attribute `k`'s form, makes of
+  the values stored now.
+
+  The first 200 distinct entities holding `k` (AEVT order) are each read as
+  the writer reconstructs them (`write-entity-value`: a cardinality-many
+  value in its declared collection, a vector from its cells), and `k`'s
+  value is validated by `definition` compiled on this database's projection.
+  `:seon.schema.usage/more?` says more entities hold `k`. An attribute not
+  installed holds no values. A definition the projection cannot compile is
+  the declared refusal, never a verdict.
+
+  ## Costs
+
+  One AEVT walk to the 201st distinct entity and one EAVT read per checked
+  entity; run once, when the registration is evaluated
+  (`registration-check`), never by a render."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword :seon.schema/value]
+                  [:or :seon.schema.usage/stored-check :seon.error/base]]}
+  [database k definition]
+  (let [projection (carried-projection database)
+        valid? (when projection
+                 (try (m/validator definition {:registry (:seon.schema.projection/registry projection)})
+                      ;; Declared case: Malli's `::m/invalid-schema` for a form
+                      ;; naming a schema this projection does not hold.
+                      (catch clojure.lang.ExceptionInfo failure failure)))]
+    (cond
+      (nil? projection)
+      (diagnostic {:seon.error/layer :database-read
+                   :seon.error/operation 'seon.db/stored-value-check
+                   :seon.error/message "This database value carries no schema projection to reconstruct stored values with."
+                   :seon.error/expected :seon.schema/projection})
+
+      (instance? Throwable valid?)
+      (diagnostic {:seon.error/layer :database-read
+                   :seon.error/operation 'seon.db/stored-value-check
+                   :seon.error/message (str "The form registered for " k " does not compile on this database's projection: "
+                                            (ex-message valid?))
+                   :seon.error/expected :seon.schema/definition
+                   :seon.error/offending definition})
+
+      (nil? (get (dbi/-schema database) k))
+      {:seon.schema.usage/checked 0 :seon.schema.usage/failing 0}
+
+      :else
+      (let [entities (into [] (comp (map :e) (dedupe) (take (inc stored-check-limit)))
+                           (d/datoms database :aevt k))
+            failing (into [] (keep (fn [entity-id]
+                                     (let [value (get (write-entity-value database projection {} entity-id) k)]
+                                       (when-not (valid? value) [entity-id value]))))
+                          (take stored-check-limit entities))]
+        (cond-> {:seon.schema.usage/checked (min stored-check-limit (count entities))
+                 :seon.schema.usage/failing (count failing)}
+          (> (count entities) stored-check-limit) (assoc :seon.schema.usage/more? true)
+          (seq failing) (assoc :seon.schema.usage/failing-example (first failing)))))))
+
+(defn registration-check
+  "The stored-data check `seon.schema/register!` records on its
+  registration: `stored-value-check` over the database in custody, when the
+  registration changes an installed attribute's committed form.
+
+  Nil outside custody (a namespace load), for an attribute not installed and
+  for an unchanged form, so those read nothing more. A custody read the
+  database refuses is returned as its refusal."
+  {:malli/schema [:=> [:cat :qualified-keyword :seon.schema/value]
+                  [:or :nil :seon.schema.usage/stored-check :seon.error/base]]}
+  [k definition]
+  (when (or *read-database* *conn*)
+    (let [database (db)]
+      (cond
+        (read-refusal? database) database
+        (and (database-value? database)
+             (some? (get (dbi/-schema database) k))
+             (not= definition (get (:seon.schema.projection/forms (carried-projection database)) k)))
+        (stored-value-check database k definition)))))
+
 (defn- write-owned-values-error
   "Validate complete owning values, reached through both sides of this report.
    EAVT supplies every child; AVET discovers owners without pull's 1,000 cap.
@@ -5779,9 +5859,9 @@
              transaction-data))]))
 
 (defn render-rejection-ai
-  "Render a rejected database transaction as readable steering text."
+  "A rejected database transaction's AI face: `seon.error/render-ai`'s data."
   {:malli/schema
-   [:=> [:cat :seon.db.write/validation-refusal] [:string {:min 1}]]}
+   [:=> [:cat :seon.db.write/validation-refusal] [:or [:string {:min 1}] :seon.error/reply]]}
   [unit]
   (@error-render-ai unit))
 

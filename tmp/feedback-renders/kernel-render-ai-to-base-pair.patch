@@ -1,0 +1,136 @@
+Only in b: .clj-kondo
+diff -ru a/resources/seon/schemas/seon.sci.kernel.edn b/resources/seon/schemas/seon.sci.kernel.edn
+--- a/resources/seon/schemas/seon.sci.kernel.edn	2026-09-27 20:24:15.327138962 -0600
++++ b/resources/seon/schemas/seon.sci.kernel.edn	2026-09-27 20:24:15.396620822 -0600
+@@ -14,7 +14,7 @@
+  ; that fired, a symbol with no installed Var, an unadmittable failure).
+  :seon.sci.kernel/error
+  [:and
+- {:seon.db/attributes true :seon.render/ai seon.sci.kernel/render-ai}
++ {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+   {:seon.db/attributes true}
+@@ -28,7 +28,7 @@
+  ; duration, allocation and outcome stay on the evaluation record.
+  :seon.sci.kernel/execution-error
+  [:and
+- {:seon.db/attributes true :seon.render/ai seon.sci.kernel/render-ai}
++ {:seon.db/attributes true}
+  :seon.error/base
+  [:map
+   {:seon.db/attributes true}
+diff -ru a/src/seon/error.clj b/src/seon/error.clj
+--- a/src/seon/error.clj	2026-09-27 20:24:15.337042936 -0600
++++ b/src/seon/error.clj	2026-09-27 20:24:15.380302144 -0600
+@@ -2057,18 +2057,6 @@
+       (held? root) root
+       (and (seq? root) (= 'seon.print/value-at (first root)) (held? (second root))) root)))
+ 
+-(defn source-entries
+-  "REPL entries in order: a string is a `;;` comment (one per line), any
+-  other entry a form printed as runnable source."
+-  {:malli/schema [:=> [:cat [:sequential {:min 1} [:or :string :seon.repl/expression]]]
+-                  :seon.render/source]}
+-  [entries]
+-  (str/join "\n" (mapcat (fn [entry]
+-                           (if (string? entry)
+-                             (map #(str ";; " %) (str/split-lines entry))
+-                             [(str/trimr (repl/source-text entry))]))
+-                         entries)))
+-
+ (defn render-form
+   "The form that finds this data again: the reply over the held error, when
+   the viewer holds it. Shown, never executed."
+diff -ru a/src/seon/sci/kernel.clj b/src/seon/sci/kernel.clj
+--- a/src/seon/sci/kernel.clj	2026-09-27 20:24:15.317792367 -0600
++++ b/src/seon/sci/kernel.clj	2026-09-27 20:24:15.363107003 -0600
+@@ -811,25 +811,6 @@
+          (or failing-symbol subject)
+          (assoc :seon.error/offending (or failing-symbol subject))))))))
+ 
+-(defn render-ai
+-  "An agent's own exception as REPL entries, the way `clojure.main` reports
+-  it: its message (class and location), then the author's SCI stacktrace and
+-  each cause's `ex-data`, read from the held error. The whole chain with its
+-  first-party frames is one read away."
+-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
+-  [unit]
+-  (let [value (if (map? (:seon.render/value unit)) (:seon.render/value unit) unit)
+-        held (error/held-reference unit)
+-        location (:seon.sci.eval/stacktrace value)]
+-    (error/source-entries
+-     (concat
+-      [(or (:seon.error/message value) (str (:seon.error/exception-class value)))]
+-      (when location
+-        [(if held (list :seon.sci.eval/stacktrace held) (str "At " (pr-str location)))])
+-      (when (and held (some :seon.error/data (:seon.error/chain value)))
+-        [(list 'keep :seon.error/data (list :seon.error/chain held))])
+-      (when held [(str "Cause chain: (:seon.error/chain " held ")")])))))
+-
+ (defn unarmed-record
+   "The diagnostic record for a failure that never reached an arm."
+   {:malli/schema [:=> [:cat :int] :seon.sci.admit/record]}
+diff -ru a/test/seon/sci/kernel_test.clj b/test/seon/sci/kernel_test.clj
+--- a/test/seon/sci/kernel_test.clj	2026-09-27 20:24:15.345494193 -0600
++++ b/test/seon/sci/kernel_test.clj	2026-09-27 20:24:32.711711540 -0600
+@@ -10,7 +10,6 @@
+   (:require [clojure.string :as str]
+             [clojure.test :refer [deftest is testing]]
+             [sci.core :as sci]
+-            [seon.ai.tokens :as tokens]
+             [seon.config :as config]
+             [seon.db :as db]
+             [seon.schema :as schema]
+@@ -113,41 +112,18 @@
+   [ctx source]
+   (:seon.sci.admit/value (evaluate ctx source 5000)))
+ 
+-(defn- shown
+-  "`source`'s forms evaluated where `handle` names `value`, and the size of
+-  the transcript they print (source plus results) in estimated tokens."
+-  [source handle value]
+-  (let [world (sci/init {:namespaces {(symbol (namespace handle)) {(symbol (name handle)) value}}})
+-        results (mapv #(sci/eval-form world %) (read-string (str "[" source "\n]")))]
+-    {:results results
+-     :tokens (long (Math/ceil (/ (+ (count source) (count (pr-str results)))
+-                                 tokens/shipped-chars-per-token)))}))
+-
+-(deftest an-agents-exception-is-whole-and-its-pair-shows-what-clojure-main-shows
++(deftest an-agents-exception-is-whole-and-its-reply-is-the-authors-evidence
++  ;; The value keeps its whole chain and first-party frames; the base error
++  ;; pair (seon.error/render-ai) shows the exception's class, message and the
++  ;; author's SCI stacktrace as data, with no evaluator frame.
+   (let [ctx (eval/build-base-ctx (schema/handed-projection))
+-        handle 'result/e1
+         divide (failure ctx "(/ 1 0)")
+-        thrown (failure ctx "(throw (ex-info \"boom\" {:a 1}))")
+-        source (kernel/render-ai {:seon.render/value divide :seon.repl/handle handle})
+-        {:keys [results tokens]} (shown source handle divide)]
+-    (testing "the value keeps its first-party frames: nothing is trimmed for presentation"
+-      (is (seq (mapcat :seon.error/frames (:seon.error/chain divide))) (pr-str divide)))
+-    (testing "the pair: clojure.main's message, then the author's location read from the held value"
+-      (is (= [";; Execution error (ArithmeticException) at (REPL:1:1)." ";; Divide by zero"]
+-             (take 2 (str/split-lines source))) source)
+-      (is (= [(:seon.sci.eval/stacktrace divide)] results) source)
+-      (is (str/includes? source (str "(:seon.error/chain " handle ")")) "the whole chain is one read away")
+-      ;; The author's location is read as `(:seon.sci.eval/stacktrace handle)`;
+-      ;; an evaluator frame would print as its class or file.
+-      (is (not-any? #(str/includes? source %) ["seon.sci.eval$" "sci/eval.clj" "sci.impl."])
+-          "no evaluator frame is shown")
+-      (is (<= tokens 200) source))
+-    (testing "an ex-info's data is shown per cause"
+-      (let [source (kernel/render-ai {:seon.render/value thrown :seon.repl/handle handle})]
+-        (is (= [{:a 1}] (peek (:results (shown source handle thrown)))) source)))
+-    (testing "without a handle only bounded comments are said"
+-      (is (every? #(str/starts-with? % ";; ")
+-                  (str/split-lines (kernel/render-ai {:seon.render/value divide})))))))
++        reply (error/reply-value nil divide)]
++    (is (seq (mapcat :seon.error/frames (:seon.error/chain divide))) (pr-str divide))
++    (is (= 'java.lang.ArithmeticException (symbol (str (:seon.error/exception-class reply)))) (pr-str reply))
++    (is (= (:seon.sci.eval/stacktrace divide) (:seon.sci.eval/stacktrace reply)))
++    (is (not-any? #(str/includes? (pr-str reply) %) ["seon.sci.eval$" "sci/eval.clj" "sci.impl."])
++        "no evaluator frame is shown")))
+ 
+ (deftest a-contract-refusals-reply-is-the-failing-path-and-an-example
+   ;; A program function resolves in an acquired agent context (a bare

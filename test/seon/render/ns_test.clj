@@ -1,5 +1,6 @@
 (ns seon.render.ns-test
-  (:require [clojure.string :as str]
+  (:require [clojure.edn]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
             [seon.cluster.agent :as agent]
@@ -166,22 +167,37 @@
            (is (= (list 'seon.issue/task-edges (list 'seon.db/db) handle) (sut/task-form (unit [:seon.task/id handle] 1)))
                "the form face is the edges read")
            (is (hiccup/hiccup? (sut/task-html (unit [:seon.task/id handle] 1))))))
-       (testing "a schema's usage is data: the form it replaces and the stored values a new form refuses"
-         (let [usage (render.schema/usage database :seon.task/intent [:string {:min 400}])]
+       (testing "a schema's AI face is data: the form it replaces and what names the key"
+         (let [usage (render.schema/render-ai
+                      (assoc (unit [:seon.schema/key :seon.task/intent] 1)
+                             :seon.render/value {:seon.schema/key :seon.task/intent
+                                                 :seon.schema/definition [:string {:min 400}]}))]
            (is (= [:string {:min 1}] (:seon.schema.usage/previous usage)) (pr-str usage))
-           (is (pos? (:seon.schema.usage/stored usage)) (pr-str usage))
-           (is (= (:seon.schema.usage/checked usage) (:seon.schema.usage/failing usage))
-               "every stored intent is shorter than 400 characters")
-           (is (some #{:seon.task/task} (:seon.schema.usage/referenced-by usage)) (pr-str usage)))
-         (is (= [(list 'doc :seon.task/intent)]
-                (forms (render.schema/render-ai (unit [:seon.schema/key :seon.task/intent] 0))))
-             "listed among others, a schema is its doc call and reads nothing")
+           (is (some #{:seon.task/task} (:seon.schema.usage/referenced-by usage)) (pr-str usage))
+           (is (not (contains? usage :seon.schema.usage/check))
+               "the render validates nothing: a check is only the registration's record")))
+       (testing "listed among others, a schema is its key and doc line as data"
+         (is (= {:seon.schema/key :seon.task/intent}
+                (render.schema/render-ai (unit [:seon.schema/key :seon.task/intent] 0))))
+         (is (str/starts-with? (:seon.schema.usage/doc (render.schema/render-ai (unit [:seon.schema/key :seon.task/ns] 0)))
+                               "The owning namespace")))
+       (testing "the form face is the usage read, shown and never run"
          (is (= (list 'seon.render.schema/usage '(seon.db/db) :seon.task/intent (list 'quote [:string {:min 1}]))
-                (render.schema/render-form (unit [:seon.schema/key :seon.task/intent] 1)))
-             "the form face is the usage read, shown and never run"))
-       (testing "a described schema listed among others carries its doc line"
-         (is (str/starts-with? (render.schema/render-ai (unit [:seon.schema/key :seon.task/ns] 0))
-                               "(doc :seon.task/ns)\n;; The owning namespace")))))))
+                (render.schema/render-form (unit [:seon.schema/key :seon.task/intent] 1)))))
+       (testing "a stored-data check judges each entity's reconstructed value, once, at registration"
+         (let [check (db/stored-value-check database :seon.task/intent [:string {:min 400}])]
+           (is (pos? (:seon.schema.usage/checked check)) (pr-str check))
+           (is (= (:seon.schema.usage/checked check) (:seon.schema.usage/failing check))
+               "every stored intent is shorter than 400 characters"))
+         (let [form (clojure.edn/read-string
+                     (db/q '[:find ?f . :in $ ?k :where [?s :seon.schema/key ?k] [?s :seon.schema/form ?f]]
+                           database :seon.fn.arity/input-refs))
+               check (db/stored-value-check database :seon.fn.arity/input-refs form)]
+           (is (zero? (:seon.schema.usage/failing check))
+               "a cardinality-many value is judged as its set, never datom by datom (Astra's 200/200)"))
+         (is (nil? (binding [db/*read-database* database]
+                     (db/registration-check :seon.task/intent [:string {:min 1}])))
+             "an unchanged form reads nothing"))))))
 
 (deftest a-function-renders-its-source-and-neighbours-by-name
   ;; Class regression: the function node is its authored form plus callees and

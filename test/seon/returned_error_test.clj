@@ -2,6 +2,7 @@
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
+            [seon.ai.tokens :as tokens]
             [seon.config :as config]
             [seon.db :as db]
             [seon.repl :as repl]
@@ -42,10 +43,10 @@
        ;; seon.db/render-rejection-ai delegates to seon.error/render-ai —
        ;; and reaches an agent only as already-saved shown text, asserted
        ;; at the end of this test.
-       (is (str/starts-with? shown "seon.db/transact! refused") shown)
+       (is (str/includes? shown "seon.db/transact! refused") shown)
        (is (str/includes? shown "expected a string") shown)
        (is (str/includes? shown "42") shown)
-       (is (< (alength (.getBytes shown "UTF-8")) 300) shown)
+       (is (< (tokens/estimate shown) 200) shown)
        (is (= shown response))
        (is (= 'seon.db/render-rejection-ai (:seon.eval/renderer result)))
        (is (= before (db/basis-t @connection)))

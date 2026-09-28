@@ -1720,10 +1720,11 @@
      v - Malli schema definition
 
    Returns the registration `{:seon.schema/key k :seon.schema/definition v}`
-   (`:seon.schema/registration`), whose render pair shows what it means for
-   the program and its stored data: the form it replaces, how many stored
-   values the new form refuses, and the schemas and contracts naming `k`
-   (`seon.render.schema/usage`).
+   (`:seon.schema/registration`). Inside an evaluation, a changed form of an
+   installed attribute also carries `:seon.schema.usage/check`: how many
+   stored values the new form refuses (`seon.db/registration-check`). Its
+   render pair shows the form it replaces, that check, and the schemas and
+   contracts naming `k` (`seon.render.schema/usage`).
 
    Map render metadata stays in the authored form. Database storability and
    stable identity derive from installed attribute declarations; no map-level
@@ -1776,7 +1777,14 @@
       :seon.schema/admission
       {:seon.schema.admission/source *registration-admission-source*}}))
   (update-candidate-forms! assoc k v)
-  {:seon.schema/key k :seon.schema/definition v})
+  ;; The stored-data check runs here, once, in the registering evaluation
+  ;; (never in its render): `seon.db` is resolved without loading it, as
+  ;; `seon.schema.edn/admit` is above, since `seon.db` requires this namespace.
+  (let [check (when-let [registration-check (some-> (find-ns 'seon.db)
+                                                    (ns-resolve 'registration-check))]
+                (registration-check k v))]
+    (cond-> {:seon.schema/key k :seon.schema/definition v}
+      (some? check) (assoc :seon.schema.usage/check check))))
 
 (defn unregister!
   "Stage removal of one schema from the current evaluation delta.

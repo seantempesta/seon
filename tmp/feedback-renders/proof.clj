@@ -5,17 +5,24 @@
 ;; `fr.error` and `fr.render.schema` of the landed source): never load-file,
 ;; intern or alter-var-root over default's program.
 ;;
-;; Every case runs on a disposable isolated branch of default's head through
-;; the one path's two entrants: an MCP code batch (`turn.batch/code-request`,
-;; what the MCP tool encodes as JSON) and a Seon agent turn whose provider is
-;; a scripted local stub (no paid call). `(proof/proofs)` answers one map of
-;; named proofs; per case the reply today (`:before`, the installed code's
-;; shown text) and with the landed renders (`:after`), their estimated tokens
-;; and milliseconds, and for an error whether the fix the reply offers,
-;; evaluated as the agent would evaluate it, succeeds.
+;; What this proves, and what it does not (Astra e9e15d610 §4):
+;; - Each case runs on a disposable isolated branch of default's head through
+;;   two batch adapters: `turn.batch/code-request` (what the MCP tool encodes)
+;;   and `turn.batch/turn-request` over text a local function returns. The
+;;   second is NOT the provider/Flow turn entrance; call it the turn-request
+;;   adapter, not an agent turn.
+;; - `:before` is the installed code's shown text. `:after` is the landed
+;;   render function called directly on the extracted value, printed here by
+;;   the value printer; it is not a saved reply of an installed render.
+;; - `:fix-works?` evaluates a fix an agent writes from the reply (`:fix`,
+;;   authored per case) and checks no thrown error; a returned error map would
+;;   pass it. Replies no longer offer a synthesized fix form.
+;; - A registration's stored-data check is `seon.db/registration-check` under
+;;   the world's database, as `register!` records it; the render only reads it.
 
 (ns proof
   (:require [clojure.pprint :as pprint]
+            [clojure.walk]
             [clojure.string :as str]
             [seon.ai.tokens :as tokens]
             [seon.batch :as batch]
@@ -111,7 +118,7 @@
 (defn installed?
   "True once default runs the landed renders (after root's restart)."
   []
-  (some? (resolve 'seon.render.schema/usage)))
+  (some? (resolve 'seon.db/registration-check)))
 
 (defn copy-landed!
   "Evaluate the landed source's new render code into scratch namespaces:
@@ -124,12 +131,9 @@
         end (str/index-of error-text ";;; SCHEMA PAIRS AS REPL ENTRIES")]
     (eval-in! '(ns fr.error
                  (:require [clojure.string :as str] [malli.core :as m] [malli.generator :as mg] [malli.registry :as mr]
-                           [malli.transform :as mt] [malli.util :as mu]
-                           [seon.batch :as batch] [seon.db :as db] [seon.render.value :as render.value] [seon.repl :as repl]))
-              (str (let [i (str/index-of error-text "(defn- refusal-value-shown")]
-                     (subs error-text i (str/index-of error-text "(defn-" (inc i))))
-                   "\n"
-                   "(def ^:private rendered-error-value @#'seon.error/rendered-error-value)\n"
+                           [malli.util :as mu]
+                           [seon.db :as db] [seon.render.value :as render.value] [seon.repl :as repl]))
+              (str "(def ^:private rendered-error-value @#'seon.error/rendered-error-value)\n"
                    "(def ^:private fact-source @#'seon.error/fact-source)\n"
 
                    (subs error-text start end))))
@@ -140,6 +144,19 @@
                 (str/replace-first "(ns seon.render.schema" "(ns fr.render.schema-copy")
                 (cond-> (:private (meta (resolve 'seon.id/printed)))
                   (str/replace "(id/printed " "(pr-str "))))
+  ;; seon.db's evaluation-time stored-data check, its private helpers referred
+  (let [src (slurp (str root "src/seon/db.clj"))
+        grab (fn [head] (let [i (str/index-of src head)]
+                          (read (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. (subs src i))))))]
+    (when (find-ns 'fr.db) (remove-ns 'fr.db))
+    (binding [*ns* (create-ns 'fr.db)]
+      (refer-clojure)
+      (require '[malli.core :as m] '[datahike.api :as d] '[datahike.db.interface :as dbi])
+      (doseq [v '[diagnostic write-entity-value carried-projection db read-refusal? database-value?]]
+        (intern *ns* v @(ns-resolve 'seon.db v)))
+      (doseq [head ["(def ^:private stored-check-limit" "(defn stored-value-check" "(defn registration-check"]]
+        (eval (clojure.walk/postwalk-replace {'*read-database* 'seon.db/*read-database* '*conn* 'seon.db/*conn*}
+                                             (grab head))))))
   (eval-in! '(ns fr.render.schema) "(def usage fr.render.schema-copy/usage) (def render-ai fr.render.schema-copy/render-ai) (def render-html fr.render.schema-copy/render-html)")
   :copied)
 
@@ -147,11 +164,13 @@
   (let [installed {'reply-value 'seon.error/reply-value 'render-ai 'seon.error/render-ai
                    'reply-html 'seon.error/reply-html 'rendered-reply 'seon.error/rendered-reply
                    'usage 'seon.render.schema/usage 'schema-ai 'seon.render.schema/render-ai
-                   'schema-html 'seon.render.schema/render-html}
+                   'schema-html 'seon.render.schema/render-html
+                   'registration-check 'seon.db/registration-check}
         copied {'reply-value 'fr.error/reply-value 'render-ai 'fr.error/render-ai
                 'reply-html 'fr.error/reply-html 'rendered-reply 'fr.error/rendered-reply
                 'usage 'fr.render.schema/usage 'schema-ai 'fr.render.schema/render-ai
-                'schema-html 'fr.render.schema/render-html}]
+                'schema-html 'fr.render.schema/render-html
+                'registration-check 'fr.db/registration-check}]
     @(resolve (get (if (installed?) installed copied) sym))))
 
 (defn- floor-text
@@ -190,8 +209,14 @@
    :schema-nilable {:form "(seon.schema/register! :scratch.fbr/maybe-n [:maybe :int])"
                     :fix "(seon.schema/register! :scratch.fbr/maybe-n :int)"}})
 
-(defn- fix-text [reply case]
-  (or (:fix case) (some-> (:seon.error/fix-form reply) repl/source-text)))
+(def ^:private example-fixes
+  "The fix an agent writes from the reply's path, expectation and example."
+  {:contract-nested "(total-area [{:scratch.fbr/w 2 :scratch.fbr/h 3} {:scratch.fbr/w 1 :scratch.fbr/h 4}])"
+   :contract-missing-key "(area {:scratch.fbr/w 2 :scratch.fbr/h 3})"
+   :first-party-contract "(my.program/callers {:seon.program/subject 'seon.error/reply-value})"})
+
+(defn- fix-text [_reply case k]
+  (or (:fix case) (get example-fixes k)))
 
 (defn error-case
   "One error case through both entrants: today's shown reply, the landed
@@ -206,8 +231,9 @@
         [reply ms] (ms-of #((impl 'reply-value) (:seon.db/db w) error))
         after (floor-text w reply)
         after-turn (floor-text w ((impl 'reply-value) (:seon.db/db w) (error-of turn)))
-        html ((impl 'reply-html) {:seon.db/db (:seon.db/db w) :seon.render/profile (:seon.render/profile w)} reply)
-        fix (fix-text reply case)
+        face ((impl 'render-ai) {:seon.render/value error :seon.db/db (:seon.db/db w)})
+        html ((impl 'reply-html) reply)
+        fix (fix-text reply case k)
         fixed (when fix (mcp-batch (world exec) (str setup fix)))]
     {:before (:seon.batch/shown (last-entry mcp))
      :before-tokens (toks (:seon.batch/shown (last-entry mcp)))
@@ -216,6 +242,7 @@
      :after-tokens (toks after)
      :after-ms ms
      :after-entrants-agree? (= after after-turn)
+     :face-is-data? (or (map? face) (string? face))
      :html-nodes (count (filter vector? (tree-seq vector? seq html)))
      :html html
      :fix fix
@@ -249,7 +276,12 @@
                              {:seon.schema/key (second form) :seon.schema/definition (nth form 2)})))
         unit {:seon.render/value registration :seon.db/db (:seon.db/db w)
               :seon.render/profile (:seon.render/profile w)}
-        [after ms] (ms-of #((impl 'schema-ai) unit))
+        check (binding [db/*read-database* (:seon.db/db w)]
+                ((impl 'registration-check)
+                 (:seon.schema/key registration) (:seon.schema/definition registration)))
+        unit (cond-> unit (some? check) (assoc-in [:seon.render/value :seon.schema.usage/check] check))
+        [selected ms] (ms-of #((impl 'schema-ai) unit))
+        after (floor-text w selected)
         html ((impl 'schema-html) unit)]
     {:before (:seon.batch/shown (last-entry mcp))
      :before-tokens (toks (:seon.batch/shown (last-entry mcp)))

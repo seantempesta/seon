@@ -8,6 +8,7 @@
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
+            [datahike.db]
             [seon.config :as config]
             [seon.blob :as blob]
             [seon.error :as error]
@@ -160,7 +161,7 @@
             (is (str/includes? (:seon.error/message (:seon.cluster.status/store-bytes status))
                                "not scanned")))
           (is (str/includes? (pr-str (#'seon.render.transcript/fault-problems database "error-graph-steward" [])) "occurrences: 6"))
-          (is (str/includes? (error/render-ai entity) "occurrence-count 6"))
+          (is (= 6 (:seon.error/occurrence-count (error/render-ai entity))))
           (is (str/includes? (pr-str (error/render-html {:seon.db/db database :seon.render/value entity})) "Open"))
           (is (= '(seon.error/for-agent (seon.db/db) "error-graph-steward") read-form))
           (let [observed (error/for-agent database "error-graph-steward")]
@@ -205,8 +206,8 @@
                             [?o :seon.error.occurrence/agent ?a] [?e :seon.error/occurrences ?o]]
                           database "agent-3"))))
         (is (:seon.error/capped? (error/latest-fact (first errors))))
-        (is (str/includes? (error/render-ai (first errors)) "capped evidence message")
-            (error/render-ai (first errors)))
+        (is (str/includes? (pr-str (error/render-ai (first errors))) "capped evidence message")
+            (pr-str (error/render-ai (first errors))))
         ;; An unstewarded fault is delivered to its escalation owner: the
         ;; writer notifies root, so root's faults hold exactly this one.
         (is (= #{(second (:seon.error/ref recorded))}
@@ -1467,7 +1468,7 @@
                   (error/render-ai (assoc unit :seon.render/value
                                           (dissoc value :seon.error/message))))]
        (is (str/includes? ai (:seon.error/message value)) ai)
-       (is (string? bare))
+       (is (some? bare))
        (is (empty? @reads) "the held observation is not read again")
        (is (seq @bare-reads) "a bare identity is read")))))
 
@@ -1652,3 +1653,35 @@
     (testing "distinct named functions stay distinct"
       (is (not= (site '[seon.test$run invoke "test.clj" 1])
                 (site '[seon.test$run_BANG_ invoke "test.clj" 1]))))))
+
+(deftest a-refused-name-read-is-shown-as-its-refusal
+  ;; An unresolved name's reply lists the names its namespace declares. When
+  ;; the database refuses that read (here a value with no attributes
+  ;; installed), the reply carries the refusal itself: never the refusal's map
+  ;; entries sorted as names, never an empty list (Astra e9e15d610 §3).
+  (let [unresolved {:seon.error/message "Unable to resolve symbol: aera"
+                    :seon.error/chain [{:seon.error/message "Unable to resolve symbol: aera"
+                                        :seon.error/data {:sci.impl/symbol 'aera}}]
+                    :seon.sci.eval/stacktrace '[[scratch.fbr 1 1]]}
+        names (get-in (error/reply-value (datahike.db/empty-db) unresolved)
+                      [:seon.error/in-namespace 'scratch.fbr])]
+    (is (db/read-refusal? names) (pr-str names))
+    (is (str/includes? (:seon.error/message names) ":seon.ns/name") (pr-str names))))
+
+(deftest a-contract-problem-shows-an-example-never-a-synthesized-call
+  ;; The reply shows the failing path, its expectation, the offending value
+  ;; and one generated example labelled as an example; it never rewrites the
+  ;; caller's input into a call (root ruling on Astra e9e15d610 §5).
+  (let [refusal {:seon.error/message "scratch.frr/f refused argument 0"
+                 :seon.instrument/fn 'scratch.frr/f
+                 :seon.instrument/check :input
+                 :seon.error/offending ["4"]
+                 :seon.error/problems [{:seon.error/schema-path [0] :seon.error/path []
+                                        :seon.error/argument "argument 0"
+                                        :seon.error/expected :int :seon.error/offending "4"}]}
+        reply (error/reply-value nil refusal)]
+    (is (= "scratch.frr/f refused argument 0" (:seon.error/message reply)))
+    (is (= [{:seon.error/path [] :seon.error/expected :int :seon.error/offending "4"}]
+           (mapv #(dissoc % :seon.error/example) (:seon.error/problems reply))))
+    (is (int? (get-in reply [:seon.error/problems 0 :seon.error/example])))
+    (is (not-any? #(contains? reply %) [:seon.error/fix-form :seon.error/offending]))))

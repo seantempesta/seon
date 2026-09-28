@@ -1325,9 +1325,9 @@
                             owner-id))
          (is (not (str/includes? (:seon.error/message rejected)
                                  "ExceptionInfo")))
-         (is (str/includes? (db/render-rejection-ai rejected)
+         (is (str/includes? (pr-str (db/render-rejection-ai rejected))
                             "seon.db/transact! refused transaction data"))
-         (is (str/includes? (db/render-rejection-ai rejected) owner-id))
+         (is (str/includes? (pr-str (db/render-rejection-ai rejected)) owner-id))
          (is (str/includes? (pr-str (db/render-rejection-html rejected))
                             owner-id))
          (is (= 'seon.db/render-rejection-ai

@@ -581,10 +581,12 @@
        (is (:db-after registration) (pr-str registration))
        (is (env/environment? environment) (pr-str environment))
        (let [diagnostic (ex-data failure)]
-         (is (str/includes? (error/render-ai diagnostic)
-                            (str function-symbol " refused argument count")))
-         (is (str/includes? (error/render-ai diagnostic) "([entities])"))
-         (is (str/includes? (error/render-ai diagnostic) "0")))))))
+         (let [reply (error/render-ai diagnostic)]
+           (is (str/includes? (:seon.error/message reply)
+                              (str function-symbol " refused argument count"))
+               (pr-str reply))
+           (is (= '([entities]) (:seon.instrument/arglists reply)) (pr-str reply))
+           (is (= 0 (get-in reply [:seon.error/problems 0 :seon.error/offending])) (pr-str reply))))))))
 
 (deftest a-violation-carries-bounded-arguments-only-when-it-can
   ;; `error/value`'s wrapper under bounded and default caps, built without
@@ -759,25 +761,14 @@
         "the refusal names the failing member, and retains the actual object")
     (is (identical? raw (first checked))
         "the whole checked argument survives beside the leaf, unprojected")
-    (is (str/includes? ai ":expected :int") ai)
-    (is (str/includes? ai "100") ai)
-    (is (not (str/includes? ai "139"))
-        "the AI projection stops at the profile's child bound")
-    ;; One cut face (one-render-path §3e): the shown members, then `…N`
-    ;; counting what was omitted of the 40 that were there.
-    ;; The layout may break the line before the cut; the cut and its
-    ;; continuation are the same tokens either way.
-    (is (str/includes? (str/replace ai #"\s+" " ")
-                       "[100 101 102 …37 (drop 3 (get-in result/eaudit [:seon.error/problems 0 :seon.error/offending]))]")
-        ai)
-    (is (str/includes? ai "(get-in result/eaudit [:seon.error/problems 0 :seon.error/offending])")
-        "and it hands back the form that requeries the leaf it elided")
-    (testing "the HTML face is the same selection with the same cut"
-      (is (every? #(str/includes? html (str %)) [100 101 102]) html)
-      (is (not (str/includes? html "139")) "HTML stops at the same child bound")
-      (is (str/includes? html "seon-print-elision") "the cut is marked in HTML")
-      (is (str/includes? html "…37 (drop 3 (get-in result/eaudit [:seon.error/problems 0 :seon.error/offending]))")
-          "and carries the same continuation that retrieves the rest"))
+    ;; The AI face is the selection as data (renders return data, 313e81181):
+    ;; the failing member itself, whole, with its expectation. Limits, cuts and
+    ;; their continuations are the value printer's, applied once at the edge.
+    (is (identical? member (get-in ai [:seon.error/problems 0 :seon.error/offending]))
+        "the selection carries the failing member itself, unclipped")
+    (is (= :int (get-in ai [:seon.error/problems 0 :seon.error/expected])) (pr-str ai))
+    (testing "the HTML face lays out the same selection"
+      (is (every? #(str/includes? html (str %)) [100 101 102]) html))
     (testing "the whole value stays retrievable from the stored reference"
       (is (= member (print/value-at refusal [:seon.error/problems 0 :seon.error/offending])))
       (is (= (drop 3 member)
@@ -1521,7 +1512,7 @@
     (is (string? caller))
     (is (str/starts-with? caller "seon.instrument-test "))
     (is (str/includes? (:seon.error/message refusal) caller))
-    (is (str/includes? (error/render-ai refusal) caller))))
+    (is (= caller (:seon.instrument/caller (error/render-ai refusal))))))
 
 (deftest a-prepared-call-refusal-names-its-caller-and-the-contract-name
   ;; Boot armed `seon.problems/open-faults` with its supplied-default plan, so
@@ -1580,7 +1571,7 @@
                      (test-support/refusal-data #(apply prefix-contract [])))]
        (is (= '([value])
               (:seon.instrument/arglists refusal)))
-       (is (not (str/includes? (error/render-ai refusal) "stale-name")))))))
+       (is (not (str/includes? (pr-str (error/render-ai refusal)) "stale-name")))))))
 
 (deftest output-validation-follows-the-declared-union
   (let [projection (schema/handed-projection)
