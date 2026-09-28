@@ -93,7 +93,7 @@
 (deftest a-request-that-is-not-json-answers-an-error-result
   (is (true? (get (json/read-str (mcp/call "{not json")) "isError"))))
 
-(deftest an-sci-call-answers-what-the-agents-next-context-reads
+(deftest ^{:seon.test/subject seon.mcp/sci-run} an-sci-call-answers-what-the-agents-next-context-reads
   (with-running-agent
    (fn [running agent-id connection]
      (let [result (answer "eval_clj" {"code" "(+ 1 2) (str \"a\" \"b\")" "agent" agent-id "cluster" running})
@@ -105,7 +105,7 @@
               (mapv #(get % "text") (get result "content")))
            "one text per evaluation, exactly the agent's own response")))))
 
-(deftest a-jvm-call-is-the-agents-recorded-run-and-its-value-digs-by-handle
+(deftest ^{:seon.test/subject seon.mcp/jvm-run} a-jvm-call-is-the-agents-recorded-run-and-its-value-digs-by-handle
   (with-running-agent
    (fn [running agent-id connection]
      (let [jvm (answer "eval_clj" {"code" "(+ 1 2)" "agent" agent-id "cluster" running "mode" "jvm"})
