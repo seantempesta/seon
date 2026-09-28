@@ -23,7 +23,11 @@
             [seon.cluster.agent :as agent]
             [seon.db :as db]
             [seon.env]
+            [seon.instrument]
+            [seon.repl]
             [seon.schema]
+            [seon.schema.edn]
+            [seon.turn]
             [seon.sci.batch :as sci.batch]
             [seon.sci.eval :as eval]
             [seon.sci.forgive :as forgive]
@@ -1219,10 +1223,19 @@
            handle (merge (:seon.turn.loop/cluster instance) (select-keys *exec* [:seon.db/connection :seon.sci.eval/ctx]))
            r (try (seon.turn/system-turn {:seon.turn.loop/cluster handle :seon.agent/id "root" :seon.turn/write? true})
                   (catch Throwable t {:threw (ex-message t)}))
-           rendered (filter :seon.turn/rendered (:seon.turn/forms r))]
-       {:pass? (and (not (:threw r)) (not (:seon.error/message r)) (some? (:seon.turn/id r))
-                    (seq rendered) (every? :seon.turn/text rendered))
-        :turn (:seon.turn/id r) :rendered (count rendered)
+           rendered (filter :seon.turn/rendered (:seon.turn/forms r))
+           ;; once recorded, an unchanged opening writes no turn: the data units
+           ;; are then each a stored evaluation of the agent, with shown text
+           d (db/db (:seon.db/connection handle))
+           declared (#'seon.turn/declared-sources handle d "root" (eval/agent-namespace d "root"))
+           latest (#'seon.turn/latest-evaluations d "root")
+           units (filter :seon.turn/rendered (:seon.turn/forms declared))
+           stored (filter #(:seon.eval/shown (get latest (#'seon.turn/source-key %))) units)]
+       {:pass? (boolean (and (not (:threw r)) (not (:seon.error/message r)) (seq units)
+                             (if (:seon.turn/id r)
+                               (and (seq rendered) (every? :seon.turn/text rendered))
+                               (= (count units) (count stored)))))
+        :turn (:seon.turn/id r) :rendered (count rendered) :units (count units) :stored (count stored)
         :failure (or (:threw r) (:seon.error/message r))}))))
 
 (defproof :union-refusal-leads-with-closest :totality
