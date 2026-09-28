@@ -328,13 +328,10 @@
   "Print one uncaught failure that could not be stored, with every cause."
   {:malli/schema [:=> [:cat :string :seon.error/throwable :map] :nil]}
   [thread-name throwable evidence]
-  (binding [*out* *err*]
-    (prn {:seon.error/message "SEON CORE FAULT (uncaught, not stored)"
-          :seon.error/operation `record-uncaught!
-          :seon.error/data (assoc evidence :thread thread-name)})
-    (println (render.value/floor throwable))
-    (flush))
-  nil)
+  (fault/print-unrecorded! {:seon.error/message "SEON CORE FAULT (uncaught, not stored)"
+                            :seon.error/operation `record-uncaught!
+                            :seon.error/data (assoc evidence :thread thread-name)}
+                           [throwable]))
 
 (defn record-uncaught!
   "Store one exception no thread caught through the cluster fault recorder.
@@ -410,7 +407,7 @@
                            (into [] (mapcat #(open-runs (:seon.db/connection %))) worlds))]
         (let [refusal (kernel/memory-pressure-error pressure)
               failure (ex-info (:seon.error/message refusal) refusal)]
-          (binding [*out* *err*] (println "SEON MEMORY PRESSURE:" (:seon.error/message refusal)) (flush))
+          (binding [*out* *err*] (println "SEON MEMORY PRESSURE:" (render.value/bounded-text (:seon.error/message refusal))) (flush))
           (doseq [{connection :seon.db/connection cluster-name :seon.boot/cluster-name
                    caps :seon.sci.admit/caps} worlds]
             (fault/record! connection cluster-name (cluster/process-identity (process/current-identity)) caps
@@ -789,5 +786,5 @@
   [ready]
   (str "seon " (:seon.boot/cluster-name ready)
        (if (seq (:seon.boot/missing-layers ready)) " partial boot " " ready ")
-       (or (:seon.render.web/url ready) (pr-str (:seon.boot/missing-layers ready)))
+       (or (:seon.render.web/url ready) (render.value/bounded-text (:seon.boot/missing-layers ready)))
        " (pid " (:seon.boot/pid ready) ", prepl " (:seon.boot/prepl-port ready) ")"))

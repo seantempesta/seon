@@ -3421,7 +3421,7 @@
        (list [:p {:class "seon-graph-counts"} (format "%,d chars · ≈%,d tokens · %d segments" (count text) (tokens/estimate text)
                                                       (count (:seon.context/contributions composed)))]
              [:pre {:class "seon-graph-prompt"} text])
-       [:pre {:class "seon-graph-prompt"} (pr-str (dissoc composed :seon.db/db))])]))
+       [:pre {:class "seon-graph-prompt"} (value/bounded-text (dissoc composed :seon.db/db))])]))
 
 (defn- graph-debug-html
   "The owner's context-tuning page for one agent: the context as sent (lazy),
@@ -3779,7 +3779,7 @@
                    observation))]
     (if (:seon.render.web/refused-member result)
       {:status 422 :headers {"content-type" "text/plain; charset=utf-8"}
-       :body (pr-str result)}
+       :body (value/bounded-text result)}
       {:status 204 :headers {} :body nil})))
 
 (defn- context-response

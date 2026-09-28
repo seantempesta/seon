@@ -69,6 +69,7 @@
             [datahike.db.interface :as dbi]
             [datahike.db.utils :as db.utils]
             [seon.db :as db]
+            [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn]))
@@ -248,7 +249,7 @@
       (seon.error.refusal/diagnostic (java.util.Date.) :seon.cluster.wake/declarations 'seon.cluster.wake/declarations-refusal
        {:seon.error/message
        (str "A listened attribute is not in the :avet index, so its wakes "
-            "read as absent: " (pr-str (vec (sort unindexed))))
+            "read as absent: " (render.value/bounded-text (vec (sort unindexed))))
        :seon.cluster.wake/attributes unindexed}))))
 
 (defn arming-refusal

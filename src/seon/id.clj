@@ -3,7 +3,10 @@
   event identity when called without data. Stable identities retain the
   supplied data's shape; callers choose their own identity parts."
   (:require [clojure.string :as str])
-  (:import [java.security MessageDigest]))
+  (:import [java.io BufferedWriter OutputStream OutputStreamWriter StringWriter Writer]
+           [java.nio.charset StandardCharsets]
+           [java.security DigestOutputStream MessageDigest]
+           [java.util HexFormat]))
 
 (def default-length
   "Default number of lowercase hexadecimal characters in an identity."
@@ -22,32 +25,74 @@
   (let [digester (MessageDigest/getInstance "SHA-256")]
     (doseq [bytes byte-arrays]
       (.update digester ^bytes bytes))
-    (apply str
-           (map #(format "%02x" (bit-and 0xff %))
-                (.digest digester)))))
+    (.formatHex (HexFormat/of) (.digest digester))))
 
-(defn- printed
-  "The printed text an identity hashes: `pr-str` under fixed print bindings,
-  so a caller's `*print-length*`, `*print-meta*` or other print binding cannot
-  change an identity. `*print-namespace-maps*` is true because every stored
-  identity was printed under clojure.main's REPL bindings, which set it."
+(defn writer?
+  "True for a `java.io.Writer`."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
+  [value]
+  (instance? Writer value))
+
+(defn- print-canonical!
+  "Print `data` onto `writer` under fixed print bindings, so a caller's
+  `*print-length*`, `*print-meta*` or other print binding cannot change the
+  text. `*print-namespace-maps*` is true because every stored identity was
+  printed under clojure.main's REPL bindings, which set it."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Canonical printing accepts arbitrary data, including nested heterogeneous values and nil.", :gen/elements [nil false 0 "" :k [] {}]}] [:fn seon.id/writer?]] :nil]}
+  [data ^Writer writer]
+  (binding [*out* writer *print-length* nil *print-level* nil *print-meta* false *print-dup* false
+            *print-readably* true *print-namespace-maps* true]
+    (pr data))
+  nil)
+
+(defn printed
+  "The canonical EDN text of `data`: the one fixed-binding print that
+  identities hash and that storage keeps as text.
+
+  ## Costs
+
+  - Linear in the printed size, and it holds the whole text: a caller that
+    only needs an identity uses [[id]], which streams the same characters
+    into the digest without building the string."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Identity hashes Clojure's printed representation of arbitrary data, including nested heterogeneous values and nil.", :gen/elements [nil false 0 "" :k [] {}]}]] :string]}
   [data]
-  (binding [*print-length* nil *print-level* nil *print-meta* false *print-dup* false
-            *print-readably* true *print-namespace-maps* true]
-    (pr-str data)))
+  (let [writer (StringWriter.)]
+    (print-canonical! data writer)
+    (str writer)))
+
+(defn- printed-digest
+  "SHA-256 hex of the UTF-8 bytes of `(printed data)`, printed straight into
+  the digest: no string or byte array of the whole text is built."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Identity hashes Clojure's printed representation of arbitrary data, including nested heterogeneous values and nil.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 64 :max 64}]]}
+  [data]
+  (let [digester (MessageDigest/getInstance "SHA-256")
+        ;; The encoder, not a per-write getBytes, so a surrogate pair split
+        ;; across two writes encodes exactly as String.getBytes would.
+        writer (BufferedWriter. (OutputStreamWriter. (DigestOutputStream. (OutputStream/nullOutputStream) digester)
+                                                     StandardCharsets/UTF_8)
+                                8192)]
+    (print-canonical! data writer)
+    (.flush writer)
+    (.formatHex (HexFormat/of) (.digest digester))))
 
 (defn id
-  "SHA-256 of the fixed-binding `pr-str` of data, truncated to n characters
-  (default 12). With no arguments, mint a fresh event identity. Data is
-  deliberately polymorphic: scalars and collections are hashed exactly as
-  printed, so equal maps printed in different entry order differ."
+  "SHA-256 of the canonical EDN text of data ([[printed]]), truncated to n
+  characters (default 12). With no arguments, mint a fresh event identity.
+  Data is deliberately polymorphic: scalars and collections are hashed
+  exactly as printed, so equal maps printed in different entry order differ.
+
+  ## Costs
+
+  - Streams the print into the digest: memory is constant in the value's
+    size, time is linear in its printed size. The 2,387 reach-digest inputs
+    of default's tests (about 600 MB printed) take 8.7 s either way;
+    streaming cut allocation from 17.4 GB to 13.4 GB (2026-09-28)."
   {:malli/schema
    [:function [:=> [:cat] [:string {:min 12, :max 12}]] [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Identity hashes Clojure's printed representation of arbitrary data, including nested heterogeneous values and nil.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 12, :max 12}]] [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Identity hashes Clojure's printed representation of arbitrary data, including nested heterogeneous values and nil.", :gen/elements [nil false 0 "" :k [] {}]}] [:int {:min 1, :max 64}]] [:string {:min 1, :max 64}]]]}
   ([] (id (random-uuid)))
   ([data] (id data default-length))
   ([data n]
-   (subs (sha-256 [(.getBytes ^String (printed data) "UTF-8")]) 0 n)))
+   (subs (printed-digest data) 0 n)))
 
 (defn digest
   "The stable id of a thing that IS its `parts`: `length` hex characters of

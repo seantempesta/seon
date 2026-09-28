@@ -11,6 +11,7 @@
             [clojure.tools.reader.edn :as reader.edn]
             [clojure.tools.reader.reader-types :as reader-types]
             [seon.schema :as schema]
+            [seon.render.value :as render.value]
             [seon.schema.edn :as schema.edn]
             [seon.schema.internal :as internal]))
 
@@ -311,7 +312,7 @@
                (finding
                 file :warning :schema-exact-reuse
                 (str "Schema " declaration-key
-                     " has the same composite shape as " (pr-str matches)
+                     " has the same composite shape as " (render.value/bounded-text matches)
                      ". If this duplicates one of those schemas, delete "
                      declaration-key " and reuse that existing key. Create a"
                      " parallel schema only when the user explicitly chooses"
@@ -406,8 +407,8 @@
     (finding
      file :warning :schema-polymorphism
      (str "Schema declaration " declaration-key " accepts anything at "
-          (pr-str (:seon.schema/path slot)) " ("
-          (pr-str (:seon.schema/definition slot)) "). If that is deliberate,"
+          (render.value/bounded-text (:seon.schema/path slot)) " ("
+          (render.value/bounded-text (:seon.schema/definition slot)) "). If that is deliberate,"
           " record why: {:seon.schema.admission/exemption"
           " :seon.schema.admission/polymorphic-boundary"
           " :seon.schema.admission/reason \"...\" :gen/schema ...}; otherwise"

@@ -20,6 +20,7 @@
             [seon.env :as env]
             [seon.print :as print]
             [seon.render :as render]
+            [seon.render.value :as render.value]
             [seon.repl :as repl]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
@@ -182,7 +183,7 @@
       (refuse!
        ::missing-input
        (if (seq missing)
-         (str "Prompt request is missing required input " (pr-str missing) ".")
+         (str "Prompt request is missing required input " (render.value/bounded-text missing) ".")
          "Prompt request violates :seon.cluster.prompt/request.")))))
 
 (defn- history-contributions

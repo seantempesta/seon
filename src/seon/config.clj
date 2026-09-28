@@ -19,6 +19,7 @@
             [seon.db :as db]
             [seon.error :as error]
             [seon.reconcile :as reconcile]
+            [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.schema.datahike :as schema.datahike]
@@ -664,7 +665,7 @@
            (vary-meta {:seon.error/at (java.util.Date.)
              :seon.error/layer :seon.config/compile
              :seon.error/operation 'seon.config/require-functions!
-             :seon.error/message (str "Configuration names functions with no program entity: " (pr-str missing))
+             :seon.error/message (str "Configuration names functions with no program entity: " (render.value/bounded-text missing))
              :seon.config/error-key (ffirst missing)
              :seon.config/rule ::missing-function
              :seon.error/expected-key :seon.fn/sym

@@ -3,6 +3,7 @@
   (:refer-clojure :exclude [await])
   (:require [seon.background :as background]
             [seon.error.refusal :as refusal]
+            [seon.render.value :as render.value]
             [seon.schema.edn :as schema.edn]))
 
 (schema.edn/load! {})
@@ -11,7 +12,7 @@
   [forms]
   (seon.error.refusal/diagnostic (java.util.Date.) :my.background/call 'my.background/background
    {:seon.error/message "background refused its call at [:forms]: expected one direct capability call with one request map, optionally preceded by an options map, but observed another form shape. Fix: inspect (doc my.background/background) and supply the documented direct call."
-    :my.background/call-source (pr-str forms)
+    :my.background/call-source (render.value/bounded-text forms)
     :seon.error/expected '(my.background/background (capability request-map))
     :seon.error/offending forms
     :seon.error/data {:my.background/authored-form forms}}))

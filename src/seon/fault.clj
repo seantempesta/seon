@@ -18,7 +18,8 @@
             [seon.cluster.branch :as cluster.branch]
             [seon.config :as config]
             [seon.db :as db]
-            [seon.error :as error]))
+            [seon.error :as error]
+            [seon.render.value :as render.value]))
 
 (defn- tagged-run
   "The tagged agent's open turn, or nil.
@@ -243,6 +244,24 @@
   (when (instance? Throwable failure)
     (some (comp :seon.fault/recorded ex-data)
           (take-while some? (iterate ex-cause failure)))))
+
+(defn print-unrecorded!
+  "Write a fault no store holds onto stderr through the value printer: `evidence` as
+  bounded text, then each Throwable's bounded cause chain. The one edge where
+  a fault that recording could not take is still delivered.
+
+  ## Costs
+
+  - Armed on default 2026-09-28, the value printer's evidence text for a map holding a
+    5,000,000-character string, a 200,000-element vector, an SCI context and an
+    atom holding both: 401 characters in 334 µs, 44 KB allocated; `pr-str` of
+    the same map built 12.6 million characters in 113 ms."
+  {:malli/schema [:=> [:cat :map [:sequential :seon.error/throwable]] :nil]}
+  [evidence throwables]
+  (let [text (apply str (interpose "\n" (cons (render.value/bounded-text evidence)
+                                              (map render.value/floor throwables))))]
+    (doto ^java.io.Writer *err* (.write text) (.write "\n") (.flush)))
+  nil)
 
 (defn fault!
   "Record one core fault on the caller's thread and wake its agent.

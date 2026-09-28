@@ -19,7 +19,6 @@
             [seon.env :as env]
             [seon.error :as error]
             [seon.fault :as fault]
-            [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.sci.kernel :as kernel]
             [seon.schema.edn :as schema.edn])
@@ -206,9 +205,9 @@
   sliding buffer, `core.async/.../flow/impl.clj:101-102,312-316`). The writer
   decides occurrence and wake (`seon.fault/fault!`); an agent graph's
   environment names its agent, which attributes the fault to that agent's run.
-  A fault that could not be stored is printed on stderr, its causes through
-  `seon.render.value/floor` (bounded text; the whole values stay on the
-  throwables), and answers true so the caller stops the
+  A fault that could not be stored is printed on stderr through
+  `seon.fault/print-unrecorded!` (the value printer's bounded text; the whole values
+  stay on the throwables), and answers true so the caller stops the
   graph; the step still returns to Flow, because a stop transition must exit
   for the graph's join to complete (`impl.clj:181,317-320`). Answers false
   when the fault was recorded and the graph continues. A supplied `stop!` is
@@ -229,14 +228,11 @@
                     stop! (assoc :seon.fault/stop-request! stop!)))
     false
     (catch Throwable unrecorded
-      (binding [*out* *err*]
-        ;; no store holds this fault, so its whole cause is printed here
-        (prn {:seon.error/message (ex-message unrecorded)
-              :seon.error/operation (symbol step-var)
-              :seon.fault/recorded (:seon.fault/recorded (ex-data unrecorded))})
-        (println (render.value/floor unrecorded))
-        (println (render.value/floor failure))
-        (flush))
+      ;; no store holds this fault, so its whole cause is printed here
+      (fault/print-unrecorded! {:seon.error/message (ex-message unrecorded)
+                                :seon.error/operation (symbol step-var)
+                                :seon.fault/recorded (:seon.fault/recorded (ex-data unrecorded))}
+                               [unrecorded failure])
       true))))
 
 (defn- request-graph-stop!
@@ -369,11 +365,10 @@
                               (when (proc-failed! step-var args failure stop!) (stop!)))
                             (catch Throwable failure
                               (stop!)
-                              (try (binding [*out* *err*]
-                                     (prn {:seon.error/message "SEON CORE FAULT (unrecorded Flow report)"
-                                           ::flow/pid (::flow/pid report)
-                                           :seon.error/throwable-class (.getName (class failure))}))
-                                   (catch Throwable _ nil)))))]
+                              (fault/print-unrecorded! {:seon.error/message "SEON CORE FAULT (unrecorded Flow report)"
+                                                        ::flow/pid (::flow/pid report)
+                                                        :seon.error/throwable-class (.getName (class failure))}
+                                                       []))))]
            (flow.spi/start
             (flow/process (step stop!) options)
             (-> start-options

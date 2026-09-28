@@ -8,6 +8,7 @@
             [seon.cluster.registry :as registry]
             [seon.db :as db]
             [seon.env :as env]
+            [seon.render.value :as render.value]
             [seon.id :as id])
   (:import [java.lang.management ManagementFactory]
            [com.sun.management HotSpotDiagnosticMXBean HotSpotDiagnosticMXBean$ThreadDumpFormat]))
@@ -185,4 +186,4 @@
   (let [value (snapshot unit)]
     [:section {:class "seon-cluster-status"}
      [:h3 "Cluster"]
-     (into [:dl] (map (fn [[k v]] [:div [:dt (name k)] [:dd (pr-str v)]]) value))]))
+     (into [:dl] (map (fn [[k v]] [:div [:dt (name k)] [:dd (render.value/bounded-text v)]]) value))]))
