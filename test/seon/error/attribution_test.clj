@@ -210,6 +210,8 @@
          (is (= 'seon.problems/open-faults (:seon.instrument/fn error))))
        (testing "the fold records it as the producer's fault, answered by its task"
          (is (string? signature))
+         (is (= 'user/make-row (:seon.error/producer (first (problems/open-faults (db/db connection) signature))))
+             "the open fault names who it counts against")
          (is (= [['user/make-row]] (mapv :seon.task/must-read (:seon.task/_faults (signature-row connection signature)))))
          (is (some #(= (:seon.task/id (first (:seon.task/_faults (signature-row connection signature)))) (:seon.task/id %))
                    (my.task/open (db/db connection)))))

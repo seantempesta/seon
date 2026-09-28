@@ -123,6 +123,7 @@
                  [:seon.error/at :seon.error/at]
                  [:seon.error/layer :seon.error/layer]
                  [:seon.error/operation :seon.error/operation]
+                 [:seon.error/producer {:optional true} :seon.error/producer]
                  [:seon.problems/occurrences
                   :seon.problems/occurrences]
                  [:seon.error/fact :seon.error/fact]

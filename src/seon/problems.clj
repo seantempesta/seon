@@ -137,6 +137,8 @@
                        :seon.problems/occurrences (reduce + 0 (map :seon.error.occurrence/count
                                                                  (:seon.error/occurrences row)))
                        :seon.error/fact fact}
+                       ;; who the fault counts against (the blame rule), when known
+                       (:seon.error/producer row) (assoc :seon.error/producer (:seon.error/producer row))
                        (:seon.error/resolved-by resolution) (assoc :seon.error/resolution resolution)))))
            (sort-by (juxt (comp - :seon.problems/occurrences) :seon.error/signature))
            vec))))
