@@ -24,6 +24,10 @@
  :text [:string {:description "Exact text of a batch; after reading, its repaired text: what is evaluated, stored and rendered."}]
  :start-ns :symbol
  :mode [:enum :reply :code]
+ :segmented [:map {:description "A text's forms read structurally (seon.sci.forgive/segments): each form's source and the prose above it, and the unread rest."}
+             [:seon.batch/segments [:vector [:map [:seon.batch/source :string]
+                                             [:seon.batch/comment {:optional true} :string]]]]
+             [:seon.batch/unread {:optional true} :string]]
  :pos nat-int?
  :line-starts [:vector nat-int?]
  :reader [:any {:description "The live SCI source reader at the cursor (sci.core/source-reader); a host object, never stored."}]

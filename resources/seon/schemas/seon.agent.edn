@@ -145,7 +145,7 @@
                       [:seon.cluster.reply/text :seon.cluster.reply/text]],
                      :segmenter
                      [:qualified-symbol
-                      {:description "The function that segments a submission's text into sources: seon.turn/planned-sources for a model reply (the default), seon.cluster.reply/code-sources for code. It must declare planned-sources' contract."}],
+                      {:description "The function that segments a submission's text into sources: seon.turn/planned-sources for a model reply (the default), seon.turn/code-sources for code. It must declare planned-sources' contract."}],
                      :source-submission-result
                      [:map
                       [:seon.turn/id :seon.turn/id]

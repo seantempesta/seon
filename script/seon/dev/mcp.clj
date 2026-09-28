@@ -424,7 +424,7 @@
                            {:seon.turn.loop/cluster handle# :seon.agent/routing (:seon.agent/routing handle#)
                             :seon.agent/id "root"})
                 result# ((requiring-resolve 'seon.cluster.agent/evaluate-source!)
-                         (cond-> (assoc custody# :seon.agent/segmenter 'seon.cluster.reply/code-sources
+                         (cond-> (assoc custody# :seon.agent/segmenter 'seon.turn/code-sources
                                         :seon.cluster.reply/text ~source)
                            '~namespace-symbol (assoc :seon.turn/starting-ns [:seon.ns/name '~namespace-symbol])))]
             (if (or (:seon.error/at result#) (not (:seon.db/db result#)))

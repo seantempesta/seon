@@ -15,10 +15,13 @@ show the additive context and since-query diff.
 
 ## Name the surface before making a claim
 
-- The reply reader turns model text into ordered source forms and reader
-  evidence. It preserves source and namespace, attaches preceding prose
-  to its form, and retains trailing prose only in the raw reply.
-  Current owner: `seon.cluster.reply/sources` (`src/seon/cluster/reply.clj:308`).
+- The forgiving stage segments model text into ordered sources structurally
+  (tags unread, no alias resolved): preceding prose becomes each form's
+  comment, prompt markers go, delimiters are repaired where unambiguous, and
+  trailing prose stays only in the raw reply (`seon.sci.forgive/segments`,
+  `src/seon/sci/forgive.clj:333`; `seon.turn/planned-sources` :3397 for a
+  reply, `seon.turn/code-sources` :3413 for code). Each form's one semantic
+  read happens when the one REPL path evaluates it (`seon.turn/read-row`).
 - An agent turn evaluates in its own SCI context, forked per turn from the
   cluster base with its private layer carried over (see below); a host REPL
   expression proves nothing about it. SCI itself provides reusable contexts,

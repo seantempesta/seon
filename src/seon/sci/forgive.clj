@@ -5,7 +5,8 @@
   cursor with the caller's reader (SCI's, under the live resolver). Only when
   that read fails, or, in a model reply, when a bare token does not stand
   alone on its line, does it repair the text at that point and read again
-  from the same offset:
+  from the same offset. Only a model reply (`:reply`) is repaired; code
+  (`:code`) is read as written:
 
     prose line          -> `; prose` comment line (a structured code suffix on
                            the line stays code, on its own line)
@@ -208,9 +209,11 @@
           follows-code? (and last-code-end (<= last-code-end start)
                              (str/blank? (subs text last-code-end start))
                              (not (str/includes? (subs text last-code-end start) "\n")))
-          marker (when begins-line? (re-find prompt (subs text start le)))
+          ;; code is read as written: only a model reply is repaired
+          reply? (= :reply mode)
+          marker (when (and reply? begins-line?) (re-find prompt (subs text start le)))
           done (fn [m] (assoc m :seon.batch/version v :seon.batch/repairs repairs))
-          fixed (delay (when (and (< start (count text)) (not (first-form-structural? (subs text start))))
+          fixed (delay (when (and reply? (< start (count text)) (not (first-form-structural? (subs text start))))
                          (delimiter-repair text start)))
           step
           (cond
@@ -331,7 +334,8 @@
             (recur (inc i) depth)))))))
 
 (defn segments
-  "A reply's forms read structurally (edamame, every semantic hook neutral:
+  "A reply's forms (`:reply`, the default: prose becomes comments) or code's
+  (`:code`: every form is a form, nothing is repaired) read structurally (edamame, every semantic hook neutral:
   tags unread, any alias), with the forgiving stage's repairs: each form's
   source text and the prose above it as its comment. A balanced form the
   structural read refuses (an odd map) is one form whose evaluation-time read
@@ -342,15 +346,15 @@
   ## Costs
 
   - 52 recorded replies: 64 ms total (default, 2026-09-28, unarmed)."
-  {:malli/schema [:=> [:cat :string]
-                  [:map [:seon.batch/segments [:vector [:map [:seon.batch/source :string]
-                                                        [:seon.batch/comment {:optional true} :string]]]]
-                   [:seon.batch/unread {:optional true} :string]]]}
-  [text]
+  {:malli/schema [:function
+                  [:=> [:cat :string] :seon.batch/segmented]
+                  [:=> [:cat :string :seon.batch/mode] :seon.batch/segmented]]}
+  ([text] (segments text :reply))
+  ([text mode]
   (let [ctx @structural-ctx
         opts {:all true :read-cond :preserve :auto-resolve (constantly 'seon.sci.forgive.trial)
               :suppress-read true :end-location true}
-        {sources :forms :keys [spans unread-from] repaired :text} (forms ctx opts :reply text)
+        {sources :forms :keys [spans unread-from] repaired :text} (forms ctx opts mode text)
         ends (into [0] (map second) spans)
         found (mapv (fn [source [start _] previous-end]
                      (let [c (comment-of (subs repaired previous-end start))]
@@ -362,10 +366,10 @@
     (cond
       (nil? unread-from) {:seon.batch/segments found}
       end (let [c (comment-of (subs repaired (peek ends) start))
-                rest-segments (segments (subs repaired end))]
+                rest-segments (segments (subs repaired end) mode)]
             (update rest-segments :seon.batch/segments
                     #(into (conj found (cond-> {:seon.batch/source (subs repaired start end)}
                                         (not (str/blank? c)) (assoc :seon.batch/comment c)))
                            %)))
       (str/blank? (subs repaired unread-from)) {:seon.batch/segments found}
-      :else {:seon.batch/segments found :seon.batch/unread (str/trim (subs repaired unread-from))})))
+      :else {:seon.batch/segments found :seon.batch/unread (str/trim (subs repaired unread-from))}))))

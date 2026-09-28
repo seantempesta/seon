@@ -22,7 +22,6 @@
             [malli.generator :as mg]
             [seon.ai :as ai]
             [seon.config :as config]
-            [seon.cluster.reply :as reply]
             [seon.agent]
             [seon.cluster.agent :as agent]
             [seon.sci.eval :as sci.eval]
@@ -676,7 +675,7 @@
        (is (seq fabricated) "The replay must include actual fabricated replies.")
        (doseq [[_id text] captures]
          (let [stopped (subs text 0 (or (str/index-of text stop) (count text)))
-               forms (reply/sources stopped 'user)]
+               forms (turn/planned-sources stopped 'user 100000)]
            (is (and (vector? forms) (seq forms))
                "must retain its preceding forms")
            (when (vector? forms)
@@ -773,7 +772,7 @@
                                    "finish_reason" "stop"}]})]
       (is (= "" (:seon.ai/text completion)))
       (is (= "stop" (:seon.ai/finish-reason completion)))
-      (is (= "" (get-in (reply/sources (:seon.ai/text completion))
+      (is (= "" (get-in (turn/planned-sources (:seon.ai/text completion) 'user 10000)
                        [:seon.error/data :seon.cluster.reply/text])))))
   (doseq [[body expected]
           [["data: {\"choices\":[{\"delta\":{\"content\":\"\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n" nil]

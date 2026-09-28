@@ -2,11 +2,11 @@
   "Stock-Clojure behavior checks exercised through Seon's production evaluation path."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is use-fixtures]]
-            [seon.cluster.reply :as reply]
             [seon.config :as config]
             [seon.sci.eval :as sci.eval]
             [seon.sci.reader :as sci.reader]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support]
+            [seon.turn :as turn]))
 
 ;; Upstream corpus pins (2026-08-01):
 ;; clojure@b18d3adc5b5f4d5d0ccea966203fb67a614d5c3d
@@ -512,7 +512,7 @@
              (first (repl-session ["(identical? *out* *err*)"])))))
 
 (defparity "C7" :passing
-  (let [plan (reply/sources "[] [] [999]" 'user)
+  (let [plan (turn/planned-sources "[] [] [999]" 'user 10000)
         sources (mapv :seon.cluster.eval/source plan)
         results (repl-session sources)]
     (compared ["[]" "[]" "[999]"]

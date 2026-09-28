@@ -52,7 +52,7 @@
                      :seon.flow/executor (cluster/projection-executor (:seon.sci.eval/projection-state ctx))
                      :seon.db.process/id cluster/boot-process-identity})
             request {:seon.turn.loop/cluster handle :seon.agent/routing routing :seon.agent/id agent-id}
-            code #(agent/evaluate-source! (assoc request :seon.agent/segmenter 'seon.cluster.reply/code-sources
+            code #(agent/evaluate-source! (assoc request :seon.agent/segmenter 'seon.turn/code-sources
                                                  :seon.cluster.reply/text %))]
         (swap! routing assoc :seon.agent/fault-channel faults)
         (support/transacted! connection (support/agent-tx @connection agent-id))
@@ -216,7 +216,7 @@
               (is (= opened closed) "and closes in it")
               (is (= 1 (- (db/basis-t after) (db/basis-t before))) "one commit per form")))
           (testing "a submission is a value on the agent's request port; a pass stopped before settlement leaves no half-written run"
-            (let [submitted (agent/submit-source! (assoc request :seon.agent/segmenter 'seon.cluster.reply/code-sources
+            (let [submitted (agent/submit-source! (assoc request :seon.agent/segmenter 'seon.turn/code-sources
                                                          :seon.cluster.reply/text "(loop [] (recur))"))
                   reply (:seon.agent/reply submitted)
                   requests (:seon.agent/requests (agent/armed routing agent-id))]

@@ -366,8 +366,8 @@
       (let [parts (set (tree-seq coll? seq (read-string sci-form)))]
         (is (contains? parts [:seon.ns/name '(quote mcp.chosen.namespace)])
             "the run names its namespace coordinate")
-        (is (= #{'seon.cluster.agent/evaluate-source! 'seon.cluster.reply/code-sources}
-               (into #{} (filter #{'seon.cluster.agent/evaluate-source! 'seon.cluster.reply/code-sources}) parts))
+        (is (= #{'seon.cluster.agent/evaluate-source! 'seon.turn/code-sources}
+               (into #{} (filter #{'seon.cluster.agent/evaluate-source! 'seon.turn/code-sources}) parts))
             "SCI without a branch is one ordinary run of root, not a bridge evaluator"))
       (finally
         (in-ns original-namespace)

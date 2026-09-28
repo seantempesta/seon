@@ -2189,7 +2189,7 @@
                      :seon.db.process/id cluster/boot-process-identity})
             request {:seon.turn.loop/cluster handle :seon.agent/routing routing :seon.agent/id agent-id}
             settle-run (fn [text]
-                   (let [result (agent/evaluate-source! (assoc request :seon.agent/segmenter 'seon.cluster.reply/code-sources
+                   (let [result (agent/evaluate-source! (assoc request :seon.agent/segmenter 'seon.turn/code-sources
                                                                :seon.cluster.reply/text text))
                          run-id (:seon.turn/id result)
                          ;; the run on the reply's own value (answered when applied)

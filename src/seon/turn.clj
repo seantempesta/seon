@@ -12,7 +12,6 @@
             [seon.ai :as ai]
             [seon.blob :as blob]
             [seon.cluster.message :as message]
-            [seon.cluster.reply :as reply]
             [seon.cluster.wake :as wake]
             [seon.await :as await]
             [seon.config :as config]
@@ -3372,23 +3371,16 @@
 
 
 
-(defn planned-sources
-  "The ordered forms one ordinary source run executes, found structurally.
-
-  The forgiving stage segments the reply (`seon.sci.forgive/segments`: prose
-  becomes each form's comment, prompt markers go, delimiters are repaired
-  where unambiguous) without resolving an alias or invoking a tag reader; each
-  form's one semantic read happens when it is evaluated, after the forms
-  before it ran. An unreadable rest is one more source, whose read answers its
-  error once; a reply with no form is a flat refusal."
-  {:malli/schema
-   [:=> [:catn
-         [:text :seon.cluster.reply/text]
-         [:namespace-name :seon.ns/name]
-         [:max-source :seon.config.eval.result/max-source]]
-    [:or :seon.cluster.reply/sources :seon.cluster.reply/no-forms-error]]}
-  [text namespace-name _max-source]
-  (let [{segments :seon.batch/segments unread :seon.batch/unread} (forgive/segments text)
+(defn- segmented-sources
+  "`text`'s forms as a run's ordered sources, found structurally by the
+  forgiving stage in `mode` (`seon.sci.forgive/segments`): each form's one
+  semantic read happens when it is evaluated, after the forms before it ran.
+  An unreadable rest is one more source, whose read answers its error once;
+  text with no form is the no-forms refusal."
+  {:malli/schema [:=> [:cat :seon.cluster.reply/text :seon.ns/name :seon.batch/mode :string]
+                  [:or :seon.cluster.reply/sources :seon.cluster.reply/no-forms-error]]}
+  [text namespace-name mode no-form-message]
+  (let [{segments :seon.batch/segments unread :seon.batch/unread} (forgive/segments text mode)
         sources (cond-> (mapv (fn [{source :seon.batch/source c :seon.batch/comment}]
                                 (cond-> {:seon.cluster.eval/source source :seon.ns/name namespace-name}
                                   c (assoc :seon.cluster.eval/comment c)))
@@ -3396,12 +3388,40 @@
                   unread (conj {:seon.cluster.eval/source unread :seon.ns/name namespace-name}))]
     (if (seq sources)
       sources
-      (vary-meta (#'reply/refused {::reply/no-forms true}
-                                  (if (str/blank? text)
-                                    "Your reply began with a response; send a form."
-                                    "Your reply had no form; only comments/prose. Send a form.")
-                                  {::reply/text text})
+      (vary-meta {:seon.cluster.reply/no-forms true :seon.cluster.reply/text text
+                  :seon.error/at (Date.) :seon.error/layer :seon.cluster.reply/source
+                  :seon.error/operation `segmented-sources :seon.error/message no-form-message
+                  :seon.error/data {:seon.cluster.reply/text text} :seon.error/expected :seon.cluster.reply/sources}
                  assoc :seon.error/declared-schema :seon.cluster.reply/no-forms-error))))
+
+(defn planned-sources
+  "The ordered forms one ordinary source run executes from a model reply:
+  prose becomes each form's comment, prompt markers go, delimiters are
+  repaired where unambiguous (`segmented-sources` in `:reply` mode)."
+  {:malli/schema
+   [:=> [:catn
+         [:text :seon.cluster.reply/text]
+         [:namespace-name :seon.ns/name]
+         [:max-source :seon.config.eval.result/max-source]]
+    [:or :seon.cluster.reply/sources :seon.cluster.reply/no-forms-error]]}
+  [text namespace-name _max-source]
+  (segmented-sources text namespace-name :reply
+                     (if (str/blank? text)
+                       "Your reply began with a response; send a form."
+                       "Your reply had no form; only comments/prose. Send a form.")))
+
+(defn code-sources
+  "The ordered forms of code (an outside agent's evaluation, a file, a
+  generated form): every form is a form, nothing is prose (`segmented-sources`
+  in `:code` mode). The MCP bridge's segmenter."
+  {:malli/schema
+   [:=> [:catn
+         [:text :seon.cluster.reply/text]
+         [:namespace-name :seon.ns/name]
+         [:max-source :seon.config.eval.result/max-source]]
+    [:or :seon.cluster.reply/sources :seon.cluster.reply/no-forms-error]]}
+  [text namespace-name _max-source]
+  (segmented-sources text namespace-name :code "Your evaluation had no form. Send a form."))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The pure turn
@@ -4780,7 +4800,7 @@
                            (empty? reply-text))
                     []
                     (planned-sources reply-text namespace-name max-source))
-                  no-forms? (::reply/no-forms prepared)
+                  no-forms? (:seon.cluster.reply/no-forms prepared)
                   sources (cond
                             (vector? prepared) prepared
                             ; Evaluation source is nonempty by contract. An empty

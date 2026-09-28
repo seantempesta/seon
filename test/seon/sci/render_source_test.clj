@@ -117,7 +117,7 @@
         (swap! routing assoc :seon.agent/fault-channel faults)
         (support/transacted! connection (support/agent-tx @connection agent-id))
         (agent/arm! agent-request)
-        (let [result (agent/evaluate-source! (assoc agent-request :seon.agent/segmenter 'seon.cluster.reply/code-sources
+        (let [result (agent/evaluate-source! (assoc agent-request :seon.agent/segmenter 'seon.turn/code-sources
                                                     :seon.cluster.reply/text "(/ 1 0)"))
               ;; the run on the reply's own value (answered when applied)
               saved (:seon.eval/shown (first (drive/run-receipts (:seon.db/db result) [(:seon.turn/id result)])))
