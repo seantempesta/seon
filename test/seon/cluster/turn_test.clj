@@ -2938,18 +2938,29 @@
                             [?run :seon.turn/id ?run-id]
                             [?run :seon.turn/closed-tx ?closed]]
                           @connection run-id))
-                 (= (if evaluation? 1 0) receipt-count)
-                 (= 1
-                    (db/q '[:find (count ?error) .
-                            :in $ ?run-id
-                            :where
-                            [?run :seon.turn/id ?run-id]
-                            [?error :seon.error/occurrences ?occurrence]
-                            [?occurrence :seon.error.occurrence/turn ?run]]
-                          @connection run-id))))))
+                 (= (if evaluation? 1 0) receipt-count)))))
           :seed 2026080601)
-         "Every injected phase failure must settle once, close once, and record
-          exactly one durable error fact.")
+         "Every injected phase failure must settle once and close once.")
+        ;; WHAT THE FAULT LEDGER GUARANTEES (owner's storage rule, 7781d115c):
+        ;; each signature counts every failure, and its first occurrences (at
+        ;; most recurrence-limit per producer digest) name the runs they came
+        ;; from; a repeat past them is counted, never another record. Which
+        ;; runs failed beyond those is the runs' own recorded diagnostics.
+        (let [db @connection
+              injected (mapv (fn [occurrence]
+                               (let [pulled (db/pull db [:seon.error.occurrence/count
+                                                         {:seon.error.occurrence/turn [:seon.turn/id]}]
+                                                     occurrence)]
+                                 {:count (:seon.error.occurrence/count pulled)
+                                  :run (get-in pulled [:seon.error.occurrence/turn :seon.turn/id])}))
+                             (db/q '[:find [?occurrence ...]
+                                     :where [?error :seon.error/operation seon.turn/phase]
+                                            [?error :seon.error/occurrences ?occurrence]]
+                                   db))]
+          (is (= @sequence-number (reduce + (map :count injected)))
+              "the signatures' counts include every injected failure")
+          (is (every? #(clojure.string/starts-with? (str (:run %)) "phase-failure-") injected)
+              "every stored occurrence names the run it came from"))
         ;; ESCALATION IS THE ONE BOUNDED OWNER'S, and this is where that is
         ;; asserted — over the whole ledger the property just produced, not
         ;; per sample. `seon.turn/refusal-terminal-data` used to
