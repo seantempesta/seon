@@ -34,4 +34,9 @@
              :kind :function
              :intent "Recording a green result after a red one refuses vector-element-swept on :seon.test/failures: the runner retracts the old failure entity while the vector cell naming it stays (reproduced at e999fdd1b, E4; test-failure-facts-test recorded-reach-belongs-to-the-tested-value-and-is-replaced, what-made-it-red-names-changed-functions). Replace the failures vector through its owner in the same transaction instead of retracting its elements."
              :must-read #{seon.test.runner/commit-results!}
-             :evidence #{"docs/research/agent-platform/red-triage-r6-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/red-triage-r6-2026-09-27.md"}}
+ #:seon.task{:name "worker-drift-prints-its-sets-unbounded"
+             :kind :function
+             :intent "The in-process runner appends \"Worker-global state changed: \" (pr-str drift) to a result's failure message (runner.clj, in-process result capture): drift holds the whole native sets of changed process-global members (272a02eab), printed outside the floor with no bound. The failure-report path already renders through report-value under the value renderer's bound (failure-report); drift must too. A 2 GB unbounded print of a failure :actual killed default on 2026-09-28T00:07Z (pid 42397, a lane's probe script); the same pattern here is one large drift away. Render drift with seon.render.value/bounded-text or keep it as data on the result and print it only through the floor."
+             :must-read #{seon.test.runner/failure-report seon.render.value/bounded-text}
+             :evidence #{"src/seon/test/runner.clj"}}]
