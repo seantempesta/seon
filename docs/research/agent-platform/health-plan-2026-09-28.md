@@ -106,6 +106,59 @@ happens anyway costs ~0 bytes (+240 B) and +2–4 ms per 100 upserts.
 
 Never: a commit of its own, per event or per timer.
 
+## 2b. The event graph: what is written, as refs, when something happens
+
+Tasks are one consumer of this graph, not its limit (owner, 2026-09-28): everything observed is stored as linked
+facts on entities that already exist, so it can be queried later in ways nobody planned. Three layers, all written on
+the transaction that already records the work (settle, test batch, fault record, publication, adoption; plus the
+per-write provenance stamp of 089ac703a: process, operation, agent). "Declared" = already in the schema resources,
+mostly never written today; "new" = to add.
+
+**Subjects (exist today; nothing new):** function `:seon.fn/sym` (+ its definition digest), schema `:seon.schema/key`,
+test `:seon.test/sym`, namespace `:seon.ns/name`, agent `:seon.agent/id`, branch, turn `:seon.turn/id`, evaluation
+`:seon.cluster.eval/id` (already holds `executed #{[sym digest]}`, `call-count`, `repeated-calls`), test run and
+member, task. New subjects: a Flow proc (`:seon.proc/id` = graph + pid, ref to its agent or cluster) and an operator
+record (boot, adoption, publication: phases with durations and what each was proportional to).
+
+**Signature — "this kind of problem" (the error entity, one per `:seon.error/signature`), stable across occurrences:**
+
+| Attribute | Kind | Status |
+|---|---|---|
+| `:seon.error/signature`, `/layer`, `/exception-class`, `/message` | values | declared, written |
+| `:seon.error/kind` — violation, throw, slow, warning, stale, missing-contract… | enum | new |
+| `:seon.error/severity` — error, warning, info | enum | new |
+| `:seon.error/producer` → function entity (the blame rule) | ref | new; replaces the `:seon.instrument/fn` name and the `/operation` guess |
+| `:seon.error/producer-digest` | value | new (declared `digest-then`/`digest-now` exist, unwritten) |
+| `:seon.error/schema` → schema entity, `:seon.error/path` (Malli path) | ref, value | `path` declared; ref new |
+| `:seon.error/occurrence-count`, `/last-at` | values, noHistory | declared, written |
+| `:seon.error/resolved-by` → the change that fixed it (derived close) | ref | declared |
+
+**Occurrence — "it happened here", bounded (first K per signature per producer digest plus a count; declared
+`:seon.error/capped` marks the cut):**
+
+| Attribute | Kind | Status |
+|---|---|---|
+| `:seon.error.occurrence/id`, `/first-at`, `/last-at`, `/count` | values | declared, written |
+| `/agent`, `/branch`, `/cluster` | refs / values | declared; agent written on 35 of 87 |
+| `/evaluation` → evaluation, `/turn` → turn | refs | declared, never written |
+| `/test-member` → test member (the test is then the reproduction) | ref | new |
+| `/proc` → Flow proc (was `proc-fn`), `/effect` → effect | refs | declared, never written |
+| `/caller` → function entity, `/caller-digest` | ref, value | new (today a `"ns (file:line)"` string) |
+| `/task` → the task in force (from the world) | ref | new |
+| `/blob-digest` — cause chain with frames, offending value | value | declared |
+| the transaction itself — process, operation, agent | tx data | 089ac703a |
+
+**Measurements — on the subject, per definition version, significance-only (§2), noHistory:** a component of the
+function entity per digest (`:seon.fn.health/digest`, `/p50-bucket`, `/p99-bucket`, `/error-class`, `/calls-class`,
+`/over-bound?`, `/at`) — new; a test member's duration (new; computed today, discarded); an operator record's phase
+durations and proportional inputs (new); a cache kind's bytes share and hit class on the process record (new).
+
+**What this lets anyone query, with no task involved:** which functions produce the most violations since a commit;
+which change (producer digest → the transaction's agent and task) introduced a regression; which tests reproduce a
+signature; hot functions reached by no test; errors per namespace, per agent, per branch; what a proc was doing when it
+faulted; every occurrence a given evaluation caused. A task is created from a signature, refs it, and renders it; the
+graph stays whole whether or not a task exists.
+
 ## 3. Per-entity health model
 
 **Today no error is linked by ref to the function, schema or test that caused it** (entities research, live default):
