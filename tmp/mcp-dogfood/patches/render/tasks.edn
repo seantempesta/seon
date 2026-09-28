@@ -1,0 +1,16 @@
+;; Task entries (lane mcp-dogfood-opus, 2026-09-28). The fix for the first is
+;; 01-declared-schema-must-fit.patch in this directory.
+
+;; resources/seon/tasks/seon.render.edn
+#:seon.task{:name "declared-metadata-selects-a-value-that-no-longer-fits"
+            :kind :function
+            :intent "(select-keys (seon.db/pull db '[*] [:seon.fn/name 'x/y]) [:q]) is {} but prints as \"Error evidence is unavailable.\": select-keys keeps the refusal's metadata {:seon.error/declared-schema :seon.db/invalid-read-error}, and render selection (seon.render/declared-producers, render.clj:569) takes that declaration's pair without asking whether the value still satisfies it (the validator answers false). Done when a declaration in metadata selects only a value that satisfies it."
+            :must-read #{seon.render/request-projection}
+            :evidence #{"tmp/mcp-dogfood/patches/render/01-declared-schema-must-fit.patch"}}
+
+;; resources/seon/tasks/seon.render.value.edn
+#:seon.task{:name "short-strings-in-pairs-are-cut"
+            :kind :function
+            :intent "A 32-row vector of [string long] pairs (a profile summary, strings of 40-60 characters) printed each string cut at 32 characters with a dig form per row, and a java.util.HashMap$Node printed as #object: the budget went to cut markers instead of the text. Done when a small tuple's string prints whole under the budget and a Map.Entry prints as its pair."
+            :must-read #{seon.render.value/prepare}
+            :evidence #{"tmp/mcp-dogfood/probe.clj"}}

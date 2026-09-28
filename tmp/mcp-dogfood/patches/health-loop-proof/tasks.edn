@@ -1,0 +1,6 @@
+;; Task entries for resources/seon/tasks/seon.task.edn (lane mcp-dogfood-opus, 2026-09-28).
+#:seon.task{:name "an-outside-agent-cannot-propose"
+            :kind :function
+            :intent "my.program/propose-merge! reads the agent's assignment from the cluster (seon.task/assignment); an outside agent assigned in chat (mcp-dogfood) has no task entity, so the dogfood path branch -> defn -> tests -> propose stops at propose with nothing an agent can call to name its work. Done when an agent without a root-assigned task can record the task it works (or root's assignment reaches it as data) and propose."
+            :must-read #{my.program/propose-merge! seon.task/assignment}
+            :evidence #{"tmp/mcp-dogfood/probe.clj"}}

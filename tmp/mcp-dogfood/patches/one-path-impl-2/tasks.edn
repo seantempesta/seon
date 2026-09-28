@@ -1,0 +1,34 @@
+;; Task entries for the one-path owner's task files (lane mcp-dogfood-opus,
+;; 2026-09-28, default warm). Append each to the named file; evidence
+;; tmp/mcp-dogfood/probe.clj (sci-stages, sci-batch, callers-proc, profiled).
+
+;; resources/seon/tasks/seon.turn.edn
+#:seon.task{:name "an-sci-run-pays-the-turn-wrapper"
+            :kind :function
+            :intent "An MCP SCI run of (+ 1 2) takes 88-100 ms against 57-70 ms in JVM mode: seon.cluster.agent/evaluate-source! is 82 ms, and each run makes 53 seon.db/q and 50 pulls (sampled callers: next-ordinal, plan settle-call, close-call, issue exhaust-tx and settle-call, previous-ending-namespace 4 times, open-for-agent, system-run-plan). The same text through the fold's SCI stages (seon.turn.batch/code-request into seon.batch/evaluate-batch) took 48-63 ms in one transaction. Done when an SCI run is the fold plus its one settlement, with no per-run ordinal, plan or issue queries."
+            :must-read #{seon.cluster.agent/evaluate-source! seon.batch/evaluate-batch}
+            :evidence #{"tmp/mcp-dogfood/probe.clj"}}
+
+;; resources/seon/tasks/seon.turn.batch.edn (new file)
+#:seon.task{:name "code-request-records-no-definition"
+            :kind :function
+            :intent "seon.turn.batch/code-request has no caller, and a run through it drops a defn's program facts: (in-ns 'mcp-dogfood.scratch) (defn sq [x] (* x x)) settled with :seon.batch/applied true and tx-count 1, recorded the namespace, but no :seon.fn/sym entity for mcp-dogfood.scratch/sq; the same defn through eval_clj recorded its entity and digest. Delete the entrant or make it the SCI run's one path (see an-sci-run-pays-the-turn-wrapper)."
+            :must-read #{seon.turn.batch/code-request seon.turn.batch/program-request}
+            :evidence #{"tmp/mcp-dogfood/probe.clj"}}
+#:seon.task{:name "a-jvm-error-has-no-source-location"
+            :kind :function
+            :intent "A JVM-mode failure (an NPE, reported by health-loop-proof 2026-09-28) comes back without a source location: jvm-read-next reads each form from (subs text pos) so the host reader's lines restart at 1, and jvm-show builds the failure from the throwable alone. The entry holds :seon.batch/start and :seon.batch/end: done when a JVM failure names its line and column in the run's text."
+            :must-read #{seon.turn.batch/jvm-request}
+            :evidence #{"tmp/mcp-dogfood/probe.clj"}}
+
+;; resources/seon/tasks/seon.sci.eval.edn
+#:seon.task{:name "every-acquisition-regenerates-the-agent-context"
+            :kind :function
+            :intent "Each eval_clj run re-acquires the agent's context and seon.sci.eval/fork-for-turn regenerates it (5.1-6.4 ms warm per run, JVM runs included, where the context only binds result handles), although neither the base context nor the agent's private layer changed since the previous run. Done when an unchanged base reuses the carried context (content-keyed), and a run's acquisition is under 1 ms warm."
+            :must-read #{seon.sci.eval/fork-for-turn seon.cluster.agent/acquire-context!}
+            :evidence #{"tmp/mcp-dogfood/probe.clj"}}
+#:seon.task{:name "an-uncontracted-defn-gets-no-warning"
+            :kind :function
+            :intent "Through eval_clj (SCI, agent mcp-dogfood, 2026-09-28) (defn cube [x] (* x x x)) answered only :value, :result, :ms and :calls 8: no warning that the definition has no contract, which AGENTS.md requires beside the value, growing with the agent's uncontracted definitions. Done when an uncontracted defn's reply carries that warning as data."
+            :must-read #{seon.cluster.agent/evaluate-source!}
+            :evidence #{"tmp/mcp-dogfood/probe.clj"}}
