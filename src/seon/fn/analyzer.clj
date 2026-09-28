@@ -360,17 +360,23 @@
 (declare delete-tree!)
 
 (defn ensure-dependency-analysis!
-  "At boot, retain only the current dependency-set directory and fill it if
-  incomplete. Lint non-program checkout roots every boot so script dependencies
-  are current even when no program file changed."
+  "At boot, fill the current dependency-set directory if incomplete and mark it
+  used. Another dependency set's directory is deleted only once unused for a
+  day: JVMs on different classpaths (a replacement, a test or disposable root)
+  share the parent, and deleting a live sibling cost its owner a ~6 s refill on
+  every boot (waste-profile 2026-09-28). Lint non-program checkout roots every
+  boot so script dependencies are current even when no program file changed."
   {:seon/tasks #{"547fc42c47a5"}
    :malli/schema [:=> [:cat [:vector :string]] :map]}
   [program-roots]
   (let [current (io/file cache-directory)
+        stale-before (- (System/currentTimeMillis) (* 24 60 60 1000))
         _ (doseq [directory (.listFiles (.getParentFile current))
-                  :when (not= (.getName directory) (.getName current))]
+                  :when (and (not= (.getName directory) (.getName current))
+                             (< (.lastModified directory) stale-before))]
             (delete-tree! directory))
         filled (if (.isFile (io/file current "complete")) {} (analyze-dependencies!))
+        _ (.setLastModified current (System/currentTimeMillis))
         program (set (map #(.getCanonicalPath (io/file %)) program-roots))
         other-roots (into (into [] (remove program) (::source-roots (roots-of ".")))
                           (comp (filter #(.isFile ^java.io.File %))
