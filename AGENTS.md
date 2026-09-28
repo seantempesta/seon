@@ -289,18 +289,25 @@ root.
   function whose contract fits the value, defined in the viewing agent's namespace; the schema's declared pair (most
   specific first, along the schema's ancestry); none, so the value goes to the value printer directly. Whether a render function serves AI or HTML is its attachment key where attached, else its declared output
   schema, never a separate fact; like any function, its omitted declared inputs are supplied by schema name.
-- **Return data, not comments.** What comes back to an agent is data whenever possible: a reply is one map whose keys
-  carry the value, its handle, its timing, its errors and its findings; comment lines are confusing next to data and
-  agents repeat them. **An AI render returns REPL entries** (forms; `;;` only for prose that has no data form); the
-  one REPL path evaluates each form read-only in the viewing agent's SCI world and prints form and result as the
-  transcript the agent reads, so every line is runnable. A render is evaluated once, when the reply that shows it is
-  built (every evaluation is shown once, so this is already on demand), cached in the central cache by the value's
-  content digest so nothing renders twice; the reply the agent saw is its stored history, and the context an agent
-  receives is always fully evaluated. An agent never sees a render form without
-  its result; only a render that genuinely fails falls back to the value itself, printed, with one diagnostic. Curated
-  namespaces render as `(require '[ns :as alias])` then their `dir`/`doc` with contracts. An HTML render returns
-  hiccup. Components and declared queries render in their own blocks; failed rendering gives a diagnostic; error base
-  and satisfied schema renderers compose. An attribute request stays an attribute request.
+- **Return data, not comments; renders return data.** What comes back to an agent is data whenever possible: a reply
+  is one map whose keys carry the value, its handle, its timing, its errors and its findings; comment lines are
+  confusing next to data and agents repeat them. A render function takes the value and returns data, never forms to
+  execute:
+  - The AI face returns the pruned, processed data the agent cares about; the value printer prints it. Offered
+    operations and dig or requery forms are part of that data, shown so the agent may run them, and never run by the
+    render step.
+  - The HTML face returns hiccup: a thing with a look and its operations.
+  - A render runs once, when the reply that shows it is built, inside the viewer's world. It is READ-ONLY: it gets a
+    database value, and no connection or writer. Its database reads are captured as read evidence on the shown unit, so
+    the refresh before a turn re-renders it when they change.
+  - Work with consequences belongs to the evaluation that caused it. For example, a defn's batch schedules its reaching
+    test agents; the Var render only reads their status.
+  - A render is cached by the value's content digest, so nothing renders twice. The reply the agent saw is its stored
+    history, and history is never re-rendered.
+  - Render output goes straight to the value printer, which never re-dispatches. A render that wants a nested thing
+    rendered calls that render explicitly.
+  - A render that fails falls back to the value itself, printed, with one diagnostic. Failed rendering gives a
+    diagnostic; error base and satisfied schema renderers compose; an attribute request stays an attribute request.
 - **Apply presentation limits once.** The value printer holds the one budget and spreads it across the value's shape;
   nothing else clips, and nothing prints unbounded: a log line, exception message, test report or HTTP error that
   prints a value outside the value printer is a defect. Printing is rendering with two consumers on one pipeline: AI agents
