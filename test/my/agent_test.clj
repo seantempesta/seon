@@ -2,6 +2,8 @@
   (:require [clojure.test :refer [deftest is]]
             [seon.agent :as agent]
             [seon.cluster.agent :as cluster.agent]
+            [seon.cluster.store :as store]
+            [my.agent]
             [seon.config :as config]
             [seon.db :as db]
             [seon.schema :as schema]
@@ -117,3 +119,20 @@
         (is (= 1234 (:seon.config.eval/time-limit-ms value)))
         (is (= value (agent/settings (db/db (:seon.db/connection handle)) "dial-owner"))))
       (finally (cluster.agent/release-context! handle)))))
+
+(deftest retiring-a-branch-this-process-still-connects-is-refused-as-a-value
+  ;; The roster owner refuses a branch this process still holds a connection
+  ;; on; that refusal escaped `retire-branch!` as a throw (default, 2026-09-28).
+  (support/with-database
+   (fn [connection]
+     (let [execution (support/execution-handle connection)
+           context {:seon.store/store (or (:seon.store/store execution)
+                                          (:seon.store/store (:seon.env/environment execution)))
+                    :seon.db/connection connection}
+           _ (my.agent/create-branch! {:seon.store/branch :held-lane} context)
+           held (store/open-branch! (:seon.store/store context) :held-lane)
+           refused (my.agent/retire-branch! {:seon.store/branch :held-lane} context)
+           _ (store/release-branch! held)
+           retired (my.agent/retire-branch! {:seon.store/branch :held-lane} context)]
+       (is (= :seon.store/branch (:seon.error/member refused)) "a held branch's retirement is refused by name")
+       (is (true? (:my.agent/retired? retired)) "once released, the branch retires")))))
