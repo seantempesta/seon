@@ -22,6 +22,16 @@
   [:seon.config/cluster {:optional true} :seon.config/cluster]
   [:seon.cluster/instruction-count [:int {:min 0}]]
   [:seon.cluster/toolkit-count [:int {:min 0}]]]
+ :seon.cluster/servable
+ [:map {:description "What seon.cluster/serve! reads of an instance: its cluster name and root, the branch connection it records the web process on, and the view its web service taps (seon.render.web/start! validates the service built from it)."}
+  [:seon.boot/advertisement [:map [:seon.boot/cluster-name :seon.boot/cluster-name]]]
+  [:seon.boot/config [:map [:seon.boot/root :seon.boot/root]]]
+  [:seon.boot/cluster-connection :seon.store/connection-object]
+  [:seon.render.web/view :map]]
+ :seon.cluster/served
+ [:and {:description "An instance serve! has bound: its web descriptor published beside its advertisement."}
+  :seon.cluster/servable
+  [:map [:seon.render.web/served :seon.render.web/server]]]
  :seon.cluster/error
  [:and
  {:seon.db/attributes true}

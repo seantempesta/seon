@@ -106,6 +106,12 @@
                    [:seon.render.web/wanted-port
                     {:optional true}
                     :seon.render.web/wanted-port]],
+                  :stop-request
+                  [:and {:description "What seon.render.web/stop! joins: the served descriptor, the view's tab registration and the delivery bound its writers wait under."}
+                   :seon.render.web/server
+                   [:map
+                    [:seon.render.web/registration :seon.render.web/registration]
+                    [:seon.config.eval/time-limit-ms :seon.sci.eval/time-limit-ms]]],
                   :service
                   [:map
                    [:seon.db/writer {:optional true :description "Writes an inbound message and the service's process row; seon.db/transact! when absent."} :seon.db/writer]

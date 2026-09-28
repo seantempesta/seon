@@ -545,8 +545,14 @@
            (select-keys (:seon.render.web/served instance) [:seon.render.web/url :seon.render.web/wanted-port]))))
 
 (defn stop!
-  "Stop this exact instance; failed release retains its lock and diagnostic listener."
-  {:malli/schema [:=> [:cat :seon.boot/instance] :nil]}
+  "Stop this exact instance; failed release retains its lock and diagnostic listener.
+
+  ## Errors
+
+  - A join `seon.cluster/disarm-agents!` misses is answered (the await
+    owner's timeout naming the missing exit) with the instance restored in
+    the roster: nothing after the join is released."
+  {:malli/schema [:=> [:cat :seon.boot/instance] [:or :nil :seon.await/timeout-error]]}
   [instance]
   (let [name (get-in instance [:seon.boot/config :seon.boot/cluster-name])
         ;; The claim marks the instance itself, so the table's readers keep
@@ -561,25 +567,27 @@
                        (swap! running-instances assoc name (assoc current :seon.boot/stopping true))
                        true)))]
     (when claimed?
-      (try
-        (cluster/disarm-agents! instance)
-        (some-> (:seon.flow/work-launcher instance) flow/stop-work-launcher!)
-        (some-> (:seon.boot/cluster-connection instance) store/release-branch!)
-        (when (:seon.store/store instance)
-          (cluster/release-root-store! (get-in instance [:seon.boot/config :seon.boot/store-dir])))
-        (server/stop-server (server-name name))
-        (.close ^java.net.ServerSocket (:seon.boot/prepl-server instance))
-        (let [file (io/file (:seon.boot/advertisement-file
-                            (cluster/cluster-paths (get-in instance [:seon.boot/config :seon.boot/root]) name)))]
-          ;; An absent file is the declared case; an unreadable one surfaces.
-          (when (and (.isFile file)
-                     (= (:seon.boot/advertisement instance) (edn/read-string (slurp file))))
-            (java.nio.file.Files/deleteIfExists (.toPath file))))
-        (swap! running-instances dissoc name)
-        (catch Throwable cause
-          (swap! running-instances assoc name instance)
-          (throw cause)))))
-  nil)
+      (if-let [missed (cluster/disarm-agents! instance)]
+        (do (swap! running-instances assoc name instance)
+            missed)
+        (try
+          (some-> (:seon.flow/work-launcher instance) flow/stop-work-launcher!)
+          (some-> (:seon.boot/cluster-connection instance) store/release-branch!)
+          (when (:seon.store/store instance)
+            (cluster/release-root-store! (get-in instance [:seon.boot/config :seon.boot/store-dir])))
+          (server/stop-server (server-name name))
+          (.close ^java.net.ServerSocket (:seon.boot/prepl-server instance))
+          (let [file (io/file (:seon.boot/advertisement-file
+                              (cluster/cluster-paths (get-in instance [:seon.boot/config :seon.boot/root]) name)))]
+            ;; An absent file is the declared case; an unreadable one surfaces.
+            (when (and (.isFile file)
+                       (= (:seon.boot/advertisement instance) (edn/read-string (slurp file))))
+              (java.nio.file.Files/deleteIfExists (.toPath file))))
+          (swap! running-instances dissoc name)
+          nil
+          (catch Throwable cause
+            (swap! running-instances assoc name instance)
+            (throw cause)))))))
 
 (defn- selected-instance
   {:malli/schema [:=> [:cat [:maybe :string]] :seon.boot/instance]}
@@ -683,7 +691,8 @@
                       ;; Forced termination cannot run shutdown hooks: a hook calling
                       ;; stop! would wait for this same reservation monitor.
                       (.halt (Runtime/getRuntime) 0)))
-                  (stop! instance))
+                  (when-let [missed (stop! instance)]
+                    (throw (ex-info (:seon.error/message missed) missed))))
                 {:seon.boot/cluster-name n
                  :seon.operator/stopped? true
                  :seon.operator/process-exit? (empty? @running-instances)})
@@ -697,7 +706,8 @@
                      began (System/nanoTime)
                      held (cluster/acquire-root-store! dir)]
                  (try
-                   (stop! instance)
+                   (when-let [missed (stop! instance)]
+                     (throw (ex-info (:seon.error/message missed) missed)))
                    (let [stopped-ms (quot (- (System/nanoTime) began) 1000000)
                          _ (registry/retire-branch! {:seon.store/store held
                                                      :seon.store/branch (registry/cluster-branch n)})

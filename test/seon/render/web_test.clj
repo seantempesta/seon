@@ -299,7 +299,9 @@ handle))}}
                  :registration registration
                  :ctx ctx})
           (finally
-            (when @server (web/stop! @server))
+            (when @server
+              (web/stop! (assoc @server :seon.render.web/registration registration
+                                :seon.config.eval/time-limit-ms (:seon.config.eval/time-limit-ms config/defaults))))
             (wake/unlisten! {:seon.cluster.wake/connection connection
                              :seon.cluster.wake/key ::route})
             (flow.core/stop graph)
@@ -2237,9 +2239,8 @@ handle))}}
       (let [taken (:seon.render.web/port first-server)
             ;; its own disposable view half: this test is about the PORT,
             ;; and the second view never opens a feed
-            second-server (web/start!
-                           (service-request connection
-                                            {:seon.render.web/port taken}))]
+            second-service (service-request connection {:seon.render.web/port taken})
+            second-server (web/start! second-service)]
         (try
           (is (not= taken (:seon.render.web/port second-server))
               "it bound somewhere else")
@@ -2247,7 +2248,7 @@ handle))}}
               "and it says which bookmark just stopped working")
           (is (= 200 (.statusCode (fetch second-server "/css/input.css")))
               "while serving normally — the collision costs a port, not a view")
-          (finally (web/stop! second-server))))))
+          (finally (web/stop! (merge second-server (select-keys second-service [:seon.render.web/registration :seon.config.eval/time-limit-ms]))))))))
   (testing "a clean bind reports no wanted-port at all, so key presence
             answers 'did this fall back?'"
     (with-server

@@ -3130,6 +3130,7 @@
   binds an ephemeral one and says BOTH numbers, because a name collision
   must not look like a broken build and a moved bookmark must not fail
   silently."
+  {:malli/schema [:=> [:cat :seon.cluster/servable :seon.config/effective] :seon.cluster/served]}
   [instance dials]
   (let [advertisement (:seon.boot/advertisement instance)
         cluster-name (:seon.boot/cluster-name advertisement)
@@ -3180,7 +3181,7 @@
                :seon.render.web/served served
                :seon.boot/advertisement advertisement)
         (catch Throwable cause
-          (web/stop! served)
+          (web/stop! (merge served (select-keys view [:seon.render.web/registration :seon.config.eval/time-limit-ms])))
           (throw cause))))))
 
 (defn- loop-handle
@@ -3412,20 +3413,23 @@
   `::flow/stop`; it does not join the proc (`flow/impl.clj:174-183`).
   Every graph runs on its own executor (`seon.flow/start-graph!`), whose
   termination is the exit of every proc loop, stop transition included.
-  All joins share ONE deadline taken at entry from
-  `:seon.config.agent/turn-completion-backstop-ms`; a join that misses it
-  throws naming the missing exit and retains custody.
+  The view is joined first (its server thread and every tab's writer,
+  `seon.render.web/stop!`); the joins after it share ONE deadline taken at
+  entry from `:seon.config.agent/turn-completion-backstop-ms`.
+
+  ## Errors
+
+  - A join that misses its bound answers the await owner's timeout value
+    naming the missing exit (`:seon.await/requested-member`); nothing after
+    it is released, so the caller keeps custody of what still runs.
 
   This is orderly-stop behavior only. A process kill cannot await a
   completion and may lose an in-flight transaction by design; the crash
   model owns that row and the next boot settles its durable wreckage."
-  {:malli/schema [:=> [:cat :map] :nil]}
+  {:malli/schema [:=> [:cat :map] [:or :nil :seon.await/timeout-error]]}
   [instance]
-  ;; the VIEW goes first: it is the newest layer and the only one
-  ;; holding sockets belonging to somebody outside this process
-  (when-let [served (:seon.render.web/served instance)]
-    (web/stop! served))
   (let [handle (:seon.turn.loop/cluster instance)
+        view (:seon.render.web/view instance)
         backstop-ms (when handle
                       (:seon.config.agent/turn-completion-backstop-ms
                        (config/effective (db/db (:seon.db/connection handle))
@@ -3435,52 +3439,57 @@
                :seon.await/config-value backstop-ms
                :seon.await/deadline-nanos
                (when backstop-ms (+ (System/nanoTime) (* 1000000 backstop-ms)))}
-        refuse! (fn [missing result]
-                  (when (:seon.error/at result)
-                    (throw (ex-info (str "Cluster stop: " missing " did not arrive in bound.")
-                                    (assoc result :seon.await/requested-member missing)))))]
-    (when handle
-      (let [armer-channel (:seon.cluster.wake/channel handle)
-            quiesced (async/promise-chan)]
-        (when-not (async.protocols/closed? armer-channel)
-          (refuse! ::armer-quiesced
-                   (await/await!
-                    {:seon.await/bound bound
-                     :seon.await/diagnostic {:seon.error/layer :seon.cluster/stop
-                                             :seon.error/operation `disarm-agents!
-                                             :seon.error/expected ::armer-quiesced}
-                     :seon.await/port-operations
-                     [[armer-channel {:seon.agent/quiesce quiesced}] quiesced]
-                     :seon.await/accept? #(= :seon.agent/quiesced %)}))
-          ;; Closure is the observable completion fact a later stop derives
-          ;; from. Publish it only after the armer acknowledged quiescence.
-          (async/close! armer-channel))))
-    (when-let [routing (:seon.agent/routing instance)]
-      (doseq [agent-id (sort (keys (:seon.agent/armed @routing)))]
-        (cluster.agent/disarm! {:seon.agent/id agent-id
-                                :seon.agent/routing routing
-                                :seon.await/deadline-nanos
-                                (:seon.await/deadline-nanos bound)})))
-    ;; BOTH cluster-graph procs are joined at their executor's termination:
-    ;; `flow/stop` only queues `::flow/stop`, so a render pass holding the
-    ;; branch connection would otherwise still be deriving when it is released
-    (when-let [graph (:seon.flow/graph instance)]
-      (flow.core/stop graph)
-      (refuse! ::cluster-graph-exited
+        missed (fn [member result]
+                 (when (:seon.error/at result)
+                   (assoc result :seon.await/requested-member member)))]
+    (or
+     ;; the VIEW goes first: it is the newest layer and the only one
+     ;; holding sockets belonging to somebody outside this process
+     (when-let [served (:seon.render.web/served instance)]
+       (missed ::view-exited
+               (web/stop! (merge served (select-keys view [:seon.render.web/registration
+                                                           :seon.config.eval/time-limit-ms])))))
+     (when handle
+       (let [armer-channel (:seon.cluster.wake/channel handle)
+             quiesced (async/promise-chan)]
+         (when-not (async.protocols/closed? armer-channel)
+           (or (missed ::armer-quiesced
+                       (await/await!
+                        {:seon.await/bound bound
+                         :seon.await/diagnostic {:seon.error/layer :seon.cluster/stop
+                                                 :seon.error/operation `disarm-agents!
+                                                 :seon.error/expected ::armer-quiesced}
+                         :seon.await/port-operations
+                         [[armer-channel {:seon.agent/quiesce quiesced}] quiesced]
+                         :seon.await/accept? #(= :seon.agent/quiesced %)}))
+               ;; Closure is the observable completion fact a later stop derives
+               ;; from. Publish it only after the armer acknowledged quiescence.
+               (async/close! armer-channel)))))
+     (when-let [routing (:seon.agent/routing instance)]
+       (doseq [agent-id (sort (keys (:seon.agent/armed @routing)))]
+         (cluster.agent/disarm! {:seon.agent/id agent-id
+                                 :seon.agent/routing routing
+                                 :seon.await/deadline-nanos
+                                 (:seon.await/deadline-nanos bound)})))
+     ;; BOTH cluster-graph procs are joined at their executor's termination:
+     ;; `flow/stop` only queues `::flow/stop`, so a render pass holding the
+     ;; branch connection would otherwise still be deriving when it is released
+     (when-let [graph (:seon.flow/graph instance)]
+       (flow.core/stop graph)
+       (missed ::cluster-graph-exited
                (flow/join-graph!
                 (into (select-keys instance [:seon.flow/executor])
                       {:seon.await/bound bound
                        :seon.await/diagnostic {:seon.error/layer :seon.cluster/stop
                                                :seon.error/operation `disarm-agents!
                                                :seon.error/expected ::cluster-graph-exited}}))))
-)
-  (when-let [handle (:seon.turn.loop/cluster instance)]
-    (some-> (:seon.turn.loop/stream-channel handle) async/close!))
-  ;; the render pipeline's own ports, after the proc that reads them has
-  ;; published its completion: a tab still looping on a tap sees its tap
-  ;; close and falls out of the loop
-  (when-let [view (:seon.render.web/view instance)]
-    (async/close! (:seon.render.web/render-channel view))
-    (async/close! (:seon.render.web/runtime-eval-channel view))
-    (async/close! (:seon.render.web/pages-channel view)))
-  nil)
+     (do
+       (some-> (:seon.turn.loop/stream-channel handle) async/close!)
+       ;; the render pipeline's own ports, after the proc that reads them has
+       ;; published its completion: a tab still looping on a tap sees its tap
+       ;; close and falls out of the loop
+       (when view
+         (async/close! (:seon.render.web/render-channel view))
+         (async/close! (:seon.render.web/runtime-eval-channel view))
+         (async/close! (:seon.render.web/pages-channel view)))
+       nil))))

@@ -2951,13 +2951,18 @@
                                             :seon.render/output :seon.render/html}
                                            failure)
                                   :seon.render.web/feed 'seon.render.web/feed-response)))
-             (finally ((::close-sse! leaf) generator))))))
+             (finally
+               ((::close-sse! leaf) generator)
+               ;; the tab leaves the registration when its writer EXITS, so
+               ;; the registration counts live feed threads and `stop!`
+               ;; joins them by awaiting it empty
+               (deregister-tab! registration registration-key))))))
       datastar.http-kit/on-close
       (fn [_generator _status]
+        ;; ends painting: the writer's next await sees its tap closed
         (vreset! painting false)
         (async/untap pages-mult tap)
-        (async/close! tap)
-        (deregister-tab! registration registration-key))})))
+        (async/close! tap))})))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Routes
@@ -4199,12 +4204,52 @@
       ;; every reader has to remember to make
       fell-back? (assoc :seon.render.web/wanted-port wanted))))
 
-(defn stop!
-  "Close the server.
+(defn- await-exit!
+  "Await one exit fact (`completion`: the await owner's `:seon.await/blocking-deref`
+  or `:seon.await/port-operations`) under the delivery bound; nil once it
+  arrived, else the timeout naming `member`."
+  {:malli/schema [:=> [:cat :map :seon.config.eval/time-limit-ms :qualified-keyword]
+                  [:or :nil :seon.await/timeout-error]]}
+  [completion backstop-ms member]
+  (let [result (await/await!
+                (merge {:seon.await/bound {:seon.await/config-attribute :seon.config.eval/time-limit-ms
+                                           :seon.await/config-value backstop-ms}
+                        :seon.await/diagnostic {:seon.error/layer :seon.render.web/delivery
+                                                :seon.error/operation 'seon.render.web/stop!
+                                                :seon.error/expected ::exited
+                                                :seon.error/offending ::pending
+                                                :seon.error/member member}}
+                       completion))]
+    (when (:seon.await/elapsed-ms result) result)))
 
-  Every connection's `on-close` untaps its own tap and drops its registration,
-  so nothing survives this that could keep painting."
-  {:malli/schema [:=> [:cat :seon.render.web/server] :nil]}
-  [{:keys [:seon.render.web/server]}]
-  (http/server-stop! server)
-  nil)
+(defn stop!
+  "Close the server and await the exit of everything it ran.
+
+  The request is the served descriptor with the view's tab registration and
+  delivery bound (the caller holds both: the view it served). http-kit's stop
+  closes every connection, so each tab's `on-close` ends its painting and
+  each writer leaves the registration in its own `finally`: the server
+  thread's exit (http-kit's stop promise) and an empty registration are the
+  two exit facts, each awaited under the delivery bound. Nil once both
+  arrived, else the first timeout, naming the pages still held.
+
+  ## Costs
+
+  - Scratch probe on default 2026-09-28 (real http-kit + Datastar SSE, three
+    curl tabs, writers doing 150 ms of close work): returns at 152 ms with
+    every writer exited; a writer that never exits returns the timeout at
+    the bound (300 ms bound: 305 ms), naming its page."
+  {:malli/schema [:=> [:cat :seon.render.web/stop-request] [:or :nil :seon.await/timeout-error]]}
+  [{server :seon.render.web/server registration :seon.render.web/registration
+    backstop-ms :seon.config.eval/time-limit-ms}]
+  (let [stopped (http/server-stop! server)
+        feeds-exited (async/promise-chan)
+        exited! (fn [_ _ _ open] (when (empty? open) (async/offer! feeds-exited true)))]
+    (add-watch registration ::stop! exited!)
+    (exited! nil nil nil @registration)
+    (try
+      ;; http-kit answers nil when the server was already stopping
+      (or (when stopped (await-exit! {:seon.await/blocking-deref stopped} backstop-ms ::server-thread))
+          (some-> (await-exit! {:seon.await/port-operations [feeds-exited]} backstop-ms ::feed-writers)
+                  (assoc-in [:seon.error/data ::open-pages] (vec (keys @registration)))))
+      (finally (remove-watch registration ::stop!)))))

@@ -174,10 +174,12 @@
   agent by name; runs that committed first are joined by
   `seon.cluster/disarm-agents!` (armer quiescence removes the route listener,
   agent graphs join, the armer graph joins, all under one deadline). A missed
-  join throws with admission closed and the execution held, so a retry after
-  exit completes. Then the execution is released. A refused read or a
-  refused admission close is answered and nothing further happens."
-  {:malli/schema [:=> [:cat ::host] [:or :nil :seon.db/invalid-read-error :seon.db/transaction-refused-error]]}
+  join is answered (the await owner's timeout naming the missing exit) with
+  admission closed and the execution held, so a retry after exit completes.
+  Then the execution is released. A refused read or a refused admission close
+  is answered and nothing further happens."
+  {:malli/schema [:=> [:cat ::host] [:or :nil :seon.db/invalid-read-error :seon.db/transaction-refused-error
+                                     :seon.await/timeout-error]]}
   [{handle :seon.turn.loop/cluster roster :seon.agent/routing agent-id :seon.agent/id
     execution ::execution :as host}]
   ;; The branch entity first: its run writer refuses every later run from then
@@ -192,7 +194,7 @@
                                     [[:db/add (:db/id entity) :seon.agent/admission-closed-tx "datomic.tx"]]))]
                     (when-not (:db-after result) result)))))
             (keep identity [(:seon.db/connection handle) (::parent host)]))
-      (do (cluster/disarm-agents! host)
-          (swap! roster dissoc ::host)
+      (cluster/disarm-agents! host)
+      (do (swap! roster dissoc ::host)
           (agent/release-context! execution)
           nil)))

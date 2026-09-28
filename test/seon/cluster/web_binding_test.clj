@@ -37,7 +37,8 @@
          (with-open [first-server
                      (support/closeable
                       (#'cluster/serve! instance dials)
-                      #(web/stop! (:seon.render.web/served %)))]
+                      #(web/stop! (merge (:seon.render.web/served %)
+                                          (select-keys (:seon.render.web/view %) [:seon.render.web/registration :seon.config.eval/time-limit-ms]))))]
            (let [first-instance @first-server
                  first-port (get-in first-instance [:seon.render.web/served
                                                     :seon.render.web/port])]
@@ -49,7 +50,8 @@
                          (support/closeable
                           (#'cluster/serve! first-instance
                            (assoc dials :seon.config.web/port first-port))
-                          #(web/stop! (:seon.render.web/served %)))]
+                          #(web/stop! (merge (:seon.render.web/served %)
+                                          (select-keys (:seon.render.web/view %) [:seon.render.web/registration :seon.config.eval/time-limit-ms]))))]
                (let [second-instance @second-server
                      served (:seon.render.web/served second-instance)
                      advertised (edn/read-string (slurp file))]
