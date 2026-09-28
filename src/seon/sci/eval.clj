@@ -4140,7 +4140,8 @@
           (catch Throwable failure
             [{:seon.render.value/diagnostics [failure]} (render.value/bounded-text value)]))
         failures (into failures (:seon.render.value/diagnostics projection))
-        shown (if (string? shown) shown (pr-str shown))]
+        ;; a refusal of the root's description is data: the value printer bounds it
+        shown (if (string? shown) shown (render.value/bounded-text shown))]
     ;; THE VALUE'S SIZE IS RECORDED BESIDE ITS SHOWN TEXT: the whole value's
     ;; estimated tokens from the floor's own cut counts (never a second print),
     ;; the shown tokens, how many cuts it made, and an explicit
