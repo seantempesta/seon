@@ -434,8 +434,10 @@
             task-id (read-string (first (hosted-run! hosted (str "(:seon.task/id (seon.task/create! '" (pr-str declaration) "))"))))
             as-root #(db/call-with-custody {:seon.db/connection connection} (fn [] (% (assoc %2 :seon.db/connection connection))))]
         (is (= ":unassigned" (refusal)) "an agent root assigned nothing is refused by name")
-        (is (:db-after (as-root task/assign! {:seon.task/assigned task-id :seon.task/agent [:seon.agent/id "mcp/proposer"]
-                                               :seon.task/branch branch})))
+        (is (= '(my.program/propose-merge! {})
+               (last (:seon.render/operations (as-root task/assign! {:seon.task/assigned task-id :seon.task/agent [:seon.agent/id "mcp/proposer"]
+                                                                     :seon.task/branch branch}))))
+            "the assignment offers the agent its proposal")
         (is (= ":no-proofs" (refusal)) "a task no test names cannot be proposed")
         (hosted-run! hosted "(defn square \"Square x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (+ x x))")
         (hosted-run! hosted (str "(clojure.test/deftest ^{:seon/tasks #{" (pr-str task-id) "}} square-test"
@@ -443,7 +445,7 @@
         (is (= ":unproven" (refusal)) "a red proof refuses")
         (is (empty? (to-root)) "and root hears nothing")
         (hosted-run! hosted "(defn square \"Square x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* x x))")
-        (let [[about] (hosted-run! hosted "(:seon.message/about (my.program/propose-merge! {}))")
+        (let [[about] (hosted-run! hosted "(:seon.task/merge (my.program/propose-merge! {}))")
               open (my.program/proposals {:seon.db/db (db/db connection)})]
           (is (= #{(read-string about)} (to-root)) "a green proof tells root, naming the merge task")
           (is (= [[(read-string about) branch #{'my.agents.host-probe/square-test}]]
@@ -466,7 +468,13 @@
             (is (= [#{'my.agents.host-probe/square-test} (read-string about)]
                    [(:seon.task/proofs prepared) (:seon.task/merge prepared)])
                 "the proposal's proofs gate the merge, and it names its merge task")
-            (is (:db-after (task/decide! connection (read-string about) :declined)))
+            (is (= [(list 'my.program/prepare-merge! {:seon.task/merge (read-string about)})]
+                   (:seon.render/operations (first open)))
+                "a proposal offers its prepare")
+            (is (= 'my.program/accept-merge! (ffirst (:seon.render/operations prepared)))
+                "the prepared merge offers its accept")
+            (is (= {:seon.task/id (read-string about) :seon.task/outcome :declined}
+                   (task/decide! connection (read-string about) :declined)))
             (is (empty? (my.program/proposals {:seon.db/db (db/db connection)})) "a decided merge task is closed")))
         (is (= {:seon.task/changed? true}
                (select-keys (as-root task/create! (assoc declaration :seon.agent/id "root" :seon.task/intent "Square it."

@@ -47,6 +47,15 @@
           [:tuple :symbol [:string {:min 64 :max 64}]]]
  :run-id [:and {:description "The test run on C that proved them."} :seon.test.run/id]
  :program [:and {:description "The run's tested program identity."} :seon.test.run/program-digest]
+ :proposal-answer [:and {:description "A proposal as propose-merge! answers it: the proposal on record, root's prepare offered, and the message failure when root was not told."}
+            :seon.task/proposal-view
+            [:map [:seon.render/operations :seon.render/operations]
+             [:seon.task/undelivered {:optional true} :seon.error/value]]]
+ :decided [:map {:description "A merge task root closed, with its outcome."} [:seon.task/id :seon.task/id] [:seon.task/outcome :seon.task/outcome]]
+ :assignment-view [:map {:description "An assignment as root's assign! answers it: the task, the agent and its branch, and the agent's proposal offered: it runs once a deftest naming the task (^{:seon/tasks #{handle}}) passes on the branch."}
+                   [:seon.task/assignment :seon.task/assignment] [:seon.task/assigned :seon.task/assigned]
+                   [:seon.agent/id :seon.agent/id] [:seon.task/branch :seon.task/branch]
+                   [:seon.render/operations :seon.render/operations]]
  :proposal-view [:map [:seon.task/proposal :seon.task/proposal] [:seon.task/merge :seon.task/merge]
                  [:seon.task/branch :seon.task/branch] [:seon.task/commit :seon.task/commit] [:seon.task/proved :seon.task/proved]
                  [:seon.task/run-id :seon.task/run-id] [:seon.task/program :seon.task/program]]

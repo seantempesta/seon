@@ -1,6 +1,6 @@
 ---
 type: research
-status: in progress — loop 1 blocked at step 2 on a held-file defect (seon.turn.batch/span-of), patch with regression handed to root
+status: in progress — loop 1 blocked at the proof (step 3) on a held SCI-fork defect; patch handed to root
 created: 2026-09-28
 lane: dogfood-loop-opus
 jvm: default pid 9778, program 29bdfce8d (22 commits behind HEAD 90828bb93)
@@ -61,6 +61,23 @@ Evidence of the previous attempt: [repl-dogfood-2026-09-27.md](repl-dogfood-2026
 Loop 1 so far: 13 SCI evaluations and 1 JVM probe, about 6k tokens read, 4 replies needed a second evaluation to
 understand, 0 manual steps outside the REPL (the fix itself went to a patch because its file is held).
 
+### Loop 1, attempt 3 (default 17087c432, span-of patch installed)
+
+```clojure
+[{:step 1 :form "(seon.task/assignment ... \"mcp/loop1-uncut-total\" :loop1-uncut-total)" :ms 18 :tok 80 :verdict :ok
+  :note "branch, hosted agent (still in seon.render.value) and assignment survived the restart"}
+ {:step 2 :form "(defn- tree ... +total)" :ms 13 :tok 330 :verdict :ok :note "persisted: the branch digest differs from the cluster's"}
+ {:step 3 :form "(totals through seon.render.value/prepare)" :ms 4 :tok 60 :verdict :confusing
+  :note "[nil nil nil nil]: the agent's live context never reacquires, so compiled prepare calls compiled tree; affected callers are interpreted only when a context is acquired (seon.sci.eval acquire!)"}
+ {:step 4 :form "(in-ns 'seon.render.value-test)" :ms 0 :tok 20 :verdict :ok}
+ {:step 5 :form "(clojure.test/deftest ^{:seon/tasks #{\"36aa005ffd4e\"}} an-uncut-string-names-its-absolute-total ...)" :ms 2 :tok 30
+  :verdict :confusing :note "the reply is the Var only: no run, no status, no next step"}
+ {:step 6 :form "(my.program/propose-merge! {})" :ms 7090 :tok 1400 :verdict :blocker
+  :note "refused :unproven; the proof member acquired the branch and tried to interpret the affected caller prepare, which failed: seon.sci.arm/write-event refused {:end-line nil}. The SCI fork builds def origins with nil-valued :end-line/:end-column when the reader location has none (analyzer.cljc:880-885, 2116-2118). 1,127,336 armed calls; a fault 'derive: Program retraction refused' whose cause is capped away (446 kB)."}
+ {:step 7 :form "(my.program/breaks / ns-unmap! of an uncalled scratch defn)" :ms [48 462] :tok 200 :verdict :defect
+  :note "ns-unmap! = three deletion-reports (pre-read, writer re-decide, :affected recompute), each a breaks (1,480 read-declarations); its evaluation is labelled :error even when it returns a count"}]
+```
+
 ## 2. Blockers and fixes
 
 | # | Step | Blocker | Root cause | Fix |
@@ -72,6 +89,10 @@ understand, 0 manual steps outside the REPL (the fix itself went to a patch beca
 | B4 | 5 (write-back) | every real change refuses `:one-file` | a function and the test proving it live in two files; write-back proved exactly one | `proven-files` groups the changes by file and proves each; `write-back!` installs each and answers one entry per file (`:seon.source/files`) |
 
 | B5 | 2 (prototype) | a `defn` whose body uses `cond->`/`case` returns its Var but writes no entity | `seon.turn.batch/span-of`'s output contract demanded ints; positionless expansion usages are real analyzer data | contract admits the positionless span (`tmp/dogfood-loop-opus/span-of-positionless-usages.patch`, with regression `host-test/a-definition-whose-body-expands-macros-persists`; batch.clj is one-path-impl-2's) |
+| B7 | 3 (proof) | a branch change to a compiled function cannot be proven: interpreting its affected callers fails | the SCI fork writes `:end-line nil` into def origins; `:seon.batch/def-origin` rightly allows the key only when present | `source-origin` in the fork omits absent ends (`tmp/dogfood-loop-opus/sci-origin-absent-ends.patch`; the fork is one-path-impl-2's) |
+| F1 | all | loop replies were a TxReport, a message or bare values with no next step | owner rule: return the useful entity, its status and the next operation | `assign!` answers the assignment offering `propose-merge!`; `propose-merge!` answers the proposal offering `prepare-merge!`; `proposals` offers `prepare-merge!` by merge task; prepare offers `accept-merge!` with its data literal; accept offers `write-back!` when prepare named the checkout |
+| F2 | all | merge-path returns were plumbing (`decide!` a TxReport, `propose-merge!` the message) | owner rule, judged by caller | `decide!` answers the closed merge task; `propose-merge!` answers the proposal (`:seon.task/proposal-answer`) |
+| F3 | pre-commit | two drills (~8 min each) failed on schema EDN errors of mine: a duplicate key, and a named error schema with no domain member | the drill was my first full compile | `seon.contracts-compile-test/check` over the touched files, in an archive of HEAD plus the diff with `reference-code` linked, compiles the whole packaged population in 24-45 s and caught both |
 | B6 | 4 (close) | the agent's branch lives on after its merge | nothing retired it | `my.program/accept-merge!` retires the proposing branch through `my.agent/retire-branch!` with the tested one |
 
 Regressions: `seon.cluster.host-test/a-proposal-waits-for-its-assigned-tasks-proofs-then-reaches-root` (extended: root

@@ -92,14 +92,16 @@
 
 (defn assign!
   "Root assigns the task `:seon.task/assigned` to the agent `:seon.task/agent`
-  working on `:seon.task/branch`, binding the revision it reviews now.
+  working on `:seon.task/branch`, binding the revision it reviews now. Answers
+  the assignment, offering the agent's proposal once a test naming the task
+  passes on its branch.
 
   Example:
   (seon.task/assign! {:seon.task/assigned \"a1b2c3d4e5f6\" :seon.task/agent [:seon.agent/id \"mcp/fix\"]
                       :seon.task/branch :fix})"
   {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection] [:seon.task/assigned :seon.task/assigned]
                              [:seon.task/agent :seon.task/agent] [:seon.task/branch :seon.task/branch]]]
-                  [:or :seon.db/transaction-report :seon.task/refused-error :seon.error/value]]}
+                  [:or :seon.task/assignment-view :seon.task/refused-error :seon.error/value]]}
   [{connection :seon.db/connection handle :seon.task/assigned agent :seon.task/agent branch :seon.task/branch}]
   (let [database (db/db (home-connection connection))
         revision (issue/task-revision database handle)
@@ -107,9 +109,15 @@
     (cond (:seon.error/at revision) revision
           (nil? revision) (refused 'seon.task/assign! :unknown-task 'seon.task handle)
           (not (string? agent-id)) (refused 'seon.task/assign! :unassigned 'seon.task agent)
-          :else (written connection [{:seon.task/assignment (id/id [handle agent-id branch]) :seon.task/assigned handle
-                                      :seon.task/revision revision :seon.task/agent [:seon.agent/id agent-id]
-                                      :seon.task/branch branch}]))))
+          :else (let [assignment (id/id [handle agent-id branch])
+                      report (written connection [{:seon.task/assignment assignment :seon.task/assigned handle
+                                                   :seon.task/revision revision :seon.task/agent [:seon.agent/id agent-id]
+                                                   :seon.task/branch branch}])]
+                  (if (:seon.error/at report)
+                    report
+                    {:seon.task/assignment assignment :seon.task/assigned handle :seon.agent/id agent-id
+                     :seon.task/branch branch
+                     :seon.render/operations ['(my.program/propose-merge! {})]})))))
 
 (defn assignment
   "What `agent-id` on `branch` is assigned in the cluster value `database`: its
@@ -165,8 +173,12 @@
 
 (defn decide!
   "Root records its `outcome` on the merge task `merge-task`, closing it: `proposals`
-  lists only merge tasks without one."
+  lists only merge tasks without one. Answers the closed merge task.
+
+  Example:
+  (seon.task/decide! connection \"0123456789ab\" :declined)"
   {:malli/schema [:=> [:cat :seon.db/connection :seon.task/merge :seon.task/outcome]
-                  [:or :seon.db/transaction-report :seon.error/value]]}
+                  [:or :seon.task/decided :seon.error/value]]}
   [connection merge-task outcome]
-  (written connection [[:db/add [:seon.task/id merge-task] :seon.task/outcome outcome]]))
+  (let [report (written connection [[:db/add [:seon.task/id merge-task] :seon.task/outcome outcome]])]
+    (if (:seon.error/at report) report {:seon.task/id merge-task :seon.task/outcome outcome})))

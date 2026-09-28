@@ -452,14 +452,16 @@
   program (`seon.test/verified?`); otherwise the refusal names them and root
   hears nothing. A green proof records on the cluster the merge task and my
   proposal (`seon.task/propose!`), then tells root with a message naming the
-  merge task. A failed message leaves the task: root's `proposals` reads it.
+  merge task, and answers the proposal with root's `prepare-merge!` offered. A
+  failed message leaves the proposal on record (root's `proposals` reads it)
+  and is named as `:seon.task/undelivered`.
 
   Example:
   (my.program/propose-merge! {})"
   {:seon/tasks #{"70bf0e12569e"}
    :malli/schema [:=> [:cat [:map [:my.program/context :my.program/context] [:seon.db/connection :seon.db/connection]
                              [:seon.agent/id :seon.agent/id]]]
-                  [:or :seon.message/message :seon.task/refused-error :seon.task/conflict-error :seon.error/value]]}
+                  [:or :seon.task/proposal-answer :seon.task/refused-error :seon.task/conflict-error :seon.error/value]]}
   [{context :my.program/context connection :seon.db/connection agent-id :seon.agent/id}]
   (let [branch (get-in (db/db connection) [:config :branch])
         work (task/assignment (db/db (task/home-connection connection)) agent-id branch)
@@ -488,14 +490,20 @@
               (seq unproven) (refuse :unproven unproven)
               (:seon.error/at proposal) proposal
               (nil? proposal) (refuse :unproven (vec (sort (remove (set (map first digests)) proofs))))
-              :else (message/send! {:my.message/to "root" :my.message/about (:seon.task/merge proposal)
-                                    :my.message/content (str "Please merge branch " (name branch) ": merge task "
-                                                             (:seon.task/merge proposal) " (" (:seon.task/key work) ").")}
-                                   connection agent-id))))))
+              :else
+              (let [sent (message/send! {:my.message/to "root" :my.message/about (:seon.task/merge proposal)
+                                         :my.message/content (str "Please merge branch " (name branch) ": merge task "
+                                                                  (:seon.task/merge proposal) " (" (:seon.task/key work) ").")}
+                                        connection agent-id)]
+                ;; A failed message leaves the proposal on record: `proposals` reads it.
+                (cond-> (assoc proposal :seon.render/operations
+                               [(list 'my.program/prepare-merge! {:seon.task/merge (:seon.task/merge proposal)})])
+                  (:seon.error/at sent) (assoc :seon.task/undelivered sent))))))))
 
 (defn proposals
   "Read the open merge proposals on my cluster: every proposal whose merge task
-  records no outcome yet, with its branch, commit, proofs and run.
+  records no outcome yet, with its branch, commit, proofs and run, each
+  offering its `prepare-merge!`.
 
   Example:
   (my.program/proposals)"
@@ -509,7 +517,28 @@
     ;; a pulled cardinality-many value is a vector; :seon.task/proved is a set
     (if (db/read-refusal? found)
       found
-      (mapv #(update % :seon.task/proved set) (sort-by :seon.task/proposal found)))))
+      (mapv #(-> (update % :seon.task/proved set)
+                 (assoc :seon.render/operations [(list 'my.program/prepare-merge! {:seon.task/merge (:seon.task/merge %)})]))
+            (sort-by :seon.task/proposal found)))))
+
+(defn- open-proposal
+  "The open proposal of merge task `merge-task` my cluster records last, or
+  the refusal naming it: the one `prepare-merge!` prepares."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/merge] [:or :seon.task/proposal-view :seon.error/value]]}
+  [database merge-task]
+  (let [found (db/q '[:find ?tx (pull ?p [:seon.task/proposal :seon.task/merge :seon.task/branch :seon.task/commit
+                                          :seon.task/proved :seon.task/run-id :seon.task/program])
+                      :in $ ?handle
+                      :where [?p :seon.task/merge ?handle] [?p :seon.task/proposal _ ?tx]
+                      [?t :seon.task/id ?handle] (not [?t :seon.task/outcome])]
+                    database merge-task)]
+    (cond (db/read-refusal? found) found
+          (empty? found)
+          (seon.error.refusal/diagnostic (java.util.Date.) :seon.program/write 'my.program/prepare-merge!
+           {:seon.error/message (str "Merge task " merge-task " has no open proposal.")
+            :seon.error/member :seon.task/merge :seon.error/offending merge-task
+            :seon.render/operations ['(my.program/proposals)]})
+          :else (update (second (last (sort-by first found))) :seon.task/proved set))))
 
 (defn- cluster-custody
   "Nil when `context` holds its cluster's own branch, the custody that merges
@@ -526,26 +555,38 @@
         :my.program/held-branch held}))))
 
 (defn prepare-merge!
-  "Test an open proposal (one of `proposals`) through the merge gate on a fresh
-  branch of the head I hold and answer the verdict `accept-merge!` takes
-  (`seon.cluster.source/prepare-merge!`): the whole run's `:seon.test/passed?`,
-  tally and red members, shown; its proofs, the tests the proposal proved,
-  gate acceptance. Name `:seon.program/identities` to merge only those
+  "Test the open proposal of merge task `:seon.task/merge` (one of
+  `proposals`) through the merge gate on a fresh branch of the head I hold and
+  answer the verdict `accept-merge!` takes (`seon.cluster.source/prepare-merge!`):
+  the whole run's `:seon.test/passed?`, tally and red members, shown; its
+  proofs, the tests the proposal proved, gate acceptance. The answer offers its
+  `accept-merge!`. Name `:seon.program/identities` to merge only those
   declarations; one reaching an unselected change refuses by name; a selected
   one carries its namespace's changed row (a require added at the REPL with
   `ns`). Name the checkout `:seon.fn/root` to prove the file write-back would
-  produce before any test runs. The merge is prepared onto the head of the
-  branch my context holds; only root's accepts it.
+  produce before any test runs; the accepted merge then offers its
+  `write-back!` there. The merge is prepared onto the head of the branch my
+  context holds; only root's accepts it.
 
   Example:
-  (my.program/prepare-merge! (assoc (first (my.program/proposals)) :seon.fn/root \"/path/to/checkout\"))"
+  (my.program/prepare-merge! {:seon.task/merge \"0123456789ab\" :seon.fn/root \"/path/to/checkout\"})"
   {:malli/schema [:=> [:cat :my.program/prepare-request]
                   [:or :my.program/merge-proposal :seon.program/three-way :seon.source/write-back-error :seon.error/value]]}
-  [{context :my.program/context branch :seon.task/branch proved :seon.task/proved merge-task :seon.task/merge
-    selection :seon.program/identities root :seon.fn/root}]
-  (let [prepared (source/prepare-merge! context (:seon.store/store context) branch (into #{} (map first) proved)
-                                        selection root)]
-    (cond-> prepared (:seon.source/candidate prepared) (assoc :seon.task/merge merge-task :seon.task/branch branch))))
+  [{context :my.program/context merge-task :seon.task/merge selection :seon.program/identities root :seon.fn/root}]
+  (let [proposal (open-proposal (db/db (:seon.db/connection context)) merge-task)
+        prepared (when-not (:seon.error/at proposal)
+                   (source/prepare-merge! context (:seon.store/store context) (:seon.task/branch proposal)
+                                          (into #{} (map first) (:seon.task/proved proposal)) selection root))]
+    (cond
+      (:seon.error/at proposal) proposal
+      (not (:seon.source/candidate prepared)) prepared
+      :else
+      (let [request (cond-> (assoc (select-keys prepared [:seon.source/candidate :seon.test.run/id :seon.task/proofs
+                                                          :seon.source/expected-digests :parents])
+                                   :seon.task/merge merge-task :seon.task/branch (:seon.task/branch proposal))
+                      root (assoc :seon.fn/root root))]
+        (merge prepared request
+               {:seon.render/operations [(list 'my.program/accept-merge! request)]})))))
 
 (defn accept-merge!
   "Merge exactly the program `prepare-merge!` tested into my cluster
@@ -567,7 +608,7 @@
     proposing :seon.task/branch :as proposal}]
   (or (cluster-custody 'my.program/accept-merge! context)
       (let [store (:seon.store/store context)
-            accepted (source/accept-merge! context store (dissoc proposal :my.program/context))
+            accepted (source/accept-merge! context store (dissoc proposal :my.program/context :seon.render/operations))
             ;; The merge task closes with the merge: `proposals` no longer lists it.
             closed (when (:seon.source/commit-id accepted)
                      (task/decide! (:seon.db/connection context) merge-task :accepted))
@@ -597,7 +638,11 @@
                                     nil)}))))
           ;; No launcher accepting work (a closing cluster): unlink here.
           (retire!))
-        (if (:seon.error/at closed) closed accepted))))
+        (cond (:seon.error/at closed) closed
+              (and (:seon.source/commit-id accepted) (:seon.fn/root proposal))
+              (assoc accepted :seon.render/operations
+                     [(list 'my.program/write-back! {:seon.source/accepted accepted :seon.fn/root (:seon.fn/root proposal)})])
+              :else accepted))))
 
 (defn write-back!
   "Write an accepted merge's declarations into their source file under `root`
