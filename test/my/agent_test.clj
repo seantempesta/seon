@@ -164,4 +164,8 @@
             "the retirement is recorded as a fact")
         (is (contains? (roster) own) "the branch stays linked while the run is live"))
       (finally (cluster.agent/release-context! handle)))
-    (is (not (contains? (roster) own)) "the release unlinks it")))
+    ;; the agent's own connection is released with its context, so the roster
+    ;; after release is read through the parent's live connection
+    (is (not (contains? (set (:my.agent/roster (my.agent/branches (assoc context :seon.db/connection connection))))
+                        own))
+        "the release unlinks it")))
