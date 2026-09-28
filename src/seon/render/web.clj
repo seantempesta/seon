@@ -112,16 +112,19 @@
   [x]
   (instance? org.httpkit.server.HttpServer x))
 
-(defonce ^:private generator-server
-  (delay (http/run-server (fn [_] {:status 200 :body ""})
-                          {:ip "127.0.0.1" :port 0
-                           :legacy-return-value? false})))
-
 (def server-generator
-  "An honest generator: a real, bound, loopback http-kit server, created
-  once. A generator that returned a stub would let a schema pass that
-  the runtime would refuse."
-  (gen/fmap (fn [_] @generator-server) (gen/return nil)))
+  "An honest generator: a real loopback http-kit server per sample, stopped
+  before it is returned (as `seon.flow/graph-generator` stops its graph).
+  http-kit's constructors always bind (`HttpServer.java:112-190`), so there
+  is no unbound sample; a stopped one keeps no port or selector thread,
+  where the once-created shared server stayed bound for the JVM's life."
+  (gen/fmap (fn [_]
+              (let [server (http/run-server (fn [_] {:status 200 :body ""})
+                                            {:ip "127.0.0.1" :port 0 :legacy-return-value? false})]
+                ;; the promise is delivered once the server thread exits
+                (some-> (http/server-stop! server {:timeout 0}) (deref 1000 nil))
+                server))
+            (gen/return nil)))
 
 ;; the gate refuses a `[:fn]` naming anything that is not a REGISTERED
 ;; core predicate — resolvable is not the same as vouched for

@@ -11,6 +11,7 @@
             [clojure.core.async.flow.impl.graph :as flow.graph]
             [clojure.core.async.flow.spi :as flow.spi]
             [clojure.core.async.impl.channels :as async.channels]
+            [clojure.core.async.impl.dispatch :as async.dispatch]
             [clojure.core.async.impl.protocols :as async.impl]
             [clojure.datafy :as datafy]
             [clojure.test.check.generators :as gen]
@@ -27,13 +28,6 @@
   (:import [clojure.lang IBlockingDeref]
            [java.util.concurrent Executor Executors ExecutorService Future FutureTask
             ThreadFactory TimeUnit]))
-
-;;; OPTIONAL LATE DEPENDENCY. `seon.operator.runtime` lives in
-;;; `resources/seon/operator/runtime.clj`, off the source path, and is loaded
-;;; by the operator, not by this namespace. Resolved once at first use rather
-;;; than on every graph start (AGENTS §2.1).
-(defonce ^:private operator-runtime-root-executors
-  (delay (requiring-resolve 'seon.operator.runtime/root-executors)))
 
 (set! *warn-on-reflection* true)
 
@@ -648,7 +642,9 @@
              ::io-queue-depth io-queue-depth
              ::io-parallelism io-parallelism
              ::io-submissions io-submissions
-             ::task-executor (:io (@operator-runtime-root-executors))}
+             ;; core.async's own process `:io` executor (memoized by
+             ;; `executor-for`, `impl/dispatch.clj`): one virtual thread per task
+             ::task-executor (async.dispatch/executor-for :io)}
             environment))})]
     {::graph graph
      ::started started

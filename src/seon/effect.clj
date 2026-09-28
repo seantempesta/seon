@@ -6,7 +6,8 @@
   committed before the protected JVM handler runs on the process-root `:io`
   executor; terminal data is bounded and committed once. Recovery interrupts
   an open receipt and never dispatches it again."
-  (:require [clojure.edn :as edn]
+  (:require [clojure.core.async.impl.dispatch :as async.dispatch]
+            [clojure.edn :as edn]
             [malli.core :as m]
             [malli.util :as mu]
             [sci.core :as sci]
@@ -32,13 +33,6 @@
            [java.util Date]
            [java.util.concurrent ExecutionException FutureTask]
            [java.util.concurrent Executor]))
-
-;;; OPTIONAL LATE DEPENDENCY. `seon.operator.runtime` lives in
-;;; `resources/seon/operator/runtime.clj`, off the source path, and is loaded
-;;; by the operator, not by this namespace. Resolved once at first use rather
-;;; than on every dispatch (AGENTS §2.1).
-(defonce ^:private operator-runtime-root-executors
-  (delay (requiring-resolve 'seon.operator.runtime/root-executors)))
 
 (def ^:dynamic *request-context*
   "The current evaluation's durable identity and projection controls."
@@ -466,7 +460,7 @@
 
 (defn- dispatch
   [handler owner-sym effect-id request effective]
-  (let [executor (:io (@operator-runtime-root-executors))
+  (let [executor (async.dispatch/executor-for :io)
         ;; Captured on THIS thread and closed over as data, so the executor
         ;; thread reads the arm from the crossing rather than from a binding
         ;; frame it happens to have inherited.
