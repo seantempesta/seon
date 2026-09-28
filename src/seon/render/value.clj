@@ -69,6 +69,8 @@
   (delay (requiring-resolve 'seon.render/declared-projection)))
 (defonce ^:private render-viewer
   (delay (requiring-resolve 'seon.render/viewer)))
+(defonce ^:private walk-with-related
+  (delay (requiring-resolve 'seon.render.walk/with-related)))
 
 
 (defn bounded-text
@@ -747,7 +749,11 @@
             answer (@render-declared-projection
                     (cond-> (assoc unit :seon.render.data/path path)
                       projector (assoc :seon.render/value value :seon.render.call/function projector))
-                    value output)]
+                    value output)
+            ;; An entity's one hop shows beside its render (`seon.related/data`).
+            answer (if (and (empty? path) (::print/node answer))
+                     (@walk-with-related unit value output answer)
+                     answer)]
         (cond
           (::print/node answer) answer
           (:seon.error/value answer) {:diagnostic (:seon.error/value answer)}

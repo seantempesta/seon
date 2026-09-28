@@ -63,7 +63,8 @@
  :seon.program/analyzed-count [:int {:min 0}]
  :seon.program/edge-symbol
  [:and
-  {:description
+  {:seon.db/reference-to #{:seon.fn/sym :seon.test/sym}
+   :description
    "A source-observed program edge name whose pr-str output reads back through clojure.edn/read-string as the same symbol. This refuses clj-kondo's :clj-kondo/unknown-namespace sentinel: a symbol minted from it prints as a keyword and corrupted calls, references, and recorded test reach across EDN boundaries."}
   :qualified-symbol
   [:fn

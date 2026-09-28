@@ -10,6 +10,12 @@
   '[:db/id :seon.test/sym :seon.test/source :seon.fn/form-span
     :seon.fn/calls])
 
+(defn- near?
+  "Is this view past distance 0, where a test's host and changes show?"
+  {:malli/schema [:=> [:cat :seon.render/unit] :boolean]}
+  [unit]
+  (pos? (long (get unit :seon.render/distance 1))))
+
 (defn- evidence [unit]
   (let [entity (or (:seon.render/value unit) unit)]
     (if-let [database (:seon.db/db unit)]
@@ -42,24 +48,34 @@
    :seon.test.failure/expected :seon.test.failure/actual])
 
 (defn render-ai
-  "A test's result as data: its state, where it runs, its failed assertions
-  and, when red, the definitions changed since it last passed."
+  "A test's result as data: its name and state; beyond distance zero also
+  where it runs, its failed assertions and, when red, the definitions changed
+  since it last passed.
+
+  ## Costs
+
+  At distance 0 one pull and one recorded-result read (about 3 ms); the host
+  report walks the call closure (14-73 ms), so only a nearer view reads it
+  (unarmed, default, 2026-09-28)."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render.test/view]}
   [unit]
   (let [entity (evidence unit) test-name (:seon.test/sym entity) database (:seon.db/db unit)
         read? (and database (qualified-symbol? test-name))
-        shown-state (state entity)]
-    (cond-> (merge {:seon.test/sym test-name :seon.render.test/state shown-state}
-                   (select-keys entity [:seon.test/unchanged :seon.test/recorded-basis-t :seon.test/run-basis-t
-                                        :seon.test/failure-message :seon.test/reach-unknown]))
-      ;; the host report without the symbol the view already names
-      read? (assoc :seon.render.test/host (let [host (test/host database test-name)]
-                                            (cond-> host (map? host) (dissoc :seon.test/sym))))
-      (seq (:seon.test.failure/reports entity))
-      (assoc :seon.test.failure/reports (mapv #(select-keys % failure-keys) (failures entity)))
-      ;; only a red test has definitions changed since it last passed
-      (and read? (#{"fail" "error"} shown-state))
-      (assoc :seon.render.test/changed-since-green (test/changed-since-green database test-name)))))
+        shown-state (state entity)
+        named {:seon.test/sym test-name :seon.render.test/state shown-state}]
+    (if-not (near? unit)
+      named
+      (cond-> (merge named
+                     (select-keys entity [:seon.test/unchanged :seon.test/recorded-basis-t :seon.test/run-basis-t
+                                          :seon.test/failure-message :seon.test/reach-unknown]))
+        ;; the host report without the symbol the view already names
+        read? (assoc :seon.render.test/host (let [host (test/host database test-name)]
+                                              (cond-> host (map? host) (dissoc :seon.test/sym))))
+        (seq (:seon.test.failure/reports entity))
+        (assoc :seon.test.failure/reports (mapv #(select-keys % failure-keys) (failures entity)))
+        ;; only a red test has definitions changed since it last passed
+        (and read? (#{"fail" "error"} shown-state))
+        (assoc :seon.render.test/changed-since-green (test/changed-since-green database test-name))))))
 
 (defn render-form
   "The read that finds this test's recorded result again. Shown, never executed."
@@ -134,7 +150,7 @@
        [:p "Unchanged; reused the result recorded at :t "
         (or (:seon.test/recorded-basis-t entity) "unavailable")
         ", tested basis :t " (or (:seon.test/run-basis-t entity) "unavailable") "."])
-     (when (and (:seon.db/db unit) (qualified-symbol? test-name))
+     (when (and (near? unit) (:seon.db/db unit) (qualified-symbol? test-name))
        [:p {:class "seon-test-host"} (test/host-text (:seon.db/db unit) test-name)])
      (into [:div {:class "seon-test-failures"}]
        (map #(failure-html entity %) (failures entity)))
@@ -143,7 +159,7 @@
      (into [:ul]
        (map (fn [target] [:li (function-link target)])
              (:seon.fn/calls entity)))
-     (when-let [database (:seon.db/db unit)]
+     (when-let [database (when (near? unit) (:seon.db/db unit))]
        (let [changed (test/changed-since-green database test-name)]
          [:section [:h4 "Changed since last green"]
           (if (:seon.error/at changed) [:p (:seon.error/message changed)]

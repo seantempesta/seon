@@ -1341,11 +1341,14 @@
         ;; A RENDER UNIT NEED NOT CARRY A CTX OR A DATABASE: no projection
         ;; anywhere means nothing is declared, and nothing is selected.
         projection (request-projection request)
-        decision (when projection (selection request))
-        selected (:seon.render.selection/selected decision)
+        ;; An explicit nested render names its producer and selects nothing
+        ;; (AGENTS: a render that wants a nested thing rendered calls that render).
+        chosen (:seon.render.call/selected-producer request)
+        decision (when (and projection (not chosen)) (selection request))
+        selected (or chosen (:seon.render.selection/selected decision))
         refusal (when decision (selection-refusal decision))]
     (cond
-      (nil? decision) nil
+      (not (or chosen decision)) nil
       refusal {:seon.error/value refusal}
       ;; A PRODUCER IS NEVER RE-ENTERED INSIDE ITS OWN WALK: `invoke-selected`
       ;; records what is rendering, so a producer that hands its own value to

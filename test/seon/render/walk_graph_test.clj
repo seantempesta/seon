@@ -1,6 +1,6 @@
 (ns seon.render.walk-graph-test
   "The linked graph walk (task-context S1): levels from a task root over refs
-  and interim value edges, presence by render pair, definitions-first order,
+  and value references derived from the schemas, presence by render pair, definitions-first order,
   a cycle rendered once, the node cut and a missing root."
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]

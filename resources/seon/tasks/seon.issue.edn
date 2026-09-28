@@ -11,4 +11,9 @@
              :intent "The issue AI render shows status and test text ('0 turns remaining') and hides the problem body and its requery form; a newcomer had to (vec ...) the issue to read its problem."
              :must-read #{seon.issue/render-ai seon.issue/status-text}
              :evidence #{"docs/research/agent-platform/dogfood-dogfood-newcomer-astra-2026-09-26.md"
-                         "docs/seon/issues/the-issue-ai-render-no-longer-teaches-its-requery-form.md"}}]
+                         "docs/seon/issues/the-issue-ai-render-no-longer-teaches-its-requery-form.md"}}
+ #:seon.task{:name "a-distance-zero-issue-render-is-prose"
+             :kind :function
+             :intent "seon.issue/render-ai ignores :seon.render/distance and returns status prose (\"Issue the-in-process-test-loader-cannot-load… still open; …\"), so an issue named in another entity's related data costs the whole status view and prints as a clipped string (seon.test/run names 23, 2026-09-28). Done when a distance-zero issue render is data: its id, title and status."
+             :must-read #{seon.issue/render-ai seon.render.walk/related}
+             :evidence #{"docs/research/agent-platform/profiling-and-related-data-2026-09-28.md"}}]

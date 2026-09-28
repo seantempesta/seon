@@ -36,4 +36,14 @@
  #:seon.task{:name "a-short-identifier-string-is-cut-at-its-first-chunk"
              :kind :function
              :intent "An MCP JVM eval returning 9 contract findings (maps of :row :col :level :type :filename :message) showed every :filename as \"/Users/sean/src/\"…+23 with a subs dig form (default 2026-09-27): breadth before depth spread the budget so each string stayed at its 16-character first chunk, and the path, the one member that identifies the finding, was unreadable while :type and :level printed whole. Rule 5 grows strings by doubling chunks but charges a path like prose. Done when a string that fits the remaining budget at its level prints whole before sibling collections expand (or short strings count as scalars), with a regression over a vector of such finding maps."
-             :must-read #{seon.render.value/prepare}}]
+             :must-read #{seon.render.value/prepare}}
+ #:seon.task{:name "nested-hiccup-exceeds-the-printers-charge"
+             :kind :function
+             :intent "MCP eval_clj (JVM mode) of [3.3 (clojure.edn/read-string (slurp \"tmp/related_data/charge-overflow.edn\"))], a 6 KB nested hiccup vector, prints its value as data with the diagnostic \"The value printer's saved text exceeded its charge.\" (default pid 9778, 2026-09-28): the laid-out text outgrew the allocator's charge. The same value prepared under the agent profile prints. Done when a regression over that value prints it under the MCP profile with no diagnostic."
+             :must-read #{seon.render.value/prepare seon.render.value/charge}
+             :evidence #{"tmp/related_data/charge-overflow.edn"}}
+ #:seon.task{:name "a-cut-operation-in-render-data-is-not-runnable"
+             :kind :function
+             :intent "Render data's cuts name no handle, so an offered operation the budget reaches last prints as (seon.render.walk/related …1): its request map is cut and the form cannot be run (seon.test/run's related data, 2026-09-28). An operation is a whole form or absent. Done when a :seon.render/operations form inside render data prints whole or is dropped whole, with a regression."
+             :must-read #{seon.render.value/select-nodes seon.render.walk/related}
+             :evidence #{"tmp/related_data/proof.clj"}}]

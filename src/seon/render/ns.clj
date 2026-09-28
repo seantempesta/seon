@@ -7,26 +7,8 @@
   (:require [clojure.string :as str]
             [seon.error.refusal]
             [seon.db :as db]
-            [seon.issue :as issue]
             [seon.sci.eval :as sci.eval]
             [seon.render.route :as route]))
-
-;;; ---------------------------------------------------------------------------
-;;; Bounded reads
-;;; ---------------------------------------------------------------------------
-
-(defn- read-bounds
-  {:malli/schema [:=> [:cat :seon.render/unit] [:map-of :keyword :int]]}
-  [unit]
-  (let [caps (:seon.sci.admit/caps unit)
-        max-nodes (:seon.config.eval.result/max-nodes caps)
-        max-collection (:seon.config.eval.result/max-collection caps)]
-    (cond-> {}
-      (pos-int? max-nodes)
-      (assoc :max-work max-nodes :max-result-weight max-nodes)
-
-      (pos-int? max-collection)
-      (assoc :max-results max-collection))))
 
 (defn- first-doc-line
   {:malli/schema [:=> [:cat [:maybe :string]] [:maybe :string]]}
@@ -109,20 +91,17 @@
 
 (defn task-ai
   "One task as data: its id, name, kind and namespace; beyond distance zero
-  its intent, the proofs that close it, its subjects and must-reads."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.task/view :seon.db/invalid-read-error]]}
+  its intent and must-reads. Its subjects and proofs are its related data."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.task/view]}
   [unit]
   (let [task (or (:seon.render/value unit) unit)
-        named (select-keys task [:seon.task/id :seon.task/name :seon.task/kind :seon.task/ns])
-        edges (when (pos? (node-distance unit)) (issue/task-edges (:seon.db/db unit) (:seon.task/id task)))]
-    (cond
-      (nil? edges) named
-      (db/read-refusal? edges) edges
+        named (select-keys task [:seon.task/id :seon.task/name :seon.task/kind :seon.task/ns])]
+    (if (zero? (node-distance unit))
+      named
       ;; A pulled cardinality-many value is a vector (Datahike's pull
       ;; shape); must-read is declared a set, so it is shown as one.
-      :else (cond-> (merge named (select-keys task [:seon.task/intent])
-                           (select-keys edges [:seon.task/proofs :seon.task/subjects]))
-              (seq (:seon.task/must-read task)) (assoc :seon.task/must-read (set (:seon.task/must-read task)))))))
+      (cond-> (merge named (select-keys task [:seon.task/intent]))
+        (seq (:seon.task/must-read task)) (assoc :seon.task/must-read (set (:seon.task/must-read task)))))))
 
 (defn task-form
   "The read of a task's edges. Shown, never executed."
@@ -131,86 +110,46 @@
   (list 'seon.issue/task-edges '(seon.db/db) (:seon.task/id (or (:seon.render/value unit) unit))))
 
 (defn task-html
-  "Render one task as a card: intent, proofs, subjects, must-reads, evidence."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.render/hiccup :seon.db/invalid-read-error]]}
+  "Render one task as a card: intent, must-reads, evidence. Its subjects and
+  proofs are its related data."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
   (let [{:seon.task/keys [id kind intent must-read evidence] task-name :seon.task/name task-ns :seon.task/ns}
         (or (:seon.render/value unit) unit)
-        edges (when (pos? (node-distance unit)) (issue/task-edges (:seon.db/db unit) id))
         entity (fn [label items]
               [:div [:dt label] [:dd (if (seq items) (into [:ul] (map #(vector :li [:code (str %)])) (sort-by str items)) "None")]])]
-    (if (db/read-refusal? edges)
-      edges
-      [:article {:class "seon-family-entry seon-task-entry"}
-       [:header [:p {:class "seon-kicker"} (str "Task · " (name kind) " · " task-ns)] [:h3 task-name " " [:code id]]]
-       [:p {:class "seon-task-intent"} intent]
-       (when edges
-         [:dl (entity "Done when these proofs pass" (:seon.task/proofs edges)) (entity "Subjects" (:seon.task/subjects edges))
-          (entity "Must read" must-read) (entity "Evidence" evidence)])])))
-
-(def ^:private callers-named
-  "Callers are named up to this count; beyond it the node renders less: the
-  count and the call that lists them."
-  20)
-
-(defn- function-neighbours
-  "The program functions among `calls`, and the functions calling `function-name`."
-  {:malli/schema [:=> [:cat :seon.render/unit :qualified-symbol [:maybe [:or [:set :symbol] [:sequential :symbol]]]]
-                  [:or [:tuple [:vector :symbol] [:vector :symbol]] :seon.db/invalid-read-error]]}
-  [unit function-name calls]
-  (let [database (:seon.db/db unit)
-        bounds (read-bounds unit)
-        callees (db/q (merge bounds {:query '[:find [?s ...] :in $ [?s ...] :where [_ :seon.fn/sym ?s]]
-                                     :args [database (vec (remove #{function-name} calls))]}))
-        callers (when-not (db/read-refusal? callees)
-                  (db/q (merge bounds {:query '[:find [?caller ...] :in $ ?target
-                                                :where [?c :seon.fn/calls ?target] [?c :seon.fn/sym ?caller]]
-                                       :args [database function-name]})))]
-    (or (first (filter db/read-refusal? [callees callers])) [(vec callees) (vec callers)])))
+    [:article {:class "seon-family-entry seon-task-entry"}
+     [:header [:p {:class "seon-kicker"} (str "Task · " (name kind) " · " task-ns)] [:h3 task-name " " [:code id]]]
+     [:p {:class "seon-task-intent"} intent]
+     (when (pos? (node-distance unit))
+       [:dl (entity "Must read" must-read) (entity "Evidence" evidence)])]))
 
 (defn function-ai
   "A function node as data: its name and doc line; beyond distance zero its
   authored source as its lines (text the printer shows unescaped, layout
-  kept), its contract where the source does not carry it, and the program
-  functions it calls and that call it, by name."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.render.ns/function-view :seon.db/invalid-read-error]]}
+  kept) and its contract where the source does not carry it. What it calls
+  and what calls it are its related data."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render.ns/function-view]}
   [unit]
-  (let [{function-name :seon.fn/sym doc :seon.fn/doc source :seon.fn/source spec :seon.fn/spec calls :seon.fn/calls}
+  (let [{function-name :seon.fn/sym doc :seon.fn/doc source :seon.fn/source spec :seon.fn/spec}
         (or (:seon.render/value unit) unit)
         named (cond-> {:seon.fn/sym function-name}
-                (first-doc-line doc) (assoc :seon.fn/doc (first-doc-line doc)))
-        neighbours (when (pos? (node-distance unit)) (function-neighbours unit function-name calls))
-        [callees callers] neighbours]
-    (cond
-      (nil? neighbours) named
-      (db/read-refusal? neighbours) neighbours
-      :else
-      (cond-> (assoc named :seon.render.ns/calls (vec (sort callees)))
-        source (assoc :seon.render.ns/source-lines (str/split-lines source))
-        (and spec (not (and source (str/includes? source ":malli/schema")))) (assoc :seon.fn/spec spec)
-        (<= (count callers) callers-named) (assoc :seon.render.ns/called-by (vec (sort callers)))
-        (> (count callers) callers-named)
-        (assoc :seon.render.ns/called-by-count (count callers)
-               :seon.render/operations [(list 'my.program/callers {:seon.program/subject (list 'quote function-name)})])))))
+                (first-doc-line doc) (assoc :seon.fn/doc (first-doc-line doc)))]
+    (cond-> named
+      (and source (pos? (node-distance unit))) (assoc :seon.render.ns/source-lines (str/split-lines source))
+      (and spec (pos? (node-distance unit)) (not (and source (str/includes? source ":malli/schema"))))
+      (assoc :seon.fn/spec spec))))
 
 (defn function-html
-  "Render a function node: its doc, authored source, callees and callers."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.render/hiccup :seon.db/invalid-read-error]]}
+  "Render a function node: its doc and authored source."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
-  (let [{function-name :seon.fn/sym doc :seon.fn/doc source :seon.fn/source calls :seon.fn/calls} (or (:seon.render/value unit) unit)
-        neighbours (when (pos? (node-distance unit)) (function-neighbours unit function-name calls))
-        [callees callers] neighbours
-        entity (fn [label items]
-              [:div [:dt label] [:dd (if (seq items) (into [:ul] (map #(vector :li [:code (str %)])) (sort-by str items)) "None")]])]
-    (if (db/read-refusal? neighbours)
-      neighbours
-      [:article {:class "seon-family-entry seon-function"}
-       [:header [:p {:class "seon-kicker"} "Function"]
-        [:h3 [:a {:href (route/path ::route/namespace {:namespace (namespace function-name)})} [:code (str function-name)]]]]
-       (when-let [line (first-doc-line doc)] [:p line])
-       (when neighbours
-         (list (when source [:pre [:code source]])
-               [:dl (entity "Calls" callees) (entity "Called by" callers)]))])))
+  (let [{function-name :seon.fn/sym doc :seon.fn/doc source :seon.fn/source} (or (:seon.render/value unit) unit)]
+    [:article {:class "seon-family-entry seon-function"}
+     [:header [:p {:class "seon-kicker"} "Function"]
+      [:h3 [:a {:href (route/path ::route/namespace {:namespace (namespace function-name)})} [:code (str function-name)]]]]
+     (when-let [line (first-doc-line doc)] [:p line])
+     (when (and source (pos? (node-distance unit))) [:pre [:code source]])]))
 
 (defn- public-functions
   "The public functions a namespace declares, by name: one reverse pull from

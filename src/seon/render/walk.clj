@@ -36,6 +36,7 @@
             [datahike.pull-api :as pull-api]
             [seon.blob :as blob]
             [seon.db :as db]
+            [seon.env :as env]
             [seon.cluster.wake :as wake]
             [seon.eval :as evaluation]
             [seon.error :as error]
@@ -919,15 +920,44 @@
 ;;; The linked graph: levels of set-at-a-time joins, definitions first
 ;;; ---------------------------------------------------------------------------
 
-(def ^:private interim-value-edges
-  "Value-stored references `[holder identity definition?]`; each row is RETIRED
-  when the references-as-refs lane stores its relation as a ref. A definition
-  row places its target before its holder."
-  [[:seon.fn/calls :seon.fn/sym true] [:seon.fn/must-read :seon.fn/sym true]
-   [:seon.fn/see-also :seon.fn/sym false] [:seon.test/subject :seon.fn/sym true]
-   [:seon.task/must-read :seon.fn/sym true] [:seon.task/tasks :seon.task/id false]
-   [:seon.fn.arity/input-refs :seon.schema/key true] [:seon.fn.arity/output-refs :seon.schema/key true]
-   [:seon.schema/references :seon.schema/key true]])
+(defn- schema-properties
+  "The properties `k` declares: an entity schema's, else its schema's own."
+  {:malli/schema [:=> [:cat :seon.schema/projection :qualified-keyword] [:maybe :map]]}
+  [projection k]
+  (some-> (mr/schema (:seon.schema.projection/registry projection) k)
+          (as-> s (or (internal/entity-properties s) (m/properties s)))))
+
+(defn- named-leaf
+  "The named schema `attribute`'s value schema bottoms out in, through
+  `:set`, `:vector`, `:sequential`, `:and` and `:maybe`; else nil."
+  {:malli/schema [:=> [:cat :seon.schema/projection :qualified-keyword] [:maybe :qualified-keyword]]}
+  [projection attribute]
+  (loop [form (some-> (mr/schema (:seon.schema.projection/registry projection) attribute) m/form) seen #{}]
+    (cond
+      (and (qualified-keyword? form) (not= form attribute)) form
+      (and (vector? form) (#{:set :vector :sequential :and :maybe} (first form)) (not (seen form)))
+      (recur (some #(when (or (qualified-keyword? %) (vector? %)) %) (drop (if (map? (second form)) 2 1) form))
+             (conj seen form))
+      :else nil)))
+
+(defn- value-references
+  "`[holder identity]` for each stored value attribute naming another entity
+  by its identity value: the holder's value schema bottoms out in the same
+  named schema as the identity attribute's (`:seon.task/tasks` and
+  `:seon.task/id` both end in `:seon.task/handle`), or the holder or that
+  named schema declares `:seon.db/reference-to` (one identity or a set)."
+  {:malli/schema [:=> [:cat :seon.schema/projection [:sequential :map]] :seon.render.walk/value-attributes]}
+  [projection declared]
+  (let [ref? #(= :db.type/ref (:db/valueType %))
+        leaf #(named-leaf projection %)
+        by-leaf (group-by leaf (into [] (comp (filter :db/unique) (remove ref?) (map :db/ident)) declared))
+        declared-to #(let [to (when % (:seon.db/reference-to (schema-properties projection %)))]
+                       (if (keyword? to) #{to} (set to)))]
+    (vec (sort (for [{a :db/ident :as attribute} declared
+                     :when (not (or (:db/unique attribute) (ref? attribute)))
+                     :let [l (leaf a)]
+                     i (disj (into (set (when l (get by-leaf l))) (concat (declared-to a) (declared-to l))) a)]
+                 [a i])))))
 
 (defn graph-structure
   "Ref, value, identity and component attributes, their owning schemas, the
@@ -949,12 +979,49 @@
                              (when (internal/entity-schema? s) [% s]))
                           (distinct (concat (vals identities) (vals components))))]
        {::ref-attributes (into [] (comp (filter (comp #{:db.type/ref} :db/valueType)) (map :db/ident)) declared)
-        ::value-attributes (mapv (comp vec butlast) interim-value-edges)
+        ::value-attributes (value-references projection declared)
         ::identity-owners identities ::component-owners components
         ::rendered-schemas (into #{} (filter #(qualified-symbol? (:seon.render/ai (properties %))))
                                  (concat (vals identities) (vals components)))
         ::required-attributes (into {} (map (fn [[k s]] [k (into #{} (keep (fn [[a p]] (when-not (:optional p) a))) (internal/entity-entries s))])) entities)
         ::attachments (into {} (map (fn [[k s]] [k (into #{} (filter #(str/starts-with? (name %) "_")) (:seon.render/units (internal/entity-properties s)))])) entities)}))))
+
+(defn- frontier-datoms
+  "`[e a v]` for every datom of each frontier entity, read by EAVT; else the
+  first refusal. Datalog binding only the entity (`[?e ?a]`) scanned past the
+  query-work bound (65,536) on a task at eid 34746 (default, 2026-09-28)."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :int]]
+                  [:or [:vector [:tuple :int :keyword :seon.schema/value]] :seon.db/invalid-read-error]]}
+  [db frontier]
+  (reduce (fn [found e]
+            (let [datoms (db/datoms db :eavt e)]
+              (if (:seon.db/invalid-read datoms) (reduced datoms) (into found (map (juxt :e :a :v)) datoms))))
+          [] frontier))
+
+(defn- frontier-edges
+  "The edges `family` reads from the frontier's own `datoms`: its refs
+  (`:forward`), the entities its value references name (`:value-forward`,
+  AVET on the identity) and the holders naming its identity values
+  (`:value-reverse`, attribute and value bound as scalars). Else the first
+  refusal."
+  {:malli/schema [:=> [:cat :seon.db/database-value :map :seon.render.walk/structure
+                       [:vector [:tuple :int :keyword :seon.schema/value]] :keyword]
+                  [:or :seon.render.walk/edges :seon.db/invalid-read-error]]}
+  [db bounds structure datoms family]
+  (let [pairs (::value-attributes structure)
+        reverse? (= family :value-reverse)]
+    (case family
+      :forward (let [refs (set (::ref-attributes structure))] (into [] (filter (comp refs second)) datoms))
+      (reduce (fn [edges [e a i v]]
+                (let [found (if reverse?
+                              (db/q (assoc bounds :query '[:find [?t ...] :in $ ?a ?v :where [?t ?a ?v]] :args [db a v]))
+                              (db/datoms db :avet i v))]
+                  (if (:seon.db/invalid-read found)
+                    (reduced found)
+                    (into edges (map (fn [t] [e (cond-> a reverse? reverse-attribute) (if reverse? t (:e t))])) found))))
+              []
+              (let [partners (group-by (if reverse? second first) pairs)]
+                (for [[e held v] datoms [a i] (partners held)] [e a i v]))))))
 
 (defn- joined
   "The `[source attribute target]` edges each family joins from the whole
@@ -962,25 +1029,28 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :map :seon.render.walk/structure [:sequential :int] [:vector :keyword]]
                   [:or :seon.render.walk/edges :seon.db/invalid-read-error]]}
   [db bounds structure frontier families]
-  (reduce
-   (fn [edges family]
-     (let [refs (::ref-attributes structure) values (::value-attributes structure)
-           [clauses bind attributes reverse?]
-           (case family
-             :forward ['[[?e ?a ?t]] '[?a ...] refs false]
-             :reverse ['[[?t ?a ?e]] '[?a ...] refs true]
-             ;; Every schema's declared attachments; `level-step` keeps those its source's schema declares.
-             :attachment ['[[?t ?a ?e]] '[?a ...] (into [] (comp (mapcat val) (distinct) (map #(keyword (namespace %) (subs (name %) 1)))) (::attachments structure)) true]
-             :value-forward ['[[?e ?a ?v] [?t ?i ?v]] '[[?a ?i] ...] values false]
-             :value-reverse ['[[?e ?i ?v] [?t ?a ?v]] '[[?a ?i] ...] values true]
-             ;; The identity VALUE is not a target: bind ?t to the holder, so every family yields `[entity attribute entity]`.
-             :identity ['[[?e ?a _] [(identity ?e) ?t]] '[?a ...] (vec (keys (::identity-owners structure))) false])
-           found (db/q (assoc bounds :query (-> '[:find ?e ?a ?t :in $ [?e ...]] (conj bind :where) (into clauses))
-                              :args [db (vec frontier) attributes]))]
-       (if (:seon.db/invalid-read found)
-         (reduced found)
-         (into edges (map (fn [[e a t]] [e (cond-> a reverse? reverse-attribute) t])) (sort found)))))
-   [] families))
+  (let [datoms (when (some #{:forward :value-forward :value-reverse} families) (frontier-datoms db frontier))]
+    (reduce
+     (fn [edges family]
+       (let [found (cond
+                     (:seon.db/invalid-read datoms) datoms
+                     (#{:reverse :attachment :identity} family)
+                     (let [[clauses attributes]
+                           (case family
+                             :reverse ['[[?t ?a ?e]] (::ref-attributes structure)]
+                             ;; Every schema's declared attachments; `level-step` keeps those its source's schema declares.
+                             :attachment ['[[?t ?a ?e]] (into [] (comp (mapcat val) (distinct) (map #(keyword (namespace %) (subs (name %) 1))))
+                                                              (::attachments structure))]
+                             ;; The identity VALUE is not a target: bind ?t to the holder, so every family yields `[entity attribute entity]`.
+                             :identity ['[[?e ?a _] [(identity ?e) ?t]] (vec (keys (::identity-owners structure)))])
+                           found (db/q (assoc bounds :query (into '[:find ?e ?a ?t :in $ [?e ...] [?a ...] :where] clauses)
+                                              :args [db (vec frontier) attributes]))]
+                       (if (or (:seon.db/invalid-read found) (= family :identity))
+                         found
+                         (mapv (fn [[e a t]] [e (reverse-attribute a) t]) found)))
+                     :else (frontier-edges db bounds structure datoms family))]
+         (if (:seon.db/invalid-read found) (reduced found) (into edges (sort found)))))
+     [] families)))
 
 (defn- owning-schemas
   "Each edge target's owning schema: its identity's row schema, else the
@@ -996,7 +1066,8 @@
 
 (defn- level-step
   "One level's edges and owning schemas; an owned child without a pair (an
-  arity) is joined through within its owner's level. Else the refusal.
+  arity, and the vector cell holding it) is joined through within its
+  owner's level, however deep the chain. Else the refusal.
   `frontier-schemas` (each frontier node's owning schema) selects the forward
   story: forward refs plus the reverse attachments the source's schema
   declares; without it every ref and value edge is followed both ways."
@@ -1006,19 +1077,31 @@
   (let [refused #(when (:seon.db/invalid-read %) %)
         declared? (fn [[e a _]] (or (not frontier-schemas) (not (str/starts-with? (name a) "_"))
                                     (contains? (get (::attachments structure) (frontier-schemas e)) a)))
+        ;; child -> the frontier node it belongs to, for each unrendered owned child
+        owned (fn [owner schemas edges]
+                (into {} (keep (fn [[e a t]] (when (and ((::component-owners structure) a)
+                                                        (not ((::rendered-schemas structure) (schemas t))))
+                                               [t (get owner e e)])))
+                      edges))
         found (joined db bounds structure frontier (if frontier-schemas [:forward :attachment] [:forward :reverse :value-forward :value-reverse]))
         found (if (refused found) found (filterv declared? found))
-        schemas (or (refused found) (owning-schemas db bounds structure found))
-        owner (if (refused schemas) {}
-                  (into {} (keep (fn [[e a t]] (when (and ((::component-owners structure) a)
-                                                          (not ((::rendered-schemas structure) (schemas t))))
-                                                 [t e])))
-                        found))
-        inner (if (seq owner) (joined db bounds structure (vec (keys owner)) (if frontier-schemas [:forward] [:forward :value-forward])) [])
-        inner-schemas (if (or (refused inner) (empty? inner)) inner (owning-schemas db bounds structure inner))]
-    (or (some refused [found schemas inner inner-schemas])
-        {::edges (into (filterv #(not (owner (peek %))) found) (map (fn [[e a t]] [(owner e) a t])) inner)
-         ::owning-schemas (merge schemas (not-empty inner-schemas))})))
+        schemas (or (refused found) (owning-schemas db bounds structure found))]
+    (or (some refused [found schemas])
+        (loop [owner (owned {} schemas found)
+               edges found
+               schemas schemas
+               pending (vec (keys owner))]
+          (if (empty? pending)
+            {::edges (filterv #(not (owner (peek %))) edges) ::owning-schemas schemas}
+            (let [inner (joined db bounds structure pending (if frontier-schemas [:forward] [:forward :value-forward]))
+                  inner-schemas (cond (refused inner) inner (empty? inner) {} :else (owning-schemas db bounds structure inner))]
+              (or (some refused [inner inner-schemas])
+                  (let [schemas (merge schemas inner-schemas)
+                        deeper (apply dissoc (owned owner schemas inner) (keys owner))]
+                    (recur (merge owner deeper)
+                           (into edges (map (fn [[e a t]] [(owner e) a t])) inner)
+                           schemas
+                           (vec (keys deeper)))))))))))
 
 (defn- definitions-first
   "Postorder over definition edges: each node after the definitions it names,
@@ -1043,7 +1126,8 @@
   [db {nodes ::nodes edges ::edges :as graph}]
   (let [ids (vec (keys nodes))
         values (zipmap ids (db/pull-many db '[*] ids))
-        definition? (into #{} (keep (fn [[a _ d]] (when d a))) interim-value-edges)
+        projection (db/carried-projection db)
+        definition? #(:seon.program/definition-edge (schema-properties projection %))
         depends (reduce (fn [m [e a t]]
                           (cond (= e t) m
                                 (definition? a) (update m e (fnil conj #{}) t)
@@ -1059,8 +1143,8 @@
 
   With `::forward-only?` it follows forward refs and only the reverse refs an
   owning schema declares as attachments in `:seon.render/units`: the story
-  from the root outward. Otherwise refs and interim value edges are followed
-  forward and reverse.
+  from the root outward. Otherwise refs and value references (derived from
+  the schemas, `value-references`) are followed forward and reverse.
 
   A target is a node when its owning schema declares an AI pair; the others are
   counted by schema under `::skipped`. Each level's joins bind the whole
@@ -1107,3 +1191,144 @@
                        (< (count admitted) (count fresh))
                        (conj (cut :seon.config.eval.result/max-nodes (inc level) (- (count fresh) (count admitted)))))
                      nodes))))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Related data: an entity's one hop, beside its render
+;;; ---------------------------------------------------------------------------
+
+(def ^:private item-unit-keys
+  "The root's own subject keys, which never reach a neighbour's render."
+  [:seon.repl/handle :seon.render.value/root :seon.render.data/cursor :seon.render.data/path
+   :seon.render.walk/attribute :seon.render.walk/lookup :seon.render.call/selected-producer
+   :seon.related/attribute :seon.related/offset :seon.render/output])
+
+(defn- related-item
+  "One neighbour rendered at distance 0 by its own schema's declared render
+  for `output`, called explicitly (AGENTS: a render that wants a nested thing
+  rendered calls that render); its refusal is the item. Without a declared
+  render for `output` the value printer shows it."
+  {:malli/schema [:=> [:cat :map :seon.render/output :map] :seon.render/value]}
+  [unit output {schema ::node-schema value :seon.render/value}]
+  (let [producer (get (schema-properties (db/carried-projection (:seon.db/db unit)) schema) output)
+        unit (assoc (apply dissoc unit item-unit-keys) :seon.render/distance 0)
+        answer (when producer
+                 (render/declared-projection (assoc unit :seon.render.call/selected-producer producer) value output))]
+    (cond
+      (:seon.print/node answer) (get-in answer [:seon.print/node :seon.print/value])
+      (:seon.error/value answer) (:seon.error/value answer)
+      (= output :seon.render/html) (render.value/render-html (assoc unit :seon.render/value value))
+      :else value)))
+
+(defn- shown-counts
+  "How many of each group's targets show when `width` items are taken
+  breadth first, the value printer's rule: every group's first before any
+  group's second."
+  {:malli/schema [:=> [:cat [:sequential [:sequential :int]] :int] [:map-of :int :int]]}
+  [target-lists width]
+  (frequencies (map first (take width (sort-by (juxt second first)
+                                               (for [[g targets] (map-indexed vector target-lists)
+                                                     position (range (count targets))]
+                                                 [g position]))))))
+
+(defn related
+  "`:seon.related/data`: the entity `lookup` names, one hop both ways, forward
+  and reverse refs and value references (`graph` at distance 1), grouped by
+  the attribute reaching each neighbour, newest first. Each item is rendered
+  at distance 0 by its own schema's declared render for `output` (default
+  AI); a neighbour whose schema declares none is counted by schema under
+  `:seon.related/skipped`. The profile's `max-children` bounds the items
+  rendered across all groups, breadth first; a group showing fewer than it
+  reaches carries `:seon.related/count` and the call that shows the next
+  ones, `attribute` selecting that group from `offset`.
+
+  ## Examples
+
+  (seon.render.walk/related {:seon.render.walk/lookup [:seon.fn/sym 'seon.test/run]
+                             :seon.related/attribute :seon.fn/_calls :seon.related/offset 4})
+
+  ## Costs
+
+  One `graph` level plus one explicit render per shown item, unarmed on
+  default 2026-09-28: the level 4-7 ms for `seon.db/write-owned-values-error`
+  and 19 ms for `seon.test/run` (117 neighbours), an item 0.3-0.6 ms (a test's
+  recorded result 3 ms)."
+  {:malli/schema [:=> [:cat :seon.related/request]
+                  [:or :seon.related/data :seon.render.walk/no-such-entity-error :seon.db/invalid-read-error]]}
+  [{db :seon.db/db ctx :seon.sci.eval/ctx lookup :seon.render.walk/lookup profile :seon.render/profile
+    selected :seon.related/attribute :as request}]
+  (let [offset (long (get request :seon.related/offset 0))
+        width (:seon.render.profile/max-children profile)
+        output (get request :seon.render/output :seon.render/ai)
+        caps (or (:seon.sci.admit/caps request) (:seon.sci.admit/caps (env/of ctx)))
+        found (graph {:seon.db/db db :seon.render.walk/lookup lookup :seon.render/distance 1
+                      :seon.sci.admit/caps (assoc caps :seon.config.eval.result/max-collection (+ offset width))})
+        refused (some #(when (= :seon.db/invalid-read (::cut-bound %)) (:seon.error/value %)) (::cuts found))]
+    (cond
+      (not (::graph-root found)) found
+      refused refused
+      :else
+      (let [root (::graph-root found)
+            counts (into {} (keep #(when (= root (::cut-source %)) [(::attribute %) (::cut-count %)])) (::cuts found))
+            groups (cond->> (sort-by (comp str key) (group-by second (filter #(= root (first %)) (::edges found))))
+                     selected (filter #(= selected (key %))))
+            targets (mapv (fn [[_ edges]] (drop offset (sort > (distinct (map peek edges))))) groups)
+            shown (shown-counts targets width)]
+        (cond-> (into (sorted-map-by #(compare (str %1) (str %2)))
+                      (map-indexed
+                       (fn [g [attribute edges]]
+                         (let [total (get counts attribute (count (distinct (map peek edges))))
+                               items (take (get shown g 0) (nth targets g))]
+                           [attribute
+                            (cond-> {:seon.related/items (mapv #(related-item request output (get (::nodes found) %)) items)}
+                              (< (+ offset (count items)) total)
+                              (assoc :seon.related/count total
+                                     :seon.render/operations
+                                     [(list 'seon.render.walk/related
+                                            {:seon.render.walk/lookup lookup :seon.related/attribute attribute
+                                             :seon.related/offset (+ offset (count items))})]))])))
+                      groups)
+          (and (not selected) (seq (::skipped found)))
+          (assoc :seon.related/skipped (::skipped found)))))))
+
+(defn- related-html
+  "The related data as Hiccup: one group per attribute, its items as their
+  HTML renders gave them, its count and next call when it shows fewer."
+  {:malli/schema [:=> [:cat [:or :seon.related/data :seon.error/base]] :seon.render/hiccup]}
+  [data]
+  (if (:seon.error/message data)
+    [:section {:class "seon-related"} [:p (:seon.error/message data)]]
+    (into [:section {:class "seon-related"}]
+          (map (fn [[attribute group]]
+                 (if (= :seon.related/skipped attribute)
+                   (into [:p {:class "seon-related-skipped"} "Not rendered: "]
+                         (map (fn [[schema n]] [:code (str schema " " n) " "])) group)
+                   [:details {:open true}
+                    [:summary [:code (str attribute)]
+                     (when-let [total (:seon.related/count group)] (str " " (count (:seon.related/items group)) " of " total))]
+                    (into [:ul] (map #(vector :li %)) (:seon.related/items group))
+                    (when-let [[operation] (:seon.render/operations group)] [:code (render.value/bounded-text operation)])])))
+          data)))
+
+(defn with-related
+  "The root value's declared render `answer` with its entity's
+  `:seon.related/data` beside the render, never inside it: assoc'd onto the AI
+  face's data, a section after the HTML face. Unchanged when the value names
+  no entity, the render is at distance 0, or the face is neither (REPL
+  entries text)."
+  {:malli/schema [:=> [:cat :seon.render/unit :seon.render/value :seon.render/output :map] :map]}
+  [unit value output answer]
+  (let [face (:seon.print/node answer)
+        shown (:seon.print/value face)
+        html? (= output :seon.render/html)
+        lookup (render.value/value-identity (:seon.db/db unit) value)]
+    (if-not (and lookup (:seon.sci.eval/ctx unit) (:seon.render/profile unit)
+                 (= :seon.print/projected (:seon.print/face face))
+                 (pos? (long (get unit :seon.render/distance 1)))
+                 (if html? (vector? shown) (map? shown)))
+      answer
+      (let [data (related (assoc (apply dissoc unit item-unit-keys) :seon.render.walk/lookup lookup :seon.render/output output))]
+        (assoc-in answer [:seon.print/node :seon.print/value]
+                  (if html?
+                    [:div {:class "seon-related-entity"} shown (related-html data)]
+                    (assoc shown :seon.related/data data)))))))
+

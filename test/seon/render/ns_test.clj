@@ -158,10 +158,9 @@
        (testing "a task at distance 0 is its name"
          (is (= {:seon.task/id handle :seon.task/name "render-node" :seon.task/kind :function :seon.task/ns 'tn.a}
                 (sut/task-ai (unit [:seon.task/id handle] 0)))))
-       (testing "a task at distance 1 shows its intent, derived proofs and subjects, and must-reads"
+       (testing "a task at distance 1 shows its intent and must-reads; its proofs and subjects are related data"
          (let [shown (sut/task-ai (unit [:seon.task/id handle] 1))]
            (is (= "Render one node.\nThen stop." (:seon.task/intent shown)))
-           (is (= #{} (:seon.task/proofs shown)))
            (is (= #{'tn.a/f} (:seon.task/must-read shown)))
            (is (= (list 'seon.issue/task-edges (list 'seon.db/db) handle) (sut/task-form (unit [:seon.task/id handle] 1)))
                "the form face is the edges read")
@@ -198,27 +197,22 @@
                      (db/registration-check :seon.task/intent [:string {:min 1}])))
              "an unchanged form reads nothing"))))))
 
-(deftest a-function-renders-its-source-and-neighbours-by-name
-  ;; Class regression: the function node is its authored form plus callees and
-  ;; callers as names; a widely called function renders less, never a clipped list.
+(deftest a-function-renders-its-source-by-name
+  ;; Class regression: the function node is its authored form; what it calls
+  ;; and what calls it are its related data (seon.render.walk/related).
   (support/with-database
     (fn [connection]
       (let [db @connection
             unit (fn [sym distance]
                    (let [value (db/pull db '[*] [:seon.fn/sym sym])]
                      (assoc value :seon.db/db db :seon.render/value value :seon.render/distance distance)))
-            launcher (sut/function-ai (unit 'seon.flow/start-work-launcher! 1))
-            query (sut/function-ai (unit 'seon.db/q 1))]
+            launcher (sut/function-ai (unit 'seon.flow/start-work-launcher! 1))]
         (is (= {:seon.fn/sym 'seon.flow/start-work-launcher!
                 :seon.fn/doc (first (str/split-lines (:seon.fn/doc (unit 'seon.flow/start-work-launcher! 1))))}
                (sut/function-ai (unit 'seon.flow/start-work-launcher! 0))))
         (is (= (str/split-lines (:seon.fn/source (unit 'seon.flow/start-work-launcher! 1)))
                (:seon.render.ns/source-lines launcher))
             "the source is its lines, so the printer shows its layout unescaped")
-        (is (vector? (:seon.render.ns/calls launcher)))
-        (is (< 20 (:seon.render.ns/called-by-count query)))
-        (is (= ['(my.program/callers {:seon.program/subject 'seon.db/q})] (:seon.render/operations query))
-            "a widely called function names its callers by count and offers the call that lists them")
         (is (hiccup/hiccup? (sut/function-html (unit 'seon.flow/start-work-launcher! 1))))))))
 
 (deftest an-agents-namespace-concern-is-its-name-requires-and-definition-count

@@ -49,4 +49,9 @@
  #:seon.task{:name "a-fault-notification-is-its-errors-edn-as-text"
              :kind :function
              :intent "A fault's notification message carries the error value printed as EDN text (message-tx: :seon.message/content (render.value/bounded-text (value fact))). On default 2026-09-27, 33 of root's 35 unread messages were such strings, so its inbox (and the runtime trigger it wakes on) shows \"#:seon.error{:at\"…+412: the content head is timestamp and layer, never what failed. Content is for the reader: the error's message and operation as its text, with the whole record one read away through :seon.message/about (the signature). Done when a notified agent's inbox entry reads what failed and where within its first line, and the error value is not re-printed into the message."
-             :must-read #{seon.error/message-tx}}]
+             :must-read #{seon.error/message-tx}}
+ #:seon.task{:name "a-distance-zero-fault-render-omits-whether-it-is-open"
+             :kind :function
+             :intent "A fault named in a function's related data (:seon.instrument/_fn) shows its message and occurrence count but not whether it is open or resolved (seon.error/resolution), so thirteen faults beside seon.test/run cannot be told apart from history (2026-09-28). Done when the distance-zero fault render carries its resolution."
+             :must-read #{seon.error/render-ai seon.error/resolution}
+             :evidence #{"docs/research/agent-platform/profiling-and-related-data-2026-09-28.md"}}]

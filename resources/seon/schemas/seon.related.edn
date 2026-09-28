@@ -1,0 +1,20 @@
+#:seon.related{:attribute [:qualified-keyword {:description "The attribute one related group was reached through; a reverse attribute is spelled :ns/_name."}]
+               :offset [:int {:min 0 :description "How many of a group's items, newest first, the request skips."}]
+               :count [:int {:min 0 :description "How many neighbours a group reaches; shown only when its items do not show them all."}]
+               :items [:vector {:description "A group's neighbours, newest first, each rendered at distance 0 by its own schema's declared render."} :seon.render/value]
+               :group [:map {:description "One attribute's neighbours of an entity: the items shown and, when they are not all, the count and the call showing the next ones."}
+                       [:seon.related/items :seon.related/items]
+                       [:seon.related/count {:optional true} :seon.related/count]
+                       [:seon.render/operations {:optional true} :seon.render/operations]]
+               :skipped [:map-of {:description "Neighbours whose schema declares no render, counted by that schema."} :qualified-keyword [:int {:min 1}]]
+               :data [:map-of {:description "An entity's one-hop neighbourhood both ways, by the attribute reaching each group, with the unrendered neighbours under :seon.related/skipped."}
+                      :qualified-keyword [:or :seon.related/group :seon.related/skipped]]
+               :request [:map {:description "The entity whose related data is read, in the viewer's world: its database, SCI context (whose environment carries the caps when the request does not) and render profile, whose max-children bounds each group."}
+                         [:seon.db/db :seon.db/database-value]
+                         [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+                         [:seon.render/profile :seon.render/profile]
+                         [:seon.render.walk/lookup :seon.render.walk/lookup]
+                         [:seon.sci.admit/caps {:optional true} :seon.sci.admit/caps]
+                         [:seon.render/output {:optional true} :seon.render/output]
+                         [:seon.related/attribute {:optional true} :seon.related/attribute]
+                         [:seon.related/offset {:optional true} :seon.related/offset]]}

@@ -7,7 +7,7 @@
             :skipped-count [:int {:min 0}],
             :skip-reason :string,
             :source :string,
-            :subject [:and {:seon.db/index true} :seon.program/edge-symbol],
+            :subject [:and {:seon.db/index true :seon.program/definition-edge true} :seon.program/edge-symbol],
             :usage :boolean,
             :fixture-observation
             [:string {:min 1

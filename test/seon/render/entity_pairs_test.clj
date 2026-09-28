@@ -61,11 +61,10 @@
            (is (nil? (:seon.error/value unit)))
            (is (= rendered (:seon.render/output unit)))))
        (when (= :seon.fn/sym (first entity-lookup))
-         ;; The function node is its authored source with its neighbours by name
-         ;; (renderers read the supplied database value: owner ruling 2026-09-25).
+         ;; The function node is its authored source (renderers read the
+         ;; supplied database value: owner ruling 2026-09-25).
          (let [shown (render.ns/function-ai {:seon.db/db database :seon.render/value entity})]
            (is (= '(defn function [] true) (read-string (str/join "\n" (:seon.render.ns/source-lines shown)))))
-           (is (= [[] []] [(:seon.render.ns/calls shown) (:seon.render.ns/called-by shown)]))
            (is (= {:seon.fn/sym 'entity-pairs.fixture/function}
                   (render.ns/function-ai {:seon.db/db database :seon.render/value entity :seon.render/distance 0})))))
        (when (= :seon.test/sym (first entity-lookup))

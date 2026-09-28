@@ -82,4 +82,9 @@
              :kind :function
              :intent "seon.db/projection-fallback (src/seon/db.clj:1364) prints `WARN seon.db/projection-fallback caller= ... missing-projection count=1` to stderr as a text line. It fires when seon.error/prepare runs inside a test member (test-data-assertions harness, 2026-09-28): the refusal value it also returns carries the fact, but the printed line is a second, undelivered channel. A log line alone is a defect: deliver the missing projection as the returned refusal (and record it where it is consumed), and have seon.error/prepare's caller supply the member's projection."
              :must-read #{seon.db/projection-fallback seon.error/prepare}
-             :evidence #{"tmp/test-data-assertions/proofs.edn"}}]
+             :evidence #{"tmp/test-data-assertions/proofs.edn"}}
+ #:seon.task{:name "an-entity-only-pattern-scans-past-the-query-work-bound"
+             :kind :function
+             :intent "seon.db/q of [:find [?a ...] :in $ ?e :where [?e ?a]] with ?e 34746 (a task) exceeds the 65,536 query-work bound in 9.7 ms, and [?e ?a ?t] with a collection of 259 ref attributes does too, where (seon.db/datoms db :eavt 34746) reads its 12 datoms in 0.12 ms (default, 2026-09-28): the pattern does not use EAVT when only the entity is bound, so the cost grows with the entity id. seon.render.walk reads frontier datoms by EAVT instead. Done when a query binding only the entity reads EAVT (in the Datahike fork's planner) or refuses by name, with a regression."
+             :must-read #{seon.db/q}
+             :evidence #{"tmp/related_data/proof.clj"}}]

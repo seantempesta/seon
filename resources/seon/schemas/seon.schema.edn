@@ -97,7 +97,9 @@
               [:set
                {:description
                 "Canonical schema keys directly referenced by this schema. Names survive retraction."
-                :seon.db/index true}
+                :seon.db/index true
+                :seon.db/reference-to :seon.schema/key
+                :seon.program/definition-edge true}
                :qualified-keyword],
               :identity :qualified-keyword,
               :identity-only :boolean,

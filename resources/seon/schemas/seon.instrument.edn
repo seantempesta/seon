@@ -23,7 +23,7 @@
                   :actual-size [:int {:min 0}],
                   :arm [:enum :input :output],
                   :expected [:string {:min 1}],
-                  :fn [:qualified-symbol {:seon.db/index true :description "The observed function identity, including historical fault attribution. It never requires or creates a definition entity."}],
+                  :fn [:qualified-symbol {:seon.db/index true :seon.db/reference-to :seon.fn/sym :description "The observed function identity, including historical fault attribution. It never requires or creates a definition entity."}],
                   :instrumented [:int {:min 0}],
                   :registered [:int {:min 0}],
                   :changed-identities [:set [:tuple [:= :seon.fn/sym] :qualified-symbol]],
