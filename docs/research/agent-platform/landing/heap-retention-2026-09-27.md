@@ -1,6 +1,6 @@
 ---
 type: landing
-status: patches-pending
+status: landed (kernel e7014b3a6, db bd6e4595e); is-message sweep patch pending
 lane: heap-retention-opus
 date: 2026-09-27
 base: b718d78c5
@@ -95,10 +95,100 @@ datahike 67b00071, and the dump shows one cache shared by 10 storages. I deleted
 
 ## Limits
 
-- The patches are not installed, so there is no before/after for them on default.
+- Root applied both patches (kernel e7014b3a6, db bd6e4595e). This lane has not measured a round on them.
 - After-install proof: repeat r10 and read the peak collection usage and the live histogram.
   Expect no pressure fault, and `:seon.db/arity-*` bytes listed in `seon.cache/status`.
 - Forced full collections in this lane:
   - 2 on pid 42397 (baseline and after the small round), plus 2 more inside the heavy round's
     per-namespace histograms before the OOM;
   - 1 on pid 51590 after r10.
+
+## The four heap dumps (analyzed offline with MAT, then deleted 2026-09-28)
+
+Every dump was parsed with MAT `ParseHeapDump.sh … org.eclipse.mat.api:suspects`. Queries used
+`org.eclipse.mat.api:query` (`path2gc`, `dominator_tree`, OQL over `clojure.lang.Var`). The dumps
+and indexes held 27 GB in `data/heap/` and were deleted on the owner's approval. This section is
+what remains of them.
+
+### `analysis/live-1725.hprof`: idle default (2026-09-26, 1.5 GB used, 2.7 GB file)
+
+- **Cause:** none. This was an idle snapshot taken by mem-idle-opus, not an OOM. The waste it
+  showed:
+  - three per-connection Datahike node caches (347 + 24 + 1.2 MB);
+  - arity bases (92.6 MB);
+  - the render cache atom (69.8 MB);
+  - two instrument-wrapper generations pinned by one in-flight SCI context (212 MB).
+- **Fixes:**
+  - malli `a89ebef0` / seon `8099d9c50`: wrappers share the registry's cached validator.
+  - datahike `67b00071`: one node cache per physical store.
+  - `bd6e4595e`: arity bases moved into `seon.cache` (this lane's patch).
+- **Details:** `landing/mem-idle-2026-09-26.md`.
+
+### `analysis-63809/oom.hprof`: OOM "Java heap space" (2026-09-27 ~17:29Z, 10.9 GB)
+
+- **Cause:** a corpus item `(range)`. After the evaluation disarmed, `seon.turn/unbound-value?`
+  walked its live result with `tree-seq`: no bound, no interrupt. One realized `LazySeq`/`Cons`
+  chain held 115.9 M Longs and retained 10.2 GB (93.7 %). Its only root was the turn thread's
+  local.
+- **Fix:** `9e61340b2`. Nothing walks a result after evaluation (task `d1efccd3ab7e`).
+- **Details:** `landing/oom-63809-2026-09-27.md`.
+
+### `analysis-42397/oom.hprof`: OOM "Requested array size exceeds VM limit" (2026-09-28 00:07Z, 8.1 GB)
+
+- **Cause:**
+  - A 2 GB `byte[]` in a `StringWriter`, on prepl thread `Clojure Connection seon.cluster/default 1`.
+  - The stack was `user$eval…/verdict → pr-str`. The source is red-triage-r8's JVM probe
+    `tmp/red-triage-r8/proof.clj`, whose `verdict` printed each failure's `:actual` whole, then
+    clipped it with `subs`.
+  - The value printed was a failing `(every? #(identical? (:ctx context) %) @seen-contexts)` from
+    `seon.render.web-test`: SCI contexts.
+  - The rest of the heap was 2.2 GB (`seon.cache` 248 MB, arity caches 271 MB, connections 109 MB).
+- **Fixes:**
+  - The probe now prints with `*print-length*`/`*print-level*` bounds (red-triage-r8,
+    `tmp/red-triage-r8/proof.clj:95,127`).
+  - Print owners and the `:discouraged-var` lint (`f3b05eb31`) name every bare print.
+
+### `analysis-3360/oom.hprof`: OOM "Requested array size exceeds VM limit" (2026-09-27 21:07 local, r13, 10.6 GB)
+
+- **Thread and stack:**
+  - The thread was a virtual thread: a test member's body thread.
+  - `Arrays.copyOf ← StringBuffer.append ← StringWriter ← clojure.core/pr ← pr-str ←
+    seon.sci.branch_execution_test$fn…` at `branch_execution_test.clj:269`, under
+    `seon.db/call-with-custody`.
+- **Value built:** a 2,147,483,645-byte string. It began
+  `{:seon.schema/projection {:seon.schema.projection/function-contracts {seon.cluster/dropped-summary …`,
+  so this was `installed`, the value `seon.sci.eval/install-row!` returned, and it carries the
+  member's whole schema projection. The heap besides it was 1.65 GB (3.8 GB used): index `Leaf`s
+  522 MB, no leak.
+- **Producer:** `(is (= :unavailable (:seon.sci.eval/load-state installed)) (pr-str installed))`.
+  - A `clojure.test/is` message is evaluated on every assertion, passing ones included, so the
+    projection was printed whole on each run.
+  - The print lint did not stop it, because `:discouraged-var` is a warning. The residue in `test/`
+    and `script/` was 1,498 unbounded-print warnings, 915 of them bare printers in `is` messages.
+- **Decision: yes, both must go through the value printer.**
+  - **Test assertion messages:** `seon.print.value/bounded-text`, as an error-level lint.
+  - **The runner's own output:** already bounded. `seon.test.runner/failure-message` prints
+    `:expected`/`:actual` through `report-value` under one budget (runner.clj:182–206). Its
+    remaining `pr-str`s are sort keys over symbols and the first ten digests.
+  - **What the runner cannot bound:** a message the test body already built before the runner saw
+    it. So the lint belongs at the message.
+- **Fixes:**
+  1. `85b4de483`: `test/seon/sci/branch_execution_test.clj` (unheld). Its 3 messages and 2
+     diagnostic prints go through `seon.print.value/bounded-text`. A value holding the projection
+     now prints as 401 characters in 0.5 ms (measured on default).
+  2. `tmp/heap-retention/is-message-bounded-sweep.patch`, from the scripted sweep
+     `tmp/heap-retention/is_message_sweep.clj` (rewrite-clj; `bb … --write FILE…`):
+     - **Scope:** 970 messages in 200 test/script files.
+     - **Rewrite:** every `pr-str` in an `is` message becomes `seon.print.value/bounded-text`, and a
+       multi-argument `(pr-str a b)` bounds `[a b]`. `seon.print.value` is added to each ns require.
+     - **Lint gate:** a new kondo hook `.clj-kondo/hooks/is_message.clj`, registered in
+       `.clj-kondo/config.edn` as `:seon/unbounded-assertion-message` at `:error`. It refuses any
+       bare printer (`pr-str`, `prn-str`, `print-str`, `println-str`, `with-out-str`, `pprint`) in an
+       `is` message.
+     - **Verified:** from a `git archive` of HEAD plus the patch, `clj-kondo --lint test script`
+       gives 0 errors, and unbounded-print warnings drop from 1,498 to 587. src lint is unchanged
+       (770 warnings, 0 errors). The hook flags 975 sites on HEAD and 0 after the sweep.
+     - **Routing:** root applies it at once. The files span many holders and it is one mechanical
+       sweep, and `config.edn` is print-owners-opus's.
+- **Still open:** a message built with `str` over a large collection is equally unbounded
+  (`str` prints through `RT/printString`), and no var-level lint can tell that from text.
