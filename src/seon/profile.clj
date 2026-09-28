@@ -125,12 +125,21 @@
      ~@body))
 
 (def ^java.util.function.Function new-adder
-  "The one function a call sink makes a symbol's first counter with."
+  "The one function a call sink makes an executed definition's first counter
+  with: its calls and its nanoseconds, `[calls nanos]`."
   (reify java.util.function.Function
-    (apply [_ _] (LongAdder.))))
+    (apply [_ _] (java.util.concurrent.atomic.AtomicLongArray. 2))))
+
+(defmacro exited-in-world
+  "Count one exit of a call into its world counter `counted` (nil outside a
+  world): one call and the nanoseconds since `started`."
+  [counted started]
+  `(when-some [^java.util.concurrent.atomic.AtomicLongArray c# ~counted]
+     (.incrementAndGet c# 0)
+     (.addAndGet c# 1 (- (System/nanoTime) ~started))))
 
 (defmacro entered-in-world
-  "The calling evaluation's counter for the executed definition `k` in its
+  "The calling evaluation's `[calls nanos]` counter for the executed definition `k` in its
   world's call sink (`seon.batch/*world*`'s `:seon.batch/sink`), taken at
   entry so an entered, unfinished call is evidence; nil outside a world. A
   dynamic read and a map lookup, calling no armed function."
@@ -152,7 +161,8 @@
   the outer entry's. A re-entry under another world (a nested test agent)
   counts one call into that world's sink only; the JVM-wide counters keep
   their outermost entry. A world's count is keyed by the executed definition
-  (`[sym digest]`) and taken at entry, incremented at exit. Each entry
+  (`[sym digest]`) and taken at entry; its calls and nanoseconds are added at
+  exit. Each entry
   restores the prior one on exit. A throw is counted as a completed call and a
   throw, then rethrown unchanged."
   [& body]
@@ -162,12 +172,13 @@
        (identical? prior# here#) (do ~@body)
 
        (some? prior#)
-       (let [counted# (entered-in-world ~'__profile-key)]
+       (let [started# (System/nanoTime)
+             counted# (entered-in-world ~'__profile-key)]
          (.set ~'__profile-entered here#)
          (try
            ~@body
            (finally
-             (some-> ^java.util.concurrent.atomic.LongAdder counted# .increment)
+             (exited-in-world counted# started#)
              (.set ~'__profile-entered prior#))))
 
        :else
@@ -191,7 +202,7 @@
            (finally
              ;; the calling evaluation's own count (its world's sink): a test
              ;; agent's counters see only its own calls
-             (some-> ^java.util.concurrent.atomic.LongAdder counted# .increment)
+             (exited-in-world counted# started#)
              (.set ~'__profile-entered prior#)))))))
 
 ;;; ---------------------------------------------------------------------------

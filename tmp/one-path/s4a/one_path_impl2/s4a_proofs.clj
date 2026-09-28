@@ -198,6 +198,26 @@
      :last (mapv #(select-keys % [:seon.eval/shown :seon.cluster.eval/error]) l)
      :middle (mapv #(select-keys % [:seon.eval/shown :seon.cluster.eval/error]) m)}))
 
+(defn- responses
+  "The reply each evaluation of `run-id` answers, as both entrants read it
+  (`seon.cluster.agent/run-observation`: the history's printed value)."
+  [run-id]
+  (let [c (boot/connection "default")]
+    (mapv :seon.repl/response
+          ((requiring-resolve 'seon.cluster.agent/run-observation)
+           {:seon.turn/id run-id :seon.db/db (db/db c)} "root" "default"))))
+
+(defproof :call-profile-in-reply
+  "Owner: every evaluation's reply carries its timing and its call profile as data, the same through both entrants: its armed calls, and each function called more than 100 times with calls and ms"
+  (let [_ (run-as :mcp "(defn s4a-rep {:malli/schema [:=> [:cat :int] :int]} [x] x)")
+        replies (mapv #(responses (run-as % "(dotimes [i 300] (s4a-rep i))")) [:agent :mcp])
+        text (mapv first replies)]
+    ;; the reply prints as a #:seon.repl{...} namespaced map
+    {:pass? (every? #(and (string? %) (str/includes? % ":calls 300") (str/includes? % "s4a-rep 300")
+                          (str/includes? % ":ms "))
+                    text)
+     :replies text}))
+
 (defn run-proofs!
   "Every proof (or those named in `only`), each timed; the map of named proofs,
   written to s4a-proof-results-<where>.edn."

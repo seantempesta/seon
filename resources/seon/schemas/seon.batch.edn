@@ -136,6 +136,10 @@
                  [:seon.error/message :string]]
  :executed-key [:tuple {:description "An executed definition: its symbol and the digest its installed callable held, nil when unknown."} :qualified-symbol [:maybe :seon.program/definition-digest]]
  :executed [:map-of :seon.batch/executed-key nat-int?]
+ :call-count nat-int?
+ :call-profile [:map {:description "One evaluation's armed calls, and each function called more than seon.batch/repeated-calls times in it, as [sym calls ms], most calls first: repetition visible at the evaluation that made it."}
+                [:seon.batch/call-count :seon.batch/call-count]
+                [:seon.batch/repeated {:optional true} [:vector [:tuple :qualified-symbol pos-int? nat-int?]]]]
  :evidence [:enum {:description "Whether a form's frozen evidence is all of it: :pending when work it owns (a future it started) had not exited."} :complete :pending]
  :owned [:fn {:description "A form's owned-work count: a java.util.concurrent.atomic.AtomicLong the kernel's future-call raises and each future's exit lowers." :gen/gen seon.turn.world/owned-generator} seon.batch/owned?]
  :evaluation [:any {:description "The entrant's own record of the evaluation (a turn's :seon.sci.eval/evaluation), kept on the entry."}]
@@ -164,6 +168,7 @@
          [:seon.batch/refused-value {:optional true :description "A value a publication refused (an early disposition), kept beside its refusal."} :seon.batch/value]
          [:seon.batch/reads {:optional true} [:vector :any]]
          [:seon.batch/executed {:optional true} :seon.batch/executed]
+         [:seon.batch/call-profile {:optional true} :seon.batch/call-profile]
          [:seon.batch/evidence {:optional true} :seon.batch/evidence]
          [:seon.batch/in-flight {:optional true} pos-int?]
          [:seon.batch/owned {:optional true} :seon.batch/owned]
@@ -171,7 +176,7 @@
          [:seon.batch/shown-map {:optional true :description "The show stage's whole shown value (size keys, renderer, diagnostics), kept beside the text."} :map]]
  :applied :boolean
  :tx-count nat-int?
- :sink [:fn {:description "A per-world call sink: java.util.concurrent.ConcurrentHashMap of symbol -> LongAdder (seon.batch/sink)." :gen/gen seon.turn.world/sink-generator} seon.batch/sink?]
+ :sink [:fn {:description "A per-world call sink: java.util.concurrent.ConcurrentHashMap of executed definition [sym digest] -> [calls nanos] (java.util.concurrent.atomic.AtomicLongArray, seon.batch/sink)." :gen/gen seon.turn.world/sink-generator} seon.batch/sink?]
  :printed [:map {:description "The show stage's answer: the one print, the printer's own diagnostics (a renderer that refused) as text, and its whole shown value."}
            [:seon.batch/shown :string] [:seon.batch/print-diagnostics {:optional true} :string]
            [:seon.batch/shown-map {:optional true} :map]]

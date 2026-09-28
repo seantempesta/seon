@@ -145,6 +145,10 @@
       (assoc :seon.cluster.eval/executed (:seon.cluster.eval/executed evaluation))
       (:seon.cluster.eval/code-evidence evaluation)
       (assoc :seon.cluster.eval/code-evidence (:seon.cluster.eval/code-evidence evaluation))
+      (:seon.cluster.eval/call-count evaluation)
+      (assoc :seon.cluster.eval/call-count (:seon.cluster.eval/call-count evaluation))
+      (seq (:seon.cluster.eval/repeated-calls evaluation))
+      (assoc :seon.cluster.eval/repeated-calls (:seon.cluster.eval/repeated-calls evaluation))
       (:seon.cluster.eval/ns evaluation)
       (assoc :seon.cluster.eval/ns (:seon.cluster.eval/ns evaluation))
       (:seon.sci.eval/ending-ns evaluation)
@@ -1451,6 +1455,8 @@
    :seon.cluster.eval/read-basis-transaction
    :seon.cluster.eval/executed
    :seon.cluster.eval/code-evidence
+   :seon.cluster.eval/call-count
+   :seon.cluster.eval/repeated-calls
    :seon.cluster.eval/ns
    :seon.sci.eval/ending-ns
    :seon.eval/duration-ms
@@ -5205,6 +5211,18 @@
                                             (some (comp nil? second) ks) :unknown
                                             :else :complete)}))
 
+(defn- call-profile-facts
+  "A form's call profile as its evaluation's facts: its armed calls, and each
+  function it called more than `seon.batch/repeated-calls` times with calls and
+  milliseconds (the same in every entrant's reply)."
+  {:malli/schema [:=> [:cat :seon.batch/entry]
+                  [:map [:seon.cluster.eval/call-count {:optional true} :seon.cluster.eval/call-count]
+                   [:seon.cluster.eval/repeated-calls {:optional true} :seon.cluster.eval/repeated-calls]]]}
+  [{{n :seon.batch/call-count repeated :seon.batch/repeated} :seon.batch/call-profile}]
+  (cond-> {}
+    (pos-int? n) (assoc :seon.cluster.eval/call-count n)
+    (seq repeated) (assoc :seon.cluster.eval/repeated-calls (set repeated))))
+
 (defn- entry-bindings
   "The Vars a form bound, as the installation reads them: symbol -> its value and metadata."
   {:malli/schema [:=> [:cat :seon.batch/batch :seon.cluster.eval/ordinal] :seon.sci.eval/bindings]}
@@ -5310,6 +5328,7 @@
                    evaluation (cond-> (merge (select-keys row [:seon.eval/origin])
                                              evaluation shown-map
                                              (code-evidence entry)
+                                             (call-profile-facts entry)
                                              {:seon.cluster.eval/at (Date.)
                                               :seon.cluster.eval/read-evidence (db/read-evidence reads)
                                               :seon.cluster.eval/read-basis-transaction (db/basis-t basis)})

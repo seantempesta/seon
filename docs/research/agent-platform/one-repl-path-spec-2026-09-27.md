@@ -553,6 +553,17 @@ write has none until it is acquired from its committed entity, so a unit calling
 at the next refresh. The form's own code counts into its own sink only: the frame binds the world's sink to the
 form's around SCI's evaluation, so the stages' machinery is not the form's evidence.
 
+**Call profile (owner, 2026-09-28).** Every evaluation's reply carries its timing and its call profile as data,
+the same for a Seon agent and MCP (both read `seon.render.transcript/history-entries`): `:seon.repl/ms`, then
+`:seon.repl/calls` (the armed calls the form's own code made) and `:seon.repl/repeated` (each function called more
+than `seon.batch/repeated-calls`, 100, times as `[sym calls ms]`, most calls first), e.g. `#:seon.repl{:value nil,
+:ms 8, :calls 300, :repeated [[my.agents.root/s4a-rep 300 1]]}`. The form's sink holds `[calls nanos]` per executed
+definition; the evaluation stores `:seon.cluster.eval/call-count` and `:seon.cluster.eval/repeated-calls`, which
+`seon.repl/cost-attributes` names for every reply reader. MCP JVM mode gets the same when S7 makes it the pipeline's
+`jvm-request` entrant: its evaluate stage then binds the form's sink around the host `eval`. Queued (Astra's
+algorithmic audit 75c8c6ef5, systemic rule 2): stage-owned counters for acquire, prelude, evidence, render and record,
+kept apart from the form's own code evidence, and a flag for one pure derivation called repeatedly with the same key.
+
 **R2-5.** `delimiter-repair-is-span-local-and-precedes-intent` asserts the repair behavior through `planned-sources`
 (one missing closer repaired; valid input unchanged; an odd map stays one source and the next form follows it; a
 repair is idempotent) and its install-timing hunk went with `gate-function-install`.

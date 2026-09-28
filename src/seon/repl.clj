@@ -15,6 +15,7 @@
             [seon.ai :as ai]
             [seon.ai.tokens :as tokens]
             [seon.db :as db]
+            [seon.print.value :as print.value]
             [seon.render.value :as value]
             [seon.schema.edn :as schema.edn]
             [seon.sci.admit :as admit]))
@@ -117,7 +118,9 @@
    :seon.repl/errors
    :seon.repl/note
    :seon.repl/ns
-   :seon.repl/ms])
+   :seon.repl/ms
+   :seon.repl/calls
+   :seon.repl/repeated])
 
 (defn- def-note
   "Explain a temporary def or a function missing its installation contract
@@ -171,6 +174,8 @@
     prompt-ns :seon.ns/name
     duration :seon.eval/duration-ms
     interrupted-at :seon.cluster.eval/interrupted-at
+    call-count :seon.cluster.eval/call-count
+    repeated :seon.cluster.eval/repeated-calls
     :as emission}]
   (let [value (value-text emission)
         ;; The evaluation's own failure: its shown text IS its flat error.
@@ -209,7 +214,13 @@
                                 (str ending-ns))
                 :seon.repl/ms (when (and (int? duration)
                                         (not (:seon.repl/changed-since? emission)))
-                               (str duration))}]
+                               (str duration))
+                ;; THE EVALUATION'S CALL PROFILE, AS DATA: its armed calls,
+                ;; and each function it called more than seon.batch/repeated-calls
+                ;; times as [sym calls ms], so repetition shows where it happened
+                :seon.repl/calls (when (pos-int? call-count) (str call-count))
+                :seon.repl/repeated (when (seq repeated)
+                                      (print.value/bounded-text (vec (sort-by (comp - second) repeated))))}]
     (into []
           (keep (fn [response-key]
                   (when-some [text (get by-key response-key)]
@@ -271,13 +282,16 @@
 
 (defn cost-attributes
   "The stored evaluation attributes the declared bounds and their lines read
-  (every measure and named value outside `seon.repl`'s own derived ones). A
+  (every measure and named value outside `seon.repl`'s own derived ones), and
+  the evaluation's call profile. A
   reader that pulls an evaluation for its reply pulls these, so the findings
   see what the receipt recorded; nothing names them by hand."
   {:malli/schema [:=> [:cat] [:vector :qualified-keyword]]}
   []
   (let [{measures ::measures named ::named} @bounds]
-    (into [] (comp (remove #(= "seon.repl" (namespace %))) (distinct)) (concat measures named))))
+    (into [] (comp (remove #(= "seon.repl" (namespace %))) (distinct))
+          ;; the evaluation's call profile: every reply shows it
+          (concat measures named [:seon.cluster.eval/call-count :seon.cluster.eval/repeated-calls]))))
 
 (defn cost
   "The measures the declared bounds judge for one evaluation: each one its

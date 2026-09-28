@@ -169,6 +169,8 @@
              [:seon.repl/errors {:optional true} :seon.repl/errors]
              [:seon.repl/ns {:optional true} :seon.repl/ns]
              [:seon.repl/ms {:optional true} :seon.repl/ms]
+             [:seon.repl/calls {:optional true} :seon.repl/calls]
+             [:seon.repl/repeated {:optional true} :seon.repl/repeated]
              [:seon.repl/note {:optional true} :seon.repl/note]],
             :candidates [:vector :seon.repl/candidate],
             :ns
@@ -182,6 +184,14 @@
             [:string
              {:description
               "The wall-clock milliseconds one evaluation took, as seon.eval/duration-ms recorded it."}],
+            :calls
+            [:string
+             {:description
+              "The armed calls one evaluation's own code made, as seon.cluster.eval/call-count recorded it."}],
+            :repeated
+            [:string
+             {:description
+              "Each function one evaluation called more than seon.batch/repeated-calls times, as [sym calls ms] data, most calls first (seon.cluster.eval/repeated-calls)."}],
             :expression
             [:or
              :qualified-symbol

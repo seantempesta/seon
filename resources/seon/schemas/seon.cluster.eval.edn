@@ -11,6 +11,13 @@
                     [:set {:seon.wake/context-inert true
                               :description "The definitions this evaluation entered, each as the symbol and the definition digest its installed callable held: its code evidence. The refresh re-runs a kept unit when one of them is no longer its symbol's current definition."}
                      [:tuple :qualified-symbol :seon.program/definition-digest]],
+                    :call-count
+                    [:int {:min 1 :seon.wake/context-inert true
+                           :description "The armed calls this evaluation's own code made: shown in its reply beside its milliseconds."}],
+                    :repeated-calls
+                    [:set {:seon.wake/context-inert true
+                           :description "Each function this evaluation called more than seon.batch/repeated-calls times, as [sym calls ms]: repetition visible in the reply of the evaluation that made it."}
+                     [:tuple :qualified-symbol :int :int]],
                     :code-evidence
                     [:enum {:seon.wake/context-inert true
                             :description "Whether :seon.cluster.eval/executed is all this evaluation ran: :complete; :unknown when a definition it entered had no known digest where it ran; :pending when work it owned had not exited when it was recorded. Absent (recorded before the one path) is unknown."}
@@ -116,6 +123,8 @@
                       :seon.cluster.eval/read-basis-transaction]
                      [:seon.cluster.eval/executed {:optional true} :seon.cluster.eval/executed]
                      [:seon.cluster.eval/code-evidence {:optional true} :seon.cluster.eval/code-evidence]
+                     [:seon.cluster.eval/call-count {:optional true} :seon.cluster.eval/call-count]
+                     [:seon.cluster.eval/repeated-calls {:optional true} :seon.cluster.eval/repeated-calls]
                      [:seon.test.accretion/gate-tests
                       {:optional true}
                       :seon.test.accretion/gate-tests]
@@ -180,6 +189,8 @@
                       :seon.cluster.eval/read-basis-transaction]
                      [:seon.cluster.eval/executed {:optional true} :seon.cluster.eval/executed]
                      [:seon.cluster.eval/code-evidence {:optional true} :seon.cluster.eval/code-evidence]
+                     [:seon.cluster.eval/call-count {:optional true} :seon.cluster.eval/call-count]
+                     [:seon.cluster.eval/repeated-calls {:optional true} :seon.cluster.eval/repeated-calls]
                      [:seon.cluster.eval/ns
                       {:optional true}
                       :seon.cluster.eval/ns]

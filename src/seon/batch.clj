@@ -70,19 +70,46 @@
   (instance? java.util.concurrent.atomic.AtomicLong x))
 
 (defn sink
-  "A new call sink: the per-world count of armed calls, by executed definition
-  `[sym digest]` (a nil digest is unknown). Concurrent calls from the world's
-  evaluations and the futures they start add to it."
+  "A new call sink: the per-world armed calls and their nanoseconds, by
+  executed definition `[sym digest]` (a nil digest is unknown), each a
+  `[calls nanos]` counter (`java.util.concurrent.atomic.AtomicLongArray`).
+  Concurrent calls from the world's evaluations and the futures they start add
+  to it."
   {:malli/schema [:=> [:cat] :seon.batch/sink]}
   []
   (java.util.concurrent.ConcurrentHashMap.))
+
+(defn- counters
+  "A sink's counters as a value: `[sym digest]` -> [calls nanos]."
+  {:malli/schema [:=> [:cat :seon.batch/sink] [:map-of :seon.batch/executed-key [:tuple nat-int? nat-int?]]]}
+  [^java.util.concurrent.ConcurrentHashMap s]
+  (into {} (map (fn [[k ^java.util.concurrent.atomic.AtomicLongArray a]] [k [(.get a 0) (.get a 1)]])) s))
 
 (defn executed
   "A sink's counts as a value: `[sym digest]` -> calls. An entered call that
   has not returned is present with 0."
   {:malli/schema [:=> [:cat :seon.batch/sink] [:map-of :seon.batch/executed-key nat-int?]]}
-  [^java.util.concurrent.ConcurrentHashMap s]
-  (into {} (map (fn [[k ^java.util.concurrent.atomic.LongAdder a]] [k (.sum a)])) s))
+  [s]
+  (update-vals (counters s) first))
+
+(def repeated-calls
+  "A function called more than this many times in one evaluation is named in
+  its call profile: repetition visible when it happens."
+  100)
+
+(defn call-profile
+  "One evaluation's call profile from its sink: the armed calls it made, and
+  each function it called more than `repeated-calls` times with its calls and
+  milliseconds, most calls first."
+  {:malli/schema [:=> [:cat :seon.batch/sink] :seon.batch/call-profile]}
+  [s]
+  (let [by-sym (reduce (fn [m [[sym _] [n t]]] (update m sym (fn [[a b]] [(+ (or a 0) n) (+ (or b 0) t)])))
+                       {} (counters s))]
+    (cond-> {:seon.batch/call-count (reduce + 0 (map first (vals by-sym)))}
+      (some (fn [[n _]] (> n repeated-calls)) (vals by-sym))
+      (assoc :seon.batch/repeated
+             (vec (sort-by (comp - second)
+                           (keep (fn [[sym [n t]]] (when (> n repeated-calls) [sym n (quot t 1000000)])) by-sym)))))))
 
 (defn calls
   "A sink's counts by symbol: symbol -> calls, every executed definition of it
@@ -92,9 +119,9 @@
   (reduce (fn [m [[sym _] n]] (update m sym (fnil + 0) n)) {} (executed s)))
 
 (def ^:private ^java.util.function.Function new-adder
-  "A sink's counter for a key it has not seen."
+  "A sink's `[calls nanos]` counter for a key it has not seen."
   (reify java.util.function.Function
-    (apply [_ _] (java.util.concurrent.atomic.LongAdder.))))
+    (apply [_ _] (java.util.concurrent.atomic.AtomicLongArray. 2))))
 
 (defn- ms-since
   {:malli/schema [:=> [:cat :int] :double]}
@@ -402,10 +429,13 @@
         in-flight (.get owned)
         executed-now (executed s)]
     (when-let [^java.util.concurrent.ConcurrentHashMap batch-sink (:seon.batch/sink (:seon.batch/world request))]
-      (doseq [[k c] executed-now]
-        (.add ^java.util.concurrent.atomic.LongAdder (.computeIfAbsent batch-sink k new-adder) (long c))))
+      (doseq [[k [n t]] (counters s)
+              :let [^java.util.concurrent.atomic.AtomicLongArray c (.computeIfAbsent batch-sink k new-adder)]]
+        (.addAndGet c 0 (long n))
+        (.addAndGet c 1 (long t))))
     (last-entry batch
                 #(cond-> (assoc % :seon.batch/reads @reads :seon.batch/read-sink reads :seon.batch/executed executed-now
+                                :seon.batch/call-profile (call-profile s)
                                 :seon.batch/evidence (if (pos? in-flight) :pending :complete)
                                 :seon.batch/owned owned)
                    (pos? in-flight) (assoc :seon.batch/in-flight in-flight)))))
