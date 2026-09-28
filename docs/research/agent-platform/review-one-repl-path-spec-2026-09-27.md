@@ -368,3 +368,113 @@ The installed contracts checker, including its namespace-placement check, read *
 Only this document is committed: **0 production/test/resource/reference-code lines changed**. Scratch evidence stays under `tmp/one-path-review/s4a`; the future joined during the probe. Another external default restart ended the review session before explicit namespace cleanup; a fresh MCP session verified the scratch namespace absent (`cleanup.edn`). No review namespace was reloaded into that new JVM. The owned archive was removed after checking; full lint evidence is retained compressed as `kondo.edn.gz`. Foreign boundaries are r12 and its database/test state, the external default restarts and pre-existing health faults, the spec/implementation namespaces, the ten script contract failures, and all concurrent source/resource/dependency changes. No other lane's session or file was resumed, messaged or edited.
 
 **Rev-S4a verdict: REVISE — A1 held reader input; A2 evaluation/disposition adapter; A3 asynchronous evidence completion; A4 executed definition identity; A5 settlement value preservation; A6 loadable caller/deletion manifest.**
+
+## Final S4a design review — §10.0 rev 2, cf8c87628
+
+**REVISE — R2-1 through R2-5 below.** Rev 2 resolves the original structural objections to segmentation, rich evaluation results, a transforming disposition stage, digest-keyed counters, and restricted settlement updates. Five execution blockers remain in the proposed instructions. This verdict supersedes the preceding S4a verdict; earlier revisions remain historical evidence.
+
+### Verification of A1–A6
+
+I read the pinned section and all five saved evidence values in `tmp/one-path/s4a`. At the selected default JVM, `evaluation-frame`, `batch/executed` and `settled-into` are **not installed**. The pinned commit supplies evidence EDN but no source for those mechanisms or `publish`; the only Clojure file under that evidence directory is an unrelated P1 measurement. Accordingly, this review distinguishes calls to installed owners from explicitly labelled implementations of the proposed rules. Absence of a landed implementation is not itself a design blocker, and the saved EDN is not treated as executable proof.
+
+Fresh MCP JVM evidence used root `/Users/sean/src/seon`, cluster `default`, session `one-path-review-s4a-r2`, initially PID **9778**, committed runtime archive **29bdfce8d**. Default was available with **11 pre-existing open faults**. Only held database reads, private SCI contexts, review-owned atoms/counters, and finite joined workers were used. No default program mutation, branch transaction, test request, provider call, or foreign namespace reload occurred. The REPL and Clojure review/testing skills were used; their old admission-refusal description does not override the owner's current contract-warning rule.
+
+Reproduction source is `tmp/one-path-review/s4a-r2/one_path_review/s4a_r2.clj`, namespace `one-path-review.s4a-r2`; complete results are adjacent EDN files. Source/caller references below were checked at HEAD **fce016f4b**. The principal five-probe envelope was **43 ms**; individual segmentation **2.707 ms**, frame **12.889 ms**, saved-callable counterexample **6.503 ms**, and counted-future model **0.945 ms**. Corrected pmap/scope probes together took **2.235 ms**, and the held-key model's MCP envelope **8 ms**. A first pmap fixture used a chunked vector and waited for both elements, reaching its deliberate one-second latch bound (1,023 ms envelope); the unchunked list below isolates pending work without that fixture-induced wait. A hand-built read-step initially failed the armed schema; the corrected probe uses the actual forgiving reader. Neither fixture failure is attributed to production.
+
+| Answer | Original counterexample and rev-2 result |
+|---|---|
+| **A1** | Fresh `segmentation` probe structurally splits `(require '[clojure.string :as r])`, `::r/k`, `#review/tag 42`, then reads/evaluates each once in the live SCI namespace: values `[nil :clojure.string/k 42]`; tag invocations **0 before evaluation, 1 after**. This closes the missing-form/alias objection at the design level. The actual private options Var is `forgive/structural-options`; §10.0's proposed public `structural-read-options` must be created/renamed explicitly, not assumed installed. |
+| **A2** | The existing frame's `(do (println "kept") 42)` returns value 42, output `"kept\n"`, shown `"42"`, integer duration **2**, allocation **91,376**, namespace ref and ending symbol. Reusing those fields closes the earlier lossy-map/cost-location design error. The transforming publish result can represent early-done replacement and continued reading, unlike the old boolean predicate. Frame totality still fails R2-1. No extracted frame or actual publish implementation was available to run as an entrant. |
+| **A3** | The counted-kernel-future model reproduces pending **`:unknown`, count 1**, then actual exit **count 0**. It preserves immediate return. The refresh policy and incomplete coverage still fail R2-2/R2-3. |
+| **A4** | Repeating the original two-cell example using real cell metadata and the proposed entry/exit counting rule retains both `[review/f digest-a]` and `[review/f digest-b]`, each count 1; `[review/g nil]` stays explicit, and entered `review/slow` appears with count **0**. The additional name-based nil repair fails R2-4. Installed profiling macros were not replaced. |
+| **A5** | The original empty-entries settlement still drops values in the installed old fold. A valid request and the revised per-held-ordinal merge rule answer **`[42 3]`**; an attempted replacement of ordinal 1 keeps value 3 and adds only its facts error (`a5-replay.edn`, `corrected.edn`). This closes A5's design defect; it is not an installation claim. |
+| **A6** | Keeping the namespace, legacy single-receipt and schema helpers fixes the original dangling-call list. The new repair-helper deletion adds one missed quoted test caller: R2-5. The −95 figure remains an estimate pending the actual cut. |
+
+The two accepted choices remain sound: retain pre-opened receipt identities until S8; let `resume-turn`'s existing settlement receive program facts as data, with **no second fold settlement**. The changed `evaluate-sources` must still return its existing vector shape and carry the batch program to that caller explicitly. Neither choice requires another evaluator or writer.
+
+### R2-1 — High: splitting the unchanged frame retains a post-evaluation value replacement
+
+**Failing form:** `(one-path-review.s4a-r2/frame)`. In its private SCI context, the form is:
+
+```clojure
+(do (review/advance) 42)
+;; review/advance changes only a review-owned loaded-identity atom.
+;; body-executed => 1
+;; :seon.sci.admit/value => adoption error map; 42 is absent
+```
+
+The normal sibling form returns 42, proving evaluation is available. The actual `trusted-evaluation` calls `call-detecting-program-change`, which discards the completed evaluation when the identity differs (`eval.clj:1636–1659,4487–4496`). The frame's catch then constructs a failure evaluation. Rev 2 expressly keeps this identity check and the success/failure frame unchanged, and only publishes an outcome **after the frame returns**. Thus the fold never receives the evaluated value that totality promises. This probe changes no shared identity or Var.
+
+**Smallest fix:** retain the raw evaluated value as soon as SCI returns, before post-evaluation frame work. Preserve the existing adoption refusal as an untrusted-execution diagnostic and refuse its program publication, while keeping that value in the outcome. Apply the same rule to later frame construction/classification failures. A before-evaluation acquisition/identity refusal still has no evaluated value to preserve. Do not weaken the adoption check or accept stale program facts.
+
+### R2-2 — High: UNKNOWN is not permission to replay work whose future has not exited
+
+**Failing form:** `(one-path-review.s4a-r2/future-model)`, a literal execution of the proposed count and refresh rule around the real `kernel/future-call`:
+
+```clojure
+{:before {:evidence :unknown, :in-flight 1}
+ :refresh-reexecution-in-flight 2
+ :values [42 42], :after 0}
+```
+
+The first unit returns while its worker is held; re-running that unknown unit starts a second worker before the first exits. Both are then released and joined. A kept unit can read the database synchronously and start further reads in a future without a recorded write, so the read-only classifier does not supply an exit fence. Rev 2 says unknown evidence re-runs the unit, while also saying nothing waits for that future. It specifies no retained execution owner that prevents this overlap. UNKNOWN must also not bypass the independent no-replay rule for effects that occur after the initial freeze.
+
+**Smallest fix:** retain the form's work ownership and actual exit fact after returning its value. Distinguish pending execution from missing historical dependency evidence. While the original work is pending, report that fact without starting another execution of the unit; after actual exit, decide refresh from its completed evidence. Ensure parent/child admission and exit, cancellation-before-start, submission refusal and exceptional exit settle that ownership exactly once. The counter is evidence, not the complete ownership protocol.
+
+### R2-3 — High: the proposed COMPLETE label is false for an admitted SCI concurrency path
+
+**Failing form:** `(one-path-review.s4a-r2/pmap-model)`, using the real SCI future addon with only `future-call` routed through the proposed counted kernel seam:
+
+```clojure
+(first (pmap review/read (list 0 1)))
+;; element 0 => 42; element 1 is held until after the freeze
+;; frozen => {:value 42 :started true :in-flight 0 :reads [] :evidence :complete}
+;; after release => {:exited true :reads-after [:late-read]}
+```
+
+Here `:late-read` is the probe's completion marker, not a claimed database-read receipt. It proves pending work exists while the proposed counter says complete. The cause is confirmed in dependency source: `sci.addons.future/future**` calls the host future directly; `pmap` uses it (`reference-code/sci/src/sci/addons/future.clj:12–31`). The current installation overrides only `future-call` (`eval.clj:398–405`). The saved design already acknowledges this and names task **`sci-pmap-escapes-the-arm`**, but deferring that fix cannot make S4a's complete evidence valid. The same completeness claim cannot cover undeclared asynchronous work inside a host callable.
+
+**Smallest fix:** make the existing kernel task a dependency of enabling complete evidence for this path, routing addon work through its governing arm/world/work owner. Until a called owner positively supplies completion, its evidence is unknown and cannot be reused as current; do not simply exclude it from the definition of complete. This does not require taking over another lane's files. Root can coordinate the dependency. It also must respect R2-2 rather than repeatedly launching the unknown unit.
+
+### R2-4 — High: a single write of a symbol does not identify an earlier digestless callable
+
+**Failing form:** `(one-path-review.s4a-r2/digest-model)`. Two separate SCI submissions in a private context model prior state followed by the current batch:
+
+```clojure
+;; Earlier submission: f's installed cell has no digest yet; retain its callable.
+(defn f {:malli/schema [:=> [:cat] :keyword]} [] (review/enter ['user/f nil] :old))
+(def saved f)
+;; Current batch: exactly one write of f, then call the saved old function.
+(defn f {:malli/schema [:=> [:cat] :keyword]} [] (review/enter ['user/f nil] :new))
+(saved)
+;; value :old, observed [[user/f nil]]
+;; proposed nil repair => [[user/f "new-definition-digest"]]
+```
+
+`review/enter` is the review's explicit stand-in for the proposed digestless cell event; this is real SCI callable retention plus a literal implementation of §10.0's join rule, not a claim that a new profiler was installed. The cell key has discarded which installation/root produced it. “One write of sym at or before this form” cannot distinguish the saved callable from that new write. Counting at entry fixes unfinished calls, but not this identity ambiguity. The design's separate allowance for unarmed functions likewise cannot make absent call evidence positive evidence of currency.
+
+**Smallest fix:** leave `[sym nil]` unknown unless the execution event carries the exact installation/root identity linked to the observed write whose digest was derived. Use the existing cell/observed callable identity; do not resolve solely by symbol or current database lookup. Once known, put the derived digest on the corresponding installed callable's identity for later calls. Preserve multiple executed versions, and treat unobserved/unarmed dependencies as unknown instead of declaring their changes irrelevant by virtue of the warning policy.
+
+### R2-5 — Medium: the new deletion list misses `repair-source`'s quoted test caller
+
+Rev 2 says the four repair helpers' only surviving caller is `planned-sources`. At both pinned `cf8c87628` and reviewed HEAD, `test/seon/cluster/turn_test.clj:2609` contains this form in **`seon.cluster.turn-test/delimiter-repair-is-span-local-and-precedes-intent`**:
+
+```clojure
+(deref (ns-resolve 'seon.turn 'repair-source))
+```
+
+Deleting the Var makes the resolution nil and the dereference fail before the test reaches its behavior assertions. This is a static deletion counterexample; no production Var was removed and no test was run to manufacture it. Kondo Var-use analysis alone is insufficient for quoted resolution; the source sweep found it.
+
+**Smallest fix:** include this exact test in S4a's caller conversion, preserving its repair/idempotence and stored-source behavior through `planned-sources`/the new input stage. Do not keep an unused compatibility helper or delete the behavior regression. The other retained-helper decisions from A6 stand.
+
+### Publish-stage result and final verification boundary
+
+The new transforming publish result answers the original boolean-stage objection. It still needs its actual guarded placement proved: no lost value on a throwing or malformed publish answer, early-done refusal retained alongside the refused disposition, correct continued reading, final handle bound once, and any publication-time read associated with the correct form. A probe of the existing fold confirms its evaluation observation scope is closed by derive (`{:value 42 :scope-at-derive [false]}`); therefore inserting the new stage there does not inherit that scope automatically. Carry/re-establish the form's world explicitly and freeze evidence after the relevant work. This is an implementation acceptance condition, not an additional observed failure of nonexistent publish code.
+
+No test runs were started. The documentation requires no behavioral test. Root's focused existing checks are `seon.cluster.turn-test/delimiter-repair-is-span-local-and-precedes-intent`, `seon.turn-test/a-forms-read-evidence-is-only-what-the-form-read`, `seon.turn-test/batch-settlement-preserves-declaration-order`, `seon.turn-test/a-refused-settlement-keeps-each-evaluated-value`, `seon.profile-test/a-re-entry-through-the-same-wrapper-is-inside-one-outermost-call`, `seon.sci.kernel-test`, and `seon.dev.mcp-bridge-test`. Required new proof names: `frame-post-evaluation-failure-keeps-value`, `unknown-pending-unit-does-not-overlap`, `pmap-work-is-owned`, `saved-digestless-callable-is-not-current-write`, and `publish-stage-totality`, alongside rev 2's six named S4a proofs. These are requested regressions, not installed tests or green results. Actual product/MCP parity and the P1 timing budget remain central landing checks.
+
+Verification used a `git archive` of HEAD **fce016f4b** plus only this document's diff. From that archive, `clj-kondo --lint src script test --cache false` returned **0 errors, 2,725 warnings, 16 info**, **505 files in 6,147 ms**. The contracts compile check read **497 files in 2,073.91 ms**: **0 src/test findings**, the same **10 foreign script failures** at `script/seon/dev/docstring.clj:285,318,334,360` and `script/seon/dev/markdown.clj:1020,1050,1090,1124,1170,1215`. The full contracts gate is therefore still red, not waived or described as green. Those timings are full-population static checks, proportional to the explicitly required scan, not ordinary REPL latency. The review changes no checked source/schema/contract input; final evidence-only prose updates do not require another scan. Complete results are retained in `contracts.edn`, `kondo-summary.edn` and compressed `kondo.edn.gz`.
+
+All probe workers exited and were joined; `one-path-review.s4a-r2` was explicitly unloaded and absence verified (`cleanup.edn`). The review-owned archive was removed after verification. Only this review document is committed: **0 production/test/resource/reference-code lines changed**. Foreign boundaries: default's existing health faults and current test activity; the unavailable proposed implementation; the spec/implementation lane and kernel task ownership; the ten script contract failures; concurrent database/source/schema/test edits. No foreign file or session was edited, restored, resumed or messaged.
+
+**Final S4a verdict: REVISE — preserve the value across frame post-checks (R2-1); retain ownership before replaying unknown work (R2-2); make complete evidence cover admitted concurrency (R2-3); remove symbol-only repair of unknown execution identity (R2-4); convert the quoted repair test caller (R2-5).**
