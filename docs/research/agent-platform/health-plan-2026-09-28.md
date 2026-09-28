@@ -115,6 +115,22 @@ the transaction that already records the work (settle, test batch, fault record,
 per-write provenance stamp of 089ac703a: process, operation, agent). "Declared" = already in the schema resources,
 mostly never written today; "new" = to add.
 
+**One base, one pipeline (owner question: "what is the common thing … or are we writing the instrumentation stuff
+separately?").** Every named error and warning shares one base: the **occurrence context** — where (agent, branch,
+evaluation / turn / test member / proc, task: from the bound world), who (producer function + digest, caller function +
+digest: from the armed wrapper, whose cell is already keyed `[sym digest]`), what (schema ref + Malli path, when a
+contract was involved), evidence (one blob digest: cause chain, offending value), and when (the transaction it rides,
+with its provenance stamp). The declared `:seon.error.occurrence/*` attributes are nearly this set. A named error
+(`:seon.error/base` extensions) or named warning adds only its specific attributes; its named schema validates the
+whole. Instrumentation is not a separate writer — three stages, each owned once:
+detect (armed wrapper, entrant boundary, significance check) → build (`seon.error.refusal/diagnostic`: base from world
++ wrapper, specifics from the producer, bulk to a blob) → store (one recorder: upsert the signature by identity, add an
+occurrence only under the cap, else bump the noHistory count, all as tx data on the commit already happening).
+Measurements are not events: they are subject attributes per digest (§2). Cost: the success path is counter
+increments only; build and store run only when something is wrong or a bucket moved; the context is already in hand
+(world read: 32 B; digest: the cell key); the signature is a hash, so recording is an upsert, never a scan; a function
+failing a million times writes K occurrences and one counter.
+
 **Subjects (exist today; nothing new):** function `:seon.fn/sym` (+ its definition digest), schema `:seon.schema/key`,
 test `:seon.test/sym`, namespace `:seon.ns/name`, agent `:seon.agent/id`, branch, turn `:seon.turn/id`, evaluation
 `:seon.cluster.eval/id` (already holds `executed #{[sym digest]}`, `call-count`, `repeated-calls`), test run and
