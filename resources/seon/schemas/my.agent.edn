@@ -12,7 +12,7 @@
                            [:seon.cluster.registry/from :seon.cluster.registry/from] [:seon.db/basis-t :seon.db/basis-t]]
  :my.agent/retired? :boolean
  :my.agent/retired-branch [:map {:description "A lane branch removed from the store's roster; its data goes when retention collects."}
-                           [:seon.store/branch :seon.store/branch] [:my.agent/retired? :my.agent/retired?]]
+                           [:seon.store/branch :seon.store/branch] [:my.agent/retired? :my.agent/retired?] [:my.agent/retiring? {:optional true} :boolean]]
  :my.agent/own-branch [:and {:description "The branch my cluster's connection holds; shared, never a lane's."} :seon.store/branch]
  :my.agent/branches [:map [:my.agent/own-branch :my.agent/own-branch] [:my.agent/roster :my.agent/roster]]
  :my.agent/roster [:and {:description "Every branch in the store's roster."} :seon.cluster.registry/roster]

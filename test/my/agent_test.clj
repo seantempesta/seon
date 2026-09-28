@@ -4,6 +4,7 @@
             [seon.cluster.agent :as cluster.agent]
             [seon.cluster.store :as store]
             [my.agent]
+            [seon.cluster.branch]
             [seon.config :as config]
             [seon.db :as db]
             [seon.schema :as schema]
@@ -136,3 +137,31 @@
            retired (my.agent/retire-branch! {:seon.store/branch :held-lane} context)]
        (is (= :seon.store/branch (:seon.error/member refused)) "a held branch's retirement is refused by name")
        (is (true? (:my.agent/retired? retired)) "once released, the branch retires")))))
+
+(deftest an-agent-retires-its-own-branch-and-the-shared-one-refuses
+  ;; The own branch was refused as "the cluster's own branch is shared". It now
+  ;; records the retirement (admission closed) and the release unlinks it.
+  (let [parent (support/execution-handle db/*conn*)
+        connection (:seon.db/connection parent)
+        _ (support/transacted! connection
+                               (cluster.agent/creation-tx
+                                {:seon.agent/id "self-retire" :seon.ns/name 'my.agents.self-retire
+                                 :seon.cluster/name "default"}))
+        handle (cluster.agent/acquire-context! parent "self-retire" {:seon.agent/isolate? true})
+        own (:seon.agent/branch handle)
+        context {:seon.store/store (:seon.store/store handle)
+                 :seon.db/connection (:seon.db/connection handle)
+                 :seon.agent/routing (:seon.agent/routing handle)}
+        roster #(set (:my.agent/roster (my.agent/branches context)))]
+    (try
+      (let [shared (my.agent/retire-branch! {:seon.store/branch (seon.cluster.branch/cluster-branch "default")} context)
+            retiring (my.agent/retire-branch! {:seon.store/branch own} context)]
+        (is (= :seon.store/branch (:seon.error/member shared)) "the cluster's shared branch still refuses")
+        (is (= {:seon.store/branch own :my.agent/retired? false :my.agent/retiring? true} retiring))
+        (is (some? (:seon.agent/admission-closed-tx
+                    (db/pull @(:seon.db/connection handle) [:seon.agent/admission-closed-tx]
+                             [:seon.agent/id "self-retire"])))
+            "the retirement is recorded as a fact")
+        (is (contains? (roster) own) "the branch stays linked while the run is live"))
+      (finally (cluster.agent/release-context! handle)))
+    (is (not (contains? (roster) own)) "the release unlinks it")))

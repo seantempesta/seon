@@ -2,6 +2,7 @@
   "Read and update my record through request maps."
   (:refer-clojure :exclude [identity])
   (:require [seon.agent :as agent]
+            [seon.cluster.branch :as cluster.branch]
             [seon.cluster.registry :as registry]
             [seon.db :as db]
             [seon.error.refusal :as refusal]
@@ -137,12 +138,40 @@
         (assoc result :seon.cluster.registry/from from :seon.db/basis-t (db/basis-t source))
         (branch-refusal `create-branch! "The branch already exists; retire it or name another." {:seon.store/branch lane})))))
 
+(defn- shared-branch?
+  "True when `lane` is the branch of the cluster my connection's facts name:
+  the one branch every agent of that cluster shares. An agent's own branch is a
+  fork that inherits the cluster's name row, so the comparison, never the
+  spelling of the branch, tells them apart."
+  {:malli/schema [:=> [:cat :my.agent/branch-context :seon.store/branch] :boolean]}
+  [{connection :seon.db/connection} lane]
+  (boolean (some #(= lane (cluster.branch/cluster-branch %))
+                 (db/q '[:find [?name ...] :where [_ :seon.cluster/name ?name]] @connection))))
+
+(defn- retire-own-branch!
+  "Record the retirement of my own branch now and unlink it after my run exits.
+
+  Admission closes on the agent rows my branch holds (the fact `retire-unclaimed!`
+  and the run writer read); the owner's release of the execution (`release-context!`, or boot's
+  `retire-unclaimed!`) unlinks the branch, so the run asking is never the one
+  released. Answers `:my.agent/retiring?`."
+  {:malli/schema [:=> [:cat :seon.store/branch :my.agent/branch-context] :my.agent/retired-branch]}
+  [lane {connection :seon.db/connection}]
+  (let [open (db/q '[:find [?agent ...] :where [?agent :seon.agent/id _]
+                     (not [?agent :seon.agent/admission-closed-tx])]
+                   @connection)]
+    (when (seq open)
+      (db/call-with-custody {}
+        #(db/transact! connection (mapv (fn [row] [:db/add row :seon.agent/admission-closed-tx "datomic.tx"]) open))))
+    {:seon.store/branch lane :my.agent/retired? false :my.agent/retiring? true}))
+
 (defn retire-branch!
   "Retire a lane branch: its hosted agent first (admission closed, its graphs
   joined, its execution released), then any execution still held on it, then
-  its roster entry. A branch an agent still holds, and my cluster's own
-  branch, refuse. Its data goes when retention collects. My context is
-  supplied.
+  its roster entry. A branch an agent still holds refuses. My cluster's shared
+  branch refuses. My own branch records its retirement now and unlinks once my
+  run exits (`:my.agent/retiring?`). Its data goes when retention collects. My
+  context is supplied.
 
   Example:
   (my.agent/retire-branch! {:seon.store/branch :my-lane})"
@@ -151,8 +180,9 @@
   [{lane :seon.store/branch} {store :seon.store/store routing :seon.agent/routing :as context}]
   (cond
     (nil? store) (branch-refusal `retire-branch! "My context holds no store to retire from." {})
-    (= lane (own-branch context))
-    (branch-refusal `retire-branch! "The cluster's own branch is shared; name a lane branch." {:seon.store/branch lane})
+    (shared-branch? context lane)
+    (branch-refusal `retire-branch! "The cluster's shared branch is never retired; name a lane branch or my own." {:seon.store/branch lane})
+    (= lane (own-branch context)) (retire-own-branch! lane context)
     :else
     (let [child #(some-> routing deref (get-in [:seon.agent/children lane]) deref)
           retired (some-> (:seon.cluster.host/host (child)) deref ((requiring-resolve 'seon.cluster.host/retire!)))
