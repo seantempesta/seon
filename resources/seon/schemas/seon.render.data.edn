@@ -29,13 +29,13 @@
                      :seon.render.data/offset]],
                    :no-such-path-error
                    [:and :seon.error/base
- [:map {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ [:map {:seon.db/attributes true}
   [:seon.render.data/root-description :seon.render.data/root-description]
   [:seon.render.data/requested-path-length :seon.render.data/requested-path-length]]]
  :refused-member :qualified-keyword
  :observation-error
  [:and :seon.error/base
-  [:map {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  [:map {:seon.db/attributes true}
    [:seon.render.data/refused-member :seon.render.data/refused-member]]]
 
  :subject :seon.db/entity-id

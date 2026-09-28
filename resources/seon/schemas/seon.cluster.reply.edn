@@ -13,7 +13,7 @@
                      :refused-tag :seon.sci.reader/refused-token
                      :unreadable :seon.cluster.reply/text
                      :no-forms [:= true]
-                     :no-forms-error [:and {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an agent reply containing no forms"} :seon.error/base [:map [:seon.cluster.reply/text :seon.cluster.reply/text] [:seon.cluster.reply/no-forms :seon.cluster.reply/no-forms] [:seon.error/message :seon.error/message]]]
+                     :no-forms-error [:and {:error/message "must mark an agent reply containing no forms"} :seon.error/base [:map [:seon.cluster.reply/text :seon.cluster.reply/text] [:seon.cluster.reply/no-forms :seon.cluster.reply/no-forms] [:seon.error/message :seon.error/message]]]
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.cluster.reply/authored-reply

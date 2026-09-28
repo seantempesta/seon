@@ -175,6 +175,25 @@
           (str "the operation names where an error was raised, not a function that "
                "returned it, so it selects no renderer")))))
 
+(deftest an-error-extension-renders-by-the-nearest-declared-pair
+  ;; AGENTS: the schema's declared pair, most specific first, along its
+  ;; ancestry. `seon.schema.internal/entity-properties` merges the maps an
+  ;; `[:and :seon.error/base ...]` reaches, base first, so base's pair is
+  ;; declared once and an extension's own face wins where it declares one.
+  (let [projection (schema/handed-projection)
+        declared (fn [schema-key output]
+                   (#'render/declared-producers
+                    projection {} (with-meta {} {:seon.error/declared-schema schema-key}) output))]
+    (doseq [schema-key [:seon.flow/submission-capacity-error :seon.program/not-found-error
+                        :seon.sci.kernel/memory-pressure-error]]
+      (is (= [['seon.error/render-ai] ['seon.error/render-html]]
+             [(declared schema-key :seon.render/ai) (declared schema-key :seon.render/html)])
+          "an extension with no pair of its own renders by :seon.error/base's"))
+    (is (= [['seon.error/mcp-prose] ['seon.error/render-html]]
+           [(declared :seon.dev.mcp/projection-failed-error :seon.render/ai)
+            (declared :seon.dev.mcp/projection-failed-error :seon.render/html)])
+        "an extension's own face wins; the face it omits comes from base")))
+
 (deftest an-inline-face-overrides-the-schema-default-for-just-that-face
   ;; A value's own :seon.render/ai or :seon.render/html is the highest
   ;; priority (owner, 2026-09-25): a renderer symbol or the rendered data

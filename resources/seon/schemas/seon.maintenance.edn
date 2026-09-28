@@ -64,22 +64,22 @@
                     :seon.maintenance/result-projection-unresolved-error
                     :seon.maintenance/result-projection-failed-error] :seon.maintenance/matching-producer-count [:int {:min 2}]
  :seon.maintenance/ambiguous-result-projection-error
- [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ [:and {:seon.db/attributes true}
   :seon.error/base [:map [:seon.maintenance/matching-producer-count :seon.maintenance/matching-producer-count]]]
  :seon.maintenance/unresolved-producer :qualified-symbol
  :seon.maintenance/result-projection-unresolved-error
- [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ [:and {:seon.db/attributes true}
   :seon.error/base [:map [:seon.maintenance/unresolved-producer :seon.maintenance/unresolved-producer]]]
  :seon.maintenance/failed-producer :qualified-symbol
  :seon.maintenance/result-projection-failed-error
- [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ [:and {:seon.db/attributes true}
   :seon.error/base [:map [:seon.maintenance/failed-producer :seon.maintenance/failed-producer]]]
  :seon.maintenance/disabled-collection-flag :qualified-keyword
  :seon.maintenance/collection-disabled-error
- [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ [:and {:seon.db/attributes true}
   :seon.error/base [:map [:seon.maintenance/disabled-collection-flag :seon.maintenance/disabled-collection-flag]]]
  :seon.maintenance/uncollected-root :string
  :seon.maintenance/root-never-collected-error
- [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ [:and {:seon.db/attributes true}
   :seon.error/base [:map [:seon.maintenance/uncollected-root :seon.maintenance/uncollected-root]]]
 }

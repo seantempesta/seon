@@ -321,9 +321,7 @@
           :transaction-refused [:= true]
           :transaction-refused-error
           [:and :seon.error/base
-           [:map {:seon.db/attributes true
-                  :seon.render/ai seon.error/render-ai
-                  :seon.render/html seon.error/render-html}
+           [:map {:seon.db/attributes true}
             [:seon.db/transaction-refused :seon.db/transaction-refused]
             [:seon.db/owned-value-refusal {:optional true} :seon.db/owned-value-refusal]
             [:seon.db.write.attempt/request-id :seon.db.write.attempt/request-id]]]
@@ -339,7 +337,7 @@
           :transaction-outcome-unknown [:= true]
  :seon.db/refused-read-operation :qualified-symbol
  :seon.db/invalid-read [:= true]
- :seon.db/invalid-read-error [:and :seon.error/base [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.db/invalid-read distinguishing member"} [:seon.db/invalid-read :seon.db/invalid-read] [:seon.db/refused-read-operation :seon.db/refused-read-operation] [:seon.error/message :seon.error/message]]]
+ :seon.db/invalid-read-error [:and :seon.error/base [:map {:error/message "must carry the :seon.db/invalid-read distinguishing member"} [:seon.db/invalid-read :seon.db/invalid-read] [:seon.db/refused-read-operation :seon.db/refused-read-operation] [:seon.error/message :seon.error/message]]]
  :seon.db/pull-budget-error
  [:and :seon.error/base
   [:map
@@ -350,9 +348,7 @@
  :seon.db/missing-request-member :keyword
  :seon.db/invalid-request-error
  [:and :seon.error/base
-  [:map {:seon.db/attributes true
-         :seon.render/ai seon.error/render-ai
-         :seon.render/html seon.error/render-html}
+  [:map {:seon.db/attributes true}
    [:seon.db/invalid-request :seon.db/invalid-request]
    [:seon.db/missing-request-member :seon.db/missing-request-member]]]
  :seon.db/owned-value-refusal

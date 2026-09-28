@@ -84,10 +84,7 @@
                  :phase-failed-error
                  [:and {:seon.db/attributes true} :seon.error/base
                   [:map
-                  {
-                   :seon.render/ai seon.error/render-ai,
-                   :seon.render/html seon.error/render-html,
-                   :error/message
+                  {:error/message
                    "must carry the :seon.turn.loop/phase-failed distinguishing member"}
                   [:seon.turn.loop/phase-failed
                    :seon.turn.loop/phase-failed]

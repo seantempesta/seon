@@ -45,7 +45,7 @@
  :seon.schedule/missing-receipt-id :string
  :seon.schedule/unresolved-handler-symbol :qualified-symbol
  :seon.schedule/unresolved-handler-error
- [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ [:and {:seon.db/attributes true}
   :seon.error/base [:map [:seon.schedule/unresolved-handler-symbol :seon.schedule/unresolved-handler-symbol]]]
  ; Additive error declaration manifest, 2026-09-18.
 

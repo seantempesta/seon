@@ -161,7 +161,7 @@
                   :value-unreadable :seon.blob/digest
                   :function-unavailable :qualified-symbol
                   :function-unavailable-error
-                  [:and :seon.error/base [:map {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} [:seon.render.web/function-unavailable :seon.render.web/function-unavailable]]]
+                  [:and :seon.error/base [:map {:seon.db/attributes true} [:seon.render.web/function-unavailable :seon.render.web/function-unavailable]]]
 
 
  ; Additive error declaration manifest, 2026-09-18.
@@ -192,7 +192,7 @@
  :page-exception-class :symbol
  :refused-member :qualified-keyword
 
- :request-error [:and :seon.error/base [:map {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} [:seon.render.web/refused-member :seon.render.web/refused-member] [:seon.render.web/refusal-reason {:optional true} :seon.render.web/refusal-reason] [:seon.render.web/page-exception-class {:optional true} :seon.render.web/page-exception-class]]]
+ :request-error [:and :seon.error/base [:map {:seon.db/attributes true} [:seon.render.web/refused-member :seon.render.web/refused-member] [:seon.render.web/refusal-reason {:optional true} :seon.render.web/refusal-reason] [:seon.render.web/page-exception-class {:optional true} :seon.render.web/page-exception-class]]]
 
 
  :context-error :seon.render.web/request-error

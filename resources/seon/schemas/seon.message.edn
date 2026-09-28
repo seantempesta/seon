@@ -54,10 +54,7 @@
                :no-limit-error
                [:and {:seon.db/attributes true} :seon.error/base
                 [:map
-                {
-                 :seon.render/ai seon.error/render-ai,
-                 :seon.render/html seon.error/render-html,
-                 :error/message
+                {:error/message
                  "must mark a message chain with no configured limit"}
                 [:seon.message/no-limit :seon.message/no-limit]
                 [:seon.message/refused-chain-limit :seon.message/refused-chain-limit]
@@ -142,10 +139,7 @@
                :chain-limit-error
                [:and {:seon.db/attributes true} :seon.error/base
                 [:map
-                {
-                 :seon.render/ai seon.error/render-ai,
-                 :seon.render/html seon.error/render-html,
-                 :error/message
+                {:error/message
                  "must identify the message-chain limit that was reached"}
                 [:seon.message/chain-limit :seon.message/chain-limit]
                 [:seon.error/message :seon.error/message]]],
@@ -158,10 +152,7 @@
                :unknown-recipient-error
                [:and {:seon.db/attributes true} :seon.error/base
                 [:map
-                {
-                 :seon.render/ai seon.error/render-ai,
-                 :seon.render/html seon.error/render-html,
-                 :error/message
+                {:error/message
                  "must identify the unknown message recipient"}
                 [:seon.message/unknown-recipient
                  :seon.message/unknown-recipient]

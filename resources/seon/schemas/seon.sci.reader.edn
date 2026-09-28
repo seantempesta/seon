@@ -11,19 +11,19 @@
            [:edamame/column :int]
            [:edamame/elements [:vector :seon.schema/value]]]]
 
- :seon.sci.reader/fabricated-response-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ :seon.sci.reader/fabricated-response-error [:and {:seon.db/attributes true}
  :seon.error/base
  [:map [:seon.sci.reader/response-keys :seon.sci.reader/response-keys]]]
 
- :seon.sci.reader/unreadable-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ :seon.sci.reader/unreadable-error [:and {:seon.db/attributes true}
  :seon.error/base
  [:map [:seon.sci.reader/unreadable-member :seon.sci.reader/unreadable-member]]]
 
- :seon.sci.reader/oversize-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ :seon.sci.reader/oversize-error [:and {:seon.db/attributes true}
  :seon.error/base
  [:map [:seon.sci.reader/length :seon.sci.reader/length] [:seon.sci.reader/source-bound :seon.sci.reader/source-bound]]]
 
- :seon.sci.reader/refused-tag-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ :seon.sci.reader/refused-tag-error [:and {:seon.db/attributes true}
  :seon.error/base
  [:map [:seon.sci.reader/refused-token :seon.sci.reader/refused-token]]]
 

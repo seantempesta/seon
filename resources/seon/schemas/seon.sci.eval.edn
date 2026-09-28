@@ -6,9 +6,7 @@
  :refused-function :qualified-symbol
  :interpretation-reason :string
  :interpretation-error
- [:and {:seon.db/attributes true
-        :seon.render/ai seon.error/render-ai
-        :seon.render/html seon.error/render-html}
+ [:and {:seon.db/attributes true}
   :seon.error/base
   [:map
    [:seon.sci.eval/refused-function :seon.sci.eval/refused-function]
@@ -257,7 +255,7 @@
                   "must hold one immutable replacement environment",
                   :gen/gen seon.sci.eval/projection-state-generator}
                  seon.sci.eval/projection-state?],
-                :documentation-unavailable-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+                :documentation-unavailable-error [:and {:seon.db/attributes true}
  :seon.error/base
  [:map [:seon.sci.eval/documentation-unavailable :seon.sci.eval/documentation-unavailable]]],
                 :acquire-request
@@ -338,7 +336,7 @@
 
 :pending-namespaces [:set {:min 1} :symbol]
 :missing-declaration :qualified-keyword
-:declaration-absent-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+:declaration-absent-error [:and {:seon.db/attributes true}
  :seon.error/base
  [:map [:seon.sci.eval/missing-declaration :seon.sci.eval/missing-declaration]]]
 

@@ -7,8 +7,7 @@
  :seon.dev.mcp/projection-failed-error
  [:and
   {:seon.db/attributes true
-   :seon.render/ai seon.error/mcp-prose
-   :seon.render/html seon.error/render-html}
+   :seon.render/ai seon.error/mcp-prose}
   :seon.error/base
   [:map
    [:seon.dev.mcp/projection-offending-class

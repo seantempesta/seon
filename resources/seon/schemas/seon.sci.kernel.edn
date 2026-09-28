@@ -52,8 +52,7 @@
   [:seon.sci.kernel/entered-at :seon.sci.kernel/entered-at]
   [:seon.sci.kernel/in-flight :seon.sci.kernel/in-flight]]
  :seon.sci.kernel/memory-pressure-error
- [:and {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
-  :seon.error/base :seon.sci.kernel/memory-pressure]
+ [:and :seon.error/base :seon.sci.kernel/memory-pressure]
 
  :seon.sci.kernel/guard-observation
  [:and

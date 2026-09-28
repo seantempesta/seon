@@ -176,8 +176,6 @@
             :refused-error
             [:and
              {:seon.db/attributes true,
-              :seon.render/ai seon.error/render-ai,
-              :seon.render/html seon.error/render-html,
               :description "A transition refused its actual request under the named rule. Occurrences own this observation; no agent identity is inferred for a request that may name no existing agent."}
              :seon.error/base
              [:map {:seon.db/attributes true}

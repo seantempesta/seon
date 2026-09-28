@@ -92,7 +92,7 @@
  [:seon.render.walk/limit :seon.render.walk/limit]
  [:seon.render.walk/continuation-subject :seon.render.walk/continuation-subject]]]
 
-                   :no-such-entity-error [:and :seon.error/base [:map {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} [:seon.render.walk/missing-lookup :seon.render.walk/missing-lookup]]]
+                   :no-such-entity-error [:and :seon.error/base [:map {:seon.db/attributes true} [:seon.render.walk/missing-lookup :seon.render.walk/missing-lookup]]]
 
  ; Additive error declaration manifest, 2026-09-18.
 
@@ -143,8 +143,7 @@
   :seon.sci.eval/ctx]
  :seon.render.walk/continuation-error
  [:and :seon.error/base
-  [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
-   [:seon.render.walk/continuation-reason :seon.render.walk/continuation-reason]
+  [:map [:seon.render.walk/continuation-reason :seon.render.walk/continuation-reason]
    [:seon.render.walk/continuation-node :seon.render.walk/continuation-node]]]
 
  ; The linked graph (task-context S1): structure per projection, levels, nodes, edges, order and cuts.

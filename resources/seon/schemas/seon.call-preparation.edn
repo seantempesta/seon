@@ -186,18 +186,18 @@
  :thrown-supplier :qualified-symbol
  :invalid-key :qualified-keyword
  :incoherent-supplier-error
- [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ [:and {:seon.db/attributes true}
   :seon.error/base [:map [:seon.call-preparation/incoherent-key :seon.call-preparation/incoherent-key] [:seon.call-preparation/supplier-symbol :seon.call-preparation/supplier-symbol] [:seon.call-preparation/schema-key :seon.call-preparation/schema-key] [:seon.call-preparation/coherence-expectation :seon.call-preparation/coherence-expectation]]]
  :unavailable-error
- [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ [:and {:seon.db/attributes true}
   :seon.error/base [:map [:seon.call-preparation/target-symbol :seon.call-preparation/target-symbol] [:seon.call-preparation/unavailable-key :seon.call-preparation/unavailable-key] [:seon.call-preparation/supplier-symbol :seon.call-preparation/supplier-symbol] [:seon.fn.argument/index :seon.fn.argument/index]]]
  :unresolved-supplier-error
- [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ [:and {:seon.db/attributes true}
   :seon.error/base [:map [:seon.call-preparation/unresolved-symbol :seon.call-preparation/unresolved-symbol]]]
  :invalid-supplied-value-error
- [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ [:and {:seon.db/attributes true}
   :seon.error/base [:map [:seon.call-preparation/target-symbol :seon.call-preparation/target-symbol] [:seon.call-preparation/invalid-key :seon.call-preparation/invalid-key] [:seon.call-preparation/supplier-symbol :seon.call-preparation/supplier-symbol] [:seon.call-preparation/schema-key :seon.call-preparation/schema-key]]]
  :ambiguous-call-error
- [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ [:and {:seon.db/attributes true}
   :seon.error/base [:map [:seon.call-preparation/target-symbol :seon.call-preparation/target-symbol] [:seon.call-preparation/supplied-count :seon.call-preparation/supplied-count] [:seon.call-preparation/candidate-count :seon.call-preparation/candidate-count] [:seon.call-preparation/candidates {:optional true} :seon.call-preparation/candidates] [:seon.call-preparation/offending-arguments {:optional true} :seon.call-preparation/offending-arguments]]]
 }

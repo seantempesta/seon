@@ -66,10 +66,10 @@
  ; The floor's B cannot show a value's root or a page's first member (one-render-path §3c).
  :seon.render.value/budget [:int {:min 0 :description "The floor's character budget B."}]
  :seon.render.value/needed [:int {:min 0 :description "Characters the root, or the root with its first member and legend, needs."}]
- :seon.render.value/insufficient-floor-budget-error [:and {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} :seon.error/base [:map [:seon.render.value/budget :seon.render.value/budget] [:seon.render.value/needed :seon.render.value/needed]]]
+ :seon.render.value/insufficient-floor-budget-error [:and :seon.error/base [:map [:seon.render.value/budget :seon.render.value/budget] [:seon.render.value/needed :seon.render.value/needed]]]
  :seon.render.value/unreadable-artifact [:string {:min 1 :description "Why stored content is not a value artifact: the one reader's refusal, or the shape it read."}]
- :seon.render.value/unreadable-artifact-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} :seon.error/base [:map [:seon.render.value/unreadable-artifact :seon.render.value/unreadable-artifact]]]
- :seon.render.value/missing-root-identity-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} :seon.error/base [:map [:seon.render.value/root-description :seon.render.value/root-description]]]
+ :seon.render.value/unreadable-artifact-error [:and {:seon.db/attributes true} :seon.error/base [:map [:seon.render.value/unreadable-artifact :seon.render.value/unreadable-artifact]]]
+ :seon.render.value/missing-root-identity-error [:and {:seon.db/attributes true} :seon.error/base [:map [:seon.render.value/root-description :seon.render.value/root-description]]]
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.render.value/error

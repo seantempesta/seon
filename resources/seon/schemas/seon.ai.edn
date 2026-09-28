@@ -18,8 +18,6 @@
           :output-observed? :boolean,
           :transport-failure-error
           [:and {:seon.db/attributes true,
-            :seon.render/ai seon.error/render-ai,
-            :seon.render/html seon.error/render-html,
             :error/message
             "must identify the endpoint whose transport failed"}
            :seon.error/base
@@ -28,8 +26,6 @@
            [:seon.error/message :seon.error/message]]],
           :token-starvation-error
           [:and {:seon.db/attributes true,
-            :seon.render/ai seon.error/render-ai,
-            :seon.render/html seon.error/render-html,
             :error/message
             "must mark an attempt with no usable output-token budget"}
            :seon.error/base
@@ -65,8 +61,6 @@
           :http-status [:int {:min 100, :max 599}],
           :reasoning-without-answer-error
           [:and {:seon.db/attributes true,
-            :seon.render/ai seon.error/render-ai,
-            :seon.render/html seon.error/render-html,
             :error/message
             "must mark a provider response with reasoning but no answer"}
            :seon.error/base
@@ -79,8 +73,6 @@
           :reasoning-partial :string,
           :no-credential-error
           [:and {:seon.db/attributes true,
-            :seon.render/ai seon.error/render-ai,
-            :seon.render/html seon.error/render-html,
             :error/message
             "must mark an attempt with no provider credential"}
            :seon.error/base
@@ -102,8 +94,6 @@
           :api-key-variable [:string {:min 1}],
           :unparseable-body-error
           [:and {:seon.db/attributes true,
-            :seon.render/ai seon.error/render-ai,
-            :seon.render/html seon.error/render-html,
             :error/message
             "must identify the status of an unparseable provider response"}
            :seon.error/base
@@ -195,8 +185,6 @@
                         :string :string],
           :stream-truncated-error
           [:and {:seon.db/attributes true,
-            :seon.render/ai seon.error/render-ai,
-            :seon.render/html seon.error/render-html,
             :error/message
             "must mark a provider stream that ended before its terminal event"}
            :seon.error/base
@@ -226,8 +214,6 @@
           :tokens [:int {:min 0}],
           :extra-body-conflict-error
           [:and {:seon.db/attributes true,
-            :seon.render/ai seon.error/render-ai,
-            :seon.render/html seon.error/render-html,
             :error/message
             "must mark provider-specific data that conflicts with governed fields"}
            :seon.error/base
@@ -374,8 +360,6 @@
           :body-read-message :string,
           :invalid-extra-body-error
           [:and {:seon.db/attributes true,
-            :seon.render/ai seon.error/render-ai,
-            :seon.render/html seon.error/render-html,
             :error/message
             "must mark invalid provider-specific request data"}
            :seon.error/base
@@ -385,8 +369,6 @@
            [:seon.error/message :seon.error/message]]],
           :timeout-error
           [:and {:seon.db/attributes true,
-            :seon.render/ai seon.error/render-ai,
-            :seon.render/html seon.error/render-html,
             :error/message
             "must identify the elapsed provider request limit"}
            :seon.error/base
@@ -405,8 +387,6 @@
           :protected-keys [:set {:min 1 :description "Request-builder field names the supplied extra body attempted to replace. Value observations survive request deletion."} :string],
           :provider-error-error
           [:and {:seon.db/attributes true,
-            :seon.render/ai seon.error/render-ai,
-            :seon.render/html seon.error/render-html,
             :error/message
             "must identify the status of a provider error response"}
            :seon.error/base
