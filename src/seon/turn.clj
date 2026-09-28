@@ -5636,14 +5636,23 @@
                           gated)]
                 ;; A batch that defined nothing installs nothing; a defining
                 ;; batch's program check reads this settlement's own datoms.
+                ;; The settlement is committed: an install failure is a fault
+                ;; recorded beside it, never a throw out of the turn.
                 (when (seq installations)
-                  (sci.eval/install-evaluated-rows!
-                   {:seon.sci.eval/ctx base-ctx
-                    :seon.sci.eval/agent-ctx ctx
-                    :seon.db/db (:db-after outcome)
-                    :seon.db/transaction-report outcome
-                    :seon.sci.eval/written-on written-on
-                    :seon.sci.eval/installations installations}))
+                  (try
+                    (sci.eval/install-evaluated-rows!
+                     {:seon.sci.eval/ctx base-ctx
+                      :seon.sci.eval/agent-ctx ctx
+                      :seon.db/db (:db-after outcome)
+                      :seon.db/transaction-report outcome
+                      :seon.sci.eval/written-on written-on
+                      :seon.sci.eval/installations installations})
+                    (catch Throwable failure
+                      (fault/fault! (env/of cluster) failure
+                                    {:seon.error/layer :seon.turn/settlement
+                                     :seon.error/operation `sci.eval/install-evaluated-rows!
+                                     :seon.db.process/id (:seon.db.process/id cluster)
+                                     :seon.agent/id agent-id}))))
                 (if (or (:seon.turn.loop/settled last-prepared)
                         (:seon.turn.loop/undisposed? last-prepared)
                         ;; a folded close (close-folded-call) closed it in the settlement

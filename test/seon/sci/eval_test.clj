@@ -140,6 +140,30 @@
      ctx (assoc :seon.sci.eval/ctx ctx)
      (nil? ctx) (assoc :seon.db/db (db/db (:seon.db/connection (test-support/execution-handle nil)))))))
 
+(deftest an-install-reads-registrations-an-earlier-run-committed
+  ;; Reds group I (reds-triage, 2026-09-28): a schema registered in one run
+  ;; and a defn naming it in the next threw out of seon.turn/step, because
+  ;; the install started from the context's projection, which never saw the
+  ;; registration. The install reads the committed value's projection.
+  (test-support/with-database
+   (fn [connection]
+     (let [ctx (eval/base-ctx (db/db connection))
+           _ (test-support/transacted!
+              connection (test-support/schema-entities @connection [[:fixture.install/amount :int]]))
+           row (test-support/program-fn-entity
+                @connection 'user/install-amount
+                "(defn install-amount {:malli/schema [:=> [:cat :fixture.install/amount] :fixture.install/amount]} [x] x)"
+                {:seon.schema.admission/source :agent})
+           _ (test-support/transacted! connection [row])
+           evaluation (eval/unrun-evaluation {:seon.sci.admit/value {:seon.error/at (java.util.Date.) :seon.error/layer :seon.turn/evaluation
+                                                                     :seon.error/operation 'fixture/install :seon.error/message "fixture"}
+                                              :seon.cluster.eval/ns [:seon.ns/name 'user]})
+           installed (eval/install-evaluated-rows!
+                      {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
+                       :seon.sci.eval/installations [{:seon.program/row row :seon.sci.eval/evaluation evaluation}]})]
+       (is (= [1] (mapv :seon.sci.eval/installed installed))
+           "the definition installs against the registration committed before it")))))
+
 (deftest a-branch-change-leaves-its-compiled-callers-compiled
   ;; Owner ruling (AGENTS ddd3cf9a2, dogfood B8): a branch never changes the
   ;; platform. An unchanged host-bound caller of a branch-changed definition

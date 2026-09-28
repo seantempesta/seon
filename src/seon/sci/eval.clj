@@ -1546,43 +1546,21 @@
     written-on :seon.sci.eval/written-on
     agent-ctx :seon.sci.eval/agent-ctx}]
   (transfer-evaluated-roots! ctx installations)
-    (let [installed (:installed
-     (reduce
-      (fn [{projection :projection installed :installed}
-           {program-row :seon.program/row}]
-        (let [next-projection
-              (cond
-                (:seon.schema/key program-row)
-                (schema/projection-with-schema
-                 projection
-                 (:seon.schema/key program-row)
-                 (edn/read-string (:seon.schema/form program-row))
-                 {:seon.schema.admission/source :agent})
-
-                (deleted-schema-key program-row)
-                (schema/projection-without-schema
-                 projection (deleted-schema-key program-row))
-
-                (:seon.fn/spec program-row)
-                (schema/projection-with-function-contract
-                 projection
-                 (:seon.fn/sym program-row)
-                 (edn/read-string (:seon.fn/spec program-row))
-                 {:seon.schema.admission/source :agent})
-
-                :else projection)
-              result
-              (install-row!
-               {:seon.sci.eval/ctx ctx
-                :seon.db/db db
-                :seon.program/row program-row
-                ::evaluated? true
-                ::prepared-projection next-projection})]
-          {:projection (or (:seon.schema/projection result) projection)
-           :installed (conj installed result)}))
-      {:projection (context-projection ctx)
-       :installed []}
-      installations))]
+    ;; THE COMMITTED VALUE'S PROJECTION: every schema and contract the
+    ;; settlement wrote, and every registration an earlier run committed. The
+    ;; context's own projection is stale for the latter, so a defn naming a
+    ;; schema registered in an earlier run refused out of the turn (reds
+    ;; group I); folding each row into it again also rebuilt the projection
+    ;; once per row. Derived once per committed value (memoized).
+    (let [projection (schema/projection-from-database db)
+          installed (mapv (fn [{program-row :seon.program/row}]
+                            (install-row!
+                             {:seon.sci.eval/ctx ctx
+                              :seon.db/db db
+                              :seon.program/row program-row
+                              ::evaluated? true
+                              ::prepared-projection projection}))
+                          installations)]
       (when-let [snapshot (::base-bindings agent-ctx)]
         (reset! snapshot (base-bindings ctx)))
       (when (and report written-on
