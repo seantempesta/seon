@@ -377,6 +377,19 @@
         (is (= {:seon.repl/columns [:sym] :seon.repl/rows [['x/f]]} (:seon.repl/value reply))
             "a render that is EDN is data")))))
 
+(deftest an-error-holding-a-host-object-is-a-map-not-a-string
+  ;; Root, 2026-09-28: an input refusal whose offending value held a channel
+  ;; came back as `:error "{…}"`, the whole map printed into one string,
+  ;; because `#object[…]` has no EDN reader. The printer's grammar is data.
+  (let [reply (one-map (repl/response
+                        {:seon.cluster.eval/source "(f {})"
+                         :seon.cluster.eval/error "refused"
+                         :seon.eval/shown (str "{:seon.error/message \"f refused argument 0\",\n"
+                                               " :seon.error/offending {:c #object[clojure.core.async.impl.channels.ManyToManyChannel 0x7c6ba730]}}")}))]
+    (is (map? (:seon.repl/error reply)))
+    (is (= "f refused argument 0" (get-in reply [:seon.repl/error :seon.error/message])))
+    (is (tagged-literal? (get-in reply [:seon.repl/error :seon.error/offending :c])))))
+
 (deftest a-reply-within-every-declared-bound-adds-nothing-and-an-exceeded-bound-is-a-findings-entry
   (let [emission {:seon.cluster.eval/source "(inc 1)"
                   :seon.repl/handle (admit/result-handle "e5885")

@@ -77,18 +77,27 @@
                                      database agent-id))))]
      (str "turns left: " remaining " of " maximum))))
 
+(defn- read-shown
+  "The one complete EDN value `shown` holds, else `shown` itself (prose, or
+  text followed by more text). A tag with no reader goes to `unknown-tag`
+  (`tagged-literal`), else the text is not read."
+  {:malli/schema [:=> [:cat :string [:maybe clojure.core/ifn?]] :seon.schema/value]}
+  [shown unknown-tag]
+  (try
+    (with-open [reader (java.io.PushbackReader. (java.io.StringReader. shown))]
+      (let [end (Object.)
+            options (cond-> {:eof end} unknown-tag (assoc :default unknown-tag))
+            value (edn/read options reader)]
+        (if (and (not (identical? end value))
+                 (identical? end (edn/read options reader)))
+          value shown)))
+    (catch Exception _ shown)))
+
 (defn shown-value
   "Read a complete shown EDN value; preserve terminal prose as its string."
   {:malli/schema [:=> [:cat :string] :seon.schema/value]}
   [shown]
-  (try
-    (with-open [reader (java.io.PushbackReader. (java.io.StringReader. shown))]
-      (let [end (Object.)
-            value (edn/read {:eof end} reader)]
-        (if (and (not (identical? end value))
-                 (identical? end (edn/read {:eof end} reader)))
-          value shown)))
-    (catch Exception _ shown)))
+  (read-shown shown nil))
 
 (defn source-text
   "Print a generated form with reader quotes and explicit keyword keys."
@@ -153,7 +162,9 @@
   string, so no comment ever lands inside the reply map."
   {:malli/schema [:=> [:cat :string] :string]}
   [text]
-  (if (or (string? (shown-value text))
+  ;; the printer's own grammar: a host object prints as `#object[…]`, data
+  ;; the reply embeds as it stands (read back as a tagged literal)
+  (if (or (string? (read-shown text tagged-literal))
           (some #(= "comment" (first %)) (syntax-tokens text)))
     (pr-str text)
     text))
