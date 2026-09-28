@@ -912,6 +912,34 @@
            (is (false? (db/read-evidence-current? @connection before))
                "the bound attribute must invalidate its evidence")))))))
 
+(deftest collection-pull-evidence-walks-each-selector-once
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           entities (vec (take 100 (sort (db/q '[:find [?e ...] :where [?e :seon.fn/sym]] database))))
+           query '[:find (pull ?e [:seon.fn/sym]) :in $ [?e ...] :where [?e :seon.fn/sym]]]
+       (is (= 100 (count entities)) "the canonical program supplies the growing input")
+       (doseq [n [1 10 100]]
+         (let [inputs (subvec entities 0 n)
+               captured (atom [])
+               [answer calls]
+               (test-support/armed-calls
+                '#{seon.db/pull-index-patterns}
+                #(binding [db/*read-evidence-sink* captured]
+                   (db/q query database inputs)))
+               patterns (set (mapcat :seon.db/read-index-patterns @captured))]
+           (is (= n (count answer)))
+           (is (= (set inputs) (set (map :seon.db/pattern-entity patterns))))
+           (is (= 1 (get calls 'seon.db/pull-index-patterns))
+               "one pull dependency walk regardless of collection input size")))
+       (let [[_ calls] (test-support/armed-calls
+                        '#{seon.db/pull-index-patterns}
+                        #(binding [db/*read-evidence-sink* nil]
+                           (doseq [n [1 10 100]]
+                             (db/pull-many database [:seon.fn/sym] (subvec entities 0 n)))))]
+         (is (zero? (get calls 'seon.db/pull-index-patterns))
+             "uncaptured pulls do no dependency walk"))))))
+
 (deftest durable-pull-digests-replay-without-retaining-read-results
   (test-support/with-database
    (fn [connection]

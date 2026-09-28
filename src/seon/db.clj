@@ -676,6 +676,7 @@
   Nested clauses bind against their enclosing positive patterns, including
   entities negation excludes. Datahike resolves those bindings; this walker
   never implements joins. Unsupported clauses keep general evidence."
+  {:malli/schema [:=> [:cat :map :int] [:maybe [:vector :map]]]}
   [request source-position]
   (let [parsed (query/memoized-parse-query (:query request))
         input-context (query/resolve-ins {:rels [] :consts {} :sources {} :rules {}}
@@ -692,16 +693,8 @@
                      (instance? Constant argument) [:bound (:value argument)]
                      (instance? Variable argument) (find bound (:symbol argument))))
         source-of (fn [clause inherited]
-                    (or (get-in clause [:source :symbol]) inherited))]
-    (let [groups
-          (mapv
-           (fn [bindings]
-            (letfn [(supported? [clause]
-              (or (instance? Pattern clause)
-                  (and (or (instance? Not clause) (instance? Or clause)
-                           (instance? And clause))
-                       (every? supported? (:clauses clause)))))
-            (resolve-bindings [clauses bound]
+                    (or (get-in clause [:source :symbol]) inherited))
+        resolve-bindings (fn [clauses bound]
               (let [variables (into [] (comp (map :symbol) (distinct))
                                     (parser.type/collect-vars clauses))
                     extra (apply dissoc bound
@@ -715,6 +708,33 @@
                                                (keys extra))
                                      :where (mapv parser.impl/get-source clauses)}
                                     :args (into (:args request) (vals extra))))))))
+        ;; The original collection arguments already select ALL matching rows.
+        ;; Resolve them once, then walk each distinct selector once, not once
+        ;; per input row followed by a quadratic distinct.
+        pull-groups
+        (delay
+          (let [pulls (filterv #(and (instance? Pull %)
+                                    (= source (source-of % '$)))
+                              (parser/find-elements (:qfind parsed)))
+                rows (when (seq pulls) (resolve-bindings (:qwhere parsed) {}))]
+            (for [element pulls
+                  [selector bindings] (group-by #(second (value-of % (:pattern element)))
+                                                input-bindings)
+                  :let [variable (get-in element [:variable :symbol])
+                        references (if (some #(contains? % variable) rows)
+                                     (mapv #(get % variable) rows)
+                                     (when (seq rows) (mapv #(get % variable) bindings)))]]
+              (when (sequential? selector)
+                (pull-index-patterns database [selector (vec (distinct references))]
+                                     :pull-many (pull-api/compile-pull-plan database selector))))))]
+    (let [groups
+          (mapv
+           (fn [bindings]
+            (letfn [(supported? [clause]
+              (or (instance? Pattern clause)
+                  (and (or (instance? Not clause) (instance? Or clause)
+                           (instance? And clause))
+                       (every? supported? (:clauses clause)))))
             (pattern [clause bound inherited]
               (when (= source (source-of clause inherited))
                 (let [[e a v] (:pattern clause)
@@ -765,30 +785,17 @@
                       @candidates)))
                  clauses)))]
       (when (every? supported? (:qwhere parsed))
-        (let [pulls (filterv #(and (instance? Pull %)
-                                  (= source (source-of % '$)))
-                            (parser/find-elements (:qfind parsed)))
-              pull-groups
-              (when (seq pulls)
-                (let [bound-entities (resolve-bindings (:qwhere parsed) bindings)]
-                  (for [element pulls
-                        :let [selector (second (value-of bindings (:pattern element)))]]
-                    (when (sequential? selector)
-                      (pull-index-patterns
-                       database [selector (mapv #(get % (get-in element [:variable :symbol]))
-                                                 bound-entities)]
-                       :pull-many (pull-api/compile-pull-plan database selector))))))]
-          (when-not (some nil? pull-groups)
-            (into [] (distinct)
-                  (concat (scope-patterns (:qwhere parsed) bindings '$)
-                          (mapcat identity pull-groups))))))))
+        (into [] (distinct)
+              (scope-patterns (:qwhere parsed) bindings '$)))))
            input-bindings)]
-      (when (every? some? groups)
-        (into [] (comp cat (distinct)) groups)))))
+      (when (and (every? some? groups) (not-any? nil? @pull-groups))
+        (into [] (comp cat (distinct)) (concat groups @pull-groups))))))
 
 (defn- pull-index-patterns
   "Bind finite explicit pull dependencies to their selected entities.
   General selectors retain their existing semantic read evidence."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.schema/value] :keyword :map]
+                  [:maybe [:vector :map]]]}
   [database arguments operation plan]
   (let [options (when (map? (first arguments)) (first arguments))
         references (if (= :pull operation)
@@ -889,7 +896,8 @@
                        :seon.schema/value [:or :nil :seon.db/pull-selector]]
                   :seon.schema/value]}
   [database arguments operation-key response result logical-selector]
-  (let [selector
+  (when *read-evidence-sink*
+   (let [selector
         (or logical-selector
             (pull-api/pull-plan-selector
              (:datahike.pull/plan response)))
@@ -909,7 +917,7 @@
       :seon.db/read-request {:seon.db/read-operation operation-key
                              :seon.db/pull-arguments replay-arguments}
       :seon.db/read-result result}
-       patterns (assoc :seon.db/read-index-patterns patterns)))))
+       patterns (assoc :seon.db/read-index-patterns patterns))))))
 
 ;;; The committed identity a retained read's revision is keyed on. Datahike
 ;;; derives its OWN query-cache key exactly this way
