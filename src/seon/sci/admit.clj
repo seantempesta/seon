@@ -86,13 +86,7 @@
   "Return canonical readable EDN independent of ambient print bindings."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The canonical EDN encoder accepts arbitrary Clojure data and represents unsupported host values through admission.", :gen/elements [nil false 0 "" :k [] {}]}]] :string]}
   [value]
-  (binding [*print-length* nil
-            *print-level* nil
-            *print-meta* false
-            *print-readably* true
-            *print-dup* false
-            *print-namespace-maps* true]
-    (pr-str value)))
+  (id/printed value))
 
 (defn- utf8-length
   "UTF-8 bytes of one string, without allocating the bytes to count them."

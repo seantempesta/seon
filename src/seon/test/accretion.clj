@@ -14,6 +14,7 @@
             [seon.effect :as effect]
             [seon.env :as env]
             [seon.error.refusal :as refusal]
+            [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.sci.kernel :as kernel]))
 
@@ -157,7 +158,7 @@
              :seon.test.accretion/actual actual
              :seon.test.accretion/expected (pr-str (m/form output-schema))
              :seon.test.accretion/pass? (and returned? (nil? explanation))}
-      explanation (assoc :seon.test.accretion/explanation (pr-str (me/humanize explanation))))))
+      explanation (assoc :seon.test.accretion/explanation (render.value/bounded-text (me/humanize explanation))))))
 
 (defn- supplied-registry
   "Generators for the supplied defaults this candidate's world holds.
@@ -438,6 +439,9 @@
     assoc :seon.error/declared-schema :seon.test.accretion/install-refused-error)))
 
 (defn- render-failure
+  "One failure's text: a test's expected and actual, or an auto-check's seed,
+  arguments and result, each value through the value printer."
+  {:malli/schema [:=> [:cat [:map [:seon.test.accretion/failure-source :seon.test.accretion/failure-source]]] :string]}
   [failure]
   (case (:seon.test.accretion/failure-source failure)
     :test
@@ -445,18 +449,17 @@
          (:seon.test.accretion/expected-actual failure))
 
     :auto-check
-    ;; generated arguments and a returned actual are arbitrary values: printed
-    ;; under Clojure's own depth and length bounds, never through a whole world
-    (binding [*print-level* 4 *print-length* 8]
+    ;; generated arguments and a returned actual are arbitrary values: shown
+    ;; through the value printer, never through a whole world
     (str "Auto-check seed " (:seon.test.accretion/seed failure)
-         "\narguments: " (pr-str (:seon.test.accretion/arguments failure))
+         "\narguments: " (render.value/bounded-text (:seon.test.accretion/arguments failure))
          "\nexpected: " (:seon.test.accretion/expected failure)
          "\nactual: " (let [actual (:seon.test.accretion/actual failure)]
                           (if (:seon.error/operation actual)
                             (str (:seon.error/operation actual) " — " (:seon.error/message actual))
-                            (pr-str actual)))
+                            (render.value/bounded-text actual)))
          (when-let [explanation (:seon.test.accretion/explanation failure)]
-           (str "\nwhy: " explanation))))))
+           (str "\nwhy: " explanation)))))
 
 (defn render-ai
   "Render the grouped teaching face of an install refusal."

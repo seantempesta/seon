@@ -27,7 +27,8 @@
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn])
   (:import (java.nio.charset StandardCharsets)
-           (java.util BitSet)))
+           (java.security MessageDigest)
+           (java.util BitSet HexFormat)))
 
 (defn var-reference?
   "True for a host or SCI Var reference."
@@ -433,7 +434,7 @@
                   (seq drift) (update :seon.test/error-count (fnil inc 0))
                   (seq drift) (update :seon.test/failure-message
                                       #(str (when % (str % "\n"))
-                                            "Worker-global state changed: " (pr-str drift)))))
+                                            "Worker-global state changed: " (value/bounded-text drift)))))
               results)))))
 
 (defn run-var!
@@ -932,6 +933,32 @@
         (recur)))
     (vec closures)))
 
+(defn- closure-digest
+  "SHA-256 hex of one test's closure, fed straight from its leaves: the test's
+  name, then one `name TAB leaf` line per reached name (`:seon.error/unknown`
+  without a node), a blank line, and one `key TAB leaf` line per reached
+  schema key (`nil` without a leaf). Names and keys hold no tab or newline and
+  leaves are hex digests, so the text is unambiguous; nothing is printed.
+
+  ## Costs
+
+  - All 2,387 tests on default, armed callers, 2026-09-28: 1.08 s and 1.24 GB
+    allocated, where `seon.id/digest` over the same closures printed about
+    600 MB of text in 16.7 s and allocated 18.3 GB."
+  {:malli/schema [:=> [:cat :seon.test/sym [:map-of :seon.schema/value [:maybe :map]] [:vector :seon.schema/value]
+                       [:map-of :seon.schema/value [:maybe :map]] [:vector :seon.schema/value]]
+                  [:string {:min 64 :max 64}]]}
+  [test-symbol nodes reached schemas reached-keys]
+  (let [digester (MessageDigest/getInstance "SHA-256")
+        put! (fn [x] (.update digester (.getBytes (str x) StandardCharsets/UTF_8)))
+        line! (fn [k leaf] (put! k) (.update digester (byte 9)) (put! (if (nil? leaf) "nil" leaf)) (.update digester (byte 10)))]
+    (put! test-symbol)
+    (.update digester (byte 10))
+    (doseq [n reached] (line! n (if-let [node (get nodes n)] (::leaf node) :seon.error/unknown)))
+    (.update digester (byte 10))
+    (doseq [k reached-keys] (line! k (::leaf (get schemas k))))
+    (.formatHex (HexFormat/of) (.digest digester))))
+
 (defn- reach-entry
   "One test's reach: the names its closure holds, the declarations there with
   no digest, and its digest over each name's leaf and the schema forms their
@@ -971,9 +998,7 @@
        (cache/lookup ::reach-digest
                      [test-symbol (fingerprint nodes reached) (fingerprint schemas reached-keys)]
                      (constantly 128)
-                     #(id/digest 64 [test-symbol
-                                     (mapv (fn [n] [n (if-let [node (get nodes n)] (::leaf node) :seon.error/unknown)]) reached)
-                                     (mapv (fn [k] [k (::leaf (get schemas k))]) reached-keys)])))}))
+                     #(closure-digest test-symbol nodes reached schemas reached-keys)))}))
 
 (defn- reach-entries
   "Each requested test's reach entry on this database value, committed or not.
@@ -987,8 +1012,9 @@
   tests reaching `seon.fn/gate-set` (3,568 names, 4,241 schema keys): 36 ms
   on a freshly committed head beside the 16 ms declaration read, 49 ms
   warm; 199 tests 120-180 ms; all 2,378 tests 951 ms when their digests are
-  cached. A digest miss costs about 5 ms a test, its print: the first
-  derivation of every test's digest in a JVM took 17 s."
+  cached. A digest miss costs about 0.45 ms a test ([[closure-digest]]):
+  every test's digest from scratch took 1.08 s on 2026-09-28, where
+  printing each closure through `seon.id/digest` took 16.7 s."
   {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]] :map]}
   [database test-symbols]
   (if (empty? test-symbols)
