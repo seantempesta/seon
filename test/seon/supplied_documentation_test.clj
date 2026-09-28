@@ -23,6 +23,13 @@
                    :seon.cluster.eval/ordinal 0
                    :seon.boot/cluster-name "supplied-docs")))))
 
+(defn- problem
+  "A refusal's first problem: where it is, what was given and the fix."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [refusal]
+  (select-keys (first (:seon.error/problems refusal))
+               [:seon.error/path :seon.error/actual-description :seon.error/fix]))
+
 (deftest docs-separate-runtime-keys-and-preserve-callable-examples
   (support/with-database
    (fn [connection]
@@ -59,8 +66,10 @@
            value (:seon.sci.admit/value result)]
        (is ((schema/projection-validator (schema/handed-projection)
                                          :seon.instrument/contract-error) value))
-       (is (str/includes? (:seon.error/message value)
-                          ":seon.db/connection is supplied by the runtime; do not pass it"))
+       (is (= {:seon.error/path [:seon.db/connection]
+               :seon.error/fix ":seon.db/connection is supplied by the runtime; do not pass it. Remove it from the request map."}
+              (select-keys (first (:seon.error/problems value)) [:seon.error/path :seon.error/fix]))
+           "the refusal's fix tells the agent to omit the supplied key")
        (is (empty? (db/q '[:find ?m :where [?m :seon.message/id]] @connection)))))))
 
 (deftest lookup-ref-refusal-names-the-actual-and-accepted-shapes
@@ -72,15 +81,18 @@
            value (:seon.sci.admit/value result)]
        (is ((schema/projection-validator (schema/handed-projection)
                                          :seon.instrument/contract-error) value))
-       (is (str/includes? (:seon.error/message value) "got a lookup-ref vector"))
-       (is (str/includes? (:seon.error/message value) "Pass the string id"))
-       (is (str/includes? (:seon.error/message value) ":my.message/about"))
+       (is (= {:seon.error/path [:my.message/about]
+               :seon.error/actual-description "a lookup-ref vector"
+               :seon.error/fix "Pass the string id (the second element of the lookup-ref vector) at [:my.message/about]."}
+              (problem value))
+           "a string-keyed lookup ref names its shape and the id to pass")
        (let [numeric (evaluate ctx connection
-                               "(my.message/send {:my.message/to \"root\" :my.message/content \"Hello\" :my.message/about [:seon.message/id 42]})")
-             message (get-in numeric [:seon.sci.admit/value :seon.error/message])]
-         (is (str/includes? message "got a lookup-ref vector"))
-         (is (str/includes? message "Pass a string id"))
-         (is (not (str/includes? message "second element"))))
+                               "(my.message/send {:my.message/to \"root\" :my.message/content \"Hello\" :my.message/about [:seon.message/id 42]})")]
+         (is (= {:seon.error/path [:my.message/about]
+                 :seon.error/actual-description "a lookup-ref vector"
+                 :seon.error/fix "Pass a string id at [:my.message/about]."}
+                (problem (:seon.sci.admit/value numeric)))
+             "a lookup ref without a string id asks for one, not for its second element"))
        (is (empty? (db/q '[:find ?m :where [?m :seon.message/id]] @connection)))))))
 
 (deftest missing-runtime-key-is-a-runtime-fault
