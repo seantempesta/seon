@@ -195,6 +195,49 @@ Root's focused tests:
 
 Foreign boundary and installation limits remain as above.
 
+## Publication keys: derive only missed file content
+
+`derivation-keys` retains the schema dependency world by its actual forms,
+dependencies and row shapes, then caches each file key by analyzer identity,
+kondo inputs, file content, that world and the file's schema roots. Schema
+closure and selected form digests are shared separately by world and roots.
+The stored key format is unchanged. A warm request over F files still makes
+O(F) lookups, but rehashes and walks closures only for missed content; one
+changed file no longer rehashes F files. A changed schema population causes
+a conservative recheck; irrelevant schemas still leave the stored keys equal.
+`stored-derivation-schema-keys` still discovers/parses stored inputs across
+the program: this slice does not make the whole publication O(delta).
+
+MCP scratch `scratch.astra.publication`, actual stored paths, 3,732 projection
+schemas. Warm 1/10/100 file populations: 2.444→0.156, 6.793→0.250,
+50.811→0.703 ms. Exact key maps equal, including separate probes changing
+one file's input at each size. Memory was not measured. The world cache
+conservatively charges 4,096 estimated bytes per schema. Reproduction:
+`tmp/astra-algorithmic-fixes-20260928/publication-probe.clj`.
+
+Final archive `712eb81a5` plus publication source/test: lint 0 errors, 1,725
+warnings, 6.850 s; contracts 498 files, same 10 foreign script findings,
+zero source/test findings, 4.501 s. No test request started.
+`bin/seon drill --with src/seon/cluster.clj test/seon/cluster_test.clj` passed:
+candidate `34771ce010d1f0d970f4e9e734dad5c38801d5c1`, base ready 213.586 s,
+move ready 87.301 s, candidate ready 220.480 s, total 646.182 s. Its passing
+root and JVMs were removed by the drill. This is the explicitly authorized
+expensive drill. Source/test delta: +61/−8 lines.
+
+Root's focused tests:
+
+- `seon.cluster-test/publication-derives-only-the-changed-files-key`
+  (new, one changed file causes at most one key derivation among 1/10/100).
+- `seon.cluster-test/a-derivation-key-follows-what-its-file-derivation-reads`
+- `seon.cluster-test/the-analyzer-digest-follows-the-analyzing-declarations-only`
+- `seon.fn.publication-cache-test/lint-direct-callers-after-committed-declaration-changes`
+
+Foreign boundary remains the one-path lane and script contracts above.
+Latest health read: default pid 32304, start 2026-09-28T15:03:45Z, still
+11 open faults, 184 failed tests and 54 unknown failed-test observations.
+This lane did not replace default. Drill proof and scratch equality do not
+claim root's installed regression round has passed.
+
 ## Arity gate: reuse Datahike's exact attribute revisions
 
 `arity-base` now first looks up the base with the raw database's connection,

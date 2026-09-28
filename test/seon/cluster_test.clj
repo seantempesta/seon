@@ -9,6 +9,7 @@
             [seon.db :as db]
             [seon.error :as error]
             [seon.fault :as fault]
+            [seon.id :as id]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.test-support :as test-support]))
@@ -424,6 +425,34 @@
       (is (not= (get before "src/b.clj") (get after "src/b.clj"))))
     (is (every? #(not= (get before %) (get (keys-of (apply str (repeat 64 "b")) projection inputs) %)) paths)
         "other deriving code re-derives every file")))
+
+(deftest publication-derives-only-the-changed-files-key
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           projection (db/carried-projection database)
+           inputs (into {} (db/q '[:find ?path ?digest
+                                   :where [?file :seon.fn.file/relative-path ?path]
+                                          [?file :seon.fn.file/digest ?digest]] database))
+           paths (vec (take 100 (sort (filter #(and (str/starts-with? % "src/")
+                                                   (str/ends-with? % ".clj")) (keys inputs)))))
+           schema-keys (#'cluster/stored-derivation-schema-keys
+                        database (set (keys (:seon.schema.projection/forms projection))))
+           code (id/digest 64 [::key-probe])]
+       (is (= 100 (count paths)))
+       (doseq [n [1 10 100]]
+         (let [selected (set (take n paths))
+               changed (first paths)
+               before (#'cluster/derivation-keys code projection inputs schema-keys selected)
+               [after calls]
+               (test-support/armed-calls
+                '#{seon.cluster/file-derivation-key}
+                #(#'cluster/derivation-keys code projection
+                   (assoc inputs changed (id/digest 64 [::changed n])) schema-keys selected))]
+           (is (= (dissoc before changed) (dissoc after changed)))
+           (is (not= (get before changed) (get after changed)))
+           (is (<= (get calls 'seon.cluster/file-derivation-key) 1)
+               "one changed file does not rehash every unchanged file")))))))
 
 (deftest the-analyzer-digest-follows-the-analyzing-declarations-only
   ;; A file's derivation key (`derivation-keys`) names the deriving code's

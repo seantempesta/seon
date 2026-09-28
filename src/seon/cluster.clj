@@ -2047,6 +2047,14 @@
      (concat (map (fn [[path keyword]] {:seon.fn/file [:seon.fn.file/relative-path path] :seon.fn/keywords [keyword]}) held)
              (map (fn [[path spec]] {:seon.fn/file [:seon.fn.file/relative-path path] :seon.fn/spec spec}) specs)))))
 
+(defn- file-derivation-key
+  "Hash one file's already selected derivation inputs, only on a content miss."
+  {:malli/schema [:=> [:cat :seon.source/analyzer-digest [:vector :seon.schema/value]
+                       [:maybe :seon.source/digest] [:map-of :keyword :seon.source/digest]]
+                  :seon.source/digest]}
+  [code kondo input form-digests]
+  (id/digest 64 [code kondo input form-digests]))
+
 (defn- derivation-keys
   "Each derivation input's key, stored as `:seon.fn.file/derivation-digest`:
   its bytes, the identity of the code deriving it (`selected-analyzer-digest`),
@@ -2080,16 +2088,32 @@
                         (recur (pop pending) reached)
                         (recur (into (pop pending) (get dependencies k)) (conj reached k)))
                       reached)))
-        shapes (closure (into #{} (filter #(contains? forms %))
-                              (tree-seq coll? seq (program/shapes-in projection))))
-        closures (into {} (map (fn [path] [path (into shapes (closure (get schema-keys path #{})))])) paths)
-        form-digests (into {} (map (fn [k] [k (id/digest 64 [(get forms k)])]))
-                           (reduce into #{} (vals closures)))
+        row-shapes (program/shapes-in projection)
+        world (cache/lookup
+               ::derivation-world [forms dependencies row-shapes]
+               (constantly (* 4096 (count forms)))
+               #(hash-map ::key (id/digest 64 [forms dependencies row-shapes])
+                          ::shapes (closure (into #{} (filter (partial contains? forms))
+                                                (tree-seq coll? seq row-shapes)))))
         kondo [(get (source/loaded-dependencies) "reference-code/clj-kondo")
                (into (sorted-map) (filter #(str/starts-with? (key %) ".clj-kondo/")) inputs)]]
-    (into {} (map (fn [path]
-                    [path (id/digest 64 [code kondo (get inputs path)
-                                         (into (sorted-map) (map (fn [k] [k (get form-digests k)])) (get closures path))])]))
+    (into {}
+          (map (fn [path]
+                 (let [start (get schema-keys path #{})
+                       input (get inputs path)]
+                   [path
+                    (cache/lookup
+                     ::file-derivation-key [code kondo input (::key world) start]
+                     (constantly (+ 512 (* 64 (count start))))
+                     #(file-derivation-key
+                       code kondo input
+                       (cache/lookup
+                        ::derivation-forms [(::key world) start]
+                        (fn [held] (* 256 (count held)))
+                        (fn []
+                          (into (sorted-map)
+                                (map (fn [k] [k (id/digest 64 [(get forms k)])]))
+                                (into (::shapes world) (closure start)))))))])))
           paths)))
 
 
