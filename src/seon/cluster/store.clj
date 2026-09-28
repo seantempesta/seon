@@ -156,7 +156,7 @@
   "The creation configuration for a cluster store.
   `:file` backend at the CANONICAL path of `store-dir` (the store id
   derives from the path, so every spelling of one physical directory
-  must be the ONE store), fused persistent-set roots with a 32-entry
+  must be the ONE store) with LZ4-compressed values, fused persistent-set roots with a 32-entry
   diff buffer and a measured 128-way branching factor, retained history by
   the settled default policy, and
   write-time schema flexibility. Fusion and index settings are
@@ -185,7 +185,14 @@
               ; names them, so konserve may make them durable at the head's
               ; barrier: two drive flushes per commit instead of one pair per
               ; key on macOS (docs/research/agent-platform/commit-floor-2026-09-26.md).
-              :config {:defer-immutable-sync? true}}
+              ;
+              ; LZ4 halves the bytes a small commit writes (146 -> 72 KB,
+              ; disk 197 -> 132 KB at 4 KiB blocks, +1 ms per commit, cold
+              ; scans unchanged; tmp/store-writes/lz4_proof.clj). Konserve
+              ; records the compressor in each file's header, so files
+              ; written before it stay readable: not a creation setting.
+              :config {:defer-immutable-sync? true
+                       :compressor {:type :lz4}}}
       :writer {:backend :self}
       :keep-history? keep-history?
       :fuse-index-roots? true
