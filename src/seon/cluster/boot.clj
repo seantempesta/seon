@@ -335,37 +335,30 @@
                             :seon.error/data (assoc evidence :thread thread-name)}
                            [throwable]))
 
+(defn- handed-off-context
+  "The fault context a foreign-thread hand-off names: its boundary, this
+  process, and the environment's agent when it carries one."
+  {:malli/schema [:=> [:cat :seon.env/environment :qualified-symbol] :seon.fault/context]}
+  [environment operation]
+  (cond-> {:seon.error/layer ::foreign-thread
+           :seon.error/operation operation
+           :seon.db.process/id (process/id (process/current-identity))}
+    (:seon.agent/id environment) (assoc :seon.agent/id (:seon.agent/id environment))))
+
 (defn record-uncaught!
-  "Store one exception no thread caught through the cluster fault recorder.
+  "Hand one exception no thread caught to its cluster's work launcher, which
+  records it (`seon.flow/hand-off-fault!`); the dying thread never writes.
 
   The world is the environment the throwable carries, never a guess: without
   one no cluster is chosen (a probe's throwable is not the sole instance's
-  fault). That failure, and a recording the database refuses, are printed on
-  stderr with every cause; a stored fault is delivered through its record."
+  fault), and the failure is printed on stderr with every cause, as is one
+  the launcher does not admit or cannot store."
   {:malli/schema [:=> [:cat :string :seon.error/throwable] :nil]}
   [thread-name throwable]
-  (let [instances (vec (vals @running-instances))
-        environment (carried-environment throwable)]
-    (if-not environment
-      (uncaught-emergency! thread-name throwable
-                           {:candidates (mapv #(get-in % [:seon.boot/config :seon.boot/cluster-name]) instances)})
-      (let [{connection :seon.db/connection cluster-name :seon.boot/cluster-name
-             caps :seon.sci.admit/caps agent-id :seon.agent/id} environment
-            [fact outcome]
-            (fault/record!
-             connection cluster-name (cluster/process-identity (process/current-identity)) caps
-             {:seon.error/source (cond-> {:clojure.core.async.flow/ex throwable}
-                                   agent-id (assoc :seon.agent/id agent-id))
-              :seon.error/declared-schema
-              (or (:seon.error/declared-schema (meta (ex-data throwable)))
-                  :seon.flow/exception-error)})]
-        (when (not= ::flow/committed outcome)
-          (uncaught-emergency! thread-name throwable
-                               {:cluster cluster-name
-                                :signature (:seon.error/signature fact)
-                                :outcome (if (instance? Throwable outcome)
-                                           (render.value/floor outcome)
-                                           outcome)})))))
+  (if-let [environment (carried-environment throwable)]
+    (flow/hand-off-fault! environment throwable (handed-off-context environment `record-uncaught!))
+    (uncaught-emergency! thread-name throwable
+                         {:candidates (vec (keys @running-instances))}))
   nil)
 
 (defn- install-uncaught-handler!
@@ -398,9 +391,10 @@
 
 (defn memory-pressure-crossed!
   "Close new arms once per crossing, naming each running cluster's open runs,
-  and store it as one core fault on every running cluster. Called on the JVM's
-  notification thread (`kernel/watch-memory!`), so it prints what it cannot
-  store and never throws."
+  and hand it as one core fault to every running cluster's work launcher
+  (`seon.flow/hand-off-fault!`). Called on the JVM's notification thread
+  (`kernel/watch-memory!`), which only closes arms and submits: it never
+  writes, prints what it cannot hand off and never throws."
   {:malli/schema [:=> [:cat] :nil]}
   []
   (try
@@ -410,11 +404,8 @@
         (let [refusal (kernel/memory-pressure-error pressure)
               failure (ex-info (:seon.error/message refusal) refusal)]
           (binding [*out* *err*] (println "SEON MEMORY PRESSURE:" (render.value/bounded-text (:seon.error/message refusal))) (flush))
-          (doseq [{connection :seon.db/connection cluster-name :seon.boot/cluster-name
-                   caps :seon.sci.admit/caps} worlds]
-            (fault/record! connection cluster-name (cluster/process-identity (process/current-identity)) caps
-                           {:seon.error/source {:clojure.core.async.flow/ex failure}
-                            :seon.error/declared-schema :seon.flow/exception-error})))))
+          (doseq [world worlds]
+            (flow/hand-off-fault! world failure (handed-off-context world `memory-pressure-crossed!))))))
     (catch Throwable failure
       (uncaught-emergency! "memory-pressure" failure {:operation `memory-pressure-crossed!})))
   nil)

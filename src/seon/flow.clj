@@ -798,3 +798,63 @@
           :seon.error/data {::launcher-stopped ::work-launcher}}}
           (env/of submission)))
         false))))
+
+(defn- fault-handed-off!
+  "`hand-off-fault!`'s work, on the launcher's io task in the cluster's
+  world: record the fault; a recording that fails prints both throwables
+  whole, as the foreign thread did inline before, so one unstorable fault
+  never stops the launcher's other work."
+  {:malli/schema [:=> [:cat :seon.env/environment :seon.error/throwable :seon.fault/context] :nil]}
+  [environment failure context]
+  (try
+    (fault/fault! environment failure context)
+    (catch Throwable panic
+      (fault/print-unrecorded! {:seon.error/message (ex-message panic)
+                                :seon.error/operation (:seon.error/operation context)
+                                :seon.fault/recorded (:seon.fault/recorded (ex-data panic))}
+                               [panic failure])))
+  nil)
+
+(defn hand-off-fault!
+  "Hand one fault raised on a FOREIGN thread (Datahike's listener
+  notification, the JVM's memory notification thread, a dying thread's
+  uncaught handler) to its cluster's work launcher, which records it with
+  `seon.fault/fault!` in that cluster's world; the calling thread only
+  submits, never writes. Answers whether the launcher admitted it.
+
+  The launcher is the cluster's `:io` Flow graph: bounded admission, the
+  cluster world bound on the task, a throwing task recorded as a proc fault,
+  and a drain awaited at cluster stop. There is no cluster-less environment
+  (`:seon.boot/cluster-name` is required), so a process-wide faults graph
+  would have no world of its own to record its own failures in.
+
+  ## Edge cases
+
+  - An environment with no work launcher (a boot that has not reached the
+    graph layer) and a refused admission (queue full, launcher stopping)
+    print the fault whole on stderr: nothing is silent.
+
+  ## Costs
+
+  - Armed, default 2026-09-28, 1,000 calls: the calling thread returns in
+    21 µs median, 93 µs p99 (one `submit!`); the write runs on a launcher
+    virtual thread."
+  {:malli/schema [:=> [:cat :seon.env/environment :seon.error/throwable :seon.fault/context] :boolean]}
+  [environment failure context]
+  (let [unrecorded! (fn [reason]
+                      (fault/print-unrecorded! {:seon.error/message "SEON CORE FAULT (not handed off)"
+                                                :seon.error/operation (:seon.error/operation context)
+                                                :seon.error/data reason}
+                                               [failure]))]
+    (if-let [launcher (:seon.flow/work-launcher environment)]
+      (submit! launcher
+               {:seon.env/environment environment
+                ::submission-id (random-uuid)
+                ::workload :io
+                ::work-fn (fn [_] (fault-handed-off! environment failure context))
+                ::complete! (fn [{::keys [value]}]
+                              ;; admitted work settles with nil; a refusal settles with its error
+                              (when (:seon.error/at value) (unrecorded! value))
+                              nil)})
+      (do (unrecorded! {::missing :seon.flow/work-launcher})
+          false))))
