@@ -2287,3 +2287,23 @@
            "the writer refuses the definition another writer changed since the basis")
        (is (= [[:seon.fn/sym 'user/stale-f]] (get-in entries [0 :seon.batch/facts-error :seon.error/offending]))
            "revalidation gives the form that proposed it the refusal as its facts error")))))
+
+(deftest removing-a-namespace-no-declaration-names-retracts-nothing
+  ;; Model proof: `my.program/remove-ns!` of an empty namespace SCI held but
+  ;; never recorded answered nil from `removal-facts`, refusing its
+  ;; transaction-data contract and recording a fault for a removal that
+  ;; needs no retraction.
+  (support/with-database
+   (fn [connection]
+     (let [basis (db/db connection)
+           request (turn.batch/code-request
+                    {:seon.batch/world (world/agent-world {:seon.db/connection connection :seon.cluster/name "default"
+                                                           :seon.sci.eval/base-ctx (sci.eval/base-ctx basis)}
+                                                          {:seon.agent/id "empty-removal"})
+                     :seon.turn.batch/row-tx @#'turn/row-tx
+                     :seon.batch/start-ns 'user
+                     :seon.batch/text "nil"})
+           facts (turn.batch/form-facts request basis {:seon.batch/entities [] :seon.batch/schema-keys #{}
+                                                       :seon.batch/removals ['never.recorded-namespace]
+                                                       :seon.batch/namespaces #{'never.held-namespace}})]
+       (is (= [] facts) "an unrecorded namespace's removal is an empty transaction, not a refusal")))))
