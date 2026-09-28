@@ -1,7 +1,7 @@
 ---
 type: plan
 date: 2026-09-28
-status: draft; research 2 of 4 in (substrate, flow-render); entities and loop pending
+status: draft; research 3 of 4 in (substrate, flow-render, entities); loop pending
 evidence: tmp/health-research/{substrate,flow-render,entities,loop}.md
 ---
 
@@ -27,9 +27,9 @@ once and never stored.
   those entities, it is the finding.
 - **Timings everywhere.** Every armed function is timed; the uncontracted ones are timed but unvalidated. Functions
   without contracts are themselves a health finding (the coverage hole list).
-- **Tests are reproductions.** A test body runs through the one path, so a violation or slow call inside it is
-  recorded with the test; the test is the failing proof handed to the fixing agent. (Pending: whether deftest Vars
-  themselves are armed — entities research.)
+- **Tests are reproductions.** A test body runs through the one path, so the functions it calls are armed; deftest
+  Vars themselves are not (0 of 264), and nothing records the test with a violation today (§3 change 3 fixes that).
+  The test is then the failing proof handed to the fixing agent.
 - **Operator phases become measured entities too** (boot layers, adoption, publication, drill steps), with the inputs
   they are proportional to (files, changed files, cache hits). Pending: loop research.
 
@@ -57,7 +57,9 @@ happens anyway costs ~0 bytes (+240 B) and +2–4 ms per 100 upserts.
 6. **Work outside evaluations** (procs, boot, JVM-mode calls) stays in memory and is read on demand; it publishes on
    the next commit that touches it, or one snapshot blob at shutdown (owner question 1).
 7. **Transaction metadata carries the rest** that a commit observed: violations (fn, schema, path, value blob, caller,
-   test/evaluation refs) and errors, on the transaction that happened anyway.
+   test/evaluation refs) and errors, on the transaction that happened anyway. The seam exists: 089ac703a stamps every
+   write with process, operation and agent (`src/seon/db.clj:3523`, astra fixer's transaction provenance; not yet in
+   the live store). Today only 37 of the latest 3000 transactions carry any metadata.
 8. **Test member run times** go into the test batch's one commit (today computed, `src/seon/test.clj:2013-2016`, never
    stored).
 
@@ -65,8 +67,44 @@ Never: a commit of its own, per event or per timer.
 
 ## 3. Per-entity health model
 
-Pending entities research: for each kind, the facts its health predicate reads, what joins today (error → fn/schema/
-test refs vs names), and the smallest producer change to record the link.
+**Today no error is linked by ref to the function, schema or test that caused it** (entities research, live default):
+- Every error carries two competing cause symbols: `:seon.error/operation` (a value) and `:seon.instrument/fn` (a
+  name), which disagree on 41 of 47 errors; `:seon.instrument/fn` often names the recorder (`seon.turn.world/
+  record-fault`), and fault resolution keys on it (`src/seon/error.clj:1156`). No error records a definition digest.
+- Declared links are unwritten: `error/agent`, `run`, `issue`, `regressions`, `cause` empty on 47 of 47;
+  `occurrence/turn`, `evaluation`, `proc-fn`, `effect`, `related` empty on 87 of 87; issue → error 0 of 463.
+- **Contract violations lose their detail when stored.** At the throw the refusal holds function, check, arity, schema
+  key, Malli path, argument, offending value and caller (as a `"ns (file:line)"` string); stored: nothing (MCP JVM
+  mode), a message string (agent evaluation), a printed string (test body, 579 distinct), or a printed schema with
+  path, value, caller and digest dropped (core fault). Violations joined by ref to fn + schema + test: 0.
+- **Tests:** deftest Vars are not armed (0 of 264); `:seon.test/reach` empty on 2383 of 2383; nothing records what a
+  test executed (only a static-closure digest); `seon.test.failure` has 0 entities (delete).
+- **Contracts:** 2816 of 5798 first-party functions contracted; 2570 non-macro, non-constant ones have none; contract
+  status stored nowhere, computed in four places; 1572 stored lint findings read by no surface.
+- **Performance joins cleanly:** 2551 of 2555 profile cells match a stored `[sym definition-digest]` — in memory only.
+  `seon.db/q` is one cell (53,453 calls, 93.5 s total, max 5.5 s); the normalized query form Datahike already
+  memoizes (`src/seon/db.clj:2776`) is a ready query identity.
+
+**Blame follows the producer (root's proposal).** An input violation means the *caller* produced the bad value: the
+cause is the calling definition (or, when the caller is an agent's own form, the agent's mistake, delivered to it and
+not counted against the function). An output violation means the function itself is wrong: the cause is the function
+at its digest. This is AGENTS.md "fix the producer" applied to attribution, and it answers "which symbol is the cause".
+
+**The finding value** (one per problem): kind (violation, slow, error, missing contract, red test), cause
+`[sym digest]` + ref, schema key + Malli path, offending-value blob, caller chain (from the code graph), world (agent,
+branch, evaluation or test member), the reproduction (the test member, else the evaluation's form), and counts.
+
+**Producer changes, smallest first:**
+1. One cause per occurrence: `[sym digest]` plus a ref, chosen by the blame rule; stop writing the recorder into
+   `:seon.instrument/fn`; resolution keys on a new digest *whose proof passes*, not on any digest change.
+2. `boundary-refusal` (`src/seon/instrument.clj:665`) carries the refusing definition's digest and a structured caller.
+3. Each entrant stores that refusal as data on its existing transaction instead of printing it; a test member records
+   member → violation and the `[sym digest]` it executed (the per-world sink already has it), so the test is the
+   reproduction.
+4. Write the declared refs (turn, evaluation, proc-fn) and delete the ones nothing will write.
+5. A query-identity profile cell for `seon.db/q`, keyed by the memoized normalized form, digested only when stored or shown.
+6. One open-fault relation becomes the only source; the other four fault lists, the dead "failed runs" family and the
+   second status namespace go.
 
 ## 4. Execution and presentation: no new proc, lazy, cached, never blocking
 
@@ -109,3 +147,6 @@ root merges → the task closes when the measurement proves it.
 3. Make the 300 KB commit record a task now?
 4. Per-query counters keyed by query form in bounded memory, or per-function time only?
 5. Should heap, ping and cache readings refresh on an idle cluster, or only on commit or reconnect?
+6. The blame rule in §3 (input violation → caller; output violation → the function; an agent's own form → the agent):
+   agree?
+7. A fault on an agent branch: ref the branch's function entity (same digest joins the cluster's when unchanged)?
