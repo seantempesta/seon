@@ -2939,8 +2939,9 @@
                 (source-files directory roots))
         prior-projection (when database (db/carried-projection database))
         projection (analysis-projection request prior-projection (some-> selected set))
-        cache-root (or (::analyzer/cache-root request)
-                       analyzer/cache-directory)
+        cache-root (analyzer/analysis-cache-root
+                    (map #(fs/absolute-path directory %) (or selected roots))
+                    (::analyzer/cache-root request))
         ;; Only the names the selected files declared: the namespaces whose
         ;; resolver entries are superseded and the definitions a removal
         ;; guard compares, never the files' whole entities.
@@ -2955,7 +2956,8 @@
         _ (when (map? previous)
             (throw (ex-info (:seon.error/message previous) previous)))
         previous-names (fn [attribute] (into #{} (keep (fn [[a v]] (when (= attribute a) v))) previous))
-        _ (analyzer/forget-namespaces! cache-root (previous-names :seon.ns/name))
+        _ (when cache-root
+            (analyzer/forget-namespaces! cache-root (previous-names :seon.ns/name)))
         artifacts (analyzed-artifacts projection roots directory
                      (mapv #(.getCanonicalPath ^java.io.File %) files) database cache-root captured)
         removed (set/difference (previous-names :seon.fn/sym)
