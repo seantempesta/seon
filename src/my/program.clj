@@ -248,10 +248,11 @@
                    (when (= subject renderer)
                      {:seon.schema/key schema-key :seon.schema/property property}))
                  (let [result (db/q database
-                                '[:find ?key ?renderer :in $ ?property :where
-                                  [?schema :seon.schema/key ?key]
-                                  [?schema ?property ?renderer]]
-                                property)]
+                                '[:find ?key ?renderer :in $ ?property ?renderer :where
+                                  [?function :seon.fn/sym ?renderer]
+                                  [?schema ?property ?function]
+                                  [?schema :seon.schema/key ?key]]
+                                property subject)]
  (if (:seon.db/invalid-read result)
 
  (throw (ex-info (:seon.error/message result) result)) result)))))

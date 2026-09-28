@@ -2899,25 +2899,26 @@
          (is (false? (db/read-evidence-current? @connection evidence))
              "a changed datom on the page makes it stale"))))))
 
-(defn- declare-entity!
-  {:malli/schema [:=> [:cat :seon.db/connection :qualified-keyword] :map]}
-  [connection schema-key]
-  (test-support/transacted!
-   connection
-   [[:db.fn/call #'turn/row-tx {}
-     {:seon.schema/key schema-key :seon.schema/form (pr-str [:map])}]]))
-
-(deftest a-declaration-write-parses-only-the-declarations-it-wrote
+(deftest removing-a-renderer-refuses-by-the-declarations-it-breaks
+  ;; CLASS: a schema's render face is a ref to its function; retracting the
+  ;; function sweeps every such ref (datahike/db/transaction.cljc:1003-1014),
+  ;; so the writer reads only the rows the report touched, never the whole
+  ;; schema population, and refuses by name while a schema still declares it.
   (test-support/with-database
    (fn [connection]
-     (let [render-check @#'seon.db/write-render-target-error
-           rendered (atom [])]
-       (with-redefs [seon.db/write-render-target-error
-                     (fn ([database] (swap! rendered conj :all) (render-check database))
-                         ([database declarations] (swap! rendered conj (count declarations))
-                          (render-check database declarations)))]
-         (declare-entity! connection ::rendered))
-       (is (= [1] @rendered) "the render gate reads the one written declaration")))))
+     (let [database (db/db connection)
+           renderer (:e (first (d/datoms database :avet :seon.fn/sym 'seon.error/render-ai)))
+           users (count (d/datoms database :avet :seon.render/ai renderer))
+           refused (db/transact! connection [[:db/retractEntity renderer]])
+           declarations (get-in refused [:seon.error/data :seon.render/declarations])]
+       (is (< 1 users) "errors derived from :seon.error/base store the inherited face")
+       (is (:seon.db/transaction-refused refused))
+       (is (some #{{:seon.schema/key :seon.error/base
+                    :seon.render/property :seon.render/ai
+                    :seon.render/function 'seon.error/render-ai}}
+                 declarations))
+       (is (= renderer (:e (first (d/datoms (db/db connection) :avet :seon.fn/sym 'seon.error/render-ai))))
+           "refused, nothing was removed")))))
 
 (deftest a-report-touching-no-function-reuses-the-committed-arity-comparison
   ;; The arity gate compares only call edges and bounds under a caller or

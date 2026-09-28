@@ -177,13 +177,13 @@
                        (support/fork-cluster-ctx connection))
            entry {:seon.repl/comment "; think"
                   :seon.repl/form '(help)}]
-       (is (valid? projection :seon.render/form '(help)))
-       (is (valid? projection :seon.render/form entry))
-       (is (valid? projection :seon.render/form
+       (is (valid? projection :seon.render/read-form '(help)))
+       (is (valid? projection :seon.render/read-form entry))
+       (is (valid? projection :seon.render/read-form
                    [entry {:seon.repl/form '(dir 'my.turn)}]))
-       (is (not (valid? projection :seon.render/form
+       (is (not (valid? projection :seon.render/read-form
                         {:seon.repl/comment "; no act"})))
        ;; A refusal is its producer's declared return, never a form.
-       (is (not (valid? projection :seon.render/form
+       (is (not (valid? projection :seon.render/read-form
                    {:seon.error/at (java.util.Date. 0) :seon.error/layer :seon.render.history-test/fixture :seon.error/operation 'seon.render.history-test/form-output-validation-is-the-declared-open-shape :seon.render/refused-member :seon.render/output
                     :seon.error/message "failed"})))))))

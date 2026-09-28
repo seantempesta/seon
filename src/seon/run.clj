@@ -63,7 +63,7 @@
   generated opening cannot silently retain a hand-copied demonstration after
   its recurring anti-rot gate disappears."
   {:malli/schema
-   [:=> [:cat :my.turn/usage-unit] :seon.render/form]}
+   [:=> [:cat :my.turn/usage-unit] :seon.render/read-form]}
   [unit]
   (let [database (:seon.db/db unit)
         usage-test
