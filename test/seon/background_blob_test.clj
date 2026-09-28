@@ -111,13 +111,14 @@
                      :seon.config.flow.io/queue-depth 2
                      :seon.config.flow.io/concurrency 2)})
             context
-            {:seon.env/environment @test-environment
+            ;; the request's world holds this scenario's launcher, where the
+            ;; background work runs
+            {:seon.env/environment (assoc @test-environment :seon.flow/work-launcher launcher)
              :seon.db/connection connection
              :seon.agent/id "binary-agent"
              :seon.turn/id "binary-run"
              :seon.cluster.eval/ordinal 0
              :seon.boot/cluster-name "default"
-             :seon.flow/work-launcher launcher
              :seon.sci.admit/caps (config/result-caps config/defaults)
              :seon.sci.eval/ctx (:seon.sci.eval/ctx (support/execution-handle connection))
              :seon.effect/counter (atom -1)}]

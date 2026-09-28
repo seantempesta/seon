@@ -897,28 +897,39 @@
                              settlement-request
                              (background-settlement-request
                               requesting-context effect-id owner-sym opened-at
-                              threshold refusal-validators)]
-                         (flow/submit!
-                          (:seon.flow/work-launcher (env/of *request-context*))
-                          {:seon.env/environment
-                           (env/refuse-incomplete-environment!
-                            (env/scope
-                             (:seon.env/environment *request-context*)
-                             {:seon.sci.kernel/arm detached}))
-                           ::flow/submission-id effect-id
-                           ::flow/workload :io
-                           ::flow/work-fn
-                           (fn [_]
-                             (with-request-context
-                               requesting-context
-                               #(handler
-                                 (:seon.sci.admit/value projected-request)
-                                 effective)))
-                           ::flow/complete!
-                           (fn [terminal]
-                             (kernel/release-arm! detached)
-                             (settle-background-terminal!
-                              settlement-request terminal))})
+                              threshold refusal-validators)
+                             ;; one world: the launcher and the submission's
+                             ;; environment are the request world's
+                             world (env/of *request-context*)
+                             launcher (:seon.flow/work-launcher world)
+                             complete! (fn [terminal]
+                                         (kernel/release-arm! detached)
+                                         (settle-background-terminal!
+                                          settlement-request terminal))]
+                         (if launcher
+                           (flow/submit!
+                            launcher
+                            {:seon.env/environment
+                             (env/refuse-incomplete-environment!
+                              (env/scope world {:seon.sci.kernel/arm detached}))
+                             ::flow/submission-id effect-id
+                             ::flow/workload :io
+                             ::flow/work-fn
+                             (fn [_]
+                               (with-request-context
+                                 requesting-context
+                                 #(handler
+                                   (:seon.sci.admit/value projected-request)
+                                   effective)))
+                             ::flow/complete! complete!})
+                           ;; the opened receipt settles with the refusal
+                           (complete!
+                            {::flow/value
+                             (seon.error.refusal/diagnostic (Date.) :seon.effect/execution 'seon.effect/request*
+                              {:seon.error/message "A background call runs on its cluster's work launcher; this request's world holds none. Evaluate it inside a turn or a context acquired from a running cluster."
+                               :seon.error/member :seon.flow/work-launcher
+                               :seon.error/expected "a request world holding its cluster's work launcher"
+                               :seon.effect/id effect-id})}))
                          result-ref)
                        (let [outcome
                              (try
