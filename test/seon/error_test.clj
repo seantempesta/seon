@@ -1104,17 +1104,14 @@
                                                :seon.db/component-schema :seon.error.location/entity} :seon.db/ref]
                      ::manifest-observation [:and {:seon.db/component true
                                                    :seon.db/component-schema :seon.agent/error} :seon.db/ref]
-                     ::manifest-explanations [:and {:seon.db/component true
-                                                    :seon.db/component-schema :seon.instrument.explanations/entity} :seon.db/ref]
                      ::manifest-root [:map {:seon.db/attributes true :seon.program/partition :seon.data}
                                       [::manifest-id ::manifest-id]
                                       [::manifest-location ::manifest-location]
-                                      [::manifest-observation {:optional true} ::manifest-observation]
-                                      [::manifest-explanations {:optional true} ::manifest-explanations]])
+                                      [::manifest-observation {:optional true} ::manifest-observation]])
         projection (schema/build-projection forms)]
     (test-support/with-database
      {::test-support/extra-schema
-      (schema.datahike/malli->datahike-schema-in projection [::manifest-id ::manifest-location ::manifest-observation ::manifest-explanations])}
+      (schema.datahike/malli->datahike-schema-in projection [::manifest-id ::manifest-location ::manifest-observation])}
      (fn [connection]
        (db/carry-connection-projection-state!
         connection (sci.eval/projection-state (db/db connection) projection))
@@ -1125,8 +1122,7 @@
         (test-support/schema-entities
          (db/db connection)
          (mapv #(vector % (get forms %))
-               [::manifest-id ::manifest-location ::manifest-observation
-                ::manifest-explanations ::manifest-root])))
+               [::manifest-id ::manifest-location ::manifest-observation ::manifest-root])))
        (test-support/transacted! connection [{::manifest-id "root-path"
                                               ::manifest-location {:seon.error.location/length 0}}])
        (test-support/transacted!
@@ -1154,35 +1150,24 @@
                       :seon.error.location.segment/key
                       {:seon.error.key/projection (str n) :seon.error.key/scalar n
                        :seon.error.key/capped? false :seon.error.key/bound-bytes 256}}))}
-             explanations
-             {:seon.instrument.explanations/count 2
-              :seon.instrument.explanations/items
-              (set (for [n (range 2)]
-                     {:seon.instrument.explanation/ordinal n
-                      :seon.instrument.explanation/schema-location {:seon.error.location/length 0}
-                      :seon.instrument.explanation/value-location {:seon.error.location/length 0}
-                      :seon.instrument.explanation/expected-shape (apply str (repeat 64 "0"))
-                      :seon.instrument.explanation/humanized {:seon.instrument.humanized/message-count 0}}))}
              report (test-support/transacted!
                      connection [{::manifest-id "large-path" ::manifest-location large-location
-                                  ::manifest-observation observation ::manifest-explanations explanations}
+                                  ::manifest-observation observation}
                                  {::manifest-id "another-observation"
                                   ::manifest-location {:seon.error.location/length 0}
                                   ::manifest-observation observation}])
              database (db/db connection)
              root (:db/id (db/pull database [:db/id] [::manifest-id "large-path"]))
              location (:v (first (db/datoms database :eavt root ::manifest-location)))
-             problems (:v (first (db/datoms database :eavt root ::manifest-explanations)))
              ; This observation is non-unique and unindexed; AEVT contains every attribute datom.
              observations (filter #(= "same-observed-agent" (:v %))
                                   (db/datoms database :aevt :seon.agent/error-agent-id))]
          (is (= 1001 (count (db/datoms database :eavt location :seon.error.location/segments))))
-         (is (= 2 (count (db/datoms database :eavt problems :seon.instrument.explanations/items))))
          (is (= 2 (count (set (map :e observations)))) "Observed identity tokens cannot upsert two errors together.")
          (is (seq (:tx-data report)))
          (println "ERROR-MANIFEST stored-large-value"
                   {:entities (count (set (map :e (:tx-data report)))) :datoms (count (:tx-data report))
-                   :segments 1001 :problems 2 :observations (count observations)}))
+                   :segments 1001 :observations (count observations)}))
        (let [database (db/db connection)
              root (:db/id (db/pull database [:db/id] [::manifest-id "missing-key"]))
              location (:v (first (db/datoms database :eavt root ::manifest-location)))

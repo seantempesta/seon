@@ -10,12 +10,6 @@
              :intent "When an armed refusal's data exceeds the admission bound (a 7,872-byte :over-bound remainder), the wrapper answers only 'X :malli.core/invalid-input: the refusal could not be built.' (instrument.clj:633), with no path, expected schema or offending shape. That is how call-reach's set-for-sequential defect showed at HEAD. The refusal must name the member and path and let the floor bound the offending value."
              :must-read #{seon.instrument/compiled-wrapper}
              :evidence #{"docs/research/agent-platform/landing/task-log-2026-09-26.md"}}
- #:seon.task{:id "d7b76a5a0481"
-             :name "explanation-schemas-have-no-producer"
-             :kind :schema
-             :intent "resources/seon/schemas/seon.instrument.explanation(s).edn and the :seon.instrument/explanations attribute have no producer since e604ee179; their generators (error.clj:2216-2427) and error_test.clj:1035-1107 only serve them. Retire them after an incremental schema-retraction proof on a branch."
-             :must-read #{seon.error/reply-value}
-             :evidence #{"docs/research/agent-platform/landing/error-text-2026-09-26.md"}}
  #:seon.task{:id "f985bfc97116"
              :name "instrumentation-is-jvm-global"
              :kind :namespace

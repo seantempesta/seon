@@ -127,15 +127,6 @@
  :seon.instrument/declared-arity-count
  [:int {:min 1}]
 
-
-
-
- :seon.instrument/explanations
- [:and
- {:seon.db/component true,
-  :seon.db/component-schema :seon.instrument.explanations/entity}
- :seon.db/ref]
-
  :seon.instrument/refusal-result
  [:or
  :seon.instrument/contract-error

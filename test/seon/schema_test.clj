@@ -1399,8 +1399,7 @@
                                            (seon.schema.internal/extends-schema? (mr/schema (:seon.schema.projection/registry projection) k) :seon.error/base)) k)))
                         forms)
            declarations
-           (loop [pending (seq (conj declared-schemas :seon.failure/entity
-                                      :seon.error.disposition/observation)) seen #{}]
+           (loop [pending (seq (conj declared-schemas :seon.failure/entity)) seen #{}]
              (if-let [k (first pending)]
                (if (seen k) (recur (next pending) seen)
                    (let [members (map first (seon.schema.internal/entity-entries (mr/schema (:seon.schema.projection/registry projection) k)))

@@ -8,10 +8,7 @@
   [:seon.error.location/length :seon.error.location/length]
   [:seon.error.location/segments
    {:optional true}
-   :seon.error.location/segments]
-  [:seon.error.location/omission
-   {:optional true}
-   :seon.error.location/omission]]
+   :seon.error.location/segments]]
  [:fn
   {:error/message "ordered-location?",
    :gen/gen seon.error/ordered-location-generator}
@@ -19,12 +16,6 @@
 
  :seon.error.location/length
  [:int {:min 0}]
-
- :seon.error.location/omission
- [:and
- {:seon.db/component true,
-  :seon.db/component-schema :seon.error.omission/entity}
- :seon.db/ref]
 
  :seon.error.location/segments
  [:set
