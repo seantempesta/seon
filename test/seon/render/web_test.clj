@@ -94,16 +94,19 @@
 (defn dom
   "The served HTML as its document: a page test asserts on the element and
   attribute its behavior is about, never on the bytes around them."
+  {:malli/schema [:=> [:cat :string] :seon.schema/value]}
   [^String html]
   (Jsoup/parse html))
 
 (defn element
   "The first element `css` selects in `html`, or nil."
+  {:malli/schema [:=> [:cat :string :string] :seon.schema/value]}
   ^Element [html css]
   (.selectFirst (dom html) ^String css))
 
 (defn texts
   "The text of every element `css` selects in `html`."
+  {:malli/schema [:=> [:cat :string :string] [:vector :string]]}
   [html css]
   (mapv #(.text ^Element %) (.select (dom html) ^String css)))
 
@@ -111,6 +114,7 @@
   "The elements a response delivered as one document: every
   `datastar-patch-elements` payload in order, or the page itself when the
   response is a document rather than a feed."
+  {:malli/schema [:=> [:cat :string] :seon.schema/value]}
   [body]
   (let [payloads (keep #(when (str/starts-with? % "data: elements ") (subs % 15))
                        (str/split-lines body))]
@@ -118,12 +122,14 @@
 
 (defn shows?
   "Whether the painted elements show `text`: what a reader sees, not markup."
+  {:malli/schema [:=> [:cat :string :string] :boolean]}
   [sse text]
   (str/includes? (.text (painted sse)) text))
 
 (defn stream-strip
   "The last painted stream strip as data: nil when none was painted, {} when
   empty, else its live reply text and token count."
+  {:malli/schema [:=> [:cat :string] :seon.schema/value]}
   [sse]
   (when-let [strip (last (.select (painted sse) "#surface-stream"))]
     (if-let [reply (.selectFirst strip ".seon-stream-reply")]
@@ -133,6 +139,7 @@
 
 (defn href
   "A link as data: its path and its decoded query parameters."
+  {:malli/schema [:=> [:cat :string] [:map [:path :string] [:query [:map-of :string :string]]]]}
   [link]
   (let [uri (URI. link)]
     {:path (.getPath uri)
@@ -142,6 +149,7 @@
 
 (defn data-links
   "Every `/data` link in the page's data panel, as data."
+  {:malli/schema [:=> [:cat :string] [:vector :seon.schema/value]]}
   [html]
   (->> (.select (dom html) ".seon-data-panel a[href^=/data]")
        (mapv #(href (.attr ^Element % "href")))))
@@ -149,6 +157,7 @@
 (defn labelled
   "The debug header's fields as data: each `<span>label</span><code>value</code>`
   pair, label to shown value."
+  {:malli/schema [:=> [:cat :string] [:map-of :string :string]]}
   [html]
   (into {}
         (keep (fn [^Element span]
@@ -1185,6 +1194,7 @@ handle))}}
 (defn- disclosure
   "A read-dependency disclosure as data: its summary line, its basis line and
   the evidence values it shows (each `[:pre (pr-str value)]` read back)."
+  {:malli/schema [:=> [:cat :seon.schema/value] [:map [:summary :string] [:basis :seon.schema/value] [:evidence [:vector :seon.schema/value]] [:notes [:vector :string]]]]}
   [rendered]
   (let [shown (fn [tag] (->> (support/hiccup-elements rendered) (filter #(= tag (first %)))))]
     {:summary (apply str (support/hiccup-leaves (first (shown :summary))))

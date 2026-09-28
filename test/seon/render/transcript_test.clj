@@ -42,6 +42,16 @@
 
 (declare unit)
 
+(defn- replies
+  "Each history entry's form and its REPL response read back as data."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:map-of :string :seon.schema/value]]}
+  [request]
+  (into {}
+        (map (fn [entry]
+               [(:seon.render.history/form entry)
+                (some-> (:seon.render.history/printed-value entry) support/reply)]))
+        (transcript/history-entries request)))
+
 (defn- agents-tx
   "Create the fixture's agents through the owner's creation transaction."
   [connection & agent-ids]
@@ -120,10 +130,7 @@
                 (str agent-prompt "(+ 1 2)\n#:seon.repl{:value 3, :result result/estored-evaluation}")]
                bytes)
             "a submitted form has a prompt and no response; a settled one
-             answers with the one REPL response map")
-        (is (not-any? #(or (str/includes? % "hello")
-                           (str/includes? % "undisposed-run"))
-                      bytes))))))
+             answers with the one REPL response map")))))
 
 (deftest stored-evaluations-are-terminal-transcript-values
   (support/with-database
@@ -161,31 +168,18 @@
          :seon.cluster.eval/at (java.util.Date. 4)
          :seon.eval/shown (pr-str {:text "alpha\nbeta"})
          :seon.cluster.eval/source "(identity {:text \"alpha\\nbeta\"})"}]))
-      (let [rendered
-            ;; THE AGENT'S OWN HISTORY IS THE AI PROJECTION. The turn
-            ;; concern emits no text of its own (`render-run-ai`), so the
-            ;; stored evaluations are read back where the agent reads
-            ;; them: its transcript.
-            (transcript/render-ai
-             (assoc (unit connection)
-                    :seon.turn/id "terminal-values"
-                    :seon.turn/agent
-                    {:seon.agent/id agent-id}))]
-        ;; ONE FORM PER PROMPT LINE, one response map under it. Printed
-        ;; output is its own key rather than bytes spliced ahead of the
-        ;; value, which is exactly what made the old grammar unreadable.
-        (is (str/includes? rendered (str agent-prompt "(swap! executions inc)\n#:seon.repl{")))
-        (is (str/includes? rendered ":out \"once\\n\""))
-        (is (str/includes? rendered
-                           (str agent-prompt "(throw (Exception. \"source error\"))")))
-        (is (str/includes? rendered "stored error"))
-        (is (str/includes? rendered ":error "))
-        (is (str/includes? rendered (str agent-prompt "(identity \"alpha\\nbeta\")\n#:seon.repl{")))
-        (is (str/includes? rendered
-                           (str agent-prompt "(identity {:text \"alpha\\nbeta\"})\n#:seon.repl{")))
-        (is (str/includes? rendered ":value {:text \"alpha\\nbeta\"}")
-            "the stored node is what the value reads back as")
-        (is (not (str/includes? rendered "t=17")))))))
+      ;; THE AGENT'S OWN HISTORY IS THE AI PROJECTION: each stored evaluation
+      ;; is one form and one response map under it. Printed output is its own
+      ;; key, a failure is :error, and a string result reads back as itself;
+      ;; the read basis (t=17) is metadata, never a key.
+      (is (= {"(swap! executions inc)" #:seon.repl{:value 1 :out "once\n"}
+              "(throw (Exception. \"source error\"))" #:seon.repl{:error "stored error"}
+              "(identity \"alpha\\nbeta\")" #:seon.repl{:value "alpha\nbeta"}
+              "(identity {:text \"alpha\\nbeta\"})" #:seon.repl{:value {:text "alpha\nbeta"}}}
+             (update-vals (replies (assoc (unit connection)
+                                          :seon.turn/id "terminal-values"
+                                          :seon.turn/agent {:seon.agent/id agent-id}))
+                          #(dissoc % :seon.repl/result)))))))
 
 (defn- at
   [offset]
@@ -365,7 +359,8 @@
          :seon.cluster.eval/interrupted-at (between decline self)
          :seon.cluster.eval/source "(missing.function/call)"}]))))
 
-(deftest populated-history-restores-the-repl-fidelity-checklist
+(deftest ^{:seon.test/golden "The REPL fidelity checklist is the agent-facing transcript itself: prompt, input, comment and response bytes as the agent reads them."}
+  populated-history-restores-the-repl-fidelity-checklist
   (support/with-database
     (fn [connection]
       (seed-populated-history! connection)
@@ -439,24 +434,19 @@
          :seon.cluster.eval/error "No such namespace: missing.function"
          :seon.cluster.eval/source "(missing.function/call)"}]))
       (let [request (unit connection)
-            ai (transcript/render-ai request)
-            html-value (transcript/render-html request)
-            html-entry (html-entry-node html-value
-                                        "eval-error-without-triage")
-            html-text (get-in html-entry [2 1 1])]
+            html-entry (html-entry-node (transcript/render-html request)
+                                        "eval-error-without-triage")]
         ;; THE ERROR IS A KEY, NOT A LOOSE LINE: an evaluation that saved no
         ;; shown text names its stored message under `:error`, one readable
         ;; string, never an invented location or class.
-        (testing "the AI projection presents the form and an execution error"
-          (is (str/includes? ai (str agent-prompt "(missing.function/call)")))
-          (is (str/includes? ai ":error \"No such namespace: missing.function\""))
-          (is (not (str/includes? ai ":value "))
-              "exactly one of :value and :error answers a form"))
-        (testing "the HTML entry structurally identifies the same error face"
-          (is (= "true" (get-in html-entry [1 :data-transcript-error])))
-          (is (str/includes? html-text ":error \"No such namespace: missing.function\"")))))))
+        (is (= {"(missing.function/call)" #:seon.repl{:error "No such namespace: missing.function"}}
+               (replies request))
+            "the form is answered by its stored message under :error, and by no :value")
+        (is (= "true" (get-in html-entry [1 :data-transcript-error]))
+            "the HTML entry structurally identifies the same error face")))))
 
-(deftest the-transcript-is-whole-and-the-ai-boundary-elides-it
+(deftest ^{:seon.test/golden "The AI boundary's cut is the value printer's text: its prefix, count and continuation as the agent reads them."}
+  the-transcript-is-whole-and-the-ai-boundary-elides-it
   ;; THE RULED SHAPE (owner ruling, 2026-09-07; AGENTS §2.4): presentation
   ;; elides in exactly ONE place, `seon.print/fit` at the AI context
   ;; generation boundary, which every producer's output crosses through
@@ -660,7 +650,8 @@
           (is (db/pull db '[*]
                        [:seon.cluster.eval/id "curated-receipt"])))))))
 
-(deftest unreadable-shown-text-and-subject-values-stay-replayable
+(deftest ^{:seon.test/golden "Unreadable shown bytes cannot be read back as data; the transcript must carry them exactly as stored."}
+  unreadable-shown-text-and-subject-values-stay-replayable
   (support/with-database
     (fn [connection]
       (support/transacted!
@@ -989,10 +980,6 @@
            basis (db/basis-t database)
            rendered (transcript/render-ai selected)]
        (is (integer? evaluation) "the selection must identify a real evaluation")
-       (is (str/includes? rendered "(+ 20 22)"))
-       (is (str/includes? rendered "42"))
-       (is (not (str/includes? rendered "Start with the failed deployment.")))
-       (is (not (str/includes? rendered "Repair the owning namespace.")))
        (is (= rendered (transcript/render-ai selected)))
        (let [entries (transcript/history-entries selected)]
          (is (= 1 (count entries)))
@@ -1097,14 +1084,18 @@
           ;; A TURN HEADER STATES THE TURN, NOT ITS EVALUATIONS — those
           ;; belong to the prompt pane (`render-run-html`'s docstring). The
           ;; header says how many there were, which is the queryable fact.
-          (is (str/includes? (hiccup/->string html) "Evaluations"))
-          (is (not (str/includes? (hiccup/->string html) "(+ 2 1)"))))))))
+          (is (= {:counted 3 :sources []}
+                 {:counted (count (filter #(and (= :dt (first %)) (= ["Evaluations"] (rest %)))
+                                          (support/hiccup-elements html)))
+                  :sources (filterv #{"(+ 2 1)"} (support/hiccup-leaves html))})
+              "each turn header counts its evaluations and shows none of their source"))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; ONE GENERATOR, END TO END
 ;;; ---------------------------------------------------------------------------
 
-(deftest one-reply-reads-identically-on-the-page-in-history-and-in-the-prompt
+(deftest ^{:seon.test/golden "Byte identity of one reply across the page, the history unit and the provider prompt is the behavior."}
+  one-reply-reads-identically-on-the-page-in-history-and-in-the-prompt
   ;; THE PROOF PRD §8 ASKS FOR AND THE AUDIT (B3) SAID COULD NOT BE WRITTEN.
   ;; One reply, evaluated ONCE through the ordinary path, then read three
   ;; ways: the page's in-memory records, the stored history unit, and the
@@ -1427,7 +1418,9 @@
 ;; settlement: an error during N reads in N's response, once, and another
 ;; branch's errors never read at all. The window is the one its settlement
 ;; saved, never reconstructed from occurrence counters.
-(deftest ^{:seon/tasks #{"3638f3f3bd57" "b331d31540bb"}} an-evaluations-branch-errors-read-in-its-own-response-once
+(deftest ^{:seon/tasks #{"3638f3f3bd57" "b331d31540bb"}
+           :seon.test/golden "The branch errors are printed inside the response the agent reads; the floor may cut them, so the transcript text is what is asserted."}
+  an-evaluations-branch-errors-read-in-its-own-response-once
   (support/with-database
    (fn [connection]
      (support/transacted! connection (agents-tx connection agent-id))

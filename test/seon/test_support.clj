@@ -611,11 +611,13 @@
 (defn hiccup-elements
   "Every element of a hiccup value, depth first: a test asserts on the node its
   behavior is about, never on the serialized page."
+  {:malli/schema [:=> [:cat :seon.schema/value] [:sequential :seon.schema/value]]}
   [hiccup]
   (filter #(and (vector? %) (keyword? (first %))) (tree-seq sequential? seq hiccup)))
 
 (defn hiccup-leaves
   "The leaves a hiccup value shows (strings, symbols, numbers), attributes skipped."
+  {:malli/schema [:=> [:cat :seon.schema/value] [:sequential :seon.schema/value]]}
   [hiccup]
   (cond (and (vector? hiccup) (keyword? (first hiccup))) (mapcat hiccup-leaves (remove map? (rest hiccup)))
         (sequential? hiccup) (mapcat hiccup-leaves hiccup)
@@ -624,8 +626,19 @@
 
 (defn hiccup-classes
   "The class of every element of a hiccup value."
+  {:malli/schema [:=> [:cat :seon.schema/value] [:set :seon.schema/value]]}
   [hiccup]
   (set (keep #(:class (second %)) (hiccup-elements hiccup))))
+
+(defn reply
+  "One `#:seon.repl{…}` response read back as the data it is. A tagged literal
+  the reader cannot construct (an `#object`) stays data too, as its tag and
+  form, so a test asserts on the reply's keys rather than on its bytes."
+  {:malli/schema [:=> [:cat :string] :seon.schema/value]}
+  [text]
+  (binding [*read-eval* false
+            *default-data-reader-fn* (fn [tag form] {::tag tag ::form form})]
+    (read-string text)))
 
 (defn refusal-data
   "Return a flat error value, deepest thrown ex-data, or `committed`."
