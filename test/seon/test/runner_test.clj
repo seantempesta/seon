@@ -11,8 +11,7 @@
             [seon.schema :as schema]
             [seon.test.runner :as runner]
             [seon.test-runner-failure-fixture]
-            [seon.test-support :as test-support]
-            [seon.print.value]))
+            [seon.test-support :as test-support]))
 
 (deftest assertion-report-uses-bounded-value-renderer
   (let [ctx (sci/init {:namespaces
@@ -82,8 +81,8 @@
         errored (report! {:type :error :var var :expected nil
                           :actual (ex-info "refused" {:seon.error/offending huge})})
         stored (:seon.test.failure/reports (first (#'runner/captured-results @capture)))]
-    (is (< (count failed) 20000) (str "the red report printed " (count failed) " chars"))
-    (is (< (count errored) 20000) (str "the error report printed " (count errored) " chars"))
+    (is (< (count failed) 20000) "the red report printout stays bounded")
+    (is (< (count errored) 20000) "the error report printout stays bounded")
     (is (re-find #"…\+?\d+" failed) "the cut names what was omitted")
     (is (= huge (:seon.test.failure/message (first stored)))
         "the stored failure keeps the whole message for the blob tier")))
@@ -168,7 +167,7 @@
                                        (when-let [s (:seon.test/sym entity)]
                                          [s entity])))
                             entities)]
-        (is (= 2 (count by-symbol)) (seon.print.value/bounded-text (keys by-symbol)))
+        (is (= 2 (count by-symbol)))
         (is (= {:seon.test/long namespace-reason :seon.test/long-ms 600000}
                (select-keys (get by-symbol (symbol (str namespace-name) "inherits"))
                             [:seon.test/long :seon.test/long-ms]))
@@ -211,7 +210,7 @@
   (doseq [namespace-name '[seon.test-runner-failure-fixture my.examples-fixture]]
     (require namespace-name)
     (let [reason (:seon.test/fixture (meta (find-ns namespace-name)))]
-      (is (string? reason) (str namespace-name " declares no :seon.test/fixture reason"))
+      (is (string? reason) "declares no :seon.test/fixture reason")
       (is (not (str/blank? reason))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -265,7 +264,7 @@
           (let [report (runner/restore-live-cluster-schema! before)
                 entity (first report)
                 forms (:seon.schema.projection/forms (:seon.schema/projection @state))]
-            (is (= 1 (count report)) (seon.print.value/bounded-text report))
+            (is (= 1 (count report)))
             (is (= "restore-probe" (:seon.cluster/name entity)))
             (is (not (contains? forms retracted))
                 "the declaration its own writer retracted STAYS retracted")
@@ -297,7 +296,7 @@
                assoc leaked [:string {:seon.db/identity true}])
         (let [report (runner/restore-live-cluster-schema! before)
               entity (first report)]
-          (is (= 1 (count report)) (seon.print.value/bounded-text report))
+          (is (= 1 (count report)))
           (is (= [(str leaked)] (:seon.test.runner/drift-added entity))
               "the leaked key is named, not merely counted")
           (is (nil? (:seon.test.runner/committed-removed entity)))

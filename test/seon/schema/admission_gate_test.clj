@@ -6,8 +6,7 @@
             [seon.schema :as schema]
             [seon.schema.admission :as admission]
             [seon.schema.datahike :as schema.datahike]
-            [seon.schema.edn :as schema.edn]
-            [seon.print.value]))
+            [seon.schema.edn :as schema.edn]))
 
 (defn- findings-of-type
   [finding-type findings]
@@ -41,9 +40,7 @@
         offenders (into [] (concat declaration-offenders
                                    admission-offenders))]
     (is (empty? offenders)
-        (str "ruling #48 requires open map declarations and authored "
-             "contract admission paths; remove " closed-property " from "
-             (seon.print.value/bounded-text offenders)))))
+        "ruling #48 requires open map declarations and authored contract admission paths; remove from")))
 
 (deftest malformed-inputs-name-the-reader-or-malli-finding
   (testing "non-EDN-readable source retains the reader location"
@@ -223,8 +220,8 @@
           [source case-name
            (register-verdict projection source schema-key form)
            (hook-verdict projection source schema-key form)])]
-    (doseq [[source case-name registered hooked] verdicts]
-      (is (= registered hooked) (seon.print.value/bounded-text [source case-name])))
+    (doseq [[_source _case-name registered hooked] verdicts]
+      (is (= registered hooked)))
     (testing "an undefined slot is admitted from every source"
       (is (= #{:admitted}
              (set (for [[_ case-name registered hooked] verdicts
@@ -258,19 +255,18 @@
           advice #(findings-of-type :schema-polymorphism (admit %))
           contract [:=> [:cat :any] :int]]
       (is (empty? (filter #(= :error (:level %)) (admit contract)))
-          (str source " function contract with a bare :any is admitted"))
+          "function contract with a bare :any is admitted")
       (is (= [[:warning [0 0]]] (mapv (juxt :level :seon.schema/path) (advice contract)))
-          (str source " with one advisory naming the slot"))
+          "with one advisory naming the slot")
       (is (= 1 (count (advice [:map [:undefined-slot.fixture/a :any]
-                               [:undefined-slot.fixture/b :some]])))
-          (str source " once per declaration"))
+                               [:undefined-slot.fixture/b :some]]))))
       (is (empty? (advice
                    [:any {:seon.schema.admission/exemption
                           :seon.schema.admission/polymorphic-boundary
                           :seon.schema.admission/reason "External value has no stable predicate."
                           :gen/schema :string}]))
-          (str source " the recorded exemption, reason and generator silence it"))
-      (is (empty? (advice [:string {:min 1}])) (str source " a defined slot needs nothing"))))
+          "the recorded exemption, reason and generator silence it")
+      (is (empty? (advice [:string {:min 1}])) "a defined slot needs nothing")))
   (testing "a stored attribute schema :any is refused: it needs a storable type"
     (let [projection (schema/declaration-projection
                       (assoc (schema.edn/packaged-forms)

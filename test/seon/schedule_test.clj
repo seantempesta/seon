@@ -15,8 +15,7 @@
             [seon.schema :as schema]
             [seon.cluster.wake :as wake]
             [seon.turn :as turn]
-            [seon.test-support :as test-support]
-            [seon.print.value])
+            [seon.test-support :as test-support])
   (:import [java.time Instant]
            [java.util Date]))
 
@@ -51,7 +50,7 @@
            expected (into #{} (map (juxt :seon.schedule.task/id :seon.fn/sym
                                           :seon.schedule/expression :seon.schedule/zone-id))
                           declarations)]
-       (is (seq (:tx-data result)) (seon.print.value/bounded-text result))
+       (is (seq (:tx-data result)))
        (is (seq expected))
        (is (= expected (set entities)))
        (is (every? #(not= "* * * * *" (nth % 2)) entities))
@@ -146,7 +145,7 @@
        :seon.schedule.task/function [:seon.fn/sym handler]
        :seon.schedule.task/schedule
        [:seon.schedule/id (str task-id "/schedule")]}]))]
-    (is (seq (:tx-data result)) (seon.print.value/bounded-text result))
+    (is (seq (:tx-data result)))
     result))
 
 (defn- count-with
@@ -213,9 +212,10 @@
                                 [function-name contract]))
                             (ns-publics 'seon.schedule))]
         (is (seq contracts) "the contract census must not pass an absent subject")
-        (doseq [[function-name contract] contracts]
-          (is (some? (m/function-schema contract options))
-              (str "invalid contract on seon.schedule/" function-name)))))))
+        (is (= [] (vec (for [[function-name contract] contracts
+                             :when (nil? (m/function-schema contract options))]
+                         function-name)))
+            "every seon.schedule contract is a function schema")))))
 
 (deftest nominal-instants-obey-gap-and-overlap-rules
   (testing "a nonexistent spring-forward minute is skipped"

@@ -50,7 +50,7 @@
         "the member's only turn is its attempt's")
     (doseq [attribute [:seon.error/id :seon.message/about]]
       (is (empty? (db/datoms world :aevt attribute))
-          (str "the member inherits no " attribute " entities")))
+          "the member inherits no entities"))
     (is (< 100 (count program-attributes)) "the program partition is derived from entity schemas")
     (is (= (digests live) (digests world))
         "the member's program is its cluster's: the published commit plus the differing entities")

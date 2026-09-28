@@ -3,8 +3,7 @@
             [clojure.string :as str]
             [seon.config :as config]
             [seon.db :as db]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (deftest ^{:seon.test/long "Canonical fixture acquisition, one refused config write, then declaration and config writes; measured 13.05 s. The symbol query itself is 4.70 ms; writer-wide work remains a measured defect."
            :seon.test/long-ms 20000}
@@ -26,7 +25,7 @@
         connection
         [(support/program-fn-entity (db/db connection) function "(defn config-supplier [] {})")])
        (let [result (config/apply-compiled! connection compiled)]
-         (is (nil? (:seon.error/at result)) (seon.print.value/bounded-text result))
+         (is (nil? (:seon.error/at result)))
          (is (= function
                 (:seon.config.web/search-result-projection
                  (db/pull (db/db connection) [:seon.config.web/search-result-projection]

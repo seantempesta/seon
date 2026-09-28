@@ -6,8 +6,7 @@
             [seon.schema :as schema]
             [seon.test :as sut]
             [seon.test-resolution-fixture]
-            [seon.test-support :as test-support]
-            [seon.print.value]))
+            [seon.test-support :as test-support]))
 
 (deftest a-registered-but-absent-test-namespace-resolves-and-runs
   (test-support/with-database
@@ -24,7 +23,7 @@
        (remove-ns 'seon.test-resolution-fixture)
        (is (contains? @@#'clojure.core/*loaded-libs* 'seon.test-resolution-fixture))
        (let [resolved (sut/resolve-test request)]
-         (is (var? resolved) (seon.print.value/bounded-text resolved))
+         (is (var? resolved))
          (is (some? (find-ns 'seon.test-resolution-fixture)) "resolution loaded the absent namespace")
          (when (var? resolved)
            (is (true? ((:test (meta resolved)))) "the resolved test body runs; its last `is` returns true")))))))

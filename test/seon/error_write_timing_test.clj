@@ -1,8 +1,7 @@
 (ns seon.error-write-timing-test
   (:require [clojure.test :refer [deftest is]]
             [seon.db :as db]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (deftest program-call-changes-still-enter-final-arity-validation
   (support/with-database
@@ -46,10 +45,10 @@
                    [[:db/add issue :seon.issue/created-by worker]]]]
          (let [before (db/basis-t (db/db connection))
                refusal (write worker tx)]
-           (is (re-find #"Started issue tests" (:seon.error/message refusal "")) (seon.print.value/bounded-text refusal))
+           (is (re-find #"Started issue tests" (:seon.error/message refusal "")))
            ;; A returned write refusal, never an unknown outcome.
-           (is (:seon.db/transaction-refused refusal) (seon.print.value/bounded-text refusal))
-           (is (not (:seon.db/transaction-outcome-unknown refusal)) (seon.print.value/bounded-text refusal))
+           (is (:seon.db/transaction-refused refusal))
+           (is (not (:seon.db/transaction-outcome-unknown refusal)))
            (is (= before (db/basis-t (db/db connection))))))
        (is (:db-after (write creator [[:db/retract issue :seon.issue/agent worker]])))
        (is (nil? (:db-after (write worker [[:db/retract issue :seon.issue/tests a]]))))

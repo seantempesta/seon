@@ -1,8 +1,7 @@
 (ns seon.dev.docstring-test
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [seon.dev.docstring :as d]
-            [seon.print.value]))
+            [seon.dev.docstring :as d]))
 
 (defn- rules
   "The set of ::rule keywords in a check-source response's findings."
@@ -105,8 +104,7 @@
       (is (contains?
            (rules (str "(ns foo)\n(defn bar\n  \"Store one thing.\n\n"
                        "     a " g " glyph here.\"\n  [x] x)"))
-           :reserved-glyph-literal)
-          (str g " is a reserved glyph"))))
+           :reserved-glyph-literal))))
 
   (testing "a `;; =>` echo IS flagged — comment-shaped results are banned
            everywhere (ruling 45; this guard was found inverted and re-armed)"
@@ -214,5 +212,4 @@
 (deftest lints-its-own-source-clean-test
   (testing "this linter's own namespace passes its own rules"
     (let [r (d/check-file {::d/file-path "src/seon/dev/docstring.clj"})]
-      (is (true? (::d/clean? r))
-          (str "self-lint findings: " (seon.print.value/bounded-text (::d/findings r)))))))
+      (is (true? (::d/clean? r))))))

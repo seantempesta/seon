@@ -22,8 +22,7 @@
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.internal :as schema.internal]
             [seon.test-support :as test-support]
-            [seon.turn :as turn]
-            [seon.print.value]))
+            [seon.turn :as turn]))
 
 (deftest preparation-preserves-loaded-var-schema-references
   (test-support/with-database
@@ -343,15 +342,13 @@
                            entries)
                  structural (m/schema (into [:map] entries)
                                       (:seon.schema.projection/compile-options projection))
-                 _ (is (m/validate structural entity)
-                       (seon.print.value/bounded-text {:schema schema-key
-                                :errors (mapv :in (:errors (m/explain structural entity)))}))]
+                 _ (is (m/validate structural entity))]
              ;; Reference grammar is independent of whole-parent count and domain
              ;; constraints. Complete owning values are proved separately through
              ;; the canonical writer; an id-only child cannot prove those constraints.
              (is (map? entity)))
            (catch Throwable failure
-             (is false (str schema-key ": " (ex-message failure)))))))))
+             (is (nil? failure))))))))
        (finally (java.nio.file.Files/deleteIfExists lock-path)))))))
 
 (deftest canonical-reference-values-use-the-pull-collection-grammar
@@ -373,10 +370,9 @@
                many? (= :db.cardinality/many (get-in database [:schema attribute :db/cardinality]))
                ids (if many? (map :db/id value) [(:db/id value)])
                expected (set (map :v (seon.db/datoms database :eavt entity attribute)))]
-           (is (if many? (vector? value) (map? value))
-               (str attribute " " (seon.print.value/bounded-text (select-keys pulled [:seon.error/message :seon.error/data]))))
+           (is (if many? (vector? value) (map? value)))
            (is (and (seq ids) (every? expected ids))
-               (str "Pulled ids come from the actual relation: " attribute))))))))
+               "Pulled ids come from the actual relation")))))))
 
 (deftest pulled-forms-derive-from-the-entity-schema-and-selector
   (test-support/with-database
@@ -413,13 +409,12 @@
          (testing (name scenario)
            (let [form (schema/pulled-form-in projection schema-key selector)
                  value (seon.db/pull database selector entity)]
-             (is (vector? form) (seon.print.value/bounded-text form))
+             (is (vector? form))
              (is (m/validate
                   (m/schema form
                             {:registry
                              (:seon.schema.projection/registry projection)})
-                  value)
-                 (seon.print.value/bounded-text {:selector selector :form form :value value})))))
+                  value)))))
        (let [selector (get-in scenarios [:scalar 2])
              form (schema/pulled-form-in projection :seon.test/test selector)
              validator
@@ -524,7 +519,7 @@
        form)
      (schema/registered-schemas))
     (is (empty? @missing)
-        (str "predicate schemas without :error/message: " (seon.print.value/bounded-text @missing)))))
+        "predicate schemas without :error/message")))
 
 (deftest canonical-definition-keeps-admitted-predicate-symbols
   (let [definition
@@ -557,7 +552,7 @@
   (let [refused (try (schema/canonical-definition [:=> [:cat :int]]) nil
                      (catch clojure.lang.ExceptionInfo e (ex-data e)))]
     (is (= :seon.schema/missing-output-schema
-           (:seon.schema/noncanonical-definition refused)) (seon.print.value/bounded-text refused))
+           (:seon.schema/noncanonical-definition refused)))
     (is (= [:=> [:cat :int]] (:seon.schema/value refused)))
     (is (str/includes? (:seon.error/message refused) "declares no output schema")))
   (testing "a complete function schema, properties included, passes"
@@ -654,8 +649,7 @@
                 [(future ((side projection-a value-a value-b :a)))
                  (future ((side projection-b value-b value-a :b)))])]
     (is (empty? violations)
-        (str "a projection answered with another projection's compiled "
-             "validator: " (seon.print.value/bounded-text (vec (take 5 violations)))))
+        "a projection answered with another projection's compiled validator")
     (testing "the compiled state is on the projection, not in a shared slot"
       (is (some? (:seon.schema.projection/compiled projection-a)))
       (is (not (identical? (:seon.schema.projection/compiled projection-a)
@@ -1137,7 +1131,7 @@
         "every collection kind a component attribute is declared with")
     (doseq [[schema-key collection-kind] component-attrs]
       (is ((schema/projection-validator projection schema-key) (carried collection-kind))
-          (str schema-key " admits the component's own entity")))
+          "admits the component's own entity"))
     (testing "a persisted ref is still admissible in the same position"
       (doseq [[schema-key collection-kind] component-attrs]
         (is ((schema/projection-validator projection schema-key)
@@ -1386,7 +1380,7 @@
                             (assoc forms ::domain-marker :boolean ::raw-payload :map
                                    ::invalid-declared-schema definition))
                            nil (catch clojure.lang.ExceptionInfo e (ex-data e)))]
-           (is (map? outcome) (str "Declaration must refuse: " definition))))
+           (is (map? outcome) "Declaration must refuse")))
        (let [raw (schema/build-projection
                   (assoc forms ::raw-payload :map
                          ::raw-declared-schema [:and {:seon.db/attributes false} :seon.error/base
@@ -1424,13 +1418,13 @@
        (is (declarations :seon.error.key/entity))
        (doseq [k declarations
                :let [entries (seon.schema.internal/entity-entries (mr/schema (:seon.schema.projection/registry projection) k))]]
-         (is (seq entries) (str "Owned declaration must exist: " k))
+         (is (seq entries) "Owned declaration must exist")
          (doseq [[attribute properties] entries
                  :when (or (not (:optional properties))
                            (schema.datahike/storable-attribute-in? projection attribute))]
-           (is (schema.datahike/storable-attribute-in? projection attribute) (str k " " attribute))
+           (is (schema.datahike/storable-attribute-in? projection attribute))
            (is (nil? (:db/unique (schema.datahike/malli->datahike-attr-in projection attribute)))
-               (str "An observation cannot upsert its domain subject: " attribute))))
+               "An observation cannot upsert its domain subject")))
        (println "ERROR-MANIFEST declarations" {:declared-schemas (count declared-schemas) :owned-closure (count declarations)})
        (doseq [k declarations
                :let [symbols (into #{} (keep #(when (map? %) (:gen/gen %)))
@@ -1824,13 +1818,12 @@
       (is (= expected
              (verdict #(schema/projection-with-schema
                         base ::nilable-candidate form
-                        {:seon.schema.admission/source :agent})))
-          (str "admission " (seon.print.value/bounded-text form)))
+                        {:seon.schema.admission/source :agent}))))
       (is (= :admitted
              (verdict #(schema/build-projection population {}))
              (verdict #(schema/build-projection
                         population {} {:seon.schema/projection base})))
-          (str "an existing population builds " (seon.print.value/bounded-text form))))))
+          "an existing population builds"))))
 
 (deftest equal-inputs-answer-the-built-projection
   ;; A packaged build cost ~390 ms and ~570 MB allocated, and callers asked
@@ -1975,7 +1968,7 @@
                entity (first (schema/canonical-schema-entities built {schema-key definition}))
                basis (:max-tx @connection)
                refusal (seon.db/transact! connection [entity])]
-           (is (string? (:seon.db.write.attempt/request-id refusal)) (seon.print.value/bounded-text refusal))
+           (is (string? (:seon.db.write.attempt/request-id refusal)))
            (is (= renderer (get-in refusal [:seon.error/data :seon.render/function]))
                "the renderer with no declared contract is named by the admission refusal")
            (is (= basis (:max-tx @connection)) "nothing was written")))))))

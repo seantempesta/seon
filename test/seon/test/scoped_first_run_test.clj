@@ -7,8 +7,7 @@
             [seon.fn :as functions]
             [seon.program :as program]
             [seon.test :as sut]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (defn- install!
   "Admit `source` as entities of the `scoped.fixture` namespace."
@@ -44,9 +43,8 @@
                                  :seon.test/changed ['scoped.fixture/leaf]})
            elapsed-ms (/ (- (System/nanoTime) started) 1e6)
            members (set (map :seon.test/sym (:seon.test.run/members selected)))]
-       (is (nil? (:seon.error/at selected)) (str (:seon.error/message selected)))
+       (is (nil? (:seon.error/at selected)))
        ;; This test's own entity names `leaf` too, so it reaches it as well.
-       (is (= #{'scoped.fixture/direct} (set (filter #(= "scoped.fixture" (namespace %)) members)))
-           (seon.print.value/bounded-text members))
+       (is (= #{'scoped.fixture/direct} (set (filter #(= "scoped.fixture" (namespace %)) members))))
        (is (> 5 (count members)) "the request never widens to every test")
-       (is (< elapsed-ms 5000) (str elapsed-ms " ms"))))))
+       (is (< elapsed-ms 5000))))))

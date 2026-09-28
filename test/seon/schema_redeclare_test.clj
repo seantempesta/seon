@@ -88,8 +88,6 @@
                  (:seon.test/long-ms
                   (meta #'seeded-schema-families-survive-development-adoption))
                  :seon.operator.subprocess/merge-error? true})]
-    (is (= 0 (:seon.operator.subprocess/exit result))
-        (:seon.operator.subprocess/output result))
+    (is (= 0 (:seon.operator.subprocess/exit result)))
     (is (str/includes? (:seon.operator.subprocess/output result)
-                       "schema-redeclare: seed-adopt-seed-new passed")
-        (:seon.operator.subprocess/output result))))
+                       "schema-redeclare: seed-adopt-seed-new passed"))))

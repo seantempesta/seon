@@ -24,8 +24,7 @@
             [seon.render.walk :as walk]
             [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (def ^:private property-seed 2026073104)
 (def ^:private agent-id "transcript-agent")
@@ -274,7 +273,7 @@
   [rendered]
   (doseq [forbidden forbidden-session-narration]
     (is (not (str/includes? rendered forbidden))
-        (str "session contains invented display grammar: " forbidden))))
+        "session contains invented display grammar")))
 
 (defn- transaction-instant
   "The instant Datahike stamped on one committed fixture transaction.
@@ -326,7 +325,7 @@
     ;; interleaving is derived from; if two fixture transactions landed in
     ;; one millisecond, say so here rather than mis-order silently.
     (is (apply < (map #(.getTime ^java.util.Date %) instants))
-        (str "fixture transactions shared an instant: " (seon.print.value/bounded-text instants)))
+        "fixture transactions shared an instant")
     (let [[_outside peer sent decline self] instants]
       (support/transacted!
        connection
@@ -488,15 +487,14 @@
                             :seon.render/value ai
                             :seon.render/profile tight
                             :seon.render.call/id [::transcript-cut agent-id]))]
-            (is (string? cut) (seon.print.value/bounded-text cut))
+            (is (string? cut))
             (is (< (count cut) (count ai))
                 "the AI projection is bounded by the render profile")
             ;; ONE CUT FACE (one-render-path §3e): the characters that fit,
             ;; then `…+N` and, when the value has a source, the form that
             ;; reads the rest; no legend (owner 2026-09-27).
             (is (re-find #"\"…\+\d+" cut)
-                (str "the cut shows its prefix and counts the rest: "
-                     (subs cut 0 (min 400 (count cut)))))
+                "the cut shows its prefix and counts the rest")
             (is (not (str/includes? cut ";; …N")) "no legend line")))
         (assert-no-session-narration ai)))))
 
@@ -1238,9 +1236,7 @@
                                      (map :seon.render.history/bytes
                                           prompt-entries))
                responses (keep :seon.render.history/printed-value stored-entries)]
-           (is (:db-after committed)
-               (seon.print.value/bounded-text (select-keys committed [:seon.error/operation
-                                               :seon.error/message])))
+           (is (:db-after committed))
            (is (= 6 (count outcomes)) "six forms, six evaluations")
 
            (testing "the same bytes on the page, in history, and in the prompt"
@@ -1248,17 +1244,13 @@
              (is (= (count page-bytes) (count stored-bytes)))
              ;; PER ENTRY, so a difference names itself instead of dumping
              ;; two vectors a reader has to diff by eye.
-             (doseq [[ordinal page stored] (map vector (range)
+             (doseq [[_ordinal page stored] (map vector (range)
                                                 page-bytes stored-bytes)]
                (is (= page stored)
-                   (str "form " ordinal
-                        " renders differently in memory and from the store"
-                        "\n  page:   " (seon.print.value/bounded-text page)
-                        "\n  stored: " (seon.print.value/bounded-text stored))))
+                   "the form renders the same in memory and from the store page"))
              (doseq [entry-bytes stored-bytes]
                (is (str/includes? prompt-text entry-bytes)
-                   (str "the prompt must carry these bytes verbatim:\n"
-                        entry-bytes))))
+                   "the prompt must carry these bytes verbatim")))
 
            (testing "a handle names a value the fork really holds"
              ;; RULING 59c's exclusion was about ADMITTED PRINT NODES: a Var
@@ -1272,8 +1264,7 @@
                      :let [entry-bytes (nth stored-bytes index)]
                      :when (str/includes? entry-bytes "#:seon.repl{")]
                (is (str/includes? entry-bytes ":result result/e")
-                   (str "a settled evaluation without its handle: "
-                        entry-bytes))))
+                   "a settled evaluation without its handle")))
 
            (testing "the response the agent reads back"
              (let [joined (str/join "\n" stored-bytes)]
@@ -1297,8 +1288,7 @@
            (testing "every response carries the duration settlement measured"
              (is (seq responses))
              (is (every? #(str/includes? % ":ms ") responses)
-                 (str "responses without :ms — "
-                      (seon.print.value/bounded-text (remove #(str/includes? % ":ms ") responses)))))
+                 "responses without :ms"))
 
            (testing "an error carries :error and never a value beside it"
              (let [failure (last stored-bytes)]
@@ -1344,9 +1334,9 @@
                ;; is the one cut face `…N` (one-render-path §3e); its bound
                ;; and coordinates stay on the tree node, never `...`.
                (is (not (str/includes? clipped "..."))
-                   (str "a second, unnamed elision mechanism: " clipped))
+                   "a second, unnamed elision mechanism")
                (is (re-find #"…\d+\]" clipped)
-                   (str "the cut shows the one cut face: " clipped))))
+                   "the cut shows the one cut face")))
 
            (testing "ruling 45 (revised): only a renderer or the agent writes comment-shaped lines"
              ;; An AI render returns REPL entries, `;;` comments included
@@ -1374,8 +1364,7 @@
                      :when (str/starts-with? (str/trim text) ";")]
                (is (or (and (= :input region) (str/includes? text "a definition worth keeping"))
                        (and (= :response region) rendered?))
-                   (str "a comment-shaped line no renderer and no agent wrote (form "
-                        ordinal ", " (name region) "): " text)))))
+                   "a comment-shaped line no renderer and no agent wrote"))))
          (finally (async/close! channel)))))))
 
 ;; The ledger's prefix check derived its profile from a request and carried a
@@ -1411,7 +1400,7 @@
                               {:seon.error/layer ::evaluation
                                :seon.error/operation `core-fault!
                                :seon.db.process/id "transcript-test"})]
-    (is (true? (:seon.fault/committed? receipt)) (seon.print.value/bounded-text receipt))))
+    (is (true? (:seon.fault/committed? receipt)))))
 
 (defn- settled-evaluation!
   "Settle one-evaluation run `run-id` of the fixture agent as the settlement
@@ -1455,8 +1444,7 @@
                            entries)
            transcript (str/join "\n" (map :seon.render.history/bytes entries))]
        (is (= #{"(identity 0)" "(identity 1)" "(identity 2)"} (set (keys responses))))
-       (is (str/includes? (get responses "(identity 1)") ":errors [")
-           (get responses "(identity 1)"))
+       (is (str/includes? (get responses "(identity 1)") ":errors ["))
        (is (str/includes? (get responses "(identity 1)") "raised while evaluation one ran"))
        (is (str/includes? (get responses "(identity 1)") ":seon.error.occurrence/count 1"))
        (is (not (str/includes? (get responses "(identity 0)") ":errors")))
@@ -1500,14 +1488,14 @@
                                             :seon.error/operation `copy-probe
                                             :seon.db.process/id "transcript-test"
                                             :seon.agent/id "worker"}))]
-               (is (true? (:seon.fault/committed? receipt)) (seon.print.value/bounded-text receipt)))
+               (is (true? (:seon.fault/committed? receipt))))
              (settled-evaluation! cluster "cluster-copy-1" 1)
              ;; each settlement is its own one-evaluation run (ordinal 0,
              ;; 6afc9415e), so entries are keyed by their form
              (let [responses (into {} (map (juxt :seon.render.history/form :seon.render.history/printed-value))
                                    (transcript/history-entries (unit cluster)))]
                (is (= #{"(identity 0)" "(identity 1)"} (set (keys responses))) "each entry names its evaluation")
-               (is (str/includes? (str (get responses "(identity 1)")) "raised on the worker's branch") (seon.print.value/bounded-text responses))
+               (is (str/includes? (str (get responses "(identity 1)")) "raised on the worker's branch"))
                (is (str/includes? (str (get responses "(identity 1)")) (str origin)) "the copy names its origin branch")
                (is (not (str/includes? (str (get responses "(identity 0)")) "raised on the worker's branch"))))
              (finally

@@ -11,8 +11,7 @@
             [seon.fs :as fs]
             [seon.schema :as schema]
             [seon.test.cache :as test.cache]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (deftest changed-paths-hash-only-the-named-files-and-use-recorded-pins
   (let [root (str "tmp/publication-inputs/" (random-uuid))
@@ -58,7 +57,7 @@
                     :seon.fn/manifest manifest
                     :seon.fn/changed-paths #{path}
                     :seon.source/relative-file-digests {path digest}})]
-       (is (not (:seon.error/at result)) (seon.print.value/bounded-text result))
+       (is (not (:seon.error/at result)))
        (is (= {path digest} (source/stored-path-digests (db/db connection) [path "missing"])))
        (is (empty? (db/q '[:find [?declaration ...] :in $ ?path
                           :where [?file :seon.fn.file/relative-path ?path]

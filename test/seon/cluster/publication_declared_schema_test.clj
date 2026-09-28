@@ -29,8 +29,8 @@
                       {:seon.test.runner/worker-id "worker" :seon.test.runner/worker-error-log "worker.log"}]]]
               (let [valid? (schema/projection-validator projection declared-schema)
                     value (merge base members)]
-                (is (true? (valid? value)) (str declared-schema " does not require a raw object"))
+                (is (true? (valid? value)) "does not require a raw object")
                 (is (true? (valid? (assoc value :seon.error/offending {:input [1 :bad]})))
-                    (str declared-schema " accepts the producer's raw observation"))
-                (is (false? (valid? base)) (str declared-schema " still requires domain facts")))))
+                    "accepts the producer's raw observation")
+                (is (false? (valid? base)) "still requires domain facts"))))
           (finally (d/release-materialized-db database)))))))

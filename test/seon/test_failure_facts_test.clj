@@ -11,8 +11,7 @@
             [seon.program :as program]
             [seon.schema.datahike]
             [seon.test.runner :as runner]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (defn- with-probe {:malli/schema [:=> [:cat :seon.db/connection [:=> [:cat :qualified-symbol :seon.schema/value :seon.schema/value] :seon.schema/value]] :seon.schema/value]}
   [connection check]
@@ -51,7 +50,7 @@
                                        "(deftest probe (is (= 1 2)) (is (= :a :b)))"
                                        {:seon.fn/file [:seon.fn.file/relative-path path]
                                         :seon.schema.admission/source :core})])]
-        (is (:db-after tx) (seon.print.value/bounded-text tx))
+        (is (:db-after tx))
         (when (:seon.db.write.attempt/request-id tx)
           (throw (ex-info "The failure fixture transaction was refused." tx))))
       (check test-symbol test-var mode)
@@ -110,7 +109,7 @@
         (fn [s v _]
           (let [result (run-probe connection v)
                 failures (reports result)]
-            (is (= 2 (:seon.test/fail-count result)) (seon.print.value/bounded-text result))
+            (is (= 2 (:seon.test/fail-count result)))
             (is (= 2 (count failures)))
             (is (= #{"first claim" "second claim"} (set (map :seon.test.failure/message failures))))
             (doseq [failure failures]
@@ -162,7 +161,7 @@
                 second-run (record)
                 report (fn [run] (first (reports (first (:seon.test/results run)))))]
             (doseq [run [first-run second-run]]
-              (is (nil? (:seon.test/recording-refusal run)) (seon.print.value/bounded-text (:seon.test/recording-refusal run)))
+              (is (nil? (:seon.test/recording-refusal run)))
               (is (= 1 (:seon.test/executed-count run)))
               (is (= 1 (:seon.test/error-count (first (:seon.test/results run)))))
               (is (= 'clojure.lang.ExceptionInfo (:seon.test.failure/throwable (report run)))))
@@ -232,8 +231,8 @@
                 _ (replace-declaration! connection [:seon.test/sym s] source {})
                 result (run-probe connection v)
                 failure (first (reports result))]
-            (is (= 1 (:seon.test/fail-count result)) (seon.print.value/bounded-text result))
-            (is (= "(= 1 2)" (:seon.test.failure/expected failure)) (seon.print.value/bounded-text failure))
+            (is (= 1 (:seon.test/fail-count result)))
+            (is (= "(= 1 2)" (:seon.test.failure/expected failure)))
             (is (nil? (:seon.test.failure/reported-file failure)))
             (is (nil? (:seon.test.failure/line failure)))))))))
 
@@ -281,22 +280,18 @@
                                 (reports red)))
                 links (filter #(and (vector? %) (= :a (first %)) (map? (second %)))
                               (tree-seq coll? seq (render/render-html unit)))]
-            (is (:db-after tx) (seon.print.value/bounded-text tx))
-            (is (= 2 (:seon.test/fail-count red)) (seon.print.value/bounded-text red))
-            (is (= 2 (count sites)) (seon.print.value/bounded-text sites))
-            (is (= [reached] changed) (seon.print.value/bounded-text changed))
-            (is (= (str "Test " s ": fail") (first (str/split-lines (second summary))))
-                (seon.print.value/bounded-text summary))
-            (is (every? (fn [[path line]] (str/includes? (second summary) (str path ":" line))) sites)
-                (seon.print.value/bounded-text summary))
-            (is (= (list 'seon.test/changed-since-green (list 'seon.db/db) (list 'quote s)) changed-form)
-                (seon.print.value/bounded-text changed-form))
+            (is (:db-after tx))
+            (is (= 2 (:seon.test/fail-count red)))
+            (is (= 2 (count sites)))
+            (is (= [reached] changed))
+            (is (= (str "Test " s ": fail") (first (str/split-lines (second summary)))))
+            (is (every? (fn [[path line]] (str/includes? (second summary) (str path ":" line))) sites))
+            (is (= (list 'seon.test/changed-since-green (list 'seon.db/db) (list 'quote s)) changed-form))
             (is (= sites (set (keep (fn [[_ attributes]]
                                       (when-let [path (:data-file attributes)]
                                         [path (:data-line attributes)]))
-                                    links)))
-                (seon.print.value/bounded-text links))
-            (is (contains? (set (mapcat #(drop 2 %) links)) reached) (seon.print.value/bounded-text links))))))))
+                                    links))))
+            (is (contains? (set (mapcat #(drop 2 %) links)) reached))))))))
 
 (deftest failure-readers-use-the-structured-claims
   (support/with-database
@@ -442,7 +437,7 @@
               _ (is (vector? (runner/commit-results! connection red)))
               stored (db/pull (db/db connection) '[{:seon.test/failures [:seon.test.failure/id]}] [:seon.test/sym s])
               failure-id (get-in stored [:seon.test/failures 0 :seon.test.failure/id])]
-          (is (string? failure-id) (seon.print.value/bounded-text stored))
+          (is (string? failure-id))
           (is (vector? (runner/commit-results! connection (completion (db/db connection) s 0)))
               "the green re-record is accepted")
           (is (empty? (:seon.test/failures (db/pull (db/db connection) '[:seon.test/failures] [:seon.test/sym s]))))
@@ -505,7 +500,7 @@
                          (assoc-in [:seon.test.run/provenance :seon.test.run/branch]
                                    :building-source-no-longer-addressable))
             result (runner/commit-results! connection captured)]
-        (is (vector? result) (seon.print.value/bounded-text result))
+        (is (vector? result))
         (is (= digest (:seon.test/reach-digest (first result))))
         (is (string? (:seon.test/reach-unknown (first result))))
         (is (= 1 (:seon.test/pass-count (first result))))
@@ -539,7 +534,7 @@
                            {s #{present deleted}}))
                 result (runner/commit-results! connection captured)
                 recorded (db/db connection)]
-            (is (vector? result) (seon.print.value/bounded-text result))
+            (is (vector? result))
             (is (= 1 (:seon.test/fail-count (first result)))
                 "the rest of the completion commits")
             (is (= #{present deleted}
@@ -553,7 +548,7 @@
   [connection captured]
   (let [report (db/transact! connection
                              [[:db.fn/call #'runner/record-tx captured]])]
-    (is (:db-after report) (seon.print.value/bounded-text report))
+    (is (:db-after report))
     (remove #(= :db/txInstant (:a %)) (:tx-data report))))
 
 (deftest an-unchanged-re-record-emits-no-datom
@@ -603,12 +598,9 @@
                   other (:db/id (db/pull (db/db connection) [:db/id]
                                          [:seon.test/sym t]))]
               (is (= #{other} (set (map :e datoms)))
-                  (str "only the changed result's entity is touched: "
-                       (seon.print.value/bounded-text datoms)))
-              (is (= #{:seon.test/pass-count} (set (map :a datoms)))
-                  (seon.print.value/bounded-text datoms))
-              (is (= [2] (mapv :v (filter :added datoms)))
-                  (seon.print.value/bounded-text datoms)))))))))
+                  "only the changed result's entity is touched")
+              (is (= #{:seon.test/pass-count} (set (map :a datoms))))
+              (is (= [2] (mapv :v (filter :added datoms)))))))))))
 
 (deftest a-changed-reach-member-retracts-only-itself
   ;; The membership is replaced member by member: a dropped member retracts
@@ -635,8 +627,8 @@
                             :seon.test/fail-count 0 :seon.test/error-count 0}]})]
           (is (seq (record-tx-data connection (captured [s a b]))))
           (let [datoms (record-tx-data connection (captured [s a]))]
-            (is (= [:seon.test/reach] (distinct (map :a datoms))) (seon.print.value/bounded-text datoms))
-            (is (= 1 (count datoms)) (seon.print.value/bounded-text datoms))
-            (is (false? (:added (first datoms))) (seon.print.value/bounded-text datoms))
-            (is (= b (:v (first datoms))) (seon.print.value/bounded-text datoms)))
+            (is (= [:seon.test/reach] (distinct (map :a datoms))))
+            (is (= 1 (count datoms)))
+            (is (false? (:added (first datoms))))
+            (is (= b (:v (first datoms)))))
           (is (= #{s a} (stored-reach (db/db connection) s))))))))

@@ -28,7 +28,7 @@
            value (:seon.sci.admit/value rejected)
            message (:seon.error/message value "")]
        (doseq [fragment ["contracts are data" "registered predicate schema" "quoted symbol"]]
-         (is (str/includes? message fragment) message)
+         (is (str/includes? message fragment))
          (is (str/includes? (:seon.eval/shown rejected) fragment)))
        (is (not (str/includes? (:seon.eval/shown rejected) "#object")))
        (is (nil? (:seon.program/row rejected)))

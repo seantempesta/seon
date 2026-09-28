@@ -21,8 +21,7 @@
             [seon.schema.edn :as schema.edn]
             [seon.sci.eval :as eval]
             [seon.sci.kernel :as kernel]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (def ^:private render-profile
   (seon.render/agent-render-profile config/defaults))
@@ -393,7 +392,7 @@
                                  (db/pull (db/db connection) [:seon.fn/calls]
                                           [:seon.fn/sym (symbol (str fixture-a) (str (second definition)))]))
                                definitions)]
-            (is (every? :db-after reports) (seon.print.value/bounded-text (remove :db-after reports)))
+            (is (every? :db-after reports))
             (is (some #{helper} (:seon.fn/calls (second entities))))
             (sci/binding
               [sci/ns (sci/create-ns fixture-a)]
@@ -530,7 +529,7 @@
              result (render-ai request)
              decision (selection (assoc request :seon.render/output :seon.render/ai))
              expected #{(str first-ai) (str second-ai)}]
-         (is (seq (:seon.render/candidates result)) (seon.print.value/bounded-text result))
+         (is (seq (:seon.render/candidates result)))
          (is (seq (:seon.render/candidates (:seon.render.selection/selected decision))))
          (is (= :ambiguous
                 (some #(when (= :declared (:seon.render.selection.stage/name %))
@@ -606,7 +605,7 @@
         ;; A distance-cap marker is an elision value, not a renderer failure.
         (let [failures (remove #(= :seon.render/distance (:seon.print/bound-by %))
                                (keep :seon.error/value units))]
-          (is (empty? failures) (seon.print.value/bounded-text failures)))
+          (is (empty? failures)))
         (is (some #(str/includes? (str (:seon.render/output %)) "\"neighborhood-owner\"") units)
             "the runtime unit names its owner, read through the unit's database")))))
 
@@ -805,7 +804,7 @@
                                     @first-invocations
                                     second-invocations
                                     second-calls))]
-              (is (string? first-output) (seon.print.value/bounded-text first-output))
+              (is (string? first-output))
               (is (str/includes? first-output "2"))
               (is (= first-output second-output))
               (is (= 1 @previews) "both presentations reuse one real preview")
@@ -851,8 +850,7 @@
                           :seon.sci.admit/caps caps
                           :seon.sci.eval/time-limit-ms 2000})]
          ;; Said as data, not :out text (737fe0a5d): the replaced definitions.
-         (is (contains? (set (:seon.eval/replaced evaluation)) renderer)
-             (seon.print.value/bounded-text evaluation)))
+         (is (contains? (set (:seon.eval/replaced evaluation)) renderer)))
        (is (= (str "program:" fixture-a) (render)) "the changed program entity runs")))))
 
 (deftest generic-renderer-receives-the-acquired-entity-id
@@ -929,7 +927,7 @@
                          :seon.schema/projection (db/carried-projection database)})
                        nil
                        (catch clojure.lang.ExceptionInfo error (ex-data error)))]
-       (is (true? (:seon.db/invalid-read refused)) (seon.print.value/bounded-text refused))
+       (is (true? (:seon.db/invalid-read refused)))
        (is (= refused thrown) "the refused read itself is the refusal")
        (is (identical? (db/carried-projection database)
                        (seon.render/request-projection {:seon.db/db database})))
@@ -968,10 +966,10 @@
                         :seon.sci.admit/caps caps
                         :seon.sci.eval/time-limit-ms 2000})]
        (is (string? cluster-name))
-       (is (keyword? (:seon.render.profile/id named)) (seon.print.value/bounded-text named))
+       (is (keyword? (:seon.render.profile/id named)))
        (is (= :seon.render/profile (:seon.render/refused-member unnamed)))
        (is (= :seon.boot/cluster-name (:seon.error/member unnamed)))
-       (is (= "2" (:seon.eval/shown evaluation)) (seon.print.value/bounded-text evaluation))))))
+       (is (= "2" (:seon.eval/shown evaluation)))))))
 
 (deftest a-carried-partial-profile-is-refused-at-request-profile
   ;; THE CLASS: a request carrying a profile missing its declared keys passed
@@ -984,8 +982,7 @@
                      nil
                      (catch clojure.lang.ExceptionInfo e (ex-data e)))]
     (is (identical? profile (seon.render/request-profile {:seon.render/profile profile})))
-    (is (= :input (:seon.instrument/check refusal)) (seon.print.value/bounded-text refusal))
+    (is (= :input (:seon.instrument/check refusal)))
     (is (= 'seon.render/request-profile (:seon.error/operation refusal)))
     (is (some #(= [:seon.render/profile :seon.render.profile/id] (:seon.error/path %))
-              (:seon.error/problems refusal))
-        (seon.print.value/bounded-text (:seon.error/problems refusal)))))
+              (:seon.error/problems refusal)))))

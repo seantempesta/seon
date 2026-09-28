@@ -4,8 +4,7 @@
             [seon.cluster :as cluster]
             [seon.db :as db]
             [seon.test-support :as support]
-            [seon.turn :as turn]
-            [seon.print.value]))
+            [seon.turn :as turn]))
 
 (deftest root-first-turn-records-its-producers-declaration
   (support/with-database
@@ -42,7 +41,7 @@
                        [?occurrence :seon.error.occurrence/turn ?turn]
                        [?error :seon.error/occurrences ?occurrence]
                        [?error :seon.error/declared-schema ?name]] database run-id)]
-           (is (= :error (:seon.turn.loop/outcome result)) (seon.print.value/bounded-text result))
+           (is (= :error (:seon.turn.loop/outcome result)))
            (is (= [:seon.turn.loop/phase-failed-error] declarations))
            (is (some? (:seon.turn/closed-tx
                        (db/pull database [:seon.turn/closed-tx]

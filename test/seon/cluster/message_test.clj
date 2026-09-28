@@ -29,8 +29,7 @@
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.sci.eval :as sci.eval]
-            [seon.test-support :as test-support]
-            [seon.print.value])
+            [seon.test-support :as test-support])
   (:import [java.util Date]))
 
 (def ^:private now (Date. 1700000000000))
@@ -115,7 +114,7 @@
             "the recipient is offered the acknowledgement")
         (let [acknowledged (message/received! "message-1" connection "bob")
               tx (get-in acknowledged [:seon.message/received-tx :db/id])]
-          (is (int? tx) (seon.print.value/bounded-text acknowledged))
+          (is (int? tx))
           (is (= tx (:seon.message/received-tx
                      (view (assoc acknowledged :seon.db/db @connection :seon.agent/id "bob"))))
               "the acknowledgement's reply shows its transaction")

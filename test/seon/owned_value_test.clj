@@ -8,8 +8,7 @@
             [seon.schema.datahike :as schema.datahike]
             [seon.sci.eval :as evaluation]
             [seon.test.accretion :as accretion]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (defn- with-owned-tree [f]
   (let [forms (assoc (schema.edn/packaged-forms)
@@ -48,7 +47,7 @@
   [connection transaction]
   (let [before (db/basis-t (db/db connection))
         result (db/transact! connection transaction)]
-    (is (string? (:seon.db.write.attempt/request-id result)) (seon.print.value/bounded-text result))
+    (is (string? (:seon.db.write.attempt/request-id result)))
     (is (= before (db/basis-t (db/db connection))))
     result))
 
@@ -113,10 +112,11 @@
   (let [forms (schema.edn/packaged-forms)
         owned (filter (fn [[_ form]] (:seon.db/component (malli.core/properties (seon.schema/structural-schema form)))) forms)]
     (is (seq owned))
-    (doseq [[attribute form] owned]
-      (let [child (:seon.db/component-schema (malli.core/properties (seon.schema/structural-schema form)))]
-        (is (and (qualified-keyword? child) (get forms child))
-            (str "Owned relation must name its child schema: " attribute))))))
+    (is (= [] (vec (for [[attribute form] owned
+                         :let [child (:seon.db/component-schema (malli.core/properties (seon.schema/structural-schema form)))]
+                         :when (not (and (qualified-keyword? child) (get forms child)))]
+                     attribute)))
+        "Owned relation must name its child schema")))
 
 (deftest one-invalid-root-among-many-refuses-by-its-identity
   ;; The owning walk groups the report by root once; each root is validated
@@ -126,7 +126,7 @@
       (let [valid (mapv #(hash-map ::key (str "k" %) ::value % ::children [{::value %}]) (range 200))]
         (let [result (refuses-without-change connection
                                              (conj valid {::key "bad" ::children [{::value 1}]}))]
-          (is (= {::key "bad"} (get-in result [:seon.error/data :seon.db/entity])) (seon.print.value/bounded-text result)))
+          (is (= {::key "bad"} (get-in result [:seon.error/data :seon.db/entity]))))
         (support/transacted! connection valid)
         (is (= 200 (count (db/datoms (db/db connection) :avet ::key))))))))
 
@@ -165,14 +165,13 @@
         (is (some? projection))
         (is (some? source-arity))
         (is (every? #(= transaction (:e %))
-                    (remove #(or (= :db/txInstant (:a %)) (= cell (:e %))) (:tx-data report)))
-            (seon.print.value/bounded-text (:tx-data report)))
+                    (remove #(or (= :db/txInstant (:a %)) (= cell (:e %))) (:tx-data report))))
         (let [changed (:seon.db/changed-identity-attributes
                        (@#'seon.db/write-owned-values-error
                         projection report
                         (@#'seon.db/write-attribute-plans projection (:db-after report))
                         (@#'seon.db/report-identity-attributes report)))]
-          (is (contains? changed :seon.fn/sym) (seon.print.value/bounded-text changed)))))))
+          (is (contains? changed :seon.fn/sym)))))))
 
 (deftest new-entities-find-their-owners-without-an-index-seek
   ;; An entity id beyond :db-before's max-eid was referenced by nothing

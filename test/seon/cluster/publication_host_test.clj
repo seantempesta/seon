@@ -14,8 +14,7 @@
             [seon.operator.runtime :as runtime]
             [seon.cluster.process :as state]
             [seon.schema :as schema]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (deftest ^{:seon.test/long "Publish and boot a real cluster in the test JVM, then send operator requests through its advertised prepl."
            :seon.test/long-ms 1200000}
@@ -108,17 +107,16 @@
                      output (:seon.operator.subprocess/output result)]
                  (println "operator measurement" (pr-str arguments)
                           "elapsed-ms" (quot (- (System/nanoTime) started) 1000000))
-                 (is (= (if invalid? 1 0) (:seon.operator.subprocess/exit result)) output)
+                 (is (= (if invalid? 1 0) (:seon.operator.subprocess/exit result)))
                  (when invalid?
-                   (is (str/includes? output ":seon.error/at") output)
-                   (is (str/includes? output ":invalid") output))
+                   (is (str/includes? output ":seon.error/at"))
+                   (is (str/includes? output ":invalid")))
                  (when (and (not invalid?) (zero? (:seon.operator.subprocess/exit result)))
                    (let [records (edn/read-string (slurp records-file))]
                      (is (every? #(pos-int? (:seon.boot/pid %)) records))
                      (is (not-any? #(contains? #{"clojure" "java"}
                                                (.getName (io/file (first (:seon.operator.subprocess/argv %)))))
-                                   records)
-                         (seon.print.value/bounded-text records))))
+                                   records))))
                  (is (= before (operator/selected-processes (str root)))))))
              (is (zero? @projection-reads)
                  "An exact source fork carries the existing projection instead of reading the whole program.")

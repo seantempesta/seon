@@ -15,8 +15,7 @@
             [seon.agent :as my.agent]
             [seon.turn :as turn]
             [seon.schema]
-            [seon.test-support :as support]
-            [seon.print.value])
+            [seon.test-support :as support])
   (:import [java.util Date]))
 
 ;;; ---------------------------------------------------------------------------
@@ -539,7 +538,7 @@
                                               (range 2))))))))))
          :seed 2026072829)]
     (is (true? (:result check))
-        (str "situation totality failed: " (seon.print.value/bounded-text check)))))))
+        "situation totality failed")))))
 
 (deftest answeredness-is-the-turns-own-transaction
   ;; THE CLASS: answeredness used to be a stored reference from the run
@@ -774,12 +773,12 @@
         connection (d/connect configuration)]
     (try
       (let [database (db/db connection)]
-        (doseq [[label derivation] [[:outside-wake-t #(turn/outside-wake-t database agent-id)]
+        (doseq [[_label derivation] [[:outside-wake-t #(turn/outside-wake-t database agent-id)]
                                 [:unanswered-wakes #(turn/unanswered-wakes database agent-id {})]]]
           (let [refusal (try (derivation) nil (catch clojure.lang.ExceptionInfo e (ex-data e)))]
-            (is (:seon.db/invalid-read refusal) (str label " refuses"))
+            (is (:seon.db/invalid-read refusal))
             (is (= 'seon.db/q (:seon.db/refused-read-operation refusal))
-                (str label " names the refused read, not a seek's contract")))))
+                "names the refused read, not a seek's contract"))))
       (finally
         (d/release connection)
         (d/delete-database configuration)))))

@@ -396,8 +396,8 @@
         right (run)
         left-rendered (last (str/split-lines (:out left)))
         right-rendered (last (str/split-lines (:out right)))]
-    (is (zero? (:exit left)) (:err left))
-    (is (zero? (:exit right)) (:err right))
+    (is (zero? (:exit left)))
+    (is (zero? (:exit right)))
     (is (= (pr-str ["#object[sci.lang.Namespace \"stable.ns\"]"
                     "#object[clojure.lang.Atom]"])
            left-rendered))

@@ -8,12 +8,10 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.render :as render]
-            [seon.render.value :as value]
             [seon.render.web]
             [seon.render.web-test :as web-test]
             [seon.sci.kernel :as kernel]
-            [seon.test-support :as support]
-            [seon.print.value])
+            [seon.test-support :as support])
   (:import [java.net URI]
            [java.util.concurrent Callable Executors TimeUnit]))
 
@@ -50,7 +48,7 @@
                                                        (finally (.disconnect connection))))))
                [virtual? result] (.get context-result support/event-backstop-seconds TimeUnit/SECONDS)]
            (is virtual?)
-           (is (string? (:seon.cluster.prompt/text result)) (seon.print.value/bounded-text result))
+           (is (string? (:seon.cluster.prompt/text result)))
            (is (= 200 (.get page-result support/event-backstop-seconds TimeUnit/SECONDS)))
            (let [costs (db/q '[:find ?cost ?tx
                                :in $ ?basis
@@ -110,7 +108,7 @@
              (let [changed (db/transact! connection
                              [(assoc (db/pull @connection '[*] [:seon.cluster.eval/id "retained-history"])
                                      :seon.eval/shown "3")])]
-               (is (:db-after changed) (seon.print.value/bounded-text changed)))
+               (is (:db-after changed)))
              (is (= "3" (:seon.eval/shown (db/pull @connection [:seon.eval/shown] [:seon.cluster.eval/id "retained-history"]))))
              (let [[changed changed-counts] (counted #(acquire @connection))]
                (is (pos? (:calls changed-counts)) "changed saved bytes invalidate the retained call")
@@ -137,7 +135,7 @@
                           [[:db/add [:seon.cluster/name "web-test"]
                             :seon.source/commit-id
                             #uuid "f54229d7-54eb-472d-9ae8-917a0f97af71"]])]
-             (is (:db-after report) (seon.print.value/bounded-text report)))
+             (is (:db-after report)))
            (let [after (#'web-test/fetch server "/agent/root")]
              (is (identical? snapshot @(:seon.sci.kernel/program-snapshot ctx)))
              (is (= 200 (.statusCode after)))
@@ -165,26 +163,7 @@
                (is (= 2 (get @calls status-renderer))
                    ;; diagnosis (shrink-web 2026-09-26): why the status call
                    ;; was not re-invoked after a write to a read attribute
-                   (let [cache @(render/shared-cache ctx)
-                         database @connection
-                         entries (filter #(= 'seon.cluster.status/render-html
-                                             (get-in % [:seon.render.call/static-evidence
-                                                        :seon.render.call/producer]))
-                                         (vals (get-in cache [:seon.render.web/calls "root"])))]
-                     (str "the adopted commit is an input to the cluster observation; "
-                          (value/bounded-text
-                           {:db-basis (db/basis-t database)
-                            :page-basis (some-> (get-in cache [:seon.render.web/page-databases "root"])
-                                                db/basis-t)
-                            :status-entries
-                            (mapv (fn [entry]
-                                    {:basis (:seon.render.call/basis-transaction entry)
-                                     :reads (mapv #(get-in % [:datahike.read/revision :datahike.read/attributes])
-                                                  (:seon.render.call/read-evidence entry))
-                                     :current? (db/read-evidence-current?
-                                                database (:seon.render.call/read-evidence entry))})
-                                  entries)}
-                           2000))))
+)
                (is (str/includes? (.body after)
                                   "f54229d7-54eb-472d-9ae8-917a0f97af71")
                    "the page shows the newly adopted commit")))))))))
@@ -211,8 +190,7 @@
                                               :seon.render.call/producer])))))
                  (vals (get-in @(render/shared-cache (:ctx context))
                                [:seon.render.web/calls "root"])))]
-       (is (empty? (disj unbounded "seon.error/render-faults-html" "seon.agent/render-settings-html"))
-           (str "whole-entity reads: " unbounded))))))
+       (is (empty? (disj unbounded "seon.error/render-faults-html" "seon.agent/render-settings-html")))))))
 
 (deftest selected-session-defers-prompt-acquisition
   (#'web-test/with-server

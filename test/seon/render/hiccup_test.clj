@@ -23,17 +23,15 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [seon.render.hiccup :as hiccup]
-            [seon.schema]
-            [seon.print.value]))
+            [seon.schema]))
 
 (def ^:private void-tags
   #{"area" "base" "br" "col" "embed" "hr" "img" "input" "link"
     "meta" "param" "source" "track" "wbr"})
 
 (defn- check!
-  [label result]
-  (is (true? (:result result))
-      (str label " failed: " (seon.print.value/bounded-text result))))
+  [_label result]
+  (is (true? (:result result))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The grammar is total, and the generator is honest
@@ -110,7 +108,7 @@
   ;; fallback did.
   (doseq [refused [{} [1 2 3] #{:a}]]
     (is (= "" (hiccup/->string refused))
-        (str "a refused value must serialize to nothing: " (seon.print.value/bounded-text refused)))))
+        "a refused value must serialize to nothing")))
 
 (deftest serialization-is-deterministic
   ;; Byte identity is a DESIGN PROPERTY, not a convenience: equality
@@ -221,7 +219,7 @@
   (testing "a head the grammar refuses is a value, never nil and never a throw"
     (doseq [refused [42 nil {:a 1}]]
       (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.error/value) (hiccup/shorthand refused))
-          (str "a refused head must name itself: " (seon.print.value/bounded-text refused))))))
+          "a refused head must name itself"))))
 
 (deftest classes-merge-shorthand-first
   (is (= "<div class=\"card flex gap-2\"></div>"

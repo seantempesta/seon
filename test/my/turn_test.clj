@@ -54,11 +54,11 @@
                call ["my.turn/complete" "my.turn/wait"]]
          (let [source (str "(" call " " wrong ")")
                value (support/agent-value ctx source)]
-           (is (map? value) source)
-           (is (string? (:seon.error/message value)) source)
+           (is (map? value))
+           (is (string? (:seon.error/message value)))
            (is (= :seon.instrument/invocation
-                  (:seon.error/layer value)) source)
-           (is (= :input (:seon.instrument/check value)) source)
+                  (:seon.error/layer value)))
+           (is (= :input (:seon.instrument/check value)))
            (is (not ((seon.schema/projection-validator (seon.schema/handed-projection) :my.turn/value) value))
                "and the loop cannot mistake it for a disposition")))))))
 

@@ -6,8 +6,7 @@
             [seon.db :as db]
             [seon.render.walk :as walk]
             [seon.schema :as schema]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (def ^:private caps (config/result-caps config/defaults))
 (def ^:private agent-id "render-walk-agent")
@@ -36,7 +35,7 @@
    [{:seon.message/id "render-walk-message"
      :seon.message/to [:seon.agent/id agent-id]
      :seon.message/content "42"}])]
-    (is (:db-after result) (seon.print.value/bounded-text result))))
+    (is (:db-after result))))
 
 (defn- seed-listeners!
   [connection]
@@ -150,8 +149,7 @@
                "a connection the pull truncated read as complete")
            (is (every? #(= :seon.config.eval.result/max-collection
                            (get-in % [:seon.error/data :seon.print/bound-by]))
-                       observations)
-               (seon.print.value/bounded-text observations))
+                       observations))
            (is (every? #(str/includes? (:seon.error/message %)
                                        "max-collection")
                        observations)
@@ -164,7 +162,7 @@
                         :seon.render/profile
                         {:seon.render.profile/id :seon.render.profile/agent
                          :seon.render.profile/max-children 1})))]
-           (is (empty? observations) (seon.print.value/bounded-text observations))))))))
+           (is (empty? observations))))))))
 
 (deftest html-neighborhood-emits-no-traversal-only-elision-units
   (support/with-database

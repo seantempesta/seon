@@ -287,7 +287,7 @@
          :seon.error/operation 'seon.maintenance/collect!
          :seon.error/message "Collection did not verify every root."}]
     (testing "the maintenance mirror admits what the public slot admits"
-      (doseq [[public-key component-key value]
+      (doseq [[_public-key component-key value]
               [[:seon.operator.collect/result
                 :seon.maintenance.result/cluster-cleanup-collection-component
                 collect-component]
@@ -295,7 +295,7 @@
                 :seon.maintenance.result/cluster-cleanup-collection-component
                 error-component]]]
         (is (true? ((schema/projection-validator (schema/handed-projection) component-key) value))
-            (str component-key " must admit the " public-key " arm"))))
+            "must admit the arm")))
     (testing "the success arm is the one collect component, not a copy"
       (is (true? ((schema/projection-validator (schema/handed-projection) :seon.maintenance.result/collect-component) collect-component))))
     (is (false? ((schema/projection-validator (schema/handed-projection) :seon.maintenance.result/cluster-cleanup-collection-component) {:seon.maintenance-schema-test/only-unrelated true}))

@@ -42,7 +42,7 @@
            text (pr-str result)]
        (is (= [[:db.fn/call #'refusing-call]]
               (get-in result [:seon.error/data :seon.db.write.attempt/transaction])))
-       (is (< (count text) 20000) (str (count text) " chars"))
+       (is (< (count text) 20000))
        (is (= (:seon.error/message result)
               (:seon.error/message (binding [*default-data-reader-fn* tagged-literal] (read-string text))))
            "the printed refusal reads back")))))

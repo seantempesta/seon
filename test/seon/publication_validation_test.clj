@@ -2,8 +2,7 @@
   (:require [clojure.test :refer [deftest is]]
             [seon.db :as db]
             [seon.profile :as profile]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (defn- armed-calls
   "Calls of `symbols` so far, summed over their armed wrappers' profile cells."
@@ -56,5 +55,5 @@
                     [[:db/add [:seon.fn/sym 'seon.id/id]
                       :seon.fn/call-arities ['seon.id/id 99]]])]
        (is (:seon.db/transaction-refused refusal))
-       (is (seq (get-in refusal [:seon.error/data :seon.fn/arity-mismatches])) (seon.print.value/bounded-text refusal))
+       (is (seq (get-in refusal [:seon.error/data :seon.fn/arity-mismatches])))
        (is (= before (db/basis-t (db/db connection))))))))

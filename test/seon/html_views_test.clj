@@ -29,9 +29,9 @@
         (io/make-parents file)
         (spit file printed)))
     (is (seq printed) "The renderer must produce a visible value.")
-    (doseq [text texts] (is (str/includes? printed text) text))
+    (doseq [text texts] (is (str/includes? printed text)))
     (doseq [literal ["#inst" ":db/id" "[:seon.agent/id"]]
-      (is (not (str/includes? printed literal)) literal))))
+      (is (not (str/includes? printed literal))))))
 
 (deftest plan-pairs-are-readable-and-ai-is-data
   (support/with-database

@@ -10,8 +10,7 @@
             [seon.eval :as evaluation]
             [seon.render :as render]
             [seon.test-support :as support]
-            [seon.turn :as turn]
-            [seon.print.value]))
+            [seon.turn :as turn]))
 
 (deftest pulled-fault-concern-uses-the-entity-pair
   (support/with-database
@@ -51,7 +50,7 @@
        (is (str/includes? (str ai) "Occurrences: 1"))
        (doseq [expected ["No credential configured." "seon.ai/complete" "1970"
                          "fault-render-turn" "Inspect evidence" "Occurrences: 1"]]
-         (is (str/includes? (pr-str html) expected) expected))))))
+         (is (str/includes? (pr-str html) expected)))))))
 
 (deftest the-opening-derives-repair-reads-through-function-refs
   (support/with-database
@@ -64,7 +63,7 @@
                                     (mapcat #(agent/creation-tx
                                               {:seon.agent/id % :seon.ns/name (symbol (str "my.agents." %))
                                                :seon.cluster/name cluster-name}) agents)))
-           _ (is (:db-after setup) (seon.print.value/bounded-text (dissoc setup :db-before :db-after)))
+           _ (is (:db-after setup))
            ctx (support/fork-cluster-ctx connection cluster-name)
            handle (support/cluster-handle
                    {:seon.db/connection connection :seon.cluster/name cluster-name
@@ -73,11 +72,11 @@
          (doseq [id agents]
            (let [result (turn/system-turn {:seon.turn.loop/cluster handle
                                           :seon.agent/id id :seon.turn/write? true})]
-             (is (vector? (:seon.turn/forms result)) (seon.print.value/bounded-text result))
+             (is (vector? (:seon.turn/forms result)))
              (is (vector? (:seon.render.walk/units result)))
              (let [entry (first (filter #(str/includes? (or (:seon.cluster.eval/source %) "") ":seon.error/fn")
                                         (evaluation/of-agent (db/db connection) id)))]
-               (is (some? entry) id)
+               (is (some? entry))
                (is (= "[]" (:seon.eval/shown entry)))
                (is (seq (:seon.cluster.eval/read-evidence entry))))))
          (finally

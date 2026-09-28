@@ -5,8 +5,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
-            [seon.test-support :as support]
-            [seon.print.value])
+            [seon.test-support :as support])
   (:import [java.time Duration]))
 
 (defn- exception-errors
@@ -32,7 +31,7 @@
        (.start thread)
        (is (.join thread (Duration/ofMillis 5000)) "The failing thread exited.")
        (let [added (remove before (exception-errors connection))]
-         (is (= 1 (count added)) (seon.print.value/bounded-text added))
+         (is (= 1 (count added)))
          (is (str/includes? (pr-str (db/pull (db/db connection) '[*] (first added)))
                             message)
              "The stored fact is this failure, in the branch the failure carried."))))))

@@ -18,8 +18,7 @@
             [seon.schema.edn :as schema.edn]
             [seon.sci.kernel :as kernel]
             [seon.test-support :as support]
-            [sci.core :as sci]
-            [seon.print.value])
+            [sci.core :as sci])
   (:import [java.util Date]))
 
 (def ^:private cluster-name "render-coverage")
@@ -86,7 +85,7 @@
   (let [written!
         (fn [tx]
           (let [report (db/transact! connection tx)]
-            (is (some? (:db-after report)) (seon.print.value/bounded-text report))
+            (is (some? (:db-after report)))
             report))]
     (written!
      (into
@@ -210,7 +209,7 @@
        (is (= after-web after-agent)
            "rendering prepares costs without moving the caller's database basis")
        (is (= 1 (count prepared)))
-       (is (some? (:db-after settled)) (seon.print.value/bounded-text settled))
+       (is (some? (:db-after settled)))
        (is (= 1 (count facts)))
        (let [[shape profile estimated at] (first facts)]
          (is (= :seon.config/entity shape))

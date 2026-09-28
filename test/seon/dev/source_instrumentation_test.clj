@@ -9,8 +9,7 @@
             [seon.instrument :as instrument]
             [seon.cluster.process :as operator.process]
             [seon.schema :as schema]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (deftest ^{:seon.test/long "Acquire the canonical database fixture before observing instrumentation restoration."
            :seon.test/long-ms 600000}
@@ -107,6 +106,6 @@
           :seon.operator.subprocess/deadline-ms
           (* 1000 support/event-backstop-seconds)
           :seon.operator.subprocess/merge-error? true})]
-    (is (= 0 (:seon.operator.subprocess/exit outcome)) (seon.print.value/bounded-text outcome))
+    (is (= 0 (:seon.operator.subprocess/exit outcome)))
     (is (= "cold-init-compilation-passed\n"
            (:seon.operator.subprocess/output outcome)))))

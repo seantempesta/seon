@@ -12,8 +12,7 @@
    [seon.db]
    [seon.schema]
    [seon.test-support]
-   [seon.turn]
-   [seon.print.value]))
+   [seon.turn]))
 
 (def ^:private planner-database
   (db/empty-db {}))
@@ -53,7 +52,7 @@
             (= canonical-plan
                (walk/postwalk-replace renamed->canonical renamed-plan))))
          :seed 1785366001)]
-    (is (:result check) (seon.print.value/bounded-text check))))
+    (is (:result check))))
 
 (deftest schema-deletion-reads-earlier-declarations-in-one-transaction
  (seon.test-support/with-database
@@ -87,7 +86,7 @@
          after (seon.db/db connection)
          forms (:seon.schema.projection/forms
                 (seon.schema/projection-from-database after (seon.db/carried-projection after)))]
-    (is (some? (:db-after result)) (seon.print.value/bounded-text result))
+    (is (some? (:db-after result)))
     (is (= form (:seon.test/form @observed)))
     (is (= schema-form (:seon.test/projected-form @observed)))
     (is (nil? (:seon.test/cache-identity @observed)))

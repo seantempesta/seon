@@ -15,8 +15,7 @@
             [seon.program :as program]
             [seon.sci.eval :as sci.eval]
             [seon.test :as sut]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (def ^:private probe-ns 'seon.id)
 
@@ -40,7 +39,7 @@
                          :seon.sci.admit/caps (config/result-caps config/defaults)
                          :seon.sci.eval/time-limit-ms 5000})))
                     ::admitted)]
-    (is (nil? (:seon.cluster.eval/error evaluation)) (str (:seon.cluster.eval/error evaluation)))
+    (is (nil? (:seon.cluster.eval/error evaluation)))
     (when-let [entity (:seon.program/row evaluation)]
       (support/transacted! connection [(program/declaration-row
                                         (db/carried-projection (db/db connection))
@@ -71,8 +70,8 @@
                               :seon.test/recording-connection connection
                               :seon.test/policy :named
                               :seon.test/identities #{(symbol (str probe-ns) "overlay-candidate-runs")}})]
-         (is (true? (:seon.test/passed? result)) (sut/tally result))
-         (is (= 1 (:seon.test/executed-count result)) (sut/tally result)))))))
+         (is (true? (:seon.test/passed? result)))
+         (is (= 1 (:seon.test/executed-count result))))))))
 
 (def ^:private clean-request-handle #'sut/clean-request-handle)
 (def ^:private checkpoint-head #'sut/checkpoint-head)
@@ -96,18 +95,16 @@
                                  (catch clojure.lang.ExceptionInfo refusal refusal)))
            outcomes (mapv #(support/await-event! % ::prepared) [(prepare) (prepare)])
            handles (filterv :seon.db/connection outcomes)
-           ;; Handles hold whole worlds: report only their kind, never print them.
-           summary (mapv #(if (:seon.db/connection %) :handle (ex-message %)) outcomes)
            checkpoints (filterv #(str/starts-with? (name %) (str "checkpoint-" cluster "-"))
                                 (registry/roster store))]
        (try
-         (is (seq handles) (seon.print.value/bounded-text summary))
-         (is (= 1 (count checkpoints)) (seon.print.value/bounded-text checkpoints))
+         (is (seq handles))
+         (is (= 1 (count checkpoints)))
          (is (some? (checkpoint-head store (first checkpoints) cluster base)) "the one checkpoint is complete")
-         (is (every? #(or (:seon.db/connection %)
-                          (= :seon.test/prepared-checkpoint (:seon.error/expected (ex-data %))))
-                     outcomes)
-             (str "the other caller reuses the complete checkpoint or is pushed back by name: " (seon.print.value/bounded-text summary)))
+         ;; Handles hold whole worlds: assert on their kind, never print them.
+         (is (every? #{:handle :seon.test/prepared-checkpoint}
+                     (mapv #(if (:seon.db/connection %) :handle (:seon.error/expected (ex-data %))) outcomes))
+             "the other caller reuses the complete checkpoint or is pushed back by name")
          (finally
            (run! agent/release-context! handles)
            (run! #(registry/retire-branch! {:seon.store/store store :seon.store/branch %}) checkpoints)))))))

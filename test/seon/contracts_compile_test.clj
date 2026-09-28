@@ -33,8 +33,7 @@
             [seon.fn :as seon.fn]
             [seon.fn.analyzer :as analyzer]
             [seon.schema :as schema]
-            [seon.schema.edn :as schema.edn]
-            [seon.print.value]))
+            [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Static reading: the contract as the indexer stores it
@@ -532,7 +531,7 @@
                          ::baselines {"src/seon/probe.clj" baseline}})
         refused (filterv #(= :incomplete-contract (:type %)) findings)
         named (fn [fragment] (some #(str/includes? (:message %) fragment) refused))]
-    (is (= 3 (count refused)) (seon.print.value/bounded-text refused))
+    (is (= 3 (count refused)))
     (is (named "adds seon.probe/fresh (defn) without a :malli/schema"))
     (is (named "adds seon.probe/private-fresh (defn-) without a :malli/schema"))
     (is (named "adds seon.probe/loose (defn) with :any standing in"))

@@ -6,8 +6,7 @@
             [seon.config :as config]
             [seon.sci.eval :as sci.eval]
             [seon.sci.reader :as sci.reader]
-            [seon.test-support :as test-support]
-            [seon.print.value]))
+            [seon.test-support :as test-support]))
 
 ;; Upstream corpus pins (2026-08-01):
 ;; clojure@b18d3adc5b5f4d5d0ccea966203fb67a614d5c3d
@@ -101,13 +100,11 @@
            (assoc outcome :parity/expected-state expected-state))
     (case expected-state
       :passing
-      (is passes?
-          (str entity-id " regressed: " (seon.print.value/bounded-text outcome)))
+      (is passes?)
 
       :known-divergence
       (is (false? passes?)
-          (str entity-id " now matches stock Clojure; promote the entity: "
-               (seon.print.value/bounded-text outcome))))))
+          "now matches stock Clojure; promote the entity"))))
 
 (defmacro defparity
   [entity-id expected-state check]
@@ -191,14 +188,11 @@
   []
   (let [entity-ids (vec (current-entity-ids))]
     (is (= (count expected-entity-ids) (count entity-ids))
-        (str "REPL parity entity cardinality changed: " (sort entity-ids)))
+        "REPL parity entity cardinality changed")
     (is (= expected-entity-ids (set entity-ids))
-        (str "REPL parity entity identities changed: "
-             {::missing (sort (remove (set entity-ids) expected-entity-ids))
-              ::unexpected (sort (remove expected-entity-ids entity-ids))}))
+        "REPL parity entity identities changed")
     (is (= expected-family-entity-counts (family-entity-counts entity-ids))
-        (str "REPL parity family cardinalities changed: "
-             (family-entity-counts entity-ids)))))
+        "REPL parity family cardinalities changed")))
 
 (defn- database-fixture
   [run-tests]

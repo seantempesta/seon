@@ -8,8 +8,7 @@
             [seon.schema]
             [seon.config]
             [seon.test-support]
-            [clojure.test :refer [deftest is testing]]
-            [seon.print.value])
+            [clojure.test :refer [deftest is testing]])
   (:import [java.io PushbackReader]
            [java.util.concurrent TimeUnit TimeoutException]))
 
@@ -54,7 +53,7 @@
   (doseq [file (reverse files)]
     (when (.exists ^java.io.File file)
       (is (.delete ^java.io.File file)
-          (str "Could not delete MCP fixture path " file)))))
+          "Could not delete MCP fixture path"))))
 
 (defn- reap-process-handle!
   [^java.lang.ProcessHandle handle]
@@ -77,7 +76,7 @@
                  (doto (ProcessBuilder.
                         ^java.util.List [(.getPath launcher)])
                    (.directory project-root)))
-        stderr (future (slurp (.getErrorStream process)))]
+        _stderr (future (slurp (.getErrorStream process)))]
     (with-open [writer (io/writer (.getOutputStream process))]
       (doseq [request requests]
         (.write writer (json/write-str request))
@@ -88,8 +87,8 @@
                          (mapv #(json/read-str % :key-fn keyword)))
           completed? (.waitFor process 10 TimeUnit/SECONDS)]
       (when-not completed? (.destroyForcibly process))
-      (is completed? @stderr)
-      (is (= 0 (when completed? (.exitValue process))) @stderr)
+      (is completed?)
+      (is (= 0 (when completed? (.exitValue process))))
       responses)))
 
 (defn- namespace-form
@@ -116,8 +115,7 @@
         (filterv #(str/starts-with? (str %) "seon.") targets)]
     (is (seq targets))
     (is (= [] application-targets)
-        (str "The REPL bridge must not require application namespaces: "
-             application-targets))))
+        "The REPL bridge must not require application namespaces")))
 
 (deftest bridge-loads-with-only-the-tooling-classpath
   (testing "Babashka does not need bb.edn, src/, or src-old/"
@@ -134,8 +132,8 @@
           _ (when-not completed? (.destroyForcibly process))
           output (slurp (.getInputStream process))]
       (is completed? "Babashka bridge load exceeded ten seconds.")
-      (is (= 0 (when completed? (.exitValue process))) output)
-      (is (str/includes? output ":bridge-loaded") output))))
+      (is (= 0 (when completed? (.exitValue process))))
+      (is (str/includes? output ":bridge-loaded")))))
 
 (deftest bridge-content-has-no-second-truncation-budget
   (let [large (apply str (repeat 20000 "x"))
@@ -202,7 +200,7 @@
               ((bridge-var 'read-clj-endpoint)
                (.getCanonicalPath fixture-root) "fixture")
               (catch clojure.lang.ExceptionInfo error error))]
-        (is (instance? clojure.lang.ExceptionInfo outcome) (seon.print.value/bounded-text outcome))
+        (is (instance? clojure.lang.ExceptionInfo outcome))
         (is (= :repl-unavailable
                (:seon.dev.mcp/failure (ex-data outcome))))
         (is (= :missing
@@ -336,8 +334,7 @@
         (is (= (count raw-events) (count events)))
         (is (= source (:seon.dev.mcp/form data)))
         (is (every? #(not (contains? % :form)) events)
-            (str mode " events retain their prepl structure on "
-                 (if exception? "evaluation error" "success")))))))
+            "events retain their prepl structure on")))))
 
 (deftest duplicate-live-cluster-identities-fail-with-candidates
   (let [fixture-root (io/file project-root "tmp" (str "mcp-ambiguous-" (random-uuid)))
@@ -401,7 +398,7 @@
                   :mode "jvm"
                   :code "[(ns-name *ns*) (+ 40 2)]"}))
             data (result-data result)]
-        (is (not (:isError result)) (seon.print.value/bounded-text data))
+        (is (not (:isError result)))
         (is (= root (:seon.dev.mcp/root data)))
         (is (= "mcp.live.chosen" (:seon.dev.mcp/namespace data)))
         (is (= "[mcp.live.chosen 42]"
@@ -513,8 +510,7 @@
             pid-line-future (future (.readLine parent-reader))
             pid-line (deref pid-line-future 10000 ::timeout)
             _ (is (not= ::timeout pid-line)
-                  (str "The helper did not report the MCP child pid: "
-                       (when (.isFile parent-error) (slurp parent-error))))
+                  "The helper did not report the MCP child pid")
             child-pid (when (string? pid-line) (parse-long pid-line))
             child-optional (when child-pid
                              (java.lang.ProcessHandle/of child-pid))
@@ -523,7 +519,7 @@
                            (.get child-optional))
             fifo-output (deref fifo-output-future 5000 ::timeout)]
         (reset! child-handle* child-handle)
-        (is child-handle (str "No child ProcessHandle for " pid-line))
+        (is child-handle "no child ProcessHandle")
         (is (not= ::timeout fifo-output) "FIFO writer did not attach.")
         (reset! fifo-output* fifo-output)
         (when (and child-handle (not= ::timeout fifo-output))
@@ -536,8 +532,7 @@
             (let [response-line-future (future (.readLine parent-reader))
                   response-line (deref response-line-future 5000 ::timeout)]
               (is (not= ::timeout response-line)
-                  (str "MCP child did not become ready; log="
-                       (when (.isFile child-error) (slurp child-error))))
+                  "MCP child did not become ready")
               (when (string? response-line)
                 (is (= "seon"
                        (get-in (json/read-str response-line :key-fn keyword)
@@ -623,7 +618,7 @@
                                                                (current-process-start-date))
                                                 :seon.boot/prepl-port (.getLocalPort server)))
       (let [face ((bridge-var 'runtime-observation) root cluster)]
-        (is (= cluster (:seon.dev.mcp/cluster face)) (seon.print.value/bounded-text face))
+        (is (= cluster (:seon.dev.mcp/cluster face)))
         (is (#{:observed :faulted :unknown} (:seon.dev.mcp/health face)))
         (is (not-any? #(contains? face %) [:seon.dev.mcp/open-fault-count
                                             :seon.dev.mcp/replaced-root-count
@@ -714,7 +709,7 @@
         cluster (first (sort (keys instances)))
         data (result-data ((bridge-var 'execute-branch)
                                   {:root @(bridge-var 'project-root) :cluster cluster :action "list"}))]
-    (is (set? (:my.agent/roster (read-string (:seon.dev.mcp/value data)))) (seon.print.value/bounded-text data))
+    (is (set? (:my.agent/roster (read-string (:seon.dev.mcp/value data)))))
     (is (not (contains? data :seon.dev.mcp/events)))))
 
 (deftest ^{:seon/tasks #{"18051e0ee3e2"}} a-run-reply-is-the-response-the-agents-context-reads
@@ -750,8 +745,7 @@
     (is (= [["outer" {:probe/value 7}] ["inner" {:probe/cause :sentinel}]]
            (mapv (juxt :seon.error/message :seon.error/data) (:seon.error/chain data)))
         "each link's ex-data survives as native EDN")
-    (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.error/base) data)
-        (seon.print.value/bounded-text data))
+    (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.error/base) data))
     (is (every? seon.error.refusal/first-party-frame?
                 (mapcat :seon.error/frames (:seon.error/chain data)))
         "no dependency or host frame is carried")))

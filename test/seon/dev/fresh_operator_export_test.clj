@@ -47,28 +47,24 @@
        root {:seon.test/fixture-observation "CLI export must produce a physically independent store that can reopen."})
       (let [cold-destination (io/file root "cold-export")
             cold (run-seon root "export" (.getPath cold-destination))]
-        (is (= 1 (::exit cold)) (::output cold))
-        (is (str/includes? (::output cold) "No live exact-root JVM")
-            (::output cold))
+        (is (= 1 (::exit cold)))
+        (is (str/includes? (::output cold) "No live exact-root JVM"))
         (is (false? (.exists cold-destination))))
       (let [started (run-seon root "start" cluster-name)]
-        (is (true? (::completed? started)) (::output started))
-        (is (= 0 (::exit started)) (::output started)))
+        (is (true? (::completed? started)))
+        (is (= 0 (::exit started))))
       (let [extra (run-seon root "export" (.getPath destination) "extra")]
-        (is (= 1 (::exit extra)) (::output extra))
-        (is (str/includes? (::output extra) "Use export PATH")
-            (::output extra)))
+        (is (= 1 (::exit extra)))
+        (is (str/includes? (::output extra) "Use export PATH")))
       (let [outcome (run-seon root "export" (.getPath destination))]
-        (is (true? (::completed? outcome)) (::output outcome))
-        (is (= 0 (::exit outcome)) (::output outcome))
+        (is (true? (::completed? outcome)))
+        (is (= 0 (::exit outcome)))
         (is (str/includes? (::output outcome)
-                           (.getCanonicalPath exported-store))
-            (::output outcome)))
+                           (.getCanonicalPath exported-store))))
       (let [occupied (run-seon root "export" (.getPath destination))]
-        (is (= 1 (::exit occupied)) (::output occupied))
+        (is (= 1 (::exit occupied)))
         (is (str/includes? (::output occupied)
-                           "an export never overwrites one")
-            (::output occupied)))
+                           "an export never overwrites one")))
       (let [exported (store/open-store!
                       {:seon.store/dir (.getPath exported-store)})]
         (try

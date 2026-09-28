@@ -120,14 +120,14 @@
 
 
         (testing "ordinary evaluation completes in each cluster's own ctx"
-          (doseq [[label instance source expected]
+          (doseq [[_label instance source expected]
                   [["cohost-a" a "(+ 20260806 1)" "20260807"]
                    ["cohost-b" b "(+ 20260807 1)" "20260808"]]]
             (let [result (evaluate-in instance source)]
               (is (nil? (:seon.cluster.eval/error result))
-                  (str label " evaluated without an error value"))
+                  "evaluated without an error value")
               (is (= expected (str (:seon.sci.admit/value result)))
-                  (str label " returned its own computed value"))))))
+                  "returned its own computed value")))))
       (finally
         (doseq [instance @instances]
           (try (boot/stop! instance) (catch Throwable _ nil)))))))

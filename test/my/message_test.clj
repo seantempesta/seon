@@ -17,8 +17,7 @@
             [seon.db :as db]
             [seon.schema]
             [seon.sci.eval :as sci]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (defn- with-messages
   [f]
@@ -106,8 +105,8 @@
                                           :seon.cluster.eval/ordinal 0
                                           :seon.config.message/max-chain 10})
               written (db/transact! connection (:seon.message/rows delivery))]
-          (is (empty? (:seon.error/values delivery)) (seon.print.value/bounded-text delivery))
-          (is (:db-after written) (seon.print.value/bounded-text written))
+          (is (empty? (:seon.error/values delivery)))
+          (is (:db-after written))
           (is (= (:seon.message/id value)
                  (:seon.message/id
                   (db/pull (:db-after written) [:seon.message/id]
@@ -124,7 +123,7 @@
                                    :seon.agent/id "bob"})
             stored (message/read (:seon.message/id sent) @connection)
             original (db/pull @connection '[*] [:seon.message/id "m-1"])]
-        (is (string? (:seon.message/id sent)) (seon.print.value/bounded-text sent))
+        (is (string? (:seon.message/id sent)))
         (is (= sent stored))
         (is (= [:seon.agent/id "alice"] (:seon.message/to stored)))
         (is (= [:seon.agent/id "bob"] (:seon.message/from stored)))
@@ -197,11 +196,11 @@
                         (str "(seon.cluster.message/decline \"planner\" \"failure-17\" "
                              bad ")")]]
           (let [value (support/agent-value ctx source)]
-            (is (map? value) source)
+            (is (map? value))
             (is (= :seon.instrument/invocation
-                   (:seon.error/layer value)) source)
-            (is (= :input (:seon.instrument/check value)) source)
-            (is (string? (:seon.error/message value)) source)
+                   (:seon.error/layer value)))
+            (is (= :input (:seon.instrument/check value)))
+            (is (string? (:seon.error/message value)))
             (is (not ((seon.schema/projection-validator (seon.schema/handed-projection) :my.message/value) value))
                 "and the loop cannot mistake it for a delivery")))))))
 
@@ -261,7 +260,7 @@
           "the inbox lists the unacknowledged message")
       (let [acknowledged (evaluate "(my.message/received! \"ack-1\")")
             tx (get-in acknowledged [:seon.message/received-tx :db/id])]
-        (is (int? tx) (seon.print.value/bounded-text acknowledged))
+        (is (int? tx))
         (is (= "ack-1" (:seon.message/id acknowledged)))
         (is (= #{} (unread)))
         (is (= [] (evaluate "(my.message/inbox)"))

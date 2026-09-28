@@ -2,8 +2,7 @@
   (:require [clojure.test :refer [deftest is]]
             [seon.db :as db]
             [seon.test-support :as support]
-            [seon.turn :as turn]
-            [seon.print.value]))
+            [seon.turn :as turn]))
 
 (deftest receipt-created-by-the-write-is-resolved-before-provenance
   (support/with-database
@@ -39,7 +38,7 @@
                      [?tx :seon.db/receipt ?receipt]]
                    @connection receipt-id)]
          (is (nil? (:db/id before)))
-         (is (some? (:db-after result)) (seon.print.value/bounded-text result))
+         (is (some? (:db-after result)))
          (is (= [receipt-id ordinal] provenance)
              "the receipt entity precedes the transaction's provenance ref"))))))
 
@@ -66,8 +65,8 @@
                      (db/transact! connection (support/agent-tx @connection %)))
            first-write (write! "open-on-first-write-a")
            second-write (write! "open-on-first-write-b")]
-       (is (:db-after first-write) (seon.print.value/bounded-text first-write))
-       (is (:db-after second-write) (str "a later write carries the open again; the writer skips it: " (seon.print.value/bounded-text second-write)))
+       (is (:db-after first-write))
+       (is (:db-after second-write) "a later write carries the open again; the writer skips it")
        (is (= 1 (count (db/q '[:find [?run ...] :in $ ?id :where [?run :seon.turn/id ?id]] @connection run-id))))
        (is (= (second receipt)
               (db/q '[:find ?rid . :in $ ?agent-id

@@ -44,9 +44,7 @@
     (doseq [[kind entity] kinds]
       (testing kind
         (let [ratio (/ (double (charge kind entity)) (:retained-bytes entity))]
-          (is (<= (/ 1 tolerance) ratio tolerance)
-              (str kind " charges " (charge kind entity) " B for " (:retained-bytes entity)
-                   " B measured (ratio " ratio ")")))))))
+          (is (<= (/ 1 tolerance) ratio tolerance)))))))
 
 (deftest the-packaged-declaration-projection-is-one-entry
   ;; Config read the packaged declaration projection through a kind of its own,

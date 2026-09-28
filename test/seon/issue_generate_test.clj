@@ -5,8 +5,7 @@
             [seon.id]
             [seon.issue]
             [seon.issue.detect]
-            [seon.test-support]
-            [seon.print.value]))
+            [seon.test-support]))
 
 (def ^:private detector 'seon.issue.detect/public-without-doc)
 
@@ -45,7 +44,7 @@
   them with `:db/add`/`:db/retract` forms, which carry no entity map."
   [connection tx]
   (let [report (seon.db/transact! connection tx)]
-    (clojure.test/is (let [observed report] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (seon.print.value/bounded-text report))
+    (clojure.test/is (let [observed report] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))))
     report))
 
 (defn- some-subject
@@ -71,9 +70,9 @@
            first-run (generate! connection)
            issue-id (subject-issue-id subject)
            entity (issue-entity connection issue-id)]
-       (clojure.test/is (let [observed first-run] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (seon.print.value/bounded-text first-run))
-       (clojure.test/is (pos? (:seon.issue/count first-run)) (seon.print.value/bounded-text first-run))
-       (clojure.test/is (= :open (:seon.issue/status entity)) (seon.print.value/bounded-text entity))
+       (clojure.test/is (let [observed first-run] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))))
+       (clojure.test/is (pos? (:seon.issue/count first-run)))
+       (clojure.test/is (= :open (:seon.issue/status entity)))
        (clojure.test/is (= detector (get-in entity [:seon.issue/detector :seon.fn/sym])))
        (clojure.test/is (= #{subject} (set (map :seon.fn/sym (:seon.issue/functions entity))))
                         "the subject is stored as a ref, not as text")
@@ -88,7 +87,7 @@
              second-run (generate! connection)
              again (issue-entity connection issue-id)]
          (clojure.test/is (= 0 (:seon.issue/forms second-run))
-                          (str "a second run of the same subjects writes nothing: " (seon.print.value/bounded-text second-run)))
+                          "a second run of the same subjects writes nothing")
          (clojure.test/is (= before (:max-tx (seon.db/db connection))))
          (clojure.test/is (= (:db/id entity) (:db/id again))
                           "the identity is the detector plus the subject, so one entity")
@@ -103,28 +102,28 @@
            issue-id (subject-issue-id subject)]
        (generate! connection)
        (let [opened (issue-entity connection issue-id)]
-         (clojure.test/is (= :open (:seon.issue/status opened)) (seon.print.value/bounded-text opened))
-         (clojure.test/is (nil? (:seon.issue/resolved-tx opened)) (seon.print.value/bounded-text opened))
+         (clojure.test/is (= :open (:seon.issue/status opened)))
+         (clojure.test/is (nil? (:seon.issue/resolved-tx opened)))
          ;; The standard now holds: the subject leaves the detector's result.
          (written! connection [[:db/add entity :seon.fn/doc "It answers its own question."]])
          (generate! connection)
          (let [resolved (issue-entity connection issue-id)]
            (clojure.test/is (= (:db/id opened) (:db/id resolved))
                             "resolution keeps the entity; nothing is deleted")
-           (clojure.test/is (= :resolved (:seon.issue/status resolved)) (seon.print.value/bounded-text resolved))
-           (clojure.test/is (some? (:seon.issue/resolved-tx resolved)) (seon.print.value/bounded-text resolved))
+           (clojure.test/is (= :resolved (:seon.issue/status resolved)))
+           (clojure.test/is (some? (:seon.issue/resolved-tx resolved)))
            (clojure.test/is (= (:seon.issue/problem opened) (:seon.issue/problem resolved))
                             "the prose is not rewritten by resolution"))
          (let [steady (generate! connection)]
            (clojure.test/is (= 0 (:seon.issue/forms steady))
-                            (str "an already resolved subject re-resolves nothing: " (seon.print.value/bounded-text steady))))
+                            "an already resolved subject re-resolves nothing"))
          ;; The finding comes back.
          (written! connection [[:db/retract entity :seon.fn/doc]])
          (generate! connection)
          (let [reopened (issue-entity connection issue-id)]
            (clojure.test/is (= (:db/id opened) (:db/id reopened)))
-           (clojure.test/is (= :open (:seon.issue/status reopened)) (seon.print.value/bounded-text reopened))
-           (clojure.test/is (nil? (:seon.issue/resolved-tx reopened)) (seon.print.value/bounded-text reopened))))))))
+           (clojure.test/is (= :open (:seon.issue/status reopened)))
+           (clojure.test/is (nil? (:seon.issue/resolved-tx reopened)))))))))
 
 (clojure.test/deftest generate-refuses-a-bare-entity-id-subject
   (seon.test-support/with-database
@@ -134,8 +133,7 @@
                    {:seon.db/connection connection
                     :seon.issue/detector 'seon.issue-generate-test/bare-entity-subject
                     :seon.issue/severity :cleanup})]
-       (clojure.test/is (= 0 (:seon.issue/subject-identity-count result))
-                        (seon.print.value/bounded-text result))
+       (clojure.test/is (= 0 (:seon.issue/subject-identity-count result)))
        (clojure.test/is (string? (:seon.error/message result)))
        (clojure.test/is (= before (:max-tx (seon.db/db connection)))
                         "a refused detector writes nothing at all")
@@ -143,8 +141,7 @@
                       {:seon.db/connection connection
                        :seon.issue/detector 'seon.issue.detect/absent-detector
                        :seon.issue/severity :cleanup})]
-         (clojure.test/is (= 'seon.issue.detect/absent-detector (:seon.issue/missing-detector unknown))
-                          (seon.print.value/bounded-text unknown)))))))
+         (clojure.test/is (= 'seon.issue.detect/absent-detector (:seon.issue/missing-detector unknown))))))))
 
 (clojure.test/deftest a-generated-issue-names-its-detector-and-promises-no-tests
   (seon.test-support/with-database
@@ -157,13 +154,13 @@
              unit {:seon.db/db database
                    :seon.render/value (issue-entity connection (subject-issue-id subject))}
              text (seon.issue/render-ai unit)]
-         (clojure.test/is (empty? (:seon.issue/tests view)) (seon.print.value/bounded-text view))
+         (clojure.test/is (empty? (:seon.issue/tests view)))
          (clojure.test/is (= (list detector '(seon.db/db))
                              (:seon.issue/check-form view))
                           "the form that decides done re-evaluates the detector, never an empty check")
          (clojure.test/is (not (clojure.string/includes? text "my.test/check"))
-                          (str "a detector issue must not promise tests it does not have: " text))
-         (clojure.test/is (clojure.string/includes? text (str detector)) text)
+                          "a detector issue must not promise tests it does not have")
+         (clojure.test/is (clojure.string/includes? text (str detector)))
          (clojure.test/is (clojure.string/includes?
                            (pr-str (seon.issue/render-html unit))
                            (str detector))

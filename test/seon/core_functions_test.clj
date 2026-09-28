@@ -5,8 +5,7 @@
             [seon.program :as program]
             [seon.sci.eval :as evaluation]
             [seon.sci.kernel :as kernel]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (def run-two-definition
   "The exact stored run-2 source, including its empty-input contract mistake."
@@ -44,11 +43,11 @@
                                :seon.cluster.eval/source (pr-str (list 'seon.schema/register! schema-key form))
                                :seon.sci.eval/time-limit-ms 10000
                                :seon.sci.admit/caps (config/result-caps config/defaults)})]
-                  (is (= schema-key (:seon.sci.admit/value result)) (seon.print.value/bounded-text result))
+                  (is (= schema-key (:seon.sci.admit/value result)))
                   (when-let [entity (:seon.program/row result)]
                     (let [written-on (db/db connection)
                            written (db/transact! connection [(program/canonical-row entity)])]
-                      (is (:db-after written) (seon.print.value/bounded-text written))
+                      (is (:db-after written))
                       (evaluation/install-evaluated-rows!
                        {:seon.sci.eval/ctx ctx :seon.db/db (:db-after written) :seon.db/transaction-report written
                         :seon.sci.eval/written-on written-on
@@ -74,9 +73,9 @@
                         :seon.sci.admit/caps (config/result-caps config/defaults)})))
             original (check run-two-definition)
             valid (check "(defn entity-count {:malli/schema [:=> [:cat [:vector :example/order-row]] :int]} [entities] (count entities))")]
-        (is (= :failed (:seon.test.accretion/status original)) (seon.print.value/bounded-text original))
+        (is (= :failed (:seon.test.accretion/status original)))
         (is (= [[]] (get-in original [:seon.test.accretion/failure :seon.test.accretion/arguments])))
-        (is (= :passed (:seon.test.accretion/status valid)) (seon.print.value/bounded-text valid))
+        (is (= :passed (:seon.test.accretion/status valid)))
         (is (= 25 (:seon.test.accretion/executed-count valid)))
         (is (= "[:map [:customer :example/customer] [:total :int]]"
                (get-in original [:seon.test.accretion/failure :seon.test.accretion/expected])))

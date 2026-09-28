@@ -19,9 +19,9 @@
                               ::connection connection
                               ::items (vec (range 100000))})
         printed (pr-str reply)]
-    (is (:seon.error/at reply) printed)
+    (is (:seon.error/at reply))
     (is (string? (:seon.error/offending reply)) "the evidence is shown text")
-    (is (< (count printed) 20000) (str (count printed) " chars"))
+    (is (< (count printed) 20000))
     (is (str/includes? (:seon.error/offending reply) "…") "the bound is marked")
     (is (not-any? #(contains? % :seon.error/data) (:seon.error/chain reply))
         "no chain link carries raw ex-data")))

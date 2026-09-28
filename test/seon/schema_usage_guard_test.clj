@@ -9,8 +9,7 @@
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
-            [seon.test-support :as test-support]
-            [seon.print.value]))
+            [seon.test-support :as test-support]))
 
 (def ^:private base-key :seon.schema-usage-guard/base)
 (def ^:private direct-key :seon.schema-usage-guard/direct)
@@ -274,7 +273,7 @@
                  (entity-tx
                   (schema-entity connection base-key
                               [:string {:seon.db/index true}])))]
-            (is (nil? (:error result)) (seon.print.value/bounded-text (:error result)))
+            (is (nil? (:error result)))
             (is (= (printed [:string {:seon.db/index true}])
                    (:seon.schema/form
                     (db/pull @connection [:seon.schema/form]
@@ -429,7 +428,7 @@
               (transact-result
                connection
                (entity-tx (schema-entity connection entity-key replacement-form)))]
-          (is (nil? (:error result)) (seon.print.value/bounded-text (:error result)))
+          (is (nil? (:error result)))
           (is (= (printed replacement-form)
                  (:seon.schema/form
                   (db/pull @connection [:seon.schema/form]

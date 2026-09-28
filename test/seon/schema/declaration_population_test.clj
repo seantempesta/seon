@@ -25,8 +25,7 @@
             [seon.print :as print]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.test-support :as test-support]
-            [seon.print.value]))
+            [seon.test-support :as test-support]))
 
 (defn- resource-reads
   "Schema resource reads performed while calling `thunk`, read from the
@@ -68,8 +67,7 @@
              ["seon.config/default-population" config/default-population]]]
       (testing operation
         (is (<= (resource-reads thunk) one)
-            (str operation
-                 " must perform ONE declaration resolution, not one per item"))))
+            "must perform ONE declaration resolution, not one per item")))
     (testing "shipped print defaults are already retained after their first acquisition"
       (is (<= (resource-reads print/default-options) one))
       (is (zero? (resource-reads print/default-options))))))
@@ -99,8 +97,7 @@
     (is (some? failure))
     (is ((schema/projection-validator projection
                                       :seon.schema/validation-refusal)
-         (ex-data failure))
-        (seon.print.value/bounded-text (ex-data failure)))
+         (ex-data failure)))
     (is (= :seon.schema/projection
            (:seon.schema/expected-value (ex-data failure))))
     (is (nil? (:seon.schema/refused-value (ex-data failure))))

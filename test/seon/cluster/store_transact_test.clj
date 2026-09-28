@@ -22,8 +22,7 @@
             [seon.error :as error]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (def ^:private schema-delta (schema/begin-registration-delta))
 
@@ -67,7 +66,7 @@
                               depth)]
              (= rule (:rule (error/refusal buried)))))
          :seed 20260727)]
-    (is (true? (:result check)) (str "refusal walk failed: " (seon.print.value/bounded-text check)))))
+    (is (true? (:result check)) "refusal walk failed")))
 
 (deftest a-clean-throwable-carries-no-refusal
   (is (nil? (error/refusal (RuntimeException. "no data"))))

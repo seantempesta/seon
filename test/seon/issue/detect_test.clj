@@ -15,8 +15,7 @@
             [seon.fn]
             [seon.issue.detect]
             [seon.program]
-            [seon.test-support]
-            [seon.print.value]))
+            [seon.test-support]))
 
 (def ^:private source-ns 'seon.detect-fixture)
 (def ^:private helper-ns 'seon.detect-fixture-helpers)
@@ -93,7 +92,7 @@
 (defn- named
   "The fixture symbols one detector call names, as a set."
   [subjects]
-  (clojure.test/is (vector? subjects) (seon.print.value/bounded-text subjects))
+  (clojure.test/is (vector? subjects))
   (into #{} (comp (map :seon.fn/sym) (filter fixture-symbols)) subjects))
 
 (clojure.test/deftest the-contract-standard-names-only-the-declaration-without-a-spec
@@ -139,18 +138,18 @@
                                    (seon.issue.detect/public-without-reaching-test
                                     database {:seon.fn.file/relative-root "src"})))
             problem (:seon.issue/problem subject)]
-        (clojure.test/is (some? subject) (str untested-fn))
+        (clojure.test/is (some? subject))
         (clojure.test/is (= #{source-ns} (:seon.issue/namespaces subject))
                          "the finding cites the namespace responsible for it")
         (clojure.test/is (clojure.string/includes? problem (str (seon.db/basis-t database)))
-                         (str "the problem names the basis :t the reach was computed at: " problem))
+                         "the problem names the basis :t the reach was computed at")
         (clojure.test/is (clojure.string/includes? problem "seon.fn/tests-reaching")
-                         (str "the problem names the derivation: " problem))
+                         "the problem names the derivation")
         (clojure.test/is (clojure.string/includes? problem "incomplete")
-                         (str "the problem says the graph may be incomplete: " problem))
+                         "the problem says the graph may be incomplete")
         (clojure.test/is (clojure.string/includes?
                           problem "seon.issue.detect/public-without-reaching-test")
-                         (str "the problem names the detector that resolves it: " problem))))))
+                         "the problem names the detector that resolves it")))))
 
 (clojure.test/deftest the-standards-exclude-a-declaration-that-does-not-own-its-form
   ;; A `defrecord`'s constructors share one `:seon.fn/form-span` in one file,
@@ -166,8 +165,8 @@
             contract (into #{} (map :seon.fn/sym)
                            (seon.issue.detect/public-without-contract
                             database {:seon.fn.file/relative-root "src"}))]
-        (clojure.test/is (not (contains? contract shared)) (str shared))
-        (clojure.test/is (not (contains? contract sibling)) (str sibling))
+        (clojure.test/is (not (contains? contract shared)))
+        (clojure.test/is (not (contains? contract sibling)))
         (clojure.test/is (contains? contract uncontracted-fn)
                          "a declaration owning its own form is still a subject")))))
 

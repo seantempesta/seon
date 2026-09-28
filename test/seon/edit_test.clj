@@ -10,8 +10,7 @@
             [seon.fs :as fs]
             [seon.id :as id]
             [seon.program :as program]
-            [seon.test-support :as test-support]
-            [seon.print.value])
+            [seon.test-support :as test-support])
   (:import [java.nio.charset StandardCharsets]
            [java.nio.file Files]
            [java.util Arrays]))
@@ -203,7 +202,7 @@
 
   (testing "every operation shape records one"
     (let [source "(def caff\u00e8 1)\n(def bar 2)\n"]
-      (doseq [[label candidate]
+      (doseq [[_label candidate]
               [[:exact (edit/exact source
                                    {:my.edit/path "sample.clj"
                                     :my.edit/expected-digest zero-digest
@@ -220,11 +219,11 @@
         (let [[start end] (:seon.edit/form-span candidate)
               octets (.getBytes ^String (:seon.edit/source candidate)
                                 StandardCharsets/UTF_8)]
-          (is (some? start) (str label " records a span"))
+          (is (some? start))
           (is (= "(def bar 3)"
                  (.trim (String. (Arrays/copyOfRange octets (int start) (int end))
                                  StandardCharsets/UTF_8)))
-              (str label " span selects the written bytes")))))))
+              "span selects the written bytes"))))))
 
 (defn- declared-root-directory!
   "A scratch directory INSIDE a declared filesystem root.
@@ -337,7 +336,7 @@
                               :my.edit/source "(defn subject [] 2)"}))
             receipt (effect-of connection 1)]
         (testing "the edit succeeded and the agent never sees writer keys"
-          (is (string? (:my.edit/after-digest edited)) (seon.print.value/bounded-text edited))
+          (is (string? (:my.edit/after-digest edited)))
           (is (nil? (:seon.effect/provenance edited))
               "write-back provenance is the writer's, not the agent's"))
         (testing "the effect refs the indexed file and the declaration it wrote"
@@ -361,7 +360,7 @@
                                    :my.edit/old-string "heading comment"
                                    :my.edit/new-string "heading note"}))
                 comment-receipt (effect-of connection 2)]
-            (is (string? (:my.edit/after-digest comment-edit)) (seon.print.value/bounded-text comment-edit))
+            (is (string? (:my.edit/after-digest comment-edit)))
             (is (= (fs/relative-path (fs/source-directory) path) (get-in comment-receipt
                                 [:seon.effect/file :seon.fn.file/relative-path])))
             (is (some? (:seon.effect/form-span comment-receipt)))
@@ -414,7 +413,7 @@
                                     :my.edit/operation :replace
                                     :my.edit/source
                                     (str "(defn " declaration-name " [] 2)")}))]
-              (is (string? (:my.edit/after-digest result)) (seon.print.value/bounded-text result))
+              (is (string? (:my.edit/after-digest result)))
               (recur (inc ordinal) (:my.edit/after-digest result) (next names)))))
         (is (= #{'fixture-changed/alpha 'fixture-changed/beta}
                (set (db/q '[:find [?symbol ...]
@@ -457,8 +456,7 @@
                               :my.edit/operation :replace
                               :my.edit/source "(defn subject [] 2)"}))]
         (is (= outside (:my.fs/path-refused refused))
-            (str "the refusal must name what was missing, not collapse into "
-                 "a handler failure; got " (seon.print.value/bounded-text refused)))
+            "the refusal must name what was missing, not collapse into a handler failure")
         (is (= outside (get-in refused [:seon.error/data :my.fs/path]))
             "and it must carry the exact path it refused")
         (.delete (java.io.File. outside))

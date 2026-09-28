@@ -11,8 +11,7 @@
             [seon.cluster.process :as operator.process]
             [seon.schema :as schema]
             [seon.sci.eval :as evaluation]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (def ^:private source-path "src/my/adoption_contract_probe.clj")
 (def ^:private schema-path "resources/seon/schemas/my.adoption-contract-probe.edn")
@@ -126,7 +125,7 @@
                             [directory]))
                      :seon.operator.subprocess/deadline-ms 1200000
                      :seon.operator.subprocess/merge-error? true})]
-        (is (= 0 (:seon.operator.subprocess/exit copied)) (seon.print.value/bounded-text copied))
+        (is (= 0 (:seon.operator.subprocess/exit copied)))
         (when (= 0 (:seon.operator.subprocess/exit copied))
           (let [result
                 (operator.process/run-process!
@@ -138,9 +137,7 @@
                   :seon.operator.subprocess/directory directory
                   :seon.operator.subprocess/deadline-ms 1200000
                   :seon.operator.subprocess/merge-error? true})]
-            (is (= 0 (:seon.operator.subprocess/exit result))
-                (:seon.operator.subprocess/output result))
+            (is (= 0 (:seon.operator.subprocess/exit result)))
             (is (str/includes? (:seon.operator.subprocess/output result)
-                               "adoption-contract-freshness: changed contract and refusal retry enforced")
-                (:seon.operator.subprocess/output result)))))
+                               "adoption-contract-freshness: changed contract and refusal retry enforced")))))
       (finally (support/delete-recursively! directory)))))

@@ -23,9 +23,8 @@
   (doseq [[route-name [params expected]] path-examples]
     (let [path (route/path route-name params)
           match (reitit/match-by-path route/router path)]
-      (is (= expected path) (str "reverse path for " route-name))
-      (is (= route-name (get-in match [:data :name]))
-          (str "round-trip name for " route-name))))
+      (is (= expected path))
+      (is (= route-name (get-in match [:data :name])))))
   (is (= "/data?entity=%5B%3Ax%2Fid+%22a+b%22%5D&offset=0"
          (route/path ::route/data
                      {}
@@ -62,5 +61,4 @@
                          (remove #(= route-file (.getCanonicalFile %)))))]
     (doseq [file files
             forbidden forbidden-url-builders]
-      (is (not (str/includes? (slurp file) forbidden))
-          (str (.getPath file) " contains " forbidden)))))
+      (is (not (str/includes? (slurp file) forbidden))))))

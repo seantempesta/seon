@@ -155,7 +155,7 @@
     (doseq [^java.io.File file files]
       (is (map? (try (edn/read-string (slurp file))
                      (catch RuntimeException failure (ex-message failure))))
-          (str (.getName file) " must read as one EDN map")))))
+          "must read as one EDN map"))))
 
 (deftest duplicates-across-sections-refuse
   (with-temporary-resources

@@ -8,8 +8,7 @@
             [seon.schema :as schema]
             [my.message :as message]
             [seon.sci.eval :as evaluation]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (defn- evaluate
   ([ctx connection source] (evaluate ctx connection source true))
@@ -48,9 +47,8 @@
            (is (not-any? #{:seon.db/connection :seon.agent/id} (map first entries)))
            (is (str/includes? (:seon.eval/shown directory) ":supplied"))
            (let [example (evaluate ctx connection (:example doc) false)]
-             (is (nil? (:seon.cluster.eval/error example)) (seon.print.value/bounded-text example))
-             (is (nil? (:seon.cluster.eval/error example))
-                 (seon.print.value/bounded-text example)))))))))
+             (is (nil? (:seon.cluster.eval/error example)))
+             (is (nil? (:seon.cluster.eval/error example))))))))))
 
 (deftest invalid-runtime-key-tells-the-agent-to-omit-it
   (support/with-database

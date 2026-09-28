@@ -28,8 +28,7 @@
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.test-support :as support]
-            [seon.turn :as turn]
-            [seon.print.value]))
+            [seon.turn :as turn]))
 
 (defn- element-text [node]
   (cond
@@ -96,7 +95,7 @@
                                                    :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms handle)})
                    acquired (render/acquire-context! acquire-request)
                    expected (:seon.cluster.prompt/text acquired)
-                   _ (is (string? expected) (seon.print.value/bounded-text acquired))
+                   _ (is (string? expected))
                    attempt (db/transact! connection
                                          [{:db/id "debug-attempt"
                                              :seon.ai.attempt/id "debug-attempt" :seon.ai.attempt/ordinal 0
@@ -110,7 +109,7 @@
                                              :seon.ai.attempt/usage-edn
                                              "{\"prompt_tokens\" 100, \"completion_tokens\" 12, \"prompt_cache_hit_tokens\" 80}"}
                                           [:db/add [:seon.turn/id provider-id] :seon.turn/attempts "debug-attempt"]])
-                   _ (is (:db-after attempt) (seon.print.value/bounded-text attempt))
+                   _ (is (:db-after attempt))
                    _ (agent/arm! request)
                    _ (fixture/submit! handle routing "(str \"later must not enter earlier prompt\")")
                    _ (agent/disarm! request)
@@ -320,7 +319,7 @@
                                  :seon.turn/id (:seon.turn/id (last (#'transcript/turn-entities @connection "juniper"))))))
                         "re-read"))
                    (doseq [[rule added] expected]
-                     (is (= (+ added (get (counts before) rule)) (get (counts after) rule)) (name rule)))
+                     (is (= (+ added (get (counts before) rule)) (get (counts after) rule))))
                    (is (pos? (get-in after [:seon.render.transcript/budget :seon.render.transcript/missing-rates])))
                    (is (str/includes? html "no rate on file"))
                    (is (not (str/includes? html "#inst")))
@@ -386,7 +385,7 @@
               :seon.cluster.eval/ns [:seon.ns/name 'my.agents.history-probe]
               :seon.cluster.eval/source "(my.plan/plan {})"
               :seon.eval/shown "The component's shown text."}])
-           _ (is (:db-after written) (seon.print.value/bounded-text written))
+           _ (is (:db-after written))
            database @connection
            agent-entity (db/pull database '[:db/id {:seon.agent/plan [:db/id]}]
                           [:seon.agent/id "history-probe"])
@@ -414,7 +413,7 @@
                           :seon.context.capture/basis-t (db/basis-t database)
                           :seon.context.capture/prompt (:seon.cluster.prompt/text acquired)}])
              request (assoc request :seon.db/db @connection :seon.turn/id "history-probe-turn")]
-         (is (:db-after captured) (seon.print.value/bounded-text captured))
+         (is (:db-after captured))
          (is (string? (:seon.cluster.prompt/text (render/acquire-context! request)))
              "Acquisition publishes units; it does not judge a capture it cannot
               recompose. The capture is compose(select(units)) plus the frame,
@@ -453,7 +452,7 @@
               :seon.cluster.eval/comment ";; I should read the plan first."
               :seon.cluster.eval/source "(my.plan/plan {})"
               :seon.eval/shown "The plan's shown text."}]]))
-           _ (is (:db-after written) (seon.print.value/bounded-text written))
+           _ (is (:db-after written))
            database @connection
            lookup [:seon.cluster.eval/id "thinking-probe-evaluation"]
            saved (db/pull database '[*] lookup)
@@ -471,8 +470,8 @@
            blocks (filter vector? (tree-seq vector? seq html))
            classed (fn [css-class]
                      (filter #(= css-class (:class (second %))) blocks))]
-       (is (vector? html) (seon.print.value/bounded-text html))
-       (is (= 1 (count (classed "seon-eval-thinking"))) (seon.print.value/bounded-text html))
+       (is (vector? html))
+       (is (= 1 (count (classed "seon-eval-thinking"))))
        (is (= ";; I should read the plan first."
               (last (first (classed "seon-eval-thinking")))))
        (is (= 1 (count (classed "seon-eval-prompt"))))
@@ -493,8 +492,7 @@
                                 (assoc saved :seon.cluster.eval/ns namespace-ref)))
                blocks (filter vector? (tree-seq vector? seq rendered))]
            (is (= 1 (count (filter #(= "seon-eval-thinking" (:class (second %)))
-                                   blocks)))
-               (seon.print.value/bounded-text rendered))
+                                   blocks))))
            (is (str/includes? (element-text rendered)
                               "my.agents.thinking-probe=> (my.plan/plan {})")
                "namespace references resolve through the carried database")))))))
@@ -707,7 +705,7 @@
                       [(schema.datahike/malli->datahike-attr-in
                         (schema/projection-from-database @connection)
                         ::probe-identity)])
-           _ (is (:db-after installed) (seon.print.value/bounded-text installed))
+           _ (is (:db-after installed))
            written (db/transact! connection
                                  (into (support/agent-tx @connection "reference-agent")
                                    [{::probe-identity "aliased-reference"}
@@ -720,7 +718,7 @@
                                      {:db/id "unidentified"
                                       :seon.error.evidence/attribute :my.plan/objective
                                       :seon.error.evidence/value "No identity"}}]))
-           _ (is (:db-after written) (seon.print.value/bounded-text written))
+           _ (is (:db-after written))
            database @connection
            projection (schema/projection-from-database database)
            agent-ref (db/pull database '[:db/id] [:seon.agent/id "reference-agent"])
@@ -960,7 +958,7 @@
            :seon.cluster.eval/source "(+ 40 2)"
            :seon.eval/shown "42"}])]
     (doseq [written [agent-written opening opening-evaluation provider evaluation]]
-      (is (:db-after written) (seon.print.value/bounded-text written)))
+      (is (:db-after written)))
     {:seon.db/db @connection
      :seon.db/connection connection
      :seon.agent/id "outline-probe"
@@ -981,25 +979,24 @@
            turns (outline-nodes rendered :data-turn-kind)
            units (outline-nodes rendered :data-evaluation-id)
            raw (outline-nodes rendered #(= "seon-session-raw" (:class %)))]
-       (is (vector? rendered) (seon.print.value/bounded-text rendered))
-       (is (not (str/includes? (element-text rendered) "No turns recorded."))
-           (seon.print.value/bounded-text rendered))
+       (is (vector? rendered))
+       (is (not (str/includes? (element-text rendered) "No turns recorded.")))
 
        ;; (1) One line per turn, collapsed, with its kind and its size.
-       (is (= 2 (count turns)) (seon.print.value/bounded-text (map second turns)))
+       (is (= 2 (count turns)))
        (is (every? #(= :details (first %)) turns)
            "a turn line stays collapsed until it is opened")
        (is (= ["Opening" "Provider"] (mapv #(:data-turn-kind (second %)) turns))
            "the kind derives from the turn's own facts, never a stamp")
        (doseq [turn turns]
          (is (re-find #"≈[\d,]+ tokens" (element-text turn))
-             (str "every turn line names its size: " (element-text turn))))
+             "every turn line names its size"))
        (is (str/includes? (element-text (first turns)) "Turn 0"))
        (is (str/includes? (element-text (first turns)) "1 unit"))
 
        ;; (2) One line per unit: ordinal, what produced it, the schema whose
        ;; render made it, and its tokens.
-       (is (= 2 (count units)) (seon.print.value/bounded-text (map second units)))
+       (is (= 2 (count units)))
        (is (every? #(= :details (first %)) units))
        (is (= ["outline-e0" "outline-e1"]
               (mapv #(:data-evaluation-id (second %)) units)))
@@ -1027,8 +1024,8 @@
            expected (mapv :seon.render.history/bytes entries)
            rendered (transcript/render-outline request)
            ai (outline-nodes rendered #(= "seon-outline-ai" (:class %)))]
-       (is (= 2 (count expected)) (seon.print.value/bounded-text acquired))
-       (is (= 2 (count ai)) (seon.print.value/bounded-text rendered))
+       (is (= 2 (count expected)))
+       (is (= 2 (count ai)))
        (is (= expected (mapv element-text ai))
            "the AI toggle serves the acquired bytes byte for byte")
        ;; The bytes ARE the evaluation schema's declared AI pair, unchanged.
@@ -1041,8 +1038,7 @@
        (is (str/includes? (first expected) "The plan's shown text.")
            "the stored shown text travels unchanged")
        ;; (3) The comment is its own thinking block in the HTML projection.
-       (is (= 1 (count (outline-nodes rendered #(= "seon-eval-thinking" (:class %)))))
-           (seon.print.value/bounded-text rendered))))))
+       (is (= 1 (count (outline-nodes rendered #(= "seon-eval-thinking" (:class %))))))))))
 
 (deftest the-outlines-show-everything-is-the-composed-prompt
   (support/with-database
@@ -1051,8 +1047,8 @@
            composed (prompt/prompt (:seon.db/db request) request)
            rendered (transcript/render-outline request)
            raw (first (outline-nodes rendered #(= "seon-session-raw" (:class %))))]
-       (is (string? (:seon.cluster.prompt/text composed)) (seon.print.value/bounded-text composed))
-       (is (some? raw) (seon.print.value/bounded-text rendered))
+       (is (string? (:seon.cluster.prompt/text composed)))
+       (is (some? raw))
        (is (= (:seon.cluster.prompt/text composed) (element-text raw))
            "show everything is the prompt the provider boundary receives")
        ;; And that text begins with `compose` over a selection of the very
@@ -1081,7 +1077,7 @@
                               :seon.issue/problem "Keep the observed origin."
                               :seon.issue/severity :cleanup})
             issue-id (:seon.issue/id added)]
-        (is (seq (:seon.issue/id added)) (seon.print.value/bounded-text added))
+        (is (seq (:seon.issue/id added)))
         (is (string? issue-id))
         (support/transacted! connection
           [[:db/add [:seon.cluster.eval/id "outline-e0"] :seon.eval/origin issue-id]])
@@ -1092,7 +1088,7 @@
                                              :tx-meta {:seon.db/user [:seon.agent/id "outline-probe"]}}))
           (let [rendered (transcript/render-outline (assoc request :seon.db/db @connection))
                 opening (first (outline-nodes rendered #(= "outline-e0" (:data-evaluation-id %))))]
-            (is (some? opening) (seon.print.value/bounded-text rendered))
+            (is (some? opening))
             (is (str/includes? (element-text opening) issue-id))
             (is (str/includes? (element-text opening) ":seon.issue/id"))
             (is (= issue-id (:seon.eval/origin (db/pull @connection [:seon.eval/origin] [:seon.cluster.eval/id "outline-e0"]))))))
@@ -1119,7 +1115,7 @@
                ;; Faces render their own `details` (the floor printer's), so select by the page's class.
                nodes (classed page "seon-graph-node")
                response (#'web/debug-response service 'my.agents.root "root" {:query-string (str "n=" n) :headers {}})]
-           (is (seq order) (seon.print.value/bounded-text graph))
+           (is (seq order))
            (is (= (sort-by level order) (map #(:data-node (second %)) nodes))
                "one node per graph node, grouped by level, graph order within each level")
            (is (every? #(= 2 (count (classed % "seon-graph-face"))) nodes)
@@ -1140,7 +1136,7 @@
        (testing "an entity id roots the walk at any entity, not only an agent"
          (let [ns-id (:db/id (db/pull @connection [:db/id] [:seon.ns/name 'my.agents.root]))
                body (:body (#'web/debug-response service 'my.agents.root "root" {:query-string (str "n=1&root=" ns-id) :headers {}}))]
-           (is (str/includes? body (str "e" ns-id)) body)))
+           (is (str/includes? body (str "e" ns-id)))))
        (testing "forward mode draws each edge's relationship kind and attribute; mode=both follows every ref both ways"
          (let [model (fn [query] (json/read-str (second (re-find #"data-graph-model=\"\"[^>]*>(.*?)</script>"
                                                                    (:body (#'web/debug-response service 'my.agents.root "root" {:query-string query :headers {}}))))))
@@ -1148,7 +1144,7 @@
                forward (model "n=1")
                both (model "n=1&mode=both")]
            (is (every? #(get-in % ["data" "attribute"]) (get-in forward ["elements" "edges"])) "every edge carries its attribute and kind")
-           (is (not-any? #{"reverse" "value"} (kinds forward)) (seon.print.value/bounded-text (kinds forward)))
+           (is (not-any? #{"reverse" "value"} (kinds forward)))
            (is (<= (count (get-in forward ["elements" "edges"])) (count (get-in both ["elements" "edges"]))))))
        (testing "node detail groups the node's attributes with their declared schemas"
          (is (str/includes? (hiccup/->string (#'web/graph-debug-html service "root" {"n" "0"})) "declared schema")))
@@ -1206,7 +1202,7 @@
            group (first (filter #(get % "group") first-page))
            root-id (:db/id (db/pull @connection [:db/id] [:seon.agent/id "root"]))
            members #(count (filter (fn [node] (= (get group "id") (peek (get node "groups")))) %))]
-       (is (= "← :seon.message/to · 10" (get group "label")) (seon.print.value/bounded-text first-page))
+       (is (= "← :seon.message/to · 10" (get group "label")))
        (is (= 9 (members first-page)) "eight members and the more node hang under the group")
        (is (some #(= "… 2 more" (get % "label")) first-page))
        (is (= 2 (members (model {"n" "1" "more" (str root-id " :seon.message/_to 8")}))) "the requeried window holds the last two")))))

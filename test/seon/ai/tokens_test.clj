@@ -40,9 +40,7 @@
                                                      calibration)
             relative-error (/ (abs (- estimated billed)) (double billed))]
         (is (= 10 (:seon.ai.tokens/sample-count calibration)))
-        (is (< relative-error 0.05)
-            (str (:seon.ai.attempt/id observation) ": estimated " estimated
-                 ", billed " billed ", relative error " relative-error))))))
+        (is (< relative-error 0.05))))))
 
 (deftest token-budget-derivations-share-one-character-ratio
   (is (= 9 (tokens/estimate-chars 3)))
@@ -84,9 +82,7 @@
                                                          calibration)
                 miss (/ (abs (- (double estimated) provider-tokens))
                         (double provider-tokens))]
-            (is (<= miss band)
-                (str characters " characters estimated at " estimated
-                     " against a recorded " provider-tokens))))))))
+            (is (<= miss band))))))))
 
 (deftest a-prompt-over-the-real-budget-is-refused-not-sent
   (testing "THE CLASS: chars/4 admitted every prompt the provider counted
@@ -103,9 +99,7 @@
               "the shipped prior agrees with the recorded budget verdict")
           (is (= really-over?
                  (= :seon.ai.tokens/over (:seon.ai.tokens/verdict calibrated)))
-              (str characters " characters really cost " provider-tokens
-                   " tokens; the calibrated verdict must agree with the"
-                   " budget about that")))))))
+              "the calibrated verdict must agree with the budget about what characters really cost"))))))
 
 (deftest an-estimate-that-fits-only-within-the-band-is-loud
   (testing "a point estimate under budget whose own measured error reaches

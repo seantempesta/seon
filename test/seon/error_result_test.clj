@@ -21,7 +21,7 @@
            registry (:seon.schema.projection/registry projection)]
        (doseq [attribute [:seon.error/result-id :seon.error/shown]]
          (is (some? (mr/schema registry attribute))
-             (str "Canonical fixture's compiled registry is missing " attribute)))))))
+             "Canonical fixture's compiled registry is missing"))))))
 
 (defn- request [connection source]
   (let [dials config/defaults]
@@ -75,7 +75,7 @@
         complete (blob/get connection (:seon.error/data-blob stored))
         artifact (render.value/read-artifact complete)
         shown (render.value/render-ai-data (render.value/prepare unit))]
-    (is (< elapsed-ms 1000) (str "error recording and transaction: " elapsed-ms " ms"))
+    (is (< elapsed-ms 1000) "error recording and transaction stay within their bound")
     (is (string? result-id))
     (is (map? (:seon.sci.admit/print-node artifact)))
     (is (= shown (:seon.error/shown stored)))
@@ -129,7 +129,7 @@
            record (render.value/artifact-value (render.value/read-artifact content))]
        (is (identical? carrier (first (:seon.error/offending refusal)))
            "the in-memory refusal keeps the actual object")
-       (is (< (count content) 4096) (str "the recorded blob is " (count content) " characters"))
+       (is (< (count content) 4096) "the recorded blob has the expected size")
        (is (= "not an int" (get-in record [:seon.error/problems 0 :seon.error/offending])))
        (is (not (str/includes? content source-text)))
        (is (= 64 (count (:seon.error/offending-digest record)))

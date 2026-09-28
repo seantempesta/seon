@@ -7,8 +7,7 @@
             [seon.db :as db]
             [seon.env :as env]
             [seon.fault :as fault]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (deftest a-refused-recording-panics-naming-the-source-fault
   (support/with-database
@@ -76,7 +75,7 @@
                                            :seon.error/related-occurrence
                                            (:seon.error.occurrence/id first-receipt)))
            signature (:seon.error/signature first-receipt)]
-       (is (true? (:seon.fault/committed? first-receipt)) (seon.print.value/bounded-text first-receipt))
+       (is (true? (:seon.fault/committed? first-receipt)))
        (is (= #{"root"} (:seon.fault/delivered-to first-receipt)) "the first opening wakes root")
        (is (= signature (:seon.error/signature recurrence)))
        (is (= #{"root"} (:seon.fault/delivered-to recurrence))

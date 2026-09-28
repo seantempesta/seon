@@ -6,8 +6,7 @@
             [seon.db :as db]
             [seon.sci.eval :as evaluation]
             [seon.test-support :as support]
-            [seon.program :as seon-program]
-            [seon.print.value]))
+            [seon.program :as seon-program]))
 
 (deftest retraction-refuses-before-context-mutation-and-removes-clean-declarations
   (support/with-database
@@ -34,13 +33,12 @@
                       :seon.cluster.eval/source "(my.program/ns-unmap! 'seon.turn/open?)"
                       :seon.sci.admit/caps (config/result-caps decisions)
                       :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms decisions)})]
-         (is (= 'seon.turn/open? (get-in result [:seon.sci.admit/value :seon.program/blocked-subject]))
-             (seon.print.value/bounded-text (select-keys result [:seon.cluster.eval/error :seon.eval/shown]))))
+         (is (= 'seon.turn/open? (get-in result [:seon.sci.admit/value :seon.program/blocked-subject]))))
        (support/transacted! connection [(support/program-fn-entity (db/db connection) (symbol "my.program" "disposable") "(defn disposable [] 42)")])
        (doseq [target [ctx fork]]
          (sci/eval-string* target "(do (in-ns 'my.program) (defn disposable [] 42))"))
        (let [removed (program/ns-unmap! context (symbol "my.program" "disposable"))]
-         (is (not (:seon.error/at removed)) (seon.print.value/bounded-text removed))
+         (is (not (:seon.error/at removed)))
          (is (= #{(symbol "my.program" "disposable")} (:seon.program/affected removed)))
          (is (nil? (db/pull (db/db connection) [:db/id] [:seon.fn/sym (symbol "my.program" "disposable")])))
          (is (nil? (sci/resolve fork (symbol "my.program" "disposable"))))
@@ -67,7 +65,7 @@
                         :seon.sci.admit/caps caps
                         :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms decisions)})
                value (:seon.sci.admit/value result)]
-           (is (= expected (:seon.program/advised-operation value)) (seon.print.value/bounded-text result))
+           (is (= expected (:seon.program/advised-operation value)))
            (is (= expected (get-in value [:seon.error/expected])))
            (is (= basis (db/basis-t (db/db connection))))
            (is (true? (= (get-in before [:namespaces 'seon.turn])
@@ -100,7 +98,7 @@
                                      (defn target [] 42)
                                      (defn caller [] (target)))"))
        (let [result (program/ns-unalias! context 'my.disposable.program 'text)]
-         (is (not (:seon.error/at result)) (seon.print.value/bounded-text result))
+         (is (not (:seon.error/at result)))
          (is (empty? (db/q (db/db connection)
                           '[:find [?alias ...] :where
                             [?ns :seon.ns/name my.disposable.program]
@@ -108,7 +106,7 @@
          (doseq [ctx [base fork]]
            (is (nil? (get-in @(:env ctx) [:namespaces 'my.disposable.program :aliases 'text])))))
        (let [result (program/remove-ns! context 'my.disposable.program)]
-         (is (not (:seon.error/at result)) (seon.print.value/bounded-text result))
+         (is (not (:seon.error/at result)))
          (is (= #{'my.disposable.program (symbol "my.disposable.program" "target") (symbol "my.disposable.program" "caller")}
                 (:seon.program/affected result)))
          (doseq [ctx [base fork]]

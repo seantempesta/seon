@@ -7,8 +7,7 @@
             [seon.turn :as turn]
             [seon.sci.eval :as evaluation]
             [seon.schema :as schema]
-            [seon.test-support :as test-support]
-            [seon.print.value]))
+            [seon.test-support :as test-support]))
 
 (deftest raw-write-maps-select-only-their-asserted-required-identity
   (test-support/with-database
@@ -27,7 +26,7 @@
                                   [:db/add "reverse-turn" :seon.turn/id "reverse-turn"]
                                   {:seon.problems/id "reverse-attempt"
                                    :seon.turn/_attempts [:seon.turn/id "reverse-turn"]}])]
-       (is (some? (:db-after accepted)) (seon.print.value/bounded-text accepted))
+       (is (some? (:db-after accepted)))
        (is (= "x" (:seon.problems/id
                     (db/pull @connection [:seon.problems/id] [:seon.problems/id "x"]))))
        (is (= "reverse-attempt"
@@ -38,7 +37,7 @@
      (let [accepted (db/transact! connection
                                  [{:db/id [:seon.problems/id "x"]
                                    :my.plan.item/title "attribute-only"}])]
-       (is (some? (:db-after accepted)) (seon.print.value/bounded-text accepted))
+       (is (some? (:db-after accepted)))
        (is (= "attribute-only"
               (:my.plan.item/title (db/pull @connection [:my.plan.item/title]
                                            [:seon.problems/id "x"])))))
@@ -62,7 +61,7 @@
   [connection transaction attribute offending path]
   (let [before (:t @connection)
         result (db/transact! connection transaction)]
-    (is (string? (:seon.db.write.attempt/request-id result)) (seon.print.value/bounded-text result))
+    (is (string? (:seon.db.write.attempt/request-id result)))
     (is (= attribute (:seon.db/attribute result)))
     (is (= offending (:seon.db/offending result)))
     ;; a missing key's offending value is the entity missing it
@@ -126,7 +125,7 @@
                            unknown "feedback/typo" [0 unknown])
            shown (db/render-rejection-ai result)]
        (is (= [:my.plan.item/id] (:seon.db/registered-candidates result)))
-       (is (str/includes? shown "Fix: Use :my.plan.item/id;") shown)))))
+       (is (str/includes? shown "Fix: Use :my.plan.item/id;"))))))
 
 (deftest nested-component-and-lookup-violations
   (test-support/with-database
@@ -161,7 +160,7 @@
              {:my.plan.item/id "feedback/single" :my.plan.item/title "Single"
               :my.plan.item/needs "feedback/step"}
              [:db/add "feedback/step" :my.plan.item/needs "datomic.tx"]])]
-       (is (some? (:db-after result)) (seon.print.value/bounded-text result))
+       (is (some? (:db-after result)))
        (is (= #{"feedback/step" "feedback/next" "feedback/single"}
               (set (db/q '[:find [?id ...] :where [_ :my.plan.item/id ?id]] @connection))))
        (is (some? (db/q '[:find ?instant . :where
@@ -195,8 +194,8 @@
                                  :db/unique :db.unique/identity}])
                  written (db/transact! connection
                                        [{:seon.problems/id "non-temporal"}])]
-             (is (some? (:db-after installed)) (seon.print.value/bounded-text installed))
-             (is (some? (:db-after written)) (seon.print.value/bounded-text written))
+             (is (some? (:db-after installed)))
+             (is (some? (:db-after written)))
              (is (= "non-temporal"
                     (db/q '[:find ?id . :where [_ :seon.problems/id ?id]]
                           @connection))))

@@ -6,8 +6,7 @@
             [seon.id :as id]
             [seon.instrument :as instrument]
             [seon.schema :as schema]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (def ^:private policy
   {:seon.config.error/max-evidence-bytes 8192})
@@ -35,12 +34,11 @@
            valid? (schema/projection-validator projection :seon.instrument/contract-error)]
        (is (nil? (mr/schema registry operation)) "armed from the evaluated metadata itself")
        (is (not (contains? (set (vals (schema/predicate-functions-in projection))) ifn?)))
-       (is (valid? refusal) (seon.print.value/bounded-text refusal))
+       (is (valid? refusal))
        (is (= :input (:seon.instrument/check refusal)))
        (is (= operation (:seon.error/operation refusal)))
        (is (= 1 (:seon.error/offending (first (:seon.error/problems refusal)))))
-       (is (str/starts-with? (:seon.error/message refusal) (str operation " refused"))
-           (:seon.error/message refusal))
+       (is (str/starts-with? (:seon.error/message refusal) (str operation " refused")))
        (is (not (str/includes? (:seon.error/message refusal) "could not be built")))
        (is (= (id/digest 64 [operation 0 :input]) (:seon.error/expected-shape refusal))
            "the producer's declared arm: function, arity ordinal, check")
@@ -50,10 +48,10 @@
              two (refusal-of projection operation multi (fn ([f] (f)) ([f x] (f x))) [1 2])
              returned (refusal-of projection operation
                                   [:=> [:cat :int] [:fn clojure.core/ifn?]] identity [3])]
-         (is (valid? two) (seon.print.value/bounded-text two))
+         (is (valid? two))
          (is (= (id/digest 64 [operation 1 :input]) (:seon.error/expected-shape two))
              "the second declared arity is ordinal 1")
-         (is (valid? returned) (seon.print.value/bounded-text returned))
+         (is (valid? returned))
          (is (= (id/digest 64 [operation 0 :output]) (:seon.error/expected-shape returned))))))))
 
 (deftest ^{:seon/tasks #{"407264e2b69d"}}
@@ -71,9 +69,8 @@
            thrown (try (wrapped 1 2) nil (catch clojure.lang.ExceptionInfo failure failure))
            refusal (ex-data thrown)]
        (is (= 3 (wrapped inc 2)))
-       (is ((schema/projection-validator projection :seon.instrument/contract-error) refusal)
-           (seon.print.value/bounded-text refusal))
+       (is ((schema/projection-validator projection :seon.instrument/contract-error) refusal))
        (is (= :seon.instrument/contract-error
               (:seon.error/declared-schema (meta refusal)))
            "the producer's declared identity rides on the thrown value")
-       (is (not (str/includes? (ex-message thrown) "could not be built")) (ex-message thrown))))))
+       (is (not (str/includes? (ex-message thrown) "could not be built")))))))

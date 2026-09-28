@@ -10,8 +10,7 @@
             [seon.env :as env]
             [seon.schema :as schema]
             [seon.sci.admit :as admit]
-            [seon.test-support :as test-support]
-            [seon.print.value]))
+            [seon.test-support :as test-support]))
 
 (deftest ^{:seon.test/long
            "First canonical fixture acquisition indexes the complete program before testing carried database views and missing-projection refusals."
@@ -44,7 +43,7 @@
            warnings (java.io.StringWriter.)
            lookup [:seon.agent/id "p1-carriage"]
            namespace-lookup [:seon.ns/name 'seon.db.carriage]]
-       (is (some? (:db-after report)) (:seon.error/message report))
+       (is (some? (:db-after report)))
        (is (= "p1-carriage"
               (:seon.ns/doc (db/pull (:db-after report) [:seon.ns/doc]
                                     [:seon.ns/name 'seon.db.carriage]))))
@@ -71,7 +70,7 @@
                                  (atom {}) #(db/q query database 'seon.db.carriage))]
                     (= supplied carried)))
                 :seed 20260915)]
-           (is (:pass? result) (seon.print.value/bounded-text result))))
+           (is (:pass? result))))
        ;; Acquire the shipped print grammar before probing running-path work.
        ;; Its first-use validator is independent of the database projection.
        (is (= 0 (:seon.sci.admit/value
@@ -140,7 +139,7 @@
                                (reset! completed failure)))))]
              (.start worker)
              (let [result (test-support/await-event! completed ::worker-carriage some?)]
-               (is (nil? (:error result)) (str (:error result)))
+               (is (nil? (:error result)))
                (is (identical? projection (:projection result)))
                (is (identical? projection (:report-projection result))))))))]
          (is (= {'seon.schema/projection-from-database 0 'seon.schema.edn/read-schema-resource 0} calls)

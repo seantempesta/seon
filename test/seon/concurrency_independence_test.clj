@@ -24,8 +24,7 @@
             [seon.eval.drive :as drive]
             [seon.id :as id]
             [seon.render.transcript :as transcript]
-            [seon.test-support :as test-support]
-            [seon.print.value])
+            [seon.test-support :as test-support])
   (:import [java.util Date UUID]
            [java.util.concurrent CountDownLatch]))
 
@@ -178,7 +177,7 @@
          connection
          {:tx-data (into [] creation-tx)})]
     (is (some? (:db-after result))
-        (str "agent creation was refused: " (seon.print.value/bounded-text result)))
+        "agent creation was refused")
     result))
 
 (defn- pause-scenario-mailboxes!
@@ -221,7 +220,7 @@
           :tx-meta {:seon.db/process
                     [:seon.db.process/id process]}})]
     (is (some? (:db-after result))
-        (str "scenario run transaction was refused: " (seon.print.value/bounded-text result)))
+        "scenario run transaction was refused")
     result))
 
 (defn- fold-scenario-runs!
@@ -273,8 +272,7 @@
           (if (::evaluation-started outcome)
             (recur remaining)
             (let [report (:seon.turn.loop/report outcome)]
-              (is (nil? (:seon.turn.loop/failure outcome))
-                  (some-> (:seon.turn.loop/failure outcome) Throwable->map pr-str))
+              (is (nil? (:seon.turn.loop/failure outcome)))
               (is (= :closed (:seon.turn.loop/outcome report)))
               (is (= form-count (:seon.turn.loop/forms-run report)))
               (recur (dec remaining)))))))
@@ -351,7 +349,7 @@
     (is (= expected actual)
         "every receipt identity maps to exactly its owning agent's run")
     (is (empty? failures)
-        (str "all receipts must settle successfully: " (seon.print.value/bounded-text failures)))))
+        "all receipts must settle successfully")))
 
 (defn- assert-closed!
   [database specs]

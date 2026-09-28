@@ -9,8 +9,7 @@
             [seon.flow :as flow]
             [seon.test :as tests]
             [seon.test-support :as support]
-            [seon.turn :as turn]
-            [seon.print.value]))
+            [seon.turn :as turn]))
 
 (defn exercise!
   "Probe declaration calls through ordinary virtual turns on the supplied connection."
@@ -107,7 +106,7 @@
      (let [result (exercise! connection "agent-call-edges" "edge-probe" 'my.agents.edge-probe)
            target (:seon.test/target result)
            later (:seon.test/later result)]
-       (is (contains? (:seon.test/after-calls result) target) (seon.print.value/bounded-text result))
+       (is (contains? (:seon.test/after-calls result) target))
        (is (not= (:seon.test/digest-before result) (:seon.test/digest-after result)))
        (is (= #{later} (:seon.test/pending result)))
        (is (contains? (:seon.test/early-calls result) later))

@@ -30,7 +30,7 @@
                               {:seon.test.seed/tx-data [{:seon.maintenance.result/id (str "saw " (count (filter #{"seed-0"} (reasons database))))}]})]
                            #(let [{database :seon.db/db commit :seon.source/commit-id} sut/*member*]
                               (reset! seen [(reasons database) (= commit (db/commit-id database))])))]
-    (is (zero? (:seon.test/error-count result)) (:seon.test/failure-message result))
+    (is (zero? (:seon.test/error-count result)))
     (is (every? (first @seen) ["seed-0" "saw 1"]) "each entry reads the database the previous one left")
     (is (true? (second @seen)) "fixtures branch from the prepared commit")))
 
@@ -41,7 +41,7 @@
                               (reset! seen [(reasons head) (db/commit-id head)
                                             (:seon.source/commit-id (support/execution-handle db/*conn*))])))
         [seeded head held] @seen]
-    (is (zero? (:seon.test/error-count result)) (:seon.test/failure-message result))
+    (is (zero? (:seon.test/error-count result)))
     (is (contains? seeded "custody") "a bare (db/db) in a host body reads its seeded member branch")
     (is (= head held) "the handle held for that connection is the prepared one, so fixtures branch with the seeds")))
 
@@ -49,7 +49,7 @@
   (doseq [[seeds rule] [[[{:seon.maintenance.result/id 42}] "Seed entry 0"]
                         [[{:seon.maintenance.result/id "ok"} (fn [_] {:seon.test.seed/tx-data "nope"})] "Seed entry 1"]]
           :let [entered (atom false) result (run-seeded seeds #(reset! entered true))]]
-    (is (false? @entered) rule)
+    (is (false? @entered))
     (is (str/includes? (str (:seon.test/failure-message result)) rule))))
 
 (deftest literal-and-inline-seed-attributes-are-the-tests-keywords
@@ -75,5 +75,4 @@
         entered (atom false)
         result (run-seeded test-symbol [redefine] #(reset! entered true))]
     (is (false? @entered) "the pre-seed Var never runs")
-    (is (str/includes? (str (:seon.test/failure-message result)) "change its own definition digest")
-        (:seon.test/failure-message result))))
+    (is (str/includes? (str (:seon.test/failure-message result)) "change its own definition digest"))))

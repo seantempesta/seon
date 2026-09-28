@@ -14,8 +14,7 @@
             [seon.operator.runtime]
             [seon.test :as sut]
             [seon.test.runner :as runner]
-            [seon.test-support :as test-support]
-            [seon.print.value]))
+            [seon.test-support :as test-support]))
 
 (def ^:private at (java.util.Date. 1785283200000))
 (def ^:private project-root
@@ -298,8 +297,8 @@
                   #(testing [:seon.fn/sym 'a/b] (is (= 1 2) "a value label")) [])]
     (try
       (let [result (runner/run-var! test-var {})]
-        (is (= 1 (:seon.test/fail-count result)) (seon.print.value/bounded-text result))
-        (is (zero? (:seon.test/error-count result)) (seon.print.value/bounded-text result))
+        (is (= 1 (:seon.test/fail-count result)))
+        (is (zero? (:seon.test/error-count result)))
         (is (= [["[:seon.fn/sym a/b]"]]
                (mapv :seon.test.failure/testing-contexts (:seon.test.failure/reports result)))))
       (finally (remove-ns (ns-name (:ns (meta test-var))))))))
@@ -415,7 +414,7 @@
                                              :seon.program/definition-digest (:seon.program/definition-digest entity)])))
             refusal (runner/reach-digests undigested symbols)]
         (is (every? string? (map digested symbols)) "the digested entities have reuse keys")
-        (is (= :seon.program/definition-digest (:seon.error/member refusal)) (seon.print.value/bounded-text refusal))
+        (is (= :seon.program/definition-digest (:seon.error/member refusal)))
         (is (= symbols (:seon.error/offending refusal)) "the refusal names both tests")
         (is (not-any? #(string? (get refusal %)) symbols) "no reuse key is answered")))))
 
@@ -452,13 +451,13 @@
         _ (report! (assoc event :actual {:seon.test/overlay (conj huge "different")}))
         [first-report second-report] (:seon.test.failure/reports
                                       (first (#'runner/captured-results @capture)))]
-    (is (< elapsed-ms 1000) (str "capturing and reporting the failure took " elapsed-ms " ms"))
+    (is (< elapsed-ms 1000) "capturing and reporting the failure stays within its bound")
     (is (< allocated (* 256 1024 1024))
-        (str "the failure allocated " allocated " bytes; one whole print is over 400 MB"))
-    (is (< (count output) bound) (str "the gate log printed " (count output) " chars"))
+        "the failure allocates far less than one whole print (over 400 MB)")
+    (is (< (count output) bound) "the gate log printout stays bounded")
     (doseq [field [:seon.test.failure/expected :seon.test.failure/actual]]
-      (is (< (count (get first-report field)) bound) (str field " is bounded by the render profile"))
-      (is (re-find #"…\+?\d+" (get first-report field)) (str field " names its cut")))
+      (is (< (count (get first-report field)) bound) "is bounded by the render profile")
+      (is (re-find #"…\+?\d+" (get first-report field))))
     (is (= (:seon.test/failure-identity first-report)
            (#'runner/failure-identity options (symbol test-var) event))
         "the identity is stable across renders")

@@ -24,9 +24,9 @@
                 (when-not (.waitFor child 10000 TimeUnit/MILLISECONDS)
                   (.destroyForcibly child) (.waitFor child 10000 TimeUnit/MILLISECONDS))
                 (let [text (deref out 10000 ::unfinished)]
-                  (is (not (.isAlive child)) (str argv " exits within 10 s"))
-                  (is (not= ::unfinished text) (str argv " output ends after its exit"))
-                  (is (zero? (.exitValue child)) (str argv))
+                  (is (not (.isAlive child)) "the process exits within 10 s")
+                  (is (not= ::unfinished text) "output ends after its exit")
+                  (is (zero? (.exitValue child)))
                   text)))]
     (run ["git" "read-tree" "HEAD"])
     (run ["git" "ls-files" "--stage" "--" "reference-code"])))
@@ -52,7 +52,7 @@
               (let [child (.start (doto (ProcessBuilder. ^java.util.List (into ["git" "-C" (str directory)] argv))
                                     (.redirectErrorStream true)))
                     out (future (slurp (.getInputStream child)))]
-                (is (.waitFor child 10000 TimeUnit/MILLISECONDS) (str argv " exits within 10 s"))
+                (is (.waitFor child 10000 TimeUnit/MILLISECONDS) "the process exits within 10 s")
                 (str/trim (deref out 10000 ""))))
         datahike (fs/path repository "reference-code" "datahike")
         older (git datahike "rev-parse" "HEAD~1")

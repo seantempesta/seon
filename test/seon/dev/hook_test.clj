@@ -42,8 +42,7 @@
                  :seon.operator.subprocess/directory "."
                  :seon.operator.subprocess/deadline-ms
                  (* 1000 support/event-backstop-seconds)})]
-    (is (zero? (:seon.operator.subprocess/exit result))
-        (:seon.operator.subprocess/error-output result))
+    (is (zero? (:seon.operator.subprocess/exit result)))
     (when (zero? (:seon.operator.subprocess/exit result))
       (let [observed (edn/read-string (:seon.operator.subprocess/output result))]
         (is (= [] (:seon.probe/calls observed)))

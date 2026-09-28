@@ -8,8 +8,7 @@
             [seon.db :as db]
             [seon.flow :as flow]
             [seon.turn :as turn]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 ; The committed trial is the executable subject, not a copied scoring model.
 (load-file "docs/prds/context-generation/research/help_trial_2026_09_09.clj")
@@ -60,7 +59,7 @@
              (let [report (db/transact! connection [{:seon.message/id "trial/pollution"
                                                      :seon.message/to [:seon.agent/id "juniper"]
                                                      :seon.message/content "Extra instruction"}])]
-               (is (some? (:db-after report)) (seon.print.value/bounded-text report)))
+               (is (some? (:db-after report))))
              (is (thrown-with-msg? clojure.lang.ExceptionInfo #"initial fixture" (check! @connection)))
              (is (= admitted (check! initial)) "an advancing connection cannot change the checked value")
              (support/transacted! connection [[:db.fn/retractEntity [:seon.message/id "trial/pollution"]]
@@ -87,7 +86,7 @@
            score #((resolve 'help-trial-2026-09-09/score) @connection ctx % 30)
            query "(seon.db/q '[:find ?order :where [?order :example/order]])"
            good (score (str answers ";; I should read the orders.\n" query))]
-       (is (= 12 (:seon.trial/passed good)) (seon.print.value/bounded-text good))
+       (is (= 12 (:seon.trial/passed good)))
        (is (empty? (:seon.trial/failed good)))
        (let [trial (edn/read-string
                     (slurp "docs/prds/context-generation/research/help_trial_run7_wave_2_2026_09_15.edn"))
@@ -105,4 +104,4 @@
                 [(str answers query "\n(my.plan/invented!)") :syntax]
                 [(str answers "```clojure\n" query "\n```") :syntax]
                 [(str answers "#=(+ 1 1)") :syntax]]]
-         (is (some #{expected} (:seon.trial/failed (score reply))) (seon.print.value/bounded-text (score reply))))))))
+         (is (some #{expected} (:seon.trial/failed (score reply)))))))))

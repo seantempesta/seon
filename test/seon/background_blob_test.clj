@@ -8,8 +8,7 @@
             [seon.db :as db]
             [seon.effect :as effect]
             [seon.flow :as flow]
-            [seon.test-support :as support]
-            [seon.print.value])
+            [seon.test-support :as support])
   (:import [java.io ByteArrayOutputStream]
            [java.util Arrays]))
 
@@ -138,7 +137,7 @@
                     effect-id (when (and (vector? result-ref)
                                          (= :seon.effect/id (first result-ref)))
                                 (second result-ref))]
-                (is (string? effect-id) (seon.print.value/bounded-text result-ref))
+                (is (string? effect-id))
                 (when effect-id
                   (support/await-event!
                    events

@@ -24,8 +24,7 @@
             [seon.config :as config]
             [seon.program :as program]
             [seon.sci.eval :as sci.eval]
-            [seon.test-support :as support]
-            [seon.print.value])
+            [seon.test-support :as support])
   (:import (java.nio.file Files)
            (java.nio.file.attribute FileAttribute)))
 
@@ -130,11 +129,10 @@
            select! #(sut/select (assoc request :seon.db/db (db/db connection)))
            expected #{(fixture-symbol "direct") (fixture-symbol "unrelated")}
            initial (select!)
-           _ (is (= expected (set (map :seon.test/sym (:seon.test.run/members initial))))
-                 (seon.print.value/bounded-text initial))
+           _ (is (= expected (set (map :seon.test/sym (:seon.test.run/members initial)))))
            admitted (complete-selection! connection request)
            reused (select!)]
-       (is (= [] (:seon.test.run/members reused)) (seon.print.value/bounded-text reused))
+       (is (= [] (:seon.test.run/members reused)))
        (is (= expected (set (map :seon.test/sym (:seon.test.selection/unchanged reused)))))
        (is (every? #(and (:seon.test/unchanged %)
                         (= (get-in admitted [:seon.test.run/provenance :seon.test.run/basis-t])
@@ -151,13 +149,13 @@
                            :seon.test/changed [(fixture-symbol "leaf")]}
              select-change! #(sut/select (assoc named-change :seon.db/db (db/db connection)))
              unchanged (select-change!)]
-         (is (= [] (:seon.test.run/members unchanged)) (seon.print.value/bounded-text unchanged))
+         (is (= [] (:seon.test.run/members unchanged)))
          (is (= #{(fixture-symbol "direct")}
                 (set (map :seon.test/sym (:seon.test.selection/unchanged unchanged)))))
          (install-selection-program! connection "(defn leaf [] 4)")
          (let [changed (select-change!)]
            (is (= #{(fixture-symbol "direct")}
-                  (set (map :seon.test/sym (:seon.test.run/members changed)))) (seon.print.value/bounded-text changed))
+                  (set (map :seon.test/sym (:seon.test.run/members changed)))))
            (is (empty? (:seon.test.selection/unchanged changed)))))
        (install-selection-program! connection "(defn leaf [] 3)")
        (let [acquire runner/reach-digests
@@ -170,7 +168,7 @@
          (is (not (@requested (fixture-symbol "direct")))
              "A test already reaching changed code cannot reuse green; do not derive its reach digest.")
          (is (= #{(fixture-symbol "direct")}
-                (set (map :seon.test/sym (:seon.test.run/members changed)))) (seon.print.value/bounded-text changed))
+                (set (map :seon.test/sym (:seon.test.run/members changed)))))
          (is (= #{(fixture-symbol "unrelated")}
                 (set (map :seon.test/sym (:seon.test.selection/unchanged changed))))))))))
 
@@ -203,7 +201,7 @@
            symbols #(set (map :seon.test/sym (:seon.test.run/members %)))
            expected (set (map fixture-symbol ["direct" "indirect" "reference"]))
            first-selection (select!)]
-       (is (seq (:seon.test.run/members first-selection)) (seon.print.value/bounded-text first-selection))
+       (is (seq (:seon.test.run/members first-selection)))
        (is (every? (symbols first-selection) (conj expected (fixture-symbol "unrelated"))))
        (is (= :seon.test/cluster-required
               (:seon.test/selection-refusal (select-request (dissoc request :seon.test.run/cluster)))))
@@ -227,8 +225,8 @@
                                                  :seon.test.run/policy policy)
                             (= :named policy) (assoc :seon.test/identities #{(fixture-symbol "direct")})))
                reused (:seon.test.selection/unchanged selection)]
-           (is (empty? (:seon.test.run/members selection)) (seon.print.value/bounded-text selection))
-           (is (seq reused) (seon.print.value/bounded-text selection))
+           (is (empty? (:seon.test.run/members selection)))
+           (is (seq reused))
            (is (every? #(and (:seon.test/unchanged %)
                             (integer? (:seon.test.run/basis-t %))
                             (string? (:seon.test.run/program-digest %))
@@ -244,19 +242,19 @@
                                             (take n definitions))))
                  started (System/nanoTime)
                  selected (sut/select (assoc request :seon.db/db snapshot))]
-             (is (vector? (:seon.test.run/members selected)) (seon.print.value/bounded-text selected))
+             (is (vector? (:seon.test.run/members selected)))
              (println "A1 selection measurement"
                       {:seeds n :elapsed-ms (/ (double (- (System/nanoTime) started)) 1e6)
                        :members (count (:seon.test.run/members selected))}))))
        (let [full (assoc request :seon.test.run/policy :full)]
          (complete-selection! connection full)
          (let [selection (select-request (assoc full :seon.db/db (db/db connection)))]
-           (is (empty? (:seon.test.run/members selection)) (seon.print.value/bounded-text selection))
+           (is (empty? (:seon.test.run/members selection)))
            (is (seq (:seon.test.selection/unchanged selection)))))
        (complete-selection! connection (assoc request :seon.test/identities #{(fixture-symbol "unrelated")}))
        (install-selection-program! connection (str/replace source "leaf [] 1" "leaf [] 3"))
        (let [changed (select!)]
-         (is (= expected (symbols changed)) (seon.print.value/bounded-text changed))
+         (is (= expected (symbols changed)))
          (is (= expected (set (sut/reaching {:seon.db/db (db/db connection)
                                              :seon.test/changed [(fixture-symbol "leaf")]}))))
          (is (every? #(get-in % [:seon.test.member/reasons]) (:seon.test.run/members changed)))
@@ -394,7 +392,7 @@
                       :seon.test/identities #{(symbol "seon.test.selection-test" "fileless-selection")}}
              result (sut/selection-admission request)]
          (is (some #(= (symbol "seon.test.selection-test" "fileless-selection") (:seon.test.member/symbol %))
-                   (:seon.test.run/members result)) (seon.print.value/bounded-text result))
+                   (:seon.test.run/members result)))
          (is (some #{(symbol "seon.test.selection-test" "fileless-selection")}
                    (sut/reaching {:seon.db/db (db/db connection) :seon.test/changed ['seon.id/id]}))))))))
 

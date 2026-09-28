@@ -26,7 +26,7 @@
     (is (str/includes? shown "The declared namespace is unavailable."))
     (is (str/includes? shown ":seon.fn/namespace-unresolvable true"))
     (is (not (str/includes? shown "function-contracts")))
-    (is (< byte-count 2048) (str "diagnostic bytes=" byte-count))
+    (is (< byte-count 2048))
     (println "adoption diagnostic bytes=" byte-count)))
 
 (deftest operator-reports-the-typed-refusal-over-a-real-prepl

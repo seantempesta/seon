@@ -14,7 +14,7 @@
                   "tmp/probe/scratch.clj"
                   "logs/current-source-failure.log"
                   ".claude/seon-hook.edn"]]
-      (is (false? (cache/widening-path? path)) path)))
+      (is (false? (cache/widening-path? path)))))
   (testing "Declared inputs outside the program graph widen."
     (doseq [path ["deps.edn" "bin/test" "bin/test-fast"
                   "config/default.edn"
@@ -22,5 +22,5 @@
                   "script/seon/operator.clj"
                   "reference-code/sci"
                   "reference-code/malli/src/malli/core.cljc"]]
-      (is (true? (cache/widening-path? path)) path))))
+      (is (true? (cache/widening-path? path))))))
 

@@ -15,7 +15,7 @@
                                       :seon.instrument/contract-error) refusal))
     ;; The reply names the function and the failing key (seon.error/reply-value).
     (doseq [fragment ["my.note/add!" ":my.note/id"]]
-      (is (str/includes? shown fragment) shown))))
+      (is (str/includes? shown fragment)))))
 
 (deftest installed-contract-refusal-names-the-run5-failing-coordinate
   (fixture/with-agent
@@ -29,8 +29,8 @@
         (is ((schema/projection-validator (schema/handed-projection)
                                           :seon.instrument/contract-error) refusal))
         (doseq [fragment ["refused argument 0" "expected a vector" "got a lazy sequence" "Fix: Convert the sequence with vec"]]
-          (is (str/includes? message fragment) message))
-        (is (str/includes? (:seon.eval/shown saved) "Convert the sequence with vec") (:seon.eval/shown saved))
+          (is (str/includes? message fragment)))
+        (is (str/includes? (:seon.eval/shown saved) "Convert the sequence with vec"))
         (is (not (find refusal :seon.error/doc)) "printing never enriches the refusal"))
       (let [[saved value] (fixture/submit connection handle routing
                                   (str/replace fixture/run5-lazy-call "(largest-customer order-entities)"
@@ -48,7 +48,7 @@
     (doseq [fragment ["my.plan/current! refused source at"
                       "expected readable Clojure source"
                       ":my.plan/item/id" "Fix: Use :my.plan.item/id."]]
-      (is (str/includes? shown fragment) shown))))
+      (is (str/includes? shown fragment)))))
 
 (defn- run11-about-refusal-names-the-attribute-and-reference-shape
   [connection handle routing]
@@ -58,7 +58,7 @@
     (is ((schema/projection-validator (schema/handed-projection)
                                       :seon.instrument/contract-error) refusal))
     (doseq [fragment ["my.note/add!" "[:my.note/about]" "largest-customer-original" ";=> "]]
-      (is (str/includes? shown fragment) shown))
+      (is (str/includes? shown fragment)))
     (is (= 1 (count (:seon.error/problems refusal))))))
 
 (defn- unresolved-symbol-shows-the-correction-without-the-evidence-map
@@ -67,10 +67,10 @@
   (let [[saved refusal] (fixture/submit connection handle routing "my.web/no-such-fetch")
         shown (:seon.eval/shown saved)]
     (is (= 'my.web/no-such-fetch (:seon.error/offending refusal)))
-    (is (str/includes? shown "my.web/no-such-fetch") shown)
-    (is (str/includes? shown "Fix: Define or require this symbol.") shown)
-    (is (< (tokens/estimate shown) 150) shown)
-    (is (not (str/includes? shown "seon.error/data")) shown)))
+    (is (str/includes? shown "my.web/no-such-fetch"))
+    (is (str/includes? shown "Fix: Define or require this symbol."))
+    (is (< (tokens/estimate shown) 150))
+    (is (not (str/includes? shown "seon.error/data")))))
 
 (deftest refusal-grammar-survives-real-evaluation
   (let [installations (atom 0)

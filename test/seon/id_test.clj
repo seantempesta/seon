@@ -1,7 +1,6 @@
 (ns seon.id-test
   (:require [clojure.test :refer [deftest is]]
-            [seon.id :as id]
-            [seon.print.value]))
+            [seon.id :as id]))
 
 (deftest data-shape-and-explicit-length-determine-identity
   (is (= "ba7816bf8f01" (id/id 'abc)))
@@ -39,5 +38,5 @@
                      {#'*print-namespace-maps* false} {#'*print-namespace-maps* true}
                      {#'*print-readably* false} {#'*print-dup* true}]]
       (with-bindings hostile
-        (is (= expected (id/digest 12 parts)) (seon.print.value/bounded-text (keys hostile)))
+        (is (= expected (id/digest 12 parts)))
         (is (= "15564fc125fc" (id/digest 12 [{:a/b 1 :a/c 2}])))))))

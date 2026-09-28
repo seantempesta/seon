@@ -260,7 +260,7 @@
         (doseq [part ["The wrapper." root-message "seon.probe"
                       "clojure.lang.ExceptionInfo" "java.lang.IllegalArgumentException"]]
           (is (str/includes? shown part)
-              (str "the reply keeps every cause link: " part)))
+              "the reply keeps every cause link"))
         (is (false? (:seon.dev.mcp/windowed? result)) "a small exception stays inline")
         (is (= [{:seon.probe/member 1} nil] (mapv :data (:via whole)))
             "each link keeps its own ex-data")
@@ -393,8 +393,7 @@
                       cluster-name content-digest [] 9000)]
         (is (string? content-digest))
         (is (true? (:seon.dev.mcp/retrievable? stored)))
-        (is (str/starts-with? (:seon.dev.mcp/text drilled) "[7 8 9 10 11 12 13 14")
-            (:seon.dev.mcp/text drilled))
+        (is (str/starts-with? (:seon.dev.mcp/text drilled) "[7 8 9 10 11 12 13 14"))
         (is (< 7 (:seon.render.data/next-offset drilled) 2000)
             "the page names its absolute continuation")
         (is (= 9000 (:seon.render.data/offset past-end)))
@@ -504,8 +503,8 @@
                     cluster-name (:seon.blob/digest nested-stored)
                     [:alpha] 7)
             projected-root (projected cluster-name effective root)]
-        (is (str/starts-with? (:seon.dev.mcp/text root) "[0 1 2 3 4 5 6 7") (:seon.dev.mcp/text root))
-        (is (str/starts-with? (:seon.dev.mcp/text nested) "[7 8 9 10 11 12 13 14") (:seon.dev.mcp/text nested))
+        (is (str/starts-with? (:seon.dev.mcp/text root) "[0 1 2 3 4 5 6 7"))
+        (is (str/starts-with? (:seon.dev.mcp/text nested) "[7 8 9 10 11 12 13 14"))
         (is (false? (:seon.dev.mcp/windowed? projected-root))
             "reading the result root must not mint another artifact")
         (is (not (contains? projected-root :seon.blob/digest))))

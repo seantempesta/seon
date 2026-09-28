@@ -23,8 +23,7 @@
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.sci.reader :as reader]
-            [seon.test-support :as test-support]
-            [seon.print.value]))
+            [seon.test-support :as test-support]))
 
 (def ^:private digest-a (apply str (repeat 64 "a")))
 (def ^:private digest-b (apply str (repeat 64 "b")))
@@ -311,7 +310,7 @@
               (and (= head base) (= :seon.program/absent branch)) :seon.program/retracted
               (= head base) :seon.program/changed-on-branch
               :else :seon.program/conflict)]
-        (is (= [expected] (class-of identity)) (seon.print.value/bounded-text [base branch head]))
+        (is (= [expected] (class-of identity)))
         (is (= (= expected :seon.program/conflict)
                (contains? (:seon.program/conflict-digests result) identity)))))
     (is (not (contains? (reduce into #{} (map result classes))
@@ -357,8 +356,8 @@
                              :seon.sci.reader/ns 'sample
                              :seon.config.eval.result/max-source
                              (count source)})]
-    (is (vector? events) (str "reader refused " source))
-    (is (= 1 (count events)) (str "reader split " source))
+    (is (vector? events))
+    (is (= 1 (count events)))
     (first events)))
 
 (defn- refusal-data
@@ -745,7 +744,7 @@
                         (entity-tx current {} {:seon.program/delete-identities [identity]}))]])]
         (is (seq (:seon.fn/form-span before)))
         (is (seq (:seon.fn/call-arities before)))
-        (is (some? (:seon.db.write.attempt/request-id result)) (seon.print.value/bounded-text result))
+        (is (some? (:seon.db.write.attempt/request-id result)))
         (is (= before
                (db/pull (db/db connection) '[*] identity)))))))
 
@@ -927,7 +926,7 @@
         (is (= admission-source (:seon.schema.admission/source entity))
             "the entity records who admitted it")
         (is ((schema/projection-validator (schema/handed-projection) :seon.program/declaration-row) entity)
-            (str "entity refused by its own output contract: " (seon.print.value/bounded-text entity))))))
+            "entity refused by its own output contract"))))
   (testing "a reader event preserves required namespace symbols"
     (is (= #{'clojure.set}
            (:seon.ns/requires
@@ -1192,17 +1191,14 @@
                                      attribute))))
                          entries)]))]
       (is (every? empty? (vals foreign))
-          (str "declared program attributes that are neither kept nor "
-               "declared :seon.program/written-by: " (seon.print.value/bounded-text foreign))))
+          "declared program attributes that are neither kept nor declared :seon.program/written-by"))
     (doseq [identity-attribute program/identity-attributes
             :let [shape (get shapes identity-attribute)
                   owned (:seon.program/owned-attributes shape)]]
-      (is (qualified-keyword? (:seon.program/source-attribute shape))
-          (str identity-attribute " declares a source attribute"))
+      (is (qualified-keyword? (:seon.program/source-attribute shape)))
       (when (coll? owned)
-        (is (seq owned) (str identity-attribute " owns attributes"))
-        (is (some #{identity-attribute} owned)
-            (str identity-attribute " owns its own identity"))))
+        (is (seq owned))
+        (is (some #{identity-attribute} owned))))
     (is (some (fn [identity-attribute]
                 (some (fn [entry]
                         (and (map? (second entry))
@@ -1329,7 +1325,7 @@
             (into {}
                   (map (fn [identity]
                          (let [pulled (db/pull database '[*] identity)]
-                           (is (some? (:db/id pulled)) (seon.print.value/bounded-text identity))
+                           (is (some? (:db/id pulled)))
                            [identity
                             (apply dissoc
                                    (#'seon.fn/normalized-index-entity
@@ -1408,13 +1404,11 @@
                                    (str/join "\n" (into [(first sources) registration] (rest sources)))))
                  turn-id (:seon.turn/id submitted)]
              (try
-               (is (string? turn-id) (seon.print.value/bounded-text submitted))
+               (is (string? turn-id))
                (when-not turn-id (throw (ex-info "Parity turn refused" submitted)))
                (let [evaluations (seon.eval/of-agent (db/db connection) "program-parity")]
                  (is (seq evaluations))
-                 (is (empty? (filter :seon.cluster.eval/error evaluations))
-                     (seon.print.value/bounded-text (mapv #(select-keys % [:seon.cluster.eval/source
-                                                   :seon.cluster.eval/error]) evaluations))))
+                 (is (empty? (filter :seon.cluster.eval/error evaluations))))
                (entities-from connection)
                (finally
                  (agent/disarm! request)
@@ -1423,11 +1417,8 @@
                                   (:seon.turn.loop/completion handle)]]
                    (async/close! channel)))))))]
     (doseq [identity identities]
-      (is (= (get indexed identity) (get evaluated identity))
-          (seon.print.value/bounded-text {:seon.program/identity identity
-                   :seon.program/indexed (get indexed identity)
-                   :seon.program/evaluated (get evaluated identity)})))
+      (is (= (get indexed identity) (get evaluated identity))))
     (doseq [identity [[:seon.fn/sym (quote sample.s1/left)]
                       [:seon.fn/sym (quote sample.s1/right)]
                       [:seon.test/sym (quote sample.s1/paired)]]]
-      (is (seq (:seon.fn/calls (get evaluated identity))) (seon.print.value/bounded-text identity)))))
+      (is (seq (:seon.fn/calls (get evaluated identity)))))))

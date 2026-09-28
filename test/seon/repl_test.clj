@@ -6,8 +6,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [seon.repl :as repl]
-            [seon.sci.admit :as admit]
-            [seon.print.value]))
+            [seon.sci.admit :as admit]))
 
 (defn- text-nodes [node]
   (cond
@@ -23,7 +22,7 @@
                                                (gen/vector (gen/choose 0 65535))) ]
                   (= source (apply str (map second (repl/syntax-tokens source)))))
                 :seed 20260914)]
-    (is (:pass? result) (seon.print.value/bounded-text result)))
+    (is (:pass? result)))
   (doseq [source ["\n```clojure\n;; café <tag>\n(+ 1 2)\n```"
                   "[\"unfinished\\\"" "\\; \\newline ; comment\n{:x -3.2}" ""]
           response [{:seon.eval/shown "[1 :two result/e3]"}
@@ -83,7 +82,7 @@
         blocks (filter vector? (tree-seq vector? seq hiccup))
         thinking (filter #(= "seon-eval-thinking" (:class (second %))) blocks)
         prompts (filter #(= "seon-eval-prompt" (:class (second %))) blocks)]
-    (is (= 1 (count thinking)) (seon.print.value/bounded-text hiccup))
+    (is (= 1 (count thinking)))
     (is (= ";; I should check the sum." (last (first thinking))))
     (is (= 1 (count prompts)))
     (is (= "my.agents.juniper=> (+ 1 1)" (last (first prompts)))
@@ -287,8 +286,7 @@
                             :seon.cluster.eval/interrupted-at
                             (java.util.Date. 1785500000000)
                             :seon.eval/duration-ms 30000})]
-    (is (str/includes? emitted ":interrupted #inst")
-        emitted)
+    (is (str/includes? emitted ":interrupted #inst"))
     (is (not (str/includes? emitted ":interrupted \"")))
     (is (str/includes? emitted ":ms 30000"))))
 
@@ -334,10 +332,10 @@
   (with-open [reader (java.io.PushbackReader. (java.io.StringReader. text))]
     (let [end (Object.)
           reply (binding [*read-eval* false *default-data-reader-fn* tagged-literal] (read {:eof end} reader))]
-      (is (map? reply) text)
+      (is (map? reply))
       (is (identical? end (binding [*read-eval* false *default-data-reader-fn* tagged-literal] (read {:eof end} reader)))
-          (str "nothing follows the reply map: " text))
-      (is (not (str/starts-with? (str/triml text) ";")) (str "nothing precedes the reply map: " text))
+          "nothing follows the reply map")
+      (is (not (str/starts-with? (str/triml text) ";")) "nothing precedes the reply map")
       reply)))
 
 (deftest ^{:seon/tasks #{"18c37812b5bc"}} the-reply-is-one-edn-map-whatever-the-value
@@ -415,7 +413,7 @@
                               :seon.eval/shown "[0 1 2 …2997 (drop 3 result/eeb53)]"
                               :seon.eval/value-tokens 1604 :seon.eval/shown-tokens 39 :seon.eval/duration-ms 5})
         reply (one-map (subs text (str/index-of text "#:seon.repl{")))]
-    (is (= :large-value (get-in reply [:seon.repl/findings 0 :seon.repl/finding])) text)))
+    (is (= :large-value (get-in reply [:seon.repl/findings 0 :seon.repl/finding])))))
 
 (deftest a-failed-evaluation-says-error-in-the-one-map
   (let [reply (one-map (repl/response {:seon.cluster.eval/source "(/ 1 0)"
@@ -423,7 +421,7 @@
                                        :seon.cluster.eval/error "Divide by zero"
                                        :seon.repl/handle (admit/result-handle "e64f")
                                        :seon.eval/duration-ms 0}))]
-    (is (= "Divide by zero" (get-in reply [:seon.repl/error :seon.error/message])) (seon.print.value/bounded-text reply))
+    (is (= "Divide by zero" (get-in reply [:seon.repl/error :seon.error/message])))
     (is (not (contains? reply :seon.repl/value)))
     (is (= 0 (:seon.repl/ms reply)))))
 
@@ -440,6 +438,6 @@
                                        :seon.repl/handle (admit/result-handle "e64f")
                                        :seon.eval/duration-ms 1}))]
     (is (= "Divide by zero" (get-in reply [:seon.repl/error :seon.error/message])))
-    (is (= [:not-admitted] (mapv :seon.repl/finding (:seon.repl/findings reply))) (seon.print.value/bounded-text reply))
+    (is (= [:not-admitted] (mapv :seon.repl/finding (:seon.repl/findings reply))))
     (is (= #{'user/f} (get-in reply [:seon.repl/findings 0 :seon.eval/unadmitted])))
     (is (not (contains? reply :seon.repl/out)))))

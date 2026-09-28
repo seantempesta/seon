@@ -93,8 +93,7 @@
       (let [form (read {:eof ::eof} reader)]
         (when-not (= ::eof form)
           (let [[result] (submit connection ctx nil (pr-str form))]
-            (is (nil? (:seon.cluster.eval/error result))
-                (:seon.cluster.eval/error result)))
+            (is (nil? (:seon.cluster.eval/error result))))
           (recur)))))
   (let [projection (:seon.schema/projection (env/of ctx))]
     (is (:db-after

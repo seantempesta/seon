@@ -3,8 +3,7 @@
   Every process here is started by the test itself."
   (:require [babashka.process :as bp]
             [clojure.test :refer [deftest is testing]]
-            [seon.cluster.process :as process]
-            [seon.print.value])
+            [seon.cluster.process :as process])
   (:import [java.nio.file Files]
            [java.nio.file.attribute FileAttribute]))
 
@@ -36,10 +35,10 @@
         started (System/nanoTime)
         left (process/terminate-subprocess! record identities 500 2000)
         elapsed-ms (quot (- (System/nanoTime) started) 1000000)]
-    (is (= 3 (count identities)) (seon.print.value/bounded-text identities))
+    (is (= 3 (count identities)))
     (testing "the root obeyed TERM, the grandchild needed the force after grace"
       (is (= 143 (.exitValue ^Process (:proc record))))
-      (is (<= 500 elapsed-ms 2500) (str elapsed-ms " ms")))
+      (is (<= 500 elapsed-ms 2500)))
     (is (= [] left))
     (is (= [] (survivors identities)))))
 
@@ -60,7 +59,7 @@
       (testing "every member exited on TERM inside the grace"
         (is (= 143 (.exitValue ^Process (:proc record))) "the root died of TERM, not KILL")
         (is (= "term\n" (when (.exists marker) (slurp marker))) "the child ran its TERM trap")
-        (is (< elapsed-ms 2000) (str elapsed-ms " ms")))
+        (is (< elapsed-ms 2000)))
       (finally
         (.delete marker)
         (Files/deleteIfExists directory)))))
@@ -94,7 +93,7 @@
         [member :as identities] (process/subprocess-tree-identities (.toHandle child))]
     (try
       (testing "a live member carries its generation and matches only it"
-        (is (= 1 (count identities)) (seon.print.value/bounded-text identities))
+        (is (= 1 (count identities)))
         (is (inst? (:seon.boot/start-instant member)))
         (is (= (:seon.boot/start-instant member)
                (process/process-start-instant (:seon.boot/pid member))))

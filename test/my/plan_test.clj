@@ -10,8 +10,7 @@
             [seon.render :as render]
             [seon.schema]
             [seon.sci.eval :as sci.eval]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (def ^:private t0-ms 1786500000000)
 
@@ -75,7 +74,7 @@
         (is (and (map? failure)
                  (inst? (:seon.error/at failure))
                  (qualified-keyword? (:seon.error/layer failure))
-                 (qualified-symbol? (:seon.error/operation failure))) (seon.print.value/bounded-text failure))
+                 (qualified-symbol? (:seon.error/operation failure))))
         (let [line (plan/format-item-ai failure)]
           (is (str/starts-with? line "Plan step unavailable for \"alice\""))
           (is (true? (:seon.db/invalid-read failure)))
@@ -442,7 +441,7 @@
         (is (and (map? refusal)
                  (inst? (:seon.error/at refusal))
                  (qualified-keyword? (:seon.error/layer refusal))
-                 (qualified-symbol? (:seon.error/operation refusal))) (seon.print.value/bounded-text refusal))
+                 (qualified-symbol? (:seon.error/operation refusal))))
         (with-redefs [db/q (fn [& arguments]
                             (let [form (first arguments)]
                               (if (#{'[:find ?step .

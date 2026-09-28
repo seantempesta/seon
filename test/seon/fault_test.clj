@@ -16,8 +16,7 @@
             [seon.env :as env]
             [seon.error :as error]
             [seon.fault :as fault]
-            [seon.test-support :as test-support]
-            [seon.print.value])
+            [seon.test-support :as test-support])
   (:import (java.util.concurrent CountDownLatch TimeUnit)))
 
 (def ^:private context
@@ -82,7 +81,7 @@
                evidence (if digest
                           (str (blob/get connection digest))
                           (:seon.error/data-edn occurrence))]
-           (is (string? evidence) (seon.print.value/bounded-text occurrence))
+           (is (string? evidence))
            (is (str/includes? (str evidence) "inner root cause"))))
        (testing "the shipped config delivers an unowned fault to root
        (owner ruling 2026-09-25 20:50Z), and the receipt names that recipient"
@@ -90,7 +89,7 @@
                         (config/effective (db/db connection) "fault-record"))))
          (is (= #{"root"} woken))
          (is (= #{"root"} (:seon.fault/delivered-to receipt))))
-       (is (< elapsed-ms 1000.0) (str "one synchronous fault write took " elapsed-ms " ms"))))))
+       (is (< elapsed-ms 1000.0) "one synchronous fault write stays within its bound")))))
 
 (deftest a-fault-that-happens-to-the-escalation-owner-wakes-nobody-and-reaches-its-own-faults
   ;; The writer never mails the agent a fault happened to (a message is a
@@ -103,7 +102,7 @@
    (fn [connection]
      (let [receipt (fault/fault! (world connection "fault-escalation-owner" {})
                                  (nested-failure) (assoc context :seon.agent/id "root"))]
-       (is (true? (:seon.fault/committed? receipt)) (seon.print.value/bounded-text receipt))
+       (is (true? (:seon.fault/committed? receipt)))
        (is (= "root" (:seon.config.error/escalate-to
                       (config/effective (db/db connection) "fault-escalation-owner"))))
        (is (= #{} (:woken (stored connection (:seon.error/signature receipt)))) "no wake to itself")
@@ -152,7 +151,7 @@
                                                             :seon.db/transaction-refused true}
                                                            extra)
                                                     (assoc context :seon.error/declared-schema declared-schema))]
-                          (is (true? (:seon.fault/committed? receipt)) (seon.print.value/bounded-text receipt))
+                          (is (true? (:seon.fault/committed? receipt)))
                           (db/pull (db/db connection) '[*]
                                    [:seon.error.occurrence/id (:seon.error.occurrence/id receipt)])))
            kept-out (occurrence :seon.program/deletion-refused-error
@@ -163,8 +162,8 @@
                                                             :db/id 1}]})
            kept (occurrence :seon.db/transaction-refused-error {:seon.db.write.attempt/request-id "r1"})]
        (is (= "refused" (:seon.error/message kept-out)) "the base's attributes are stored")
-       (is (not (contains? kept-out :seon.db/transaction-refused)) (seon.print.value/bounded-text kept-out))
-       (is (true? (:seon.db/transaction-refused kept)) (seon.print.value/bounded-text kept))
+       (is (not (contains? kept-out :seon.db/transaction-refused)))
+       (is (true? (:seon.db/transaction-refused kept)))
        (is (= "r1" (:seon.db.write.attempt/request-id kept)))))))
 
 (deftest ^{:seon/tasks #{"6b8d26a16ce7"}}
@@ -271,7 +270,7 @@
                                              (nested-failure)
                                              (assoc context :seon.agent/id "worker")))]
                (testing "the cluster connection's committer records on the agent's own branch"
-                 (is (true? (:seon.fault/committed? receipt)) (seon.print.value/bounded-text receipt))
+                 (is (true? (:seon.fault/committed? receipt)))
                  (is (= [#{origin}] (branches-seen attempt since))))
                (testing "and copies it to the cluster branch naming its origin"
                  (is (= [#{origin}] (branches-seen cluster since))))
@@ -322,7 +321,7 @@
                                            :seon.sci.admit/caps (config/result-caps config/defaults)})
                                          (nested-failure)
                                          (assoc context :seon.agent/id "no-row"))]
-               (is (true? (:seon.fault/committed? receipt)) (seon.print.value/bounded-text receipt))
+               (is (true? (:seon.fault/committed? receipt)))
                (is (= [#{origin}] (branches-seen attempt since)) "recorded where it happened")
                (is (= [] (branches-seen cluster since)) "and not copied onto the cluster"))
              ;; The world creates its own agent, placed on the world's branch
@@ -340,7 +339,7 @@
                                            :seon.sci.admit/caps (config/result-caps config/defaults)})
                                          (nested-failure)
                                          (assoc context :seon.agent/id "member"))]
-               (is (true? (:seon.fault/committed? receipt)) (seon.print.value/bounded-text receipt))
+               (is (true? (:seon.fault/committed? receipt)))
                (is (= [#{origin}] (branches-seen attempt since)) "the member's fault is recorded on its world")
                (is (= [] (branches-seen cluster cluster-since))
                    "and not copied onto a cluster that does not place the agent there"))

@@ -13,8 +13,7 @@
             [seon.print :as print]
             [seon.render :as render]
             [seon.render.value :as value]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (defn- prepl-events
   [cluster-name effective form]
@@ -62,8 +61,8 @@
                          cluster-name effective
                          (list 'do '(seon.cluster/project-next-prepl-value!) form))
                  terminal (filterv #(= :ret (:tag %)) events)]
-             (is (= 1 (count terminal)) (seon.print.value/bounded-text events))
-             (is (not (:exception (first terminal))) (seon.print.value/bounded-text events))
+             (is (= 1 (count terminal)))
+             (is (not (:exception (first terminal))))
              (is (= expected
                     (:seon.dev.mcp/value
                      (edn/read-string (:val (first terminal))))))))
@@ -78,7 +77,7 @@
            ;; The thrown Throwable itself reaches the projection, which keeps
            ;; it in the one error shape: class, message and ex-data per cause
            ;; link, and the root frame (task 8aba59c87b88).
-           (is (= "expected failure" (:seon.error/message result)) (seon.print.value/bounded-text result))
+           (is (= "expected failure" (:seon.error/message result)))
            (is (= 'clojure.lang.ExceptionInfo (:seon.error/exception-class result)))
            (is (= [{:seon.error/throwable-class "clojure.lang.ExceptionInfo"
                     :seon.error/message "expected failure" :seon.error/data {}}]
@@ -106,8 +105,8 @@
                                 :seon.render/value value))
                shown (:seon.render.value/text prepared)
                diagnostics (filter #(str/starts-with? % ";; renderer failed") (str/split-lines shown))]
-           (is (= value (edn/read-string shown)) shown)
-           (is (= 1 (count diagnostics)) (:seon.render.value/text prepared))
+           (is (= value (edn/read-string shown)))
+           (is (= 1 (count diagnostics)))
            (is (str/includes? (first diagnostics) "seon.repl/render-directory-ai"))
            (is (= :refused (:seon.render.unknown/reason
                             (first (:seon.render.value/diagnostics prepared))))))

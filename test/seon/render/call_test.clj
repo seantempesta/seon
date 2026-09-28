@@ -3,8 +3,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.render :as render]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (deftest declared-producer-refusals-stop-context-rendering
   (support/with-database
@@ -50,7 +49,7 @@
            keyword-id :seon.render.web/root-acquisition
            first-output (render/render-call (assoc base :seon.render.call/id keyword-id))
            retained @captured]
-       (is (string? first-output) (seon.print.value/bounded-text first-output))
+       (is (string? first-output))
        (is (map? (get retained keyword-id)))
        (doseq [call-id [keyword-id [:seon.render/ai [:seon.agent/id "juniper"]]]]
          (is (= first-output

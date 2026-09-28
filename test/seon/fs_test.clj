@@ -4,8 +4,7 @@
   "Recurring proof for the one recursive filesystem deletion owner."
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
-            [seon.fs :as fs]
-            [seon.print.value])
+            [seon.fs :as fs])
   (:import [java.nio.file Files LinkOption Path]
            [java.util.concurrent CountDownLatch TimeUnit]))
 
@@ -120,12 +119,10 @@
                   second-result
                   (deref second-deletion 10000 ::deletion-backstop)]
               (.countDown release-first)
-              (is (= :deleted second-result)
-                  (seon.print.value/bounded-text second-result))
+              (is (= :deleted second-result))
               (let [first-result
                     (deref first-deletion 10000 ::deletion-backstop)]
-                (is (= :deleted first-result)
-                    (seon.print.value/bounded-text first-result)))))))
+                (is (= :deleted first-result)))))))
       (finally
         (.countDown release-first)
         (fs/delete-recursively! base base)))))

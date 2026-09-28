@@ -3,8 +3,7 @@
             [seon.background :as background]
             [seon.db :as db]
             [seon.schema :as schema]
-            [seon.test-support :as test-support]
-            [seon.print.value]))
+            [seon.test-support :as test-support]))
 
 (deftest background-error-renderers-cover-every-declared-declared-schema
   (doseq [[schema-key observation message]
@@ -73,7 +72,7 @@
                          :seon.effect/opened-at #inst "2026-08-03T12:00:00.000-00:00"
                          :seon.effect/notify
                          [:seon.agent/id "background-agent"]}]))]
-        (is (:db-after written) (seon.print.value/bounded-text written)))
+        (is (:db-after written)))
       (binding [db/*conn* connection]
         (is (= {:seon.effect/id "background-result"
                 :seon.effect/request-edn "{}"}

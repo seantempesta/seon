@@ -5,8 +5,7 @@
             [seon.note :as note]
             [seon.db :as db]
             [seon.schema]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (defn- with-notes
   [f]
@@ -15,7 +14,7 @@
       (support/transacted! connection (support/agents-tx @connection ["alice" "bob"]))
       (let [sent (message/send! {:my.message/to "bob" :my.message/content "The note's subject."}
                                 connection "alice")]
-        (is (:seon.message/id sent) (seon.print.value/bounded-text sent)))
+        (is (:seon.message/id sent)))
       (f connection))))
 
 (deftest add-upserts-current-content-by-identity

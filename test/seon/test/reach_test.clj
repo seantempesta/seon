@@ -3,8 +3,7 @@
             [seon.db :as db]
             [seon.program :as program]
             [seon.test.runner :as runner]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (deftest program-digest-uses-the-databases-program-shapes
   (support/with-database
@@ -18,7 +17,7 @@
                                 #(throw (ex-info "Program digest read authored resources." {}))]
                      (runner/program-digest (db/db connection)))]
          (is (string? before))
-         (is (string? after) (seon.print.value/bounded-text after))
+         (is (string? after))
          (is (not= before after)))))))
 
 (defn- oracle-closure
@@ -48,7 +47,7 @@
        (is (contains? (get reaches (first tests)) 'seon.id/id) "the subject is reached")
        (doseq [t tests]
          (is (= (oracle-closure database t) (get reaches t))
-             (str t " reaches exactly the closure its rows name")))))))
+             "reaches exactly the closure its rows name"))))))
 
 (deftest a-digest-follows-its-closures-content-and-nothing-else
   (support/with-database
@@ -57,7 +56,7 @@
            elsewhere 'seon.db-test/semantic-replay-declines-opaque-and-lazy-values-without-realizing
            symbols [reaching elsewhere]
            before (runner/reach-digests (db/db connection) symbols)]
-       (is (every? string? (map before symbols)) (seon.print.value/bounded-text before))
+       (is (every? string? (map before symbols)))
        (is (not (contains? (get (runner/reach-memberships (db/db connection) [elsewhere]) elsewhere)
                            'seon.id/id))
            "the other test does not reach the changed definition")

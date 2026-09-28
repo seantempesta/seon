@@ -63,7 +63,7 @@
                 :tool_input {:file_path (str source)
                              :content "(ns prospective\n"}})})
             response (json/parse-string (str/trim (::stdout result)) true)]
-        (is (hook-exit-honest? result) (::stderr result))
+        (is (hook-exit-honest? result))
         (is (= "block" (:decision response)))
         (is (str/includes? (:reason response) "[error/syntax]")))
       (finally
@@ -86,7 +86,7 @@
                        {:hook_event_name "PreToolUse"
                         :tool_name "MultiEdit"
                         :tool_input {:file_path (str source) :edits edits}})})]
-                (is (hook-exit-honest? result) (::stderr result))
+                (is (hook-exit-honest? result))
                 (json/parse-string (str/trim (::stdout result)) true)))]
     (try
       (spit config "{}\n")
@@ -117,7 +117,7 @@
             :tool_name "Edit"
             :tool_input {:file_path (str (io/file repo-root "tmp" "absent.clj"))}})})
         response (json/parse-string (str/trim (::stdout result)) true)]
-    (is (zero? (::exit result)) (::stderr result))
+    (is (zero? (::exit result)))
     (is (str/includes? (get-in response [:hookSpecificOutput :additionalContext])
                        "HOOK ERROR"))))
 
@@ -147,20 +147,20 @@
       (testing "one exact occurrence is reconstructed and checked"
         (let [result (invoke "(def value 1)" "(def value")
               response (json/parse-string (str/trim (::stdout result)) true)]
-          (is (hook-exit-honest? result) (::stderr result))
+          (is (hook-exit-honest? result))
           (is (= "block" (:decision response)))
           (is (str/includes? (:reason response) "[error/syntax]"))))
       (testing "an ambiguous exact occurrence produces no invented first edit"
         (let [result (invoke " 1)" "")
               response (json/parse-string (str/trim (::stdout result)) true)]
-          (is (hook-exit-honest? result) (::stderr result))
+          (is (hook-exit-honest? result))
           (is (true? (:continue response)))
           (is (nil? (:decision response)))))
       (testing "a reconstruction failure carries its actual exception message"
         (.delete source)
         (let [result (invoke "(def value 1)" "(def value")
               response (json/parse-string (str/trim (::stdout result)) true)]
-          (is (hook-exit-honest? result) (::stderr result))
+          (is (hook-exit-honest? result))
           (is (= "block" (:decision response)))
           (is (str/includes? (:reason response) "prospective.clj"))))
       (finally
@@ -203,7 +203,7 @@
                  :content
                  "{:wrong.namespace/value [:map {:closed true}]}"}})
               response (json/parse-string (str/trim (::stdout result)) true)]
-          (is (hook-exit-honest? result) (::stderr result))
+          (is (hook-exit-honest? result))
           (is (= "block" (:decision response)))
           (is (str/includes? (:reason response)
                              "[error/schema-misplaced-key]"))
@@ -221,7 +221,7 @@
               response (json/parse-string (str/trim (::stdout result)) true)
               feedback
               (get-in response [:hookSpecificOutput :additionalContext])]
-          (is (hook-exit-honest? result) (::stderr result))
+          (is (hook-exit-honest? result))
           (is (true? (:continue response)))
           (is (str/includes? feedback
                              "[warning/schema-exact-reuse]"))
@@ -268,7 +268,7 @@
             response (json/parse-string (str/trim (::stdout result)) true)
             feedback (get-in response
                              [:hookSpecificOutput :additionalContext])]
-        (is (hook-exit-honest? result) (::stderr result))
+        (is (hook-exit-honest? result))
         (is (true? (:continue response)))
         (is (= "block" (:decision response))
             "Unreadable Clojure on disk is a refusal, never an advisory line.")
@@ -315,7 +315,7 @@
             response (json/parse-string (str/trim (::stdout result)) true)
             feedback (get-in response
                              [:hookSpecificOutput :additionalContext])]
-        (is (hook-exit-honest? result) (::stderr result))
+        (is (hook-exit-honest? result))
         (is (true? (:continue response)))
         (is (str/includes? feedback "clj-kondo analysis failed")))
       (finally
@@ -369,8 +369,8 @@
             second-worker (edn/read-string (slurp worker-file))
             pid (:seon.review.worker/pid first-worker)
             handle (.get (java.lang.ProcessHandle/of (long pid)))]
-        (is (zero? (::exit first-result)) (::stderr first-result))
-        (is (zero? (::exit second-result)) (::stderr second-result))
+        (is (zero? (::exit first-result)))
+        (is (zero? (::exit second-result)))
         (is (= pid (:seon.review.worker/pid second-worker)))
         (is (= 1 (count (str/split-lines
                          (slurp (io/file state ".pending-review"))))))
@@ -447,7 +447,7 @@
                      ::directory repo-root
                      ::environment {"SEON_PROBE_DIRECTORY" relative}})
             observed (edn/read-string (::stdout result))]
-        (is (hook-exit-honest? result) (::stderr result))
+        (is (hook-exit-honest? result))
         (testing "every header form contributes its exact declared path"
           (is (= (mapv #(str relative "/" %)
                        ["added.clj" "updated.clj" "moved.clj"
@@ -480,7 +480,7 @@
                        :seon.probe/unapplicable]]
             (is (= :unavailable
                    (:seon.hook.reconstruction/status (get observed key)))
-                (str key " must refuse rather than report nothing to check")))
+                "must refuse rather than report nothing to check"))
           (is (str/includes? (:seon.hook.reconstruction/reason
                               (:seon.probe/absent observed))
                              "does not exist"))))
@@ -511,7 +511,7 @@
                                absent "\n@@\n-(def a 1)\n+(def a 2)\n"
                                "*** End Patch")}})})
             response (json/parse-string (str/trim (::stdout result)) true)]
-        (is (hook-exit-honest? result) (::stderr result))
+        (is (hook-exit-honest? result))
         (is (= "block" (:decision response))
             "A path the hook cannot lint is refused, never waved through.")
         (is (= 2 (::exit result))
@@ -549,7 +549,7 @@
                                source "\n@@\n-(def value 1)\n"
                                "+(def value (inc 1)\n*** End Patch")}})})
             response (json/parse-string (str/trim (::stdout result)) true)]
-        (is (hook-exit-honest? result) (::stderr result))
+        (is (hook-exit-honest? result))
         (is (= "block" (:decision response))
             "An unmatched delimiter is refused before the bytes land.")
         (is (str/includes? (:reason response) "[error/syntax]")))
@@ -566,7 +566,7 @@
             :tool_name "apply_patch"
             :tool_input {:command "*** Begin Patch\n*** End Patch"}})})
         response (json/parse-string (str/trim (::stdout result)) true)]
-    (is (hook-exit-honest? result) (::stderr result))
+    (is (hook-exit-honest? result))
     (is (= "block" (:decision response))
         "An edit naming no path is an edit the hook cannot check.")
     (is (str/includes? (:reason response) "no file path"))))
@@ -610,7 +610,7 @@
                           :tool_name "exec"
                           :session_id "shell-write-regression"
                           :tool_input {:command command}})})]
-                  (is (hook-exit-honest? result) (::stderr result))
+                  (is (hook-exit-honest? result))
                   (json/parse-string (str/trim (::stdout result)) true)))]
     (try
       (spit config (shell-write-config root))
@@ -667,7 +667,7 @@
                                                root "/sibling.clj\n+(ns sibling)\n"
                                                "*** End Patch")}})})
                 response (json/parse-string (str/trim (::stdout result)) true)]
-            (is (hook-exit-honest? result) (::stderr result))
+            (is (hook-exit-honest? result))
             (is (= "block" (:decision response))
                 "The patch was fine; the shell write it never named was not.")
             (is (str/includes? (:reason response) "probe.clj")))))
@@ -681,8 +681,7 @@
           (is (true? (:continue response)))
           (is (nil? (:decision response)))
           (is (< elapsed-ms 3000)
-              (str "One derived scan must stay well inside a second of work; "
-                   "measured " elapsed-ms " ms including process startup."))))
+              "One derived scan must stay well inside a second of work, process startup included.")))
       (finally (test-support/delete-recursively! directory)))))
 
 (deftest a-derived-write-reaches-the-agent-whose-tool-call-spanned-it
@@ -707,7 +706,7 @@
                           :session_id "derived-attribution-regression"
                           :agent_id agent-id
                           :tool_input {:command "true"}})})]
-                  (is (hook-exit-honest? result) (::stderr result))
+                  (is (hook-exit-honest? result))
                   (json/parse-string (str/trim (::stdout result)) true)))]
     (try
       (spit config (shell-write-config root))

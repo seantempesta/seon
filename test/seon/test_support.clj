@@ -22,8 +22,7 @@
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
-            [seon.test]
-            [seon.print.value])
+            [seon.test])
   (:import [java.util.concurrent CountDownLatch ExecutionException Future TimeUnit
             TimeoutException]))
 
@@ -655,9 +654,9 @@
                  (update :shrunk without-duplicate-error))))]
      (let [passed? (and (pos-int? (:num-tests check))
                         (true? (:result check)))]
-       (test/is passed?
-              (str message " "
-                   (seon.print.value/bounded-text (without-duplicate-error check))))))))
+       ;; The failing check is the value the report prints, shrink data included.
+       (test/testing message
+         (test/is (nil? (when-not passed? (without-duplicate-error check)))))))))
 
 (defn- run-database-body
   "Call `body` with `connection` as its custody, under the projection the

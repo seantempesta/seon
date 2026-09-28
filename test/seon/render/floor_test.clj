@@ -57,14 +57,14 @@
                     "#object[seon.render.floor_test.Hostile" "#object[java.util.ArrayList"
                     "at seon.probe/outer (probe.clj:3)" "at my.work/run (work.clj:9)"
                     "at seon.probe/middle (probe.clj:7)" "at seon.probe/leaf (:-1)"]]
-        (is (str/includes? text part) part))
+        (is (str/includes? text part)))
       (is (not (str/includes? text "clojure.lang.RT")) "host frames are not first-party"))
     (testing "nothing is dereferenced, forced or realized past the bound"
       (is (not (realized? forced)))
       (is (<= @realized 32) "one chunk at most of the infinite seq"))
     (testing "the cost is the caps', not the value's"
       (is (< (count text) 8300))
-      (is (< ms 50) (str "one floor took " ms " ms"))
+      (is (< ms 50) "one floor stays within its bound")
       (is (= text (edn/read-string (pr-str text))) "the floor reads back as a string"))))
 
 (deftest deep-cyclic-and-accessor-hostile-chains-stay-bounded

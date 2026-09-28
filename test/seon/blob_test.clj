@@ -12,8 +12,7 @@
             [seon.cluster.store :as store]
             [seon.db :as db]
             [seon.schema :as schema]
-            [seon.test-support :as support]
-            [seon.print.value])
+            [seon.test-support :as support])
   (:import [java.io ByteArrayInputStream ByteArrayOutputStream
             FileInputStream InputStream RandomAccessFile SequenceInputStream]
            [java.security MessageDigest]
@@ -125,7 +124,7 @@
                      (= (alength payload) (:seon.blob/size result))
                      (Arrays/equals payload reconstructed))))))
          :seed 1785772983)]
-    (is (:result check) (seon.print.value/bounded-text check))))
+    (is (:result check))))
 
 (deftest interrupted-staging-leaves-the-store-unchanged
   (with-file-blob-store
@@ -188,10 +187,10 @@
           (is (= binary-threshold
                  (alength ^bytes (:seon.blob/inline-prefix result))))
           (is (< write-allocation (* 8 1024 1024))
-              (str "32 MiB staged write allocated " write-allocation " bytes"))
+              "32 MiB staged write allocated bytes")
           (is (= 4096 (alength ^bytes range-bytes)))
           (is (< read-allocation (* 1024 1024))
-              (str "4 KiB chunk read allocated " read-allocation " bytes")))))))
+              "4 KiB chunk read allocated bytes"))))))
 
 (deftest utf8-content-round-trips-by-its-digest
   (let [root (str "tmp/blob-test/" (random-uuid))

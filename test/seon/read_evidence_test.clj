@@ -3,8 +3,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.sci.eval :as eval]
-            [seon.test-support :as test-support]
-            [seon.print.value]))
+            [seon.test-support :as test-support]))
 
 (defn- as-seen-by
   "`evidence` as a later check sees it: from this connection, from a fresh
@@ -56,25 +55,18 @@
                                     evidence))
            juniper (db/q '[:find ?e . :where [?e :seon.agent/id "juniper"]]
                          @connection)]
-       (is (vector? (:seon.sci.admit/value evaluation)) (seon.print.value/bounded-text evaluation))
+       (is (vector? (:seon.sci.admit/value evaluation)))
        (is (= "Opening message"
-              (get-in evaluation [:seon.sci.admit/value 0 :seon.message/content]))
-           (seon.print.value/bounded-text evaluation))
+              (get-in evaluation [:seon.sci.admit/value 0 :seon.message/content])))
        (is (some #(= {:seon.db/pattern-attribute :seon.message/to
                       :seon.db/pattern-value juniper} %)
-                 patterns)
-           (seon.print.value/bounded-text evidence))
+                 patterns))
        ;; The form's evidence is what the form read on its own branch: the
        ;; context's acquisition held the pre-write value and the host
        ;; program's entities, and neither is the form's read.
        (is (= #{(:datahike.cache/connection-id (:cache-context @connection))}
-              (into #{} (map #(get-in % [:datahike.read/revision :datahike.cache/connection-id])) evidence))
-           (seon.print.value/bounded-text (mapv :datahike.read/revision evidence)))
-       (is (true? (db/read-evidence-current? @connection evidence))
-           (seon.print.value/bounded-text (into [] (comp (remove #(db/read-evidence-current? @connection [%]))
-                                  (map #(select-keys % [:seon.db/read-request :seon.db/read-result-digest
-                                                        :datahike.read/revision])))
-                         evidence)))
+              (into #{} (map #(get-in % [:datahike.read/revision :datahike.cache/connection-id])) evidence)))
+       (is (true? (db/read-evidence-current? @connection evidence)))
        (is (some? (:db-after (db/transact!
                   connection
                   [{:seon.message/id "next" :seon.message/to [:seon.agent/id recipient] :seon.message/content "Next message"}]))))

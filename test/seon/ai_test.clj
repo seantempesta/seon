@@ -28,8 +28,7 @@
             [seon.sci.eval :as sci.eval]
             [seon.turn :as turn]
             [seon.schema :as schema]
-            [seon.test-support :as test-support]
-            [seon.print.value]))
+            [seon.test-support :as test-support]))
 
 (def ^:private base
   {:seon.ai/endpoint "http://127.0.0.1:1/chat/completions"
@@ -269,7 +268,7 @@
                                         (dissoc :seon.config.ai.backup/model)
                                         (assoc dial "set-but-alone")))
                         :seon.ai/backup))
-        (str dial " alone is not a backup, and it is not half of one"))))
+        "alone is not a backup, and it is not half of one")))
 
 (defn- seed-registry!
   [connection]
@@ -551,8 +550,7 @@
          "details" {"cached" true
                     "classes" [nil "hit" 1.5]}}]
     (doseq [value [nil false 7 1.25 "text" [] {} [nil {"ok" true}]]]
-      (is ((schema/projection-validator (schema/handed-projection) :seon.ai/json-value) value)
-          (seon.print.value/bounded-text value)))
+      (is ((schema/projection-validator (schema/handed-projection) :seon.ai/json-value) value)))
     (is ((schema/projection-validator (schema/handed-projection) :seon.ai/usage) payload))
     (is (= payload (json/read-str (json/write-str payload))))
     (is (not ((schema/projection-validator (schema/handed-projection) :seon.ai/json-value) (fn [] :not-json))))))
@@ -562,7 +560,7 @@
         schema-values (mg/sample compiled {:seed 2026080301 :size 30})]
     (is (seq schema-values))
     (is (every? #(m/validate compiled %) schema-values))
-    (doseq [[json-partition seed generator]
+    (doseq [[_json-partition seed generator]
             [[:null 2026080310 (gen/return nil)]
              [:boolean 2026080311 gen/boolean]
              [:number 2026080312 json-number-generator]
@@ -580,8 +578,7 @@
                    (json-round-trip? value)))
              :seed seed)]
         (is (true? (:result check))
-            (str (name json-partition) " JSON round-trip failed: "
-                 (seon.print.value/bounded-text check)))))))
+            "JSON round-trip failed")))))
 
 (deftest the-request-body-carries-the-model-and-the-messages
   (let [body (ai/request-body (seon.schema/handed-projection) (assoc base :seon.ai/system "be brief"))]
@@ -664,7 +661,7 @@
                            :where [?a :seon.ai.attempt/ordinal ?ordinal]
                            [?a :seon.ai.attempt/settings-edn ?settings]]
                          @connection ordinal)]
-         (is (nil? recorded) (seon.print.value/bounded-text recorded))
+         (is (nil? recorded))
          (is (= expected (get body "stop")))
          (is (= expected (:seon.config.ai/stop (edn/read-string saved)))))))))
 
@@ -677,11 +674,11 @@
            fabricated (filter #(str/includes? (second %) stop) captures)
            evaluated (atom 0)]
        (is (seq fabricated) "The replay must include actual fabricated replies.")
-       (doseq [[id text] captures]
+       (doseq [[_id text] captures]
          (let [stopped (subs text 0 (or (str/index-of text stop) (count text)))
                forms (reply/sources stopped 'user)]
            (is (and (vector? forms) (seq forms))
-               (str id " must retain its preceding forms: " (seon.print.value/bounded-text forms)))
+               "must retain its preceding forms")
            (when (vector? forms)
              (doseq [form forms]
                (let [result (sci.eval/evaluate
@@ -691,9 +688,9 @@
                               :seon.sci.admit/caps (config/result-caps @dials)})]
                  (swap! evaluated inc)
                  (is (contains? result :seon.sci.admit/value)
-                     (str id " must return an evaluated value: " (seon.print.value/bounded-text result)))
+                     "must return an evaluated value")
                  (is (not= true
-                           (get-in result [:seon.sci.admit/value :seon.sci.reader/fabricated-response])) id))))))
+                           (get-in result [:seon.sci.admit/value :seon.sci.reader/fabricated-response]))))))))
        (is (pos? @evaluated) "At least one preceding form must actually evaluate.")))))
 
 (deftest disabled-thinking-emits-sampling-and-omits-effort
@@ -1236,8 +1233,7 @@
                                                   (with-test-key (stub-request server "/stream")))))
                                  (range 6)))]
         (is (= 6 (count (filter #(= "(+ 1 2)" (:seon.ai/text %)) outcomes)))
-            (str "every concurrent stream completed: "
-                 (seon.print.value/bounded-text (mapv #(or (:seon.error/message %) :ok) outcomes)))))
+            "every concurrent stream completed"))
       (finally (.stop server 0)))))
 
 (deftest payment-required-primary-is-terminal-with-a-configured-backup
@@ -1313,8 +1309,7 @@
           (.countDown ^java.util.concurrent.CountDownLatch release-peer)
           (let [peer-outcome (deref peer 2000 {::timed-out true})]
             (is (= "peer survived" (:seon.ai/text peer-outcome))
-                (str "the concurrent peer remained readable: "
-                     (seon.print.value/bounded-text peer-outcome))))))
+                "the concurrent peer remained readable"))))
       (finally (stop-custody-stub! stub)))))
 
 (deftest a-stop-interrupt-exits-the-http-leaf-with-the-flag-set
@@ -1344,10 +1339,10 @@
             (.interrupt thread)
             (.join thread 2000)
             (is (not (.isAlive thread)) "the leaf exits on the interrupt")
-            (let [{:keys [stop interrupted? returned]}
+            (let [{:keys [stop interrupted?]}
                   (.get outcome 1 java.util.concurrent.TimeUnit/SECONDS)]
               (is (instance? InterruptedException stop)
-                  (str "an interrupt is never a value: " (seon.print.value/bounded-text returned)))
+                  "an interrupt is never a value")
               (is (true? interrupted?) "the thread's interrupt flag is restored")))))
       (finally (stop-custody-stub! stub)))))
 
@@ -1486,8 +1481,7 @@
                             :seon.ai/prompt "hello"
                             :seon.ai/timeout-ms 500})]
     (is ((schema/projection-validator (schema/handed-projection) :seon.ai/transport-failure-error) value)
-        (str "the production transport boundary must construct the subject: "
-             (seon.print.value/bounded-text value)))
+        "the production transport boundary must construct the subject")
     (is ((schema/projection-validator (schema/handed-projection) :seon.error/value) value)
         "the derived subject is one complete typed error value")
     (let [evidence (:seon.error/data value)]

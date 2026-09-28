@@ -3,8 +3,7 @@
             [clojure.test :refer [deftest is testing]]
             [seon.schema :as schema]
             [seon.db :as db]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (deftest form-operation-relation-is-structural-and-open
   (let [base {:my.edit/path "src/example.clj"
@@ -42,5 +41,5 @@
                 declaration (when handler
                               (db/pull @connection [:seon.fn/private? :seon.fn/spec]
                                        [:seon.fn/sym handler]))]
-            (is (true? (:seon.fn/private? declaration)) (seon.print.value/bounded-text entry))
-            (is (string? (:seon.fn/spec declaration)) (seon.print.value/bounded-text entry))))))))
+            (is (true? (:seon.fn/private? declaration)))
+            (is (string? (:seon.fn/spec declaration)))))))))

@@ -448,7 +448,7 @@ handle))}}
                           ".seon-print-table"
                           ".seon-render-unavailable"]]
           (is (str/includes? (.body stylesheet) selector)
-              (str selector " has a rule in the served stylesheet"))))
+              "has a rule in the served stylesheet")))
       (testing "and path traversal is refused by construction"
         (is (= 404 (.statusCode (fetch server "/css/../../secret"))))))))
 
@@ -501,8 +501,7 @@ handle))}}
             response (#'web/failure-response {:seon.store/connection-object connection} failure)]
         (is (= 500 (:status response)))
         (is (= "text/html; charset=utf-8" (get-in response [:headers "content-type"])))
-        (is (str/includes? (:body response) "The record refused its request.")
-            (:body response))
+        (is (str/includes? (:body response) "The record refused its request."))
         (is (not (re-find #"\n\s+at |\.java:\d+\)" (:body response)))
             "no stack frame reaches the body")))))
 
@@ -517,7 +516,7 @@ handle))}}
                                         :seon.message/to [:seon.agent/id "page-reader"]}])
       (let [route "/agent/page-reader/context"
             acknowledged (post-form server route "action=received&message-id=page-inbox-1")]
-        (is (= 204 (.statusCode acknowledged)) (.body acknowledged))
+        (is (= 204 (.statusCode acknowledged)))
         (is (some? (:seon.message/received-tx
                     (db/pull @connection [:seon.message/received-tx] [:seon.message/id "page-inbox-1"])))
             "the acknowledgement is committed")
@@ -533,7 +532,7 @@ handle))}}
               created (post-form server route "action=create-owner")
               owner (cluster.agent/steward-of @connection namespace-name)
               basis-after-create (:max-tx @connection)]
-          (is (= 303 (.statusCode created)) (.body created))
+          (is (= 303 (.statusCode created)))
           (is (= (str "/ns/" namespace-name)
                  (.orElse (.firstValue (.headers created) "location") nil)))
           (is (= (str namespace-name) owner))
@@ -557,9 +556,9 @@ handle))}}
       (doseq [path ["/ns/nonexistent.thing" "/ns/123bad"]]
         (let [commit-before (db/commit-id @connection)
               response (fetch server path)]
-          (is (= 404 (.statusCode response)) path)
+          (is (= 404 (.statusCode response)))
           (is (= commit-before (db/commit-id @connection))
-              (str path " committed no transaction")))))))
+              "committed no transaction"))))))
 
 (deftest canonical-debug-inspects-without-creating-a-namespace-owner
   (with-server
@@ -1451,11 +1450,7 @@ handle))}}
                 (is (= 2 (count @sent))
                     ;; diagnosis (shrink-web 2026-09-26): which fragments each
                     ;; send carried
-                    (value/bounded-text
-                     (mapv #(->> (re-seq #"id=\"([^\"]+)\"" (String. ^bytes % "UTF-8"))
-                                 (map second) distinct (take 16) vec)
-                           @sent)
-                     2000))
+)
                 (is (every? #(java.util.Arrays/equals ^bytes (first @sent) ^bytes %) @sent)
                     "each caller paints equivalent current bytes")
                 (is (= before (derivations context))
@@ -1696,7 +1691,7 @@ handle))}}
             (is (empty?
                  (filter #(= :seon.ai.stream/text (:a %))
                          (db/datoms (db/as-of db t) :eavt)))
-                (str "no partial entity at basis " t))))))))
+                "no partial entity at basis")))))))
 
 ;;; Seal revision, 2026-07-29 — terminal facts supersede partials
 
@@ -1837,12 +1832,10 @@ handle))}}
                                    (str "(ns my.agents.root)\n(def burst " n ")")}]))
             (let [settled (read-until! tab "def burst 5")]
               (is (< (patches settled) m)
-                  (str "the tab saw " (patches settled) " repaints for "
-                       m " commits — the burst coalesced")))
+                  "the burst of commits coalesces into fewer repaints"))
             (let [passes (- (derivations context) before)]
               (is (< passes m)
-                  (str "the floor coalesced " m " commits into " passes
-                       " derivations for the whole cluster"))))
+                  "the floor coalesces commits into fewer derivations for the whole cluster")))
           (finally (.close tab)))))))
 
 (deftest the-pass-oracle-awaits-a-held-derivation
@@ -2004,13 +1997,13 @@ handle))}}
              ai (render/render-ai request)
              html (render/render-html request)
              html-string (hiccup/->string html)]
-         (is (string? ai) (seon.print.value/bounded-text ai))
+         (is (string? ai))
          (is (< (count ai) (count huge))
              "the AI projection is bounded by the render profile")
          ;; A cut never omits its whole subject: the prefix that fit is
          ;; shown and only the remainder is counted (one-render-path §3e).
          (let [[_ prefix omitted] (re-find #"^\"([^\"]*)\"…\+(\d+)" ai)]
-           (is (pos? (count prefix)) ai)
+           (is (pos? (count prefix)))
            (is (= (count huge) (+ (count (edn/read-string (str "\"" prefix "\""))) (parse-long omitted)))))
          (is (not (str/includes? ai ";; …N")) "no legend: each cut carries its own continuation")
          (is (< (count html-string) (count huge))
@@ -2028,7 +2021,7 @@ handle))}}
                                    [::ai-bound-wide namespace-name])
                wide-ai (render/render-ai wide-request)
                wide-html (hiccup/->string (render/render-html wide-request))]
-           (is (string? wide-ai) (seon.print.value/bounded-text wide-ai))
+           (is (string? wide-ai))
            (is (< (count wide-ai) (count (pr-str wide)))
                "a wide collection is cut for AI under the same profile")
            (let [shown (edn/read-string wide-ai)
@@ -2243,8 +2236,7 @@ handle))}}
   ;; port after every restart, or the tab a person left open stops
   ;; working for no visible reason.
   (doseq [name ["default" "acme" "morning" "a" "клас" "with-dashes"]]
-    (is (= (web/derived-port name) (web/derived-port name))
-        (str "unstable derivation for " name)))
+    (is (= (web/derived-port name) (web/derived-port name))))
   (testing "and it is a pinned VALUE, not merely stable within a run —
             these are the numbers a bookmark depends on"
     (is (= 7994 (web/derived-port "default")))
@@ -2403,7 +2395,7 @@ handle))}}
             (is (= 200 (.statusCode response)))
             (is (str/includes? body "id=\"surface-debug-session_2f_root\""))
             (doseq [evidence ["fixture prompt acquisition refused" "seon.error/value"]]
-              (is (str/includes? body evidence) evidence))
+              (is (str/includes? body evidence)))
             (is (not (str/includes? body "Loading the selected turn")))))
         (doseq [failure [(IllegalStateException. "unrelated runtime failure")
                          (ex-info "unrelated typed failure" {:seon.error/at (java.util.Date. 0) :seon.error/layer :seon.render.web-test/fixture :seon.error/operation 'seon.render.web-test/session-acquisition-failure-replaces-the-loading-panel :seon.render/refused-member :seon.render/output})]]

@@ -409,7 +409,7 @@
                                    (let [messages (messages-to db "root")]
                                      (when (>= (count messages) 2) messages))))]
             (is (<= (count told) (inc limit))
-                (str "root was told " (count told) " times for one signature"))
+                "root is told once for one signature")
             (is (apply = (map :seon.error/signature (errors @connection)))
                 "and every fact of the storm shares one signature, which is
                  what makes the count a fence rather than a guess")))

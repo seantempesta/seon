@@ -13,8 +13,7 @@
             [seon.test :as sut]
             [seon.render.test :as render.test]
             [seon.test.runner :as runner]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (defn- run-in-fixture
   "Request one indexed test on the fixture's branch through the one request owner."
@@ -79,7 +78,7 @@
    (seed-reach-fixture! connection)
    (let [ta 'reach.fixture/a-test tb 'reach.fixture/b-test
          initial (runner/reach-digests (db/db connection) [ta tb])]
-    (is (= 2 (count initial)) (seon.print.value/bounded-text initial))
+    (is (= 2 (count initial)))
     (is (= initial (runner/reach-digests (db/db connection) [ta tb])))
     ;; Source, contract and schema writes each derive a digest only for the
     ;; test they reach; the other test's closure content is unchanged.
@@ -117,7 +116,7 @@
          _ (.countDown start)
          results (mapv deref readers)]
     (is (apply = results))
-    (is (string? (get-in results [0 ta])) (seon.print.value/bounded-text (first results)))
+    (is (string? (get-in results [0 ta])))
     ;; Equal content already derived (an earlier run) derives nothing.
     (is (contains? #{before (inc before)} (derived-digests ta)))
     (define! connection '[:seon.fn/sym reach.fixture/a]
@@ -136,7 +135,7 @@
                 [(runner/reach-digests (db/db connection) [s]) (derived-digests s)])))
        [digests derivations] (read-reach false)
        [again again-derivations] (read-reach true)]
-  (is (string? (get digests s)) (seon.print.value/bounded-text digests))
+  (is (string? (get digests s)))
   (is (= digests again))
   (is (= derivations again-derivations) "the fresh branch derived no entry")))
 
@@ -190,7 +189,7 @@
           (let [written (:seon.test/sym
                          (db/pull (db/db connection) [:seon.test/sym]
                                   [:seon.test/sym test-symbol]))]
-            (is (qualified-symbol? written) (seon.print.value/bounded-text written))))))))
+            (is (qualified-symbol? written))))))))
 
 (deftest fixture-observations-remain-stale
   (support/with-database
@@ -219,7 +218,7 @@
             (fn [_ v]
               (is (some #{#'seon.id/digest} (seon.instrument/instrumented)))
               (let [result (runner/run-var! v)]
-                (is (= 1 (:seon.test/error-count result)) (seon.print.value/bounded-text result))
+                (is (= 1 (:seon.test/error-count result)))
                 (is (.contains (:seon.test/failure-message result "")
                                "Worker-global state changed"))))))))))
 
@@ -232,7 +231,7 @@
                 observed (first (seon.db/datoms database :eavt))]
             (alter-meta! v assoc :test #(t/is (= [] observed) "Original Datom failure"))
             (let [result (binding [t/report (constantly nil)] (run-in-fixture v connection))]
-              (is (= 1 (:seon.test/fail-count result)) (seon.print.value/bounded-text result))
+              (is (= 1 (:seon.test/fail-count result)))
               (is (= 0 (:seon.test/error-count result)))
               (is (.contains (:seon.test/failure-message result "") "Original Datom failure"))
               ;; Admitted members record their reach (f3a4b33d9).
@@ -261,18 +260,14 @@
                              :seon.cluster.eval/ns [:seon.ns/name namespace-name]
                              :seon.program/row (:seon.program/row evaluation)}])
                 entity (when (vector? analysis) (second (first analysis)))]
-            (is (map? entity) (seon.print.value/bounded-text evaluation))
+            (is (map? entity))
             (when entity
               (support/transacted! connection [(dissoc entity :seon.sci.eval/evaluated?)]))))
         (let [database (db/db connection)
               s 'my.agents.reach-digest/largest-customer-test
               f 'my.agents.reach-digest/largest-customer
               before (sut/reach-digest database s)]
-          (is (contains? (get (runner/reach-memberships database [s]) s) f)
-              (seon.print.value/bounded-text (db/pull database
-                        '[:seon.test/source :seon.fn/calls
-                          {:seon.test/subject [:seon.fn/sym]}]
-                        [:seon.test/sym s])))
+          (is (contains? (get (runner/reach-memberships database [s]) s) f))
           ;; A changed definition is re-analyzed, so its stored digest changes.
           (support/transacted! connection
                                [(support/program-entity database [:seon.fn/sym f]
@@ -290,9 +285,9 @@
                              (fn [] (run-in-fixture test-var connection)))
                 _ (.start (Thread/ofVirtual) ^Runnable completion)
                 result (support/await-event! completion ::run-completed)]
-            (is (= 1 (:seon.test/pass-count result)) (seon.print.value/bounded-text result))
-            (is (zero? (:seon.test/fail-count result)) (seon.print.value/bounded-text result))
-            (is (zero? (:seon.test/error-count result)) (seon.print.value/bounded-text result))))))))
+            (is (= 1 (:seon.test/pass-count result)))
+            (is (zero? (:seon.test/fail-count result)))
+            (is (zero? (:seon.test/error-count result)))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Where a test may run: a destructive drill never runs on a development root
@@ -360,7 +355,7 @@
     (fn [connection]
       (let [database (db/db connection)
             owners (sut/destroyers database)
-            _ (is (contains? owners destructive-owner) (seon.print.value/bounded-text owners))
+            _ (is (contains? owners destructive-owner))
             ;; Each owner loses its declaration with the digest of its final
             ;; value, as the writer checks (support/revised-entity).
             removed (db/transact!
@@ -375,9 +370,9 @@
                                   owners)))
             after (db/db connection)
             derived (sut/destroyers after)]
-        (is (:db-after removed) (seon.print.value/bounded-text removed))
-        (is (string? (:seon.test/unknown derived)) (seon.print.value/bounded-text derived))
-        (is (.contains (:seon.error/message derived "") ":seon.fn/destroys") (seon.print.value/bounded-text derived))
+        (is (:db-after removed))
+        (is (string? (:seon.test/unknown derived)))
+        (is (.contains (:seon.error/message derived "") ":seon.fn/destroys"))
         (is (string? (:seon.test/unknown (sut/host after 'seon.id-test/anything)))
             "an unanswerable declaration never answers in-process")
         (is (string? (:seon.test/unknown
@@ -407,13 +402,12 @@
           (is (nil? (:db/id (db/pull database [:db/id] [:seon.test/sym test-symbol])))
               "the probe is deliberately not indexed")
           (let [report (sut/host database test-symbol)]
-            (is (string? (:seon.test/unknown report)) (seon.print.value/bounded-text report))
+            (is (string? (:seon.test/unknown report)))
             (is (nil? (:seon.test/host report))
                 "an unknown call graph never reads as in-process")
             (is (.contains (sut/host-text database test-symbol) "unknown")))
           (let [result (run-in-fixture test-var connection)]
-            (is (= :seon.test/identity-unresolved (:seon.test/selection-refusal result))
-                (seon.print.value/bounded-text result))
+            (is (= :seon.test/identity-unresolved (:seon.test/selection-refusal result)))
             (is (not (.exists marker)) "an unknown test executed nothing"))
           (finally
             (support/delete-recursively! marker)
@@ -439,11 +433,11 @@
                 ai (render.test/render-ai unit)
                 html (pr-str (render.test/render-html unit))]
             (is (= line (sut/host-text database test-symbol)))
-            (is (not (.contains what "\n")) what)
+            (is (not (.contains what "\n")))
             (is (= (dissoc (sut/host database test-symbol) :seon.test/sym) (:seon.render.test/host ai))
                 "the AI face carries where it runs as the host report's data")
             (is (= :seon.test.host/isolated-snapshot (get-in ai [:seon.render.test/host :seon.test/host])))
-            (is (.contains html line) html))
+            (is (.contains html line)))
           ;; The cheap test is indexed from its source, digests included.
           (let [namespace-name (symbol (str "render.probe" (id/id)))
                 cheap (symbol (str namespace-name) "cheap")]
@@ -528,7 +522,7 @@
       (let [entities (functions/program-entities {:seon.fn/roots [(.getPath root)]})
             entity (first (filter :seon.test/sym entities))]
         (is (= long-declaration (:seon.test/long entity))
-            (str "the indexer lifts the declaration onto the entity a check queries: " (seon.print.value/bounded-text entity))))
+            "the indexer lifts the declaration onto the entity a check queries"))
       (finally (support/delete-recursively! root)))))
 
 (deftest an-in-process-check-excludes-a-declared-long-test-and-names-it
@@ -541,17 +535,16 @@
               (let [result (changed-request connection [test-symbol cheap-symbol] {})
                     excluded (:seon.test/long-excluded result)
                     tally (sut/tally result)]
-                (is (= [cheap-symbol] (map :seon.test/sym (:seon.test/results result))) tally)
+                (is (= [cheap-symbol] (map :seon.test/sym (:seon.test/results result))))
                 ;; An excluded long obligation is unfulfilled, never green (57f02fd5b).
-                (is (false? (:seon.test/passed? result)) tally)
+                (is (false? (:seon.test/passed? result)))
                 (is (= [{:seon.test/sym test-symbol
                          :seon.test/long long-declaration
                          :seon.test/command ["bin/test-check" "default" "--test" (str test-symbol)]}]
-                       excluded)
-                    (seon.print.value/bounded-text result))
+                       excluded))
                 ;; ec93442ee: "excluded (declared long; include-long runs it) <test>".
-                (is (.contains tally (str "excluded (declared long; include-long runs it) " test-symbol)) tally)
-                (is (.contains tally long-declaration) tally)
+                (is (.contains tally (str "excluded (declared long; include-long runs it) " test-symbol)))
+                (is (.contains tally long-declaration))
                 (is (not (.exists marker)) "the excluded test executed nothing")
                 ;; A recorded execution is a run member (runner/latest-results).
                 (is (empty? (runner/latest-results (db/db connection) [test-symbol])))))))))))
@@ -562,9 +555,9 @@
       (with-long-test connection {}
         (fn [test-symbol _ marker]
           (let [result (changed-request connection [test-symbol] {:seon.test/include-long? true})]
-            (is (= [test-symbol] (map :seon.test/sym (:seon.test/results result))) (seon.print.value/bounded-text result))
-            (is (true? (:seon.test/passed? result)) (sut/tally result))
-            (is (nil? (:seon.test/long-excluded result)) (seon.print.value/bounded-text result))
+            (is (= [test-symbol] (map :seon.test/sym (:seon.test/results result))))
+            (is (true? (:seon.test/passed? result)))
+            (is (nil? (:seon.test/long-excluded result)))
             (is (.exists marker) "the opted-in test executed its body")
             (is (seq (runner/latest-results (db/db connection) [test-symbol])))))))))
 

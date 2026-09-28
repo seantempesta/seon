@@ -7,8 +7,7 @@
             [seon.cluster.registry :as registry]
             [seon.db :as db]
             [seon.id :as id]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (defn- deftest-entity
   "The canonical declaration entity of one synthetic deftest in this namespace."
@@ -43,14 +42,14 @@
       (testing "an unchanged change selects and executes nothing"
         (let [before (head)
               gate (gate! target branch (constantly #{}))]
-          (is (true? (:seon.test/passed? gate)) (:seon.source/tally gate))
+          (is (true? (:seon.test/passed? gate)))
           (is (nil? (:seon.source/gate-run gate)) "no test request was made")
           (is (= #{} (:seon.source/advanced gate)))
           (is (= before (head)))))
       (testing "a change whose reaching test fails leaves the target's commit unchanged"
         (let [before (head)
               gate (gate! target branch (writing "gate-red" "(= 1 2)"))]
-          (is (false? (:seon.test/passed? gate)) (:seon.source/tally gate))
+          (is (false? (:seon.test/passed? gate)))
           (is (pos? (:seon.test/fail-count (first (:seon.test/results (:seon.source/gate-run gate))) 0))
               "the failure comes back to the editor")
           (is (not (contains? gate :seon.source/advanced)))
@@ -60,7 +59,7 @@
       (testing "a change whose reaching test passes advances the target"
         (let [before (head)
               gate (gate! target branch (writing "gate-green" "(= 1 1)"))]
-          (is (true? (:seon.test/passed? gate)) (:seon.source/tally gate))
+          (is (true? (:seon.test/passed? gate)))
           (is (= 1 (:seon.test/executed-count (:seon.source/gate-run gate))))
           (is (pos? (:seon.test/pass-count (first (:seon.test/results (:seon.source/gate-run gate))) 0)))
           (is (not= before (head)) "the target advanced")
@@ -91,7 +90,7 @@
             write! (writing "gate-host-red" "(= 1 2)")
             identities #{[:seon.test/sym 'seon.cluster.save-gate-test/gate-host-red]}
             answer (cluster/adopt-then-test! target identities [host] #(write! target))]
-        (is (false? (:seon.test/passed? answer)) (:seon.source/tally answer))
+        (is (false? (:seon.test/passed? answer)))
         (is (= [host] (:seon.source/host-bound answer)))
         (is (not= before (db/commit-id (db/db (:seon.db/connection target)))) "adopted first")
         (is (pos? (:seon.test/fail-count (first (:seon.test/results (:seon.source/gate-run answer))) 0))
@@ -122,7 +121,7 @@
                                                                      [[:db/retractEntity [:seon.fn/sym callee]]])
                                                 #{[:seon.fn/sym callee]}))
                          (catch clojure.lang.ExceptionInfo refused refused))]
-        (is (clojure.string/includes? (str (ex-message refusal)) "surviving referrers") (seon.print.value/bounded-text refusal))
+        (is (clojure.string/includes? (str (ex-message refusal)) "surviving referrers"))
         (is (some #(= caller (get-in % [:seon.program/referrer :seon.test/sym]))
                   (tree-seq coll? seq (ex-data refusal)))
             "the refusal names the reaching test")
@@ -136,7 +135,7 @@
                                                     (deftest-entity (db/db connection) "gate-replacement" "(= 1 2)")])
                               #{[:seon.fn/sym callee] [:seon.test/sym caller]
                                 [:seon.test/sym 'seon.cluster.save-gate-test/gate-replacement]})))]
-          (is (false? (:seon.test/passed? gate)) (:seon.source/tally gate))
+          (is (false? (:seon.test/passed? gate)))
           (is (= ['seon.cluster.save-gate-test/gate-replacement]
                  (mapv :seon.test/sym (:seon.test/timings (:seon.source/gate-run gate)))))
           (is (= before (head)) "red: the target keeps the function")))

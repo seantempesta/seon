@@ -12,8 +12,7 @@
             [malli.generator :as mg]
             [seon.flow :as sut]
             [seon.schema :as schema]
-            [seon.test-support :as test-support]
-            [seon.print.value])
+            [seon.test-support :as test-support])
   (:import [java.io File]
            [java.net URI]
            [java.net.http HttpClient HttpRequest HttpResponse$BodyHandlers
@@ -138,10 +137,10 @@
                                    :seon.await/bound (join-bound 200)
                                    :seon.await/diagnostic diagnostic})
             elapsed-ms (/ (- (System/nanoTime) started) 1e6)]
-        (is (number? (:seon.await/elapsed-ms busy)) (seon.print.value/bounded-text busy))
+        (is (number? (:seon.await/elapsed-ms busy)))
         (is (= ::join-probe-exited (:seon.error/expected busy))
             "the expiry names the exit that did not arrive")
-        (is (<= 190 elapsed-ms 450) (str "the one deadline bounds the join: " elapsed-ms))
+        (is (<= 190 elapsed-ms 450) "the one deadline bounds the join")
         (is (not (.isTerminated ^java.util.concurrent.ExecutorService executor))
             "a missed deadline keeps the live proc visible"))
       (.countDown release)
@@ -196,11 +195,10 @@
             stored (db/q '[:find [?message ...]
                            :where [?o :seon.error.occurrence/message ?message]]
                          @connection)]
-        (is (nil? exited) (seon.print.value/bounded-text exited))
+        (is (nil? exited))
         (is (.isTerminated ^java.util.concurrent.ExecutorService executor)
             "no proc thread of the graph survives the throw")
-        (is (= 1 (count (filter #(str/includes? % "gate-2 stop transition throws") stored)))
-            (seon.print.value/bounded-text stored))))))
+        (is (= 1 (count (filter #(str/includes? % "gate-2 stop transition throws") stored))))))))
 
 ;;; An unstored panic prints bounded text: the class regression for the
 ;;; 3.18 GB stderr lines of pid 68592 (issue
@@ -230,7 +228,7 @@
         (is (true? proc-result) "the proc sink answers the panic so its graph stops")
         (is (nil? listener-result) "the listener sink returns as before")
         (doseq [text [proc-text listener-text]]
-          (is (< 0 (count text) bound) (str (count text) " stderr chars"))
+          (is (< 0 (count text) bound))
           (is (str/includes? text "a proc step threw") "the cause is named"))
         (is (identical? big (::big (ex-data failure)))
             "the whole value stays on the throwable")))))
@@ -269,10 +267,7 @@
               result (apply callback args)]
           (is (ifn? callback))
           (is (m/validate compiled callback))
-          (is (m/validate output result)
-              (seon.print.value/bounded-text {:schema schema-key
-                       :args args
-                       :result result})))))))
+          (is (m/validate output result)))))))
 
 (defn- database-events
   [connection]
@@ -335,7 +330,7 @@
                 "equal throws are one occurrence, counted")
             (is (nil? (async/poll! (:error-chan started)))
                 "nothing waits in Flow's error channel")
-            (is (< elapsed-ms 2000.0) (str work-throws " fault writes took " elapsed-ms " ms")))
+            (is (< elapsed-ms 2000.0) "fault writes stay within their bound"))
           (finally
             (stop-database-events! connection transactions)
             (flow/stop graph)
@@ -356,8 +351,7 @@
    [state nil]))
 
 (deftest ^{:seon/tasks #{"6b8d26a16ce7"}} a-recorded-transform-fault-keeps-its-graph-running
-  (let [mode :record]
-    (test-support/with-database
+  (test-support/with-database
       (fn [connection]
         (test-support/apply-config! connection "seon.flow-test" {})
         (let [in (async/chan 3)
@@ -378,9 +372,9 @@
                                        :seon.await/diagnostic {:seon.error/layer :flow
                                                                :seon.error/operation ::panicking-work}})]
           (test-support/await-event! seen ::third-input #(= [0 1 2] %))
-          (is (= [0 1 2] @seen) (str mode ": a recorded fault keeps the graph running"))
+          (is (= [0 1 2] @seen) "a recorded fault keeps the graph running")
           (flow/stop graph)
-          (is (nil? (join!))))))))
+          (is (nil? (join!)))))))
 
 ;;; Lost-error seams P1: a panicked proc must not strand its graph. Flow fans
 ;;; control out through per-proc taps of 10 behind a control channel of 10
@@ -688,7 +682,7 @@
           (is (str/includes? graph-message "~:datafy"))
           (doseq [pid ["~:seon.flow/work-launcher"]]
             (is (str/includes? graph-message pid)
-                (str "monitor graph data names " pid)))
+                "monitor graph data names"))
           (test-support/await-event!
            (.sendClose ^WebSocket @connection WebSocket/NORMAL_CLOSURE "test complete")
            ::monitor-socket-closed))))))

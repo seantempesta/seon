@@ -4,8 +4,7 @@
             [clojure.test :refer [deftest is]]
             [seon.db :as db]
             [seon.fn :as functions]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (deftest ^{:seon.test/long "Canonical fixtures plus real cold/partial clj-kondo and declaration/finding transactions, including arity/privacy refusals."
            :seon.test/long-ms 600000}
@@ -51,7 +50,7 @@
                                :seon.fn/previous-manifest before
                                :seon.fn/manifest after
                                :seon.fn/changed-paths #{"src/alpha.clj"}))]
-                 (is (not (:seon.error/at result)) (seon.print.value/bounded-text result)))
+                 (is (not (:seon.error/at result))))
                (is (= ["alpha.clj" "beta.clj"] @observed)
                    "Declaration changes conservatively lint direct callers, not their callers.")
                (reset! observed [])
@@ -70,7 +69,7 @@
                                             :seon.fn/previous-manifest after
                                             :seon.fn/manifest changed
                                             :seon.fn/changed-paths #{"src/alpha.clj"}))]
-                 (is (not (:seon.error/at result)) (seon.print.value/bounded-text result))
+                 (is (not (:seon.error/at result)))
                  ;; Publication lints with type-derived linters off, so a
                  ;; contract-only change cannot change a caller's findings.
                  (is (= ["alpha.clj"] @observed)
@@ -110,9 +109,9 @@
                                              :seon.fn/previous-manifest before
                                              :seon.fn/manifest changed
                                              :seon.fn/changed-paths #{"src/alpha.clj"})))]
-               (is (true? (:seon.fn/index-refused refusal)) (seon.print.value/bounded-text refusal))
+               (is (true? (:seon.fn/index-refused refusal)))
                (is (some #(and (= expected (:seon.fn.analyzer/type %))
                                (= "beta.clj" (.getName (io/file (:seon.fn.analyzer/filename %)))))
                          (:seon.fn/findings refusal))
-                   (str "Absent specs must not hide caller " expected ": " (seon.print.value/bounded-text refusal)))))
+                   "Absent specs must not hide caller")))
            (finally (support/delete-recursively! root))))))))

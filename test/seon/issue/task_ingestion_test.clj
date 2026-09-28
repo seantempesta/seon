@@ -108,12 +108,12 @@
                             :invalid-entry "[#:seon.task{:name \"x\" :kind :function :intnet \"i\"}]"
                             :handle-mismatch "[#:seon.task{:id \"000000000000\" :name \"x\" :kind :function :intent \"i\"}]"
                             :duplicate-id "[#:seon.task{:name \"x\" :kind :function :intent \"i\"} #:seon.task{:name \"x\" :kind :function :intent \"j\"}]"}]
-         (is (= rule (refusal #(ingest! connection text))) text))
+         (is (= rule (refusal #(ingest! connection text)))))
        (testing "only #{} at an optional set member is absence; other empty values meet the closed entry"
          (doseq [members [":unknown []" ":must-read []" ":evidence {}" ":id []" ":id \"\""]]
            (let [text (str "[#:seon.task{:name \"x\" :kind :function :intent \"i\" " members "}]")
                  refused (ingest! connection text)]
-             (is (= :invalid-entry (:seon.task/refused refused)) members)
+             (is (= :invalid-entry (:seon.task/refused refused)))
              (is (= (edn/read-string text) (:seon.error/offending refused)) "the diagnostic keeps the authored entry"))))
        (is (= :unreadable-file (refusal #(ingest! connection "#=(+ 1 2)"))))
        (is (= :not-one-vector (refusal #(ingest! connection "{}"))))

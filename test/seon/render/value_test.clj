@@ -23,8 +23,7 @@
             [seon.schema :as schema]
             [seon.sci.admit :as admit]
             [seon.sci.eval :as evaluation]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (def ^:private caps
   (config/result-caps config/defaults))
@@ -87,9 +86,9 @@
                            :seon.render.profile/max-depth 3
                            :seon.render.profile/max-children 256
                            :seon.render.profile/composition :single-line})]
-       (is (seq (:tx-data report)) (seon.print.value/bounded-text report))
-       (is (map? installed) (seon.print.value/bounded-text installed))
-       (is (map? completed) (seon.print.value/bounded-text completed))
+       (is (seq (:tx-data report)))
+       (is (map? installed))
+       (is (map? completed))
        (let [shown-plan (plan/format-plan-ai whole-plan)]
          (is (str/includes? (:seon.plan/current-line shown-plan) "Current criterion"))
          (is (= #{"later" "finished"} (set (keys (:seon.plan/step-lines shown-plan)))))
@@ -109,8 +108,7 @@
                                           [whole-plan plan/format-plan-ai 'seon.plan/plan]]]
          (is (= (render-pair raw)
                 (render/render-ai (assoc request :seon.render/value raw
-                                         :seon.render.call/function producer)))
-             (str producer)))))))
+                                         :seon.render.call/function producer)))))))))
 
 (deftest explicit-structural-results-retain-attributes-through-real-evaluation
   (support/with-database
@@ -146,7 +144,7 @@
                           :seon.render.profile/max-children 32
                           :seon.render.profile/max-string-length 128)
            handle 'result/e0123456789ab]
-       (is (:db-after written) (seon.print.value/bounded-text written))
+       (is (:db-after written))
        (doseq [lookup [[:seon.fn/sym 'seon.db/q]
                        [:seon.config/cluster "render-results"]
                        [:seon.turn/id "render-results-turn"]
@@ -168,16 +166,16 @@
                cuts (tree-cuts tree-projection)
                shown-keys (keep #(when (vector? %) (:seon.print/value (first %)))
                                 (:seon.print/entries (:seon.render.value/tree tree-projection)))]
-           (is (= (second lookup) (get raw (first lookup))) (seon.print.value/bounded-text [lookup raw]))
-           (is (nil? (:seon.cluster.eval/error result)) (seon.print.value/bounded-text result))
+           (is (= (second lookup) (get raw (first lookup))))
+           (is (nil? (:seon.cluster.eval/error result)))
            (is (= raw (:seon.sci.admit/value result)))
            (is (= shown (value/render-ai-data tree-projection)) "one selection, one text")
-           (is (str/starts-with? shown "{") shown)
-           (is (<= (tokens/estimate shown) (:seon.render.profile/token-budget profile)) shown)
-           (is (seq shown-keys) shown)
-           (is (every? (set (keys raw)) shown-keys) shown)
+           (is (str/starts-with? shown "{"))
+           (is (<= (tokens/estimate shown) (:seon.render.profile/token-budget profile)))
+           (is (seq shown-keys))
+           (is (every? (set (keys raw)) shown-keys))
            (when (#{:seon.turn/id :seon.effect/id} (first lookup))
-             (is (seq cuts) shown))
+             (is (seq cuts)))
            (evaluation/bind-result! ctx handle raw)
            (doseq [cut cuts]
              (let [path (:seon.render.data/path cut)
@@ -223,11 +221,11 @@
                      :seon.sci.admit/caps (config/result-caps configuration)
                      :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)})
            shown (:seon.eval/shown result)]
-       (is (= 'seon.db/q (:seon.fn/sym raw)) (seon.print.value/bounded-text [lookup raw]))
-       (is (nil? (:seon.cluster.eval/error result)) (seon.print.value/bounded-text result))
+       (is (= 'seon.db/q (:seon.fn/sym raw)))
+       (is (nil? (:seon.cluster.eval/error result)))
        (is (= raw (:seon.sci.admit/value result)))
-       (is (= raw (edn/read-string shown)) shown)
-       (is (not (str/includes? shown "Restart the JVM")) shown)
+       (is (= raw (edn/read-string shown)))
+       (is (not (str/includes? shown "Restart the JVM")))
        (is (empty? (filter :seon.render/ai
                            (schema/matching-shapes-in
                             (db/carried-projection database) raw)))
@@ -275,14 +273,14 @@
                               :seon.sci.admit/caps (config/result-caps configuration)
                               :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)})
                     shown (:seon.eval/shown result)]
-                (is (:db-after written) (seon.print.value/bounded-text written))
-                (is (nil? (:seon.cluster.eval/error result)) (seon.print.value/bounded-text result))
+                (is (:db-after written))
+                (is (nil? (:seon.cluster.eval/error result)))
                 ;; Clojure's printer lifts the shared namespace (#:seon.effect{...}).
-                (is (str/starts-with? shown "#:seon.effect{") shown)
-                (is (str/includes? shown ":id \"poll-render-effect\"") shown)
-                (is (str/includes? shown ":duration-ms 12") shown)
+                (is (str/starts-with? shown "#:seon.effect{"))
+                (is (str/includes? shown ":id \"poll-render-effect\""))
+                (is (str/includes? shown ":duration-ms 12"))
                 ;; The payload is cut to its prefix; the cut names what remains.
-                (is (re-find #":result-edn\s+\"x+\"…\+\d+" shown) shown)
+                (is (re-find #":result-edn\s+\"x+\"…\+\d+" shown))
                 (is (= payload (get-in result [:seon.sci.admit/value :seon.effect/result-edn])))
                 (is (< (tokens/estimate shown) (:seon.render.profile/token-budget profile)))
                 (tokens/estimate shown)))
@@ -332,7 +330,7 @@
         request (assoc (unit raw) :seon.print/options {:seon.print/width 10})
         shown (value/render-ai request)]
     (is (= raw (edn/read-string shown)))
-    (is (< 3 (count (str/split-lines shown))) shown)
+    (is (< 3 (count (str/split-lines shown))))
     (is (str/includes? (hiccup/->string (value/render-html request))
                        (apply str (repeat 180 "x"))))))
 
@@ -490,7 +488,7 @@
                          :seon.print/requery-id])))
     (let [text (:seon.render.value/text projection)]
       ;; One cut face carrying the form that reads the rest (owner 2026-09-27).
-      (is (str/includes? text (str "…" (- (count raw) kept) " (drop " kept " result/e0123456789ab)]")) text)
+      (is (str/includes? text (str "…" (- (count raw) kept) " (drop " kept " result/e0123456789ab)]")))
       (is (not (str/includes? text ";;")) "no legend: the cut's own form says how to read on")
       (is (= '(seon.print/value-at result/e0123456789ab [])
              (:seon.print/requery-form elision))))
@@ -519,9 +517,9 @@
         "at the bound every member shows in held order")
     (is (= (take kept (whole mixed)) (shown mixed))
         "beyond the bound the kept members are the held order's first")
-    (is (= (- (count large) kept) (:seon.print/omitted cut)) (seon.print.value/bounded-text cut))
+    (is (= (- (count large) kept) (:seon.print/omitted cut)))
     (is (= :seon.render.profile/max-children (:seon.print/bound-by cut)))
-    (is (< elapsed-ms 1000) (str "a million-entry map rendered in " elapsed-ms " ms"))))
+    (is (< elapsed-ms 1000) "a million-entry map renders within its bound")))
 
 (deftest references-stay-opaque
   ;; A reference is never entered: it contributes its class and nothing
@@ -553,8 +551,8 @@
         text (:seon.render.value/text projection)]
     (is (string? (value/render-ai (unit (poison)))))
     (is (= ["poison"] (map ex-message (:seon.render.value/diagnostics projection))))
-    (is (= 1 (count (re-seq #"renderer failed" text))) text)
-    (is (str/includes? text "poison") text)))
+    (is (= 1 (count (re-seq #"renderer failed" text))))
+    (is (str/includes? text "poison"))))
 
 (def ^:private probe-profile
   {:seon.render.profile/id :seon.render.profile/test
@@ -617,7 +615,7 @@
                                   (:seon.print/omitted cut)))))
                       @cuts))))
             :seed 20260914)]
-       (is (:pass? result) (seon.print.value/bounded-text result))
+       (is (:pass? result))
        (is (pos? @observed-cuts) "the generated cases must exercise elision and requery")))))
 
 (deftest documentation-body-is-whole-or-one-executable-elision
@@ -632,7 +630,7 @@
                           :seon.render/profile
                           (assoc probe-profile :seon.render.profile/max-children 64
                                                :seon.render.profile/max-string-length 24))]
-       (is (string? body) (seon.print.value/bounded-text documentation))
+       (is (string? body))
        (is (> (count body) 24) "the real documentation must exceed the string limit")
        (evaluation/bind-result! ctx handle documentation)
        (let [cut (first (filter #(= [:body] (:seon.render.data/path %))
@@ -652,7 +650,7 @@
   (let [visits (atom [])
         raw (map (fn [i] (swap! visits conj i) i) (iterate inc 0))
         text (value/render-ai (probe-unit raw))]
-    (is (str/starts-with? text "(0 1 2 …? (drop 3 result/e0123456789ab))") text)
+    (is (str/starts-with? text "(0 1 2 …? (drop 3 result/e0123456789ab))"))
     (is (= [0 1 2] @visits) "no member past the printed ones is realized")))
 
 (deftest strings-are-quoted-and-their-cut-path-is-associative
@@ -682,7 +680,7 @@
            (map :seon.print/bound-by (tree-cuts (value/prepare request)))))
     (is (= [[:a :b :c :d]] (map :seon.render.data/path (tree-cuts (value/prepare request)))))
     ;; A map's cut reads the whole map: its shown order is not its iteration order.
-    (is (str/includes? ai "{:d {…1 (get-in result/e0123456789ab [:a :b :c :d])}}") ai)
+    (is (str/includes? ai "{:d {…1 (get-in result/e0123456789ab [:a :b :c :d])}}"))
     (is (not (str/includes? html "last-leaf")))
     (is (str/includes? html "seon-print-elision"))))
 
@@ -690,14 +688,14 @@
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "shape")
-     (let [written (support/transacted!
+     (let [_ (support/transacted!
                     connection
                     (agent/creation-tx {:seon.agent/id "shape"
                                         :seon.ns/name 'seon.print
                                         :seon.cluster/name "shape"}))
            _ (is (= "shape" (:seon.agent/id
                               (db/pull (db/db connection) '[:seon.agent/id]
-                                       [:seon.agent/id "shape"]))) (seon.print.value/bounded-text written))
+                                       [:seon.agent/id "shape"]))))
            ctx (support/fork-cluster-ctx connection "shape")
            configuration (support/effective-config)
            result (evaluation/evaluate
@@ -708,9 +706,9 @@
                     :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)})
            shown (:seon.eval/shown result)
            parsed (edn/read-string shown)]
-       (is (not (:seon.cluster.eval/error result)) (seon.print.value/bounded-text result))
-       (is (= "shape" (get-in parsed [:seon.agent/namespace :seon.ns/steward :seon.agent/id])) shown)
-       (is (= (:seon.sci.admit/value result) parsed) shown)))))
+       (is (not (:seon.cluster.eval/error result)))
+       (is (= "shape" (get-in parsed [:seon.agent/namespace :seon.ns/steward :seon.agent/id])))
+       (is (= (:seon.sci.admit/value result) parsed))))))
 
 (deftest large-values-have-bounded-work-in-both-faces
   (doseq [[label raw terminal]
@@ -726,13 +724,13 @@
           ai-ms (/ (- middle start) 1e6)
           html-ms (/ (- end middle) 1e6)]
       (println "VALUE-RENDERER" label "AI-ms" ai-ms "HTML-ms" html-ms)
-      (is (< ai-ms 100.0) (str label " AI took " ai-ms " ms"))
-      (is (< html-ms 100.0) (str label " HTML took " html-ms " ms"))
-      (is (re-find #"\((drop|subs) .*result/e0123456789ab" ai) ai)
+      (is (< ai-ms 100.0) "the AI render stays within its bound")
+      (is (< html-ms 100.0) "the HTML render stays within its bound")
+      (is (re-find #"\((drop|subs) .*result/e0123456789ab" ai))
       ;; HTML is the same selection under the same 1,000-token budget: its
       ;; text is the AI text, cut and continuation included, never more.
       (is (= ai (lexical-hiccup-text html)))
-      (is (<= (count ai) (tokens/estimate-chars (:seon.render.profile/token-budget probe-profile))) ai)
+      (is (<= (count ai) (tokens/estimate-chars (:seon.render.profile/token-budget probe-profile))))
       (when terminal
         (is (not (str/includes? (hiccup/->string html) terminal)))))))
 
@@ -795,29 +793,26 @@
                      (:seon.config.eval/time-limit-ms configuration)})
            shown (:seon.eval/shown result)
            cut (elision-in shown (:seon.sci.admit/value result) profile)]
-       (is (nil? (:seon.cluster.eval/error result)) (seon.print.value/bounded-text result))
-       (is (str/includes? shown "\"…+") shown)
+       (is (nil? (:seon.cluster.eval/error result)))
+       (is (str/includes? shown "\"…+"))
        (is (> (count (:seon.sci.admit/value result))
               (:seon.render.profile/max-string-length profile)))
-       (is (some? cut) shown)
+       (is (some? cut))
        ;; The floor: content, not a bare count.
-       (is (pos? (count (:seon.print/prefix cut))) shown)
-       (is (str/starts-with? (:seon.print/prefix cut) "abab") shown)
+       (is (pos? (count (:seon.print/prefix cut))))
+       (is (str/starts-with? (:seon.print/prefix cut) "abab"))
        ;; The remainder is what is missing, never the whole value.
-       (is (pos? (:seon.print/omitted cut)) shown)
-       (is (< (:seon.print/omitted cut) (:seon.render.data/total cut)) shown)
+       (is (pos? (:seon.print/omitted cut)))
+       (is (< (:seon.print/omitted cut) (:seon.render.data/total cut)))
        ;; The offset is a real coordinate: it names what was already shown.
-       (is (pos? (:seon.render.data/next-offset cut)) shown)
+       (is (pos? (:seon.render.data/next-offset cut)))
        (is (= (:seon.render.data/total cut)
-              (+ (:seon.print/omitted cut) (:seon.render.data/next-offset cut)))
-           shown)
-       (is (= 6000 (:seon.render.data/total cut)) shown)
+              (+ (:seon.print/omitted cut) (:seon.render.data/next-offset cut))))
+       (is (= 6000 (:seon.render.data/total cut)))
        (is (= (count (:seon.print/prefix cut))
-              (:seon.render.data/next-offset cut))
-           shown)
+              (:seon.render.data/next-offset cut)))
        ;; And the reader can ask again rather than being told a refusal.
-       (is (= 'seon.print/value-at (first (:seon.print/requery-form cut)))
-           shown)
+       (is (= 'seon.print/value-at (first (:seon.print/requery-form cut))))
        (evaluation/bind-result! ctx 'result/e0123456789ab (:seon.sci.admit/value result))
        (is (= (:seon.sci.admit/value result)
               (sci/eval-form ctx (:seon.print/requery-form cut))))))))
@@ -835,8 +830,7 @@
                              :seon.render.profile/id :seon.render.profile/agent})
         shown (edn/read-string (print/render-elision-ai node))]
     (is (= (tokens/estimate-of-characters characters)
-           (:seon.ai.tokens/estimate shown))
-        (seon.print.value/bounded-text shown))
+           (:seon.ai.tokens/estimate shown)))
     ;; The declared fields stay the value's own units, because `next-offset`
     ;; and `total` are the reader's COORDINATES, not display sizes. Restating
     ;; a coordinate as a floored estimate names a position that does not
@@ -883,14 +877,14 @@
                      (:seon.config.eval/time-limit-ms configuration)})
            shown (:seon.eval/shown result)
            rendered (repl/render-directory-ai (:seon.sci.admit/value result))]
-       (is (nil? (:seon.cluster.eval/error result)) (seon.print.value/bounded-text result))
+       (is (nil? (:seon.cluster.eval/error result)))
        (is (> (tokens/estimate rendered) (:seon.render.profile/token-budget profile))
            "the directory exceeds the raw budget")
        ;; Owner 2026-09-27: a render follows the value's budget (no separate
        ;; ceiling). Its text is cut there, still printed as the render's REPL
        ;; text, and the renderer that produced it is still named.
-       (is (str/starts-with? shown (subs rendered 0 500)) shown)
-       (is (re-find #"…\+\d+$" shown) (subs shown (max 0 (- (count shown) 80))))
+       (is (str/starts-with? shown (subs rendered 0 500)))
+       (is (re-find #"…\+\d+$" shown))
        (is (<= (count shown) (+ (tokens/estimate-chars (:seon.render.profile/token-budget profile)) 16)))
        (is (= 'seon.repl/render-directory-ai (:seon.eval/renderer result)))))))
 
@@ -906,16 +900,14 @@
                          "not-a-vector")
                         (catch Exception failure (ex-data failure)))]
        (is ((seon.schema/projection-validator projection :seon.instrument/contract-error) refusal)
-           (str "the reproduction is a genuinely declared base error: "
-                (seon.print.value/bounded-text refusal)))
+           "the reproduction is a genuinely declared base error")
        ;; The canonical runner arms both data-conversion arities.
-       (doseq [[label returned]
+       (doseq [[_label returned]
                [["shape-only arity" (value/transacted refusal)]
                 ["database arity" (value/transacted refusal (db/db connection))]]]
          (is ((seon.schema/projection-validator projection :seon.instrument/contract-error) returned)
-             (str label " returns a value satisfying its declared alternative"))
-         (is (= (:seon.error/operation refusal) (:seon.error/operation returned))
-             label))
+             "returns a value satisfying its declared alternative")
+         (is (= (:seon.error/operation refusal) (:seon.error/operation returned))))
        ;; An ordinary success value still normalizes and validates.
        (is (= {:seon.agent/id "root"}
               (value/transacted {:db/id 7 :seon.agent/id "root"})))
@@ -973,8 +965,7 @@
    (fn [connection]
      (let [text #(:seon.render.value/text (value/prepare (render-request connection %)))]
        (is (= "hello 1" (text {:seon.render/ai (fn [unit] (str "hello " (:x unit))) :x 1})))
-       (is (str/starts-with? (text {:a {:seon.render/ai (fn [_] "inner")}}) "{:a {:seon.render/ai #object[")
-           (text {:a {:seon.render/ai (fn [_] "inner")}}))))))
+       (is (str/starts-with? (text {:a {:seon.render/ai (fn [_] "inner")}}) "{:a {:seon.render/ai #object["))))))
 
 (deftest ^{:seon/tasks #{"135d92ea1308"}} a-failing-renderer-never-replaces-the-value
   ;; AGENTS.md, the REPL path is total: a renderer that throws or refuses
@@ -991,11 +982,11 @@
            ;; width; the value printed as data is what matters, not its layout.
            value-text (str/replace (str/join " " value-lines) #"\s+" " ")
            nested (value/prepare (render-request connection [{:seon.render/ai boom :a 1}]))]
-       (is (str/includes? value-text ":a 1") shown)
-       (is (str/includes? value-text ":b {:c 2}") shown)
-       (is (str/includes? value-text ":seon.render/ai #object[") shown)
-       (is (= 1 (count diagnostics)) shown)
-       (is (str/starts-with? (first diagnostics) ";; renderer failed at []") shown)
+       (is (str/includes? value-text ":a 1"))
+       (is (str/includes? value-text ":b {:c 2}"))
+       (is (str/includes? value-text ":seon.render/ai #object["))
+       (is (= 1 (count diagnostics)))
+       (is (str/starts-with? (first diagnostics) ";; renderer failed at []"))
        (is (= 1 (count (:seon.render.value/diagnostics prepared))))
        (is (nil? (:seon.render.value/diagnostics nested))
            "a nested render is never invoked, so it cannot fail")))))
@@ -1014,12 +1005,11 @@
            text #(:seon.render.value/text (value/prepare (render-request connection %)))
            sentence "cannot read uninstalled attribute :no.such/attr"]
        (is (= :seon.db/invalid-read-error (:seon.error/declared-schema (meta refusal))))
-       (is (str/includes? (text refusal) sentence) (text refusal))
-       (is (str/includes? (text [refusal]) sentence) (text [refusal]))
-       (is (str/includes? (text {:k [1 refusal]}) sentence) (text {:k [1 refusal]}))
-       (is (str/starts-with? (text undeclared) "{") (text undeclared))
-       (is (str/includes? (text [undeclared]) ":seon.error/operation seon.db/pull")
-           (text [undeclared]))))))
+       (is (str/includes? (text refusal) sentence))
+       (is (str/includes? (text [refusal]) sentence))
+       (is (str/includes? (text {:k [1 refusal]}) sentence))
+       (is (str/starts-with? (text undeclared) "{"))
+       (is (str/includes? (text [undeclared]) ":seon.error/operation seon.db/pull"))))))
 
 (deftest ^{:seon/tasks #{"135d92ea1308"}} a-map-that-cannot-hold-keywords-prints-as-clojure-prints-it
   ;; Smoke 2026-09-26: `(sorted-map 'b 2 'a 1)` printed a ClassCastException
@@ -1073,11 +1063,11 @@
            empty-result (db/q '[:find ?e :where [?e :seon.agent/id "no-such-agent"]] database)
            rows (db/q '[:find ?name :where [_ :seon.cluster/name ?name]] database)
            text #(:seon.render.value/text (value/prepare (registered-unit connection %)))]
-       (is (instance? datahike.java.QueryResult empty-result) (seon.print.value/bounded-text (class empty-result)))
+       (is (instance? datahike.java.QueryResult empty-result))
        (is (= "#{}" (text empty-result)))
        ;; Datahike answers a non-empty relation here with a plain set; only
        ;; the empty relation is a QueryResult (measured on default, 2026-09-27)
-       (is (set? rows) (seon.print.value/bounded-text (class rows)))
+       (is (set? rows))
        (is (= rows (edn/read-string (text rows))))))))
 
 (deftest a-cut-costs-less-than-it-hides-and-never-lands-in-a-tuple
@@ -1121,7 +1111,7 @@
                                             :seon.schema.projection/compile-options)
                               :h-has false :fc-type nil})))
     (is (empty? (diagnostics [(atom 1) identity (Object.)])))
-    (is (:pass? observed) (seon.print.value/bounded-text (:shrunk observed)))))
+    (is (:pass? observed))))
 
 (deftest vars-and-namespaces-print-by-name
   ;; As clojure.main prints them: #'ns/name and #namespace[name], from their
@@ -1183,7 +1173,7 @@
         html (hiccup/->string (:seon.render.value/html projection))]
     (is (= (:seon.render.value/tree projection) (:seon.render.value/tree (value/prepare request))))
     (is (= (:seon.render.data/next-offset cut) (count leaves)))
-    (is (str/includes? html (str "offset=" (:seon.render.data/next-offset cut))) html)
+    (is (str/includes? html (str "offset=" (:seon.render.data/next-offset cut))))
     (is (not (str/includes? html ">2999<")))))
 
 (deftest a-composite-key-cut-addresses-the-key-it-was-cut-from
@@ -1206,10 +1196,10 @@
                        :seon.sci.admit/caps caps :seon.render/profile probe-profile
                        :seon.render.data/cursor {:seon.render.data/path (:seon.render.data/path key-cut)
                                                  :seon.render.data/offset (:seon.render.data/next-offset key-cut)}})]
-       (is (= (vec (range 50)) (print/value-at value (:seon.render.data/path key-cut))) (seon.print.value/bounded-text cuts))
+       (is (= (vec (range 50)) (print/value-at value (:seon.render.data/path key-cut))))
        (is (= 50 (:seon.render.data/total key-cut)))
-       (is (str/starts-with? (value/render-ai-data next-page) "[3 4 5") (seon.print.value/bounded-text next-page))
-       (is (= 50 (count (print/value-at value (:seon.render.data/path set-cut)))) (seon.print.value/bounded-text cuts))
+       (is (str/starts-with? (value/render-ai-data next-page) "[3 4 5"))
+       (is (= 50 (count (print/value-at value (:seon.render.data/path set-cut)))))
        (is (= :zero (print/value-at value [0])) "a plain step keeps get-in's meaning")))))
 
 (deftest an-unaffordable-root-or-first-member-is-the-declared-refusal
@@ -1224,9 +1214,9 @@
         ;; 8 tokens (25 chars) holds the root with its cut and continuation
         ;; (25) but not its first member too (31): the member refusal.
         member (at-budget 8 {:a 1 :b 2})]
-    (is (valid? root) (seon.print.value/bounded-text root))
+    (is (valid? root))
     (is (= [(tokens/estimate-chars 1) 18] ((juxt :seon.render.value/budget :seon.render.value/needed) root)))
-    (is (valid? member) (seon.print.value/bounded-text member))
+    (is (valid? member))
     (is (< (:seon.render.value/budget member) (:seon.render.value/needed member)))
     (is (= "42" (:seon.render.value/text (at-budget 1 42))) "a root that fits whole prints whole")))
 
@@ -1249,7 +1239,7 @@
            cut (first (filter #(= [:t] (:seon.render.data/path %)) (tree-cuts first-page)))
            next-page ((requiring-resolve 'seon.render.walk/continue) (request [:t] (:seon.render.data/next-offset cut)))
            expected (key (nth (seq (:t backing)) (:seon.render.data/next-offset cut)))]
-       (is (str/starts-with? (value/render-ai-data next-page) (str "{" expected " ")) (seon.print.value/bounded-text next-page))
+       (is (str/starts-with? (value/render-ai-data next-page) (str "{" expected " ")))
        (is (= :unavailable (:seon.render.walk/continuation-reason
                             ((requiring-resolve 'seon.render.walk/continue)
                              (dissoc (request [:t] 0) :seon.db/connection)))))))))
@@ -1265,7 +1255,7 @@
         cut (first (tree-cuts projection))
         form (:seon.print/continuation cut)]
     (is (= '(drop 3 result/e0123456789ab) form))
-    (is (str/includes? text "…97 (drop 3 result/e0123456789ab)") text)
+    (is (str/includes? text "…97 (drop 3 result/e0123456789ab)"))
     (is (= (drop 3 raw) (eval (map #(if (= 'result/e0123456789ab %) raw %) form)))
         "evaluating the continuation answers exactly the omitted rest")
     (is (= 1 (:seon.render.value/elisions projection)))
@@ -1284,8 +1274,8 @@
       (is (str/includes? (value/render-ai (probe-unit (apply str (repeat 5000 "ab"))))
                          " (subs result/e0123456789ab "))
       (let [text (value/render-ai (probe-unit (into (sorted-map) (map (fn [i] [i i])) (range 10))))]
-        (is (str/includes? text "…7 result/e0123456789ab}") text)
-        (is (not (str/includes? text "renderer failed")) text)))
+        (is (str/includes? text "…7 result/e0123456789ab}"))
+        (is (not (str/includes? text "renderer failed")))))
     (clojure.test/testing "seon.print/full prints the value whole and says so"
       (let [whole (value/prepare (probe-unit (print/full raw)))]
         (is (:seon.render.value/full? whole))
@@ -1316,10 +1306,10 @@
                                                                  :seon.eval/shown-tokens :seon.eval/duration-ms
                                                                  :seon.cluster.eval/diagnostics])
                                        :seon.cluster.eval/source source :seon.repl/handle handle))]
-       (is (not (:seon.cluster.eval/error evaluation)) (seon.print.value/bounded-text (dissoc evaluation :seon.sci.admit/value)))
+       (is (not (:seon.cluster.eval/error evaluation)))
        (is (< 1000 (:seon.eval/value-tokens evaluation)) "the whole value's estimate is recorded")
        (is (<= (:seon.eval/shown-tokens evaluation) 1100) "the print stays within the value budget")
-       (is (str/includes? shown "(drop 32 (get-in result/elargerender1 [:rows]))") shown)
+       (is (str/includes? shown "(drop 32 (get-in result/elargerender1 [:rows]))"))
        ;; The diagnostic holds the renderer's refusal as its offending value
        ;; (which has its own :seon.error/at), so count the render-layer entry.
        (is (= 1 (count (re-seq #":seon.error/layer :seon.render/invocation"
@@ -1327,5 +1317,4 @@
            "one renderer-failed diagnostic, beside the value")
        (is (str/starts-with? reply "#:seon.repl{") "the reply is one map, nothing above it")
        (is (= :large-value
-              (get-in (binding [*read-eval* false *default-data-reader-fn* tagged-literal] (read-string reply)) [:seon.repl/findings 0 :seon.repl/finding]))
-           reply)))))
+              (get-in (binding [*read-eval* false *default-data-reader-fn* tagged-literal] (read-string reply)) [:seon.repl/findings 0 :seon.repl/finding])))))))

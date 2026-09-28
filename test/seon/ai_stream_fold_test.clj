@@ -134,7 +134,7 @@
       (doseq [malformed malformed-lines]
         (let [result (ai/stream-fold [prefix malformed suffix] nil)]
           (is ((schema/projection-validator (schema/handed-projection) :seon.ai/unparseable-body-error) result)
-              (str "malformed data must refuse the stream: " malformed))
+              "malformed data must refuse the stream")
           (is (= (subs malformed 6) (:seon.ai/body (:seon.error/data result))))
           (is (not (contains? result :seon.ai/text))
               "a partial reply must not retain the completion success shape")))))

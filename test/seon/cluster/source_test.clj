@@ -17,8 +17,7 @@
             [seon.sci.eval :as sci.eval]
             [seon.schema :as schema]
             [seon.test.cache :as cache]
-            [seon.test-support :as test-support]
-            [seon.print.value])
+            [seon.test-support :as test-support])
   (:import [java.util.concurrent CountDownLatch]))
 
 (def ^:private probe-schema
@@ -229,8 +228,7 @@
             result (refusal #(publish opened digest-a 'seon.cluster.source-test/populate!
                                       {:seon.db/writer refusing-writer}))]
         (is (= :seon.cluster.source/source-seal-refused
-               (:seon.cluster.source/rule result))
-            (seon.print.value/bounded-text result))
+               (:seon.cluster.source/rule result)))
         (is (= "injected refusal"
                (get-in result
                        [:seon.source/transaction-result :seon.error/message])))
@@ -346,10 +344,10 @@
                     ;; The real writer, never the fixture writer that binds its own custody.
                     (let [c (:seon.db/connection execution)
                           written (db/transact! c [(entity c '[:seon.fn/sym scratch.gate-class/f] "(defn f {:malli/schema [:=> [:cat] :int]} [] 2)")])]
-                      (is (:db-after written) (seon.print.value/bounded-text (select-keys written [:seon.error/message])))
+                      (is (:db-after written))
                       #{[:seon.fn/sym 'scratch.gate-class/f]}))
                   (constantly #{}))]
-        (is (true? (:seon.test/passed? gate)) (:seon.source/tally gate))
+        (is (true? (:seon.test/passed? gate)))
         (is (str/includes? (:seon.source/tally gate) "executed 1 ")))
       (let [execution (cluster.agent/acquire-context! target nil {:seon.agent/branch s})]
         (try
@@ -357,7 +355,7 @@
                          {:seon.test/policy :named :seon.test/execution execution
                           :seon.test/recording-connection (:seon.db/connection execution)
                           :seon.test/changed ['scratch.gate-class/f]})]
-            (is (:seon.db/transaction-refused refused) (seon.print.value/bounded-text (select-keys refused [:seon.error/message])))
+            (is (:seon.db/transaction-refused refused))
             ;; A recording connection outside the caller's custody is the caller's
             ;; mistake: returned, never a core fault (which would throw under :panic).
             (is (get-in refused [:seon.error/data :seon.db/ambient-branch])))
@@ -402,8 +400,8 @@
       (let [proposal (prepare)
             before (db/commit-id (db/db h-conn))
             refused (source/accept-merge! target held-store proposal)]
-        (is (true? (:seon.test/passed? proposal)) (:seon.source/tally proposal))
-        (is (= {handle #{(sym "merge-tasked")}} (:seon.error/offending refused)) (seon.print.value/bounded-text refused))
+        (is (true? (:seon.test/passed? proposal)))
+        (is (= {handle #{(sym "merge-tasked")}} (:seon.error/offending refused)))
         (is (= before (db/commit-id (db/db h-conn))) "the refused merge writes nothing")
         (testing "a task admitted on the destination survives a refused merge, then the merge lands"
           (is (:seon.task/changed? (issue/index-tasks! {:seon.db/connection h-conn :seon.task/basis {}

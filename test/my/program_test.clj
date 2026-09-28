@@ -9,8 +9,7 @@
             [seon.issue :as issue]
             [seon.schema :as schema]
             [seon.sci.eval :as evaluation]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (deftest program-reads-name-the-referrers-and-propose-without-writing
   (support/with-database
@@ -27,7 +26,7 @@
                                database 'seon.turn/open?))
            plans (get-in report [:seon.program/plan :seon.program/issues])
            valid? (schema/projection-validator (schema/handed-projection) :seon.program/breakage)]
-       (is (not (:seon.error/at report)) (seon.print.value/bounded-text report))
+       (is (not (:seon.error/at report)))
        (is (= expected (:seon.program/callers report)))
        (is (= expected (:seon.program/callers caller-report)))
        (is (= expected (set (map :seon.fn/sym (:seon.program/call-sites report)))))
@@ -59,7 +58,7 @@
            namespace-report (program/breaks {:seon.db/db database :seon.program/subject 'seon.turn})
            render-report (program/breaks {:seon.db/db database
                                           :seon.program/subject 'seon.render.value/render-ai})]
-       (is (not (:seon.error/at key-report)) (seon.print.value/bounded-text key-report))
+       (is (not (:seon.error/at key-report)))
        (is (contains? (:seon.program/contract-refs key-report) 'seon.db/transact!))
        (is (seq (:seon.program/schema-references key-report)))
        (is (seq (:seon.program/mentions key-report)))
@@ -71,8 +70,7 @@
                       {:seon.schema/key :seon.program/breakage
                        :seon.schema/property :seon.render/ai}))
        (doseq [report [key-report namespace-report render-report]]
-         (is ((schema/projection-validator (schema/handed-projection) :seon.program/breakage) report)
-             (seon.print.value/bounded-text report)))))))
+         (is ((schema/projection-validator (schema/handed-projection) :seon.program/breakage) report)))))))
 
 (deftest past-reach-is-advisory-and-source-history-survives-retraction
   (support/with-database
@@ -95,11 +93,11 @@
              metadata-snapshot (program/history {:seon.db/db (db/db connection)
                                                  :seon.program/subject (symbol target)
                                                  :seon.db/tx metadata-t})]
-         (is (not (:seon.error/at snapshot)) (seon.print.value/bounded-text snapshot))
+         (is (not (:seon.error/at snapshot)))
          (is (= [source] (mapv :seon.program/source (:seon.program/history snapshot))))
          (is (not (contains? (:seon.program/definition (first (:seon.program/history snapshot)))
                             :seon.fn/doc)))
-         (is (not (:seon.error/at metadata-snapshot)) (seon.print.value/bounded-text metadata-snapshot))
+         (is (not (:seon.error/at metadata-snapshot)))
          (is (= metadata-t (:seon.db/tx metadata-snapshot)))
          (is (= ["Later metadata"]
                 (mapv #(get-in % [:seon.program/definition :seon.fn/doc])
@@ -108,7 +106,7 @@
        (let [result (program/history {:seon.db/db (db/db connection)
                                       :seon.program/subject (symbol target)})
              events (:seon.program/history result)]
-         (is (not (:seon.error/at result)) (seon.print.value/bounded-text result))
+         (is (not (:seon.error/at result)))
          (is (= #{source changed-source} (set (map :seon.program/source events))))
          (is (= [true false true false] (mapv :seon.db/added? events)))
          (is (= (mapv :seon.program/source events)
@@ -146,10 +144,10 @@
        (is (every? (set (map :sym (:functions directory)))
                    '#{my.program/breaks my.program/callers my.program/tests-reaching
                       my.program/reads-key my.program/history my.program/overrides
-                      my.program/ns-unmap! my.program/remove-ns! my.program/ns-unalias!}) (seon.print.value/bounded-text directory))
+                      my.program/ns-unmap! my.program/remove-ns! my.program/ns-unalias!}))
        (is (every? #(and (:in %) (:out %) (:doc %)) (:functions directory)))
        (is (:example documentation))
-       (is (not (:seon.cluster.eval/error read-evaluation)) (seon.print.value/bounded-text read-evaluation))
+       (is (not (:seon.cluster.eval/error read-evaluation)))
        (is (seq (get-in read-evaluation [:seon.sci.admit/value :seon.program/callers])))))))
 
 (deftest program-refusals-carry-complete-distinguishable-declared-schemas

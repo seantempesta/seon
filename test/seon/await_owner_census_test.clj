@@ -2,8 +2,7 @@
   "Program-graph census for the single bounded-await owner."
   (:require [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
-            [seon.test-support :as test-support]
-            [seon.print.value]))
+            [seon.test-support :as test-support]))
 
 (def ^:private await-owner
   'seon.await/await!)
@@ -40,8 +39,6 @@
                   await-owner)
             callers (production-callers database await-owner)]
         (testing "the census proves that it inspected the owner subject"
-          (is (= 1 (count owners)) (seon.print.value/bounded-text owners)))
+          (is (= 1 (count owners))))
         (testing "every production member is declared and new members fail"
-          (is (= declared-production-callers callers)
-              (seon.print.value/bounded-text {:expected declared-production-callers
-                       :actual callers})))))))
+          (is (= declared-production-callers callers)))))))

@@ -9,8 +9,7 @@
             [seon.flow :as flow]
             [seon.fn.analyzer :as analyzer]
             [seon.sci.admit :as admit]
-            [seon.sci.eval :as sci.eval]
-            [seon.print.value]))
+            [seon.sci.eval :as sci.eval]))
 
 (defn- public-defn?
   [definition]
@@ -69,12 +68,12 @@
     (is (seq subjects) "the production analyzer must find public functions")
     (is (every? identity-bearing? subjects)
         "every analyzed public function must retain source identity")
-    (is (empty? missing) (seon.print.value/bounded-text missing))))
+    (is (empty? missing))))
 
 (deftest public-contract-census-refuses-an-absent-source-root
   (let [absent-root (io/file "tmp" "n2-public-contract-absent-source-root")
         _ (is (not (.exists absent-root))
-              (str "counterexample root must be absent: " absent-root))
+              "counterexample root must be absent")
         failure
         (try
           (public-function-census! [(.getPath absent-root)])
@@ -95,7 +94,7 @@
            [admit/interrupt-fn? admit/interrupt-fn-generator]
            [sci.eval/ctx? sci.eval/ctx-generator]]]
     (is (true? (predicate (gen/generate generator)))
-        (str predicate " rejected the value from its own generator"))))
+        "rejected the value from its own generator")))
 
 (defn- release-sample!
   [sample]
@@ -116,7 +115,7 @@
 ;;; are still shared and tracked in
 ;;; docs/seon/issues/opaque-contract-generators-share-live-process-objects.md
 (deftest lifecycle-generators-make-a-fresh-sample-each-generation
-  (doseq [[label generator]
+  (doseq [[_label generator]
           [[:seon.flow/executor flow/executor-generator]
            [:seon.flow/atom-reference flow/atom-reference-generator]
            [:seon.flow/java-future flow/java-future-generator]
@@ -128,7 +127,7 @@
           two (gen/generate generator)]
       (try
         (is (not (identical? one two))
-            (str label " handed out the same sample twice"))
+            "handed out the same sample twice")
         (finally
           (release-sample! one)
           (release-sample! two))))))

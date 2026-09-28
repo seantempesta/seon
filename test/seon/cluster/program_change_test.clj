@@ -17,8 +17,7 @@
             [seon.schema.edn :as schema.edn]
             [seon.sci.eval :as sci.eval]
             [seon.test]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (def ^:private adopted
   {:seon.source/reloaded-namespaces [] :seon.source/arming-identities #{}})
@@ -184,7 +183,7 @@
    (fn [_connection]
      (let [result (my.program/breaks {:seon.program/subject 'seon.id/valid?})]
        (is (map? result))
-       (is (not (:seon.error/at result)) (seon.print.value/bounded-text (select-keys result [:seon.error/message])))))))
+       (is (not (:seon.error/at result)))))))
 
 (deftest a-test-bodys-direct-render-call-gets-its-members-database
   ;; A JVM test body's world is its member's context scoped to the member's
@@ -224,7 +223,7 @@
   (support/with-database
    (fn [connection]
      (let [result (seon.fn/gate-sets {:seon.db/db (db/db connection) :seon.fn/seeds #{'seon.id/valid?}})]
-       (is (vector? result) (seon.print.value/bounded-text result))))))
+       (is (vector? result))))))
 
 (deftest a-launch-on-analyzer-bytes-with-unchanged-definitions-publishes-selected
   ;; WANTED: a JVM launched on analyzer files whose reached definitions are
@@ -323,7 +322,7 @@
          (is (contains? (writes connection) :retire.probe/dial) "the fixture writer is indexed")
          (testing "retired while its writer survives: refused by name, nothing retired"
            (let [refusal (pr-str (support/refusal-data #(publish! connection without-dial)))]
-             (is (str/includes? refusal "retire.probe/write!") refusal)
+             (is (str/includes? refusal "retire.probe/write!"))
              (is (str/includes? refusal ":seon.fn/writes"))
              (is (installed? connection) "the attribute stays installed")))
          (testing "retired in the publication that converts its writer: admitted"

@@ -11,8 +11,7 @@
             [seon.sci.eval :as sci.eval]
             [seon.test :as sut]
             [seon.test.runner :as runner]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (deftest a-member-body-runs-on-its-own-listed-branch
   (let [handle (support/execution-handle nil)
@@ -44,7 +43,7 @@
                     ::agent-test-defined)
         entity (program/declaration-row (db/carried-projection (db/db connection))
                                      (:seon.program/row evaluation) :all :agent)]
-    (is (nil? (:seon.cluster.eval/error evaluation)) (seon.print.value/bounded-text evaluation))
+    (is (nil? (:seon.cluster.eval/error evaluation)))
     ;; A redefinition replaces the stored declaration exactly: an upsert keeps
     ;; the owned attributes the new entity drops, and the writer refuses its digest.
     (support/transacted! connection
@@ -81,7 +80,7 @@
          (let [result (request #{'seon.test.one-request-test/writes-a
                                  'seon.test.one-request-test/writes-b})
                branches (map :seon.agent/branch (:seon.test/timings result))]
-           (is (true? (:seon.test/passed? result)) (sut/tally result))
+           (is (true? (:seon.test/passed? result)))
            (is (= 2 (:seon.test/executed-count result)))
            (is (= 2 (count (set branches))))
            (is (not-any? (set (registry/roster store)) branches)
@@ -91,7 +90,7 @@
                "no member write reaches the execution branch")))
        (testing "unchanged green members are answered from the record"
          (let [again (request #{'seon.test.one-request-test/writes-a})]
-           (is (true? (:seon.test/passed? again)) (sut/tally again))
+           (is (true? (:seon.test/passed? again)))
            ;; Reuse also requires the loaded program to be the one the entities
            ;; record (proved both ways in
            ;; `evidence-earned-by-another-loaded-program-is-never-reused`);
@@ -107,7 +106,7 @@
                                 :seon.test/policy :named
                                 :seon.test/identities #{'seon.test.one-request-test/writes-c}
                                 :seon.test/check-time-limit-ms 1})]
-           (is (false? (:seon.test/passed? result)) (sut/tally result))
+           (is (false? (:seon.test/passed? result)))
            (is (= ['seon.test.one-request-test/writes-c] (:seon.test/pending result)))
            (is (= 0 (:seon.test/executed-count result)))))))))
 
@@ -144,8 +143,7 @@
                               :seon.test/recording-connection connection
                               :seon.test/policy :named
                               :seon.test/namespaces #{probe-ns}})]
-         (is (= ['seon.id/c4-long] (map :seon.test/sym (:seon.test/long-excluded result)))
-             (sut/tally result))
+         (is (= ['seon.id/c4-long] (map :seon.test/sym (:seon.test/long-excluded result))))
          (is (= ['seon.id/c4-short] (map :seon.test/sym (:seon.test/results result))))
          (is (false? (:seon.test/passed? result))
              "a skipped declared-long obligation is unfulfilled")
@@ -217,24 +215,24 @@
          ;; pending, never a second body beside it (2026-09-27: one stuck
          ;; web-test member refused every later request of the cluster).
          (let [runnable (request other)]
-           (is (nil? (:seon.test/admission-refusal runnable)) (seon.print.value/bounded-text runnable))
-           (is (= 1 (:seon.test/executed-count runnable)) (sut/tally runnable))
-           (is (true? (:seon.test/passed? runnable)) (sut/tally runnable)))
+           (is (nil? (:seon.test/admission-refusal runnable)))
+           (is (= 1 (:seon.test/executed-count runnable)))
+           (is (true? (:seon.test/passed? runnable))))
          (let [held (request test-symbol)]
-           (is (nil? (:seon.test/admission-refusal held)) (seon.print.value/bounded-text held))
+           (is (nil? (:seon.test/admission-refusal held)))
            (is (= [test-symbol] (:seon.test/pending held)) "the live body's test is reported pending")
            (is (zero? (:seon.test/executed-count held)) "no body started beside a live one")
            (is (false? (:seon.test/passed? held))))
          ;; The watcher's write is the exit only, never a re-sent outcome
          ;; (a changed outcome was refused as immutable and held the test).
          (let [written (exit!)]
-           (is (not (:seon.error/at written)) (seon.print.value/bounded-text written)))
+           (is (not (:seon.error/at written))))
          (let [recorded (exit-tx)]
            (is (some? recorded) "the observed exit is recorded")
            (is (not (:seon.error/at (exit!))))
            (is (= recorded (exit-tx)) "a second observation changes nothing")))
        (let [after (request test-symbol)]
-         (is (= 1 (:seon.test/executed-count after)) (sut/tally after))
+         (is (= 1 (:seon.test/executed-count after)))
          (is (true? (:seon.test/passed? after))))))))
 
 (deftest ^{:seon.test/long "One agent test definition, one entity edit and one nested request on a fixture branch: 13.8 s measured on default's JVM (load 14.7): define 1.0 s, edit 0.2 s, member 0.06 s, the nested request's admission and recording 12.6 s (docs/seon/issues/a-data-only-commit-rebuilds-the-whole-sci-program.md)."
@@ -256,11 +254,11 @@
                               :seon.test/policy :named
                               :seon.test/identities #{test-symbol}})
              branches (map :seon.agent/branch (:seon.test/timings result))]
-         (is (false? (:seon.test/passed? result)) (sut/tally result))
-         (is (= [test-symbol] (map :seon.test/sym (:seon.test/results result))) (sut/tally result))
-         (is (pos? (:seon.test/error-count (first (:seon.test/results result)) 0)) (sut/tally result))
+         (is (false? (:seon.test/passed? result)))
+         (is (= [test-symbol] (map :seon.test/sym (:seon.test/results result))))
+         (is (pos? (:seon.test/error-count (first (:seon.test/results result)) 0)))
          ;; Only this request's own branches: other lanes acquire on the same store.
-         (is (= 1 (count branches)) (seon.print.value/bounded-text (:seon.test/timings result)))
+         (is (= 1 (count branches)))
          (is (not-any? (set (registry/roster store)) branches)
              "the member branch is unlinked after its resolution failed"))))))
 
@@ -284,10 +282,10 @@
                                               [?run :seon.test.run/members ?member]]
                                      (db/db connection) run-id)))
                       runs)]
-       (is (true? (:seon.test/passed? result)) (sut/tally result))
+       (is (true? (:seon.test/passed? result)))
        (is (= 3 (:seon.test/executed-count result)))
        (is (= 2 (count runs)) "three members over a limit of two admit as two runs")
-       (is (every? #(<= % 2) sizes) (seon.print.value/bounded-text sizes))))))
+       (is (every? #(<= % 2) sizes))))))
 
 (deftest ^{:seon.test/long "One request recording green, then two selections: about 10 s on a scratch cluster at 0e53eb8b1, dominated by the routed per-request costs."
            :seon.test/long-ms 30000}
@@ -312,7 +310,7 @@
                                  :seon.test/loaded-source loaded}))
            matching (select entities-commit)
            drifted (select (random-uuid))]
-       (is (true? (:seon.test/passed? recorded)) (sut/tally recorded))
+       (is (true? (:seon.test/passed? recorded)))
        (is (uuid? entities-commit) "the cluster records the source commit its entities came from")
        (is (= [test-symbol] (map :seon.test/sym (:seon.test.selection/unchanged matching)))
            "the same loaded program reuses its recorded green")
@@ -364,14 +362,14 @@
              latest (first (runner/latest-results database [unstarted]))
              stop (db/q '[:find ?cause . :in $ ?id :where [?r :seon.test.run/id ?id] [?r :seon.test.run/stopped ?cause]]
                         database (second (:seon.test/run latest)))]
-         (is (false? (:seon.test/passed? stopped)) (sut/tally stopped))
-         (is (some #{unstarted} (:seon.test/pending stopped)) (sut/tally stopped))
+         (is (false? (:seon.test/passed? stopped)))
+         (is (some #{unstarted} (:seon.test/pending stopped)))
          (is (nil? run-id) "the unstarted member has no captured result")
-         (is (= unstarted (:seon.test/error-test-symbol latest)) (seon.print.value/bounded-text latest))
+         (is (= unstarted (:seon.test/error-test-symbol latest)))
          (is (not-any? #(contains? latest %) [:seon.test/pass-count :seon.test/error-count])
              "never started is an unknown, not a red")
          (is (= :member-unfinished stop) "the run names why it stopped")
-         (is (str/includes? (:seon.error/message latest) "member-unfinished") (:seon.error/message latest))
+         (is (str/includes? (:seon.error/message latest) "member-unfinished"))
          (is (false? (sut/verified? database unstarted)) "an unknown never verifies"))
        ;; B's old body keeps its world until SCI interrupts it at its own
        ;; 15 s bound; no request of the cluster is admitted until the watcher
@@ -390,8 +388,8 @@
               " b-runs-until-released (clojure.test/is true))"))
        (let [again (request)]
          (is (some #(= unstarted (:seon.test/sym %)) (:seon.test/results again))
-             (str "an identical later request is admitted and reruns the unstarted member: " (sut/tally again)))
-         (is (not-any? #{unstarted} (:seon.test/pending again)) (sut/tally again))
+             "an identical later request is admitted and reruns the unstarted member")
+         (is (not-any? #{unstarted} (:seon.test/pending again)))
          (is (= 1 (:seon.test/pass-count (first (runner/latest-results (db/db connection) [unstarted]))))))))))
 
 (deftest ^{:seon.test/long "One agent test definition and one nested request stopped at admission: unmeasured; bounded by the sibling one-definition, one-request test's measured 13.8 s (define 1.0 s, request 12.6 s)."
@@ -427,8 +425,7 @@
                      (db/q '[:find ?signature . :where [?e :seon.error/operation seon.db/transact!]
                              [?e :seon.error/signature ?signature]]
                            (db/db connection))}]
-       (is (= {:error ::writer-refused} (:seon.error/data (peek (:seon.error/chain refusal))))
-           (seon.print.value/bounded-text (:seon.error/chain refusal)))
+       (is (= {:error ::writer-refused} (:seon.error/data (peek (:seon.error/chain refusal)))))
        (is (= refusal result) "the request returns the whole refusal, its cause chain included")
        (is (string? (:seon.error/signature recorded)) "the refused admission is a stored core fault")
        ;; The occurrence keeps the evidence inline (`:seon.error/data-edn`);
@@ -440,7 +437,7 @@
              occurrence (first (:seon.error/occurrences entity))
              digest (get-in occurrence [:seon.error.occurrence/data-blob :seon.error.occurrence/blob-digest])
              evidence (if digest (str (blob/get connection digest)) (:seon.error/data-edn occurrence))]
-         (is (string? evidence) (str "the fault is stored with its evidence: " (seon.print.value/bounded-text entity)))
+         (is (string? evidence) "the fault is stored with its evidence")
          (is (str/includes? (str evidence) "writer-refused")
              "the stored evidence keeps the root cause's data"))
        (is (empty? (db/q '[:find [?m ...] :where [?m :seon.test.member/symbol seon.test.one-request-test/refused-recording]]

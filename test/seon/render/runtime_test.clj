@@ -6,8 +6,7 @@
             [seon.db :as db]
             [seon.render.hiccup :as hiccup]
             [seon.render.transcript :as transcript]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (defn- text-content [node]
   (cond
@@ -45,11 +44,11 @@
                  :seon.cluster.eval/at (java.util.Date. 0)
                  :seon.cluster.eval/run "newer" :seon.cluster.eval/ordinal 0
                  :seon.cluster.eval/source "(+ 1 2)" :seon.eval/shown "3"}]))
-            _ (is (:db-after written) (seon.print.value/bounded-text written))
+            _ (is (:db-after written))
             opened (db/transact! connection
                                  [[:db/add [:seon.turn/id "private-newer-id"]
                                    :seon.turn/opened-tx "datomic.tx"]])
-            _ (is (:db-after opened) (seon.print.value/bounded-text opened))
+            _ (is (:db-after opened))
             database @connection
             unit {:seon.db/db database :seon.db/connection connection :seon.agent/id "runtime-reader"}
             ai-before (transcript/render-runtime-ai unit)
@@ -78,11 +77,11 @@
         (is (not (str/includes? text "Full reply remains stored.")))
         (is (not (str/includes? text "A separately stored continuation.")))
         (doseq [forbidden ["#inst" ":db/id" "private-older-id" "private-newer-id" "private-eval-id"]]
-          (is (not (str/includes? html forbidden)) forbidden))
+          (is (not (str/includes? html forbidden))))
         (let [closed (db/transact! connection
                                   [[:db/add [:seon.turn/id "private-newer-id"]
                                     :seon.turn/closed-tx "datomic.tx"]])
-              _ (is (:db-after closed) (seon.print.value/bounded-text closed))
+              _ (is (:db-after closed))
               idle (text-content (transcript/render-runtime-html (assoc unit :seon.db/db @connection)))]
           (is (str/includes? idle "Idle since "))
           (is (str/includes? idle " ms")))))))

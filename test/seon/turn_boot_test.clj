@@ -9,8 +9,7 @@
             [seon.eval :as evaluation]
             [seon.fn :as function]
             [seon.test-support :as support]
-            [seon.turn :as turn]
-            [seon.print.value]))
+            [seon.turn :as turn]))
 
 (deftest listened-datom-delivers-under-armed-contracts
   (support/with-database
@@ -90,9 +89,7 @@
                 pass (first (:clojure.core.async.flow/report report))
                 entries (evaluation/of-agent (db/db connection) "root")]
            (is (nil? (:seon.turn.loop/parked state)))
-           (is (nil? (:seon.turn.loop/refusal pass))
-               (seon.print.value/bounded-text (select-keys (:seon.turn.loop/refusal pass)
-                                   [:seon.error/message :seon.turn/generated-read-attributes])))
+           (is (nil? (:seon.turn.loop/refusal pass)))
            (is (string? (:seon.turn/id pass)))
            (is (seq entries))
            (is (some #(seq (:seon.cluster.eval/read-evidence %)) entries))

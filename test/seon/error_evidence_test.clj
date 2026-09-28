@@ -67,7 +67,7 @@
          (testing "the blob holds the whole evidence the cap dropped"
            (is (string? whole))
            (is (str/includes? (str whole) tail)))
-         (is (< elapsed-ms 1000.0) (str "one turn fault settlement took " elapsed-ms " ms")))))))
+         (is (< elapsed-ms 1000.0) "one turn fault settlement stays within its bound"))))))
 
 (deftest a-capped-core-fault-is-recoverable-in-full-from-its-blob
   (support/with-database

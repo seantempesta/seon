@@ -20,8 +20,7 @@
             [seon.turn :as turn]
             [seon.issue]
             [seon.task :as task]
-            [my.program]
-            [seon.print.value]))
+            [my.program]))
 
 (def ^:private cluster-name "host")
 
@@ -194,8 +193,8 @@
             [winner] (filter :seon.flow/graph outcomes)
             [loser] (remove :seon.flow/graph outcomes)
             home (:seon.agent/branch (db/pull (db/db connection) [:seon.agent/branch] [:seon.agent/id "mcp/twin"]))]
-        (is (some? winner) (seon.print.value/bounded-text (mapv #(select-keys % [:seon.agent/id :seon.agent/branch :seon.error/member :seon.error/message]) outcomes)))
-        (is (= :seon.agent/branch (:seon.error/member loser)) (seon.print.value/bounded-text (#(select-keys % [:seon.agent/id :seon.agent/branch :seon.error/member :seon.error/message]) loser)))
+        (is (some? winner))
+        (is (= :seon.agent/branch (:seon.error/member loser)))
         (is (= home (get-in winner [:seon.turn.loop/cluster :seon.agent/branch]))
             "the cluster entity names the branch whose host was admitted")
         (is (= ["1"] (hosted-run! winner "1")))
@@ -231,7 +230,7 @@
         (let [before (or (closed-runs @connection) 0)
               sent (as-host hosted
                      #(message/send! {:my.message/to "mcp/listener" :my.message/content "hello"} connection "listener-sender"))]
-          (is (:seon.message/id sent) (str (:seon.error/message sent) " " (vec (sort (keys sent)))))
+          (is (:seon.message/id sent))
           (support/await-event! connection ::message-answered
                                 (fn [_] (< before (or (closed-runs @connection) 0))))
           (is (< before (closed-runs @connection)) "the branch's route listener woke the idle agent"))))))
@@ -250,8 +249,7 @@
           ;; its reply (never left hanging) and no run id is claimed for it
           (is (or (= ["2"] raced) (refused-by? :seon.turn/admission-closed raced)
                   (refused-by? :seon.agent/released? raced)
-                  (and (:seon.await/closed-operation raced) (not (:seon.turn/id raced))))
-              (seon.print.value/bounded-text raced)))
+                  (and (:seon.await/closed-operation raced) (not (:seon.turn/id raced))))))
         (testing "the writer refuses any later run for the agent"
           (let [execution (agent/acquire-context! handle nil {:seon.agent/branch branch})]
             (try
@@ -291,7 +289,7 @@
             second-run (submit! "1")
             third-run (submit! "2")
             done? #(= % (second (async/alts!! [% (async/timeout 0)] :priority true)))]
-        (is (:seon.turn/id first-run) (seon.print.value/bounded-text first-run))
+        (is (:seon.turn/id first-run))
         (is (:seon.turn/id second-run) "one submission waits on the request port")
         (is (= :seon.agent/requests (:seon.error/member third-run)) "a full request port refuses as busy")
         (host/retire! hosted)
@@ -312,7 +310,7 @@
             namespace-of #(get-in (db/pull (database) [{:seon.fn/ns [:seon.ns/name]}] [:seon.fn/sym %])
                                   [:seon.fn/ns :seon.ns/name])
             before (file-entity)]
-        (is (= "src/seon/id.clj" (get-in before [:seon.fn/file :seon.fn.file/relative-path])) (seon.print.value/bounded-text before))
+        (is (= "src/seon/id.clj" (get-in before [:seon.fn/file :seon.fn.file/relative-path])))
         (is (= "#'seon.id/switch-probe"
                (last (hosted-run! hosted "(in-ns 'seon.id)\n(defn switch-probe \"Add one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))"))))
         (is (= before (file-entity)) "the file namespace's entity is unchanged")
@@ -345,7 +343,7 @@
                                            "(clojure.test/deftest run-square-test (clojure.test/is (= 16 (run-square 4))))\n"
                                            "(defn run-square \"Square x.\" {:malli/schema [:=> [:cat [:int {:min -1000 :max 1000}]] :int]} [x] (* x x x))\n"
                                            "(run-square 4)"))]
-        (is (= "#'my.agents.host-probe/run-square" (first shown)) (seon.print.value/bounded-text shown))
+        (is (= "#'my.agents.host-probe/run-square" (first shown)))
         ;; A refused form shows its small error map (737fe0a5d): the refusal
         ;; is the install gate's by its member, not by a face's wording.
         (is (re-find #":seon.test.accretion/install\?" (str (nth shown 2)))
@@ -360,13 +358,12 @@
   (with-host-world {}
     (fn [{:keys [handle branch!]}]
       (let [hosted (host-on! handle (branch!) "mcp/one-run-schema")
-            {receipts :receipts :as result}
+            {receipts :receipts}
             (hosted-run-receipts hosted (str "(seon.schema/register! :probe.run/v [:int {:min -8 :max 8}])\n"
                                              "(defn run-v \"Identity on v.\" {:malli/schema [:=> [:cat :probe.run/v] :int]} [x] x)\n"
                                              "(run-v 3)"))]
-        (is (= 3 (count receipts)) (seon.print.value/bounded-text result))
-        (is (not-any? :seon.cluster.eval/error receipts)
-            (seon.print.value/bounded-text (mapv :seon.cluster.eval/error receipts)))
+        (is (= 3 (count receipts)))
+        (is (not-any? :seon.cluster.eval/error receipts))
         (is (= "3" (:seon.eval/shown (last receipts))))))))
 
 (deftest ^{:seon.test/long "One nested seon.test/run (checkpoint world + one member); 60 s is merge-test's measured bound for one nested run."
@@ -456,7 +453,7 @@
       (let [hosted (host-on! handle (branch!) "mcp/member-custody")
             shown (first (hosted-run! hosted (str "(let [r (my.test/check {:seon.test/changed ['my.plan-test/a-changed-title-is-an-ordinary-fact-update]})] "
                                                   "[(:seon.test/passed? r) (mapv (juxt :seon.test/sym :seon.test/error-count :seon.test/failure-message) (:seon.test/results r))])")))]
-        (is (= "[true [[my.plan-test/a-changed-title-is-an-ordinary-fact-update 0 nil]]]" shown) shown)))))
+        (is (= "[true [[my.plan-test/a-changed-title-is-an-ordinary-fact-update 0 nil]]]" shown))))))
 
 (deftest a-refused-settlement-is-its-forms-refusal-and-the-run-closes
   ;; Before, one refused declaration replaced every form's shown text with the
@@ -475,14 +472,12 @@
               (hosted-run-receipts hosted "(+ 1 2)\n(ns-unmap 'my.agents.host-probe 'refused-helper)\n(+ 3 4)\n(/ 1 0)")
               errors (mapv (comp str :seon.cluster.eval/error) receipts)
               {:keys [proposals validator]} (recorded-proposals @connection run-id)]
-          (is (= [0 1 2 3] (mapv :seon.cluster.eval/ordinal receipts)) (seon.print.value/bounded-text receipts))
+          (is (= [0 1 2 3] (mapv :seon.cluster.eval/ordinal receipts)))
           (is (= ["3" "nil" "7"] (subvec (mapv :seon.eval/shown receipts) 0 3)) "every form keeps the value it evaluated")
-          (is (str/includes? (nth errors 1) (str "Evaluation 1 proposed deleting " helper))
-              (nth errors 1))
+          (is (str/includes? (nth errors 1) (str "Evaluation 1 proposed deleting " helper)))
           (is (str/includes? (nth errors 1) "refused-caller") "the surviving referrer is named")
           (is (every? #(and (str/includes? % "this run's settlement was refused") (not (str/includes? % "proposed")))
-                      (map errors [0 2]))
-              (seon.print.value/bounded-text errors))
+                      (map errors [0 2])))
           (is (str/includes? (nth errors 3) "Divide by zero") "a form's own body error stays its error")
           (is (str/includes? (str (db/q '[:find ?d . :in $ ?id
                                           :where [?run :seon.turn/id ?id] [?e :seon.cluster.eval/run ?run]
@@ -493,8 +488,7 @@
           (testing "the association is the refused write's recorded data"
             (is (= :seon.program/deletion-refused-error validator))
             (is (= [{:seon.program/identity [:seon.fn/sym helper] :seon.cluster.eval/ordinal 1}]
-                   (mapv #(dissoc % :seon.program/referrers) proposals))
-                (seon.print.value/bounded-text proposals))
+                   (mapv #(dissoc % :seon.program/referrers) proposals)))
             (is (= [{:seon.fn/sym (symbol (str host-ns) "refused-caller")}]
                    (mapv :seon.program/referrer (:seon.program/referrers (first proposals)))))))
         (is (some? (db/pull @connection [:seon.fn/sym] [:seon.fn/sym helper])) "nothing of the refused run settled")
@@ -525,8 +519,7 @@
                 (hosted-run-receipts hosted (str/join "\n" [(unmap "h") (unmap "c1") (unmap "c2") (unmap "k")]))
                 {:keys [proposals]} (recorded-proposals @connection run-id)]
             (is (= [{:seon.program/identity [:seon.fn/sym (named "k")] :seon.cluster.eval/ordinal 3}]
-                   (without-referrers proposals))
-                (seon.print.value/bounded-text proposals))
+                   (without-referrers proposals)))
             (is (str/includes? (str (:seon.cluster.eval/error (nth receipts 3))) "Evaluation 3 proposed deleting"))
             (is (not-any? #(str/includes? (str (:seon.cluster.eval/error %)) "proposed") (take 3 receipts))
                 "a repaired deletion is never associated")))
@@ -539,12 +532,13 @@
                                     {:seon.turn.loop/cluster cluster :seon.turn.loop/now (java.util.Date.)
                                      :seon.agent/id agent-id :seon.turn/id "proposal-boundary"
                                      :seon.cluster.eval/ordinal ordinal :seon.sci.eval/evaluation evaluation})
-                                  (turn/evaluate-sources
+                                  (:seon.turn.loop/evaluated-sources
+                                   (turn/evaluate-sources
                                    {:seon.turn.loop/cluster cluster :seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
                                     :seon.agent/id agent-id :seon.cluster.eval/ordinal first-ordinal :seon.ns/name host-ns
-                                    :seon.cluster.reply/sources (turn/planned-sources (str/join "\n" sources) host-ns max-source)}))))]
+                                    :seon.cluster.reply/sources (turn/planned-sources (str/join "\n" sources) host-ns max-source)})))))]
           (testing "the writer's refusal declares itself and types each removed identity"
-            (is (string? (:seon.db.write.attempt/request-id refusal)) (seon.print.value/bounded-text refusal))
+            (is (string? (:seon.db.write.attempt/request-id refusal)))
             (is (some? (:seon.error/basis refusal)))
             (is (= :seon.db.write/validation-refusal (:seon.error/declared-schema (meta refusal))))
             (is (= :seon.program/deletion-refused-error (:seon.db.write/validator-schema refusal)))
@@ -554,7 +548,7 @@
           ;; association is judged over entities evaluated below.
           (testing "a complete repair in one run commits: neither the helper nor its callers remain"
             (let [shown (hosted-run! hosted (str/join "\n" [(unmap "h") (unmap "c1") (unmap "c2")]))]
-              (is (= ["nil" "nil" "nil"] shown) (seon.print.value/bounded-text shown))
+              (is (= ["nil" "nil" "nil"] shown))
               (is (every? #(nil? (db/pull @connection [:db/id] [:seon.fn/sym (named %)])) ["h" "c1" "c2"]))))
           (evaluate 0 [(fn-source "h" "(inc x)")])
           (let [unmapped (evaluate 5 [(unmap "h")])]
@@ -577,7 +571,7 @@
               (is (= [{:seon.turn/unattributed :invalid-deletion-evidence}]
                      (proposals-of (dissoc refusal :seon.program/referrers) unmapped)))
               (let [other (as-host hosted #(db/transact! connection [[:db/retract [:seon.agent/id agent-id] :seon.agent/id agent-id]]))]
-                (is (string? (:seon.db.write.attempt/request-id other)) (seon.print.value/bounded-text other))
+                (is (string? (:seon.db.write.attempt/request-id other)))
                 (is (nil? (proposals-of other unmapped)) "another refusal family is associated with no form"))))
           (testing "repeated changes to one identity are never associated"
             (is (= :declared-in-run
@@ -588,8 +582,7 @@
                                                               (fn-source "h" "(inc x)") (unmap "h")])))))))
           (testing "a form declaring and removing in one is judged by the entity that reached settlement"
             (let [both (evaluate 13 [(str "(do " (fn-source "h" "(inc x)") " " (unmap "h") ")")])]
-              (is (not-any? #(= 13 (:seon.cluster.eval/ordinal %)) (proposals-of refusal both))
-                  (seon.print.value/bounded-text (get-in (first both) [:seon.sci.eval/evaluation :seon.program/row]))))))))))
+              (is (not-any? #(= 13 (:seon.cluster.eval/ordinal %)) (proposals-of refusal both))))))))))
 
 (deftest a-branch-behind-the-loaded-program-runs-the-loaded-definitions
   ;; Before, every file-derived entity a branch held at another digest than the
@@ -638,7 +631,7 @@
           (finally (agent/release-context! execution)))
         (let [hosted (host-on! handle branch "mcp/dropped")
               shown (first (hosted-run! hosted "(let [r (my.test/check {:seon.test/changed ['my.agents.host-probe/dropped-callee]})] [(:seon.test/selection-refusal r) (:seon.error/offending r)])"))]
-          (is (= "[:seon.test/coverage-unknown [my.agents.host-probe/dropped-check]]" shown) shown))))))
+          (is (= "[:seon.test/coverage-unknown [my.agents.host-probe/dropped-check]]" shown)))))))
 
 (deftest a-refused-deletion-names-its-surviving-caller-and-a-plan-proposes-only-installed-forms
   ;; Before, breaks' plan proposed (my.program/launch! …), which does not exist,
@@ -664,7 +657,7 @@
             shown (first (hosted-run! hosted (str "(:seon.issue/id (my.issue/add! {:seon.issue/title \"Cluster task\" "
                                                   ":seon.issue/problem \"Filed from a branch.\" :seon.issue/severity :friction}))")))
             issue-id (read-string shown)]
-        (is (string? issue-id) shown)
+        (is (string? issue-id))
         (is (= "Cluster task" (:seon.issue/title (db/pull (db/db connection) [:seon.issue/title] [:seon.issue/id issue-id])))
             "the task is on the cluster")
         (is (= [(pr-str issue-id)]
@@ -699,4 +692,4 @@
         (hosted-run! hosted "(clojure.test/deftest gated-sq-test (clojure.test/is (= 16 (gated-sq 4))))")
         (let [[shown] (hosted-run! hosted "(defn gated-sq \"Cube.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* x x x))")
               errors (set (db/q '[:find [?error ...] :where [_ :seon.cluster.eval/error ?error]] (db/db connection)))]
-          (is (contains? errors shown) (seon.print.value/bounded-text [shown errors])))))))
+          (is (contains? errors shown)))))))

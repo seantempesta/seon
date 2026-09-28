@@ -10,8 +10,7 @@
             [seon.render.walk :as walk]
             [seon.schema :as schema]
             [seon.test-support :as support]
-            [seon.program :as program]
-            [seon.print.value]))
+            [seon.program :as program]))
 
 (defn- exercise-pair
   [entity-lookup expected-ai expected-html]
@@ -34,7 +33,7 @@
                  :seon.issue/agent [:seon.agent/id "entity-pairs-agent"]
                  :seon.issue/functions [[:seon.fn/sym (quote entity-pairs.fixture/function)]]
                  :seon.issue/tests [[:seon.test/sym (quote entity-pairs.fixture/test)]]}]))]
-       (is (:db-after report) (seon.print.value/bounded-text report)))
+       (is (:db-after report)))
      (let [database (db/db connection)
            entity (db/pull database '[*] entity-lookup)
            ctx (support/fork-cluster-ctx connection)
@@ -56,12 +55,11 @@
                           (render/render-ai request) (render/render-html request))
                units (walk/neighborhood request)
                unit (first (filter #(= entity-lookup (:seon.render.walk/lookup %)) units))]
-           (is (= expected (:seon.render.selection/selected decision)) (seon.print.value/bounded-text decision))
-           (is (if (= output :seon.render/ai) (some? rendered) (hiccup/hiccup? rendered))
-               (seon.print.value/bounded-text rendered))
-           (is unit (seon.print.value/bounded-text units))
-           (is (nil? (:seon.error/value unit)) (seon.print.value/bounded-text unit))
-           (is (= rendered (:seon.render/output unit)) (seon.print.value/bounded-text unit))))
+           (is (= expected (:seon.render.selection/selected decision)))
+           (is (if (= output :seon.render/ai) (some? rendered) (hiccup/hiccup? rendered)))
+           (is unit)
+           (is (nil? (:seon.error/value unit)))
+           (is (= rendered (:seon.render/output unit)))))
        (when (= :seon.fn/sym (first entity-lookup))
          ;; The function node is its authored source with its neighbours by name
          ;; (renderers read the supplied database value: owner ruling 2026-09-25).
@@ -135,14 +133,11 @@
            html (vals html-by-lookup)
            page (str/join "" html)]
        (is (= #{[:seon.ns/name 'fixture.namespace-page]}
-              (into #{} (map :seon.render.walk/lookup) namespace-units))
-           (seon.print.value/bounded-text (mapv :seon.render.walk/lookup namespace-units)))
-       (is (= 1 (count (filter #(str/includes? % "namespace source") html)))
-           page)
-       (is (str/includes? page "own-marker") page)
-       (is (str/includes? page "href=\"/ns/seon.id\"") page)
-       (is (not (str/includes? page "seon.id/id"))
-           page)))))
+              (into #{} (map :seon.render.walk/lookup) namespace-units)))
+       (is (= 1 (count (filter #(str/includes? % "namespace source") html))))
+       (is (str/includes? page "own-marker"))
+       (is (str/includes? page "href=\"/ns/seon.id\""))
+       (is (not (str/includes? page "seon.id/id")))))))
 
 (deftest ^{:seon/tasks #{"15a0784f82d5"}} declared-identity-and-producer-lookups-name-their-owners
   ;; Slices 0a/0b of the one render path: ownership is the identity

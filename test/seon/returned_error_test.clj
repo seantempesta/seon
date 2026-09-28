@@ -7,8 +7,7 @@
             [seon.db :as db]
             [seon.repl :as repl]
             [seon.sci.eval :as evaluation]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (deftest returned-refusal-is-a-schema-first-error-with-unchanged-history
   (support/with-database
@@ -18,7 +17,7 @@
      (let [setup (db/transact! connection
                                [[:db/add "cluster" :seon.cluster/name "returned-error"]
                                 {:my.plan.item/id "error/item" :my.plan.item/title "Verify"}])
-           _ (is (:db-after setup) (seon.print.value/bounded-text setup))
+           _ (is (:db-after setup))
            ctx (support/fork-cluster-ctx connection "returned-error")
            configuration (support/effective-config)
            source "(seon.db/transact! [[:db/add [:my.plan.item/id \"error/item\"] :my.plan.item/title 42]])"
@@ -35,7 +34,7 @@
        (println "RETURNED-ERROR"
                 (pr-str {:shown shown :bytes (alength (.getBytes shown "UTF-8"))
                          :response response}))
-       (is (string? (:seon.db.write.attempt/request-id diagnostic)) (seon.print.value/bounded-text result))
+       (is (string? (:seon.db.write.attempt/request-id diagnostic)))
        (is (:seon.schema/form diagnostic))
        (is (= 42 (:seon.db/offending diagnostic)))
        ;; §2.4's refusal grammar: the shown text names the layer and member
@@ -44,10 +43,10 @@
        ;; seon.db/render-rejection-ai delegates to seon.error/render-ai —
        ;; and reaches an agent only as already-saved shown text, asserted
        ;; at the end of this test.
-       (is (str/includes? shown "seon.db/transact! refused") shown)
-       (is (str/includes? shown "expected a string") shown)
-       (is (str/includes? shown "42") shown)
-       (is (< (tokens/estimate shown) 200) shown)
+       (is (str/includes? shown "seon.db/transact! refused"))
+       (is (str/includes? shown "expected a string"))
+       (is (str/includes? shown "42"))
+       (is (< (tokens/estimate shown) 200))
        (is (= shown response))
        (is (= 'seon.db/render-rejection-ai (:seon.eval/renderer result)))
        (is (= before (db/basis-t @connection)))

@@ -8,8 +8,7 @@
             [seon.render :as render]
             [seon.repl :as repl]
             [seon.sci.eval :as evaluation]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (deftest settings-without-overrides-use-the-declared-pair
   (support/with-database
@@ -19,7 +18,7 @@
                     (agent/creation-tx {:seon.agent/id "root"
                                         :seon.ns/name 'my.agents.root
                                         :seon.cluster/name "empty-settings"}))]
-       (is (:db-after created) (seon.print.value/bounded-text created)))
+       (is (:db-after created)))
      (let [database @connection
            component (:seon.agent/settings
                       (db/pull database '[{:seon.agent/settings [*]}] [:seon.agent/id "root"]))
@@ -33,7 +32,7 @@
                                            :seon.render/value component :seon.render/output output
                                            ;; A component renders as its attribute's value.
                                            :seon.render.walk/attribute :seon.agent/settings})]
-           (is (= expected (:seon.render.selection/selected decision)) (seon.print.value/bounded-text decision))))))))
+           (is (= expected (:seon.render.selection/selected decision)))))))))
 
 (defn- example-forms
   "Each top-level form of one authored Example, as agent-facing source.
@@ -109,7 +108,7 @@
            groups (:seon.sci.admit/value result)
            values (apply merge groups)
            examples (authored-examples @connection 'my.plan)]
-       (is (not (:seon.cluster.eval/error result)) (:seon.eval/shown result))
+       (is (not (:seon.cluster.eval/error result)))
        (is (= ["seon.config.ai" "seon.config.ai.retry" "seon.config.eval" "seon.config.run"]
               (mapv (comp namespace ffirst) (take 4 groups))))
        (is (= 1234 (:seon.config.eval/time-limit-ms values)))
@@ -118,7 +117,7 @@
        ;; Turn accounting left the settings groups in `0dca8534e`:
        ;; `:my.agent/turns-left` is `:seon.wake/context-inert` and is read at
        ;; its owner on demand, never mirrored into a settings group.
-       (is (not (find values :my.agent/turns-left)) (seon.print.value/bounded-text values))
+       (is (not (find values :my.agent/turns-left)))
        (is (nat-int? (:seon.sci.admit/value (evaluate "(seon.turn/turns-left)"))))
        (is (not (str/includes? (:seon.eval/shown result) "seon.render/ambiguous")))
        ;; THE CLASS: every Example my.plan authors into an agent's context
@@ -126,12 +125,10 @@
        ;; is self-contained, so order is irrelevant and one failing example
        ;; names its own function.
        (is (seq examples))
-       (doseq [[function-symbol example] examples
+       (doseq [[_function-symbol example] examples
                source (example-forms example)]
          (let [evaluated (evaluate source)]
-           (is (not (:seon.cluster.eval/error evaluated))
-               (str function-symbol " example " (seon.print.value/bounded-text source) ": "
-                    (:seon.eval/shown evaluated)))))
+           (is (not (:seon.cluster.eval/error evaluated)))))
        (let [steps (db/q '[:find [(pull ?step [:my.plan.item/id
                                                :my.plan.item/completed-tx]) ...]
                            :where [_ :my.plan/steps ?step]]
@@ -140,14 +137,14 @@
                              :where [_ :my.plan/current-step ?step]
                                     [?step :my.plan.item/id ?id]]
                            @connection)]
-         (is (< 1 (count steps)) (seon.print.value/bounded-text steps))
-         (is (some :my.plan.item/completed-tx steps) (seon.print.value/bounded-text steps))
-         (is (string? current) (seon.print.value/bounded-text steps)))
+         (is (< 1 (count steps)))
+         (is (some :my.plan.item/completed-tx steps))
+         (is (string? current)))
        (let [documentation (evaluate "(doc my.plan)")
              text (:example (:seon.sci.admit/value documentation))
              source (plan/render-plan-ai {:seon.agent/id "juniper"})]
-         (is (string? text) (:seon.eval/shown documentation))
-         (is (str/includes? text "my.plan/add!") text)
+         (is (string? text))
+         (is (str/includes? text "my.plan/add!"))
          (is (= 1 (count (filter #(str/starts-with? % ";;") (str/split-lines source)))))
          (is (not (str/includes? source "transact!"))))
        (is (not-any? #(find values %) [:seon.config.ai/api-key-variable

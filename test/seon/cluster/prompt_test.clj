@@ -17,8 +17,7 @@
 
             [seon.blob :as blob]
             [seon.test-support :as support]
-            [datahike.api :as d]
-            [seon.print.value])
+            [datahike.api :as d])
   (:import [java.util Date]))
 
 (def ^:private caps
@@ -150,7 +149,7 @@
      (let [before (:seon.cluster.prompt/text
                    (prompt/prompt (db/db connection) (request connection ctx)))]
        (let [result (db/transact! connection [[:db/add [:seon.turn/id "walk-run"] :seon.turn/closed-tx "datomic.tx"]])]
-         (is (some? (:db-after result)) (seon.print.value/bounded-text result)))
+         (is (some? (:db-after result))))
        (record-evaluation! connection ctx "second-history" "(str \"SECOND-EVALUATION\")")
        (let [after (:seon.cluster.prompt/text
                     (prompt/prompt (db/db connection) (request connection ctx)))]
@@ -185,8 +184,8 @@
            rendered (prompt/prompt (db/db connection)
                                    (assoc (request connection ctx)
                                           :seon.turn/id "plan-wake"))]
-       (is (some? (:db-after result)) (seon.print.value/bounded-text result))
-       (is (string? (:seon.cluster.prompt/text rendered)) (seon.print.value/bounded-text rendered))
+       (is (some? (:db-after result)))
+       (is (string? (:seon.cluster.prompt/text rendered)))
        (is (str/includes? (:seon.cluster.prompt/text rendered)
                           "inspect this walk"))))))
 
@@ -468,7 +467,7 @@
        (doseq [ordinal [1 2 3]]
          (let [result (db/transact! connection
                                     (recorded-usage-tx model ordinal 32000 10000))]
-           (is (some? (:db-after result)) (seon.print.value/bounded-text result))))
+           (is (some? (:db-after result)))))
        (testing "the calibration is fitted to those committed facts"
          (let [calibration (prompt/model-calibration (db/db connection) model)]
            (is (= :seon.ai.tokens/observed
@@ -537,8 +536,7 @@
               :seon.context.capture/prompt composed}])
            (let [replayed (prompt/prompt (db/db connection) (request connection ctx))]
              (is (string? (:seon.cluster.prompt/text replayed))
-                 (str "a replay of its own capture is not a mismatch: "
-                      (seon.print.value/bounded-text replayed)))
+                 "a replay of its own capture is not a mismatch")
              (is (= composed (:seon.cluster.prompt/text replayed))))
            (testing "changed saved evaluations are still refused by name"
              (support/transacted!
@@ -570,7 +568,7 @@
        (let [unread (d/connect configuration)]
          (try
            (let [calibration (prompt/model-calibration (d/db unread) "no-usage-model")]
-             (is (true? (:seon.db/invalid-read calibration)) (seon.print.value/bounded-text calibration))
+             (is (true? (:seon.db/invalid-read calibration)))
              (is (= 'seon.db/q (:seon.error/operation calibration)))
              (is (not (contains? calibration :seon.ai.tokens/basis))))
            (finally

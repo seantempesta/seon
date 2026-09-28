@@ -5,8 +5,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.sci.eval :as evaluation]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (deftest an-empty-directory-observes-later-schema-declarations
   (support/with-database
@@ -18,7 +17,7 @@
                           (agent/creation-tx
                            {:seon.agent/id "directory" :seon.ns/name 'my.agents.directory
                             :seon.cluster/name "directory"})))
-           _ (is (:db-after written) (seon.print.value/bounded-text written))
+           _ (is (:db-after written))
            ctx (support/fork-cluster-ctx connection "directory")
            configuration (support/effective-config)
            captured (atom [])
@@ -32,7 +31,7 @@
                        :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)})))
            initial (read! "(dir my.agents.directory)")
            evidence (db/read-evidence @captured)]
-       (is (not (:seon.cluster.eval/error initial)) (seon.print.value/bounded-text initial))
+       (is (not (:seon.cluster.eval/error initial)))
        (is (= {:schemas {} :functions []} (:seon.sci.admit/value initial)))
        (is (seq evidence))
        (is (true? (db/read-evidence-current? @connection evidence)))
@@ -40,12 +39,12 @@
                        connection
                        [[:db/add [:seon.schema/key :seon.print/options] :seon.schema/ns
                          [:seon.ns/name 'my.agents.directory]]])]
-         (is (:db-after assigned) (seon.print.value/bounded-text assigned)))
+         (is (:db-after assigned)))
        (is (false? (db/read-evidence-current? @connection evidence)))
        (let [updated (read! "(dir my.agents.directory)")
              entities (:seon.sci.admit/value updated)
              functions (:seon.sci.admit/value (read! "(dir my.message)"))]
-         (is (not (:seon.cluster.eval/error updated)) (seon.print.value/bounded-text updated))
+         (is (not (:seon.cluster.eval/error updated)))
          (is (= [:seon.print/options] (vec (keys (:schemas entities)))))
          (is (vector? (get-in entities [:schemas :seon.print/options])))
          (is (= entities (edn/read-string (:seon.eval/shown updated))))

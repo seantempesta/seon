@@ -179,8 +179,8 @@
               pid (some-> (io/file root "pid") (#(when (.exists ^java.io.File %) (slurp %))) parse-long)
               child (some-> pid java.lang.ProcessHandle/of (.orElse nil))]
           (try
-            (is (true? (:seon.operator.subprocess/reaped? data)) (str signal-ms " ms"))
-            (is (false? (boolean (and child (.isAlive child)))) (str signal-ms " ms: the child escaped"))
+            (is (true? (:seon.operator.subprocess/reaped? data)))
+            (is (false? (boolean (and child (.isAlive child)))) "the child escaped")
             (finally (when (and child (.isAlive child)) (.destroyForcibly child)))))
         (finally (test-support/delete-recursively! root))))))
 

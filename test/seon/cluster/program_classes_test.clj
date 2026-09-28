@@ -31,7 +31,7 @@
                                              (require '~namespace-name)))])
                             (.redirectErrorStream true)))]
         (is (.waitFor child 15 java.util.concurrent.TimeUnit/SECONDS))
-        (is (zero? (.exitValue child)) (slurp (.getInputStream child))))
+        (is (zero? (.exitValue child))))
       (is (.isFile (io/file classes (str relative "__init.class"))))
       ;; A promoted directory's classes carry a far-future time, so a later
       ;; archive's source (extracted after the compile) still loses to them.

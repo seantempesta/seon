@@ -2,8 +2,7 @@
   "An agent-authored capability stub crosses the real effect path in a test attempt (design §2c)."
   (:require [clojure.test :refer [deftest is]] [seon.config :as config] [seon.db :as db]
             [seon.program :as program] [seon.sci.eval :as sci.eval] [seon.test :as sut]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (defn- admit!
   "Evaluate `source` in `my.catalog` as an agent does and write its declaration entity."
@@ -15,7 +14,7 @@
                                                    :seon.sci.admit/caps (config/result-caps config/defaults)
                                                    :seon.sci.eval/time-limit-ms 5000})))
                     ::admitted)]
-    (is (nil? (:seon.cluster.eval/error evaluation)) (seon.print.value/bounded-text evaluation))
+    (is (nil? (:seon.cluster.eval/error evaluation)))
     (support/transacted! connection [(program/declaration-row (db/carried-projection (db/db connection))
                                                               (:seon.program/row evaluation) :all :agent)])))
 
@@ -43,7 +42,7 @@
          (admit! handle source))
        (let [result (sut/run {:seon.test/execution handle :seon.test/recording-connection connection
                               :seon.test/policy :named :seon.test/identities tests})]
-         (is (true? (:seon.test/passed? result)) (sut/tally result))
+         (is (true? (:seon.test/passed? result)))
          (is (= 2 (:seon.test/executed-count result)))
          (is (empty? (db/q '[:find ?e :where [?e :seon.effect/id]] (db/db connection)))
              "no receipt reaches the requesting branch"))))))

@@ -102,6 +102,4 @@
               projection-key [:seon.render/ai :seon.render/html]
               :let [projection (get entity projection-key)]
               :when projection]
-        (is (var? (requiring-resolve projection))
-            (str (:seon.schema/key entity)
-                 " advertises missing " projection-key " " projection))))))
+        (is (var? (requiring-resolve projection)))))))

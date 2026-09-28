@@ -55,7 +55,7 @@
                                                          :seon.cluster/name cluster-name})))
       (let [html (pr-str (agent/render-identity-html {:seon.db/db @connection :seon.agent/id "root"}))]
         (is (str/includes? html "\"Tasks\"] [:dd \"None\"]"))
-        (is (re-find #"\"Status\"\] \[:dd \"(Idle|Turn open) · \d+ turns?\"" html) html)
+        (is (re-find #"\"Status\"\] \[:dd \"(Idle|Turn open) · \d+ turns?\"" html))
         (is (not (str/includes? html "seon-root-agents")) "no fleet table")))))
 
 (deftest identity-rendering-keeps-partial-data-and-read-errors-visible

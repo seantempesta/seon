@@ -2,8 +2,7 @@
   (:require [clojure.test :refer [deftest is]]
             [seon.db :as db]
             [seon.test :as sut]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (def ^:private marker :seon.test.request-acquisition-test/marker)
 
@@ -32,13 +31,12 @@
                             :seon.test/identities (into #{} (map #(symbol "seon.test.request-acquisition-test" (str "writes-" %)))
                                                         ["a" "b" "c"])})
            timings (:seon.test/timings result)]
-       (is (true? (:seon.test/passed? result)) (sut/tally result))
+       (is (true? (:seon.test/passed? result)))
        (is (= 3 (:seon.test/executed-count result)))
        ;; The request acquires its program once; each member forks it and finds
        ;; that program by commit (29-35 ms measured) instead of re-acquiring it
        ;; (325-581 ms before, 2026-09-25).
-       (is (every? #(< (+ (:seon.test.timing/acquire-ms %) (:seon.test.timing/resolve-ms %)) 50) timings)
-           (seon.print.value/bounded-text (map #(select-keys % [:seon.test.timing/acquire-ms :seon.test.timing/resolve-ms]) timings)))
+       (is (every? #(< (+ (:seon.test.timing/acquire-ms %) (:seon.test.timing/resolve-ms %)) 50) timings))
        (is (= 3 (count (set (map :seon.agent/branch timings)))) "every member ran on its own branch")
        (is (empty? (support/file-store-markers connection marker))
            "no member write reaches the execution branch")))))

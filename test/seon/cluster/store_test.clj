@@ -23,8 +23,7 @@
             [seon.schema]
             [seon.test-support :as test-support]
             [replikativ.logging]
-            [taoensso.trove :as trove]
-            [seon.print.value])
+            [taoensso.trove :as trove])
   (:import [java.io File]
            [java.util.concurrent CompletableFuture TimeUnit]))
 
@@ -72,7 +71,7 @@
                   (= lock (store/lock-file (str "./" dir))))))
          :seed 20260727)]
     (is (true? (:result check))
-        (str "lock-file derivation failed: " (seon.print.value/bounded-text check)))))
+        "lock-file derivation failed")))
 
 (deftest configuration-is-the-one-shape
   (let [configuration (store/datahike-configuration "tmp/x/store")
@@ -163,8 +162,7 @@
                              (catch Throwable failure failure))]
             (is (or (= :released release)
                     (some #(= "injected Error in one store write" (ex-message %))
-                          (take-while some? (iterate ex-cause release))))
-                (seon.print.value/bounded-text release)))
+                          (take-while some? (iterate ex-cause release))))))
           (let [reopened (store/open-store! {:seon.store/dir dir})]
             (try
               (let [database @(:seon.store/connection-object reopened)]
@@ -712,4 +710,4 @@
     (let [line (logged #(replikativ.logging/error :datahike/listener-error large))]
       (is (str/includes? line "ERROR"))
       (is (str/includes? line ":datahike/listener-error"))
-      (is (< (count line) 600) line))))
+      (is (< (count line) 600)))))

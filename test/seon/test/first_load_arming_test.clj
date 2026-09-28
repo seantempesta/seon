@@ -5,8 +5,7 @@
   (:require [clojure.test :refer [deftest is]]
             [seon.db :as db]
             [seon.test]
-            [seon.test-support :as test-support]
-            [seon.print.value]))
+            [seon.test-support :as test-support]))
 
 (defn- identity-int
   {:malli/schema [:=> [:cat :int] :int]}
@@ -19,8 +18,8 @@
         checks (keep (comp :seon.instrument/check ex-data)
                      (take-while some? (iterate ex-cause outcome)))]
     (is (:malli.instrument/original (meta @#'identity-int)) "the Var root is a wrapper")
-    (is (instance? Throwable outcome) (str "an invalid input returned " (seon.print.value/bounded-text outcome)))
-    (is (= :input (first checks)) (seon.print.value/bounded-text (ex-data outcome)))))
+    (is (instance? Throwable outcome) "an invalid input returned")
+    (is (= :input (first checks)))))
 
 (deftest a-branch-changed-contract-refuses-instead-of-arming-the-host-var
   (test-support/with-database
@@ -35,7 +34,7 @@
                 "(defn identity-int {:malli/schema [:=> [:cat :string] :string]} [value] value)")])
            refusal (#'seon.test/arm-first-loads!
                     (db/db connection) (test-support/effective-config) ctx #{fixture})]
-       (is (= function (:seon.sci.eval/refused-function refusal)) (seon.print.value/bounded-text refusal))
+       (is (= function (:seon.sci.eval/refused-function refusal)))
        (is (nil? (find-ns fixture)) "the refusal loads, and so arms, nothing")))))
 
 (deftest a-stale-acquisition-snapshot-does-not-decide-a-first-load
@@ -56,5 +55,5 @@
                         (atom (assoc @(:seon.sci.kernel/program-snapshot ctx)
                                      :seon.sci.eval/loaded-database changed)))
            refusal (#'seon.test/arm-first-loads! changed (test-support/effective-config) stale #{fixture})]
-       (is (= function (:seon.sci.eval/refused-function refusal)) (seon.print.value/bounded-text refusal))
+       (is (= function (:seon.sci.eval/refused-function refusal)))
        (is (nil? (find-ns fixture)) "a snapshot agreeing with the branch neither loads nor arms")))))

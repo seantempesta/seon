@@ -14,8 +14,7 @@
             [seon.id :as id]
             [seon.sci.eval :as evaluation]
             [seon.turn :as turn]
-            [seon.test-support :as support]
-            [seon.print.value])
+            [seon.test-support :as support])
   (:import [com.sun.net.httpserver HttpServer HttpHandler]
            [java.io PushbackReader StringReader]
            [java.net InetSocketAddress]
@@ -72,7 +71,7 @@
                                      (turn/open-tx {:seon.turn/id "examples"
                                                     :seon.turn/agent [:seon.agent/id "examples"]
                                                     :seon.turn/opened-tx "datomic.tx"}))]
-            (is (:db-after opened) (seon.print.value/bounded-text opened)))
+            (is (:db-after opened)))
           (with-open [launcher-resource
                       (support/closeable
                        (flow/start-work-launcher!
@@ -120,7 +119,7 @@
                   namespaces (instruction/toolkit-namespaces @connection)
                   entities (mapcat (fn [namespace-name]
                                  (let [directory (:seon.sci.admit/value (run (str "(dir " namespace-name ")")))]
-                                   (is (seq (:functions directory)) (str namespace-name))
+                                   (is (seq (:functions directory)))
                                    (:functions directory))) namespaces)]
               (is (seq entities))
               (is (some #{'my.examples.nested-fixture} namespaces))
@@ -128,12 +127,11 @@
                      (:seon.sci.admit/value (run "(help)"))))
               (doseq [{function-symbol :sym} entities]
                 (is (true? (:seon.sci.admit/value
-                            (run (str "(boolean (resolve '" function-symbol "))"))))
-                    (str function-symbol)))
+                            (run (str "(boolean (resolve '" function-symbol "))"))))))
               (let [failed (run "(my.note/add! {:my.note/id \"bad-note\" :my.note/content 42})")
                     value (:seon.sci.admit/value failed)
                     documented (:seon.sci.admit/value (run "(doc my.note/add!)"))]
-                (is (= :input (:seon.instrument/check value)) (seon.print.value/bounded-text failed))
+                (is (= :input (:seon.instrument/check value)))
                 (is (map? documented))
                 (is (not (find value :seon.error/doc)) "printing never enriches the refusal")
                 (is (str/includes? (:seon.error/message value "") "my.note/add!"))
@@ -152,15 +150,15 @@
                     (Files/deleteIfExists (.toPath (io/file root path))))
                   (let [documented (:seon.sci.admit/value (run (str "(doc " function-symbol ")")))
                         example (:example documented)]
-                    (is (not (str/blank? example)) (seon.print.value/bounded-text documented))
-                    (is (str/ends-with? (:summary documented "") ".") (seon.print.value/bounded-text documented))
+                    (is (not (str/blank? example)))
+                    (is (str/ends-with? (:summary documented "") "."))
                     (when (seq example)
                       (with-open [reader (PushbackReader. (StringReader. example))]
                         (loop []
                           (let [form (read {:eof ::eof} reader)]
                             (when-not (= ::eof form)
                               (let [result (run (pr-str form))]
-                                (is (nil? (:seon.cluster.eval/error result)) (seon.print.value/bounded-text result))
+                                (is (nil? (:seon.cluster.eval/error result)))
                                 (when (= 'my.test/run function-symbol)
                                   (is (= [{:seon.test/pass-count 1 :seon.test/fail-count 0
                                            :seon.test/error-count 0}]
@@ -168,8 +166,7 @@
                                                                 :seon.test/fail-count
                                                                 :seon.test/error-count])
                                                (:seon.sci.admit/value result)))))
-                                (is (nil? (get-in result [:seon.sci.admit/value :seon.error/at]))
-                                    (seon.print.value/bounded-text result)))
+                                (is (nil? (get-in result [:seon.sci.admit/value :seon.error/at]))))
                               (recur)))))))))
               (let [effect-ids (db/q '[:find [?id ...] :where
                                        [?e :seon.effect/id ?id]
@@ -178,7 +175,7 @@
                                        (or [?e :seon.effect/notify ?agent]
                                            [?e :seon.effect/to ?agent])
                                        [?agent :seon.agent/id "examples"]] @connection)]
-                (is (vector? effect-ids) (seon.print.value/bounded-text effect-ids))
+                (is (vector? effect-ids))
                 (is (= 3 (count effect-ids)) "All three background examples submitted real work.")
                 (doseq [effect-id effect-ids]
                   (let [settled? (fn [database]

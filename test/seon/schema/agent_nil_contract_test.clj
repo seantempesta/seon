@@ -55,7 +55,7 @@
       (is (= :admitted (admission projection subject [:=> [:cat [:or :nil :int]] :int])))
       (is (= :admitted (admission projection subject [:=> [:cat :int] :nil]))))
     (testing "`[:or :nil X]` refuses exactly where `[:maybe X]` refuses"
-      (doseq [[position maybe-form or-form expected]
+      (doseq [[_position maybe-form or-form expected]
               [[:bare-return
                 [:=> [:cat :int] [:maybe :int]]
                 [:=> [:cat :int] [:or :nil :int]]
@@ -66,9 +66,9 @@
                 :seon.schema/nilable-map-value]]]
         (let [maybe-refusal (admission projection subject maybe-form)
               or-refusal (admission projection subject or-form)]
-          (is (= expected (:seon.schema/error maybe-refusal)) position)
-          (is (= expected (:seon.schema/error or-refusal)) position)
-          (is (= subject (get or-refusal expected)) position))))
+          (is (= expected (:seon.schema/error maybe-refusal)))
+          (is (= expected (:seon.schema/error or-refusal)))
+          (is (= subject (get or-refusal expected))))))
     (testing "an undefined slot is advice, never a refusal (owner ruling 2026-09-24)"
       (is (= :admitted (admission projection subject [:=> [:cat :any] :int]))))
     (testing "no packaged core contract is refused for :nil or through the helper's contract"
@@ -78,8 +78,7 @@
         (is (seq contracts))
         (doseq [[function-symbol outcome] outcomes
                 :when (not= :admitted outcome)]
-          (is (qualified-keyword? (:seon.schema/error outcome)) [function-symbol outcome])
+          (is (qualified-keyword? (:seon.schema/error outcome)))
           (is (or (= function-symbol (:seon.schema/identity outcome))
-                  (qualified-keyword? (:seon.schema/identity outcome)))
-              [function-symbol outcome])
-          (is (not= :nil (:seon.schema/schema-type outcome)) [function-symbol outcome]))))))
+                  (qualified-keyword? (:seon.schema/identity outcome))))
+          (is (not= :nil (:seon.schema/schema-type outcome))))))))
