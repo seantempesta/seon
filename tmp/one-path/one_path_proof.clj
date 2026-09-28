@@ -1048,7 +1048,7 @@
            b (batch/evaluate-batch req)
            e (first (filter #(= 'user/pair (:seon.batch/macro %)) @seen))
            entry (second (:seon.batch/entries b))
-           relative (#'turn.batch/form-relative-expansions entry [e])
+           relative (#'turn.batch/form-relative-expansions entry (vec @seen))
            hooks (tree-expansion-hooks relative 7)]
        {:pass? (and (= [3 5 3 11] (:seon.batch/call-span e))
                     (= [2 5 2 11] (:seon.batch/call-span (first relative)))

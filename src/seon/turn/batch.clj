@@ -21,6 +21,7 @@
   `render-request`) and `seon.sci.batch/acquire-request` are `seon.batch/evaluate-batch`
   requests that differ only in these values."
   (:require [clj-kondo.core :as kondo]
+            [clojure.string :as str]
             [sci.impl.vars]
             [datahike.db.utils :as dbu]
             [my.program :as my.program]
@@ -200,13 +201,23 @@
     (subs t (off r c) (off er ec))))
 
 (defn- form-relative-expansions
-  "The form's observed expansions, their call spans moved from the batch's
-  text coordinates to the form's own (its first line 1, its first column 1):
-  the analyzer places them at the form's first row."
+  "The observed expansions the analyzer needs: a macro call that is the owning
+  call of a generated definition (a bind's origin, `:expanded-by`) and that
+  clj-kondo cannot analyze itself (a Clojure core macro such as `defn` or
+  `defmacro` it knows; substituting SCI's expansion would hide the authored
+  form). Their call spans move from the batch's text coordinates to the form's
+  own (its first line 1, its first column 1): the analyzer places them at the
+  form's first row."
   {:malli/schema [:=> [:cat :seon.batch/entry [:vector :seon.batch/write]] [:vector :seon.batch/write]]}
   [{line :seon.batch/line column :seon.batch/column} writes]
-  (let [relative (fn [[l c]] [(inc (- l line)) (if (= l line) (inc (- c column)) c)])]
-    (into [] (comp (filter #(= :expansion (:seon.batch/op %)))
+  (let [relative (fn [[l c]] [(inc (- l line)) (if (= l line) (inc (- c column)) c)])
+        owning (into #{} (keep (fn [{op :seon.batch/op {:keys [line column end-line end-column expanded-by]} :seon.batch/origin}]
+                                 (when (and (= :bind op) expanded-by end-line)
+                                   [line column end-line end-column])))
+                     writes)]
+    (into [] (comp (filter #(and (= :expansion (:seon.batch/op %))
+                                 (owning (:seon.batch/call-span %))
+                                 (not (str/starts-with? (str (namespace (:seon.batch/macro %))) "clojure."))))
                    (map (fn [{[l c el ec] :seon.batch/call-span :as w}]
                           (assoc w :seon.batch/call-span (into (relative [l c]) (relative [el ec]))))))
           writes)))
