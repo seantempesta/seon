@@ -41,19 +41,39 @@
          (let [before (db/basis-t (db/db connection))
                report (health/report {:seon.boot/cluster-name cluster-name :seon.health/deadline-ms 7000})
                found (:seon.health/findings report)
-               finding (some #(when (= `an-open-fault-is-a-ranked-finding-and-the-report-writes-nothing
-                                       (:seon.health/subject %))
+               finding (some #(when (= (:seon.error/signature receipt)
+                                       (get-in % [:seon.health/value :seon.error/signature]))
                                 %)
                              found)
                face (health/render-ai {:seon.render/value report :seon.db/db (db/db connection)})]
            (is (= :seon.problems/open-fault (:seon.health/schema finding)) "the fault is named by the schema it satisfies")
-           (is (= (:seon.error/signature receipt) (get-in finding [:seon.health/value :seon.error/signature])))
+           (is (= (get-in finding [:seon.health/value :seon.error/producer]) (:seon.health/subject finding))
+               "its subject is its producer, when one is known")
            (is (= :faulted (:seon.health/state report)))
            (is (apply >= (map :seon.health/score found)) "findings are ranked worst first")
            (is (= before (db/basis-t (db/db connection))) "the report commits nothing")
            (is (<= (count (:seon.health/top face)) 5) "the AI face shows the top findings")
            (is (pos? (get-in face [:seon.health/counts :seon.problems/open-fault] 0)) "and counts every schema's matches"))
          (finally (swap! running-instances dissoc cluster-name)))))))
+
+(deftest an-open-fault-counts-against-its-producer
+  ;; Default 2026-09-28: my.e1probe/opening-unit passed a bad value to
+  ;; seon.turn/record-evaluated-tx; the report listed the fault under the
+  ;; refuser, so the producer's task ccd4e875780c never linked.
+  (support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           projection (db/carried-projection database)
+           unit (-> (mg/generate :seon.problems/error-signature
+                                 {:registry (:seon.schema.projection/registry projection) :seed 3})
+                    (dissoc :seon.error/resolution)
+                    (assoc :seon.error/operation `health/report :seon.error/producer `health/findings))
+           report {:seon.health/problems {:seon.problems/error-signatures [unit]}}
+           finding (some #(when (= :seon.problems/open-fault (:seon.health/schema %)) %)
+                         (health/findings database report))]
+       (is (= `health/findings (:seon.health/subject finding)) "the producer, not the refuser")
+       (is (= `health/report (get-in finding [:seon.health/value :seon.error/operation]))
+           "the refuser stays in the value")))))
 
 (deftest a-derivation-is-reused-until-an-attribute-it-read-changes
   (support/with-database

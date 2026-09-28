@@ -64,6 +64,15 @@
          {:seon.cluster/name (:seon.cluster/name cluster)
           :seon.cluster.status/heap-used (.getUsed heap)
           :seon.cluster.status/heap-max (.getMax heap)
+          ;; Used heap counts garbage G1 has not yet collected (4.56 GB used
+          ;; beside 0.97 GB live after a full collection, default
+          ;; 2026-09-28). What the collected pools held after their last
+          ;; collection bounds the live set from above without forcing one
+          ;; (1.63 GB just after boot; old regions wait for a mixed cycle).
+          :seon.cluster.status/heap-live
+          (reduce + 0 (keep #(when (= java.lang.management.MemoryType/HEAP (.getType ^java.lang.management.MemoryPoolMXBean %))
+                               (some-> (.getCollectionUsage ^java.lang.management.MemoryPoolMXBean %) .getUsed))
+                            (ManagementFactory/getMemoryPoolMXBeans)))
           :seon.cluster.status/store-bytes
           (unknown "Store bytes are not scanned during a cluster observation. Use bin/seon status --verbose for an explicit footprint measurement.")
           :seon.cluster.status/adopted-commit

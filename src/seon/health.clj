@@ -635,7 +635,7 @@
       :seon.health/fleet {:seon.health/agents (count (:seon.oversight/agents value))
                           :seon.health/procs (+ (count (:seon.oversight/plumbing value))
                                                 (count (mapcat :seon.oversight/procs (:seon.oversight/agents value))))}
-      :seon.health/status (select-keys value [:seon.cluster.status/heap-used :seon.cluster.status/heap-max
+      :seon.health/status (select-keys value [:seon.cluster.status/heap-used :seon.cluster.status/heap-live :seon.cluster.status/heap-max
                                               :seon.cluster.status/open-turns :seon.cluster.status/platform-threads])
       :seon.health/cache (select-keys value [:seon.cache/max-bytes :seon.cache/weighted-bytes])
       :seon.health/profile {:seon.health/observed (count value)}
