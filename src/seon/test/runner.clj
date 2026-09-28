@@ -968,7 +968,7 @@
   digests its declaration's identity and content, and the names a closure
   holds without a node follow from its nodes' edges."
   {:malli/schema [:=> [:cat :map :seon.test/sym] :map]}
-  [{::keys [nodes schemas names schema-keys name-index name-closures own-keys]} test-symbol]
+  [{::keys [nodes schemas names schema-keys name-index name-closures own-keys single?]} test-symbol]
   (let [members (fn [items ^BitSet closure]
                   (loop [i (.nextSetBit closure 0) found (transient [])]
                     (if (neg? i) (persistent! found) (recur (.nextSetBit closure (inc i)) (conj! found (nth items i))))))
@@ -978,16 +978,16 @@
                                   [(inc n) (unchecked-add (long a) (long x)) (unchecked-add (long b) (long y))]))
                               [0 0 0] items))
         start (when (get nodes test-symbol) (get name-index test-symbol))
-        reached (if start (members names (nth name-closures start)) [])
-        reached-keys (if start
-                       (let [closure (BitSet. (count schema-keys))
+        reached (cond (nil? start) [] single? names
+                      :else (members names (nth name-closures start)))
+        reached-keys (cond (nil? start) [] single? schema-keys
+                          :else (let [closure (BitSet. (count schema-keys))
                              ^BitSet reaching (nth name-closures start)]
                          (loop [i (.nextSetBit reaching 0)]
                            (when-not (neg? i)
                              (when-let [keys-closure (nth own-keys i)] (.or closure ^BitSet keys-closure))
                              (recur (.nextSetBit reaching (inc i)))))
-                         (members schema-keys closure))
-                       [])
+                         (members schema-keys closure)))
         ;; A name with no program entity is host code (`clojure.core/=`); a
         ;; declared entity without its stored digest is unknown evidence.
         undigested (filterv #(when-let [node (get nodes %)] (not (string? (::leaf node)))) reached)]
@@ -1003,9 +1003,10 @@
 
 (defn- reach-entries
   "Each requested test's reach entry on this database value, committed or not.
-  Every test's closure is derived at once over the graph the tests reach:
-  names and schema keys are bit positions in their sorted order, and each
-  vertex's closure is propagated from its successors'.
+  Cache the combined entries by the exact reached graph content, so digest
+  and membership readers share one derivation across unrelated commits.
+  For one test the graph IS its closure: sort its nodes, with no all-pairs
+  closure. Multiple tests amortize shared reach with bitset propagation.
 
   ## Costs
 
@@ -1021,24 +1022,36 @@
   (if (empty? test-symbols)
     {}
     (try
-      (let [{::keys [nodes schemas] :as graph} (reach-graph database test-symbols)
+      (let [{::keys [nodes schemas] :as graph} (reach-graph database test-symbols)]
+        (cache/lookup
+         ::reach-entries [(set test-symbols)
+                          (update-vals nodes #(or (::leaf %) %))
+                          (update-vals schemas ::leaf)]
+         (fn [entries]
+           (+ (* 128 (+ (count nodes) (count schemas)))
+              (* 48 (reduce + 0 (map #(count (::reach-names %)) (vals entries))))))
+         (fn []
+          (let [single? (= 1 (count test-symbols))
             names (vec (sort (keys nodes)))
             schema-keys (vec (sort (keys schemas)))
             name-index (zipmap names (range))
             key-index (zipmap schema-keys (range))
-            schema-closures (reach-closures (reach-successors schema-keys key-index #(::keys (get schemas %))))
+            schema-closures (when-not single?
+                              (reach-closures (reach-successors schema-keys key-index #(::keys (get schemas %)))))
             index (assoc graph
+                         ::single? single?
                          ::names names ::schema-keys schema-keys ::name-index name-index
-                         ::name-closures (reach-closures (reach-successors names name-index #(::out (get nodes %))))
+                         ::name-closures (when-not single?
+                                          (reach-closures (reach-successors names name-index #(::out (get nodes %)))))
                          ;; Each name's own keywords with the schema keys they reach.
-                         ::own-keys (mapv (fn [n]
+                         ::own-keys (when-not single? (mapv (fn [n]
                                             (when-let [node-keys (seq (::keys (get nodes n)))]
                                               (let [closure (BitSet. (count schema-keys))]
                                                 (doseq [k node-keys]
                                                   (.or closure ^BitSet (nth schema-closures (key-index k))))
                                                 closure)))
-                                          names))]
-        (into {} (map (fn [s] [s (reach-entry index s)])) test-symbols))
+                                          names)))]
+        (into {} (map (fn [s] [s (reach-entry index s)])) test-symbols)))))
       (catch Exception failure
         (seon.error.refusal/diagnostic (java.util.Date.) :seon.test/recording `reach-entries
          {:seon.error/message (str "Reach digest unavailable: " (ex-message failure))
@@ -1605,7 +1618,10 @@
               (not= tested-branch destination) (assoc :seon.test.run/tested-branch tested-branch))
         digests (or carried-digests
                     (when tested (reach-digests tested (mapv :seon.test/sym results))))
-        derived-reaches (when tested (reach-memberships tested (mapv :seon.test/sym results)))
+        derived-reaches (when tested
+                          (reach-memberships tested
+                            (into [] (comp (map :seon.test/sym)
+                                           (remove #(contains? carried-reaches %))) results)))
         reaches (if (and (map? derived-reaches) (contains? derived-reaches :seon.error/at) (contains? derived-reaches :seon.error/layer) (contains? derived-reaches :seon.error/operation))
                   (or carried-reaches derived-reaches)
                   (merge derived-reaches carried-reaches))

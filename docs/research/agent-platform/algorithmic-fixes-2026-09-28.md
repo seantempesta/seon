@@ -105,3 +105,50 @@ Root's focused tests (not run by this lane):
 
 The foreign boundary remains the one-path lane and the pre-existing script
 contract failures above. Only fn source/test and this evidence land in this slice.
+
+## Requested test reach: share entries and use the single root's graph
+
+`reach-graph` already computes exactly the union reachable from the requested
+roots. For one test that union is its answer: `reach-entry` now uses the sorted
+names and schemas directly, avoiding both all-vertex closure matrices. Its
+derivation is O(V+E+K+J) graph acquisition and O(V log V + K log K) ordering,
+not all-pairs transitive closure. Multiple roots keep the existing amortized
+bitset algorithm. A map-based per-root walk was rejected: 100 roots grew from
+76 ms to 408 ms. An indexed variant also lost at that size; neither lands.
+
+The new `seon.cache` kind `:seon.test.runner/reach-entries` retains combined
+digests/memberships under requested symbols and each reached declaration's
+leaf digest (undigested nodes carry their full unknown input). This is the same
+content identity already used by `reach-graph` for nodes. A hit still acquires
+and compares the reached graph, O(V+E+K+J); it rebuilds zero closures and hashes
+zero closure digests. `record-latest-tx` derives memberships only for results
+whose memberships the completion did not already carry. Partial carried maps
+still get their missing entries; existing contracts and unknown handling stay.
+
+MCP `scratch.astra.reach`, real 1/10/100 stored test symbols, exact entry maps
+equal. The recording caller asks for both digests and memberships, so the
+paired probe includes two entry requests with a cold combined-entry cache:
+76.787→31.070 ms (1), 52.816→42.342 ms (10), 125.805→86.245 ms (100).
+Subsequent individual hits were 12–17 ms; earlier individual calls were
+24–63 ms. First multi-root misses can add about 5–13 ms for key construction
+and cache admission; the measured caller's paired work improves. These are
+scratch derivation measurements, not a claim of an installed test-run latency.
+Memory was not measured. The bounded cache weighs the retained leaf keys and
+result memberships without walking declaration trees again.
+
+Verification from archive `21a8b04f0` plus runner source/test: lint 0 errors,
+1,725 warnings, 6.409 s. Contracts: 497 files, same 10 foreign script findings,
+zero source/test findings, 15.421 s with other lanes' drills active. No test
+request was started; no publication/boot/arming implementation changed.
+Reproduction: `tmp/astra-algorithmic-fixes-20260928/reach-probe.clj`.
+
+Root's focused tests:
+
+- `seon.test.runner-test/reach-digests-and-memberships-share-content-valid-work`
+  (new, 1/10/100 requested tests, equal answers and zero repeated closure builds).
+- `seon.test.selection-test/definition-content-agrees-across-exploratory-branches`
+- `seon.test.selection-test/named-selection-reuses-green-members-by-reachable-content`
+- `seon.test.selection-test/selection-derives-bases-obligations-and-exact-symbol-reach`
+- `seon.test.runner-test/nested-runs-own-their-counters-and-evidence`
+
+Foreign boundary and installation limits are unchanged from the first slice.

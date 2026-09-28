@@ -13,6 +13,25 @@
             [seon.test-runner-failure-fixture]
             [seon.test-support :as test-support]))
 
+(deftest reach-digests-and-memberships-share-content-valid-work
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           symbols (vec (take 100 (sort (db/q '[:find [?s ...] :where [_ :seon.test/sym ?s]] database))))]
+       (is (= 100 (count symbols)))
+       (doseq [n [1 10 100]]
+         (let [requested (subvec symbols 0 n)
+               first-digests (runner/reach-digests database requested)
+               [_ calls] (test-support/armed-calls
+                          '#{seon.test.runner/reach-closures}
+                          #(do
+                             (is (= first-digests (runner/reach-digests database requested)))
+                             (is (= (set requested) (set (keys (runner/reach-memberships database requested)))))))]
+           (is (= n (count first-digests)))
+           (is (every? string? (vals first-digests)))
+           (is (zero? (get calls 'seon.test.runner/reach-closures))
+               "digest and membership reads never rebuild the same graph closures")))))))
+
 (deftest assertion-report-uses-bounded-value-renderer
   (let [ctx (sci/init {:namespaces
                        {'large.fixture
