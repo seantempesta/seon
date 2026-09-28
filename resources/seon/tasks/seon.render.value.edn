@@ -46,10 +46,10 @@
              :kind :function
              :intent "Render data's cuts name no handle, so an offered operation the budget reaches last prints as (seon.render.walk/related …1): its request map is cut and the form cannot be run (seon.test/run's related data, 2026-09-28). An operation is a whole form or absent. Done when a :seon.render/operations form inside render data prints whole or is dropped whole, with a regression."
              :must-read #{seon.render.value/select-nodes seon.render.walk/related}
-             :evidence #{"tmp/related_data/proof.clj"}}]
+             :evidence #{"tmp/related_data/proof.clj"}}
 
-#:seon.task{:name "short-strings-in-pairs-are-cut"
+ #:seon.task{:name "short-strings-in-pairs-are-cut"
             :kind :function
             :intent "A 32-row vector of [string long] pairs (a profile summary, strings of 40-60 characters) printed each string cut at 32 characters with a dig form per row, and a java.util.HashMap$Node printed as #object: the budget went to cut markers instead of the text. Done when a small tuple's string prints whole under the budget and a Map.Entry prints as its pair."
             :must-read #{seon.render.value/prepare}
-            :evidence #{"tmp/mcp-dogfood/probe.clj"}}
+            :evidence #{"tmp/mcp-dogfood/probe.clj"}}]
