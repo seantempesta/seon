@@ -1609,15 +1609,15 @@
                         (recur (into (pop pending) (get dependencies k)) (conj reached k)))
                       reached)))
         row-shapes (program/shapes-in projection)
-        world (cache/lookup
-               ::derivation-schema-values [forms dependencies row-shapes]
-               (constantly (* 4096 (count forms)))
-               #(let [forms (update-vals forms derivation-form)]
-                  (hash-map ::key (id/digest 64 [forms dependencies row-shapes])
+        ;; Derived once per refresh (a cached copy hit 0 of 1 and held 19% of the
+        ;; byte budget for the whole projection's forms); the per-file keys below
+        ;; are the content-keyed cache.
+        world (let [forms (update-vals forms derivation-form)]
+                (hash-map ::key (id/digest 64 [forms dependencies row-shapes])
                           ::absent (id/digest 64 [nil])
                           ::digests (into {} (map (fn [[k form]] [k (id/digest 64 [form])])) forms)
                           ::shapes (closure (into #{} (filter (partial contains? forms))
-                                                (tree-seq coll? seq row-shapes))))))
+                                                (tree-seq coll? seq row-shapes)))))
         kondo [(get (source/loaded-dependencies) "reference-code/clj-kondo")
                (into (sorted-map) (filter #(str/starts-with? (key %) ".clj-kondo/")) inputs)]]
     (into {}
