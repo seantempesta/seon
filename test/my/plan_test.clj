@@ -129,7 +129,7 @@
         (is (not (contains? current :my.plan/current-step)))
         (is (= {} (:seon.plan/step-lines ai)))
         (is (nil? (:seon.plan/current-line ai)))
-        (is (str/includes? (pr-str html) "No steps yet."))))))
+        (is (some #{"No steps yet."} (support/hiccup-leaves html)))))))
 
 (deftest one-step-is-owned-by-the-agent-through-the-component-edge
   (with-plan
@@ -275,14 +275,17 @@
       (let [current (plan-of connection)
             ai (plan/format-plan-ai current)
             html (plan/render-plan-html (render-view connection current))
-            printed (pr-str html)]
+            shown (set (support/hiccup-leaves html))]
         (is (= "alice" (:seon.agent/id ai)))
-        (is (= 1 (count (re-seq #"my-plan\"" printed))))
+        (is (= 1 (count (filter #(and (map? (second %))
+                                      (some #{"my-plan"} (str/split (str (:class (second %))) #" ")))
+                                (support/hiccup-elements html))))
+            "the plan renders once")
         (is (str/includes? (:seon.plan/current-line ai) "1. current — Improve the plan"))
         (is (= "1.1 ready — Inspect the facts" (get-in ai [:seon.plan/step-lines "child"])))
         (is (nil? (:my.plan/objective ai)) "a step title is not the plan objective")
-        (is (str/includes? printed "Inspect the facts"))
-        (is (str/includes? printed "0 of 2 steps completed"))))))
+        (is (= #{"Inspect the facts" "0 of 2 steps completed"}
+               (into #{} (filter #{"Inspect the facts" "0 of 2 steps completed"}) shown)))))))
 
 (deftest plan-source-selects-reads-from-current-data
   (with-plan
@@ -555,7 +558,8 @@
       (let [current (plan/plan {:seon.db/db @connection
                                 :seon.agent/id "juniper"})
             ai (plan/render-plan-ai {:seon.db/db @connection :seon.agent/id "juniper"})
-            printed (pr-str (plan/render-plan-html (render-view connection current)))]
+            html (plan/render-plan-html (render-view connection current))
+            shown (set (support/hiccup-leaves html))]
         (is (= ["juniper/inspect-identity-messages"
                 "juniper/render-plan"
                 "juniper/compare-changed-results"
@@ -576,9 +580,10 @@
             "selecting the next step is offered beside completing this one")
         (is (not-any? #(= 'my.plan/complete! (first %))
                       (:seon.render/operations (plan/format-plan-ai (dissoc current :my.plan/current-step)))))
-        (is (str/includes? printed "1 of 4 steps completed"))
-        (is (str/includes? printed "Current step: "))
-        (is (not (str/includes? printed ":open nil"))
+        (is (contains? shown "1 of 4 steps completed"))
+        (is (some #(str/starts-with? (str %) "Current step: ") shown))
+        (is (not-any? (fn [[_ attributes]] (and (map? attributes) (some nil? (vals attributes))))
+                      (support/hiccup-elements html))
             "no nil attribute reaches the rendered panel")))))
 
 (deftest the-plan-component-holds-objective-tree-and-current-step

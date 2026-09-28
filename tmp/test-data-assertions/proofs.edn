@@ -134,4 +134,8 @@
    runtime-tests-install-run-redefine-and-delete-exactly {:head [7 0 0] :broken [4 3 0]}
    a-red-form-routes-to-its-namespace-owner-and-the-fold-continues {:head [4 1 0] :broken [3 2 0] :note "head red on an unchanged assertion in this JVM"}
    import-only-ns-unmap-installs-exactly-after-its-context-commit {:head [3 1 0] :broken [2 2 0] :note "head red on an unchanged assertion in this JVM"}
-   delimiter-repair-is-span-local-and-precedes-intent {:note "unverified: HEAD's seon.sci.forgive/segments is not loaded in this JVM"}}}}
+   delimiter-repair-is-span-local-and-precedes-intent {:note "unverified: HEAD's seon.sci.forgive/segments is not loaded in this JVM"}}}
+ :my-plan-test
+ {an-empty-plan-renders-in-both-projections {:head [6 0 0] :broken [5 1 0]}
+  the-whole-plan-renders-once-in-both-projections {:head [6 0 0] :broken [5 1 0] :note "first conversion red: the plan is a class token, not an id"}
+  the-example-fixture-shape-installs-and-renders {:head [12 0 0] :broken [11 1 0]}}}
