@@ -24,7 +24,7 @@
   `:type` discriminator because the key a family arrives under IS the
   family.
 
-  EIGHT FAMILIES, and each one is a fact nobody has to maintain:
+  SEVEN FAMILIES, and each one is a fact nobody has to maintain:
 
   - ERROR SIGNATURES — every committed `:seon.error` fact, grouped by
     signature. Grouping is the point: a hundred errors of one signature
@@ -34,9 +34,6 @@
   - WEDGED RUNS — a run held by a process that is not in the live set.
     No clock: liveness is observable, and a deadline standing in for it
     is the tuned constant the standing ruling bans.
-  - FAILED RUNS — a run that closed carrying WHY. The agent reads this
-    in its next prompt; a human reading problems sees the same fact
-    from the other side.
   - ERRORED RECEIPTS — one form of one plan that errored. An agent's
     own mistake is NOT a core fault and never becomes an error fact,
     but a plan that keeps erroring is something a human wants to see.
@@ -111,40 +108,69 @@
     (update :seon.error/regressions #(into #{} (map (fn [r] (restore-error-ref r :db/id))) %))))
 
 (defn- error-signatures
-  "Errors ordered by the sum of their occurrence counts; a resolved one carries its `seon.error/resolution`."
+  "Errors ordered by the sum of their occurrence counts; a resolved one carries its `seon.error/resolution`.
+
+  Read through the error's declared observation selector
+  ([[seon.error/observation-selector]]), never `*`: a wildcard pull depends on
+  every attribute, so any commit would re-derive it; named attributes let a
+  reader key this family by their revisions.
+
+  ## Costs
+
+  Armed, default 2026-09-28 (47 signatures): 163 ms, of which the pull of 541
+  declared attributes is 133 ms; the `*` pull it replaced was 4.6 ms but
+  depended on every commit."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:or [:vector :seon.problems/error-signature] :seon.db/error-result]]}
   [database]
-  (->> (db/q '[:find [(pull ?error
-                            [*
-                             {:seon.error/occurrences
-                              [* {:seon.error.occurrence/turn [:db/id :seon.turn/id]}
-                                 {:seon.error.occurrence/agent [:db/id :seon.agent/id]}]}]) ...]
-                :where [?error :seon.error/signature]] database)
-       (mapv (fn [row]
-               (let [fact (restore-error-fact (error/latest-fact row))
-                     resolution (error/resolution database (:seon.error/signature row))]
-                 (cond->
-                  {:seon.error/signature (:seon.error/signature row)
-                   :seon.error/at (:seon.error/at fact)
-                   :seon.error/layer (:seon.error/layer fact)
-                   :seon.error/operation (:seon.error/operation fact)
-                   :seon.problems/occurrences (reduce + 0 (map :seon.error.occurrence/count
-                                                             (:seon.error/occurrences row)))
-                   :seon.error/fact fact}
-                  (:seon.error/resolved-by resolution) (assoc :seon.error/resolution resolution)))))
-       (sort-by (juxt (comp - :seon.problems/occurrences) :seon.error/signature))
-       vec))
+  (let [errors (db/q '[:find [?error ...] :where [?error :seon.error/signature]] database)
+        rows (if (db/read-refusal? errors)
+               errors
+               (db/pull-many database (error/observation-selector (db/carried-projection database)) errors))]
+    (if (db/read-refusal? rows)
+      rows
+      (->> rows
+           (mapv (fn [row]
+                   (let [fact (restore-error-fact (error/latest-fact row))
+                         resolution (error/resolution database (:seon.error/signature row))]
+                     (cond->
+                      {:seon.error/signature (:seon.error/signature row)
+                       :seon.error/at (:seon.error/at fact)
+                       :seon.error/layer (:seon.error/layer fact)
+                       :seon.error/operation (:seon.error/operation fact)
+                       :seon.problems/occurrences (reduce + 0 (map :seon.error.occurrence/count
+                                                                 (:seon.error/occurrences row)))
+                       :seon.error/fact fact}
+                       (:seon.error/resolved-by resolution) (assoc :seon.error/resolution resolution)))))
+           (sort-by (juxt (comp - :seon.problems/occurrences) :seon.error/signature))
+           vec))))
 
 (defn open-faults
-  "Keep the signatures of `entries` that `seon.error/resolution` left open.
-  `entries` are `problems`'s error signatures of `database`, each already
-  carrying its resolution when one resolves it, so none is derived again.
-  A fault resolves when its function's definition digest changed after its
-  latest occurrence, or by `resolve!`; a later occurrence re-opens it, and an
-  unreadable resolution keeps it open."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.problems/error-signature]]
-                  [:vector :seon.problems/error-signature]]}
-  [_database entries]
-  (filterv #(not (:seon.error/resolved-by (:seon.error/resolution %))) entries))
+  "Every fault `seon.error/resolution` leaves open at `database`: the error
+  signatures (`problems`'s family) with no resolution, worst-recurring first.
+  With `signature`, only that fault. A fault resolves when its function's
+  definition digest changed after its latest occurrence, or by `resolve!`; a
+  later occurrence re-opens it, and an unreadable resolution keeps it open.
+  This is the one reader of open faults; the health report ranks them.
+
+  ## Examples
+
+      (seon.problems/open-faults (seon.db/db))"
+  {:malli/schema [:function
+                  [:=> [:cat :seon.db/database-value]
+                   [:or [:vector :seon.problems/error-signature] :seon.db/error-result]]
+                  [:=> [:cat :seon.db/database-value :seon.error/signature]
+                   [:or [:vector :seon.problems/error-signature] :seon.db/error-result]]]}
+  ([database]
+   (let [entries (error-signatures database)]
+     (if (db/read-refusal? entries)
+       entries
+       (filterv #(not (:seon.error/resolved-by (:seon.error/resolution %))) entries))))
+  ([database signature]
+   (let [entries (open-faults database)]
+     (if (db/read-refusal? entries)
+       entries
+       (filterv #(= signature (:seon.error/signature %)) entries)))))
 
 (defn resolve!
   "Record that the fault `signature` names is fixed away from its failing function.
@@ -162,23 +188,6 @@
       (db/pull (:db-after report) [:seon.error/signature :seon.error/operation :seon.error/resolved-tx]
                [:seon.error/signature signature])
       report)))
-
-(defn- failed-runs
-  [db]
-  (->> (db/q '[:find ?id ?agent-id ?error
-              :where
-              [?run :seon.turn/id ?id]
-              [?run :seon.turn/closed-tx _]
-              [?occurrence :seon.error.occurrence/turn ?run]
-              [?occurrence :seon.error.occurrence/message ?error]
-              [?run :seon.turn/agent ?agent]
-              [?agent :seon.agent/id ?agent-id]]
-            db)
-       (sort)
-       (mapv (fn [[id agent-id message]]
-               {:seon.turn/id id
-                :seon.agent/id agent-id
-                :seon.error/message message}))))
 
 (defn- errored-receipts
   [db]
@@ -409,6 +418,19 @@
          missing-model-ai missing-model-html
          stale-var-ai stale-var-html)
 
+(def families
+  "Each family's key and the Var deriving it from one database value, in the
+  order `problems` lists them. A family's derivation reads only the database
+  (and, for stale Vars, the loaded namespaces), so a reader may retain each by
+  what it reads (`seon.health`)."
+  [[:seon.problems/error-signatures #'error-signatures]
+   [:seon.problems/failed-tests #'failed-tests]
+   [:seon.problems/errored-receipts #'errored-receipts]
+   [:seon.problems/deferred-agents #'deferred-agents]
+   [:seon.problems/unowned-namespaces #'unstewarded-namespaces]
+   [:seon.problems/stale-vars #'stale-vars]
+   [:seon.problems/missing-models #'missing-models]])
+
 (defn problems
   "Everything wrong now, as a map keyed by family. `{}` when nothing is.
   Reads one immutable `db` and one
@@ -420,39 +442,32 @@
   Ordering is deterministic and meaningful, not incidental: error
   signatures come worst-recurring first, and every other family sorts
   by its own identity so two derivations of one database value are the
-  same value."
-  {:malli/schema [:=> [:cat :seon.db/database-value
-                       :seon.problems/request]
-                  [:or [:and :seon.problems/problems
-                        [:map [:seon.problems/failed-tests-unknown {:optional true}
-                               [:vector :seon.test/execution-error]]]]
-                   :seon.test/execution-error
-                   :seon.db/invalid-read-error]]}
-  [db _request]
-  (let [signatures (error-signatures db)
-        tests (failed-tests db)
-        failed (failed-runs db)
-        errored (errored-receipts db)
-        deferred (deferred-agents db)
-        unstewarded (unstewarded-namespaces db)
-        stale (stale-vars db)
-        missing-model-rows (missing-models db)
-        ;; Unknown test evidence makes its own family unknown, never the rest.
-        [unknown failed-tests] (if (:seon.error/at tests) [[tests] []]
-                                   (mapv vec ((juxt filter remove) :seon.error/at tests)))
-        found (cond-> {}
-                (seq unknown) (assoc :seon.problems/failed-tests-unknown unknown)
-                (seq failed-tests) (assoc :seon.problems/failed-tests failed-tests)
-                (seq signatures) (assoc :seon.problems/error-signatures signatures)
-                (seq failed) (assoc :seon.problems/failed-runs failed)
-                (seq errored) (assoc :seon.problems/errored-receipts errored)
-                (seq deferred) (assoc :seon.problems/deferred-agents deferred)
-                (seq unstewarded)
-                (assoc :seon.problems/unowned-namespaces unstewarded)
-                (seq stale) (assoc :seon.problems/stale-vars stale)
-                (seq missing-model-rows)
-                (assoc :seon.problems/missing-models missing-model-rows))]
-    found))
+  same value.
+
+  `through` derives each family, `(through family derivation)`, where
+  `derivation` takes the database: the default calls it; the health report retains each
+  family by the revisions of the attributes it read."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.db/database-value :seon.problems/request]
+                   [:or :seon.problems/problems :seon.test/execution-error :seon.db/invalid-read-error]]
+                  [:=> [:cat :seon.db/database-value :seon.problems/request [:fn clojure.core/ifn?]]
+                   [:or :seon.problems/problems :seon.test/execution-error :seon.db/invalid-read-error]]]}
+  ([db request] (problems db request (fn [_family derivation] (derivation db))))
+  ([_db _request through]
+   (let [derived (into {} (map (fn [[family derivation]] [family (through family derivation)])) families)
+         tests (:seon.problems/failed-tests derived)
+         ;; Unknown test evidence makes its own family unknown, never the rest.
+         [unknown failed-tests] (if (:seon.error/at tests) [[tests] []]
+                                    (mapv vec ((juxt filter remove) :seon.error/at tests)))
+         ;; Any other family's refusal is the answer: a partial map would read as healthy families.
+         refused (some (fn [[family rows]] (when (and (not= family :seon.problems/failed-tests) (map? rows)) rows))
+                       derived)]
+     (or refused
+      (into (cond-> {}
+             (seq unknown) (assoc :seon.problems/failed-tests-unknown unknown)
+             (seq failed-tests) (assoc :seon.problems/failed-tests failed-tests))
+            (keep (fn [[family rows]] (when (and (not= family :seon.problems/failed-tests) (seq rows)) [family rows])))
+            derived)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The html projection — the problems PAGE
@@ -534,10 +549,8 @@
   human, so a thrash burst was one line in the prompt and a hundred in
   the page.
 
-  A healthy cluster never reaches here: `problems` declares no
-  projection for `{}`, so there is nothing to render and no cheerful
-  empty state to maintain. The BLOCK renders the healthy case, because
-  only the block knows a surface has to occupy space either way."
+  A healthy cluster renders an empty report: the health page states the
+  health, so no family needs a cheerful empty state."
   {:malli/schema [:function
                   [:=> [:cat :seon.problems/problems] :seon.render/hiccup]
                   [:=> [:cat :seon.problems/problems [:maybe :seon.db/database-value]] :seon.render/hiccup]]}
@@ -561,12 +574,6 @@
            "resolved" (resolution-text (:seon.error/resolution entry)))))
 
    (family-section
-    "failed runs"
-    (for [entry (:seon.problems/failed-runs found)]
-      (row "run" (:seon.turn/id entry)
-           "agent" (:seon.agent/id entry)
-           "error" (:seon.error/message entry))))
-   (family-section
     "errored forms"
     (for [entry (:seon.problems/errored-receipts found)]
       (row "run" (:seon.turn/id entry)
@@ -589,17 +596,6 @@
    (family-section
     "missing models"
     (map missing-model-html (:seon.problems/missing-models found)))]))
-
-(defn block
-  "Derive the problems block from its supplied database value."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
-  [unit]
-  (let [found (problems (:seon.db/db unit) {})]
-    (if (empty? found)
-      [:div {:class "seon-problems seon-problems-healthy"}
-       [:span {:class "seon-problems-healthy-mark"} "◆"]
-       [:span "nothing is wrong"]]
-      (html-report found (:seon.db/db unit)))))
 
 (defn ai-prose
   "`:seon.render/ai` — concise steering, derived from the families.

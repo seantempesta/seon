@@ -7,8 +7,27 @@
  :seon.cache/evictions [:int {:min 0}]
  :seon.cache/bytes [:int {:description "Estimated bytes this kind retains."}]
  :seon.cache/load-ms [:int {:min 0 :description "Wall milliseconds spent deriving missed values."}]
+ :seon.cache/kind [:qualified-keyword {:description "A cache kind: the owner's name for one derivation."}]
+ :seon.cache/hit-percent [:int {:min 0 :max 100 :description "Hits of all lookups, a whole percent."}]
+ :seon.cache/byte-percent [:int {:min 0 :max 100 :description "This kind's share of the weighed bytes, a whole percent."}]
+ :seon.cache/since :inst
+ :seon.cache/pending-kind :qualified-keyword
+ :seon.cache/pending [:map {:description "A lookup-within reader's answer while the key's one derivation runs."}
+                      [:seon.cache/pending-kind :seon.cache/pending-kind]
+                      [:seon.cache/since :seon.cache/since]]
+ :seon.cache/discipline-warning
+ [:map {:seon.health/severity 5 :seon.health/impact :seon.cache/byte-percent :seon.health/subject :seon.cache/kind
+        :seon.health/in [:seon.health/cache :seon.cache/kinds]
+        :seon.health/clues [[:seon.cache/byte-percent] [:seon.cache/hit-percent] [:seon.cache/bytes] [:seon.cache/evictions] [:seon.cache/load-ms]]
+        :description "A kind (its status) holding a quarter or more of the cache while under half its lookups hit: its derivation, not the budget, is the finding (health plan §10)."}
+  [:seon.cache/kind :seon.cache/kind]
+  [:seon.cache/byte-percent [:int {:min 25}]]
+  [:seon.cache/hit-percent [:int {:max 49}]]]
  :seon.cache/kind-status
  [:map
+  [:seon.cache/kind :seon.cache/kind]
+  [:seon.cache/hit-percent :seon.cache/hit-percent]
+  [:seon.cache/byte-percent :seon.cache/byte-percent]
   [:seon.cache/hits :seon.cache/hits]
   [:seon.cache/misses :seon.cache/misses]
   [:seon.cache/evictions :seon.cache/evictions]

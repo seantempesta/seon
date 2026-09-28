@@ -20,6 +20,8 @@
    ["/agent/{id}/context" {:name ::agent-context
                           :post {:middleware [::same-origin]
                                  :handler ::agent-context}}]
+   ["/health" {:name ::health
+                :get {:handler ::health}}]
    ["/feed/{id}" {:name ::feed
                    :get {:handler ::feed}}]
    ["/data" {:name ::data

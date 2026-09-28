@@ -108,3 +108,35 @@
       (is (= (zipmap (range n) (range n)) (cache/retained held ::kept)))
       (is (zero? (get-in (cache/status held) [:seon.cache/kinds ::retired-a :seon.cache/bytes])))
       (is (= 0 (cache/evict-kinds! held #{::retired-a ::retired-b}))))))
+
+(deftest a-deadline-reader-gets-pending-and-the-one-derivation-completes
+  (let [held (cache/create 1000000)
+        release (CountDownLatch. 1)
+        derivations (AtomicLong.)
+        woke (CountDownLatch. 1)
+        slow #(do (.incrementAndGet derivations) (.await release 5 TimeUnit/SECONDS) :derived)
+        first-read (cache/lookup-within held ::slow :k (constantly 10) slow 10 #(.countDown woke))
+        second-read (cache/lookup-within held ::slow :k (constantly 10) slow 10 nil)]
+    (is (= ::slow (:seon.cache/pending-kind first-read)) "past its deadline a reader gets pending, not a wait")
+    (is (inst? (:seon.cache/since second-read)))
+    (.countDown release)
+    (is (.await woke 5 TimeUnit/SECONDS) "completion runs the reader's wake")
+    (is (= :derived (cache/lookup-within held ::slow :k (constantly 10) slow 10 nil)))
+    (is (= 1 (.get derivations)) "readers join the one derivation; none is started twice or cancelled")))
+
+(deftest evicting-one-entry-lets-its-owner-replace-it
+  (let [held (cache/create 1000000)]
+    (cache/lookup held ::reads :k (constantly 10) (constantly #{:a}) some?)
+    (cache/evict! held ::reads :k)
+    (is (= #{:a :b} (cache/lookup held ::reads :k (constantly 10) (constantly #{:a :b}) some?)))))
+
+(deftest kind-status-names-its-kind-and-states-hit-and-byte-shares
+  (let [held (cache/create 1000000)]
+    (cache/lookup held ::big :k (constantly 1000) (constantly :v) some?)
+    (dotimes [_ 3] (cache/lookup held ::big :k (constantly 1000) (constantly :v) some?))
+    (cache/lookup held ::small :k (constantly 10) (constantly :v) some?)
+    (settle held)
+    (let [{kinds :seon.cache/kinds} (cache/status held)]
+      (is (= ::big (get-in kinds [::big :seon.cache/kind])))
+      (is (= 75 (get-in kinds [::big :seon.cache/hit-percent])) "three hits of four lookups")
+      (is (< (get-in kinds [::small :seon.cache/byte-percent]) (get-in kinds [::big :seon.cache/byte-percent]))))))

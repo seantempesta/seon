@@ -1,0 +1,14 @@
+--- a/resources/seon/schemas/seon.operator.edn
++++ b/resources/seon/schemas/seon.operator.edn
+@@ -225,9 +225,8 @@
+                   [:seon.operator/clusters
+                    [:vector
+                     [:map
+-                     [:seon.dev.mcp/cluster :seon.boot/cluster-name]
+-                     [:seon.dev.mcp/health
+-                      [:enum :observed :faulted :unknown]]]]]
++                     [:seon.health/cluster :seon.health/cluster]
++                     [:seon.health/state :seon.health/state]]]]
+                   [:seon.operator/footprint
+                    {:optional true}
+                    :seon.operator/footprint]

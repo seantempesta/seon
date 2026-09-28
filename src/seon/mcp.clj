@@ -9,8 +9,8 @@
   evaluations (`seon.cluster.agent/run-observation`): SCI mode through the
   agent's turn (`evaluate-source!`), JVM mode through the one path's fold
   (`seon.turn.batch/jvm-request`), recorded as the same agent's run.
-  `runtime_status` prints the cluster's runtime observation through its
-  declared AI render. Every failure is the one error value, printed by the
+  `runtime_status` prints the cluster's health report
+  (`seon.health/report`) through its AI face. Every failure is the one error value, printed by the
   value printer, and a thrown one is recorded as a fault here."
   (:require [clojure.core.async :as async]
             [clojure.data.json :as json]
@@ -27,6 +27,7 @@
             [seon.env :as env]
             [seon.error.refusal :as refusal]
             [seon.fault :as fault]
+            [seon.health :as health]
             [seon.id :as id]
             [seon.operator.runtime :as runtime]
             [seon.render.value :as render.value]
@@ -302,19 +303,19 @@
       :else (sci-run custody code namespace-name cluster-name))))
 
 (defn- runtime-status
-  "`runtime_status`: the observation through its declared AI render, printed."
+  "`runtime_status`: the cluster's health report through its AI face, printed."
   {:malli/schema [:=> [:cat :map] [:tuple [:vector :string] :boolean]]}
   [{cluster-name :seon.mcp/cluster}]
   (let [found (instance cluster-name)
         running-name (:seon.mcp/cluster found cluster-name)
-        source (str "(seon.cluster/mcp-runtime-observation " (id/printed running-name) ")")]
+        source (str "(seon.health/report {:seon.boot/cluster-name " (id/printed running-name) "})")]
     (if (:seon.error/at found)
       [[(printed found source nil nil)] true]
       (let [database (db/db (get-in found [:seon.turn.loop/cluster :seon.db/connection]))
-            observation (cluster/mcp-runtime-observation running-name)]
-        [[(printed (cluster/runtime-observation-ai {:seon.render/value observation :seon.db/db database})
+            report (health/report {:seon.boot/cluster-name running-name :seon.db/db database})]
+        [[(printed (health/render-ai {:seon.render/value report :seon.db/db database})
                    source database (:seon.cluster/name found))]
-         (boolean (:seon.error/at observation))]))))
+         (boolean (:seon.error/at report))]))))
 
 (defn- fault-receipt
   "Record `failure` as a core fault in the cluster's environment, answering

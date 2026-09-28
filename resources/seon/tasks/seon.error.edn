@@ -54,4 +54,9 @@
              :kind :function
              :intent "A fault named in a function's related data (:seon.instrument/_fn) shows its message and occurrence count but not whether it is open or resolved (seon.error/resolution), so thirteen faults beside seon.test/run cannot be told apart from history (2026-09-28). Done when the distance-zero fault render carries its resolution."
              :must-read #{seon.error/render-ai seon.error/resolution}
-             :evidence #{"docs/research/agent-platform/profiling-and-related-data-2026-09-28.md"}}]
+             :evidence #{"docs/research/agent-platform/profiling-and-related-data-2026-09-28.md"}}
+ #:seon.task{:name "the-error-observation-pull-names-541-attributes"
+             :kind :function
+             :intent "seon.error/observation-selector names 541 attributes (every declared error extension's members), so pulling 47 error signatures costs 133 ms against 4.6 ms for the wildcard pull it replaced in seon.problems/error-signatures (default, armed, 2026-09-28); the wildcard read depended on every attribute, so the selector is kept for attribution. Done when an error pull costs about the wildcard's while its reads still name attributes (e.g. errors store refs and a blob, plan §3)."
+             :must-read #{seon.error/observation-selector seon.problems/error-signatures}
+             :evidence #{"tmp/health-page/RESUME.md"}}]

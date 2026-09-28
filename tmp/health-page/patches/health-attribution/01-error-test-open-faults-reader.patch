@@ -1,0 +1,13 @@
+--- a/test/seon/error_test.clj
++++ b/test/seon/error_test.clj
+@@ -155,8 +155,8 @@
+           (is (= 6 (:seon.error/occurrence-count (error/latest-fact entity))))
+           (is (= 6 (:seon.problems/occurrences summary)))
+           (let [status (seon.cluster.status/snapshot {:seon.db/db database :seon.db/connection connection})]
+-            (is (= 6 (get (into {} (:seon.cluster.status/faults status))
+-                          (second (:seon.error/ref a)))))
++            ;; open faults have one reader (seon.problems/open-faults); status no longer lists them
++            (is (= 6 (:seon.problems/occurrences (first (seon.problems/open-faults database (second (:seon.error/ref a)))))))
+             (is ((schema/projection-validator (schema/handed-projection) :seon.error/base) (:seon.cluster.status/store-bytes status)))
+             (is (some? (:seon.cluster.status/unavailable-observation (:seon.cluster.status/store-bytes status)))
+                 "store bytes are an unavailable observation, never a scanned number"))

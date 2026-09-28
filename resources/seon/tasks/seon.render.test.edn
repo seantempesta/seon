@@ -2,4 +2,9 @@
              :kind :function
              :intent "Pulling a test entity renders '(clojure.core/identity \"Test ...: fail ... expected ... actual ...\")' then ';=> ' the same string, then the recorded-result map with the same failures a third time, every string escaped three levels deep; one four-assertion red test cost 1,001 shown tokens and was cut (repl-dogfood 2026-09-27). An AI render of a test shows its verdict and failures once, as data."
              :must-read #{seon.render.test/render-ai seon.test/recorded-result}
-             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}
+ #:seon.task{:name "a-failed-test-renders-in-28-ms"
+             :kind :function
+             :intent "seon.render.test/render-html takes 28 ms per failed test (5 tests 142 ms, armed, default 2026-09-28), so seon.problems/html-report over 241 failed tests is 6.8 s: the health page shows problems as family counts instead. Find what one render is proportional to (its pulls of failure reports and blobs per test) and make it read only what it shows; done when html-report over 241 failed tests renders under a second."
+             :must-read #{seon.render.test/render-html seon.problems/html-report}
+             :evidence #{"tmp/health-page/RESUME.md"}}]

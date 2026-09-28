@@ -62,6 +62,7 @@
             [seon.context :as context]
             [seon.db :as db]
             [seon.env :as env]
+            [seon.health :as health]
             [seon.error :as error]
             [seon.fault :as fault]
             [seon.oversight :as oversight]
@@ -374,7 +375,7 @@
 ;;; Painting
 ;;; ---------------------------------------------------------------------------
 
-(declare walk-request root-call-id acquire-root cluster-effective!)
+(declare walk-request root-call-id acquire-root cluster-effective! current-cluster-name)
 
 (defn- unit-id
   [agent-id unit]
@@ -2054,11 +2055,33 @@
            (not-any? #(contains? row %)
                      [:seon.turn/reply-size :seon.turn/closed-tx])))))
 
+(def ^:private health-surface
+  "The health page's one morph target."
+  "seon-health")
+
+(defn- health-page-result
+  "The health page at `database`: the cluster's `seon.health/report` through
+  its HTML face, as one block. The report waits at most the paint deadline
+  for a unit; a pending one completes off this pass and offers the render
+  proc a payload-free wake, so the page never blocks a pass."
+  {:malli/schema [:=> [:cat :map :seon.db/database-value] :map]}
+  [handle database]
+  (let [report (health/report {:seon.boot/cluster-name (current-cluster-name handle)
+                               :seon.db/db database
+                               :seon.health/deadline-ms 50
+                               :seon.health/wake #(async/offer! (:seon.render.web/render-channel handle) {})})]
+    {:seon.render.web/page
+     {health-surface (hiccup/->string [:div {:id health-surface}
+                                       (health/render-html {:seon.render/value report :seon.db/db database})])}
+     :seon.render.web/fragments {}
+     :seon.render/captured-calls {}
+     :seon.render/captured-invocations {}}))
+
 (defn- derive-page
   "One page at `database`: derive the blocks whose retained calls are
   candidates, or return the retained calls alone."
   {:malli/schema [:=> [:cat :map :seon.db/database-value :map :map
-                       [:or :seon.agent/id [:tuple [:= ::debug-tab] :map]] :map :boolean :boolean :boolean]
+                       [:or :seon.agent/id [:tuple [:enum ::debug-tab ::health-tab] :map]] :map :boolean :boolean :boolean]
                   :map]}
   [handle database streams profile registration-key retained-values derive-all? invalidate-calls? confirmed?]
   (let [connection (:seon.db/connection handle)
@@ -2071,7 +2094,10 @@
                    registration-key)
         retained-invocations (::invocations retained-values {})
         captured-invocations (atom {})]
-    (if debug?
+    (cond
+      (= [::health-tab {}] registration-key)
+      (health-page-result handle database)
+      debug?
       (let [retained (get-in retained-values [::calls registration-key] {})
             candidates (candidate-call-ids retained database confirmed?)
             package (get-in retained-values [::packages registration-key])]
@@ -2092,6 +2118,7 @@
                                    package))
            :seon.render/captured-calls retained
            :seon.render/captured-invocations retained-invocations}))
+      :else
       (let [retained (get-in retained-values [::calls registration-key] {})
             candidates (candidate-call-ids retained database confirmed?)
             call-id (root-call-id :seon.render/html registration-key)
@@ -2163,7 +2190,7 @@
   committed value they were last derived or checked at: an unchanged head asks
   no read evidence and derives no block."
   {:malli/schema [:=> [:cat :map :seon.db/database-value :map :map
-                       [:or :seon.agent/id [:tuple [:= ::debug-tab] :map]] :boolean :boolean]
+                       [:or :seon.agent/id [:tuple [:enum ::debug-tab ::health-tab] :map]] :boolean :boolean]
                   :map]}
   [handle database streams profile registration-key derive-all? invalidate-calls?]
   (let [cache (render/shared-cache (:seon.sci.eval/ctx handle))
@@ -2842,15 +2869,18 @@
             :as service}]
   (let [query (query-params request)
         debug? (= "true" (get query "debug"))
+        health? (= "true" (get query "health"))
         viewer-namespace (when debug?
                            (or (some-> (get query "viewer") route-namespace)
                                (agent-namespace (db/db connection) id)))
         registration-key
-        (if debug?
+        (cond
+          health? [::health-tab {}]
+          debug?
           [::debug-tab
            (debug-query query [:seon.agent/id id] viewer-namespace
                         (when (agent-namespace (db/db connection) id) id))]
-          id)
+          :else id)
         channel (:async-channel request)
         tap (async/chan (async/sliding-buffer 1))
         tab-id (str (random-uuid))
@@ -3742,6 +3772,26 @@
         (page-response service agent-id))
       (not-found request))))
 
+(defn- health-response
+  "The health page: the cluster's health report through its HTML face, then
+  the render proc's packages on the feed. Painted from one database value on
+  the request's thread; a unit still deriving shows pending and repaints when
+  it completes."
+  {:malli/schema [:=> [:cat :seon.render.web/service :map]
+                  [:map [:status :int] [:headers [:map-of :string :string]] [:body :string]]]}
+  [{connection :seon.store/connection-object root :seon.agent/id :as service} _request]
+  (let [database (db/db connection)]
+    (if (:seon.error/at database)
+      {:status 503 :headers {"content-type" "text/plain; charset=utf-8"}
+       :body (value/bounded-text (:seon.error/message database))}
+      (let [page (current-page service database [::health-tab {}])]
+        {:status 200
+         :headers {"content-type" "text/html; charset=utf-8"}
+         :body (shell {:seon.agent/id root
+                       ::agent-header? true
+                       :seon.render/page [(hiccup/raw (get page health-surface))]
+                       :seon.render.web/feed-url (route/path ::route/feed {:id root} {:health "true"})})}))))
+
 (defn- root-alias-response
   [service request]
   (agent-alias-response service false
@@ -3995,6 +4045,7 @@
                   ::route/agent-message #(inbound-response service %)
                   ::route/agent-context #(context-response service %)
                   ::route/feed #(feed-response service %)
+                  ::route/health #(health-response service %)
                   ::route/data #(data-response service %)
                   ::route/css #(static-response "css" %)
                   ::route/js #(static-response "js" %)}

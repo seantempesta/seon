@@ -84,7 +84,7 @@
              :evidence #{"docs/research/agent-platform/red-triage-3-2026-09-27.md"}}
  #:seon.task{:name "functions-without-tests-is-the-last-datalog-reach"
              :kind :function
-             :intent "seon.fn/functions-without-tests has no caller outside fn_test and is the last reader of test-reach-rules and declared-reference-rules, a second statement of the declared-invocation relation beside seon.fn/declared-callers that can drift from it (111 s on default when measured 2026-09-17). Delete it with both rule sets, or derive coverage from call-reach."
+             :intent "seon.fn/functions-without-tests has no caller outside fn_test and is the last reader of test-reach-rules and declared-reference-rules, a second statement of the declared-invocation relation beside seon.fn/declared-callers that can drift from it (111 s on default when measured 2026-09-17). Delete it with both rule sets, or derive coverage from call-reach. 2026-09-28: seon.health now calls it for the hot-and-untested warning (351-919 ms cold, retained by seon.health/derived per program version, 1 ms warm; 159 untested public functions); a replacement derived from call-reach must keep that caller."
              :must-read #{seon.fn/functions-without-tests seon.fn/declared-callers}
              :evidence #{"tmp/test-feedback-perf/proof.clj"}}
  #:seon.task{:name "cross-file-derivation-inputs-rely-on-dependent-relint"

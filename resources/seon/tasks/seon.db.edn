@@ -97,4 +97,9 @@
              :kind :function
              :intent "seon.db/missing-connection-error answers a refusal whose fix (pass the database value, or (seon.cluster.boot/connection \"default\") at a development REPL) exists only inside :seon.error/message prose, so a test or agent can read it only as text. A refusal adds its fix as :seon.error/fix (AGENTS.md, errors are ordinary values of one shape)."
              :must-read #{seon.db/missing-connection-error}
-             :evidence #{"tmp/test-data-assertions/proofs.edn"}}]
+             :evidence #{"tmp/test-data-assertions/proofs.edn"}}
+ #:seon.task{:name "capturing-read-evidence-costs-0.8-ms-per-index-seek"
+             :kind :function
+             :intent "Binding seon.db/*read-evidence-sink* around seon.problems failed-tests made it 1,572 ms against 180 ms uncaptured: 1,775 captured (db/datoms :avet) reads at about 0.8 ms each (default, armed, 2026-09-28). The runner patch reads those members in one query (25 ms); the capture's own per-read cost remains for any reader that seeks per item. Done when a captured index seek costs within 2x of an uncaptured one."
+             :must-read #{seon.db/read-evidence seon.db/datoms}
+             :evidence #{"tmp/health-page/RESUME.md"}}]

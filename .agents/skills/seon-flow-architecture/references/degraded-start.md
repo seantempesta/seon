@@ -30,10 +30,12 @@ in that JVM is reachable, ask the owning function for the same answer:
  (get @seon.operator.runtime/running-instances "scratch-name"))
 ```
 
-`readiness` (`src/seon/cluster/boot.clj:530-545`) returns the advertisement,
+`readiness` (`seon.cluster.boot/readiness`) returns the advertisement,
 `:seon.boot/missing-layers` (each required layer absent from the instance), the
-agent count, `seon.problems/problems` and `:seon.boot/ready-ms`. The registry
-atom is `resources/seon/operator/runtime.clj:11`.
+agent count and `:seon.boot/ready-ms`; what is wrong with the cluster is
+`(seon.health/report {:seon.boot/cluster-name "scratch-name"})`, whose
+readiness unit is this value. The registry atom is
+`resources/seon/operator/runtime.clj:11`.
 
 Read the missing layers in boot order
 (`stand-boot-layers!`, `src/seon/cluster/boot.clj:147-258`, then

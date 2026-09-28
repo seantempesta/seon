@@ -56,14 +56,6 @@
                    :when (= "seon-problems-field" (:class (second field)))]
                (vec (test-support/hiccup-leaves field))))))
 
-(defn problems-surface
-  "The problems block as a producer wires it: a projection that supplies
-  the liveness set the pipeline will thread from the process. Package 2
-  owns that threading; here the seam is explicit so the test proves the
-  block, not the refusal card."
-  [unit]
-  (problems/block unit))
-
 (defn- world-namespaces
   "The namespaces the member's own world leaves unstewarded. The test world
   carries default's agent-authored namespace rows without their agents
@@ -124,27 +116,6 @@
 
 
 
-(defn- commit-failed-run!
-  [connection]
-  (test-support/transacted! connection
-                            [{:seon.turn/id "run-failed"
-                              :seon.turn/agent [:seon.agent/id "agent-a"]
-                              :seon.turn/opened-tx "datomic.tx"
-                              :seon.turn/closed-tx "datomic.tx"}])
-  (test-support/transacted! connection
-                            (error/commit-tx
-                             (db/db connection)
-                             {:seon.error/declared-schema :seon.error/normalization-error
-      :seon.error/source {:seon.error/at now
-                                                  :seon.error/layer :seon.ai/provider
-                                                  :seon.error/operation 'seon.ai/complete
-                                                  :seon.error/message "the model did not answer"}
-                              :seon.error/id "run-failed-error" :seon.error/at now
-                              :seon.error/process live :seon.sci.admit/caps caps
-                              :seon.config.error/max-evidence-bytes 16384
-                              :seon.config.error/recurrence-limit 3
-                              :seon.turn/id "run-failed" :seon.agent/id "agent-a"})))
-
 (defn- commit-errored-receipt!
   [connection]
   (test-support/transacted! connection
@@ -164,7 +135,6 @@
 
 (def ^:private families
   {:seon.problems/error-signatures commit-error!
-   :seon.problems/failed-runs commit-failed-run!
    :seon.problems/errored-receipts commit-errored-receipt!
    :seon.problems/missing-models commit-missing-model!})
 
@@ -363,8 +333,7 @@
 (deftest a-resolved-fault-stays-closed-until-it-recurs
   (with-db
     (fn [connection]
-      (let [open (fn [] (->> (:seon.problems/error-signatures (found connection))
-                             (problems/open-faults @connection)
+      (let [open (fn [] (->> (problems/open-faults @connection)
                              (filterv #(= 'seon.problems-test/rejected (:seon.error/operation %)))))
             _ (is (:db-after (commit-error! connection)))
             [entry] (open)
@@ -405,7 +374,7 @@
             signature #(db/q '[:find ?s . :in $ ?f :where [?e :seon.error/signature ?s] [?e :seon.instrument/fn ?f]]
                              @connection function)
             open? #(= [(signature)] (mapv :seon.error/signature
-                                          (problems/open-faults @connection (vec (:seon.problems/error-signatures (found connection))))))
+                                          (problems/open-faults @connection)))
             messages #(db/q '[:find (count ?m) . :in $ ?s :where [?m :seon.message/about ?s]] @connection (signature))]
         (define! "(defn target [] 1)")
         (fault!)
@@ -469,14 +438,6 @@
         (is (= :seon.db/database-write (:seon.error/layer result)))
         (is (empty? (:seon.problems/error-signatures (found connection))))))))
 
-(deftest a-run-that-closed-with-an-error-says-why
-  (with-db
-    (fn [connection]
-      (commit-failed-run! connection)
-      (let [entry (first (:seon.problems/failed-runs (found connection)))]
-        (is (= "run-failed" (:seon.turn/id entry)))
-        (is (= "the model did not answer" (:seon.error/message entry)))))))
-
 (deftest an-errored-receipt-is-a-problem-without-being-a-fault
   (with-db
     (fn [connection]
@@ -511,17 +472,14 @@
         verify-value
         (fn [connection present occurrences]
           (let [value (found connection)
-                expected (cond-> present
-                           (present :seon.problems/failed-runs)
-                           (conj :seon.problems/error-signatures))
+                expected present
                 html (problems/html-report value)
                 entities (filter
                       (fn [node]
                         (and (vector? node)
                              (= "seon-problems-row" (:class (nth node 1 nil)))))
                       (tree-seq sequential? seq html))
-                entity-count (+ (count present)
-                             (if (present :seon.problems/failed-runs) 1 0))]
+                entity-count (count present)]
             (is (every? #(seq (get value %)) present))
             (is (= expected (set (keys value))))
             (is (= (empty? present) (= {} value)))
@@ -534,8 +492,7 @@
                     signature (first (filter #(= 'seon.problems-test/rejected
                                                   (:seon.error/operation %)) signatures))]
                 (is (= occurrences (:seon.problems/occurrences signature)))
-                (is (= (if (present :seon.problems/failed-runs) 2 1)
-                       (count signatures)))))))]
+                (is (= 1 (count signatures)))))))]
     (doseq [present subsets]
       (acquire
        (fn [connection]
@@ -548,22 +505,8 @@
        (verify-value connection #{:seon.problems/error-signatures} 1)
        (dotimes [_ 4] (commit-error! connection))
        (verify-value connection #{:seon.problems/error-signatures} 5)))
-    (is (= 16 (count @exercised) (count (set @exercised))))
-    (is (= 17 @acquisitions))))
-
-(deftest the-block-derives-at-the-units-own-database-value
-  (with-db
-    (fn [connection]
-      (let [healthy @connection
-            _ (commit-failed-run! connection)
-            broken @connection
-            render-at (fn [db] (problems/block {:seon.db/db db}))
-            errors (fn [db] (keep #(get % "error") (page-rows (render-at db))))]
-        (is (= (render-at (db/db (:seon.db/connection seon.test/*member*))) (render-at healthy))
-            "the fixture's healthy value renders exactly its world's surface")
-        (is (empty? (errors healthy)) "the healthy value shows no failed run")
-        (is (= ["the model did not answer"] (errors broken))
-            "the broken value shows its failed run's error")))))
+    (is (= 8 (count @exercised) (count (set @exercised))))
+    (is (= 9 @acquisitions))))
 
 (deftest ^{:seon.test/golden "ai-prose is the value printer's bounded text: its budget, whole lines and elision continuation are what the agent reads."}
   six-hundred-failed-tests-render-within-the-profile-bound

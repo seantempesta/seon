@@ -23,4 +23,9 @@
              :kind :function
              :intent "seon.profile/timed restores a cell's entry with (.set entered prior), so an outermost exit sets nil and leaves the ThreadLocal's slot in that thread's ThreadLocalMap: a long-lived thread (the prepl, a Flow proc thread) holds one entry per cell it ever called (up to about 2,560), and each ThreadLocal.get probes that map. Measured 2026-09-28: the same bracket cost 40 to 52 ns per call on the prepl thread depending on which ThreadLocal instance it drew, and 40 to 41 ns on fresh threads. Done when an outermost exit removes its entry (or the entry lives in one per-thread structure) and the bracket costs the same on a long-lived thread as on a fresh one, measured parent against change."
              :must-read #{seon.profile/timed seon.profile/with-cell}
-             :evidence #{"docs/research/agent-platform/landing/health-recording-2026-09-28.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/health-recording-2026-09-28.md"}}
+ #:seon.task{:name "reading-the-profile-cells-costs-3-ms"
+             :kind :function
+             :intent "seon.profile/cells builds a vector of every live cell (2,673) on each call: 2.9 ms, and summing each cell's total counter over it 2.5 ms (default 2026-09-28); a health report reads it live every time (the counters move with the read itself, so no key can hold it). Done when the report's candidates (definitions with a second of inclusive time) are found without touching every cell, e.g. from the stored judgments once they land."
+             :must-read #{seon.profile/cells seon.profile/observation}
+             :evidence #{"tmp/health-page/RESUME.md"}}]

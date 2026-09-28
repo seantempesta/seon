@@ -1,0 +1,64 @@
+--- a/src/seon/test/runner.clj
++++ b/src/seon/test/runner.clj
+@@ -1798,6 +1798,21 @@
+    :seon.test/failing-assertions
+    :seon.test/failure-message])
+ 
++(defn- report-selector
++  "Every member `:seon.test.report/report` declares, from the database's
++  projection: never `*`, whose read depends on every attribute, so a reader
++  retaining failed tests by the attributes they read (`seon.health/derived`)
++  re-derived them on every commit. Equal to `*` on default's 400 reports
++  (2026-09-28)."
++  {:malli/schema [:=> [:cat :seon.db/database-value] :seon.db/pull-selector]}
++  [database]
++  (let [projection (db/carried-projection database)]
++    (schema/projection-cache-value
++     projection ::report-selector
++     #(into [:db/id] (map first)
++            (m/entries (m/deref-all (m/schema :seon.test.report/report
++                                              {:registry (:seon.schema.projection/registry projection)})))))))
++
+ (defn- recorded-member-results
+   "The recorded results of each `[run-id test-symbol]` in `wanted`, by symbol:
+   one run pull, one member read, one report query and one report pull for the
+@@ -1826,7 +1841,7 @@
+                            database (mapv (comp :db/id second) pairs)))
+         reports (group-by first report-entities)
+         pulled (zipmap (map second report-entities)
+-                       (execution-read (db/pull-many database '[*] (mapv second report-entities))))]
++                       (execution-read (db/pull-many database (report-selector database) (mapv second report-entities))))]
+     (into {}
+           (map (fn [[run-eid member]]
+                  (let [run (by-eid run-eid)
+@@ -2035,10 +2050,12 @@
+ 
+   ## Costs
+ 
+-  An index read from each name (`:seon.test.member/symbol` AVET), one query
+-  for the runs holding those members and one over those runs: proportional
+-  to the requested tests' executions, never every member, and a run more
+-  adds no read. Measured unarmed on
++  One query binding every name (`:seon.test.member/symbol` AVET), one for
++  the runs holding those members and one over those runs: proportional to the
++  requested tests' executions, never every member, and a run more adds no
++  read. The members were one index read per name: 1,775 reads, 1.4 s when a
++  reader captured read evidence; the one query is 25 ms for the same 16,846
++  members (default, armed, 2026-09-28). Measured unarmed on
+   default 2026-09-27: the executions of 14 tests (148) in 3.9 ms where the
+   unbound Datalog took 152 ms; 595 tests (377 results) in 60 ms where it took
+   4.7 s."
+@@ -2046,9 +2063,10 @@
+                   [:or :seon.test/latest-results :seon.test/execution-error]]}
+   [database test-symbols]
+   (try
+-    (let [members (into {} (for [test-symbol (distinct test-symbols)
+-                                 {member :e} (execution-read (db/datoms database :avet :seon.test.member/symbol test-symbol))]
+-                             [member test-symbol]))
++    (let [members (into {} (execution-read
++                            (db/q '[:find ?member ?symbol :in $ [?symbol ...]
++                                    :where [?member :seon.test.member/symbol ?symbol]]
++                                  database (vec (distinct test-symbols)))))
+           ;; One read for the runs holding every member, however many runs they span.
+           runs (when (seq members)
+                  (mapv (fn [[run member]] [(members member) run])

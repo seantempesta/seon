@@ -27,7 +27,7 @@
             [clojure.java.io :as io])
   (:import [com.github.benmanes.caffeine.cache AsyncCache Caffeine Policy$Eviction
             RemovalCause RemovalListener Weigher]
-           [java.util.concurrent CompletableFuture ConcurrentHashMap]
+           [java.util.concurrent CompletableFuture ConcurrentHashMap TimeUnit TimeoutException]
            [java.util.concurrent.atomic LongAdder]
            [java.util.function Function]))
 
@@ -118,6 +118,45 @@
 ;; without bound (Astra audit F3, 2026-09-26).
 (def ^:private entry-bytes 256)
 
+(defn- claim
+  "The entry of `k` in `cache` and whether this caller put it: the caller that
+  puts the entry runs its one derivation; every other caller joins it."
+  {:malli/schema [:=> [:cat :seon.schema/value :seon.schema/value] [:tuple :seon.schema/value :boolean]]}
+  [^AsyncCache cache k]
+  (if-let [prior (.getIfPresent cache k)]
+    [prior false]
+    (let [mine (CompletableFuture.)]
+      (if-let [prior (.putIfAbsent (.asMap cache) k mine)] [prior false] [mine true]))))
+
+(defn- settle!
+  "Derive the claimed entry `mine` of `[kind content-key]` and complete it,
+  answering what it completed with: `{::value v}`, or `{::thrown t}` for a
+  derivation that threw. Neither a throw nor a value `retain?` refuses stays
+  in the cache. Completed normally even when carrying a throwable: an
+  exceptional completion would log a Caffeine warning per refusal."
+  {:malli/schema [:=> [:cat :seon.cache/cache :qualified-keyword :seon.schema/value [:fn clojure.core/ifn?]
+                       [:fn clojure.core/ifn?] [:fn clojure.core/ifn?] :seon.schema/value]
+                  :map]}
+  [{::keys [^AsyncCache cache] :as held} kind content-key weigh derive-fn retain? ^CompletableFuture mine]
+  (let [k [kind content-key]
+        c (kind-counters held kind)
+        started (System/nanoTime)]
+    (.increment ^LongAdder (::misses c))
+    (let [result (try
+                   (let [value (derive-fn)
+                         keep? (and (some? value) (boolean (retain? value)))
+                         weight (if keep? (+ entry-bytes (long (weigh value))) 0)]
+                     (.add ^LongAdder (::load-nanos c) (- (System/nanoTime) started))
+                     (if keep?
+                       (.add ^LongAdder (::bytes c) weight)
+                       (.remove (.asMap cache) k mine))
+                     {::value value ::weight weight})
+                   (catch Throwable t
+                     (.remove (.asMap cache) k mine)
+                     {::thrown t ::weight 0}))]
+      (.complete mine result)
+      result)))
+
 (defn lookup
   "The value `derive-fn` computes for `[kind content-key]`, derived once per key.
 
@@ -151,34 +190,58 @@
      :seon.schema/value]]}
   ([kind content-key weigh derive-fn] (lookup @process kind content-key weigh derive-fn some?))
   ([kind content-key weigh derive-fn retain?] (lookup @process kind content-key weigh derive-fn retain?))
-  ([{::keys [^AsyncCache cache] :as held} kind content-key weigh derive-fn retain?]
-   (let [k [kind content-key]
-         c (kind-counters held kind)
-         prior (or (.getIfPresent cache k)
-                   (let [mine (CompletableFuture.)]
-                     (or (.putIfAbsent (.asMap cache) k mine)
-                         (let [started (System/nanoTime)]
-                           (.increment ^LongAdder (::misses c))
-                           (try
-                             (let [value (derive-fn)
-                                   keep? (and (some? value) (boolean (retain? value)))
-                                   weight (if keep? (+ entry-bytes (long (weigh value))) 0)]
-                               (.add ^LongAdder (::load-nanos c) (- (System/nanoTime) started))
-                               (if keep?
-                                 (.add ^LongAdder (::bytes c) weight)
-                                 (.remove (.asMap cache) k mine))
-                               (.complete mine {::value value ::weight weight})
-                               (reduced value))
-                             (catch Throwable t
-                               ;; Completed normally, carrying the throwable:
-                               ;; the entry is already gone, and an exceptional
-                               ;; completion would log a Caffeine warning per refusal.
-                               (.remove (.asMap cache) k mine)
-                               (.complete mine {::thrown t ::weight 0})
-                               (throw t)))))))]
-     (if (reduced? prior)
-       @prior
-       (do (.increment ^LongAdder (::hits c)) (join prior))))))
+  ([{::keys [cache] :as held} kind content-key weigh derive-fn retain?]
+   (let [[pending mine?] (claim cache [kind content-key])]
+     (if mine?
+       (let [{::keys [value thrown]} (settle! held kind content-key weigh derive-fn retain? pending)]
+         (if thrown (throw thrown) value))
+       (do (.increment ^LongAdder (::hits (kind-counters held kind))) (join pending))))))
+
+(defn lookup-within
+  "[[lookup]] that waits at most `deadline-ms` for the value: a reader that
+  must not block (a page's render pass) gets `:seon.cache/pending` instead.
+
+  A miss starts the one derivation of the key on its own virtual thread; a
+  reader that stops waiting never cancels it (an interrupt is not an exit),
+  and later readers of the key join it rather than starting another. When the
+  answer is pending, `on-complete` (no arguments) runs once the derivation
+  completes, so the reader can offer itself a wake. A thrown derivation
+  rethrows as [[lookup]]'s does.
+
+  ## Examples
+
+  `(seon.cache/lookup-within ::family key count #(derive db) 50 #(async/offer! wake {}))`"
+  {:malli/schema [:function
+                  [:=> [:cat :qualified-keyword :seon.schema/value [:fn clojure.core/ifn?] [:fn clojure.core/ifn?]
+                        [:int {:min 0}] [:maybe [:fn clojure.core/ifn?]]]
+                   [:or :seon.cache/pending :seon.schema/value]]
+                  [:=> [:cat :seon.cache/cache :qualified-keyword :seon.schema/value [:fn clojure.core/ifn?] [:fn clojure.core/ifn?]
+                        [:int {:min 0}] [:maybe [:fn clojure.core/ifn?]]]
+                   [:or :seon.cache/pending :seon.schema/value]]]}
+  ([kind content-key weigh derive-fn deadline-ms on-complete]
+   (lookup-within @process kind content-key weigh derive-fn deadline-ms on-complete))
+  ([{::keys [cache] :as held} kind content-key weigh derive-fn deadline-ms on-complete]
+   (let [[^CompletableFuture pending mine?] (claim cache [kind content-key])]
+     (if mine?
+       (Thread/startVirtualThread #(settle! held kind content-key weigh derive-fn some? pending))
+       (.increment ^LongAdder (::hits (kind-counters held kind))))
+     (try
+       (let [{::keys [value thrown]} (.get pending (long deadline-ms) TimeUnit/MILLISECONDS)]
+         (if thrown (throw thrown) value))
+       (catch TimeoutException _
+         (when on-complete (.thenRun pending ^Runnable on-complete))
+         {:seon.cache/pending-kind kind :seon.cache/since (java.util.Date.)})))))
+
+(defn evict!
+  "Remove the one entry `[kind content-key]`: a value its owner has replaced
+  (a derivation that learned more of what it reads). Answers nil."
+  {:malli/schema [:function
+                  [:=> [:cat :qualified-keyword :seon.schema/value] :nil]
+                  [:=> [:cat :seon.cache/cache :qualified-keyword :seon.schema/value] :nil]]}
+  ([kind content-key] (evict! @process kind content-key))
+  ([{::keys [^AsyncCache cache]} kind content-key]
+   (.remove (.asMap cache) [kind content-key])
+   nil))
 
 (defn retained
   "The retained values of `kind`, by content key: the completed entries only.
@@ -219,20 +282,26 @@
   "The byte budget, the estimated bytes held, and per-kind counters.
 
   Per kind: hits, misses, evictions, estimated bytes and derivation
-  milliseconds since the JVM began."
+  milliseconds since the JVM began, with its hit rate and its share of the
+  weighed bytes as whole percents."
   {:malli/schema [:function
                   [:=> [:cat] :seon.cache/status]
                   [:=> [:cat :seon.cache/cache] :seon.cache/status]]}
   ([] (status @process))
   ([{::keys [^ConcurrentHashMap stats] :as held}]
-   (let [policy (eviction held)]
+   (let [policy (eviction held)
+         weighted (.getAsLong (.weightedSize policy))
+         percent (fn [part whole] (if (pos? whole) (quot (* 100 part) whole) 0))]
      {:seon.cache/max-bytes (.getMaximum policy)
-      :seon.cache/weighted-bytes (.getAsLong (.weightedSize policy))
+      :seon.cache/weighted-bytes weighted
       :seon.cache/kinds
       (into (sorted-map)
             (map (fn [[kind c]]
-                   (let [sum #(.sum ^LongAdder (get c %))]
-                     [kind {:seon.cache/hits (sum ::hits) :seon.cache/misses (sum ::misses)
-                            :seon.cache/evictions (sum ::evictions) :seon.cache/bytes (sum ::bytes)
-                            :seon.cache/load-ms (quot (sum ::load-nanos) 1000000)}])))
+                   (let [sum #(.sum ^LongAdder (get c %))
+                         [hits misses held] (map sum [::hits ::misses ::bytes])]
+                     [kind {:seon.cache/kind kind :seon.cache/hits hits :seon.cache/misses misses
+                            :seon.cache/evictions (sum ::evictions) :seon.cache/bytes held
+                            :seon.cache/load-ms (quot (sum ::load-nanos) 1000000)
+                            :seon.cache/hit-percent (percent hits (+ hits misses))
+                            :seon.cache/byte-percent (percent (max 0 held) weighted)}])))
             stats)})))

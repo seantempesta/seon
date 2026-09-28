@@ -2,16 +2,12 @@
   "Root's cluster observation and per-agent accounting, derived at read time."
   (:require [seon.error.refusal]
             [clojure.edn :as edn]
-            [clojure.java.io :as io]
-            [cheshire.core :as json]
             [seon.blob :as blob]
             [seon.cluster.registry :as registry]
             [seon.db :as db]
             [seon.env :as env]
-            [seon.render.value :as render.value]
-            [seon.id :as id])
-  (:import [java.lang.management ManagementFactory]
-           [com.sun.management HotSpotDiagnosticMXBean HotSpotDiagnosticMXBean$ThreadDumpFormat]))
+            [seon.render.value :as render.value])
+  (:import [java.lang.management ManagementFactory]))
 
 (defn- unknown
   {:malli/schema [:=> [:cat :string] :seon.cluster.status/unavailable-error]}
@@ -26,33 +22,22 @@
 (defn- utf8-size [text]
   (alength (.getBytes ^String text "UTF-8")))
 
-(defn- thread-counts []
-  (let [directory (io/file "tmp/root-cluster-observations")
-        file (io/file directory (str (id/id) ".json"))]
-    (.mkdirs directory)
-    (try
-      (.dumpThreads (ManagementFactory/getPlatformMXBean HotSpotDiagnosticMXBean)
-                    (.getAbsolutePath file) HotSpotDiagnosticMXBean$ThreadDumpFormat/JSON)
-      (let [dump (json/parse-string (slurp file))
-            containers (get-in dump ["threadDump" "threadContainers"])
-            threads (mapcat #(get % "threads") containers)]
-        (if (seq threads)
-          {:seon.cluster.status/platform-threads (count (remove #(get % "virtual") threads))
-           :seon.cluster.status/virtual-threads
-           (if (= "false" (System/getProperty "jdk.trackAllThreads"))
-             (unknown "The JVM disables tracking all virtual threads.")
-             (count (filter #(get % "virtual") threads)))}
-          (throw (ex-info "The JVM thread dump contained no threads." {}))))
-      (catch Exception failure
-        {:seon.cluster.status/platform-threads (unknown (ex-message failure))
-         :seon.cluster.status/virtual-threads (unknown (ex-message failure))})
-      (finally (.delete file)))))
+(defn- thread-counts
+  "Live platform threads from the JVM's thread bean. Virtual threads are a
+  typed unknown: the bean counts platform threads only, and a thread dump to
+  count them wrote a file per observation."
+  {:malli/schema [:=> [:cat] [:map [:seon.cluster.status/platform-threads :seon.cluster.status/measurement]
+                              [:seon.cluster.status/virtual-threads :seon.cluster.status/measurement]]]}
+  []
+  {:seon.cluster.status/platform-threads (.getThreadCount (ManagementFactory/getThreadMXBean))
+   :seon.cluster.status/virtual-threads
+   (unknown "Virtual threads are not counted: the JVM's thread bean counts platform threads only.")})
 
 (defn snapshot
   "Observe this cluster and JVM. SCI supplies the database and connection.
-  Thread counts are a non-atomic JVM dump. Store size is an explicit operator
-  diagnostic: routine observations never traverse the store's files.
-  Faults and session accounting start at this JVM's boot instant.
+  Store size is an explicit operator diagnostic: routine observations never
+  traverse the store's files. Open faults are `seon.problems/open-faults`'s,
+  shown by the health report beside this value.
 
   Example: (seon.cluster.status/snapshot {})"
   {:malli/schema [:=> [:cat :seon.cluster.status/request]
@@ -72,15 +57,7 @@
                              (db/q '[:find ?c . :in $ ?name :where [?c :seon.cluster/name ?name]] database named)
                              (db/q '[:find ?c . :where [?c :seon.cluster/name]] database))
                            (db/pull database [:seon.cluster/name :seon.source/commit-id]))
-          heap (.getHeapMemoryUsage (ManagementFactory/getMemoryMXBean))
-          faults (db/q '[:find ?signature (sum ?count)
-                         :with ?o
-                         :in $ ?boot
-                         :where [?f :seon.error/signature ?signature]
-                         [?f :seon.error/occurrences ?o]
-                         [?o :seon.error.occurrence/count ?count]
-                         [?o :seon.error.occurrence/last-at ?at] [(compare ?at ?boot) ?order]
-                         [(>= ?order 0)]] database (boot-time))]
+          heap (.getHeapMemoryUsage (ManagementFactory/getMemoryMXBean))]
       (if-not (:seon.cluster/name cluster)
         (unknown "This database has no cluster identity.")
         (merge
@@ -98,8 +75,7 @@
           (count (db/q '[:find ?a :where [?a :seon.agent/id]] database))
           :seon.cluster.status/open-turns
           (count (db/q '[:find ?t :where [?t :seon.turn/id]
-                        (not [?t :seon.turn/closed-tx])] database))
-          :seon.cluster.status/faults (vec (sort-by first faults))}
+                        (not [?t :seon.turn/closed-tx])] database))}
          (thread-counts))))
     (catch Exception failure (unknown (ex-message failure)))))
 
@@ -194,10 +170,12 @@
   (list 'seon.db/q (list 'quote cluster-query) '(seon.db/db)))
 
 (defn render-html
-  "Show the same cluster observation as labeled data."
+  "Show a cluster observation as labeled data: the value it is given when that
+  is a `snapshot`, else my cluster and adopted source, as the AI face reads
+  them. A render never collects: `snapshot` is offered, not run."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
-  [unit]
-  (let [value (snapshot unit)]
+  [{value :seon.render/value :as unit}]
+  (let [shown (if (and (map? value) (:seon.cluster.status/heap-used value)) value (render-ai unit))]
     [:section {:class "seon-cluster-status"}
      [:h3 "Cluster"]
-     (into [:dl] (map (fn [[k v]] [:div [:dt (name k)] [:dd (render.value/bounded-text v)]]) value))]))
+     (into [:dl] (map (fn [[k v]] [:div [:dt (name k)] [:dd (render.value/bounded-text v)]]) shown))]))

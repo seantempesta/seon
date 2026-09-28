@@ -42,5 +42,4 @@
   [:seon.cluster.status/adopted-commit [:or :uuid :seon.error/value]]
   [:seon.cluster.status/current-commit [:or :uuid :seon.error/value]]
   [:seon.cluster.status/agents :seon.cluster.status/count]
-  [:seon.cluster.status/open-turns :seon.cluster.status/count]
-  [:seon.cluster.status/faults [:vector [:tuple :string :seon.cluster.status/count]]]]}
+  [:seon.cluster.status/open-turns :seon.cluster.status/count]]}

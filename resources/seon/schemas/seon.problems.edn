@@ -3,13 +3,34 @@
                  [:seon.error/signature :seon.error/signature]
                  [:seon.error/operation {:optional true} :seon.error/operation]
                  [:seon.error/resolved-tx :seon.error/resolved-tx]]
-                :failed-tests
-                [:vector [:map [:seon.test/sym :seon.test/sym]
-                          [:seon.test/fail-count :seon.test/fail-count]
-                          [:seon.test/error-count :seon.test/error-count]
-                          [:seon.test/failures {:optional true} [:vector :seon.test.failure/value]]]]
+                :failed-test
+                [:map {:seon.health/severity 4 :seon.health/impact :seon.test/fail-count :seon.health/subject :seon.test/sym
+                       :seon.health/in [:seon.health/problems :seon.problems/failed-tests]
+                       :seon.health/clues [[:seon.test/fail-count] [:seon.test/error-count]]
+                       :description "A test whose latest admitted execution failed or errored."}
+                 [:seon.test/sym :seon.test/sym]
+                 [:seon.test/fail-count :seon.test/fail-count]
+                 [:seon.test/error-count :seon.test/error-count]
+                 [:seon.test/failures {:optional true} [:vector :seon.test.failure/value]]]
+                :failed-tests [:vector :seon.problems/failed-test]
+                :unknown-test
+                [:and {:seon.health/severity 3 :seon.health/subject :seon.test/error-test-symbol
+                       :seon.health/in [:seon.health/problems :seon.problems/failed-tests-unknown]
+                       :seon.health/clues [[:seon.error/message]]
+                       :description "A test whose latest execution recorded no outcome: unknown, never green."}
+                 :seon.test/execution-error]
+                :open-fault
+                [:and {:seon.health/severity 8 :seon.health/impact :seon.problems/occurrences :seon.health/at :seon.error/at
+                       :seon.health/subject :seon.error/operation
+                       :seon.health/in [:seon.health/problems :seon.problems/error-signatures]
+                       :seon.health/clues [[:seon.error/fact :seon.error/message] [:seon.problems/occurrences] [:seon.error/layer]]
+                       :description "A fault no resolution closes: its function has not changed since its latest occurrence and nobody resolved it."}
+                 :seon.problems/error-signature
+                 [:not [:map [:seon.error/resolution :seon.error/resolution]]]]
                 :errored-receipt
-                [:map
+                [:map {:seon.health/severity 1 :seon.health/subject :seon.cluster.eval/id
+                       :seon.health/in [:seon.health/problems :seon.problems/errored-receipts]
+                       :seon.health/clues [[:seon.cluster.eval/error] [:seon.turn/id]]}
                  [:seon.cluster.eval/id :seon.cluster.eval/id]
                  [:seon.turn/id :seon.turn/id]
                  [:seon.cluster.eval/ordinal
@@ -29,18 +50,19 @@
                  [:seon.problems/author :seon.agent/id]
                  [:seon.cluster.eval/error :seon.cluster.eval/error]],
                 :unowned-namespace
-                [:map [:seon.ns/name :seon.ns/name]],
+                [:map {:seon.health/severity 1 :seon.health/subject :seon.ns/name
+                       :seon.health/in [:seon.health/problems :seon.problems/unowned-namespaces]}
+                 [:seon.ns/name :seon.ns/name]],
                 :missing-model
                 [:map
-                 #:seon.render{:ai seon.problems/missing-model-ai,
-                               :html seon.problems/missing-model-html}
+                 {:seon.render/ai seon.problems/missing-model-ai,
+                  :seon.render/html seon.problems/missing-model-html
+                  :seon.health/severity 2 :seon.health/subject :seon.config.ai/model
+                  :seon.health/in [:seon.health/problems :seon.problems/missing-models]}
                  [:seon.config.ai/model :seon.config.ai/model]],
-                :failed-run
-                [:map
-                 [:seon.turn/id :seon.turn/id]
-                 [:seon.agent/id :seon.agent/id]],
                 :stale-var
-                [:map
+                [:map {:seon.health/severity 2 :seon.health/subject :seon.fn/sym
+                       :seon.health/in [:seon.health/problems :seon.problems/stale-vars]}
                  ;; NO RENDER PAIR. This entity's only attribute is
                  ;; `:seon.fn/sym`, the `:db.unique/identity` of the
                  ;; `:seon.fn` family, and maps are OPEN — so a declared
@@ -50,12 +72,13 @@
                  ;; call `stale-var-ai`/`stale-var-html` directly on the
                  ;; entities `stale-vars` derived, which is the one mechanism
                  ;; and the only place the staleness is actually known;
-                 ;; the sibling finding entities (`:failed-run`,
-                 ;; `:unowned-namespace`) declare no pair for the same
-                 ;; reason.
+                 ;; the sibling finding entity `:unowned-namespace`
+                 ;; declares no pair for the same reason.
                  [:seon.fn/sym :seon.fn/sym]],
                 :deferred-agent
-                [:map
+                [:map {:seon.health/severity 2 :seon.health/impact :seon.problems/deferred-count :seon.health/subject :seon.agent/id
+                       :seon.health/in [:seon.health/problems :seon.problems/deferred-agents]
+                       :seon.health/clues [[:seon.problems/deferred-count] [:seon.turn.work/episode-runs]]}
                  [:seon.agent/id :seon.agent/id]
                  [:seon.turn.work/episode-runs
                   :seon.turn.work/episode-runs]
@@ -74,12 +97,11 @@
                                :html seon.problems/html-report}
                  [:seon.problems/failed-tests {:optional true}
                   :seon.problems/failed-tests]
+                 [:seon.problems/failed-tests-unknown {:optional true}
+                  [:vector :seon.problems/unknown-test]]
                  [:seon.problems/error-signatures
                   {:optional true}
                   [:vector :seon.problems/error-signature]]
-                 [:seon.problems/failed-runs
-                  {:optional true}
-                  [:vector :seon.problems/failed-run]]
                  [:seon.problems/errored-receipts
                   {:optional true}
                   [:vector :seon.problems/errored-receipt]]

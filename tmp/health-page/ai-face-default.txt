@@ -1,0 +1,72 @@
+{:seon.health/cluster "default",
+ :seon.health/state :faulted,
+ :seon.health/basis
+   {:seon.db/basis-t 536888983,
+    :datahike/commit-id #uuid "6abac497-4485-5b7e-8115-d5959c7e532e"},
+ :seon.health/top
+   [#:seon.health{:schema :seon.health/untested-hot-warning,
+     :subject seon.program/edn-round-trip-symbol?,
+     :score 712,
+     :clues #:seon.profile{:calls 6952626, :total-ms 5838}}
+    #:seon.health{:schema :seon.health/untested-hot-warning,
+     :subject seon.schema/pull-selector?,
+     :score 612,
+     :tasks #{"77dd954dce1b"},
+     :clues #:seon.profile{:calls 696043, :total-ms 16262}}
+    #:seon.health{:schema :seon.health/over-bound-warning,
+     :subject seon.test-support/run-database-body,
+     :score 546,
+     :callers 1,
+     :clues
+       {:seon.profile/calls 273,
+        :seon.profile/mean-us 1979860,
+        :seon.profile/max-ms 22287,
+        :seon.health/tested? true}}
+    #:seon.health{:schema :seon.health/over-bound-warning,
+     :subject seon.test.runner/run-vars!,
+     :score 490,
+     :tasks #{"6f6af011c031"},
+     :callers 1,
+     :clues #:seon.profile{:calls 142, :mean-us 3792945, …2}}
+    #:seon.health{:schema :seon.problems/open-fault,
+     :subject seon.turn/write-refusal-error,
+     :score 399,
+     :clues
+       {:seon.problems/occurrences 19,
+        :seon.error/layer :seon.agent/agent-graph,
+        :seon.error/message "Agent \"root\" with no open turn h"…+174}}],
+ :seon.health/counts
+   {:seon.health/over-bound-warning 10,
+    :seon.health/throwing-warning 2,
+    :seon.health/untested-hot-warning 2,
+    :seon.problems/errored-receipt 43,
+    :seon.problems/failed-test 206,
+    :seon.problems/open-fault 19,
+    :seon.problems/unknown-test 70,
+    :seon.problems/unowned-namespace 24},
+ :seon.health/units
+   #:seon.health{:cache
+      #:seon.cache{:max-bytes 512000000, :weighted-bytes 4129792},
+    :fleet #:seon.health{:agents 1, :procs 4},
+    :maintenance {:seon.health/entries 3},
+    :problems
+      #:seon.problems{:error-signatures 50,
+       :errored-receipts 43,
+       :failed-tests 206,
+       :failed-tests-unknown 70,
+       :unowned-namespaces 24},
+    :profile {:seon.health/observed 396},
+    :readiness
+      {:seon.boot/missing-layers [],
+       :seon.boot/ready-ms 35458,
+       :seon.render.web/url "http://127.0.0.1:7994"},
+    :replaced-roots {:seon.health/count 0},
+    :status
+      #:seon.cluster.status{:heap-used 5962508080,
+       :heap-max 10997465088,
+       :open-turns 0,
+       :platform-threads 232}},
+ :seon.render/operations
+   [(seon.health/report {:seon.boot/cluster-name "default"})
+    (seon.problems/open-faults (seon.db/db))
+    (seon.cache/status)]}

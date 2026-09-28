@@ -58,6 +58,12 @@
                   [:seon.oversight/passes {:optional true} :seon.oversight/passes]
                   [:seon.oversight/buffers {:optional true} :seon.oversight/buffers]],
                  :procs [:vector :seon.oversight/proc-observation],
+                 :unanswered-proc
+                 [:map {:seon.health/severity 6 :seon.health/subject :seon.oversight/proc
+                        :seon.health/in [:seon.health/fleet] :seon.health/clues [[:seon.oversight/ping]]
+                        :description "A proc (its observation) that did not answer a bounded Flow ping, or whose graph stopped: unknown is never healthy."}
+                  [:seon.oversight/proc :seon.oversight/proc]
+                  [:seon.oversight/ping [:enum :unknown :stopped]]],
                  :plumbing [:vector :seon.oversight/proc-observation],
                  :mailbox :seon.oversight/occupancy,
                  :turn-buffer :seon.oversight/occupancy,

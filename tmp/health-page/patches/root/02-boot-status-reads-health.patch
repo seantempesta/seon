@@ -1,0 +1,38 @@
+--- a/src/seon/cluster/boot.clj
++++ b/src/seon/cluster/boot.clj
+@@ -21,6 +21,7 @@
+             [seon.error.refusal :as refusal]
+             [seon.flow :as flow]
+             [seon.fs :as fs]
++            [seon.health :as health]
+             [seon.maintenance :as maintenance]
+             [seon.operator.runtime :refer [running-instances]]
+             [seon.render.value :as render.value]
+@@ -536,7 +537,7 @@
+   "Read each acquired layer; missing values are explicit, including partial boot.
+ 
+   Readiness is the boot's own facts. The cluster's problems are read by their
+-  owner where they are shown (`seon.cluster/mcp-runtime-observation`): carried
++  owner where they are shown (`seon.health/report`): carried
+   here they crossed every start reply whole, every stored failed test run
+   included."
+   {:malli/schema [:=> [:cat :seon.boot/instance] :seon.boot/readiness]}
+@@ -662,14 +663,14 @@
+         :status (cond-> (merge identity
+                               {:seon.operator/clusters
+                                (mapv (fn [[n instance]]
+-                                       (let [observation (cluster/mcp-runtime-observation n)
++                                       (let [report (health/report {:seon.boot/cluster-name n})
+                                              connection (:seon.boot/cluster-connection instance)]
+                                          (if (:seon.operator/verbose? request)
+-                                           observation
++                                           report
+                                            ;; The operator's request has no evaluation
+                                            ;; world: the cluster hands its own database.
+-                                           (cluster/runtime-observation-ai
+-                                            (cond-> {:seon.render/value observation}
++                                           (health/render-ai
++                                            (cond-> {:seon.render/value report}
+                                               (store/connection? connection)
+                                               (assoc :seon.db/db (db/db connection)))))))
+                                      @running-instances)}

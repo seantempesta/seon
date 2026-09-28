@@ -71,30 +71,17 @@
          (is (= 6 (:seon.cluster.status/storage-bytes entity))
              "all retained shown bytes plus one copy of the shared blob"))))))
 
-(deftest root-concern-is-selected-by-schema-and-jvm-counts-include-virtual-threads
+(deftest root-concern-is-selected-by-schema-and-virtual-threads-are-unknown
   (support/with-database
    (fn [connection]
      (let [projection (schema/projection-from-database @connection)
            matching #(set (map :seon.schema/key (schema/matching-shapes-in projection %)))
-           ready (java.util.concurrent.CountDownLatch. 1)
-           release (java.util.concurrent.CountDownLatch. 1)
-           finished (java.util.concurrent.CountDownLatch. 1)
-           _thread (Thread/startVirtualThread
-                    (fn []
-                      (try
-                        (.countDown ready)
-                        (support/await-event! release :status-thread-release)
-                        (finally (.countDown finished)))))]
-       (try
-         (is (support/await-event! ready :status-thread-ready))
-         (is (contains? (matching {:seon.agent/id "root"}) :seon.cluster.status/root))
-         (is (not (contains? (matching {:seon.agent/id "other"}) :seon.cluster.status/root)))
-         (let [counts (#'status/thread-counts)]
-           (is (pos-int? (:seon.cluster.status/platform-threads counts)))
-           (is (pos-int? (:seon.cluster.status/virtual-threads counts))))
-         (finally
-           (.countDown release)
-           (support/await-event! finished :status-thread-finished)))))))
+           counts (#'status/thread-counts)]
+       (is (contains? (matching {:seon.agent/id "root"}) :seon.cluster.status/root))
+       (is (not (contains? (matching {:seon.agent/id "other"}) :seon.cluster.status/root)))
+       (is (pos-int? (:seon.cluster.status/platform-threads counts)))
+       (is (:seon.cluster.status/unavailable-observation (:seon.cluster.status/virtual-threads counts))
+           "virtual threads are a typed unknown, never a count read from a dump file")))))
 
 (deftest routine-status-declares-unmeasured-store-size
   (support/with-database
