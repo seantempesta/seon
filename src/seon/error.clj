@@ -1516,7 +1516,7 @@
    :seon.message/id (notification-id (:seon.error/signature fact) recipient opening)
    :seon.message/to [:seon.agent/id recipient]
    :seon.message/from [:seon.agent/id sender]
-   :seon.message/content (pr-str (value fact))
+   :seon.message/content (render.value/bounded-text (value fact))
    :seon.message/about (:seon.error/signature fact)})
 
 
@@ -2386,7 +2386,7 @@
           (into [:tbody]
                 (map-indexed
                  (fn [index {:seon.error/keys [path expected offending]}]
-                   [:tr [:td [:code (pr-str path)]]
+                   [:tr [:td [:code (render.value/bounded-text path)]]
                     [:td (shown [:seon.error/problems index :seon.error/expected] expected)]
                     [:td (shown [:seon.error/problems index :seon.error/offending] offending)]]))
                 problems)]])
@@ -2405,7 +2405,7 @@
          [:summary [:code (str sym)]] [:pre source]])
       (when-let [frames (seq (:seon.sci.eval/stacktrace reply))]
         [(into [:ol {:class "seon-error-frames"}]
-               (map (fn [frame] [:li [:code (pr-str frame)]]))
+               (map (fn [frame] [:li [:code (render.value/bounded-text frame)]]))
                frames)])))))
 
 ;;; SCHEMA PAIRS AS REPL ENTRIES (owner 2026-09-26, "Three points"). An

@@ -12,6 +12,7 @@
   (:require [clojure.edn :as edn]
             [malli.core :as m]
             [seon.db :as db]
+            [seon.id :as id]
             [seon.render.route :as render.route]
             [seon.render.value :as render.value]
             [seon.repl :as repl]))
@@ -182,15 +183,15 @@
         (str (repl/source-text (list 'doc schema-key))
              (some->> (description definition) (str "\n;; ")))
         (let [shown (floor-shown unit (usage database schema-key definition) :seon.render/ai)]
-          (if (and (string? shown) (seq shown)) shown (pr-str schema-key)))))
+          (if (and (string? shown) (seq shown)) shown (str schema-key)))))
     "Schema evidence is unavailable."))
 
 (defn- form-text
-  "A schema form as the source that writes it."
+  "A schema form as the source that writes it, through the value printer's
+  bounded text."
   {:malli/schema [:=> [:cat :seon.schema/value] :string]}
   [form]
-  (binding [*print-namespace-maps* false *print-length* nil *print-level* nil]
-    (pr-str form)))
+  (render.value/bounded-text form))
 
 (defn render-form
   "The form that finds this data again: the `usage` read for the registered
@@ -203,13 +204,13 @@
 (defn- function-link
   {:malli/schema [:=> [:cat :qualified-symbol] :seon.render/hiccup]}
   [sym]
-  [:a {:href (render.route/path :seon.render.route/data {} {:entity (pr-str [:seon.fn/sym sym])})}
+  [:a {:href (render.route/path :seon.render.route/data {} {:entity (id/printed [:seon.fn/sym sym])})}
    [:code (str sym)]])
 
 (defn- schema-link
   {:malli/schema [:=> [:cat :qualified-keyword] :seon.render/hiccup]}
   [schema-key]
-  [:a {:href (render.route/path :seon.render.route/data {} {:entity (pr-str [:seon.schema/key schema-key])})}
+  [:a {:href (render.route/path :seon.render.route/data {} {:entity (id/printed [:seon.schema/key schema-key])})}
    [:code (str schema-key)]])
 
 (defn- named-list
