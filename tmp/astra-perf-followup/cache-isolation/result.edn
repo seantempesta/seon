@@ -1,0 +1,7 @@
+{:live-names [stub], :live-cache-unchanged true, :cached-entry-bytes 4708,
+ :isolated-pairs
+ [{:parent {:ms 7.106208 :names [stub] :cache-unchanged false} :candidate {:ms 4.994750 :names [stub] :cache-unchanged true}}
+  {:parent {:ms 4.745667 :names [stub] :cache-unchanged false} :candidate {:ms 4.522125 :names [stub] :cache-unchanged true}}
+  {:parent {:ms 4.574834 :names [stub] :cache-unchanged false} :candidate {:ms 4.620417 :names [stub] :cache-unchanged true}}
+  {:parent {:ms 4.726750 :names [stub] :cache-unchanged false} :candidate {:ms 4.321083 :names [stub] :cache-unchanged true}}]
+ :envelope-ms 53}

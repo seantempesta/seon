@@ -276,6 +276,18 @@
     (under? (::source-roots (roots-of (.getPath checkout)))
             (.getCanonicalPath (io/file (analyzed-source-path path))))))
 
+(defn analysis-cache-root
+  "Select the resolver cache once from source ownership. Scratch inputs may
+  use an explicitly private cache, never the shared cache or its descendants;
+  canonical paths include aliases through symlinks. Nil disables caching."
+  {:malli/schema [:=> [:cat [:sequential :string] [:maybe :string]] [:maybe :string]]}
+  [paths requested]
+  (let [directory (or requested cache-directory)]
+    (when (or (every? checkout-source? paths)
+              (not (under? #{(.getCanonicalPath (io/file config-directory ".cache"))}
+                           (.getCanonicalPath (io/file directory)))))
+      directory)))
+
 (defn- invoke-kondo
   "Lint the supplied files once using the dependency-set cache."
   {:malli/schema [:=> [:cat [:map [:lint [:vector :string]]]] :map]}
@@ -643,13 +655,14 @@
   {:malli/schema
    [:=>
     [:cat
-     [:map
+     [:and [:map
       [::paths {:optional true} [:vector {:min 1} [:string {:min 1}]]]
       [::cache-root {:optional true} :string]
       [::config-root {:optional true} :string]
       [::hooks {:optional true :description "clj-kondo :hooks merged into the analysis config (expansion-hooks)."} :map]
       [::sources {:optional true}
-       [:map-of {:min 1} [:string {:min 1}] :string]]]]
+       [:map-of {:min 1} [:string {:min 1}] :string]]]
+      [:or [:map [::paths :some]] [:map [::sources :some]]]]]
     [:map
      [::namespace-definitions [:vector :map]]
      [::namespace-usages [:vector :map]]
@@ -662,9 +675,6 @@
      [::unanalyzed-namespaces [:set :symbol]]
      [::mentioned-symbols [:set :qualified-symbol]]]]}
   [{::keys [paths sources cache-root config-root hooks]}]
-  (when-not (or (seq paths) (seq sources))
-    (throw (ex-info "Analysis requires either captured sources or paths."
-                    {})))
   ;; A trusted diagnostic must preserve each call as one coherent record.
   ;; clj-kondo's parallel analysis has combined an outer call's location and
   ;; arity with an inner call's resolved var, then emitted the corruption
@@ -677,26 +687,17 @@
                           (.toPath parent) "analysis"
                           (into-array java.nio.file.attribute.FileAttribute [])))))
         lint-paths (if mirror-root (write-mirror! mirror-root sources) paths)
+        cache-root (analysis-cache-root lint-paths cache-root)
         stdin-source (when (some #{"-"} paths) (slurp *in*))
         result (try
                  (binding [*in* (if stdin-source
                                  (java.io.BufferedReader. (java.io.StringReader. stdin-source))
                                  *in*)]
                  (invoke-kondo
-                  ;; ONE cache rule, decided here: only the checkout's own
-                  ;; declared source may read or write the shared dependency
-                  ;; cache. A synthesized stdin buffer (2026-08-29) and a
-                  ;; fixture root under `tmp/` (2026-09-16) are the same
-                  ;; defect — kondo keys the cache by namespace name, so a
-                  ;; decoy `seon.error` would answer for the real one in every
-                  ;; later analysis in this JVM. A mirror is not a decoy: it
-                  ;; carries the checkout file's own captured bytes, and
-                  ;; `checkout-source?` reads the source path back out of it.
                   (cond-> {:lint lint-paths :config (cond-> publication-config hooks (assoc :hooks hooks))}
                     cache-root (assoc :cache-dir cache-root)
                     config-root (assoc :config-dir config-root)
-                    (and (nil? cache-root) (not (every? checkout-source? lint-paths)))
-                    (assoc :cache false))))
+                    (nil? cache-root) (assoc :cache false))))
                  (finally
                    (when mirror-root (delete-tree! mirror-root))))
         raw-analysis (:analysis result)

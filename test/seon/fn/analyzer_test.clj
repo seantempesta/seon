@@ -1,6 +1,7 @@
 (ns seon.fn.analyzer-test
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
+            [clj-kondo.impl.cache :as kondo-cache]
             [seon.fn.analyzer :as analyzer]
             [seon.test-support :as test-support]))
 
@@ -50,6 +51,28 @@
       (let [analysis (analyzer/analyze {::analyzer/paths [source]})]
         (is (= ['f] (mapv ::analyzer/name (::analyzer/var-definitions analysis)))))
       (is (not (.exists cache-file)))
+      (finally (test-support/delete-recursively! directory)))))
+
+(deftest fixture-names-cannot-replace-shared-namespace-analysis
+  (let [directory (fixture-directory (str (random-uuid)))
+        text "(ns clojure.string) (defn stub [] :fixture)"
+        source (write-fixture! directory "string.clj" text)
+        shared (str (io/file analyzer/cache-directory "v1"))
+        before (kondo-cache/from-cache-1 shared :clj 'clojure.string)]
+    (try
+      (is (= :disk (:source before)) "the shared dependency entry exists")
+      (doseq [input [{::analyzer/paths [source]} {::analyzer/sources {source text}}]
+              cache [nil analyzer/cache-directory
+                     (.getCanonicalPath (io/file analyzer/cache-directory))]]
+        (let [analysis (analyzer/analyze
+                        (cond-> input cache (assoc ::analyzer/cache-root cache)))]
+          (is (= ['stub] (mapv ::analyzer/name (::analyzer/var-definitions analysis)))))
+        (is (= before (kondo-cache/from-cache-1 shared :clj 'clojure.string))))
+      (let [private-cache (str (io/file directory "resolver"))]
+        (analyzer/analyze {::analyzer/sources {source text}
+                          ::analyzer/cache-root private-cache})
+        (is (contains? (kondo-cache/from-cache-1 (str (io/file private-cache "v1"))
+                                               :clj 'clojure.string) 'stub)))
       (finally (test-support/delete-recursively! directory)))))
 
 (deftest complete-roots-and-individual-files-have-parity
