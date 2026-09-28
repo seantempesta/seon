@@ -32,6 +32,14 @@
                            (doall (take-while #(not= ::eof %)
                                               (repeatedly #(read {:eof ::eof :read-cond :allow} r)))))))
           defns (fn [forms] (filter #(and (seq? %) (#{'defn 'defn-} (first %))) forms))
+          ;; postwalk-replace that leaves (var sym) alone: a Var reference names
+          ;; the loaded Var, never a letfn local
+          replace-outside-var (fn replace-outside-var [smap form]
+                                (cond
+                                  (and (seq? form) (= 'var (first form))) (get smap form form)
+                                  (coll? form) (let [walked (clojure.walk/walk #(replace-outside-var smap %) identity form)]
+                                                 (get smap walked walked))
+                                  :else (get smap form form)))
           ;; Simple class names a working-tree file imports, fully qualified, so a
           ;; body compiled in the loaded namespace resolves classes that ns lacks.
           imports (fn [ns-sym path]
@@ -120,9 +128,9 @@
                                         y)))
                                   x))
                   bindings (mapv (fn [[_ local form]]
-                                   (letfn-binding local (hinted (clojure.walk/postwalk-replace renames form))))
+                                   (letfn-binding local (hinted (replace-outside-var renames form))))
                                  helpers)
-                  body (hinted (clojure.walk/postwalk-replace renames
+                  body (hinted (replace-outside-var renames
                                                               (qualify-aliases (file-aliases ns-sym path) (drop 2 form))))]
               (binding [*ns* (the-ns ns-sym)]
                 (eval (list 'fn [] (list* 'letfn bindings body))))))

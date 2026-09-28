@@ -106,4 +106,32 @@
   [accepted-socket-writes-have-a-loud-drain-backstop a-feed-writer-failure-enters-the-cluster-fault-path
    two-tabs-each-get-their-own-complete-paint failed-ephemeral-bind-preserves-the-bind-failure
    start-refuses-a-flat-process-write-before-binding an-unchanged-head-re-derives-no-block-and-an-input-change-re-derives-its-block
-   runtime-evaluation-cannot-be-displaced-by-a-database-wake]}}
+   runtime-evaluation-cannot-be-displaced-by-a-database-wake]}
+ :render-coverage-test
+ {effect-receipts-render-state-from-attribute-presence {:head [37 0 0] :broken [35 2 0] :golden true :note "HTML face on hiccup; AI prose face is the golden part"}}
+ :oversight-test
+ {absent-pongs-never-become-evidence-of-work {:head [8 0 0] :broken [7 1 0]}
+  oversight-reads-the-handed-routing-and-names-what-it-lacks {:head [14 0 0] :broken [11 3 0]}
+  a-stopped-graph-is-observed-as-stopped {:head [3 0 0] :broken [2 1 0]}
+  a-booted-cluster-tells-its-live-fleet-story {:note "unverified: boots a real cluster (fixture-observation, long)"}}
+ :held-patches
+ {"phase2-instrument-test.patch"
+  {a-wrong-shaped-call-throws-a-flat-error-value {:head [7 0 0] :broken [6 1 0]}
+   a-prepared-call-refusal-names-its-caller-and-the-contract-name {:head [3 0 0] :broken [2 1 0]}
+   a-missing-key-refusal-holds-values-and-names-the-key {:head [6 0 0] :note "removal only"}
+   an-output-refusal-names-the-function-that-returned-it {:head [2 0 0] :note "removal only"}}
+  "phase2-turn-test.patch"
+  {evaluation-ai-is-only-the-repl-session {:head [9 0 0] :broken [7 2 0]}
+   a-refused-generated-form-records-its-refusal {:head [5 0 0] :note "no breaker run"}}
+  "phase2-cluster-turn-test.patch"
+  {:note "shown text read back as EDN; breaker: every read replaced"
+   a-combined-evaluation-projects-every-terminal-receipt-datom {:head [10 0 0] :broken [9 1 0]}
+   a-whole-turn-runs-a-REAL-sci-evaluation-end-to-end {:head [14 0 0] :broken [13 1 0]}
+   contracted-redefinition-exactly-replaces-the-entity {:head [5 0 0] :broken [4 1 0]}
+   evaluation-follows-the-readers-parse-time-namespace {:head [3 0 0] :broken [2 1 0]}
+   mixed-plan-publishes-only-the-contracted-function {:head [4 0 0] :broken [3 1 0]}
+   ns-unmap-retracts-the-owned-function-after-the-terminal-commit {:head [7 0 0] :broken [6 1 0]}
+   runtime-tests-install-run-redefine-and-delete-exactly {:head [7 0 0] :broken [4 3 0]}
+   a-red-form-routes-to-its-namespace-owner-and-the-fold-continues {:head [4 1 0] :broken [3 2 0] :note "head red on an unchanged assertion in this JVM"}
+   import-only-ns-unmap-installs-exactly-after-its-context-commit {:head [3 1 0] :broken [2 2 0] :note "head red on an unchanged assertion in this JVM"}
+   delimiter-repair-is-span-local-and-precedes-intent {:note "unverified: HEAD's seon.sci.forgive/segments is not loaded in this JVM"}}}}

@@ -16,7 +16,6 @@
             [seon.render.transcript :as transcript]
             [seon.render.web :as web]
             [seon.oversight :as oversight]
-            [seon.render.hiccup :as hiccup]
             [seon.test-support :as support])
   (:import [java.net URI]
            [java.time Duration]
@@ -59,6 +58,20 @@
       (finally
         (async/close! channel)))))
 
+(defn- fleet-table
+  "The fleet table's hiccup as data: which table it is, each agent row's state
+  and the plumbing passes it lists."
+  {:malli/schema [:=> [:cat :seon.schema/value] :map]}
+  [table]
+  (let [elements (support/hiccup-elements table)]
+    {:table (some #(:data-fleet-oversight (second %)) elements)
+     :states (into {} (keep (fn [[_ attributes]]
+                              (when (map? attributes)
+                                (when-let [agent-id (:data-agent attributes)]
+                                  [agent-id (:data-state attributes)]))))
+                   elements)
+     :plumbing (into [] (comp (filter #(= :dd (first %))) (mapcat support/hiccup-leaves)) elements)}))
+
 (deftest absent-pongs-never-become-evidence-of-work
   (doseq [[observations expected]
           [[{} "unknown"]
@@ -74,12 +87,11 @@
                          observations)]
                  :seon.oversight/plumbing
                  [(oversight/proc-ping :probe/delayed nil)]}}
-          ai (oversight/ai-story unit)
-          html (hiccup/->string (oversight/html-table unit))]
+          ai (oversight/ai-story unit)]
       (is (str/starts-with? ai (str "observed: " expected)))
-      (is (str/includes? html (str "data-state=\"" expected "\"")))
-      (is (str/includes? html ":probe/delayed unknown"))
-      (is (not (str/includes? html "mid-pass"))))))
+      (is (= {:states {"observed" expected} :plumbing [":probe/delayed unknown"]}
+             (select-keys (fleet-table (oversight/html-table unit)) [:states :plumbing]))
+          "the row's state is what was observed, and an absent pong is unknown"))))
 
 (defn- await-fact
   "Return the first truthy `probe` result published by a database value."
@@ -200,13 +212,12 @@
           (let [expected (cond (:seon.turn/id root) "mid-turn"
                                (some? (:seon.oversight/turn-passes root)) "parked"
                                :else "unknown")
-                html (hiccup/->string
-                      (oversight/html-table built))]
+                table (fleet-table (oversight/html-table built))]
             (is (str/starts-with? (oversight/ai-story built) (str "root: " expected)))
-            (is (str/includes? html "data-fleet-oversight=\"agents\""))
-            (is (str/includes? html "<td>root</td>"))
-            (is (str/includes? html (str "data-state=\"" expected "\"")))
-            (is (str/includes? html "plumbing passes"))))
+            (is (= {:table "agents" :root expected :plumbing? true}
+                   {:table (:table table) :root (get-in table [:states "root"])
+                    :plumbing? (seq? (seq (:plumbing table)))})
+                "the HTML face shows the same fleet: root's state and the plumbing passes")))
         (testing "the prose grammar carries run and episode position"
           (is (= "agent-b: mid-turn on turn run-3, 3rd turn since the outside wake; agent-c: parked"
                  (oversight/ai-story
@@ -307,13 +318,12 @@
                      [{} [:seon.agent/armed :seon.flow/graph]]]]
               (let [built (oversight/unit {:seon.db/db db
                                            :seon.agent/routing (atom state)})
-                    html (hiccup/->string (oversight/html-table built))]
+                    table (fleet-table (oversight/html-table built))]
                 (is (= {:seon.oversight/missing missing}
                        (:seon.render/value built)))
                 (is (str/starts-with? (oversight/ai-story built)
                                       "Live fleet state is unavailable"))
-                (is (str/includes? html "data-fleet-oversight=\"unavailable\""))
-                (is (not (str/includes? html "data-fleet-oversight=\"agents\""))
+                (is (= "unavailable" (:table table))
                     "missing state never renders as an empty fleet"))))
           (testing "a caller naming no cluster is unavailable, never a guessed entity"
             (let [routing (agent/routing)
@@ -339,7 +349,7 @@
                                    :seon.agent/routing routing})]
         (is (= [{:seon.oversight/proc :probe/idle :seon.oversight/ping :stopped}]
                (:seon.oversight/plumbing (:seon.render/value built))))
-        (is (str/includes? (hiccup/->string (oversight/html-table built)) "probe/idle stopped"))
+        (is (= [":probe/idle stopped"] (:plumbing (fleet-table (oversight/html-table built)))))
         (is (= "stopped"
                (#'oversight/agent-story-text
                 {:seon.agent/id "root"

@@ -300,7 +300,8 @@
            (is (nil? (walk-output-by-attribute units :seon.agent/cluster))
                "the branch is not a stored connection on the agent")))))))
 
-(deftest effect-receipts-render-state-from-attribute-presence
+(deftest ^{:seon.test/golden "effect/render-ai answers prose lines; its AI face is asserted as the text it is (the HTML face is asserted on its hiccup)."}
+  effect-receipts-render-state-from-attribute-presence
   (is (= {:seon.render/ai `effect/render-ai
           :seon.render/html `effect/render-html}
          (select-keys (family-properties :seon.effect/receipt)
@@ -331,34 +332,35 @@
          (is (str/includes? ai run-id))
          (is (not (str/includes? ai ":db/id"))))
        (let [pending-ai (get-in faces [:pending :ai])
-             pending-html (hiccup/->string (get-in faces [:pending :html]))
+             pending-html (get-in faces [:pending :html])
              returned-ai (get-in faces [:returned :ai])
-             returned-html (hiccup/->string (get-in faces [:returned :html]))
+             returned-html (get-in faces [:returned :html])
              interrupted-ai (get-in faces [:interrupted :ai])
-             interrupted-html
-             (hiccup/->string (get-in faces [:interrupted :html]))]
+             interrupted-html (get-in faces [:interrupted :html])
+             ;; an HTML face's terminal fields, read from its hiccup
+             terminal (fn [html] {:result? (contains? (support/hiccup-classes html) "seon-effect-result")
+                                  :duration? (boolean (some #{"Duration"} (support/hiccup-leaves html)))})]
          (testing "pending shows its request and omits terminal fields"
            (is (str/includes? pending-ai "Request"))
            (is (str/includes? pending-ai
                               (str "~" (tokens/estimate request-edn)
                                    " tokens")))
            (is (not (str/includes? pending-ai "Result")))
-           (is (not (str/includes? pending-html "seon-effect-result")))
-           (is (not (str/includes? pending-html "Duration"))))
+           (is (= {:result? false :duration? false} (terminal pending-html))))
          (testing "returned shows result, duration, and blob handle"
            (is (str/includes? returned-ai "Result"))
            (is (str/includes? returned-ai
                               (str "~" (tokens/estimate result-edn)
                                    " tokens")))
-           (is (str/includes? returned-html "Duration"))
-           (is (str/includes? returned-html blob-digest))
+           (is (:duration? (terminal returned-html)))
+           (is (some #(str/includes? (str %) blob-digest) (support/hiccup-leaves returned-html))
+               "the result names its blob")
            (is (not (str/includes? returned-ai "bytes")))
            (is (not (str/includes? returned-ai "chars"))))
          (testing "interrupted shows the interruption and no result"
            (is (str/includes? interrupted-ai "interrupted"))
            (is (not (str/includes? interrupted-ai "Result")))
-           (is (not (str/includes? interrupted-html "seon-effect-result")))
-           (is (not (str/includes? interrupted-html "Duration")))))
+           (is (= {:result? false :duration? false} (terminal interrupted-html)))))
        ;; THE WALK SELECTS THE SAME PAIR. Rooted at the receipt, because the
        ;; agent's declared `:seon.render/units`
        ;; (`resources/seon/schemas/seon.agent.edn:5`) are plan, issues, inbox,
