@@ -7,6 +7,7 @@
             [clojure.test :refer [deftest is]]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
+            [seon.cluster.host :as host]
             [seon.config :as config]
             [seon.db :as db]
             [seon.flow :as flow]
@@ -51,6 +52,7 @@
             request {:seon.turn.loop/cluster handle :seon.agent/routing routing :seon.agent/id agent-id}]
         (support/transacted! connection (support/agent-tx @connection agent-id))
         (swap! running-instances assoc running {:seon.turn.loop/cluster (assoc handle :seon.agent/routing routing)
+                                                  :seon.store/store (:seon.store/store target)
                                                   :seon.boot/ready-ms 0})
         (try
           (body running agent-id connection)
@@ -131,6 +133,35 @@
       (is (true? (signal #(binding [*ns* (the-ns 'seon.mcp-entrance-test)] (eval (list 'def probe 1)))))
           "a new Var re-renders pages")
       (finally (ns-unmap 'seon.mcp-entrance-test probe)))))
+
+(deftest ^{:seon.test/long "One hosted agent's first MCP runs and its own test request: hosting a new branch, a cold checkpoint and request world, 3.0-6.5 s measured on default (2026-09-28)."
+           :seon.test/long-ms 30000}
+  an-agent-runs-its-own-test-on-its-own-branch
+  ;; Before 06fd3a4d5, every such request refused: its member branched in the
+  ;; agent's file store, not the request's overlay that holds the commit.
+  (with-running-agent
+   (fn [running _ connection]
+     (let [agent-id (str "mcp-own-tests-" (id/id))
+           namespace-name (symbol (str "my.own" (id/id)))
+           test-symbol (symbol (str namespace-name) "twice-doubles")
+           evaluate! #(answer "eval_clj" {"code" % "agent" agent-id "cluster" running})]
+       (try
+       (evaluate! (str "(ns " namespace-name ")"
+                  " (defn twice \"Doubles x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x))"
+                  " (clojure.test/deftest twice-doubles (clojure.test/is (= 4 (twice 2))))"))
+       (evaluate! (str "(my.test/run-owned {:seon.ns/name '" namespace-name "})"))
+       (let [branch (:seon.agent/branch (db/pull (db/db connection) [:seon.agent/branch] [:seon.agent/id agent-id]))
+             recorded (db/q '[:find ?pass ?fail ?error :in $ ?symbol
+                              :where [?member :seon.test.member/symbol ?symbol]
+                                     [?member :seon.test.member/pass-count ?pass]
+                                     [?member :seon.test.member/fail-count ?fail]
+                                     [?member :seon.test.member/error-count ?error]]
+                            (db/branch-database (db/db connection) branch) test-symbol)]
+         (is (not= (get-in (db/db connection) [:config :branch]) branch) "the agent is hosted on its own branch")
+         (is (= #{[1 0 0]} recorded) "its test ran green there and is recorded on its branch"))
+       (finally
+         (when-let [branch (:seon.agent/branch (db/pull (db/db connection) [:seon.agent/branch] [:seon.agent/id agent-id]))]
+           (some-> (host/hosted (get-in @running-instances [running :seon.turn.loop/cluster]) branch) host/retire!))))))))
 
 (deftest a-retired-agent-refuses-by-name
   (with-running-agent
