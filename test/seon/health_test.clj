@@ -103,7 +103,7 @@
            "a stored schema constraining only an identity is refused")
        (is (not (#'health/identity-only? database projection ::uncontracted)))))))
 
-(deftest ^{:seon/tasks #{"1d75e484543a"}} a-replaced-root-rides-the-report-as-instrument-reports-it
+(deftest a-replaced-root-rides-the-report-as-instrument-reports-it
   ;; bin/seon status refused its own report on default (2026-09-28): the report
   ;; declared symbols where seon.instrument/replaced-roots answers its values.
   (let [projection (schema/handed-projection)
