@@ -1,0 +1,7 @@
+;; Rehearsal root on c4628c22b plus this change (and db-replay-retired-attribute.patch), 2026-09-28.
+;; A system-authored form in a :generate run reading (seon.db/q '[:find ?id :where [_ :seon.turn/id ?id]]), resumed through seon.turn/turn:
+{:before {:outcome :error :shown "the refusal \"A generated context read depends on the agent's own turn-taking.\"" :effect "root's loop parked after 3 refusals on default (16:06Z, 16:21Z)"}
+ :after {:outcome :released :ms 533 :shown "#{[\"12a2b18544e6\"] [\"gfault-run\"]}" :error nil
+         :diagnostics "[{:seon.error/expected :seon.wake/context-inert, :seon.turn/generated-read-attributes #{:seon.turn/id}, ... \"A generated context read depends on the agent's own turn-taking.\"}]"
+         :turn-taking-faults-recorded []}
+ :default-live {:faulting-source "(seon.plan/plan {})" :attributes 49 :note "a retained agent read re-run in root's opening; not reproduced on a fresh branch agent (its opening unit is (seon.plan/plan {:seon.db/db (seon.db/db) :seon.agent/id ...}))"}}

@@ -25,6 +25,7 @@
             [seon.id :as id]
             [seon.plan :as plan]
             [seon.program :as program]
+            [seon.print.value :as print.value]
             [seon.render :as render]
             [seon.render.walk :as walk]
             [seon.repl :as repl]
@@ -5363,17 +5364,23 @@
                                 (get handles ordinal) (assoc :seon.repl/handle (get handles ordinal))
                                 (seq (entry-bindings batch ordinal)) (assoc :seon.sci.eval/bindings (entry-bindings batch ordinal))
                                 facts-error (update :seon.cluster.eval/error
-                                                    #(or % (str "Its program facts were not proposed: " (:seon.error/message facts-error)))))]
-               ;; a generated read that depends on the agent's own turn-taking
-               ;; refuses the generating turn (`generated-read-fault`)
-               (when-let [entity-id (when run-id (evaluation-entity-id basis (receipt-identity run-id ordinal)))]
-                 (when-let [fault (when (and (= :system (:seon.cluster.eval/author
-                                                          (db/pull basis [:seon.cluster.eval/author] entity-id)))
-                                             (= :generate (:seon.turn.work/situation
-                                                           (db/pull basis [:seon.turn.work/situation] [:seon.turn/id run-id]))))
-                                    (generated-read-fault basis (assoc row :seon.cluster.eval/ns [:seon.ns/name ns-before])
-                                                          (select-keys evaluation [:seon.cluster.eval/read-evidence])))]
-                   (throw (ex-info (:seon.error/message fault) fault))))
+                                                    #(or % (str "Its program facts were not proposed: " (:seon.error/message facts-error)))))
+                   ;; A generated read whose reads now depend on the agent's own
+                   ;; turn-taking (`generated-read-fault`) keeps its value: the
+                   ;; fault rides beside it as a diagnostic, and its stored
+                   ;; evidence names the turn attributes, so `generated-sources`
+                   ;; never regenerates it. Refusing the turn instead parked the
+                   ;; agent's loop after three refusals (root, 2026-09-28).
+                   fault (when-let [entity-id (when run-id (evaluation-entity-id basis (receipt-identity run-id ordinal)))]
+                             (when (and (= :system (:seon.cluster.eval/author
+                                                    (db/pull basis [:seon.cluster.eval/author] entity-id)))
+                                        (= :generate (:seon.turn.work/situation
+                                                      (db/pull basis [:seon.turn.work/situation] [:seon.turn/id run-id]))))
+                               (generated-read-fault basis (assoc row :seon.cluster.eval/ns [:seon.ns/name ns-before])
+                                                     (select-keys evaluation [:seon.cluster.eval/read-evidence]))))
+                     evaluation (cond-> evaluation
+                                  fault (update :seon.cluster.eval/diagnostics
+                                                #(str/join "\n" (remove nil? [% (print.value/bounded-text [fault])]))))]
                (when (and run-id (= :pending (:seon.cluster.eval/code-evidence evaluation)))
                  (kernel/own-pending! (receipt-identity run-id ordinal) (:seon.batch/owned entry)))
                (cond-> {:seon.cluster.eval/ordinal ordinal

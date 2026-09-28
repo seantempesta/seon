@@ -237,8 +237,8 @@
                     (evidence reading)))
            "a form's one query is its one read")))))
 
-(deftest a-refused-generated-form-records-its-refusal
-  (testing "an appended form whose evaluation is refused never stays bare"
+(deftest a-turn-dependent-generated-form-keeps-its-value-beside-the-fault
+  (testing "a generated form whose reads depend on turn-taking settles its value with the fault as a diagnostic, and the turn closes"
    (support/with-database
     (fn [connection]
       (config/apply! {:seon.db/connection connection
@@ -280,22 +280,18 @@
                               (java.util.Date.))
             settled (db/pull (db/db connection)
                              [:seon.eval/shown :seon.cluster.eval/error
-                              :seon.cluster.eval/source]
+                              :seon.cluster.eval/diagnostics :seon.cluster.eval/source]
                              [:seon.cluster.eval/id evaluation-id])]
-        (is (= :error (:seon.turn.loop/outcome report)))
-        ;; The class this pins: a form the loop appended and then refused
-        ;; must carry a terminal fact. Neither shown nor error is absence
-        ;; of signal read as health — no query can say what happened to it.
+        ;; The class this pins (root's loop parked, 2026-09-28): the fault
+        ;; never refuses the turn. The value settles, the fault is delivered
+        ;; beside it, and the stored evidence keeps it out of later openings.
         (is (string? (:seon.eval/shown settled)))
-        (is (string? (:seon.cluster.eval/error settled)))
-        ;; Errors carry no kind name (9bf22ecd9); the declared message is
-        ;; what the shown refusal says.
-        (is (= "A generated context read depends on the agent's own turn-taking."
-               (:seon.error/message (support/reply (:seon.eval/shown settled))))
-            "the shown refusal is the declared error, read back as data")
-        (is (some? (:seon.turn/closed-tx
-                    (db/pull (db/db connection) [:seon.turn/closed-tx]
-                             [:seon.turn/id run-id])))))))))
+        (is (nil? (:seon.cluster.eval/error settled)))
+        (is (str/includes? (str (:seon.cluster.eval/diagnostics settled))
+                           "A generated context read depends on the agent's own turn-taking.")
+            "the fault is the declared error, delivered beside the value")
+        (is (= :released (:seon.turn.loop/outcome report))
+            "the generating turn goes on to its provider call instead of parking"))))))
 
 (deftest compaction-refuses-an-open-turn-at-the-writer
   (support/with-database
