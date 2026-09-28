@@ -650,12 +650,10 @@
   [store branch]
   (locking branch-open-monitor
     (let [main-connection (:seon.store/connection-object store)
-          configuration (assoc (open-configuration
-                                (datahike-configuration
-                                 (:seon.store/dir store)
-                                 (get-in @main-connection
-                                         [:config :keep-history?])))
-                               :branch branch)
+          ; the store's own opened configuration: a file store's, or an
+          ; overlay's (`open-overlay!`), whose branches must never open the
+          ; file store
+          configuration (assoc (:config @main-connection) :branch branch)
           connection-id (datahike.store/connection-id configuration)]
       (when-not (contains? (d/branches main-connection) branch)
         (refuse! ::branch-absent

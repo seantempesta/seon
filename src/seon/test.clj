@@ -1852,32 +1852,41 @@
                  (throw (ex-info "Another request is preparing this test world; retry once it completes."
                                  {:seon.error/expected :seon.test/prepared-checkpoint
                                   :seon.error/offending branch})))
+        ;; The request's writes — its branch, the program overlay and every
+        ;; member branch acquired from this handle — stay in memory over the
+        ;; shared store (`store/open-overlay!`), which they never write; the
+        ;; checkpoint above is shared by digest and stays durable. Only the
+        ;; recorded results reach the store, on the recording connection.
+        shared store
+        store (store/open-overlay! shared)
         ;; The request branch holds the overlay and roots its commit for the members.
         request-branch (keyword (str "agent-" (id/id)))
-        _ (when-not (:seon.cluster/created? (registry/branch! {:seon.store/store store :seon.store/branch request-branch
-                                                              :seon.cluster.registry/from head}))
-            (throw (ex-info "The request branch already exists." {:seon.error/offending request-branch})))
         release! (fn [^Throwable failure steps]
                    (doseq [cleanup! steps]
                      (try (cleanup!) (catch Throwable cleanup (.addSuppressed failure cleanup))))
                    failure)
+        drop! #(store/release-store! store)
+        _ (when-not (:seon.cluster/created? (registry/branch! {:seon.store/store store :seon.store/branch request-branch
+                                                              :seon.cluster.registry/from head}))
+            (throw (release! (ex-info "The request branch already exists." {:seon.error/offending request-branch})
+                             [drop!])))
         retire! #(registry/retire-branch! {:seon.store/store store :seon.store/branch request-branch})
         connection (try (open-world! store request-branch candidate cluster)
-                        (catch Throwable failure (throw (release! failure [retire!]))))
+                        (catch Throwable failure (throw (release! failure [retire! drop!]))))
         report (when (seq overlay)
                  (try (db/call-with-custody {:seon.db/connection connection}
                                             #(db/transact! connection overlay))
                       (catch Throwable failure
-                        (throw (release! failure [#(store/release-branch! connection) retire!])))))]
+                        (throw (release! failure [#(store/release-branch! connection) retire! drop!])))))]
     (when (and report (not (:db-after report)))
       (throw (release! (world-refusal (str "program overlay (" (count overlay) " entries)") report)
-                       [#(store/release-branch! connection) retire!])))
-    (doseq [other (registry/roster store)
+                       [#(store/release-branch! connection) retire! drop!])))
+    (doseq [other (registry/roster shared)
             :when (and (not= other branch) (str/starts-with? (name other) prefix))]
       ;; Datahike refuses a connected branch. A request between reading an old
       ;; head and branching from it holds that commit by id; retirement only
       ;; removes the roster name, so the commit stays until collection.
-      (try (registry/retire-branch! {:seon.store/store store :seon.store/branch other})
+      (try (registry/retire-branch! {:seon.store/store shared :seon.store/branch other})
            (catch clojure.lang.ExceptionInfo refusal
              (when-not (= ::registry/cluster-connected (::registry/refused (ex-data refusal)))
                (throw refusal)))))
@@ -1894,7 +1903,7 @@
                                               (:seon.sci.eval/projection-state (meta connection))
                                               {:seon.env/environment environment})
                    (catch Throwable failure
-                     (throw (release! failure [#(store/release-branch! connection) retire!]))))]
+                     (throw (release! failure [#(store/release-branch! connection) retire! drop!]))))]
       ;; The execution's value with this request's own world: a fresh roster,
       ;; so member contexts and graphs stay the request's.
       (assoc execution
@@ -2513,9 +2522,10 @@
                       outcome))
                   (finally
                     (when-let [request-handle @held-handle]
-                      ;; Unlink only: the daily `seon.maintenance/collect!`
-                      ;; reclaims what no roster branch reaches.
-                      (@release-context! request-handle))))
+                      ;; The request's branches live in its overlay: releasing
+                      ;; the handle, then the overlay, leaves nothing to collect.
+                      (try (@release-context! request-handle)
+                           (finally (store/release-store! (:seon.store/store request-handle)))))))
                 held-elsewhere (::held outcome)
                 reused (vec (:seon.test.selection/unchanged selection))
                 results (into (vec (:seon.test/results outcome)) reused)
