@@ -162,3 +162,11 @@
         view (assoc view :seon.task/proposal (id/id [key (:seon.task/commit view)]) :seon.task/merge (:seon.task/id entity))
         report (refusal-data #(written connection (conj (task-call connection entity {}) (assoc view :seon.task/proposes proposes))))]
     (if (:seon.error/at report) report view)))
+
+(defn decide!
+  "Root records its `outcome` on the merge task `merge-task`, closing it: `proposals`
+  lists only merge tasks without one."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.task/merge :seon.task/outcome]
+                  [:or :seon.db/transaction-report :seon.error/value]]}
+  [connection merge-task outcome]
+  (written connection [[:db/add [:seon.task/id merge-task] :seon.task/outcome outcome]]))

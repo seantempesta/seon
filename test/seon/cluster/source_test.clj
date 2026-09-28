@@ -376,27 +376,24 @@
         entity #(test-support/program-entity (db/db %1) [%2 (sym %3)] %4)
         write! #(test-support/transacted! %1 (vec %2))
         handle (issue/task-handle 'scratch.merge-tasks "merge-task" :function)
-        issue-id (str "merge-task-test-" (id/id))
+        proofs #{(sym "merge-tasked-check")}
         c (keyword (str "merge-task-test-c-" (id/id)))
         _ (write! h-conn [(test-support/namespace-entity (db/db h-conn) 'scratch.merge-tasks)
                           (entity h-conn :seon.fn/sym "merge-tasked" "(defn merge-tasked {:malli/schema [:=> [:cat] :int]} [] 1)")])
-        _ (write! h-conn [(entity h-conn :seon.test/sym "merge-tasked-check" "(clojure.test/deftest merge-tasked-check (clojure.test/is (pos? (scratch.merge-tasks/merge-tasked))))")
-                          {:seon.issue/id issue-id :seon.issue/title "Tasked" :seon.issue/status :open
-                           :seon.issue/severity :cleanup :seon.issue/problem "Replace the tasked function."
-                           :seon.issue/tests #{[:seon.test/sym (sym "merge-tasked-check")]}}])
+        _ (write! h-conn [(entity h-conn :seon.test/sym "merge-tasked-check" "(clojure.test/deftest merge-tasked-check (clojure.test/is (pos? (scratch.merge-tasks/merge-tasked))))")])
         _ (registry/branch! {:seon.store/store held-store :seon.store/branch c
                              :seon.cluster.registry/from (db/commit-id (db/db h-conn))})
         candidate (cluster.agent/acquire-context! target nil {:seon.agent/branch c})
         c-conn (:seon.db/connection candidate)
         made (volatile! [])
-        prepare #(let [p (source/prepare-merge! target held-store c issue-id)]
+        prepare #(let [p (source/prepare-merge! target held-store c proofs)]
                    (some->> (:seon.source/candidate p) (vswap! made conj)) p)
         intent #(:seon.task/intent (db/pull (db/db h-conn) [:seon.task/intent] [:seon.task/id handle]))]
     (try
       ;; A stored identity is replaced exactly (its dropped contract retracted),
       ;; so the writer's final value carries its definition's digest.
       (write! c-conn (test-support/replacement-tx (db/db c-conn) [:seon.fn/sym (sym "merge-tasked")]
-                                                  (str "(defn merge-tasked {:seon/tasks #{\"" handle "\"}} [] 2)") {}))
+                                                  (str "(defn merge-tasked {:seon/tasks #{\"" handle "\"} :malli/schema [:=> [:cat] :int]} [] 2)") {}))
       (let [proposal (prepare)
             before (db/commit-id (db/db h-conn))
             refused (source/accept-merge! target held-store proposal)]

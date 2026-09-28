@@ -526,33 +526,34 @@
         :my.program/held-branch held}))))
 
 (defn prepare-merge!
-  "Test a proposed branch's change through the merge gate on a fresh branch of
-  the head I hold and answer the verdict `accept-merge!` takes
-  (`seon.cluster.source/prepare-merge!`): `:seon.test/passed?`, the tally and
-  the run. Name `:seon.program/identities` to merge only those declarations;
-  one reaching an unselected change refuses by name; a selected one carries
-  its namespace's changed row (a require added at the REPL with `ns`). Name
-  the checkout `:seon.fn/root` to prove the file write-back would produce
-  before any test runs. The merge is prepared onto the head of the branch my
-  context holds; only root's accepts it.
+  "Test an open proposal (one of `proposals`) through the merge gate on a fresh
+  branch of the head I hold and answer the verdict `accept-merge!` takes
+  (`seon.cluster.source/prepare-merge!`): the whole run's `:seon.test/passed?`,
+  tally and red members, shown; its proofs, the tests the proposal proved,
+  gate acceptance. Name `:seon.program/identities` to merge only those
+  declarations; one reaching an unselected change refuses by name; a selected
+  one carries its namespace's changed row (a require added at the REPL with
+  `ns`). Name the checkout `:seon.fn/root` to prove the file write-back would
+  produce before any test runs. The merge is prepared onto the head of the
+  branch my context holds; only root's accepts it.
 
   Example:
-  (my.program/prepare-merge! {:seon.store/branch :my-branch :seon.issue/id \"my-fix\" :seon.fn/root \"/path/to/checkout\"})"
-  {:malli/schema [:=> [:cat [:map [:my.program/context :my.program/context] [:seon.store/branch :seon.store/branch]
-                             [:seon.issue/id :seon.issue/id]
-                             [:seon.program/identities {:optional true} :seon.program/identity-set]
-                             [:seon.fn/root {:optional true} :seon.fn/root]]]
+  (my.program/prepare-merge! (assoc (first (my.program/proposals)) :seon.fn/root \"/path/to/checkout\"))"
+  {:malli/schema [:=> [:cat :my.program/prepare-request]
                   [:or :my.program/merge-proposal :seon.program/three-way :seon.source/write-back-error :seon.error/value]]}
-  [{context :my.program/context branch :seon.store/branch issue :seon.issue/id selection :seon.program/identities
-    root :seon.fn/root}]
-  (source/prepare-merge! context (:seon.store/store context) branch issue selection root))
+  [{context :my.program/context branch :seon.task/branch proved :seon.task/proved merge-task :seon.task/merge
+    selection :seon.program/identities root :seon.fn/root}]
+  (let [prepared (source/prepare-merge! context (:seon.store/store context) branch (into #{} (map first) proved)
+                                        selection root)]
+    (cond-> prepared (:seon.source/candidate prepared) (assoc :seon.task/merge merge-task))))
 
 (defn accept-merge!
   "Merge exactly the program `prepare-merge!` tested into my cluster
-  (`seon.cluster.source/accept-merge!`) and answer the accepted merge
-  `write-back!` takes: the merged identities, the commit before it, its merge
-  commit and the run. Refuses only when a merged declaration itself changed
-  since the prepare, naming it with both digests. The tested branch is unlinked
+  (`seon.cluster.source/accept-merge!`), record the merge task `:accepted`,
+  and answer the accepted merge `write-back!` takes: the merged identities,
+  the commit before it, its merge commit and the run. Refuses when a proof is
+  not green, or when a merged declaration itself changed since the prepare,
+  naming it with both digests. The tested branch is unlinked
   afterwards as detached io work, off this call. Only the cluster's own custody
   (root) accepts.
 
@@ -561,10 +562,13 @@
   {:malli/schema [:=> [:cat :my.program/accept-request]
                   [:or :seon.source/accepted :seon.source/test-evidence-error :seon.error/value
                    :my.program/custody-refused-error]]}
-  [{context :my.program/context tested :seon.source/candidate :as proposal}]
+  [{context :my.program/context tested :seon.source/candidate merge-task :seon.task/merge :as proposal}]
   (or (cluster-custody 'my.program/accept-merge! context)
       (let [store (:seon.store/store context)
             accepted (source/accept-merge! context store (dissoc proposal :my.program/context))
+            ;; The merge task closes with the merge: `proposals` no longer lists it.
+            closed (when (:seon.source/commit-id accepted)
+                     (task/decide! (:seon.db/connection context) merge-task :accepted))
             environment (:seon.env/environment context)
             retire! #(registry/retire-branch! {:seon.store/store store :seon.store/branch tested})]
         ;; Unlinking takes the store's roster permit, which a running
@@ -585,7 +589,7 @@
                                     nil)}))))
           ;; No launcher accepting work (a closing cluster): unlink here.
           (retire!))
-        accepted)))
+        (if (:seon.error/at closed) closed accepted))))
 
 (defn write-back!
   "Write an accepted merge's declarations into their source file under `root`

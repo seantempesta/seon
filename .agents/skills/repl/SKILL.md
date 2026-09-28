@@ -142,9 +142,14 @@ Verified at default's REPL on 2026-09-23. Forms and timings are in
 4. **Test there.** `seon.test/run` (`src/seon/test.clj:2205`) takes the branch
    handle as `:seon.test/execution` and records on its connection. It runs the
    branch's program entities, so it does not test an in-memory def (measured).
-5. **Accept.** Accepting work is D1 §2c's merge:
-   root's `my.program/prepare-merge!`, `accept-merge!` and `write-back!`
-   (`src/my/program.clj`, over `seon.cluster.source`). They merge the branch's
+5. **Propose, then root accepts.** Root assigns the task (`seon.task/assign!`);
+   the agent writes a deftest naming it (`^{:seon/tasks #{"<handle>"}}`) and calls
+   `(my.program/propose-merge! {})`, which runs those proofs on its branch.
+   Root reads `(my.program/proposals)` and passes one open proposal to
+   `my.program/prepare-merge!`, then the answer to `accept-merge!` (which
+   closes the merge task) and that answer to `write-back!`
+   (`src/my/program.clj`, over `seon.cluster.source`). Only the proofs gate
+   acceptance; other reaching tests' reds are shown as `:seon.source/red`. They merge the branch's
    changed program entities through the tested head; the basis is each merged entity's
    definition digest, so other writes never stale a merge or its write-back.
    Private SCI defs never merge. Write-back splices the accepted declarations

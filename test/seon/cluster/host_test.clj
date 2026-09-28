@@ -401,8 +401,8 @@
                (db/pull (db/db connection) [:seon.task/intent {:seon.task/created-by [:seon.agent/id]}] [:seon.task/id task-id]))
             "the task is on the cluster, written by the agent")))))
 
-(deftest ^{:seon.test/long "Two nested seon.test/run requests of one member each (red, then green); 60 s per nested run is merge-test's measured bound."
-           :seon.test/long-ms 120000}
+(deftest ^{:seon.test/long "Two nested seon.test/run requests of one member each (red, then green), then root's prepare (one more nested run); 60 s per nested run is merge-test's measured bound."
+           :seon.test/long-ms 180000}
   a-proposal-waits-for-its-assigned-tasks-proofs-then-reaches-root
   ;; Before, propose-merge! took any issue id the agent named, ran no test and
   ;; messaged root at once; root inferred pending proposals from messages.
@@ -435,7 +435,23 @@
               "root reads the open proposal from facts")
           (hosted-run! hosted "(my.program/propose-merge! {})")
           (is (= #{(read-string about)} (set (map :seon.task/merge (my.program/proposals {:seon.db/db (db/db connection)}))))
-              "proposing again finds the same merge task"))
+              "proposing again finds the same merge task")
+          ;; Before (2026-09-28 dogfood loop), root's prepare took an issue id, so
+          ;; the proposal an agent made could not be prepared at all.
+          (let [context (assoc (select-keys handle [:seon.sci.eval/ctx :seon.db/connection :seon.cluster/name
+                                                    :seon.store/store :seon.env/environment])
+                               :my.program/base-ctx (:seon.sci.eval/ctx handle))
+                prepared (db/call-with-custody {:seon.db/connection connection}
+                                               #(my.program/prepare-merge! (assoc (first open) :my.program/context context)))]
+            (some->> (:seon.source/candidate prepared)
+                     (hash-map :seon.store/store (:seon.store/store handle) :seon.store/branch)
+                     registry/retire-branch!)
+            (is (true? (:seon.test/passed? prepared)) "root prepares the proposal it read")
+            (is (= [#{'my.agents.host-probe/square-test} (read-string about)]
+                   [(:seon.task/proofs prepared) (:seon.task/merge prepared)])
+                "the proposal's proofs gate the merge, and it names its merge task")
+            (is (:db-after (task/decide! connection (read-string about) :declined)))
+            (is (empty? (my.program/proposals {:seon.db/db (db/db connection)})) "a decided merge task is closed")))
         (is (= {:seon.task/changed? true}
                (select-keys (as-root task/create! (assoc declaration :seon.agent/id "root" :seon.task/intent "Square it."
                                                          :seon.task/basis {task-id declaration}))

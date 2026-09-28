@@ -831,12 +831,15 @@
     []))
 
 ;; Write-back's proof, below with its helpers; prepare runs it before the gate.
-(declare proven-file)
+(declare proven-files)
 
 (defn prepare-merge!
   "Test `candidate`'s function and test changes since its merge base with
   `source`'s head H on a fresh branch S of H through the save gate, with the
-  issue's tests, and answer the proposal `accept-merge!` takes. A change is a
+  `proofs` (the test symbols that prove the change: a merge task's proofs),
+  and answer the proposal `accept-merge!` takes: the whole run's verdict and
+  tally, and its red members by name, shown and not gated; only the proofs
+  gate acceptance (AGENTS.md, merge). A change is a
   replacement, an addition (absent at the base) or a retraction (absent on the
   candidate), as `seon.program/three-way` classifies it; one reconcile
   transaction applies all three. A conflict answers the three-way value; an
@@ -849,21 +852,21 @@
   the candidate changed it. Without one the whole delta merges, namespace rows
   included.
 
-  With the checkout `root`, the file write-back would produce is proven first
-  (`proven-file` over the merged value, `seon.db/with`): a declaration naming
+  With the checkout `root`, the files write-back would produce are proven first
+  (`proven-files` over the merged value, `seon.db/with`): a declaration naming
   a namespace its file does not require refuses before any test runs."
   {:malli/schema [:function
-                  [:=> [:cat :seon.agent/context-source :seon.store/store :seon.store/branch :seon.issue/id]
+                  [:=> [:cat :seon.agent/context-source :seon.store/store :seon.store/branch :seon.task/proofs]
                    [:or :seon.source/proposal :seon.program/three-way :seon.error/value]]
-                  [:=> [:cat :seon.agent/context-source :seon.store/store :seon.store/branch :seon.issue/id
+                  [:=> [:cat :seon.agent/context-source :seon.store/store :seon.store/branch :seon.task/proofs
                         [:maybe :seon.program/identity-set]]
                    [:or :seon.source/proposal :seon.program/three-way :seon.error/value]]
-                  [:=> [:cat :seon.agent/context-source :seon.store/store :seon.store/branch :seon.issue/id
+                  [:=> [:cat :seon.agent/context-source :seon.store/store :seon.store/branch :seon.task/proofs
                         [:maybe :seon.program/identity-set] [:maybe :seon.fn/root]]
                    [:or :seon.source/proposal :seon.program/three-way :seon.source/write-back-error :seon.error/value]]]}
-  ([source held-store candidate issue] (prepare-merge! source held-store candidate issue nil nil))
-  ([source held-store candidate issue selection] (prepare-merge! source held-store candidate issue selection nil))
-  ([source held-store candidate issue selection root]
+  ([source held-store candidate proofs] (prepare-merge! source held-store candidate proofs nil nil))
+  ([source held-store candidate proofs selection] (prepare-merge! source held-store candidate proofs selection nil))
+  ([source held-store candidate proofs selection root]
   (let [c-id (registry/branch-commit-id {:seon.store/store held-store :seon.store/branch candidate})]
     (if (:seon.error/at c-id)
       c-id
@@ -890,8 +893,7 @@
             ;; The file the merge would write back, proven before any test runs.
             proof (when (and root (vector? tx))
                     (let [merged (db/with head {:tx-data tx})]
-                      (if (:seon.error/at merged) merged (proven-file head merged delta root))))
-            subject (db/pull branch [:db/id {:seon.issue/tests [:seon.test/sym]}] [:seon.issue/id issue])
+                      (if (:seon.error/at merged) merged (proven-files head merged delta root))))
             refuse #(refused :seon.program/scope %1 {:seon.error/offending %2})]
         (try
           (cond
@@ -905,7 +907,7 @@
             (empty? delta) (refuse "The candidate changes nothing the head lacks." three)
             (:seon.error/at tx) tx
             (:seon.error/at proof) proof
-            (not (:db/id subject)) (refuse "The issue is absent on the candidate." issue)
+            (empty? proofs) (refuse "A merge names the tests that prove it; none were given." proofs)
             :else
             (let [s (keyword (str "merge-" (id/id)))
                   write! (fn [execution]
@@ -913,24 +915,32 @@
                                  ;; The writer re-derives a merged namespace's declarations: their tests run too.
                                  touched (when-not (:seon.error/at written) (fn/report-identities written))]
                              (run! #(when (:seon.error/at %) (throw (ex-info "The merge delta was refused." %))) [written touched])
-                             (into (into delta touched) (map #(vector :seon.test/sym (:seon.test/sym %))) (:seon.issue/tests subject))))
+                             (into (into delta touched) (map #(vector :seon.test/sym %)) proofs)))
                   gate ((requiring-resolve 'seon.cluster/candidate-gate!) source held-store s write! (constantly #{}))
                   run (:seon.source/gate-run gate)
-                  ;; Missing coverage refuses by name: every issue test is a member.
+                  ;; Missing coverage refuses by name: every proof is a member.
                   answered (set (map :seon.test/sym (:seon.test/results run)))
-                  unselected (vec (remove answered (map :seon.test/sym (:seon.issue/tests subject))))]
+                  unselected (vec (sort (remove answered proofs)))
+                  red (vec (sort (keep #(when-not (and (pos? (:seon.test/pass-count %)) (zero? (:seon.test/fail-count %))
+                                                       (zero? (:seon.test/error-count %)))
+                                          (:seon.test/sym %))
+                                       (:seon.test/results run))))]
               (cond
                 (:seon.error/at run) run
-                (seq unselected) (refuse "The gate answered none of these issue tests." unselected)
-                :else (assoc (select-keys gate [:seon.test/passed? :seon.source/tally])
-                             :seon.source/candidate s :seon.test.run/id (:seon.test.run/id run)
-                             :seon.source/expected-digests (held-digests head delta) :parents #{c-id}))))
+                (seq unselected) (refuse "The gate answered none of these proofs." unselected)
+                :else (cond-> (assoc (select-keys gate [:seon.test/passed? :seon.source/tally])
+                                     :seon.source/candidate s :seon.test.run/id (:seon.test.run/id run)
+                                     :seon.task/proofs proofs
+                                     :seon.source/expected-digests (held-digests head delta) :parents #{c-id})
+                        (seq red) (assoc :seon.source/red red)))))
           (finally (run! #(when-not (:seon.error/at %) (d/release-materialized-db %)) [base branch]))))))))
 
 (defn accept-merge!
   "Merge exactly the program tested by `prepare-merge!`'s proposal into
-  `source`: the named run on S complete, every member green, every added or
-  replaced function reached by one, and S's program unwritten since. The
+  `source`: the named run on S complete, every one of its `:seon.task/proofs`
+  green (the other reaching members' verdicts are shown by prepare, not
+  gated), every added or replaced function reached by a green member, and S's
+  program unwritten since. The
   writer refuses, before any datom lands, a merged declaration whose digest on
   the head moved from the proposal's `:seon.source/expected-digests`; writes to
   other rows never stale it. The merge commit's parents add the candidate and
@@ -942,11 +952,12 @@
   (accept-merge! source store proposal)"
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.store/store
                        [:map [:seon.source/candidate :seon.store/branch] [:seon.test.run/id :seon.test.run/id]
+                        [:seon.task/proofs :seon.task/proofs]
                         [:seon.source/expected-digests :seon.source/expected-digests]
                         [:parents [:set :seon.source/commit-id]]]]
                   [:or :seon.source/accepted :seon.source/test-evidence-error :seon.error/value]]}
   [source held-store {s :seon.source/candidate run-id :seon.test.run/id expected :seon.source/expected-digests
-                      merged :parents}]
+                      proofs :seon.task/proofs merged :parents}]
   (let [e-id (registry/branch-commit-id {:seon.store/store held-store :seon.store/branch s})]
     (if (:seon.error/at e-id)
       e-id
@@ -966,6 +977,7 @@
                                          [?m :seon.test.member/symbol ?sym]] tested run-id))
                 green-ids ((requiring-resolve 'seon.test/green-members) tested (vec (keys members)))
                 green (set (vals (select-keys members green-ids)))
+                unproven (vec (sort (remove green proofs)))
                 ;; A retracted function has nothing to cover: its surviving
                 ;; callers are the writer's refs and the run's reaching tests.
                 ;; What an agent merges back is specified (owner 2026-09-27): the
@@ -987,8 +999,8 @@
               (not= s (or (:seon.test.run/tested-branch run) (:seon.test.run/branch run)))
               (refuse "The named run was not recorded on the tested branch." run)
               (:seon.error/at results) results
-              (or (empty? members) (not-every? green-ids (keys members)))
-              (refuse "Every member of the named run must be green." (vec (vals (apply dissoc members green-ids))))
+              (or (empty? proofs) (seq unproven))
+              (refuse "Every proof of the named run must be green." unproven)
               (not (false? ((requiring-resolve 'seon.test.runner/program-written-since?) tested (:seon.test.run/basis-t run))))
               (refuse "The tested program changed after the named run." (:seon.test.run/basis-t run))
               (seq uncontracted)
@@ -1171,6 +1183,35 @@
           :else {:seon.source/path path :seon.source/base-digest base-digest
                  :seon.source/candidate-bytes candidate :seon.source/proof-rows (vec changes)})))))
 
+(defn- change-path
+  "The relative path of the one file `identity`'s change is written into: the
+  declaration's own file as `before` recorded it, else (an addition) its
+  namespace's file; nil when neither is recorded."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/declaration-identity] [:maybe :seon.source/path]]}
+  [before [_ declared :as identity]]
+  (or (get-in (db/pull before [{:seon.fn/file [:seon.fn.file/relative-path]}] identity)
+              [:seon.fn/file :seon.fn.file/relative-path])
+      (when (qualified-symbol? declared)
+        (:seon.fn.file/relative-path (namespace-path before (symbol (namespace declared)))))))
+
+(defn- proven-files
+  "`proven-file` for each file the changes of `identities` are written into,
+  by path: a function and the test proving it are two files of one merge.
+  The first refusal answers; a change naming no file refuses `:one-file`."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.program/identity-set :seon.fn/root]
+                  [:or [:vector :seon.source/proof] :seon.source/write-back-error]]}
+  [before after identities root]
+  (let [groups (group-by #(change-path before %) identities)]
+    (cond
+      (empty? identities) (write-back-refusal :no-replacement "The accepted merge changed no declaration." {})
+      (contains? groups nil)
+      (write-back-refusal :one-file "Each change needs its source and one file."
+                          {:seon.error/offending (vec (sort-by str (get groups nil)))})
+      :else (reduce (fn [proofs [_ group]]
+                      (let [proof (proven-file before after (set group) root)]
+                        (if (:seon.error/at proof) (reduced proof) (conj proofs proof))))
+                    [] (sort-by key groups)))))
+
 (defn- write-back-commits
   "`write-back!` between the accepted merge's `before` and `after` commits."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.source/accepted :seon.db/database-value
@@ -1180,39 +1221,49 @@
   (let [identities (:seon.program/identities accepted)
         merged (held-digests after identities)
         moved (moved-digests merged (held-digests (db/db connection) identities))
-        proven (when (empty? moved) (proven-file before after identities root))
-        {path :seon.source/path base-digest :seon.source/base-digest candidate :seon.source/candidate-bytes
-         entities :seon.source/proof-rows} proven
-        file (io/file root (str path))
-        kind (fn [pick] (vec (keep (fn [[identity was now]] (when (pick was now) identity)) entities)))
-        refuse (fn [reason message evidence]
-                 (write-back-refusal reason message (cond-> evidence path (assoc :seon.source/path path))))]
+        proven (when (empty? moved) (proven-files before after identities root))
+        disk-digest #(sha-256 (Files/readAllBytes (.toPath (io/file root (str (:seon.source/path %))))))
+        changed (when (vector? proven) (first (remove #(= (:seon.source/base-digest %) (disk-digest %)) proven)))
+        kind (fn [entities pick] (vec (keep (fn [[identity was now]] (when (pick was now) identity)) entities)))]
     (cond
       (seq moved)
-      (refuse :row-changed (str "The branch changed " (str/join ", " (map pr-str moved))
-                                " after the merge was accepted; merge that change before writing back.")
-              {:seon.error/member :seon.source/accepted
-               :seon.error/expected (select-keys merged moved)
-               :seon.error/offending (select-keys (held-digests (db/db connection) identities) moved)})
+      (write-back-refusal :row-changed (str "The branch changed " (str/join ", " (map pr-str moved))
+                                            " after the merge was accepted; merge that change before writing back.")
+                          {:seon.error/member :seon.source/accepted
+                           :seon.error/expected (select-keys merged moved)
+                           :seon.error/offending (select-keys (held-digests (db/db connection) identities) moved)})
       (:seon.error/at proven) proven
-      (not= base-digest (sha-256 (Files/readAllBytes (.toPath file))))
-      (refuse :file-changed "The file changed while the candidate was proven." {:seon.error/offending base-digest})
+      changed
+      (write-back-refusal :file-changed "The file changed while the candidate was proven."
+                          {:seon.source/path (:seon.source/path changed) :seon.error/offending (:seon.source/base-digest changed)})
       :else
-      (try
-        (install! (.getPath file) candidate)
-        {:seon.source/changed-paths [path]
-         :seon.source/written {:seon.source/path path :seon.source/base-digest base-digest
-                               :seon.source/candidate-digest (sha-256 candidate)
-                               :seon.source/replaced (kind #(and %1 %2))
-                               :seon.source/added (kind #(and (not %1) %2))
-                               :seon.source/retracted (kind #(and %1 (not %2)))}}
-        (catch Exception failure
-          (refuse :install-failed "The proven candidate could not be installed." {:seon.error/throwable failure}))))))
+      (reduce
+       (fn [written {path :seon.source/path base-digest :seon.source/base-digest candidate :seon.source/candidate-bytes
+                     entities :seon.source/proof-rows}]
+         (try
+           (install! (.getPath (io/file root (str path))) candidate)
+           (let [added (kind entities #(and (not %1) %2))
+                 retracted (kind entities #(and %1 (not %2)))]
+             (-> written
+                 (update :seon.source/changed-paths conj path)
+                 (update :seon.source/files conj
+                         (cond-> {:seon.source/path path :seon.source/base-digest base-digest
+                                  :seon.source/candidate-digest (sha-256 candidate)
+                                  :seon.source/replaced (kind entities #(and %1 %2))}
+                           (seq added) (assoc :seon.source/added added)
+                           (seq retracted) (assoc :seon.source/retracted retracted)))))
+           (catch Exception failure
+             ;; Files installed before this one stay installed and are named.
+             (reduced (write-back-refusal :install-failed "The proven candidate could not be installed."
+                                          {:seon.source/path path :seon.source/changed-paths (:seon.source/changed-paths written)
+                                           :seon.error/throwable failure})))))
+       {:seon.source/changed-paths [] :seon.source/files []}
+       proven))))
 
 (defn write-back!
   "Write the function and test changes of `accepted` (`accept-merge!`'s
-  accepted merge on `connection`'s branch) into their one source file under
-  `root`: a replaced declaration's recorded byte span takes its accepted
+  accepted merge on `connection`'s branch) into their source files under
+  `root`, each change into its one file: a replaced declaration's recorded byte span takes its accepted
   source, a retracted one's span (and the blank lines before it) goes, and an
   added one is appended to its namespace's file. A namespace row is its `ns`
   form: its span takes the merged form.
@@ -1221,12 +1272,12 @@
   declaration still holds, on the branch head, the digest the merge commit gave
   it (other writes never stale it); every change names one file (a replaced or
   retracted declaration by its state before the merge, an added one by its
-  namespace's file) and every before-state a span holding its source; the
+  namespace's file) and every before-state a span holding its source; each
   file's bytes are the ones its declarations were analyzed from; and the
   ordinary analyzer (`seon.fn/analyze-rows` over the candidate text) reindexes
   the candidate to exactly the digests the merge commit holds for the file's
-  declarations. The disk bytes are checked again, then the candidate is
-  installed by an atomic rename. Publishing the changed path stays with the
+  declarations. Every file's disk bytes are checked again, then each
+  candidate is installed by an atomic rename, answering one entry per file. Publishing the changed path stays with the
   publication owner.
 
   Example:

@@ -24,11 +24,21 @@
  :my.program/merge-proposal
  [:map [:seon.source/candidate :seon.store/branch] [:seon.test.run/id :seon.test.run/id]
   [:seon.test/passed? {:optional true} :boolean] [:seon.source/tally {:optional true} :string]
+  [:seon.task/proofs :seon.task/proofs] [:seon.source/red {:optional true} :seon.source/red]
+  [:seon.task/merge :seon.task/merge]
   [:seon.source/expected-digests :seon.source/expected-digests] [:parents [:set :seon.source/commit-id]]]
+ :my.program/prepare-request
+ [:map {:description "An open proposal (my.program/proposals) root prepares, optionally narrowed to declarations and proven against a checkout."}
+  [:my.program/context :my.program/context]
+  [:seon.task/merge :seon.task/merge] [:seon.task/branch :seon.task/branch] [:seon.task/proved :seon.task/proved]
+  [:seon.program/identities {:optional true} :seon.program/identity-set]
+  [:seon.fn/root {:optional true} :seon.fn/root]]
  :my.program/accept-request
  [:map [:my.program/context :my.program/context]
   [:seon.source/candidate :seon.store/branch] [:seon.test.run/id :seon.test.run/id]
   [:seon.test/passed? {:optional true} :boolean] [:seon.source/tally {:optional true} :string]
+  [:seon.task/proofs :seon.task/proofs] [:seon.source/red {:optional true} :seon.source/red]
+  [:seon.task/merge :seon.task/merge]
   [:seon.source/expected-digests :seon.source/expected-digests] [:parents [:set :seon.source/commit-id]]]
  :my.program/held-branch
  [:keyword {:description "The branch a context refused the cluster's own custody holds."}]

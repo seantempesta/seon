@@ -109,8 +109,11 @@
               [:map {:description "A prepared merge accept-merge! takes: the tested intermediate branch, its run and verdict, the digest each merged declaration held on the destination, and the candidate's commit."}
                [:seon.source/candidate :seon.store/branch] [:seon.test.run/id :seon.test.run/id]
                [:seon.test/passed? :boolean] [:seon.source/tally :string]
+               [:seon.task/proofs :seon.task/proofs]
+               [:seon.source/red {:optional true} :seon.source/red]
                [:seon.source/expected-digests :seon.source/expected-digests]
                [:parents [:set :seon.source/commit-id]]],
+              :red [:vector {:min 1 :description "The run's members that are not green, by symbol: shown to root, not gated; only the proofs gate acceptance."} :seon.test/sym],
               :candidate-bytes [:and {:description "The proven file bytes a write-back installs."} :seon.source/file-bytes],
               :proof-rows [:sequential {:description "Each written declaration with its entity before and after the merge (absent: nil)."}
                            [:tuple :seon.program/declaration-identity [:maybe :map] [:maybe :map]]],
@@ -142,14 +145,16 @@
               :written
               [:map
                [:seon.source/changed-paths :seon.source/changed-paths]
-               [:seon.source/written
-                [:map
-                 [:seon.source/path :seon.source/path]
-                 [:seon.source/base-digest :seon.source/base-digest]
-                 [:seon.source/candidate-digest :seon.source/candidate-digest]
-                 [:seon.source/replaced :seon.source/replaced]
-                 [:seon.source/added {:optional true} :seon.source/added]
-                 [:seon.source/retracted {:optional true} :seon.source/retracted]]]],
+               [:seon.source/files [:vector {:min 1 :description "One entry per file a write-back installed, in path order: a merge writes each change into its one file."}
+                                    :seon.source/file-written]]],
+              :file-written
+              [:map
+               [:seon.source/path :seon.source/path]
+               [:seon.source/base-digest :seon.source/base-digest]
+               [:seon.source/candidate-digest :seon.source/candidate-digest]
+               [:seon.source/replaced :seon.source/replaced]
+               [:seon.source/added {:optional true} :seon.source/added]
+               [:seon.source/retracted {:optional true} :seon.source/retracted]],
               :refresh-result [:or [:and :seon.source/published :seon.source/adoption-result]
                                :seon.source/publication-error],
               :published

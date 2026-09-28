@@ -95,7 +95,7 @@
         file (io/file root path)
         callee [:seon.fn/sym (symbol (str fixture-ns) "callee")]
         replacement "(defn callee\n  \"Add one, by increment.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (inc x))"
-        issue (str "write-back-test-" suffix)
+        proofs #{(symbol (str fixture-ns) "caller-check")}
         c (keyword (str "write-back-c-" suffix))
         agent-id (str "write-back-" suffix)
         made (volatile! [c])]
@@ -110,9 +110,6 @@
             ;; The test is the agent's own, written at its REPL on H before the lane forks.
             _ (with-agent! h-conn cluster-name (str agent-id "-author") fixture-ns
                 #(submit! % "(clojure.test/deftest caller-check (clojure.test/is (= 3 (caller 2))))"))
-            _ (support/transacted! h-conn [{:seon.issue/id issue :seon.issue/title "Write back" :seon.issue/status :open
-                                            :seon.issue/severity :cleanup :seon.issue/problem "Replace the callee."
-                                            :seon.issue/tests #{[:seon.test/sym (symbol (str fixture-ns) "caller-check")]}}])
             before (digests entities)
             _ (registry/branch! {:seon.store/store store :seon.store/branch c
                                  :seon.cluster.registry/from (db/commit-id (db/db h-conn))})
@@ -127,7 +124,7 @@
           (testing "the parent head does not move before the merge"
             (is (= (before callee)
                    (:seon.program/definition-digest (db/pull (db/db h-conn) [:seon.program/definition-digest] callee)))))
-          (let [proposal (source/prepare-merge! target store c issue)
+          (let [proposal (source/prepare-merge! target store c proofs)
                 _ (some->> (:seon.source/candidate proposal) (vswap! made conj))
                 _ (is (true? (:seon.test/passed? proposal)))
                 accepted (source/accept-merge! target store proposal)
@@ -138,11 +135,13 @@
            (let [merged (:seon.program/definition-digest (db/pull (db/db h-conn) [:seon.program/definition-digest] callee))
                 request {:seon.db/connection h-conn :seon.source/accepted accepted :seon.fn/root root}
                 ;; Before, any write after the accept (root's own recorded run) refused as a moved head.
-                _ (support/transacted! h-conn [{:seon.issue/id issue :seon.issue/title "Merged"}])
+                _ (support/transacted! h-conn [{:seon.issue/id (str "write-back-test-" suffix) :seon.issue/title "Merged"
+                                                :seon.issue/status :open :seon.issue/severity :cleanup
+                                                :seon.issue/problem "An unrelated head write."}])
                 written (source/write-back! request)]
             (testing "the exact span is written back and nothing else changes"
               (is (= [path] (:seon.source/changed-paths written)))
-              (is (= [callee] (get-in written [:seon.source/written :seon.source/replaced])))
+              (is (= [callee] (get-in written [:seon.source/files 0 :seon.source/replaced])))
               (is (= (str (subs base-text 0 start) replacement (subs base-text stop)) (slurp file))))
             (testing "the file reindexed from disk declares exactly the merged program"
               (is (= (assoc before callee merged) (digests (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})))))
@@ -178,7 +177,7 @@
         added-test [:seon.test/sym (symbol (str fixture-ns) "triple-check")]
         function-source "(defn triple\n  \"Triple.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (* 3 x))"
         test-source "(clojure.test/deftest triple-check (clojure.test/is (= 9 (triple 3))))"
-        issue (str "write-back-add-" suffix)
+        proofs #{(second added-test)}
         c (keyword (str "write-back-add-c-" suffix))
         made (volatile! [c])]
     (io/make-parents file)
@@ -195,18 +194,14 @@
         (try
           (with-agent! c-conn cluster-name (str "write-back-add-" suffix) fixture-ns
             (fn [request] (submit! request function-source) (submit! request test-source)))
-          ;; The issue lives on the lane with the test it names.
-          (support/transacted! c-conn [{:seon.issue/id issue :seon.issue/title "Add triple" :seon.issue/status :open
-                                        :seon.issue/severity :cleanup :seon.issue/problem "Add a triple function."
-                                        :seon.issue/tests #{added-test}}])
           (testing "the head lacks both additions before the merge"
             (is (every? #(nil? (:db/id (db/pull (db/db h-conn) [:db/id] %))) [added-fn added-test])))
           (testing "a selection merges only named changes; a selected test reaching an unselected addition refuses by name"
-            (is (= #{added-test} (get-in (source/prepare-merge! target store c issue #{added-test})
+            (is (= #{added-test} (get-in (source/prepare-merge! target store c proofs #{added-test})
                                          [:seon.error/offending :seon.program/identities])))
             (is (= [[:seon.fn/sym 'absent/declaration]]
-                   (:seon.error/offending (source/prepare-merge! target store c issue #{[:seon.fn/sym 'absent/declaration]})))))
-          (let [proposal (source/prepare-merge! target store c issue #{added-fn added-test})
+                   (:seon.error/offending (source/prepare-merge! target store c proofs #{[:seon.fn/sym 'absent/declaration]})))))
+          (let [proposal (source/prepare-merge! target store c proofs #{added-fn added-test})
                 _ (some->> (:seon.source/candidate proposal) (vswap! made conj))
                 _ (is (true? (:seon.test/passed? proposal)))
                 accepted (when (:seon.test/passed? proposal) (source/accept-merge! target store proposal))
@@ -215,7 +210,7 @@
               (let [written (source/write-back! {:seon.db/connection h-conn :seon.source/accepted accepted :seon.fn/root root})
                     text (slurp file)]
                 (testing "both additions are appended to the namespace's file, the rest untouched"
-                  (is (= #{added-fn added-test} (set (get-in written [:seon.source/written :seon.source/added]))))
+                  (is (= #{added-fn added-test} (set (get-in written [:seon.source/files 0 :seon.source/added]))))
                   (is (str/starts-with? text base-text))
                   (is (str/includes? text function-source))
                   (is (str/includes? text test-source)))
@@ -234,8 +229,8 @@
 
 (defn- merge-world!
   "The fixture file indexed onto H and a lane C where the agent submits
-  `forms` (each a function of the fixture namespace) with an issue naming its
-  test `test-name`; calls `body` with the world, then retires C and every
+  `forms` (each a function of the fixture namespace), proved by its test
+  `test-name`; calls `body` with the world, then retires C and every
   branch `body` conj'd onto `:made`, and deletes the root."
   [label test-name forms body]
   (let [target (support/execution-handle nil)
@@ -245,7 +240,6 @@
         fixture-ns (symbol (str label suffix ".core"))
         root (str "tmp/" label "-test-" suffix)
         file (io/file root (str "src/" label suffix "/core.clj"))
-        issue (str label "-" suffix)
         c (keyword (str label "-c-" suffix))
         made (volatile! [c])]
     (io/make-parents file)
@@ -260,10 +254,7 @@
         (try
           (with-agent! c-conn (:seon.cluster/name target) (str label suffix) fixture-ns
             (fn [request] (doseq [form forms] (submit! request (form fixture-ns)))))
-          (support/transacted! c-conn [{:seon.issue/id issue :seon.issue/title label :seon.issue/status :open
-                                        :seon.issue/severity :cleanup :seon.issue/problem label
-                                        :seon.issue/tests #{[:seon.test/sym (symbol (str fixture-ns) test-name)]}}])
-          (body {:target target :store store :c c :issue issue :root root :file file :fixture-ns fixture-ns :made made})
+          (body {:target target :store store :c c :proofs #{(symbol (str fixture-ns) test-name)} :root root :file file :fixture-ns fixture-ns :made made})
           (finally (agent/release-context! candidate))))
       (finally
         (doseq [b @made] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))
@@ -276,9 +267,9 @@
   ;; unrequired, so the merge gate passed and only write-back refused.
   (merge-world! "wbreq" "set-check"
                 [(fn [_] "(clojure.test/deftest set-check (clojure.test/is (= #{1 2} (clojure.set/union #{1} #{2}))))")]
-                (fn [{:keys [target store c issue root file made]}]
+                (fn [{:keys [target store c proofs root file made]}]
                   (let [before (slurp file)
-                        refused (source/prepare-merge! target store c issue nil root)]
+                        refused (source/prepare-merge! target store c proofs nil root)]
                     (some->> (:seon.source/candidate refused) (vswap! made conj))
                     (is (= :not-analyzable (:seon.source/write-back-refused refused)))
                     (is (not (:seon.source/candidate refused)) "no intermediate branch, no test run")
@@ -295,11 +286,11 @@
     (merge-world!
      "wbns" "set-check"
      [ns-form (fn [_] "(clojure.test/deftest set-check (clojure.test/is (= #{1 2} (clojure.set/union #{1} #{2}))))")]
-     (fn [{:keys [target store issue c root file fixture-ns made]}]
+     (fn [{:keys [target store proofs c root file fixture-ns made]}]
        (let [h-conn (:seon.db/connection target)
              check [:seon.test/sym (symbol (str fixture-ns) "set-check")]
              namespace-entity [:seon.ns/name fixture-ns]
-             proposal (source/prepare-merge! target store c issue #{check} root)
+             proposal (source/prepare-merge! target store c proofs #{check} root)
              _ (some->> (:seon.source/candidate proposal) (vswap! made conj))
              _ (is (true? (:seon.test/passed? proposal)))
              accepted (when (:seon.test/passed? proposal) (source/accept-merge! target store proposal))]
@@ -307,9 +298,60 @@
          (when (:seon.source/commit-id accepted)
            (let [written (source/write-back! {:seon.db/connection h-conn :seon.source/accepted accepted :seon.fn/root root})
                  reindexed (digests (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]}))]
-             (is (= [namespace-entity] (get-in written [:seon.source/written :seon.source/replaced])))
+             (is (= [namespace-entity] (get-in written [:seon.source/files 0 :seon.source/replaced])))
              (is (str/starts-with? (slurp file) (ns-form fixture-ns)))
              (is (= reindexed
                     (digests (db/pull-many (db/db h-conn) [:seon.fn/sym :seon.test/sym :seon.ns/name :seon.program/definition-digest]
                                            (vec (keys reindexed)))))
                  "the file reindexed from disk declares the merged program"))))))))
+
+(deftest ^{:seon.test/long "Two agent turns on C, one prepare-merge! (file proofs, then a nested seon.test/run; 60 s is merge-test's measured bound) and three analyses of a two-file fixture."
+           :seon.test/long-ms 90000}
+  a-merge-writes-each-change-into-its-own-file
+  ;; Before (2026-09-28 dogfood loop), a merge whose function and proving test
+  ;; live in two files refused :one-file: every real change with its regression.
+  (let [target (support/execution-handle nil)
+        store (:seon.store/store target)
+        h-conn (:seon.db/connection target)
+        suffix (id/id)
+        fixture-ns (symbol (str "wbtwo" suffix ".core"))
+        test-ns (symbol (str fixture-ns "-test"))
+        root (str "tmp/wbtwo-test-" suffix)
+        paths [(str "src/wbtwo" suffix "/core.clj") (str "src/wbtwo" suffix "/core_test.clj")]
+        test-source (str "(ns " test-ns "\n  \"Write-back test fixture.\"\n  (:require [clojure.test] [" fixture-ns "]))\n")
+        callee [:seon.fn/sym (symbol (str fixture-ns) "callee")]
+        check [:seon.test/sym (symbol (str test-ns) "callee-check")]
+        c (keyword (str "wbtwo-c-" suffix))
+        made (volatile! [c])]
+    (doseq [[path text] (map vector paths [(fixture-source fixture-ns) test-source])]
+      (io/make-parents (io/file root path))
+      (spit (io/file root path) text))
+    (try
+      (let [entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})
+            _ (support/transacted! h-conn (fn/reconcile-tx (db/db h-conn) entities (mapv program/row-identity entities)))
+            _ (registry/branch! {:seon.store/store store :seon.store/branch c
+                                 :seon.cluster.registry/from (db/commit-id (db/db h-conn))})
+            candidate (agent/acquire-context! target nil {:seon.agent/branch c})
+            c-conn (:seon.db/connection candidate)]
+        (try
+          (with-agent! c-conn (:seon.cluster/name target) (str "wbtwo-" suffix) fixture-ns
+            (fn [request]
+              (submit! request "(defn callee\n  \"Add one, by increment.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (inc x))")
+              (submit! request (str "(in-ns '" test-ns ")\n(clojure.test/deftest callee-check (clojure.test/is (= 3 ("
+                                    fixture-ns "/callee 2))))"))))
+          (let [proposal (source/prepare-merge! target store c #{(second check)} nil root)
+                _ (some->> (:seon.source/candidate proposal) (vswap! made conj))
+                accepted (when (:seon.test/passed? proposal) (source/accept-merge! target store proposal))
+                written (when (:seon.source/commit-id accepted)
+                          (source/write-back! {:seon.db/connection h-conn :seon.source/accepted accepted :seon.fn/root root}))]
+            (is (= (sort paths) (:seon.source/changed-paths written)) "both files are written")
+            (is (= [[callee] [check]] (mapv #(into (:seon.source/replaced %) (:seon.source/added %)) (:seon.source/files written))))
+            (is (= (select-keys (digests (db/pull-many (db/db h-conn) [:seon.fn/sym :seon.test/sym :seon.program/definition-digest]
+                                                        [callee check]))
+                                [callee check])
+                   (select-keys (digests (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})) [callee check]))
+                "each file reindexed from disk declares the merged program"))
+          (finally (agent/release-context! candidate))))
+      (finally
+        (doseq [b @made] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))
+        (support/delete-recursively! root)))))
