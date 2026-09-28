@@ -16,9 +16,8 @@
            facts on the new head and drops only the forms now refused
   show     each entry's shown text through the one printer
 
-  Entrants (`turn-request`, `code-request`, `jvm-request`, `test-request`,
-  `render-request`) and `seon.sci.batch/acquire-request` are `seon.batch/evaluate-batch`
-  requests that differ only in these values."
+  Entrants (`turn-request`, `code-request`, `jvm-request`, `test-request`)
+  are `seon.batch/evaluate-batch` requests that differ only in these values."
   (:require [clj-kondo.core :as kondo]
             [clojure.string :as str]
             [sci.impl.vars]
@@ -340,7 +339,7 @@
                                         ;; the name: its source no longer describes the root
                                         (and (= :rebound (:seon.batch/join private))
                                              (dbu/entid working [:seon.fn/sym sym])
-                                             (not (dbu/entid (get-in request [:seon.batch/world :seon.db/db]) [:seon.fn/sym sym])))
+                                             (not (dbu/entid (:seon.batch/basis request) [:seon.fn/sym sym])))
                                         (assoc m sym [:withdrawn private])
                                         :else (assoc m sym [:private private])))
                                     m)
@@ -553,7 +552,7 @@
   {:malli/schema [:=> [:cat :seon.batch/request :seon.db/database-value [:vector :seon.program/row]]
                   [:maybe :seon.error/value]]}
   [request head entities]
-  (when-let [basis (get-in request [:seon.batch/world :seon.db/db])]
+  (when-let [basis (:seon.batch/basis request)]
     (when-not (identical? basis head)
       (let [digest (fn [database lookup]
                      (:seon.program/definition-digest
@@ -622,7 +621,7 @@
 (defn record-facts
   "The run and its evaluations, through the recording writer."
   {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/batch] :seon.store/transaction-data]}
-  [{{agent-id :seon.agent/id turn-id :seon.turn/id basis :seon.db/db} :seon.batch/world start-ns :seon.batch/start-ns
+  [{{agent-id :seon.agent/id turn-id :seon.turn/id} :seon.batch/world basis :seon.batch/basis start-ns :seon.batch/start-ns
     record-call :seon.turn.batch/record-call} batch]
   (let [entries (:seon.batch/entries batch)]
     (when (and agent-id (seq entries))
@@ -723,8 +722,8 @@
   printer's own diagnostics (a renderer that refused, a profile it could not
   prepare): the fold records those as faults."
   {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/entry] :seon.batch/printed]}
-  [{{ctx :seon.sci.eval/ctx limit :seon.sci.eval/time-limit-ms db :seon.db/db profile :seon.render/profile
-     cluster :seon.boot/cluster-name} :seon.batch/world}
+  [{{ctx :seon.sci.eval/ctx limit :seon.sci.eval/time-limit-ms profile :seon.render/profile
+     cluster :seon.boot/cluster-name} :seon.batch/world db :seon.batch/working}
    {:seon.batch/keys [value error source] :as entry}]
   (let [req (cond-> {:seon.sci.eval/ctx ctx :seon.cluster.eval/source (or source "")
                      ;; the profile derives from the form's working value and cluster
@@ -786,8 +785,10 @@
 
 (defn- sci-stages
   {:malli/schema [:=> [:cat :map] :map]}
-  [{{db :seon.db/db} :seon.batch/world :as request}]
-  (merge {:seon.batch/read-state forgive/read-state
+  [{world :seon.batch/world :as request}]
+  (let [db (or (:seon.batch/basis request) (world/basis world))]
+  (merge {:seon.batch/basis db
+          :seon.batch/read-state forgive/read-state
           :seon.batch/read-next sci.batch/read-next
           :seon.batch/evaluate sci.batch/evaluate
           :seon.batch/ns-name sci.batch/current-ns
@@ -798,7 +799,7 @@
           :seon.batch/start-ns 'user
           :seon.batch/mode :code
           :seon.sci.batch/delta (schema/begin-registration-delta (db/carried-projection db))}
-         request))
+         request)))
 
 (defn program-request
   "An evaluation that records program facts: derive, facts, apply, fold,
@@ -825,17 +826,6 @@
   [request]
   (program-request (merge {:seon.batch/mode :code} request)))
 
-(defn render-request
-  "A render or context-assembly batch: the viewer's context forked, custody
-  a database value (no connection: a write refuses), writes observed and
-  reported, nothing derived, nothing recorded here (the owning run records
-  the shown text)."
-  {:malli/schema [:=> [:cat :map] :seon.batch/request]}
-  [request]
-  (sci-stages (merge (dissoc request :seon.batch/settle :seon.batch/derive)
-                     {:seon.batch/evaluate (fn [{world :seon.batch/world :as req} form working]
-                                             (world/with-world world #(sci.batch/evaluate req form working)))})))
-
 (defn- jvm-read-next
   "One host `read+string` at the live `*ns*` after `forgive/skip-to`."
   {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/read-state] :seon.batch/read-step]}
@@ -861,8 +851,8 @@
   context in the world, the value is bound there under its result handle
   (`result/e<evaluation id>`), so the agent digs it as it digs an SCI value."
   {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/entry] :seon.batch/printed]}
-  [{{db :seon.db/db profile :seon.render/profile cluster :seon.boot/cluster-name ctx :seon.sci.eval/ctx
-     turn-id :seon.turn/id limit :seon.sci.eval/time-limit-ms} :seon.batch/world}
+  [{{profile :seon.render/profile cluster :seon.boot/cluster-name ctx :seon.sci.eval/ctx
+     turn-id :seon.turn/id limit :seon.sci.eval/time-limit-ms} :seon.batch/world db :seon.batch/working}
    {:seon.batch/keys [value error source duration-ms allocated-bytes ordinal] :as entry}]
   (let [req (cond-> {:seon.cluster.eval/source (or source "")}
               cluster (assoc :seon.boot/cluster-name cluster)
@@ -887,10 +877,11 @@
   SCI observation or program facts; its evaluations are recorded as the run
   of `:seon.agent/id`."
   {:malli/schema [:=> [:cat :map] :seon.batch/request]}
-  [request]
+  [{world :seon.batch/world :as request}]
   ;; the host evaluates: no SCI write observer, no program facts
   (dissoc
-   (merge {:seon.batch/read-state (fn [text] {:seon.batch/version {:seon.batch/text text :seon.batch/pos 0}
+   (merge {:seon.batch/basis (world/basis world)
+           :seon.batch/read-state (fn [text] {:seon.batch/version {:seon.batch/text text :seon.batch/pos 0}
                                              :seon.batch/repairs []})
           :seon.batch/read-next jvm-read-next
           :seon.batch/evaluate (fn [_ form _] {:seon.batch/value (eval form)})
@@ -909,8 +900,9 @@
   "A test agent's resolved body: one entry whose evaluation is the body, its
   recording the same settle stage, on its world's settlement connection."
   {:malli/schema [:=> [:cat :map] :seon.batch/request]}
-  [{body :seon.batch/body :as request}]
+  [{body :seon.batch/body world :seon.batch/world :as request}]
   (merge {:seon.batch/text "(body)"
+          :seon.batch/basis (world/basis world)
           :seon.batch/read-state (fn [text] {:seon.batch/version {:seon.batch/text text :seon.batch/pos 0}
                                              :seon.batch/repairs []})
           :seon.batch/read-next (fn [_ {v :seon.batch/version}]

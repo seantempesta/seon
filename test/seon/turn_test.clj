@@ -2373,3 +2373,22 @@
            entry (first (:seon.batch/entries (seon.batch/evaluate-batch (dissoc request :seon.batch/settle))))]
        (is (contains? (:seon.batch/value entry) :my.agent/roster)
            "the one-argument call answers the store's roster")))))
+
+(deftest a-call-omitting-its-database-sees-the-forms-own-write
+  ;; Owner ruling 2026-09-28: no world holds a database value. A call that
+  ;; omits its database is supplied its world connection's current value, so
+  ;; within one evaluation a write is seen by the next call.
+  (support/with-database
+   (fn [connection]
+     (support/transacted! connection (support/agent-tx @connection "sees-own-write"))
+     (let [request (turn.batch/code-request
+                    {:seon.batch/world (world/agent-world {:seon.db/connection connection :seon.cluster/name "default"
+                                                           :seon.sci.eval/base-ctx (sci.eval/base-ctx (db/db connection))}
+                                                          {:seon.agent/id "sees-own-write"})
+                     :seon.batch/observe observe/observe
+                     :seon.turn.batch/row-tx @#'turn/row-tx
+                     :seon.batch/start-ns 'user
+                     :seon.batch/text "(do (my.agent/settings! {:seon.config.eval/time-limit-ms 4321}) (my.agent/settings))"})
+           entry (first (:seon.batch/entries (seon.batch/evaluate-batch (dissoc request :seon.batch/settle))))]
+       (is (= 4321 (:seon.config.eval/time-limit-ms (:seon.batch/value entry)))
+           "the read after the write, omitting its database, sees the write")))))

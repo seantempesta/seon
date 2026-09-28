@@ -3994,9 +3994,14 @@
                        ;; projection state: interpreted reads run past the
                        ;; dynamic binding above, and a bare value rebuilds
                        ;; the projection per read (measured 2026-09-15).
+                       ;; With a connection (custody, or the world's) an
+                       ;; elided read is that connection's CURRENT value, so a
+                       ;; form sees its own writes (owner ruling 2026-09-28);
+                       ;; only a connectionless evaluation reads its value.
                        #'db/*read-database*
-                       (some-> (:seon.db/db turn-environment)
-                               (db/carry-projection-state projection-state))
+                       (when-not (or connection db/*conn*)
+                         (some-> (:seon.db/db turn-environment)
+                                 (db/carry-projection-state projection-state)))
                        #'db/*receipt* receipt
                        #'db/*open* (when receipt (:seon.db/pending-open request))
                        #'effect/*request-context*

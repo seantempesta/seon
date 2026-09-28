@@ -365,6 +365,7 @@
                      (some-> (:seon.sci.kernel/program-snapshot ctx) deref :seon.db/db)
                      ;; an agent's evaluation always has one: the executing member's
                      (db/db (:seon.db/connection (execution-handle nil))))
+        connection (or (:seon.db/connection request) (get-in ctx [::sci.eval/custody :seon.db/connection]))
         _ (when (and (contains? ctx ::sci.eval/custody) (not (sci.eval/acquired-database? ctx database)))
             (sci.eval/acquire! {:seon.sci.eval/ctx (::sci.eval/base-ctx ctx ctx) :seon.db/db database}))
         request (assoc request :seon.sci.eval/ctx ctx)
@@ -373,11 +374,14 @@
         world (cond-> {:seon.boot/cluster-name (:seon.boot/cluster-name request "default")
                        :seon.sci.eval/ctx ctx :seon.sci.eval/time-limit-ms limit
                        :seon.batch/sink (seon.batch/sink)}
-                database (assoc :seon.db/db database)
-                (:seon.db/connection request) (assoc :seon.db/connection (:seon.db/connection request)))
+                ;; the world an agent's evaluation has: its custody's connection
+                ;; and its identity, from which omitted inputs are supplied
+                connection (assoc :seon.db/connection connection)
+                (:seon.agent/id request) (assoc :seon.agent/id (:seon.agent/id request)))
         batch (seon.batch/evaluate-batch
                (-> (turn.batch/code-request
                     {:seon.batch/world world
+                     :seon.batch/basis database
                      :seon.batch/text source
                      :seon.batch/start-ns start
                      :seon.batch/evaluate #'seon.turn/evaluate-row

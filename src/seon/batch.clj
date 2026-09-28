@@ -37,7 +37,7 @@
 
 (def ^:dynamic *world*
   "The world of the evaluation running on this thread: the entrant's world
-  value with its database the batch's working value. The fold binds it around
+  value (its connection and writer; no database value). The fold binds it around
   each evaluation and its print; `seon.turn.batch/with-world` binds it again
   after a thread hop. It is the one source a called function's omitted
   world-member inputs are supplied from."
@@ -47,7 +47,9 @@
   "Each world member by the schema name a function declares it under: an
   omitted input declared under one of these names is supplied from the
   calling evaluation's world, required or optional. A function whose meaning
-  needs the member absent declares another name."
+  needs the member absent declares another name. The database is no stored
+  member: it is the world connection's current value, read at the call
+  (`seon.call-preparation/supply`)."
   {:seon.db/database-value :seon.db/db
    :seon.db/connection :seon.db/connection
    :seon.db/writer :seon.db/writer
@@ -281,8 +283,8 @@
      (catch Throwable _ false))))
 
 (defn- form-world
-  "The world one form runs in: the entrant's world with its database the
-  working value, and the form's own evidence members, fresh: its call sink
+  "The world one form runs in: the entrant's world and the form's own
+  evidence members, fresh: its call sink
   (`:seon.batch/form-sink`, which the evaluator binds as the world's sink
   around the form's own code only, so the stages' machinery is not the form's
   code evidence), its
@@ -290,10 +292,9 @@
   sink) and its owned-work count (the futures the form starts,
   `seon.sci.kernel/future-call`). Everything the form and the work it starts
   do lands here, whatever form is running when it finishes."
-  {:malli/schema [:=> [:cat :seon.batch/request :seon.db/database-value :seon.cluster.eval/ordinal] :seon.batch/world]}
-  [request working ordinal]
+  {:malli/schema [:=> [:cat :seon.batch/request :seon.cluster.eval/ordinal] :seon.batch/world]}
+  [request ordinal]
   (assoc (:seon.batch/world request)
-         :seon.db/db working
          :seon.batch/ordinal ordinal
          :seon.batch/form-sink (sink)
          :seon.batch/reads (atom [])
@@ -334,8 +335,9 @@
         n (:seon.batch/ordinal batch)
         t0 (System/nanoTime)
         base (merge {:seon.batch/ordinal n :seon.batch/form (:seon.batch/form r)} (source-of r))
-        world (form-world request (:seon.batch/working batch) n)
-        request (assoc request :seon.batch/world world)
+        world (form-world request n)
+        ;; the stages read the batch's working value from their request
+        request (assoc request :seon.batch/world world :seon.batch/working (:seon.batch/working batch))
         writes (java.util.concurrent.ConcurrentLinkedQueue.)
         open (java.util.concurrent.atomic.AtomicBoolean. true)
         on-write (fn [w]
@@ -429,7 +431,8 @@
   (let [entry (peek (:seon.batch/entries batch))
         n (:seon.batch/ordinal entry)
         answer (within request (:seon.batch/form-world batch)
-                 #((:seon.batch/publish request) request batch entry))
+                 #((:seon.batch/publish request) (assoc request :seon.batch/working (:seon.batch/working batch))
+                                                 batch entry))
         e (:seon.batch/entry answer)]
     (if (and (map? e) (= n (:seon.batch/ordinal e))
              (not= (contains? e :seon.batch/value) (contains? e :seon.batch/error)))
@@ -623,7 +626,7 @@
   {:malli/schema [:=> [:cat :seon.batch/request] :seon.batch/batch]}
   [request]
   (let [t0 (System/nanoTime)
-        basis (get-in request [:seon.batch/world :seon.db/db])
+        basis (:seon.batch/basis request)
         ;; a read state the stage cannot build is a diagnostic: reading then
         ;; ends at once with nothing read
         [read-state failure] (try [((:seon.batch/read-state request) (:seon.batch/text request))]

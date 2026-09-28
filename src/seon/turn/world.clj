@@ -4,7 +4,6 @@
   thread, where its run is recorded, and the fault stage that records a
   diagnostic in it. Every stage reads the world from its request."
   (:require [clojure.test.check.generators :as gen]
-            [sci.core :as sci]
             [seon.batch]
             [seon.db :as db]
             [seon.fault :as fault]
@@ -30,8 +29,8 @@
 
 (defn agent-world
   "A Seon agent's world from its acquired execution (`agent/acquire-context!`):
-  its cluster and branch, its connection, the value read at the batch's
-  start, the writer, its SCI context forked onto that connection, its id and
+  its cluster and branch, its connection, the writer, its SCI context forked
+  onto that connection's current value, its id and
   task, render profile and settlement inputs. An MCP SCI run's world is this
   one (MCP only supplies the agent id and transport)."
   {:malli/schema [:=> [:cat :map :map] :seon.batch/world]}
@@ -42,7 +41,6 @@
   (let [db (db/db conn)]
     (cond-> {:seon.boot/cluster-name cluster
              :seon.db/connection conn
-             :seon.db/db db
              :seon.db/writer (or writer db/transact!)
              :seon.sci.eval/ctx (eval/fork-cluster-ctx base db conn)
              :seon.sci.eval/base-ctx base
@@ -66,13 +64,12 @@
   (assoc (agent-world execution opts) :seon.batch/settlement {:seon.db/connection requester}))
 
 (defn jvm-world
-  "An MCP JVM evaluation's world: the agent's connection and value and the
-  writer. The host evaluates; the agent's SCI context, when given, holds
+  "An MCP JVM evaluation's world: the agent's connection and the writer. The host evaluates; the agent's SCI context, when given, holds
   each value under its result handle."
   {:malli/schema [:=> [:cat :seon.boot/cluster-name :seon.db/connection :map] :seon.batch/world]}
   [cluster conn {agent-id :seon.agent/id turn-id :seon.turn/id writer :seon.db/writer ctx :seon.sci.eval/ctx
                  environment :seon.env/environment process :seon.db.process/id profile :seon.render/profile}]
-  (cond-> {:seon.boot/cluster-name cluster :seon.db/connection conn :seon.db/db (db/db conn)
+  (cond-> {:seon.boot/cluster-name cluster :seon.db/connection conn
            :seon.db/writer (or writer db/transact!)
            :seon.batch/sink (seon.batch/sink)
            :seon.batch/stamped-ns (java.util.concurrent.atomic.AtomicLong. (System/nanoTime))}
@@ -84,16 +81,13 @@
     process (assoc :seon.db.process/id process)
     profile (assoc :seon.render/profile profile)))
 
-(defn read-only-world
-  "A render's, context assembly's or the install gate's world: `db` as the
-  only custody (no connection, no writer: a write refuses), the viewer's
-  context forked."
-  {:malli/schema [:=> [:cat :seon.batch/world :seon.db/database-value] :seon.batch/world]}
-  [world db]
-  (-> world
-      ;; a read-only world writes nothing and counts into nobody's sink
-      (dissoc :seon.db/connection :seon.db/writer :seon.batch/settlement :seon.batch/sink)
-      (assoc :seon.db/db db :seon.sci.eval/ctx (sci/fork (:seon.sci.eval/ctx world)))))
+(defn basis
+  "The world's connection's current value: the value a batch starts from
+  (`:seon.batch/basis`). No world holds a database value (owner ruling
+  2026-09-28): a caller that needs one reads its connection."
+  {:malli/schema [:=> [:cat :seon.batch/world] :seon.db/database-value]}
+  [{conn :seon.db/connection}]
+  (db/db conn))
 
 (defn merge-world
   "Root's world on a merge branch: merge moves entities by identity and
@@ -105,7 +99,7 @@
 (defn with-world
   "Run `f` with the world's bindings re-established on this thread: its
   custody (the connection, when it has one) for the elided seon.db arities,
-  its value as the read basis, and the running evaluation's observation
+  which read its current value, and the running evaluation's observation
   scope (`:seon.batch/scope`, the observer's bindings). A body moved to
   another thread (a compute-pool hop) carries the world as a value and calls
   this; nothing is inherited from the submitting thread."
@@ -113,8 +107,7 @@
   [world f]
   (db/call-with-custody (select-keys world [:seon.db/connection])
                         #(with-bindings (cond-> (merge (:seon.batch/scope world {})
-                                                       {#'db/*read-database* (:seon.db/db world)
-                                                        #'seon.batch/*world* world})
+                                                       {#'seon.batch/*world* world})
                                           ;; a form's reads land in its own sink
                                           (:seon.batch/reads world)
                                           (assoc #'db/*read-evidence-sink* (:seon.batch/reads world)))

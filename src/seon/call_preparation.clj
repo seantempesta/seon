@@ -863,7 +863,12 @@
   [slot sym]
   (let [member (:seon.call-preparation/key slot)
         world seon.batch/*world*
-        v (get world member ::absent)]
+        ;; no world holds a database value: it is the world connection's
+        ;; current value, read at this call (owner ruling 2026-09-28)
+        v (if (= :seon.db/db member)
+            ;; unarmed: ~1.8 us against ~3 us armed (default, 2026-09-28)
+            (if-let [connection (:seon.db/connection world)] ((mi/-f->original db/db) connection) ::absent)
+            (get world member ::absent))]
     (if (or (nil? v) (= ::absent v))
       (unavailable sym slot {:seon.error/message
                              (str "This evaluation's world holds no "

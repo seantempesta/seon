@@ -5092,7 +5092,7 @@
   profile, viewer namespace and the form's handle; the whole shown map rides
   the entry."
   {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/entry] :seon.batch/printed]}
-  [{{ctx :seon.sci.eval/ctx ordinal :seon.batch/ordinal working :seon.db/db} :seon.batch/world
+  [{{ctx :seon.sci.eval/ctx ordinal :seon.batch/ordinal} :seon.batch/world working :seon.batch/working
     frame :seon.turn/frame-request limit :seon.sci.eval/time-limit-ms}
    {:seon.batch/keys [value error evaluation form ns-before source] :as entry}]
   (let [request (assoc (frame ordinal (or ns-before (second (:seon.cluster.eval/ns evaluation)) 'user))
@@ -5120,7 +5120,7 @@
   reading stops (a disposition ends the reply)."
   {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/batch :seon.batch/entry]
                   [:map [:seon.batch/entry :seon.batch/entry] [:seon.batch/stop? :boolean]]]}
-  [{{ctx :seon.sci.eval/ctx working :seon.db/db} :seon.batch/world frame :seon.turn/frame-request handles :seon.turn/handles}
+  [{{ctx :seon.sci.eval/ctx} :seon.batch/world working :seon.batch/working frame :seon.turn/frame-request handles :seon.turn/handles}
    batch {:seon.batch/keys [ordinal form value ns-before] :as entry}]
   (let [projection (db/carried-projection working)
         ;; a form that never ran (its read failed) settles through the one
@@ -5264,7 +5264,7 @@
                   (assoc :seon.db/pending-open
                          (get-in cluster [:seon.turn.loop/submission :seon.db/tx-data]))))
         world (cond-> {:seon.boot/cluster-name (:seon.cluster/name cluster)
-                       :seon.db/connection connection :seon.db/db basis :seon.db/writer db/transact!
+                       :seon.db/connection connection :seon.db/writer db/transact!
                        :seon.sci.eval/ctx ctx :seon.sci.eval/time-limit-ms limit
                        :seon.render/profile profile :seon.batch/sink (seon.batch/sink)
                        :seon.batch/stamped-ns (java.util.concurrent.atomic.AtomicLong. (System/nanoTime))
@@ -5275,6 +5275,8 @@
                 (:seon.db.process/id cluster) (assoc :seon.db.process/id (:seon.db.process/id cluster)))
         request (-> (turn.batch/program-request
                      {:seon.batch/world world
+                      ;; the batch starts from the value this turn read
+                      :seon.batch/basis basis
                       :seon.batch/text ""
                       :seon.batch/start-ns starting-namespace
                       :seon.batch/first-ordinal first-ordinal
