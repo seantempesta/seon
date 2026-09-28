@@ -92,11 +92,10 @@ root.
 3. **Design the smallest composition.** Open the owning spec or landing note with one or two lines naming what
    exists, its data flow and the principal Clojure approach. State what disappears, each operation's cost and target
    complexity, the concerns separated, and the simplest alternative: dependency seam, existing function or deletion.
-   Research existing libraries before writing a replacement. A change's added lines are justified by the duplicate
-   paths it deletes in the same cut, named with line counts. More than about 100 added lines without matching
-   deletions is presumed wrong: stop before writing and report the smaller alternative. Net deletion does not excuse
-   new machinery; code that still grows is justified to the owner before integration: what it adds, why nothing
-   smaller works, what it lets go later.
+   Research existing libraries before writing a replacement. Line counts are a codebase budget, not a per-change
+   ledger: a change need not delete what it adds, feature for feature. Write the simplest correct form of what is
+   needed; when the code grows, name what it lets go elsewhere and plan that deletion. Large additions still start
+   with the smaller alternative considered, and net deletion never excuses needless machinery.
 4. **Opus builds at the REPL; Astra profiles and fixes.**
    - **Opus designs and implements by dogfooding.** In its own Seon branch it tries alternatives at the REPL (defn,
      the tests reaching the change, timings), keeps what worked, and proposes it through the ordinary merge;
