@@ -594,11 +594,12 @@
 
 (defn release-store!
   "Release the store: Datahike release first, then the flock.
-  THE FENCE OUTLIVES A FAILED RELEASE: when the Datahike release
-  throws, the flock is NOT released and the error propagates loudly —
-  a live connection behind a dropped fence is the two-writers loss and
-  must be unrepresentable. Only a successful Datahike release frees the
-  flock. Idempotent — releasing a released store is a no-op returning
+  THE FENCE OUTLIVES A LIVE CONNECTION: when the Datahike release
+  throws and the connection is not released, the flock is NOT released and
+  the error propagates loudly — a live connection behind a dropped fence is
+  the two-writers loss and must be unrepresentable. A release that Datahike
+  completed (connection `:released`) frees the flock even when it reports
+  a writer failure, which still propagates. Idempotent — releasing a released store is a no-op returning
   nil. After a successful release the same process (or any other) may
   open the store again."
   {:malli/schema [:=> [:cat :seon.store/store] :nil]}
@@ -617,8 +618,17 @@
         (d/delete-database (:seon.store/overlay-configuration store)))
 
       (.isValid lock)
-      (do (d/release (:seon.store/connection-object store))
-          (release-flock! (:seon.store/lock-file store) lock))))
+      (let [connection (:seon.store/connection-object store)]
+        (try
+          (d/release connection)
+          (finally
+            ; Datahike finishes a release whose writer failed (it deletes the
+            ; connection, marks it :released and releases the konserve store)
+            ; before it throws `:connection-release-failed`
+            ; (datahike/connector.cljc:519-560): nothing holds the store
+            ; then, so the fence goes with it and the failure still throws.
+            (when (= :released @(:wrapped-atom connection))
+              (release-flock! (:seon.store/lock-file store) lock)))))))
   nil)
 
 (defn open-overlay!
