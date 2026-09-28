@@ -186,8 +186,9 @@
   {:malli/schema [:=> [:cat :seon.cluster.registry/branch-commit-request]
                   [:maybe :seon.db/connection]]}
   [{:keys [:seon.store/store :seon.store/branch]}]
-  (let [configuration (assoc (store/datahike-configuration
-                              (:seon.store/dir store))
+  ;; the store value's own opened configuration: a file store's, or an
+  ;; overlay's (`store/open-overlay!`), whose connection ids differ
+  (let [configuration (assoc (:config @(:seon.store/connection-object store))
                              :branch branch)]
     (connections/active-connection
      (datahike.store/connection-id configuration))))

@@ -599,10 +599,41 @@
   ; the flock's own validity IS the released? fact — no second flag, and
   ; nothing in the (closed, immutable) store value has to change
   (let [^FileLock lock (:seon.store/lock store)]
-    (when (.isValid lock)
-      (d/release (:seon.store/connection-object store))
-      (release-flock! (:seon.store/lock-file store) lock)))
+    (cond
+      ; an overlay carries the shared store's flock but never owns it
+      (:seon.store/overlay store)
+      (let [connection (:seon.store/connection-object store)]
+        (when-not (= :released @(:wrapped-atom connection))
+          (d/release connection))
+        (d/delete-database (:config @connection)))
+
+      (.isValid lock)
+      (do (d/release (:seon.store/connection-object store))
+          (release-flock! (:seon.store/lock-file store) lock))))
   nil)
+
+(defn open-overlay!
+  "A store value whose writes stay in memory over `store`, which is never written.
+
+  Every branch, commit and node made through it lands in a Datahike
+  `:datahike/overlay` frontend (`reference-code/datahike/src/datahike/store.cljc`);
+  reads fall through to `store`. It carries `store`'s directory and flock (it
+  lives only while that store is held) and is released with `release-store!`,
+  which drops the overlay's writes and never the flock. For test worlds:
+  twenty member commits wrote 0 bytes to the shared store
+  (`datahike.test.overlay-test`)."
+  {:malli/schema [:=> [:cat :seon.store/store] :seon.store/store]}
+  [store]
+  (let [shared (:config @(:seon.store/connection-object store))
+        overlay (random-uuid)
+        configuration (assoc shared :store {:backend :datahike/overlay
+                                            :id (get-in shared [:store :id])
+                                            :overlay overlay
+                                            :backend-config (:store shared)})]
+    (assoc store
+           :seon.store/connection-object (d/connect configuration)
+           :seon.store/overlay overlay
+           :seon.store/created? false)))
 
 (defonce ^:private branch-open-monitor (Object.))
 
