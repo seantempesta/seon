@@ -13,6 +13,7 @@
             [seon.schema :as schema]
             [seon.id :as id]
             [seon.schema.internal :as internal]
+            [datahike.db.interface :as dbi]
             [datalog.parser.pull :as pull-parser]))
 
 (def malli-type->datahike-type
@@ -333,6 +334,32 @@
                       (and (some? v) (storable? property) (not (identity-of property)))))
             (m/properties compiled)))))
 
+(defn property-dependents-in
+  "The schema keys whose rows lift one of `attributes` as a property.
+
+  A row's lifted properties are a function of those attributes' declarations
+  (`storable-properties-in`): a retyped render face changes every row that
+  declares or inherits it, though no row's form changed. A partial
+  publication re-derives them beside the schemas its changed declarations
+  reach (`seon.schema/dependent-schema-keys`).
+
+  ## Costs
+
+  Empty and free unless a changed key is a storable property attribute; then
+  one walk of every schema's reference chain (about 15 ms for 3,664 schemas,
+  default, 2026-09-27)."
+  {:malli/schema [:=> [:cat :map [:set :keyword]] [:set :keyword]]}
+  [projection attributes]
+  (let [registry (:seon.schema.projection/registry projection)
+        properties (into #{} (filter #(and (qualified-keyword? %) (storable-attribute-in? projection %))) attributes)]
+    (if (empty? properties)
+      #{}
+      (into #{}
+            (filter (fn [schema-key]
+                      (when-let [compiled (mr/schema registry schema-key)]
+                        (some #(some properties (keys %)) (chain-properties compiled)))))
+            (filter keyword? (keys (:seon.schema.projection/forms projection)))))))
+
 (defn database-attributes-core-in
   "Entity members and independently persisted attributes, without metadata properties."
   {:malli/schema [:=> [:cat :map] [:vector :qualified-keyword]]}
@@ -359,6 +386,21 @@
   (boolean
    (when-let [compiled (mr/schema (:seon.schema.projection/registry projection) attr)]
      (::edn? (compiled-storage compiled)))))
+
+(defn- edn-encoded-slot?
+  "Whether a write encodes `attr` as its EDN string: its declaration uses the
+  codec and, when the writer supplied the installed schema
+  (`::installed-schema`), the installed attribute stores strings. A
+  publication retypes an installed attribute before the rows that declare its
+  new form (the render faces' EDN-to-ref retype): until those rows land the
+  projection still reads the old declaration, so the installed type decides,
+  as `::cells-installed?` decides for vector cells."
+  {:malli/schema [:=> [:cat :map :keyword] :boolean]}
+  [projection attr]
+  (and (edn-encoded-attr-in? projection attr)
+       (if-let [value-type (get-in (::installed-schema projection) [attr :db/valueType])]
+         (= :db.type/string value-type)
+         true)))
 
 (defn vector-shaped-attr-in?
   "Whether `attr` is declared `[:vector T]` or `[:sequential T]`, stored in
@@ -487,15 +529,31 @@
 (defn- encode-call-output-in
   "Encode transaction data returned by one Datahike transaction function.
    `vectors-fn` is the writer's vector transaction function, so vector writes
-   in the output batch into one call after it (nil when none is supplied)."
+   in the output batch into one call after it (nil when none is supplied).
+
+   ## Errors
+
+   A function that answers an error value (`:seon.error/base`) refuses the
+   transaction by throwing that value as `ex-data`; Datahike aborts it and the
+   writer answers it (datahike/writer.cljc:139-171)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection
                        [:or :nil :seon.instrument/callable] :seon.instrument/callable
                        [:* :seon.schema/value]]
                   :seon.store/transaction-data]}
   [db projection vectors-fn f & args]
-  (encode-transaction-data-in
-   projection vectors-fn
-   (apply f db args)))
+  (let [output (apply f db args)]
+    ;; A transaction function that answers an error value (its own refusal,
+    ;; or an armed contract's) refuses the transaction with THAT error: it is
+    ;; never encoded as transaction data, where a second refusal would hide it.
+    (when (and (map? output)
+               (contains? (:seon.schema.projection/forms projection) :seon.error/base)
+               ((schema/projection-validator projection :seon.error/base) output))
+      (throw (ex-info (or (:seon.error/message output) "A transaction function refused.") output)))
+    ;; The in-transaction value's installed attributes decide each slot's
+    ;; storage: an earlier operation of this transaction may have retyped one.
+    (encode-transaction-data-in
+     (assoc projection ::installed-schema (dbi/-schema db)) vectors-fn
+     output)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Vectors: a `[:vector T]` attribute's elements live in bridge cells
@@ -590,7 +648,7 @@
         (reduce-kv
          (fn [[encoded operations requests] attr value]
            (cond
-             (edn-encoded-attr-in? projection attr)
+             (edn-encoded-slot? projection attr)
              [(assoc encoded attr (storage-string (validate-logical-slot-in! projection attr value))) operations requests]
 
              (or cell? (not (vector-attribute-in? projection attr)))
@@ -956,7 +1014,7 @@
                         (encoded-operation? operation) operation
 
                         (and (vector? operation) (= :db/add (first operation))
-                             (edn-encoded-attr-in? projection (nth operation 2 nil)))
+                             (edn-encoded-slot? projection (nth operation 2 nil)))
                         (mark-encoded (update operation 3 #(storage-string (validate-logical-slot-in! projection (nth operation 2) %))))
 
                         ;; Datahike splices a transaction function's output into

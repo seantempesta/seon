@@ -357,6 +357,55 @@
         "the later :and arm wins per property; an alias reads its target")
     (is (= {} (lifted ::plain)))))
 
+(deftest a-changed-property-attribute-re-derives-the-rows-that-lift-it
+  ;; CLASS: a retyped render face changed every schema row that declares or
+  ;; inherits it, but a partial publication re-derived only the schemas whose
+  ;; FORMS reach the changed key, so 204 rows kept no face after the retype.
+  (let [projection (schema/build-projection
+                    (merge (schema.edn/packaged-forms)
+                           {::renders [:and {:seon.fn/reference-to :seon.fn/sym} :seon.db/ref]
+                            ::base [:map {::renders 'probe.render/base} [::x ::x]]
+                            ::x :int
+                            ::inherits [:and ::base [:map [::x ::x]]]
+                            ::alias ::inherits
+                            ::plain [:map [::x ::x]]}))]
+    (is (= #{::base ::inherits ::alias}
+           (schema.datahike/property-dependents-in projection #{::renders})))
+    (is (= #{} (schema.datahike/property-dependents-in projection #{::x}))
+        "an attribute no schema lifts as a property re-derives nothing")))
+
+(deftest a-write-encodes-a-slot-by-its-installed-attribute
+  ;; CLASS: boot refused the render-face retype (23991131e): the publication
+  ;; installed the faces as refs, then its rows were encoded by the store's
+  ;; previous declarations (EDN strings), refusing the ref-shaped values. The
+  ;; installed attribute decides a slot's storage, as installed cells do.
+  (let [projection (schema/build-projection
+                    (merge (schema.edn/packaged-forms)
+                           {::id [:string {:seon.db/identity true}]
+                            ::face [:or :qualified-symbol :string]}))
+        row {::id "probe" ::face {:seon.fn/sym 'probe.render/view}}
+        installed (assoc projection ::schema.datahike/installed-schema
+                         {::face {:db/valueType :db.type/ref}})
+        encoded (schema.datahike/encode-transaction-in installed [row])]
+    (is (= {:seon.fn/sym 'probe.render/view} (get-in encoded [0 ::face]))
+        "an installed ref keeps the nested identity map Datahike links")
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (schema.datahike/encode-transaction-in projection [row]))
+        "declared EDN with no installed schema supplied still refuses a map")))
+
+(deftest a-transaction-function-error-refuses-as-itself
+  ;; CLASS: an error value a transaction function answered (seon.db/vectors-tx
+  ;; under its armed contract) was encoded as transaction data, and the second
+  ;; refusal hid the first.
+  (let [projection (schema/build-projection (schema.edn/packaged-forms))
+        error {:seon.error/at (java.util.Date. 0) :seon.error/layer ::probe
+               :seon.error/operation 'probe/tx :seon.error/message "first cause"}
+        thrown (try (#'schema.datahike/encode-call-output-in nil projection nil (fn [_] error))
+                    nil
+                    (catch clojure.lang.ExceptionInfo e e))]
+    (is (= error (ex-data thrown)))
+    (is (= "first cause" (ex-message thrown)))))
+
 (deftest compiled-storage-navigation-reuses-retained-roots
   ;; Navigation reads the projection's retained compiled roots: every lookup
   ;; answers the same compiled object, so selecting and deriving the storable

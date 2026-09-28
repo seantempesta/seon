@@ -3365,12 +3365,15 @@
           source-rows)
         projection (or (when partial? (incremental-projection request source-rows))
                        (schema/build-projection packaged-forms))
-        ;; A dependent schema entity re-derives with the schemas it reaches.
+        ;; A dependent schema entity re-derives with the schemas it reaches,
+        ;; and a row lifting a changed attribute as a property re-derives with
+        ;; that attribute's declaration (a retyped render face).
         selected-forms (if partial?
-                         (select-keys packaged-forms
-                                      (schema/dependent-schema-keys
-                                       projection (into (changed-schema-keys request)
-                                                        (keep :seon.schema/key) changed-entities)))
+                         (let [changed (into (changed-schema-keys request)
+                                             (keep :seon.schema/key) changed-entities)]
+                           (select-keys packaged-forms
+                                        (into (schema/dependent-schema-keys projection changed)
+                                              (schema.datahike/property-dependents-in projection changed))))
                          packaged-forms)
         ;; Generatability is judged in the packaged population, from its
         ;; compiled schemas (the population's projection, already built).
