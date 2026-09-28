@@ -1269,34 +1269,31 @@
                            (when-let [loaded (::loaded-database snapshot)]
                              (let [previous (db/pull loaded '[*] [:seon.fn/sym function-symbol])]
                                (when (and previous (host-bound-row? previous)) previous)))))
-              ;; A host-bound row overrides a compiled Var only when its
-              ;; namespace is loaded and its own definition differs. An
-              ;; unchanged caller of a changed definition, or a row whose
-              ;; namespace this JVM never loaded, has no Var to override: it
-              ;; refuses by name when called instead of refusing the program.
-              ;; Agent rows and evaluations keep the returned refusal.
-              ;; An unchanged caller in an unloaded namespace has neither a
-              ;; compiled Var nor its namespace's other interns to analyze
-              ;; against, so it refuses by name when called too.
+              ;; A BRANCH NEVER CHANGES THE PLATFORM (owner, AGENTS ddd3cf9a2):
+              ;; compiled code keeps running as compiled on every branch and
+              ;; sees a change only after merge and reload. An unchanged
+              ;; host-bound caller of a branch-changed definition binds its
+              ;; compiled Var; what the branch evaluates from source sees the
+              ;; branch's definitions. Refused by name when called: a branch's
+              ;; own change to a host-bound definition (SCI cannot interpret
+              ;; it), and an unchanged core row in a namespace this JVM never
+              ;; loaded (no compiled Var, no interns to analyze against).
               unloaded? (nil? (find-ns namespace-name))
-              unbound? (and interpreted?
-                            (= :core (:seon.schema.admission/source committed))
-                            (not (or evaluated? (::evaluated? row)))
-                            (if host-row
-                              (or unloaded?
-                                  (not (overridden-row? (::loaded-database snapshot) committed)))
-                              (and unloaded?
-                                   (not (overridden-row? (::loaded-database snapshot) committed)))))
               evaluated-row? (boolean (or evaluated? (::evaluated? row)))
-              refusal (when (or host-row unbound?)
+              changed? (overridden-row? (::loaded-database snapshot) committed)
+              compiled? (and host-row (not changed?) (not unloaded?))
+              unloaded-core? (and interpreted? (not compiled?) unloaded? (not changed?)
+                                  (= :core (:seon.schema.admission/source committed))
+                                  (not evaluated-row?))
+              refusal (when (or (and host-row (not compiled?)) unloaded-core?)
                         (interpretation-error function-symbol
                           (str (cond (nil? host-row) "Declaration "
                                      (contains? host-row :seon.fn/host-bound?) "Host-bound declaration "
                                      :else "Declaration with no :seon.fn/host-bound? fact ")
                                (:seon.fn/sym (or host-row committed))
-                               (cond unloaded? " is in a namespace this JVM has not loaded; load its source files to call it."
-                                     unbound? " is unchanged but calls a definition this branch changes; it runs only from the loaded source files."
-                                     :else " must change through the loaded source files."))))
+                               (if unloaded?
+                                 " is in a namespace this JVM has not loaded; load its source files to call it."
+                                 " must change through the loaded source files."))))
               ;; A row acquired from the database refuses by name only when
               ;; called: the rest of the program and every later form keep
               ;; working. An agent's evaluation keeps the returned refusal.
@@ -1305,7 +1302,7 @@
                 (and refusal (not evaluated-row?)) (install-refusing-root! ctx function-symbol refusal)
                 refusal refusal
                 :else
-                  (if-not interpreted?
+                  (if (or (not interpreted?) compiled?)
                     (if (install-jvm-root! ctx function-symbol) :jvm :unavailable)
                     (try
                       (if (or evaluated? (::evaluated? row))
@@ -1326,14 +1323,17 @@
                         (interpretation-failure function-symbol failure)))))
               ;; An unchanged core row SCI cannot interpret (a same-namespace
               ;; deftype constructor named by its short class name) is not
-              ;; the branch's change: like the host-bound case above it
-              ;; refuses by name when called, carrying its whole cause,
-              ;; instead of refusing the acquisition and so every later form.
+              ;; the branch's change: it keeps its compiled Var, as a
+              ;; host-bound caller does; with no compiled Var it refuses by
+              ;; name when called, carrying its whole cause, never refusing
+              ;; the acquisition and so every later form.
               failed (when (and (map? result) (not refusal) (not evaluated-row?)
                                 (= :core admission))
                        result)
-              result (if failed (install-refusing-root! ctx function-symbol failed) result)
-              refusal (or refusal failed)]
+              result (cond (not failed) result
+                           (install-jvm-root! ctx function-symbol) :jvm
+                           :else (install-refusing-root! ctx function-symbol failed))
+              refusal (or refusal (when (= :unavailable result) failed))]
           (if (map? result)
             (do (sci/eval-form ctx (list 'ns-unmap (list 'quote namespace-name)
                                        (list 'quote (symbol (name function-symbol)))))

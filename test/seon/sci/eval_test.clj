@@ -140,6 +140,39 @@
      ctx (assoc :seon.sci.eval/ctx ctx)
      (nil? ctx) (assoc :seon.db/db (db/db (:seon.db/connection (test-support/execution-handle nil)))))))
 
+(deftest a-branch-change-leaves-its-compiled-callers-compiled
+  ;; Owner ruling (AGENTS ddd3cf9a2, dogfood B8): a branch never changes the
+  ;; platform. An unchanged host-bound caller of a branch-changed definition
+  ;; keeps its compiled Var, so the branch's own evaluator keeps working;
+  ;; what the branch evaluates from source sees the branch's definition.
+  ;; seon.cluster/write-advertisement! has one host-bound caller in a loaded
+  ;; namespace (seon.cluster/serve!) and a small reverse closure.
+  (test-support/with-database
+   (fn [connection]
+     (let [changed-sym 'seon.cluster/write-advertisement!
+           before (db/db connection)
+           source (str/replace-first (:seon.fn/source (db/pull before [:seon.fn/source] [:seon.fn/sym changed-sym]))
+                                     #"^(\(defn-?\s+\S+)" "$1 \"Branch version.\"")
+           admitted (test-support/program-fn-entity before changed-sym source {:seon.schema.admission/source :agent})
+           _ (test-support/transacted!
+              connection
+              (test-support/replacement-tx
+               before [:seon.fn/sym changed-sym] (:seon.fn/source admitted)
+               {:seon.schema.admission/source :agent}))
+           after (db/db connection)
+           ctx (eval/base-ctx after)
+           callers (filterv #(and (find-ns (symbol (namespace %)))
+                                  (:seon.fn/host-bound? (db/pull after [:seon.fn/host-bound?] [:seon.fn/sym %])))
+                            (:seon.fn/affected (seon.fn/reverse-closure {:seon.db/db after
+                                                                         :seon.fn/seeds #{changed-sym}})))]
+       (is (= "Branch version." (:doc (meta (sci/resolve ctx changed-sym))))
+           "what the branch evaluates from source sees its definition")
+       (is (seq callers) "the change reaches host-bound callers in loaded namespaces")
+       (is (every? #(identical? @(resolve %) @(sci/resolve ctx %)) callers)
+           "each unchanged host-bound caller keeps its compiled Var, never a refusing stub")
+       (is (= "{:a 1}" (sci/eval-string* ctx "(pr-str {:a 1})"))
+           "the branch's evaluator keeps printing")))))
+
 (deftest database-provenance-regenerates-the-base-and-reverts-for-retained-forks
   (test-support/with-database
    (fn [connection]

@@ -14,4 +14,19 @@
              :kind :function
              :intent "Each SCI reply's :errors repeated the agent's same open fault (seon.schema.datahike/decode-vectors, occurrence count 1..17) on every evaluation for the whole session, about 150 tokens per reply, whether or not the evaluation caused it, and after the fault's last occurrence. Show a fault in the reply of the evaluation that produced it or once when it opens; later replies can name the open count."
              :must-read #{seon.repl/response}
-             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}
+ #:seon.task{:name "a-slow-reply-names-counts-not-proportionality"
+             :kind :function
+             :intent "A reply over one second lists :repeated [[sym calls ms] ...] sorted by call count (propose-merge!: seon.schema.datahike/logical-attribute? 199,406 calls first) but not what the work was proportional to or which armed call held the wall time, so the agent cannot tell a hub traversal from a per-member recording. Order by inclusive time, name the top call's input size (members, datoms, program entities), and state the ratio to the evaluation's own input."
+             :must-read #{seon.repl/response-entries seon.profile/summary}
+             :evidence #{"docs/research/agent-platform/dogfood-loop-2026-09-28.md"}}
+ #:seon.task{:name "offered-operations-cannot-name-the-prior-result"
+             :kind :function
+             :intent "*1, *2 and *3 are nil at the SCI REPL (dogfood loop 2026-09-28), so a value that offers its next call as data cannot refer to itself: my.program/prepare-merge! offers (my.program/accept-merge! {...}) with its whole request literal. Bind *1/*2/*3 (and *e) in the agent's context from its own evaluations, as clojure.main does, or have the reply's printer substitute the result symbol it already prints (result/eN) into offered forms, so an offer is short and runs as shown."
+             :must-read #{seon.repl/response}
+             :evidence #{"docs/research/agent-platform/dogfood-loop-2026-09-28.md"}}
+ #:seon.task{:name "directory-render-returns-text-the-printer-clips-mid-form"
+             :kind :function
+             :intent "render-directory-ai (src/seon/repl.clj) is dir's :seon.render/ai face but returns pr-str text (contract :string), so the value printer charges it as one leaf and clips it by characters: (dir my.message) in a fresh cluster is shown as 3,199 characters ending \"render-a…+646\" inside an unclosed schema map, which no reader can read back (EOF while reading), and its tail rows and :seon.repl/schemas are unreachable data. Return the {:seon.repl/columns :seon.repl/rows :seon.repl/schemas} map itself so the printer spreads its one budget over the shape and names each cut with a dig form; the HTML face renders the same map (test-data-assertions lane, 2026-09-28)."
+             :must-read #{seon.repl/render-directory-ai seon.repl/render-directory-html seon.render.value/render-ai}
+             :evidence #{"test/seon/supplied_documentation_test.clj"}}]
