@@ -498,11 +498,9 @@
   [database identity-attribute attributes]
   (if-not (every? #(get (:schema database) %) [identity-attribute (first attributes)])
     []
-    (let [entities (db/q {:find '[[?e ...]] :where [['?e (first attributes)]]} database)]
-      (if (db/read-refusal? entities)
-        entities
-        (let [pulled (db/pull-many database (into [identity-attribute] attributes) (vec entities))]
-          (if (db/read-refusal? pulled) pulled (vec pulled)))))))
+    (let [pulled (db/q {:find [[(list 'pull '?e (into [identity-attribute] attributes)) '...]]
+                        :where [['?e (first attributes)]]} database)]
+      (if (db/read-refusal? pulled) pulled (vec pulled)))))
 
 (defn regressions
   "Every comparison of a stored measure's newest value with its value before
@@ -519,7 +517,7 @@
   ## Costs
 
   Proportional to the process records and the measurements stored: one
-  query and one pull each."
+  query with a pull expression each."
   {:malli/schema [:=> [:cat :seon.db/database-value] :seon.health/regressions]}
   [database]
   (let [records (stored database :seon.db.process/id
