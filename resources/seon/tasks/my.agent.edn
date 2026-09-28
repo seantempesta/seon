@@ -1,0 +1,5 @@
+[#:seon.task{:name "branch-operations-promise-a-context-the-world-cannot-supply"
+             :kind :function
+             :intent "my.agent/retire-branch! (and create-branch!, same :my.agent/branch-context) documents a one-argument call with its context supplied, but the context's members :seon.store/store and :seon.agent/routing are not world members (seon.batch/world-members), so an agent's one-argument call through MCP refuses its argument count (default, 2026-09-28, result/edbce7b73d830: (my.agent/retire-branch! {:seon.store/branch :opi2-guard})). Done when the one-argument call works from an agent's evaluation: the operation derives store and routing from a world member it is supplied (its connection or ctx environment), and the regression is that call through the one path."
+             :must-read #{my.agent/retire-branch! my.agent/create-branch! seon.call-preparation/supply seon.batch/world-members}
+             :evidence #{"resources/seon/schemas/my.agent.edn"}}]
