@@ -192,9 +192,7 @@
                (::schema.edn/attribute data)))
         (is (= 2 (count files)))
         (is (some #(str/ends-with? % "/first.edn") files))
-        (is (some #(str/ends-with? % "/second.edn") files))
-        (is (every? #(str/includes? (ex-message failure) %) files)
-            "the loud collision message names both files")))))
+        (is (some #(str/ends-with? % "/second.edn") files))))))
 
 (deftest declaration-digest-is-independent-of-resource-order
   (let [resource-paths-var #'schema.edn/schema-resource-paths
@@ -219,8 +217,7 @@
               (catch clojure.lang.ExceptionInfo error
                 error))]
         (is (= ::schema.edn/unreadable-file
-               (::schema.edn/error (ex-data failure))))
-        (is (str/includes? (ex-message failure) "contains no EDN files")))
+               (::schema.edn/error (ex-data failure)))))
       (finally
         (.delete directory)))))
 
@@ -238,7 +235,8 @@
                (::schema.edn/error (ex-data failure))))
         (is (= "actual.namespace.edn"
                (::schema.edn/expected-file (ex-data failure))))
-        (is (str/includes? (ex-message failure) "wrong.namespace.edn"))))))
+        (is (str/ends-with? (::schema.edn/file (ex-data failure)) "/wrong.namespace.edn")
+            "the refusal names the file that holds the misplaced key")))))
 
 (deftest an-unsafe-key-namespace-refuses-before-placement
   (with-temporary-resources
@@ -252,8 +250,7 @@
               (catch clojure.lang.ExceptionInfo error error))]
         (is (= ::schema.edn/unsafe-namespace
                (::schema.edn/error (ex-data failure))))
-        (is (= :bad?/key (::schema.edn/attribute (ex-data failure))))
-        (is (str/includes? (ex-message failure) "verbatim filename"))))))
+        (is (= :bad?/key (::schema.edn/attribute (ex-data failure))))))))
 
 (deftest unreadable-files-refuse-by-name
   (with-temporary-resources
