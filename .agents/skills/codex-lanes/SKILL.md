@@ -29,7 +29,7 @@ assuming it ran.
 
 | `LANE_MODEL` | Efforts (default) | Use for (owner 2026-09-23) |
 |---|---|---|
-| `gpt-6-astra` (launcher default) | low … max, ultra (medium) | review, PRDs/plan docs, diagnosing problems (medium; never high for implementation) |
+| `gpt-6-astra` (launcher default) | low … max, ultra (medium) | the FIXER (owner 2026-09-28): follows each landed Opus slice, profiles it at the REPL and commits fixes for super-linear or repeated work and law violations in root-assigned files; also diff review and diagnosis |
 | `gpt-6-sol` | low … max, ultra (medium) | implementation from a written PRD or plan doc — owner: "try out gpt 6 sol that's new"; compare against Opus lanes on clean, small, bug-free code |
 | `gpt-6-luna` | low … max (medium) | fast and cheap: probes, mechanical edits |
 
