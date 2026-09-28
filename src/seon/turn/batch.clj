@@ -103,7 +103,10 @@
   [(+ first-row (- l line)) (if (= l line) (+ 1 (- c column)) c)])
 
 (defn- span-of
-  {:malli/schema [:=> [:cat :map] [:tuple int? int? int? int?]]}
+  "An analyzer entry's [row col end-row end-col]. A usage clj-kondo records
+  inside a macro's expansion (the `->` of a `cond->`, the `if` of a `case`)
+  has no position: its span is all nil and equals no definition's."
+  {:malli/schema [:=> [:cat :map] [:tuple [:maybe int?] [:maybe int?] [:maybe int?] [:maybe int?]]]}
   [{r ::analyzer/row c ::analyzer/col er ::analyzer/end-row ec ::analyzer/end-col}]
   [r c er ec])
 

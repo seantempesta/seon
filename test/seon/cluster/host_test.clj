@@ -81,7 +81,7 @@
   [hosted source]
   (let [custody (select-keys hosted [:seon.turn.loop/cluster :seon.agent/routing :seon.agent/id])
         result (as-host hosted
-                 #(agent/evaluate-source! (assoc custody :seon.agent/segmenter 'seon.cluster.reply/code-sources
+                 #(agent/evaluate-source! (assoc custody :seon.agent/segmenter 'seon.turn/code-sources
                                                  :seon.cluster.reply/text source)))]
     ;; The reply is answered when the settlement is applied; this fixture's
     ;; callers read the connection afterwards, so it waits for the commit.
@@ -160,6 +160,22 @@
         (is (identical? (:seon.agent/routing hosted)
                         (get-in @(:seon.agent/routing handle) [:seon.agent/children branch]))
             "the host lives in the child roster the parent records")))))
+
+(deftest a-definition-whose-body-expands-macros-persists
+  ;; Before (2026-09-28 dogfood loop), a defn whose body used cond-> or case
+  ;; returned its Var but wrote no entity: the positionless usages clj-kondo
+  ;; records inside those expansions failed seon.turn.batch/span-of's contract.
+  (with-host-world {}
+    (fn [{:keys [handle branch!]}]
+      (let [hosted (host-on! handle (branch!) "mcp/expander")
+            probe [:seon.fn/sym (symbol (str host-ns) "expanding-probe")]]
+        (is (= ["#'my.agents.host-probe/expanding-probe"]
+               (hosted-run! hosted (str "(defn- expanding-probe \"Bump positives.\" {:malli/schema [:=> [:cat :int] :int]}"
+                                        " [x] (case x 0 0 (cond-> x (pos? x) inc)))"))))
+        (is (some? (:seon.program/definition-digest
+                    (db/pull @(get-in hosted [:seon.turn.loop/cluster :seon.db/connection])
+                             [:seon.program/definition-digest] probe)))
+            "the definition is an entity on the branch")))))
 
 (deftest a-host-retires-after-it-has-run
   ;; The live-host path: before the fix `retire!` wrote the admission ref as
@@ -276,7 +292,7 @@
     (fn [{:keys [handle branch!]}]
       (let [hosted (host-on! handle (branch!) "mcp/busy")
             custody (select-keys hosted [:seon.turn.loop/cluster :seon.agent/routing :seon.agent/id])
-            submit! #(as-host hosted (fn [] (agent/submit-source! (assoc custody :seon.agent/segmenter 'seon.cluster.reply/code-sources
+            submit! #(as-host hosted (fn [] (agent/submit-source! (assoc custody :seon.agent/segmenter 'seon.turn/code-sources
                                                                         :seon.cluster.reply/text %))))
             first-run (submit! "(loop [] (recur))")
             ;; the turn proc has taken the first submission off its port
