@@ -193,7 +193,7 @@
   (let [regression? (schema/projection-validator (schema/handed-projection) :seon.health/definition-regression)
         flagged (fn [p50-after p99-after calls-before calls-after]
                   (let [row (fn [digest p50 p99 calls at]
-                              {:seon.profile.measurement/id digest :seon.profile.measurement/sym 'seon.db/transact!
+                              {:seon.profile.measurement/id (apply str (repeat 16 digest)) :seon.profile.measurement/sym 'seon.db/transact!
                                :seon.profile.measurement/digest (apply str (repeat 64 digest))
                                :seon.profile.measurement/p50 p50 :seon.profile.measurement/p99 p99
                                :seon.profile.measurement/errors :none :seon.profile.measurement/calls calls

@@ -1538,7 +1538,7 @@
                     (:malli/schema (meta #'problems/open-faults))
                     (fn [_ _] :not-a-vector) (config/result-caps config/defaults)
                     {:seon.config.error/max-evidence-bytes 8192})
-           refusal (test-support/refusal-data #(wrapped (db/db connection) []))]
+           refusal (test-support/refusal-data #(wrapped (db/db connection) (apply str (repeat 64 "a"))))]
        (is (= :seon.fn.arity/output (:seon.error/member refusal)))
        ;; the fix names the definition; the expectation is already the sentence's
        (is (str/starts-with? (:seon.error/fix (first (:seon.error/problems refusal)))
@@ -1788,6 +1788,6 @@
            supplied #(binding [seon.batch/*world* world]
                        (:max-tx (:seon.db/db (instrument/calling-environment))))
            before (supplied)]
-       (test-support/transacted! connection [{:seon.agent/id "world-db-leak"}])
+       (test-support/transacted! connection (test-support/agent-tx (db/db connection) "world-db-leak"))
        (is (= (:max-tx (db/db connection)) (supplied)))
        (is (< before (supplied)))))))

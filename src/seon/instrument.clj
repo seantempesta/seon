@@ -449,7 +449,10 @@
                               (filter #(and (= :or (m/type (:schema %)))
                                             (:error/message (m/properties (:schema %))))
                                       (mu/subschemas offended)))
+           ;; an arity refusal has no explained schema (`offended` is nil) and no problems
            [explained-problems other-alternatives]
+           (if-not explanation
+             [[] 0]
            (closest-alternatives
             offended
             value
@@ -464,7 +467,7 @@
                            (and (not (:check problem))
                                 (some #(and (:check %) (= (:in %) (:in problem)))
                                       (:errors explanation))))
-                         (:errors explanation)))))
+                         (:errors explanation))))))
            arm (case kind :malli.core/invalid-output :output
                           :malli.core/invalid-guard :guard :input)
            supplied-entries (when (= :input arm) (supplied-entry-problems function-symbol))

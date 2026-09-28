@@ -85,7 +85,7 @@
                                 [:seon.fn.arity/argument-count
                                  :seon.fn.arity/input
                                  :seon.fn.arity/output]}]
-                             [:seon.fn/sym "seon.cluster.agent/whoami"])
+                             [:seon.fn/sym 'seon.cluster.agent/whoami])
             arities (:seon.fn/arities indexed)
             expected (agent/whoami {:seon.db/db database :seon.agent/id agent-id})
             ;; A built context holds no program until it acquires one: evaluate
