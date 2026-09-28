@@ -144,19 +144,29 @@
           :seon.error/expected ::resume-bytes)))
 
 (defn enter-memory-pressure!
-  "Close new arms: the tenured pool crossed `::enter` after a collection.
-  Answers the pressure entered, or nil when already under pressure."
+  "Close new arms when the tenured pool's live bytes cross `::enter`.
+  Answers the pressure entered, or nil when already under pressure or when
+  the crossing was garbage.
+
+  The crossing notice alone is not live occupancy: G1 updates the old pool's
+  collection usage after every young pause (`G1 Young Generation` manages
+  `G1 Old Gen`), so it counts promoted garbage no marking has reclaimed yet.
+  Measured on default 2026-09-27: 8.53 GB read after a round whose forced
+  collections held 1.5-2.4 GB live. One full collection per crossing measures
+  the live bytes (0.1-0.5 s at 1.5-2.4 GB live), and only they close arms."
   {:malli/schema [:=> [:cat ::in-flight] [:maybe ::memory-pressure]]}
   [in-flight]
   (when-not @memory-pressure-state
+    (System/gc)
     (let [usage (collection-usage (tenured-pool))
           bound #(long (* (% memory-bounds) (::max-bytes usage)))]
-      (vreset! memory-pressure-state
-               (assoc usage
-                      ::enter-bytes (bound ::enter)
-                      ::resume-bytes (bound ::resume)
-                      ::entered-at (java.util.Date.)
-                      ::in-flight in-flight)))))
+      (when (>= (::used-bytes usage) (bound ::enter))
+        (vreset! memory-pressure-state
+                 (assoc usage
+                        ::enter-bytes (bound ::enter)
+                        ::resume-bytes (bound ::resume)
+                        ::entered-at (java.util.Date.)
+                        ::in-flight in-flight))))))
 
 (defn memory-pressure
   "The memory pressure `state` holds (this process's by default), or nil while
