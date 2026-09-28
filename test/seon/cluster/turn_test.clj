@@ -1632,17 +1632,26 @@
     (with-cluster
       (fn [cluster]
         (let [connection (:seon.db/connection cluster)
-              usage {"prompt_tokens" 106 "completion_tokens" 12}]
+              usage {"prompt_tokens" 106 "completion_tokens" 12}
+              ;; the fixture branches the live store, so its faults are inherited
+              faults-before (db/q '[:find [?error ...] :where [?error :seon.error/id _]]
+                                  (db/db connection))]
           (with-redefs [ai/complete
                         (fn [_projection _] {:seon.ai/text reply-text
                                  :seon.ai/usage usage
                                  :seon.ai/finish-reason "stop"})]
-            (is (= [:open :call :close]
+            ;; The call pass settles the reply and closes its run in the same
+            ;; transaction (close-folded-call), so there is no close pass.
+            (is (= [:open :call]
                    (mapv :seon.turn.work/situation
-                         (drive-agent! cluster "agent-a" 3)))))
+                         (drive-agent! cluster "agent-a" 2)))))
+          (is (= :open (:seon.turn.work/situation
+                        (turn/next-agent-work @connection (request connection "agent-a"))))
+              "an accepted reply with no disposition continues, so the agent sees its diagnostic")
           (let [database (db/db connection)
                 evaluations (agent-evaluations database)
                 evaluation (first evaluations)
+                _ (is (some? evaluation) "the unreadable reply settles as an evaluation")
                 turn (db/pull database '[* {:seon.turn/attempts [*]}]
                               (:db/id (:seon.cluster.eval/run evaluation)))
                 [attempt :as attempts] (:seon.turn/attempts turn)
@@ -1665,7 +1674,8 @@
             (is (= "stop" (:seon.ai.attempt/finish-reason attempt)))
             (is (not (contains? attempt :seon.ai.attempt/error))
                 "the provider succeeded; interpreting its reply failed")
-            (is (empty? (db/q '[:find ?error :where [?error :seon.error/id _]] database))
+            (is (= (set faults-before)
+                   (set (db/q '[:find [?error ...] :where [?error :seon.error/id _]] database)))
                 "an agent reader error is not a core fault")
             (is (str/includes? rendered reply-text))
             (is (str/includes? rendered (:seon.cluster.eval/error evaluation))
