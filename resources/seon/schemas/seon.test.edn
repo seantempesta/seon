@@ -241,13 +241,11 @@
   [:type [:= :fail]] [:var :seon.test/var] [:message :string]
   [:expected [:map [:seon.test/time-limit-ms :seon.test/time-limit-ms]]]
   [:actual [:map [:seon.test/elapsed-ms :seon.test/elapsed-ms]]]]
- :seon.test/adoption-identities [:set :seon.db/ref]
  :seon.test/adoption-inputs [:set :string]
  :seon.test/adoption-cluster :seon.db/ref
  :seon.test/adoption
  [:map {:seon.db/attributes true}
   [:seon.test/adoption-cluster :seon.test/adoption-cluster]
-  [:seon.test/adoption-identities {:optional true} :seon.test/adoption-identities]
   [:seon.test/adoption-inputs {:optional true} :seon.test/adoption-inputs]]
  ; Additive error declaration manifest, 2026-09-18.
 

@@ -220,3 +220,36 @@ from-scratch candidate 161.499 s, total 563.376 s. This proves the indexed
 candidate loads and arms; central focused tests remain root's responsibility.
 Foreign boundaries are the turn/SCI lane, schema lane and cluster MCP removal;
 none of those pending changes is included in this slice.
+
+## Adoption records store only their consumed inputs
+
+The declaration list is still derived for reload/unmapping, now explicitly named
+`reload-identities`. It is no longer copied onto the adoption transaction:
+`:seon.test/adoption-identities` had no source consumer. Its schema and the two
+measurement selectors are removed; the former test now checks the reload filter
+and constant recording work at 1/10/100 declarations. Recording stores the cluster
+and distinct changed file paths, O(P) in those paths rather than O(D) declarations.
+Retiring the attribute during adoption retracts current values; history remains.
+
+Fresh paired branch measurements after restart, pid 85484, on 100 real function
+identities, one changed path. Both use the same held commit and normal writer;
+the pulled cluster/input answer agrees. The entire six-case probe took 816 ms.
+
+| Declarations | Commits before / after | Datoms before / after | Node bytes before / after | ms before / after |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 1 / 1 | 4 / 3 | 785,672 / 712,389 | 60.949 / 38.450 |
+| 10 | 1 / 1 | 13 / 3 | 862,837 / 712,389 | 41.767 / 45.470 |
+| 100 | 1 / 1 | 103 / 3 | 868,322 / 712,389 | 42.659 / 39.426 |
+
+At 100 declarations, 100 unused datoms and 155,933 node bytes disappear. Latency
+is essentially unchanged. Evidence is `adoption-probe.clj` and
+`adoption-measurements.json` under `tmp/astra-store-fixes-20260928/`.
+
+Root's focused test (not run here):
+`seon.adoption-entities-test/adoption-record-size-does-not-grow-with-reload-identities`.
+Archive `ddd3cf9a2` plus the five owned files: lint 0 errors, 1,673 warnings,
+7.551 s; contracts 495 files, 5.122 s, only the same ten foreign documentation-script
+findings. Drill `46a71e5a9972` passed: base 228.735 s, move 29.954 s,
+candidate from scratch 173.276 s, total 510.522 s. The unchanged cluster MCP
+region remains the entrance lane/root's boundary. Source/resource/test delta is
++41/−53 lines; this slice contains no turn, SCI, schema-owner or MCP edits.

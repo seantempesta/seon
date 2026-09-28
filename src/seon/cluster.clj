@@ -2387,23 +2387,15 @@
 
 (declare process-identity)
 
-(def ^:private adoption-identity-attribute?
-  "Declaration identity attributes the adoption record names.
-
-  A `:seon.fn.file/relative-path` row is a file digest and a `:seon.lint/id` row is an
-  analyzer finding; neither is a declaration a test can reach, and the file is
-  already recorded as an adoption input. Excluding them here keeps
-  `:seon.test/adoption-identities` a set of real declaration refs."
+(def ^:private reload-identity-attribute?
+  "Declaration families reload and unmapping consume; files and findings are data."
   #{:seon.ns/name :seon.fn/sym :seon.schema/key :seon.test/sym})
 
-(defn- adoption-identities
-  "Declaration identities among `identities`, in admission order.
-
-  An identity a row does not carry is absent, never a nil member: the
-  adoption record is a set of refs, and `#{nil}` names nothing a later check
-  can resolve."
+(defn- reload-identities
+  "Declaration identities reload and unmapping need, in input order."
+  {:malli/schema [:=> [:cat [:seqable :seon.program/identity]] [:vector :seon.program/identity]]}
   [identities]
-  (into [] (filter (comp adoption-identity-attribute? first)) identities))
+  (into [] (filter (comp reload-identity-attribute? first)) identities))
 
 (def ^:private compiled-into-callers
   "Clojure expands macros/inline bodies and embeds protocol/type interfaces at
@@ -2997,6 +2989,14 @@
        {:seon.boot/population :seon.source/adoption-rows}))
     program-identities))
 
+(defn- adoption-record
+  "The adoption's cluster and changed file inputs, independent of declaration count."
+  {:malli/schema [:=> [:cat :seon.db/ref [:seqable :string]] :seon.test/adoption]}
+  [cluster-ref changed-paths]
+  {:db/id :db/current-tx
+   :seon.test/adoption-cluster cluster-ref
+   :seon.test/adoption-inputs (set changed-paths)})
+
 (defn- development-source-refresh!
   {:malli/schema
    [:=> [:cat :seon.store/store :seon.boot/instance :seon.source/published
@@ -3036,7 +3036,7 @@
         (let [identities (published-changes held-store published prior-commit published-database)
         program-identities (into #{} (filter (comp (set program/identity-attributes) first)) identities)
         projection (db/carried-projection published-database)
-        changed-identities (adoption-identities program-identities)
+        changed-identities (reload-identities program-identities)
         deleted-identities (filterv #(empty? (db/pull published-database '[*] %)) changed-identities)
         ;; Reload and arming are the JVM's, entities and record the cluster's: a
         ;; JVM already running the published commit (booted on it, or adopted
@@ -3065,11 +3065,7 @@
                                        prior-commit (:seon.source/commit-id published)]
                                       {:db/id cluster-ref
                                        :seon.source/commit-id (:seon.source/commit-id published)}
-                                      {:db/id :db/current-tx
-                                       :seon.test/adoption-cluster cluster-ref
-                                       :seon.test/adoption-identities (set/difference (set changed-identities)
-                                                                                     (set deleted-identities))
-                                       :seon.test/adoption-inputs (set changed-paths)}]})
+                                      (adoption-record cluster-ref changed-paths)]})
              {:seon.boot/population :seon.source/commit-id})
             {:seon.source/reloaded-namespaces reloaded
              :seon.source/arming-identities arming-identities})
@@ -4054,4 +4050,3 @@
     (async/close! (:seon.render.web/runtime-eval-channel view))
     (async/close! (:seon.render.web/pages-channel view)))
   nil)
-

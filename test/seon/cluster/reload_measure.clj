@@ -88,7 +88,7 @@
                                       :seon.probe/transaction
                                       (seon.db/pull database
                                                     [:db/id :seon.test/adoption-cluster
-                                                     :seon.test/adoption-identities :seon.test/adoption-inputs]
+                                                     :seon.test/adoption-inputs]
                                                     transaction))
                                :seon.probe/heap-used-bytes
                                (- (.totalMemory (Runtime/getRuntime))
