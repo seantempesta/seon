@@ -63,16 +63,18 @@
   (assoc (agent-world execution opts) :seon.batch/settlement {:seon.db/connection requester}))
 
 (defn jvm-world
-  "An MCP JVM evaluation's world: the cluster's connection and value and the
-  writer; no SCI context (the host evaluates)."
+  "An MCP JVM evaluation's world: the agent's connection and value and the
+  writer. The host evaluates; the agent's SCI context, when given, holds
+  each value under its result handle."
   {:malli/schema [:=> [:cat :seon.boot/cluster-name :seon.db/connection :map] :seon.batch/world]}
-  [cluster conn {agent-id :seon.agent/id turn-id :seon.turn/id writer :seon.db/writer
+  [cluster conn {agent-id :seon.agent/id turn-id :seon.turn/id writer :seon.db/writer ctx :seon.sci.eval/ctx
                  environment :seon.env/environment process :seon.db.process/id profile :seon.render/profile}]
   (cond-> {:seon.boot/cluster-name cluster :seon.db/connection conn :seon.db/db (db/db conn)
            :seon.db/writer (or writer db/transact!)
            :seon.batch/sink (seon.batch/sink)}
     agent-id (assoc :seon.agent/id agent-id)
     turn-id (assoc :seon.turn/id turn-id)
+    ctx (assoc :seon.sci.eval/ctx ctx)
     environment (assoc :seon.env/environment environment)
     process (assoc :seon.db.process/id process)
     profile (assoc :seon.render/profile profile)))
