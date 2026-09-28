@@ -602,10 +602,12 @@
     (cond
       ; an overlay carries the shared store's flock but never owns it
       (:seon.store/overlay store)
+      ; its configuration is carried: a released connection can no longer be
+      ; dereferenced for it, and a request's handle may have released it first
       (let [connection (:seon.store/connection-object store)]
         (when-not (= :released @(:wrapped-atom connection))
           (d/release connection))
-        (d/delete-database (:config @connection)))
+        (d/delete-database (:seon.store/overlay-configuration store)))
 
       (.isValid lock)
       (do (d/release (:seon.store/connection-object store))
@@ -633,6 +635,7 @@
     (assoc store
            :seon.store/connection-object (d/connect configuration)
            :seon.store/overlay overlay
+           :seon.store/overlay-configuration configuration
            :seon.store/created? false)))
 
 (defonce ^:private branch-open-monitor (Object.))
