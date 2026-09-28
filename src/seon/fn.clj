@@ -2520,9 +2520,17 @@
         authored (into {} (map (juxt :seon.fn/sym identity)) authored-entities)
         attributes [:seon.fn/sym :seon.fn/calls :seon.fn/private?
                     :seon.fn/spec :seon.fn/workload :seon.effect/capability]
+        prior-symbols (vec (keys authored))
+        prior-rows (when database
+                     (db/pull-many database attributes (mapv #(vector :seon.fn/sym %) prior-symbols)))
+        _ (when (:seon.error/at prior-rows)
+            (throw (ex-info (:seon.error/message prior-rows) prior-rows)))
+        prior (zipmap prior-symbols prior-rows)
         read-entity (fn [function-symbol]
                    (when database
-                     (let [entity (db/pull database attributes [:seon.fn/sym function-symbol])]
+                     (let [entity (if-let [entry (find prior function-symbol)]
+                                    (val entry)
+                                    (db/pull database attributes [:seon.fn/sym function-symbol]))]
                        (when (:seon.error/at entity) (throw (ex-info (:seon.error/message entity) entity)))
                        (when (:seon.fn/sym entity)
                          (cond-> (dissoc entity :db/id)

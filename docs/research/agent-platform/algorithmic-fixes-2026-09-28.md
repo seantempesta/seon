@@ -1,4 +1,5 @@
 ---
+type: research
 title: Algorithmic fixes
 date: 2026-09-28
 status: partial
@@ -62,3 +63,45 @@ Foreign boundary: `one-path-impl-2` owns turn/SCI/agent/batch/render work and
 failed-test observations. None is treated as a pass or attributed to this fix.
 Installed armed behavior and the new regressions await root's central adoption
 and test round; scratch timing is not evidence of installed publication.
+
+## Boot profile A: batch capability comparison's previous rows
+
+The 7,161 single pulls in the supplied profile are reached from
+`seon.fn/assert-capability-contracts!`: it compares each authored definition's
+six capability fields with a separate `db/pull`. `file-entities` was already
+batched. This change reads the authored batch's prior rows with one
+`pull-many`, indexes by symbol (including missing rows), and retains the existing
+fallback for referenced functions outside that batch. Work remains O(D) in
+authored definitions, but read-owner/contract/projection entry becomes O(1)
+instead of O(D). Capability admission and its contracts are unchanged.
+
+MCP scratch `scratch.astra.capability`, same live immutable database as above:
+canonical `database-manifest` artifact for `src/seon/db.clj`, restricted to
+1/10/100 of its stored function rows. Before/after answers equal the supplied
+artifacts in every case. Warm times in milliseconds: 0.700/0.169,
+0.887/0.348, 5.037/2.315. These measure this comparison, not a claim that all
+10 seconds of inclusive pull time disappear: the supplied full profile reports
+1,441 ms in the 7,161 public single pulls, while its batched pulls also do real
+entity decoding. Memory was not measured. Reproduction body:
+`tmp/astra-algorithmic-fixes-20260928/capability-probe.clj`.
+
+Archive HEAD `1d05b4f164bc84788defefa5fd74ef298ee2ace1` plus fn source/test only:
+lint 0 errors, 1,725 warnings, 7.258 s; contracts 497 files, same 10 foreign
+script findings, zero source/test findings, 5.142 s. No test request started.
+`bin/seon drill --with src/seon/fn.clj test/seon/fn_test.clj` passed:
+candidate `14d4f556154a65a19cf159584fe3ef22d4547f4a`; base from scratch ready
+246.259 s, move ready 93.164 s, candidate from scratch ready 201.977 s;
+total 673.434 s. The drill stopped its JVMs and removed its passing root.
+This is the explicitly requested expensive drill, not ordinary warm latency.
+Other lanes were independently drilling; no other lane's process was controlled.
+
+Root's focused tests (not run by this lane):
+
+- `seon.fn-test/capability-comparison-batches-prior-rows` (new, deterministic
+  captured-read counts at 1/10/100 definitions: one batch, zero single pulls).
+- `seon.fn-test/capability-metadata-is-one-program-graph-contract`
+- `seon.fn-test/capability-indexing-refuses-every-malformed-declaration`
+- `seon.fn-test/file-entities-read-in-batches-not-per-entity`
+
+The foreign boundary remains the one-path lane and the pre-existing script
+contract failures above. Only fn source/test and this evidence land in this slice.

@@ -3014,6 +3014,27 @@
                      (db/pull database [:seon.fn/host-bound?]
                               [:seon.fn/sym 'seon.id/id]))))))))
 
+(deftest capability-comparison-batches-prior-rows
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           artifact (first (:seon.fn.manifest/artifacts
+                            (seon.fn/database-manifest database (fs/source-directory)
+                                                       ["src" "test"] ["src/seon/db.clj"])))
+           rows (vec (take 100 (filter :seon.fn/sym (:seon.fn.file/rows artifact))))]
+       (is (= 100 (count rows)))
+       (doseq [n [1 10 100]]
+         (let [artifacts [(assoc artifact :seon.fn.file/rows (subvec rows 0 n))]
+               reads (atom [])
+               result (binding [db/*read-evidence-sink* reads]
+                        (@#'seon.fn/assert-capability-contracts! artifacts database #{}))
+               operations (frequencies (map #(get-in % [:seon.db/read-request :seon.db/read-operation]) @reads))]
+           (is (= artifacts result))
+           (is (= 1 (get operations :pull-many 0))
+               "one previous-row batch for any number of authored declarations")
+           (is (zero? (get operations :pull 0))
+               "unchanged declarations never reread their previous entity individually")))))))
+
 (deftest file-entities-read-in-batches-not-per-entity
   ;; Each armed read costs ~0.1 ms of owner overhead, so a pull per entity made a
   ;; whole-program read seconds (lane fix-f4-batched-index-entities).
