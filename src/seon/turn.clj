@@ -2451,15 +2451,22 @@
                        [0 []] selected))]
         (or (some #(when (:seon.cluster.reply/no-forms %)
                      (assoc % :seon.turn/refused-system-agent agent-id)) previews)
-            (some identity
-                  (map (fn [source preview]
-                         (some #(when-let [failure (generated-read-fault database source
-                                                      (select-keys (:seon.sci.eval/evaluation %)
-                                                                   [:seon.cluster.eval/read-evidence]))]
-                                  (assoc failure :seon.turn/refused-system-agent agent-id))
-                               (:seon.turn.loop/evaluated-sources preview)))
-                       selected previews))
-            (let [silent (filterv #(= :unchanged (:seon.turn/status (second %)))
+            (let [;; A read whose fresh reads depend on turn-taking keeps its
+                  ;; value with the fault beside it, never refusing the turn
+                  ;; (root's loop parked, 2026-09-28); its stored evidence
+                  ;; keeps it out of later openings.
+                  previews (mapv (fn [source preview]
+                                   (update preview :seon.turn.loop/evaluated-sources
+                                           (partial mapv
+                                                    (fn [evaluated]
+                                                      (if-let [fault (generated-read-fault
+                                                                      database source
+                                                                      (select-keys (:seon.sci.eval/evaluation evaluated)
+                                                                                   [:seon.cluster.eval/read-evidence]))]
+                                                        (update-in evaluated [:seon.sci.eval/evaluation :seon.cluster.eval/diagnostics]
+                                                                   #(str/join "\n" (remove nil? [% (print.value/bounded-text [fault])])))
+                                                        evaluated)))))
+                                 selected previews)silent (filterv #(= :unchanged (:seon.turn/status (second %)))
                                   (mapv vector selected previews))
                   refresh-tx
                   (into [] cat

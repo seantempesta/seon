@@ -1,0 +1,9 @@
+;; Rehearsal root on 52e163bee plus this change, 2026-09-28.
+{:system-turn {:setup "agent zoo2 retains (if (seq (q notes)) (count (q turn ids)) :no-notes); then a note is added, so its fresh reads name :seon.turn/id"
+               :before "default 52e163bee: root's system-turn preview refused \"A generated context read depends on the agent's own turn-taking.\" (2,345 ms), turn proc parked"
+               :after {:preview-refusal nil :preview-forms 9 :written-refusal nil :write-ms 521
+                       :regenerated-diagnostic "[{... :seon.turn/generated-read-attributes #{:seon.turn/id} ...}]"
+                       :next-opening-has-it? false}}
+ :derive-refusal {:source "(ns-unmap *ns* 'zf) with zg calling zf"
+                  :after {:form-0-error "Its program facts were not proposed: Cannot perform seon.turn.batch/removal-facts on my.agents.zoo2/zf; repair the named referrers first."
+                          :form-1-shown ":after" :retraction-faults-recorded [0 0] :zf-still-stored true :ms 7197}}}

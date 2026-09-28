@@ -1,0 +1,13 @@
+diff --git a/resources/seon/schemas/seon.batch.edn b/resources/seon/schemas/seon.batch.edn
+index 40a13a9bc..912c363b0 100644
+--- a/resources/seon/schemas/seon.batch.edn
++++ b/resources/seon/schemas/seon.batch.edn
+@@ -147,7 +147,7 @@
+  :evidence [:enum {:description "Whether a form's frozen evidence is all of it: :pending when work it owns (a future it started) had not exited."} :complete :pending]
+  :owned [:fn {:description "A form's owned-work count: a java.util.concurrent.atomic.AtomicLong the kernel's future-call raises and each future's exit lowers." :gen/gen seon.turn.world/owned-generator} seon.batch/owned?]
+  :evaluation [:any {:description "The entrant's own record of the evaluation (a turn's :seon.sci.eval/evaluation), kept on the entry."}]
+- :facts-error [:map {:description "The writer's refusal of this form's facts: its logged return value. The facts were not proposed."}
++ :facts-error [:map {:description "The refusal of this form's facts, by the writer or while deriving them (a removal whose referrers survive): its logged return value. The facts were not proposed."}
+                [:seon.error/message :string]]
+  :entry [:map {:description "One top-level form: its value or error, published the moment evaluation returned, then where it came from and what its facts became."}
+          [:seon.batch/ordinal :seon.cluster.eval/ordinal]

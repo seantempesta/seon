@@ -482,6 +482,10 @@
     ;; an execution the entrant does not trust (the loaded program changed
     ;; while it ran) keeps its value and proposes no facts
     (last-entry batch #(assoc % :seon.batch/facts-error refused))
+  ;; A refusal while deriving the form's change or its facts (a removal
+  ;; whose referrers survive) is that FORM's error value, delivered with it;
+  ;; it never escapes to the fold's guard as a core fault.
+  (try
   (let [t0 (System/nanoTime)
         entry (peek (:seon.batch/entries batch))
         {change :seon.batch/change state :seon.batch/derive-state}
@@ -497,7 +501,13 @@
             (assoc :seon.batch/pending {:seon.batch/ordinal (:seon.batch/ordinal entry) :seon.batch/tx tx
                                         :seon.batch/change change})
             (last-entry #(merge % (select-keys change [:seon.batch/notes :seon.batch/private])))
-            (clock :facts t1)))))))
+            (clock :facts t1)))))
+  (catch Exception t
+    (let [refusal (ex-data t)]
+      (last-entry batch #(assoc % :seon.batch/facts-error
+                                (if (string? (:seon.error/message refusal))
+                                  refusal
+                                  (diagnostic :derive (:seon.batch/ordinal %) t)))))))))
 
 (defn- form-step
   "Read, evaluate and record one form. Answers the batch with :seon.batch/done
