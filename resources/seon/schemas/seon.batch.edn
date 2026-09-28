@@ -11,6 +11,10 @@
          [:seon.db.process/id {:optional true} :seon.db.process/id]
          [:seon.batch/scope {:optional true} :seon.batch/scope]
          [:seon.batch/sink {:optional true :description "This world's armed-call counts (seon.batch/sink): a test agent's counters see only its own calls."} :seon.batch/sink]
+         [:seon.batch/reads {:optional true :description "One form's read sink: the atom seon.turn.world/with-world binds as seon.db/*read-evidence-sink*, so the form's reads and those of work it starts land in it."} :seon.db/read-evidence-sink]
+         [:seon.batch/in-flight {:optional true} :seon.batch/owned]
+         [:seon.batch/ordinal {:optional true :description "The ordinal of the form this world is running."} :seon.cluster.eval/ordinal]
+         [:seon.batch/form-sink {:optional true :description "The running form's own call sink: the evaluator binds it as the world's sink around the form's code (seon.sci.eval/evaluate), so the definitions the form executed are its code evidence."} :seon.batch/sink]
          [:seon.agent/id {:optional true} :seon.agent/id]
          [:seon.task/id {:optional true} :seon.task/id]
          [:seon.render/profile {:optional true} :seon.render/profile]
@@ -48,6 +52,7 @@
  :start nat-int?
  :end nat-int?
  :refused [:enum :fabricated-response]
+ :read-error [:any {:description "A form's read failure: the reader's error, answered once as that form's error, never evaluated."}]
  :eof [:= true]
  :unread-from nat-int?
  :reason [:or :keyword :string]
@@ -56,10 +61,14 @@
               [:seon.batch/end :seon.batch/end] [:seon.batch/version :seon.batch/text-version]
               [:seon.batch/repairs :seon.batch/repairs]
               [:seon.batch/refused {:optional true} :seon.batch/refused]]
+             [:map [:seon.batch/read-error :seon.batch/read-error] [:seon.batch/start :seon.batch/start]
+              [:seon.batch/end :seon.batch/end] [:seon.batch/version :seon.batch/text-version]
+              [:seon.batch/repairs :seon.batch/repairs]]
              [:map [:seon.batch/eof :seon.batch/eof] [:seon.batch/version :seon.batch/text-version]
               [:seon.batch/repairs :seon.batch/repairs]]
              [:map [:seon.batch/unread-from :seon.batch/unread-from] [:seon.batch/reason :seon.batch/reason]
-              [:seon.batch/version :seon.batch/text-version] [:seon.batch/repairs :seon.batch/repairs]]]
+              [:seon.batch/version :seon.batch/text-version] [:seon.batch/repairs :seon.batch/repairs]
+              [:seon.batch/cause {:optional true :description "The live reader's own failure, kept for its reader error."} :seon.error/throwable]]]
  :op [:enum :bind :unmap :remove-ns :namespace :expansion]
  :sym :qualified-symbol
  :ns :symbol
@@ -116,7 +125,20 @@
               [:seon.error/throwable-class {:optional true} :string]
               [:seon.error/data {:optional true} :map]]
  :value [:any {:description "The form's live value, kept whole; never stored."}]
+ :outcome [:or {:description "An evaluate stage's answer: the value or the error, with the entrant's own entry keys."}
+           [:map [:seon.batch/value :seon.batch/value]
+            [:seon.batch/evaluation {:optional true} :seon.batch/evaluation]
+            [:seon.batch/facts-refused {:optional true} :seon.batch/facts-refused]]
+           [:map [:seon.batch/error :seon.batch/error]
+            [:seon.batch/evaluation {:optional true} :seon.batch/evaluation]]]
  :error [:any {:description "The form's thrown failure, kept whole; its error value rides :seon.batch/error-value."}]
+ :facts-refused [:map {:description "An evaluate stage's refusal of its own form's facts (the loaded program changed while the form ran): the value is kept, the facts are not proposed."}
+                 [:seon.error/message :string]]
+ :executed-key [:tuple {:description "An executed definition: its symbol and the digest its installed callable held, nil when unknown."} :qualified-symbol [:maybe :seon.program/definition-digest]]
+ :executed [:map-of :seon.batch/executed-key nat-int?]
+ :evidence [:enum {:description "Whether a form's frozen evidence is all of it: :pending when work it owns (a future it started) had not exited."} :complete :pending]
+ :owned [:fn {:description "A form's owned-work count: a java.util.concurrent.atomic.AtomicLong the kernel's future-call raises and each future's exit lowers." :gen/gen seon.turn.world/owned-generator} seon.batch/owned?]
+ :evaluation [:any {:description "The entrant's own record of the evaluation (a turn's :seon.sci.eval/evaluation), kept on the entry."}]
  :facts-error [:map {:description "The writer's refusal of this form's facts: its logged return value. The facts were not proposed."}
                [:seon.error/message :string]]
  :entry [:map {:description "One top-level form: its value or error, published the moment evaluation returned, then where it came from and what its facts became."}
@@ -135,17 +157,33 @@
          [:seon.batch/facts-error {:optional true} :seon.batch/facts-error]
          [:seon.batch/private {:optional true} [:vector :seon.batch/join]]
          [:seon.batch/notes {:optional true} [:vector :seon.batch/note]]
-         [:seon.batch/shown {:optional true} :string]]
+         [:seon.batch/shown {:optional true} :string]
+         [:seon.batch/form {:optional true} :seon.batch/form]
+         [:seon.batch/evaluation {:optional true} :seon.batch/evaluation]
+         [:seon.batch/facts-refused {:optional true} :seon.batch/facts-refused]
+         [:seon.batch/refused-value {:optional true :description "A value a publication refused (an early disposition), kept beside its refusal."} :seon.batch/value]
+         [:seon.batch/reads {:optional true} [:vector :any]]
+         [:seon.batch/executed {:optional true} :seon.batch/executed]
+         [:seon.batch/evidence {:optional true} :seon.batch/evidence]
+         [:seon.batch/in-flight {:optional true} pos-int?]
+         [:seon.batch/owned {:optional true} :seon.batch/owned]
+         [:seon.batch/read-sink {:optional true :description "The form's live read sink, kept to tell a read after the freeze (work the form owns that outlived it)."} :seon.db/read-evidence-sink]
+         [:seon.batch/shown-map {:optional true :description "The show stage's whole shown value (size keys, renderer, diagnostics), kept beside the text."} :map]]
  :applied :boolean
  :tx-count nat-int?
  :sink [:fn {:description "A per-world call sink: java.util.concurrent.ConcurrentHashMap of symbol -> LongAdder (seon.batch/sink)." :gen/gen seon.turn.world/sink-generator} seon.batch/sink?]
- :printed [:map {:description "The show stage's answer: the one print, and the printer's own diagnostics (a renderer that refused) as text."}
-           [:seon.batch/shown :string] [:seon.batch/print-diagnostics {:optional true} :string]]
+ :printed [:map {:description "The show stage's answer: the one print, the printer's own diagnostics (a renderer that refused) as text, and its whole shown value."}
+           [:seon.batch/shown :string] [:seon.batch/print-diagnostics {:optional true} :string]
+           [:seon.batch/shown-map {:optional true} :map]]
  :scope [:map-of {:description "A running evaluation's observation scope: the observer's dynamic bindings (Var -> value), carried in its world so any thread re-establishing the world observes that evaluation."} :any :any]
  :storage-error :string
  :writer-refusal [:map {:description "The settlement writer's refusal of the recording: kept beside the values as data, and delivered as a diagnostic through the fault stage."}
                   [:seon.error/message :string]]
- :settled [:map {:description "The state a settlement settled, on every path: its entries (withdrawn forms with their refusals), program and working value."}]
+ :settled [:map {:closed true :description "What a settlement answers of the state it settled: the program and working value, and per published ordinal only its facts error. It never replaces or drops an entry (seon.batch/settled-into)."}
+           [:seon.batch/entries {:optional true} [:vector [:map [:seon.batch/ordinal :seon.cluster.eval/ordinal]
+                                                           [:seon.batch/facts-error {:optional true} :seon.batch/facts-error]]]]
+           [:seon.batch/program {:optional true} :map]
+           [:seon.batch/working {:optional true} :seon.db/database-value]]
  :commit [:or
           [:map [:seon.batch/applied :seon.batch/applied] [:seon.batch/tx-count :seon.batch/tx-count]
            [:seon.batch/after {:optional true} :seon.db/database-value]
@@ -173,7 +211,10 @@
            [:seon.batch/mode {:optional true} :seon.batch/mode]
            [:seon.batch/read-state [:=> [:cat :string] :seon.batch/read-state]]
            [:seon.batch/read-next [:=> [:cat :map :seon.batch/read-state] :seon.batch/read-step]]
-           [:seon.batch/evaluate [:=> [:cat :map :any :seon.db/database-value] :any]]
+           [:seon.batch/first-ordinal {:optional true :description "The ordinal of the batch's first form (a turn resumed at its first unevaluated row)."} :seon.cluster.eval/ordinal]
+           [:seon.batch/evaluate [:=> [:cat :map :any :seon.db/database-value] :seon.batch/outcome]]
+           [:seon.batch/publish {:optional true :description "The entrant's last word on a published entry, in the form's world: it may replace it and stop reading."}
+            [:=> [:cat :map :map :seon.batch/entry] [:map [:seon.batch/entry :seon.batch/entry] [:seon.batch/stop? {:optional true} :boolean]]]]
            [:seon.batch/ns-name [:=> [:cat :map] :symbol]]
            [:seon.batch/around {:optional true} [:=> [:cat :map [:=> [:cat] :any]] :any]]
            [:seon.batch/observe {:optional true}

@@ -38,8 +38,7 @@
             [seon.render.web :as web]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
-            [seon.test-support :as test-support]
-            [seon.print.value])
+            [seon.test-support :as test-support])
   (:import [java.util Date]))
 
 (def ^:private test-environment
@@ -85,7 +84,7 @@
     (is (= "seon.cluster.eval/read-evidence/run-1-receipt-0/1023"
            (:db/id (last entities))))
     (is (< elapsed-ms 200.0)
-        (str "read-evidence transaction projection took " elapsed-ms " ms"))))
+        "read-evidence transaction projection stays within its bound")))
 
 (deftest attempt-settlement-updates-the-registered-model-gauges
   (test-support/with-database
@@ -217,7 +216,8 @@
                 outcome
                 (try
                   (first
-                   (turn/evaluate-sources
+                   (:seon.turn.loop/evaluated-sources
+                    (turn/evaluate-sources
                     {:seon.turn.loop/cluster cluster
                      :seon.sci.eval/ctx ctx
                      :seon.agent/id agent-id
@@ -227,15 +227,14 @@
                      :seon.cluster.reply/sources
                      [((private-loop-fn 'fold-source)
                        (first (filter #(= 1 (:seon.cluster.eval/ordinal %))
-                                      (fold-evaluations @connection run-id))))]}))
+                                      (fold-evaluations @connection run-id))))]})))
                   (finally (async/close! channel)))
                 form (:seon.turn.loop/admitted-form outcome)
                 evaluation (:seon.sci.eval/evaluation outcome)]
             (is (= ending-ns resumed-namespace))
             (is (= [:seon.ns/name ending-ns]
                    (:seon.cluster.eval/ns form)))
-            (is (nil? (:seon.cluster.eval/error evaluation))
-                (seon.print.value/bounded-text evaluation))
+            (is (nil? (:seon.cluster.eval/error evaluation)))
             ;; Construct the expected name from data: a quoted qualified
             ;; symbol would declare this regression itself as a gate test for
             ;; the function it is evaluating, recursively running the fixture
@@ -485,7 +484,7 @@
        (let [opening (turn/system-turn {:seon.turn.loop/cluster cluster
                                         :seon.agent/id agent-id
                                         :seon.turn/write? true})]
-         (is (vector? (:seon.turn/forms opening)) (seon.print.value/bounded-text opening)))
+         (is (vector? (:seon.turn/forms opening))))
        (prepare-call! cluster agent-id "settings-run-1" "settings-message-1")
        (with-render-context-proc
         cluster
@@ -707,7 +706,7 @@
                    {:seon.error/message "boom" }
                    {:my.turn/disposition :completed}]]
       (is (nil? (turn/disposition (seon.schema/handed-projection) value))
-          (str "must not read as a disposition: " (seon.print.value/bounded-text value))))))
+          "must not read as a disposition"))))
 
 (deftest a-clean-last-form-without-a-disposition-is-loud-terminal-evidence
   (test-support/with-database
@@ -796,9 +795,7 @@
                  terminal)
               ;; nil means not idle or not undisposed: name the work that
               ;; keeps the agent busy, so the red says which one.
-              (str "the episode verdict names the missing disposition; next work "
-                   (seon.print.value/bounded-text (turn/next-agent-work @connection {:seon.agent/id agent-id
-                                                              :seon.db.process/id process}))))
+              "the episode verdict names the missing disposition; next work")
           ;; The undisposed-turn notice is dissolved (decision 8b of
           ;; docs/prds/steward-platform/plan/owner-decisions-2026-09-17.md,
           ;; ruled by T2 of program-facts-are-the-runtime-prd-2026-09-17.md).
@@ -1185,7 +1182,7 @@
                                 (let [refusal (db/transact! conn
                                                 {:tx-data [{:db/id [:seon.agent/id "agent-a"]
                                                             :seon.agent/id 42}]})]
-                                  (is (inst? (:seon.error/at refusal)) (seon.print.value/bounded-text refusal))
+                                  (is (inst? (:seon.error/at refusal)))
                                   ;; Keep the real writer's diagnostic.
                                   refusal))
                               (publish conn staged-writes commit-roots!)))]

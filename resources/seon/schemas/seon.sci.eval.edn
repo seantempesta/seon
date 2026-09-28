@@ -64,7 +64,8 @@
                   :seon.sci.eval/bindings]
                  [:seon.sci.eval/restore {:optional true} :seon.sci.eval/restore]
                  [:seon.print/options :seon.print/options]
-                 [:seon.sci.admit/record :seon.sci.admit/record]],
+                 [:seon.sci.admit/record :seon.sci.admit/record]
+                 [:seon.sci.eval/untrusted {:optional true} :seon.sci.eval/untrusted]],
                 ,
                 ,
                 ,
@@ -233,6 +234,7 @@
                   {:optional true}
                   :seon.sci.eval/ctx]
                  [:seon.db/db {:optional true} :seon.sci.eval/database]
+                 [:seon.sci.eval/form {:optional true :description "The one path's already read form: evaluated once by the evaluation frame, never read again and never admitted here (the fold observes and derives)."} :seon.batch/form]
                  [:seon.db/read-evidence-sink
                   {:optional true}
                   :seon.db/read-evidence-sink]
@@ -418,6 +420,8 @@
  [:=> [:cat [:maybe [:=> [:cat :qualified-symbol] :any]] [:maybe :seon.error/throwable]]
   [:maybe :seon.sci.eval/execution-unavailable-error]]]
 :current-db :seon.db/database-value
+:untrusted [:map {:description "Why a frame's kept value is not trusted: a failure after SCI returned it (the loaded program changed while it ran). The value stays; its program facts are not proposed."}
+            [:seon.error/message :string]]
 :database
 [:and {:description "The database an evaluation reads when its caller hands one. Absent, the evaluation reads its context's custody, so this is not a world member (seon.batch/world-members): a bound world never supplies it."}
  :seon.db/database-value]

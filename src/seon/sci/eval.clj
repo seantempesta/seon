@@ -120,6 +120,7 @@
             [seon.config :as config]
             [seon.blob :as blob]
             [seon.cache]
+            [seon.batch]
             [seon.db :as db]
             [seon.id :as id]
             [seon.effect :as effect]
@@ -401,7 +402,10 @@
          :load-fn load-host-namespace}
          ;; SCI's own `future` addon; its `future-call` carries the arm
          sci.future/install
-         (assoc-in [:namespaces 'clojure.core 'future-call] kernel/future-call)))
+         (assoc-in [:namespaces 'clojure.core 'future-call] kernel/future-call)
+         ;; the addon's pmap calls the host future-call: its threads escaped
+         ;; the arm and the form's owned work (task sci-pmap-escapes-the-arm)
+         (assoc-in [:namespaces 'clojure.core 'pmap] kernel/pmap)))
         help-var (get-in injected-namespaces ['seon.bootstrap 'help])
         dir-var (get-in injected-namespaces ['seon.bootstrap 'dir])
         doc-var (get-in injected-namespaces ['seon.bootstrap 'doc])]
@@ -4503,6 +4507,33 @@
   [request]
   (or (:seon.db/read-evidence-sink request) db/*read-evidence-sink*))
 
+(def ^:private raw-none
+  "The frame's marker for a form SCI has not returned from."
+  (Object.))
+
+(defn- failure-refusal
+  "A failure after the frame's form returned, as the error value beside the
+  kept value: the adoption check's own refusal (its ex-data), else the
+  failure's message and class."
+  {:malli/schema [:=> [:cat :seon.error/throwable] :seon.sci.eval/untrusted]}
+  [^Throwable throwable]
+  (let [data (ex-data throwable)]
+    (if (and (map? data) (string? (:seon.error/message data)))
+      data
+      {:seon.error/message (or (ex-message throwable) (.getName (class throwable)))
+       :seon.error/throwable-class (.getName (class throwable))})))
+
+(defn- kept-evaluation
+  "The frame's evaluation of a form whose value SCI returned before a later
+  step failed (the loaded program changed while it ran; its evaluation could
+  not be classified): the value, its output and cost, and the failure as
+  `::untrusted`. The value is never lost; its program facts are not proposed."
+  {:malli/schema [:=> [:cat :map] :seon.sci.eval/evaluation]}
+  [{value ::value record :seon.sci.admit/record untrusted ::untrusted :as request}]
+  (assoc (success-evaluation (assoc request ::admitted {:seon.sci.admit/value value
+                                                        :seon.sci.admit/record record}))
+         ::untrusted untrusted))
+
 (defn evaluate
   "Evaluate one form source and return what may leave the boundary.
   Runs synchronously on the caller's `:compute` workload task — this
@@ -4654,6 +4685,15 @@
         ;; A turn's fork carries the session's print options; a host caller
         ;; that forked nothing gets a carrier of its own for its own forms.
         print-session (or (::print-session evaluation-ctx) (atom {}))
+        ;; THE EVALUATION FRAME: a request holding its already read form
+        ;; (`::form`, the one path's live read) evaluates it once and answers
+        ;; the frame's evaluation: no read, no acquisition (the turn's fork
+        ;; holds its program; the batch observes its own writes), no
+        ;; admission and no print (the fold's show stage prints). Its value
+        ;; is kept the moment SCI returns (`raw`): a later check or
+        ;; construction failure is a diagnostic beside it, never its loss.
+        held? (contains? request ::form)
+        raw (volatile! raw-none)
         connection (get-in evaluation-ctx
                            [::custody :seon.db/connection])
         receipt (when (and run-id (some? form-ordinal))
@@ -4727,6 +4767,17 @@
                           :seon.effect/counter (atom -1)})}
       (let [failure-result
              (fn [throwable]
+               (if (and held? (not (identical? raw-none @raw)))
+                 (kept-evaluation {:seon.sci.eval/value @raw
+                                   :seon.sci.admit/record (record :ok)
+                                   :seon.sci.eval/untrusted (failure-refusal throwable)
+                                   :seon.sci.eval/printed printed
+                                   :seon.sci.eval/output-prefix output-prefix
+                                   :seon.sci.eval/namespace-name namespace-name
+                                   :seon.sci.eval/ending-namespace @ending-namespace
+                                   :seon.print/options @print-options
+                                   :seon.eval/duration-ms (elapsed-ms)
+                                   :seon.eval/acquisition-ms (quot @acquisition-nanos 1000000)})
                (let [record (record (if (kernel/interrupted? throwable)
                                  :time :error))
                 observation @session-observation
@@ -4779,7 +4830,7 @@
              (= :time (:seon.eval/outcome record))
              (assoc :seon.cluster.eval/interrupted-at
                     (java.util.Date.))
-             (seq unadmitted) (assoc :seon.eval/unadmitted unadmitted)))))]
+             (seq unadmitted) (assoc :seon.eval/unadmitted unadmitted))))))]
        (try
         (kernel/with-arm
        evaluation-ctx time-limit-ms
@@ -4793,7 +4844,7 @@
           ;; the environment that names it.
           (when-let [unavailable (::unavailable-execution @(:env evaluation-ctx))]
             (throw (ex-info (:seon.error/message unavailable) unavailable)))
-          (when (contains? evaluation-ctx ::custody)
+          (when (and (not held?) (contains? evaluation-ctx ::custody))
             (when-let [database (:seon.db/db request)]
               (when-not (acquired-database? evaluation-ctx database)
                 (let [before-snapshot @(::kernel/program-snapshot evaluation-ctx)
@@ -4819,31 +4870,34 @@
             (throw (ex-info "SCI program acquisition refused a declaration." failure)))
           (let [before-reader-context
             (reader-context evaluation-ctx namespace-name)
-            event (or (:seon.sci.eval/event request)
-                      (one-event
-                       source namespace-name evaluation-ctx
-                       (:seon.config.eval.result/max-source caps)))
+            event (if held?
+                    {:seon.sci.reader/form (::form request)}
+                    (or (:seon.sci.eval/event request)
+                        (one-event
+                         source namespace-name evaluation-ctx
+                         (:seon.config.eval.result/max-source caps))))
             _ (when-let [reader-error (:seon.sci.reader/error event)]
                 (throw (ex-info (:seon.error/message reader-error)
                                 reader-error)))
             form (:seon.sci.reader/form event)
             namespace-unmap? (:seon.sci.reader/ns-unmap? event)
             execution-ctx evaluation-ctx
-            capture (context-capture execution-ctx)
+            capture (when-not held? (context-capture execution-ctx))
             before-namespaces (::namespaces capture)
             before-owned (::owned capture)
-            before-intern-values (turn-intern-values before-owned)
+            before-intern-values (when-not held? (turn-intern-values before-owned))
             ;; The one restoration of this form's program change, reused at
             ;; every failure point: admission, arming and settlement refusal
             ;; restore all of it; a throw inside the form only what replaced
             ;; or removed a stored row (`failure-result`).
-            restore! (context-restoration execution-ctx capture)
-            _ (vreset! session-observation
+            restore! (when-not held? (context-restoration execution-ctx capture))
+            _ (when-not held?
+                (vreset! session-observation
                          {:seon.sci.eval/ctx execution-ctx
                           :seon.sci.eval/before-intern-values
                           before-intern-values
                           :seon.sci.eval/restore restore!
-                          :seon.sci.eval/form form})
+                          :seon.sci.eval/form form}))
             before-namespace-state (when namespace-unmap? before-namespaces)
             before-interns (when namespace-unmap?
                              (sci/namespace-interns execution-ctx))
@@ -4868,7 +4922,12 @@
                   ;; clojure.test reports through the host `*test-out*`
                   ;; (its `with-test-out`); this form's report is its output.
                   (let [value (binding [db/*read-evidence-sink* form-sink
-                                        clojure.test/*test-out* printed]
+                                        clojure.test/*test-out* printed
+                                        ;; the form's own code counts into its own
+                                        ;; sink: what it executed is its code evidence
+                                        seon.batch/*world* (if-let [s (:seon.batch/form-sink seon.batch/*world*)]
+                                                             (assoc seon.batch/*world* :seon.batch/sink s)
+                                                             seon.batch/*world*)]
                                 ;; This thread is the REPL thread for this
                                 ;; form. SCI attaches the form's location to a
                                 ;; throw only on the ctx's :main-thread-id,
@@ -4924,12 +4983,16 @@
              unregister-key :seon.sci.eval/unregister-key}
             ;; Keep this call inside the total evaluation try: declared-row
             ;; deliberately throws ::schema-refused for an agent mistake.
-            (declared-row
-             {:seon.sci.eval/event event
-              :seon.sci.eval/eval-form! eval-form!
-              :seon.schema/projection projection})
+            (when-not held?
+              (declared-row
+               {:seon.sci.eval/event event
+                :seon.sci.eval/eval-form! eval-form!
+                :seon.schema/projection projection}))
             evaluated-value
             (cond
+              ;; the frame: evaluated once, the value kept at SCI's return
+              held? (let [v (eval-form!)] (vreset! raw v) v)
+
               ;; A faithful REPL returns the value SCI produced. This is the
               ;; same path a plain `def` takes, and keeps `defn`/`deftest`
               ;; declarations as Vars instead of replacing them with identity
@@ -4959,12 +5022,13 @@
                                form))
 
               :else (eval-form!))
-            top-level (when (top-level-do? form) evaluated-value)
+            top-level (when (and (not held?) (top-level-do? form)) evaluated-value)
             evaluated-value (if top-level (::value top-level) evaluated-value)
             _ (when-let [declared-ns (:seon.ns/name base-declared-row)]
                 (vreset! ending-namespace declared-ns))
             {reader-row :seon.program/row}
-            (unmap-row
+            (when-not held?
+             (unmap-row
              {:seon.sci.eval/execution-ctx execution-ctx
               :seon.sci.eval/before-interns before-interns
               :seon.sci.eval/before-namespace-state before-namespace-state
@@ -4974,18 +5038,21 @@
               :seon.sci.eval/live-declaration? live-declaration?
               :seon.sci.eval/namespace-name namespace-name
               :seon.sci.eval/namespace-unmap? namespace-unmap?
-              :seon.db/db (if connection (db/db connection) (:seon.db/db request))})
+              :seon.db/db (if connection (db/db connection) (:seon.db/db request))}))
             ;; A top-level `do` admitted its children's definitions as they
             ;; ran; what remains is the form's own reader row, counted with them.
             var-rows
-            (if top-level
+            (cond
+              held? nil
+              top-level
               (into (::rows top-level)
                     (admit! (context-capture execution-ctx) reader-row (::declared top-level)))
-              (admit! capture reader-row []))
+              :else (admit! capture reader-row []))
             var-row (first var-rows)
             row (or var-row reader-row)
             next-projection
             (cond
+              held? nil
               (:seon.schema/key reader-row)
               (schema/projection-with-schema
                projection
@@ -5015,15 +5082,19 @@
               evaluation-record (record :ok)
               ;; Capture exact evaluated roots; settlement installs rows from them.
               definitions
-              (bindings execution-ctx before-intern-values)
+              (when-not held? (bindings execution-ctx before-intern-values))
               ;; A top-level call's contracted head names the root value's
               ;; declared returns; any other form supplies no producer.
-              head (some-> (render/request-projection request)
-                           (render/head-function execution-ctx namespace-name form))
-              admitted (binding [db/*read-evidence-sink* form-sink]
-                         (shown-result value (cond-> request
-                                               head (assoc :seon.render.call/function head))
-                                       evaluation-record))]
+              head (when-not held?
+                     (some-> (render/request-projection request)
+                             (render/head-function execution-ctx namespace-name form)))
+              ;; the frame does not print: the fold's show stage does
+              admitted (if held?
+                         {:seon.sci.admit/value value :seon.sci.admit/record evaluation-record}
+                         (binding [db/*read-evidence-sink* form-sink]
+                           (shown-result value (cond-> request
+                                                 head (assoc :seon.render.call/function head))
+                                         evaluation-record)))]
           (success-evaluation
            {:seon.sci.eval/admitted admitted
             :seon.sci.admit/caps caps

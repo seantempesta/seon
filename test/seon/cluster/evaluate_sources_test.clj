@@ -11,8 +11,7 @@
             [seon.render :as render]
             [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (deftest ordered-evaluation-retains-one-explicit-basis-without-publication
   (support/with-database
@@ -97,7 +96,8 @@
                       (when (= 1 (swap! evaluations inc))
                         (support/transacted! connection (support/agent-tx @connection "later-agent")))
                       result))]
-                 (turn/evaluate-sources
+                 (:seon.turn.loop/evaluated-sources
+                  (turn/evaluate-sources
                   {:seon.turn.loop/cluster cluster
                    :seon.db/db database
                    :seon.sci.eval/ctx (:seon.sci.eval/ctx forked)
@@ -105,7 +105,7 @@
                    :seon.turn/id "preview-run"
                    :seon.cluster.eval/ordinal 0
                    :seon.ns/name 'my.agents.preview-batch
-                   :seon.cluster.reply/sources sources}))
+                   :seon.cluster.reply/sources sources})))
                closed-at (java.util.Date.)
                values (mapv #(get-in % [:seon.sci.eval/evaluation :seon.sci.admit/value]) outcomes)]
            (is (= 7 (count outcomes)))
@@ -165,7 +165,7 @@
                                            :where [?run :seon.turn/id ?run-id]
                                            [?evaluation :seon.cluster.eval/run ?run]]
                                          @connection "saved-preview"))]
-             (is (some? (:db-after committed)) (seon.print.value/bounded-text (select-keys committed [:seon.error/message :seon.turn/refused])))
+             (is (some? (:db-after committed)))
              (is (= "saved-preview"
                     (:seon.turn/id
                      (db/pull (turn/opening-db @connection "saved-preview")
@@ -261,14 +261,15 @@
                     (when-not (contains? request :seon.render/profile)
                       (swap! derivations inc))
                     (request-profile request))]
-                 (turn/evaluate-sources
+                 (:seon.turn.loop/evaluated-sources
+                  (turn/evaluate-sources
                   {:seon.turn.loop/cluster cluster
                    :seon.db/db database
                    :seon.sci.eval/ctx (:seon.sci.eval/ctx forked)
                    :seon.agent/id "profile-once-agent"
                    :seon.cluster.eval/ordinal 0
                    :seon.ns/name 'my.agents.profile-once
-                   :seon.cluster.reply/sources sources}))]
+                   :seon.cluster.reply/sources sources})))]
            (reset! carried
                    (mapv #(get-in % [:seon.sci.eval/evaluation :seon.eval/shown])
                          outcomes))
@@ -276,6 +277,5 @@
            (is (= ["1" "2" "3" "4" "5" "6"] @carried)
                "every form still renders its shown text under the profile")
            (is (= 1 @derivations)
-               (str "six forms derived the render profile " @derivations
-                    " times; one turn derives it once")))
+               "one turn derives the render profile once"))
          (finally (async/close! channel)))))))

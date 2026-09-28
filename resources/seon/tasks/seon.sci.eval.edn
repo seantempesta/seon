@@ -37,24 +37,6 @@
                          "docs/research/agent-platform/dogfood-maintainer-opus-2026-09-26.md"
                          "docs/research/agent-platform/dogfood-report-2026-09-26.md"
                          "docs/seon/issues/doc-replaces-every-schema-keyword-so-request-keys-disappear.md"}}
- #:seon.task{:id "d653ed4b633f"
-             :name "install-gate-interprets-file-tests-in-sci"
-             :kind :function
-             :intent "The install gate re-evaluates every reaching file test's source in the candidate's SCI (run-candidate-test!), where the test's own requires do not resolve: a docstring-only defn of my.note/add! gated 4 tests, 0 passed, each 'Unable to resolve symbol: support/with-database'; an arity change of my.fs/write! failed 3 of 3, while my.test/check ran the same 3 tests green in 7,165 ms. It also runs compiled host test bodies under an SCI arm that cannot interrupt them, which drove the 14:20Z recursion to 10.2 GB. Needs the owner's reach-executor ruling (loose-threads section 11 Q1: run unchanged file tests as compiled Vars with the branch definition bound, interpret only differing entities, or gate only branch tests and leave file tests to merge)."
-             :must-read #{seon.sci.eval/evaluate-candidate seon.sci.eval/run-candidate-test! seon.turn/gate-function-install}
-             :evidence #{"docs/research/agent-platform/dogfood-maintainer-opus-2026-09-26.md"
-                         "docs/research/agent-platform/landing/fix-dogfood-api-2026-09-26.md"
-                         "docs/research/agent-platform/landing/inv-heap-stuck-members-opus-2026-09-26.md"
-                         "docs/seon/issues/a-first-party-redefinition-gates-on-saturated-reach-interpreted-in-sci-and-is-refused.md"
-                         "docs/research/agent-platform/repl-dogfood-2026-09-27.md"
-                         "tmp/boot-source-perf/evidence.md"}}
- #:seon.task{:id "fc812316b5da"
-             :name "a-registration-lets-a-later-redefinition-skip-its-gate"
-             :kind :function
-             :intent "A breaking defn installs without its gate when a seon.schema/register! came earlier in the same run; the same defn alone is refused by its gating test (952 ms run). A bad normalize-tags with two gating tests installed the same way. A skipped gate and a passing gate both print #'ns/name. A gate that cannot run must refuse, never admit."
-             :must-read #{seon.schema/register! seon.sci.eval/evaluate seon.turn/gate-function-install}
-             :evidence #{"docs/research/agent-platform/dogfood-author-opus-2026-09-26.md"
-                         "docs/seon/issues/a-schema-registration-earlier-in-a-run-lets-a-later-redefinition-install-ungated.md"}}
  #:seon.task{:id "85bb0e44a4b9"
              :name "a-contract-predicate-is-refused-both-ways"
              :kind :function
@@ -191,11 +173,6 @@
              :kind :function
              :intent "A deftype/defrecord imports its class into its own namespace implicitly, but no :seon.ns/imports fact names it, so SCI cannot resolve its short class name: seon.cluster.agent/graph-definition (CountedSlidingBuffer., agent.clj:596) fails to interpret in any branch whose change reaches it and, since the root-applied probe-acq fix, refuses by name when called instead of running. install-caller-host-bindings! (eval.clj ~2320) also carries the loaded namespace's own-class imports; then update the graph-definition assertion in branch_execution_test (an-unoverridden-host-bound...)."
              :must-read #{seon.sci.eval/install-caller-host-bindings!}
-             :evidence #{"docs/research/agent-platform/landing/whole-acquisition-refusal-2026-09-27.md"}}
- #:seon.task{:name "agent-defn-of-core-row-refused-by-install-gate"
-             :kind :function
-             :intent "An agent-REPL defn of seon.render.value/datum through MCP sci mode on a branch was refused at entry with {:seon.error/member :seon.test.accretion/install? :expected true}. Judge whether the gate refusing this revision is intended (the tests reaching datum fail on the revised body) or a false refusal; if intended, the refusal names the failing tests as data."
-             :must-read #{seon.sci.eval/gate-function-install}
              :evidence #{"docs/research/agent-platform/landing/whole-acquisition-refusal-2026-09-27.md"}}
  #:seon.task{:name "copied-jvm-import-hides-sci-import"
              :kind :function

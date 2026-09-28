@@ -1,0 +1,119 @@
+{:early-done-replacement
+ {:pass? true,
+  :forms
+  [{:seon.eval/shown
+    "{:seon.error/message\n   \"(my.agent/done) must be the last form of your reply; a disposition cannot precede another reply form.\"}",
+    :seon.cluster.eval/error
+    "(my.agent/done) must be the last form of your reply; a disposition cannot precede another reply form."}
+   #:seon.eval{:shown "42"}],
+  :claim
+  "A2: an early (my.agent/done {}) is refused on its form, its value kept beside the refusal, and the next form still runs",
+  :ms 1556},
+ :executed-digest-evidence
+ {:pass? true,
+  :executed
+  [[my.agents.root/s4a-e
+    "5cb6174917d875e3406c5fdd57e9273fe9fd53f30f1b50e6d9a40fae57231720"]],
+  :evidence :complete,
+  :claim
+  "A4: an acquired definition's call records its symbol and digest",
+  :ms 683},
+ :fold-facts-commit
+ {:pass? true,
+  :shown
+  ["#'my.agents.root/s4a-c"
+   "#'my.agents.root/s4a-v"
+   "nil"
+   "#:seon.schema{:key :s4a.proof/n, :definition :int}"],
+  :claim
+  "A defn, a def, a require and a schema registration commit through the fold's facts in the turn's one settlement",
+  :ms 1453},
+ :frame-post-evaluation-failure-keeps-value
+ {:pass? true,
+  :value 42,
+  :untrusted
+  "The loaded program changed during this execution, from 6aba71c4-5afa-58da-baaf-95bef9d3a680 to 8ef7f847-2451-4e89-9040-d0e819cb23e0; its result is not trusted. Rerun it.",
+  :claim
+  "R2-1: a failure after SCI returned (the loaded program changed while the form ran) keeps the value beside it as untrusted; its facts are refused",
+  :ms 734},
+ :held-reader-form
+ {:pass? true,
+  :shown [["nil" ":clojure.string/k"] ["nil" ":clojure.string/k"]],
+  :claim
+  "A1: each form is read once, at the live cursor: an alias a prior form of the same reply required resolves, through both entrants",
+  :ms 1199},
+ :late-form-evidence
+ {:pass? true,
+  :evidence [:complete :pending :complete],
+  :pending-before true,
+  :claim
+  "A3/R2-2: a form whose future has not exited records :pending code evidence; the refresh reports it and never runs it again until the work exits",
+  :ms 1318},
+ :pmap-work-is-owned
+ {:pass? true,
+  :evidence [:complete :pending],
+  :claim
+  "R2-3: an agent's pmap runs under the kernel's future-call: work it still holds leaves the form's evidence :pending, never :complete",
+  :ms 753},
+ :publish-stage-totality
+ {:pass? true,
+  :diagnostics
+  ["publish: publish broke"
+   "publish: publish broke"
+   "publish: the stage answered no entry of this form; the published entry stands"
+   "publish: the stage answered no entry of this form; the published entry stands"],
+  :claim
+  "A publish stage that throws, or answers no entry of the form, is a diagnostic: the published entry stands and reading continues",
+  :ms 9},
+ :refused-facts-are-form-by-form
+ {:pass? true,
+  :last
+  [#:seon.eval{:shown "#'my.agents.root/s4a-ok1"}
+   {:seon.eval/shown "#'my.agents.root/s4a-bad",
+    :seon.cluster.eval/error
+    "Its program facts were not proposed: Schema reference :no.such/key is not declared in the candidate projection; it is named by my.agents.root/s4a-bad. Declare :no.such/key in the same change, or convert every referrer that names it."}],
+  :middle
+  [{:seon.eval/shown "#'my.agents.root/s4a-bad",
+    :seon.cluster.eval/error
+    "Its program facts were not proposed: Schema reference :no.such/key is not declared in the candidate projection; it is named by my.agents.root/s4a-bad. Declare :no.such/key in the same change, or convert every referrer that names it."}
+   #:seon.eval{:shown "#'my.agents.root/s4a-ok2"}],
+  :claim
+  "OQ1: a form whose facts the writer refuses loses only its facts, logged as its error beside its kept value: as the last form (validated at the writer, then revalidated form by form) and as a middle form (validated before the next form reads)",
+  :ms 7069},
+ :saved-digestless-callable-is-not-current-write
+ {:pass? true,
+  :shown ["#'my.agents.root/s4a-s" ":old"],
+  :evidence [:complete :unknown],
+  :executed nil,
+  :claim
+  "R2-4: a saved callable of an earlier definition, called after the name's one write in this batch, is not complete evidence, never repaired to the new write's digest",
+  :ms 1368},
+ :settlement-field-parity
+ {:pass? true,
+  :agent
+  {:seon.cluster.eval/read-evidence 0,
+   :seon.cluster.eval/source "(do (println \"kept\") 42)",
+   :seon.sci.eval/ending-ns my.agents.root,
+   :seon.cluster.eval/ns #:seon.ns{:name my.agents.root},
+   :seon.cluster.eval/output "kept\n",
+   :seon.cluster.eval/ordinal 0,
+   :seon.eval/shown "42",
+   :seon.cluster.eval/code-evidence :complete},
+  :mcp
+  {:seon.cluster.eval/read-evidence 0,
+   :seon.cluster.eval/source "(do (println \"kept\") 42)",
+   :seon.sci.eval/ending-ns my.agents.root,
+   :seon.cluster.eval/ns #:seon.ns{:name my.agents.root},
+   :seon.cluster.eval/output "kept\n",
+   :seon.cluster.eval/ordinal 0,
+   :seon.eval/shown "42",
+   :seon.cluster.eval/code-evidence :complete},
+  :claim
+  "A2: the frame's evaluation reaches the settlement whole (output, integer cost, namespace, ending namespace, shown), the same through both entrants",
+  :ms 678},
+ :settlement-preserves-published-entries
+ {:pass? true,
+  :values [42 3],
+  :claim
+  "A5: a settlement answering no entries, or naming an ordinal the batch never published, loses no published value",
+  :ms 4}}

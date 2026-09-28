@@ -37,13 +37,14 @@
   (forgive/next-form ctx (parse-options ctx) :code state))
 
 (defn evaluate
-  "Evaluate `form` once in the request's context under the kernel arm.
+  "Evaluate `form` once in the request's context under the kernel arm, and
+  answer its outcome (`:seon.batch/value`).
 
   The form reads `working` as its database, and registers into the batch's
   registration delta over `working`'s projection. A failure throws with its
   complete error value (`kernel/failure-value` under the arm's record) as
   `:seon.batch/error-value`, the thrown cause kept."
-  {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/form :seon.db/database-value] :seon.batch/value]}
+  {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/form :seon.db/database-value] :seon.batch/outcome]}
   [{{ctx :seon.sci.eval/ctx limit :seon.sci.eval/time-limit-ms} :seon.batch/world delta :seon.sci.batch/delta} form working]
   (kernel/with-arm
    ctx (or limit 30000)
@@ -51,10 +52,11 @@
      (try
        (binding [db/*read-database* working]
          (let [run #(sci/eval-form (assoc ctx :main-thread-id (.getId (Thread/currentThread))) form)]
-           (if delta
-             (schema/call-with-registration-delta
-              (assoc delta :seon.schema.delta/projection (db/carried-projection working)) run)
-             (run))))
+           {:seon.batch/value
+            (if delta
+              (schema/call-with-registration-delta
+               (assoc delta :seon.schema.delta/projection (db/carried-projection working)) run)
+              (run))}))
        (catch Throwable t
          (throw (ex-info (or (ex-message t) (.getName (class t)))
                          {:seon.batch/error-value

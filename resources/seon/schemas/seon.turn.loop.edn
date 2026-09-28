@@ -239,7 +239,12 @@
                   [:seon.turn.loop/admitted-form
                    :seon.turn.loop/admitted-form]
                   [:seon.sci.eval/evaluation
-                   :seon.turn.loop/evaluation]],
+                   :seon.turn.loop/evaluation]
+                  [:seon.batch/change {:optional true} :seon.batch/change]],
+                 :evaluated-batch
+                 [:map {:description "A run's rows through the one REPL path: each form's evaluation as the settlement reads it, and the batch's folded program with the request that folds it, which the caller's one settlement commits."}
+                  [:seon.turn.loop/evaluated-sources :seon.turn.loop/evaluated-sources]
+                  [:seon.turn.loop/program [:map [:seon.batch/request :seon.batch/request] [:seon.batch/program :map]]]],
                  :settlement
                  [:or
                   :seon.turn.loop/evaluation-settlement

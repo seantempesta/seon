@@ -14,7 +14,6 @@
             [clojure.core.async.impl.protocols :as async.impl]
             [clojure.core.async.flow :as flow]
             [clojure.string :as str]
-            [clojure.edn :as edn]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
@@ -37,8 +36,7 @@
             [sci.core :as sci]
             [seon.id :as id]
             [seon.render.web :as web]
-            [seon.test-support :as test-support]
-            [seon.print.value])
+            [seon.test-support :as test-support])
   (:import [com.sun.net.httpserver HttpExchange HttpHandler HttpServer]
            [java.net InetSocketAddress]
            [java.util Date]
@@ -1024,7 +1022,7 @@
                     ;; receipt (0cbf4336f deleted the :panic policy); disarm!
                     ;; throws the declared failure itself
                     failure thrown]
-                (is (nil? (:seon.fault/recorded (ex-data thrown))) (seon.print.value/bounded-text (ex-data thrown)))
+                (is (nil? (:seon.fault/recorded (ex-data thrown))))
                 (is (= :seon.agent/disarm (get-in (ex-data failure) [:seon.error/data :seon.error/operation])))
                 (is (string? (:seon.agent/turn-completion-backstop (ex-data failure))))
                 (is (= turn-completion-backstop-ms
@@ -1330,82 +1328,6 @@
                             (db/db connection) agent-id))
               "no backstop fault follows the escaped transform"))))))
 
-(deftest install-gate-failure-closes-with-a-durable-diagnostic
-  (with-connection
-    (fn [connection ctx]
-      (let [routing (armory connection)
-            agent-id "install-gate-chain"
-            run-id "install-gate-chain-run"
-            message-id "install-gate-chain-message"
-            namespace-name 'my.agents.install-gate-chain
-            timeout-ms (:seon.config.agent/turn-completion-backstop-ms
-                        config/defaults)
-            gate-var (ns-resolve 'seon.turn 'gate-function-install)
-            events (database-events connection)]
-        (test-support/transacted!
-                     connection
-                     [(agent-entity connection agent-id)
-                      (config-entity
-                       "install-gate-chain"
-                       {:seon.config.agent/turn-completion-backstop-ms timeout-ms})
-                      {:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "finish generated opening"}])
-        (test-support/transacted!
-                     connection
-                     (turn/open-tx
-                      {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/trigger [:seon.message/id message-id] :seon.turn/opened-tx "datomic.tx"}))
-
-        (test-support/transacted!
-                     connection
-                     (turn/plan-tx
-                      {:seon.turn/id run-id :seon.db.process/id process :seon.turn/starting-ns [:seon.ns/name namespace-name] :seon.turn/sources [{:seon.cluster.eval/source
-                         "(defn ^{:malli/schema [:=> [:cat] :int]} gate-chain [] 1)"
-                         :seon.ns/name namespace-name}]}))
-        (try
-          (with-redefs-fn
-            {gate-var (fn [& _]
-                        (throw (ex-info "install gate broke mid-opening"
-                                        {:seon.test/install-gate-broke true})))}
-            (fn []
-              (let [_ (arm-one! connection ctx routing "install-gate-chain" agent-id)
-                    database
-                    (await-database-state!
-                     connection (:seon.cluster.agent-test/events events)
-                     #(some? (:seon.turn/closed-tx
-                              (db/pull % [:seon.turn/closed-tx]
-                                       [:seon.turn/id run-id]))))
-                    ;; the error entity keeps the site and its declared
-                    ;; schema; the declared schema's distinguishing members
-                    ;; (`phase-failed`, `failed-step`) are stored on the
-                    ;; occurrence (`seon.error/commit-call`)
-                    [declared-schema occurrence]
-                    (db/q '[:find [?declared (pull ?occurrence [*])]
-                            :where
-                            [?error :seon.error/occurrences ?occurrence]
-                            [?error :seon.error/declared-schema ?declared]
-                            [?occurrence :seon.error.occurrence/message "install gate broke mid-opening"]]
-                          database)
-                    evaluation (db/pull database '[*]
-                                        [:seon.cluster.eval/id
-                                         (turn/receipt-identity run-id 0)])]
-                (is (= :seon.turn.loop/phase-failed-error declared-schema))
-                (is (true? (:seon.turn.loop/phase-failed occurrence)))
-                (is (some? evaluation))
-                ;; the shown refusal is the small reply map
-                ;; (`seon.error/reply-value`, 737fe0a5d): its message, not
-                ;; the declared members, which stay on the stored error
-                (is (= "install gate broke mid-opening"
-                       (:seon.cluster.eval/error evaluation)
-                       (:seon.error/message (edn/read-string (:seon.eval/shown evaluation))))
-                    "turn PRD section 15 retains the shown refusal on the started evaluation")
-                (is (some? (:seon.turn/closed-tx
-                            (db/pull database [:seon.turn/closed-tx]
-                                     [:seon.turn/id run-id]))))
-                (is (nil? (db/entity database
-                                    [:seon.fn/sym 'my.agents.install-gate-chain/gate-chain]))))))
-          (finally
-            (stop-database-events! connection events)
-            (disarm-all! routing)))))))
-
 (deftest a-changed-core-entity-refuses-by-name-and-every-agent-still-arms
   ;; Owner ruling 2026-09-23 (AGENTS.md error policy): a core entity the program
   ;; cannot install never throws out of arm!. acquire-context! threw
@@ -1437,7 +1359,7 @@
         (try
           (let [first-agent (arm-one! connection ctx routing "core-fault" "fault-a")
                 second-agent (arm-one! connection ctx routing "core-fault" "fault-b")]
-            (is (some? (:seon.flow/started first-agent)) (seon.print.value/bounded-text (keys first-agent)))
+            (is (some? (:seon.flow/started first-agent)))
             (is (some? (:seon.flow/started second-agent)) "the next agent arms too")
             (doseq [entry [first-agent second-agent]]
               (is (= subject
@@ -1610,7 +1532,7 @@
                   :seon.turn/sources
                   [{:seon.cluster.eval/source "(identity nil)"
                     :seon.ns/name namespace-name}]}))]
-    (is (some? (:db-after result)) (seon.print.value/bounded-text result)))
+    (is (some? (:db-after result))))
   (test-support/transacted! connection
                           (turn/close-tx {:seon.turn/id run-id :seon.db.process/id process :seon.turn/closed-tx "datomic.tx"})))
 
@@ -2279,12 +2201,12 @@
                                                      :in $ ?id
                                                      :where [?r :seon.turn/id ?id] [?e :seon.cluster.eval/run ?r]]
                                                    database run-id)))]
-                     (is (string? run-id) (str text " -> " (seon.print.value/bounded-text result)))
+                     (is (string? run-id))
                      (is (some? (:seon.turn/closed-tx (db/pull database [:seon.turn/closed-tx] [:seon.turn/id run-id])))
-                         (str text ": the run is terminal"))
+                         "the run is terminal")
                      (is (every? #(some % [:seon.eval/shown :seon.cluster.eval/error :seon.cluster.eval/interrupted-at])
                                  receipts)
-                         (str text ": every form carries a terminal fact " (seon.print.value/bounded-text receipts)))
+                         "every form carries a terminal fact")
                      (mapv :seon.eval/shown receipts)))]
         (swap! routing assoc :seon.agent/fault-channel faults)
         (test-support/transacted! connection (test-support/agent-tx @connection agent-id))
@@ -2295,7 +2217,7 @@
             (is (= ["{\"a\" 1}"] (settle-run "(sorted-map \"a\" 1)"))))
           (testing "an evaluation error settles on its form"
             (let [[shown] (settle-run "(/ 1 0)")]
-              (is (str/includes? (str shown) "Divide by zero") (seon.print.value/bounded-text shown))))
+              (is (str/includes? (str shown) "Divide by zero"))))
           (testing "an alias required earlier in the batch, then a declaration using it, reaches a terminal"
             (settle-run "(require '[clojure.string :as s])\n(defn shout {:malli/schema [:=> [:cat :string] :string]} [x] (s/upper-case x))"))
           (testing "after all of them, the agent's next run works"

@@ -185,10 +185,11 @@
             :status
             [:enum
              {:description
-              "Why one read form participates in this system walk: no prior evaluation, unchanged dependencies, or changed dependencies." :seon.wake/context-inert true}
+              "Why one read form participates in this system walk: no prior evaluation, unchanged dependencies (read and code evidence current), changed dependencies, or pending (work its last evaluation owns has not exited, so it is not run again)." :seon.wake/context-inert true}
              :none
              :unchanged
-             :changed],
+             :changed
+             :pending],
             :generated-form-request
             [:map
              [:seon.turn/id :seon.turn/id]

@@ -123,8 +123,8 @@
  #:seon.task{:id "8bb6b8b791ac"
              :name "a-definition-is-settled-twice"
              :kind :function
-             :intent "The install gate builds each definition's settlement with with-settled -> settled-value -> db/with (row-tx) (turn.clj ~1415-1431, called at ~5089), then the writer rebuilds the same row-tx in receipt-settle-call (turn.clj ~1770-1772): x43 mean 315 ms and x93 mean 244 ms on pid 66629, the second on the writer thread where it serializes every write on the branch. One settle-batch! applied for 19,475 ms with no armed callee over 1.1 s (unverified: fits a batch of ~70 defining forms). Settle the gate's computed tx-data under an expected-basis fence (:datahike/expected-basis-t) and recompute only when the head moved. Done when a defining form's settlement runs row-tx once (profile count per form) and a moved head still settles correctly."
-             :must-read #{seon.turn/receipt-settle-call seon.turn/with-settled seon.turn/row-tx}
+             :intent "A definition's facts are derived twice: once on the batch's working value, where the writer's validation admits them form by form (seon.turn.batch/apply-facts), then again at the writer on the head in the turn's one settlement (seon.turn.batch/program-facts-call, since S4a; before it, with-settled then receipt-settle-call's row-tx: x43 mean 315 ms and x93 mean 244 ms on pid 66629, the second on the writer thread where it serializes every write on the branch). Settle the working value's validated tx-data under an expected-basis fence (:datahike/expected-basis-t) and re-derive only when the head moved. Done when a defining form's facts are derived once (profile count per form) and a moved head still settles correctly."
+             :must-read #{seon.turn.batch/program-facts-call seon.turn.batch/apply-facts seon.turn/settle-batch!}
              :evidence #{"docs/research/agent-platform/perf-audit-2026-09-27.md"}}
  #:seon.task{:name "a-trivial-agent-turn-takes-eleven-seconds"
              :kind :function

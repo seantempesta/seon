@@ -534,6 +534,13 @@
                :seon.batch/schema-keys (or schema-keys #{})
                :seon.batch/namespaces (or namespaces #{})}))
 
+(defn program-facts-call
+  "The folded program's facts, derived at the writer on its head: a turn's one
+  settlement commits them beside its evaluations (`seon.turn/settle-batch!`)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.batch/request :map] :seon.store/transaction-data]}
+  [db request program]
+  (program-facts request db program))
+
 (defn- evaluation-record
   "One entry as the recording writer's terminal evaluation."
   {:malli/schema [:=> [:cat :string :seon.batch/entry] :map]}
@@ -566,21 +573,31 @@
                                        :seon.ns/name (or (:seon.batch/ns-before e) 'user)}) entries)
          :seon.turn/evaluations (mapv #(evaluation-record turn-id %) entries)}]])))
 
+(defn revalidate
+  "Each form's change re-derived as facts on `head`, in order, through the
+  writer's validation: a form the head now refuses gets its facts error and
+  loses its change; the rest fold. Answers the working value, the program and
+  the entries."
+  {:malli/schema [:=> [:cat :seon.batch/request :seon.db/database-value
+                       [:vector [:map [:seon.batch/ordinal :seon.cluster.eval/ordinal]
+                                 [:seon.batch/change {:optional true} :seon.batch/change]]]]
+                  [:tuple :seon.db/database-value :map [:vector :map]]]}
+  [request head entries]
+  (reduce (fn [[w p es] e]
+            (if-let [change (:seon.batch/change e)]
+              (let [r (try (apply-facts request w (form-facts request w change) change)
+                           (catch Throwable t {:seon.batch/refusal {:seon.error/message (ex-message t)}}))]
+                (if-let [refusal (:seon.batch/refusal r)]
+                  [w p (conj es (-> e (dissoc :seon.batch/change) (assoc :seon.batch/facts-error refusal)))]
+                  [(:seon.batch/working r) (fold-change request p change) (conj es e)]))
+              [w p (conj es e)]))
+          [head {} []] entries))
+
 (defn- rebase
-  "Each applied form's change re-derived as facts on `head`, in order: forms
-  now refused get their facts error; the rest fold again."
+  "The batch's changes revalidated on `head` (`revalidate`)."
   {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/batch :seon.db/database-value] :seon.batch/batch]}
   [request batch head]
-  (let [[working program entries]
-        (reduce (fn [[w p es] e]
-                  (if-let [change (:seon.batch/change e)]
-                    (let [r (try (apply-facts request w (form-facts request w change) change)
-                                 (catch Throwable t {:seon.batch/refusal {:seon.error/message (ex-message t)}}))]
-                      (if-let [refusal (:seon.batch/refusal r)]
-                        [w p (conj es (-> e (dissoc :seon.batch/change) (assoc :seon.batch/facts-error refusal)))]
-                        [(:seon.batch/working r) (fold-change request p change) (conj es e)]))
-                    [w p (conj es e)]))
-                [head {} []] (:seon.batch/entries batch))]
+  (let [[working program entries] (revalidate request head (:seon.batch/entries batch))]
     (assoc batch :seon.batch/working working :seon.batch/program program :seon.batch/entries entries)))
 
 (defn settle
@@ -794,7 +811,7 @@
   (merge {:seon.batch/read-state (fn [text] {:seon.batch/version {:seon.batch/text text :seon.batch/pos 0}
                                              :seon.batch/repairs []})
           :seon.batch/read-next jvm-read-next
-          :seon.batch/evaluate (fn [_ form _] (eval form))
+          :seon.batch/evaluate (fn [_ form _] {:seon.batch/value (eval form)})
           :seon.batch/ns-name (fn [_] (ns-name *ns*))
           :seon.batch/around (fn [{n :seon.batch/start-ns} body]
                                (binding [*ns* (create-ns n)] (refer-clojure) (body)))
@@ -820,7 +837,7 @@
                                     {:seon.batch/form ::body :seon.batch/start 0 :seon.batch/end 6
                                      :seon.batch/version (assoc v :seon.batch/pos 6) :seon.batch/repairs []}
                                     {:seon.batch/eof true :seon.batch/version v :seon.batch/repairs []}))
-          :seon.batch/evaluate (fn [_ _ _] (body))
+          :seon.batch/evaluate (fn [_ _ _] {:seon.batch/value (body)})
           :seon.batch/ns-name (fn [_] 'user)
           :seon.batch/settle settle
           :seon.batch/fault world/record-fault

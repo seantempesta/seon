@@ -119,7 +119,9 @@
          (:seon.profile/throw-counter cell#)
          ~(with-meta '__profile-entered {:tag 'java.lang.ThreadLocal})
          (:seon.profile/entered cell#)
-         ~'__profile-sym (:seon.profile/sym cell#)]
+         ;; the executed definition's identity, once: its symbol and held
+         ;; definition digest (nil is unknown), the key of a world's call sink
+         ~'__profile-key [(:seon.profile/sym cell#) (:seon.profile/digest cell#)]]
      ~@body))
 
 (def ^java.util.function.Function new-adder
@@ -127,14 +129,14 @@
   (reify java.util.function.Function
     (apply [_ _] (LongAdder.))))
 
-(defmacro count-into-world!
-  "Count one call of `sym` in the calling evaluation's world's sink
-  (`seon.batch/*world*`, its `:seon.batch/sink`): a dynamic read and a
-  LongAdder increment, calling no armed function."
-  [sym]
+(defmacro entered-in-world
+  "The calling evaluation's counter for the executed definition `k` in its
+  world's call sink (`seon.batch/*world*`'s `:seon.batch/sink`), taken at
+  entry so an entered, unfinished call is evidence; nil outside a world. A
+  dynamic read and a map lookup, calling no armed function."
+  [k]
   `(when-some [sink# (:seon.batch/sink seon.batch/*world*)]
-     (.increment ^java.util.concurrent.atomic.LongAdder
-                 (.computeIfAbsent ^java.util.concurrent.ConcurrentHashMap sink# ~sym seon.profile/new-adder))))
+     (.computeIfAbsent ^java.util.concurrent.ConcurrentHashMap sink# ~k seon.profile/new-adder)))
 
 (def host-entry
   "The re-entry marker of an armed call made outside any evaluation's world."
@@ -149,8 +151,10 @@
   of the same cell in the same world runs `body` uncounted: its time is inside
   the outer entry's. A re-entry under another world (a nested test agent)
   counts one call into that world's sink only; the JVM-wide counters keep
-  their outermost entry. Each entry restores the prior one on exit. A throw
-  is counted as a completed call and a throw, then rethrown unchanged."
+  their outermost entry. A world's count is keyed by the executed definition
+  (`[sym digest]`) and taken at entry, incremented at exit. Each entry
+  restores the prior one on exit. A throw is counted as a completed call and a
+  throw, then rethrown unchanged."
   [& body]
   `(let [prior# (.get ~'__profile-entered)
          here# (or (:seon.batch/sink seon.batch/*world*) seon.profile/host-entry)]
@@ -158,34 +162,37 @@
        (identical? prior# here#) (do ~@body)
 
        (some? prior#)
-       (do (.set ~'__profile-entered here#)
-           (try
-             (let [value# (do ~@body)] (count-into-world! ~'__profile-sym) value#)
-             (catch Throwable failure# (count-into-world! ~'__profile-sym) (throw failure#))
-             (finally (.set ~'__profile-entered prior#))))
+       (let [counted# (entered-in-world ~'__profile-key)]
+         (.set ~'__profile-entered here#)
+         (try
+           ~@body
+           (finally
+             (some-> ^java.util.concurrent.atomic.LongAdder counted# .increment)
+             (.set ~'__profile-entered prior#))))
 
        :else
-       (let [started# (System/nanoTime)]
+       (let [started# (System/nanoTime)
+             counted# (entered-in-world ~'__profile-key)]
          (.set ~'__profile-entered here#)
          (try
            (let [value# (do ~@body)
                  elapsed# (- (System/nanoTime) started#)]
-             ;; the calling evaluation's own count (its world's sink): a test
-             ;; agent's counters see only its own calls
-             (count-into-world! ~'__profile-sym)
              (.increment ~'__profile-calls)
              (.add ~'__profile-total elapsed#)
              (.accumulate ~'__profile-max elapsed#)
              value#)
            (catch Throwable failure#
              (let [elapsed# (- (System/nanoTime) started#)]
-               (count-into-world! ~'__profile-sym)
                (.increment ~'__profile-calls)
                (.add ~'__profile-total elapsed#)
                (.accumulate ~'__profile-max elapsed#)
                (.increment ~'__profile-throws))
              (throw failure#))
-           (finally (.set ~'__profile-entered prior#)))))))
+           (finally
+             ;; the calling evaluation's own count (its world's sink): a test
+             ;; agent's counters see only its own calls
+             (some-> ^java.util.concurrent.atomic.LongAdder counted# .increment)
+             (.set ~'__profile-entered prior#)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Reads — pure over the cells; nothing here resets a counter

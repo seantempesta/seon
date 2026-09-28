@@ -25,7 +25,7 @@
             [seon.turn :as turn]
             [seon.error :as error]
             [seon.cluster.message :as message]
-            [seon.cluster.reply :as reply]
+            [seon.sci.forgive :as forgive]
 
 
             [seon.config :as config]
@@ -37,8 +37,7 @@
             [seon.sci.eval :as sci.eval]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.test-support :as test-support]
-            [seon.print.value])
+            [seon.test-support :as test-support])
   (:import [com.sun.net.httpserver HttpExchange HttpHandler HttpServer]
            [java.net InetSocketAddress]
            [java.util Date]))
@@ -431,14 +430,13 @@
           (let [started (System/nanoTime)
                 reports (drive-agent! cluster "agent-a" 4)
                 elapsed-ms (/ (- (System/nanoTime) started) 1e6)]
-            (is (= [:open :call] (mapv :seon.turn.work/situation reports))
-                (seon.print.value/bounded-text (mapv #(dissoc % :seon.turn.loop/cluster) reports)))
+            (is (= [:open :call] (mapv :seon.turn.work/situation reports)))
             (is (= :closed (:seon.turn.loop/outcome (last reports))))
             (is (= 1 (count @ledger)) "one provider request, no refused re-open")
             (is (= ["42"] (keep #(when (= "(+ 40 2)" (str/trim (:seon.cluster.eval/source %)))
                                    (:seon.eval/shown %))
                                 (agent-evaluations @(:seon.db/connection cluster)))))
-            (is (< elapsed-ms 10000.0) (str "the turn took " elapsed-ms " ms"))))))))
+            (is (< elapsed-ms 10000.0) "the turn stays within its bound")))))))
 
 (deftest spending-the-last-episode-run-is-a-loud-core-fault
   ;; Law (lane fix-turn-hang-2026-09-25, round 5): reaching
@@ -458,13 +456,12 @@
                            (test-support/environment "turn-test" connection))
             panic (try (drive-agent! cluster "agent-a" 4) nil
                        (catch clojure.lang.ExceptionInfo failure failure))]
-        (is (= 1 (:seon.config.run/max-episode-runs configured)) (seon.print.value/bounded-text configured))
+        (is (= 1 (:seon.config.run/max-episode-runs configured)))
         (is (true? (get-in (ex-data panic) [:seon.fault/recorded :seon.fault/committed?]))
             "the fault is stored before the panic")
         (is (some? panic) "the pass that spends the last run throws under :panic")
-        (is (str/includes? (str (ex-message panic)) "seon.run/complete") (ex-message panic))
-        (is (= 'seon.turn/turn (get-in (ex-data panic) [:seon.fault/recorded :seon.error/operation]))
-            (seon.print.value/bounded-text (ex-data panic)))
+        (is (str/includes? (str (ex-message panic)) "seon.run/complete"))
+        (is (= 'seon.turn/turn (get-in (ex-data panic) [:seon.fault/recorded :seon.error/operation])))
         (is (nil? (turn/next-agent-work @connection (request connection)))
             "the bound still defers every later opening")))))
 
@@ -581,8 +578,7 @@
           (is (= 2 (count evaluations)))
           (is (every? #(and (nil? (:seon.cluster.eval/error %))
                             (nil? (:seon.cluster.eval/interrupted-at %)))
-                      evaluations)
-              (seon.print.value/bounded-text evaluations))
+                      evaluations))
           (is (< (:max-tx before) (:max-tx after)) "the turn committed")
           (is (not-any? :seon.fn/calls evaluations)
               "a settled receipt carries no static call edge")
@@ -1275,11 +1271,7 @@
           (drive-agent! (assoc cluster :seon.sci.eval/agent-ctx author) "agent-a" 2)
           (let [admitted (db/pull @connection '[*]
                                  [:seon.fn/sym 'seon.eval.drive/uuid-text])]
-            (is (= :agent (:seon.schema.admission/source admitted))
-                (seon.print.value/bounded-text (mapv #(select-keys % [:seon.cluster.eval/source
-                                               :seon.cluster.eval/error
-                                               :seon.eval/shown])
-                              (agent-evaluations @connection))))
+            (is (= :agent (:seon.schema.admission/source admitted)))
             (is (= source (:seon.fn/source admitted))))
           (sci.eval/acquire! {:seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
                              :seon.db/db @connection})
@@ -1764,14 +1756,14 @@
                             (fn [_projection _request]
                               {:seon.ai/text reply-text
                                :seon.ai/finish-reason "stop"})]
-                (let [[state report]
+                (let [[state _report]
                       (turn/step {:seon.agent/id "agent-a"
                                   :seon.turn.loop/cluster handle}
                                  :seon.agent/episode :seon.agent/wake)
                       _ (settled! handle state)
                       database (db/db connection)
                       evaluation (first (agent-evaluations database))]
-                  (is (int? (:db/id evaluation)) (seon.print.value/bounded-text report))
+                  (is (int? (:db/id evaluation)))
                   (is (= reply-text (:seon.cluster.eval/source evaluation)))
                   (is (str/includes? (or (:seon.cluster.eval/error evaluation) "")
                                      "no form"))
@@ -2579,14 +2571,15 @@
                                   (fn [request]
                                     (swap! evaluations inc)
                                     (evaluate request))]
-                      (turn/evaluate-sources
+                      (:seon.turn.loop/evaluated-sources
+                       (turn/evaluate-sources
                        {:seon.turn.loop/cluster cluster
                         :seon.sci.eval/ctx ctx
                         :seon.agent/id "agent-a"
                         :seon.turn/id run-id
                         :seon.cluster.eval/ordinal 0
                         :seon.ns/name 'my.agents.agent-a
-                        :seon.cluster.reply/sources (subvec planned 0 prefix-count)}))]
+                        :seon.cluster.reply/sources (subvec planned 0 prefix-count)})))]
                 (is (= [2 4]
                        (mapv (comp :seon.sci.admit/value :seon.sci.eval/evaluation)
                              evaluated)))))
@@ -2606,16 +2599,16 @@
                 "recovery never re-executes the in-memory prefix")))))))
 
 (deftest delimiter-repair-is-span-local-and-precedes-intent
-  (testing "repair is one bounded, honest, idempotent pass"
-    (let [repair (deref (ns-resolve 'seon.turn 'repair-source))
-          broken "(defn repaired [x]\n  (+ x 1)"
-          fixed (repair broken 'my.agents.agent-a 10000)]
-      (is (= "(+ 1 2)" (repair "(+ 1 2)" 'my.agents.agent-a 10000))
-          "unchanged valid input is rejected as a repair")
-      (is (= "{:a 1 :b}" (repair "{:a 1 :b}" 'my.agents.agent-a 10000))
-          "still-invalid output is rejected")
-      (is (= fixed (repair fixed 'my.agents.agent-a 10000))
-          "accepted repair is idempotent")))
+  (testing "repair is one bounded, honest, idempotent pass through the reply's planned sources"
+    (let [plan (fn [text] (mapv :seon.cluster.eval/source (turn/planned-sources text 'my.agents.agent-a 10000)))
+          fixed (first (plan "(defn repaired [x]\n  (+ x 1)"))]
+      (is (= "(defn repaired [x]\n  (+ x 1))" fixed) "one missing closer is repaired")
+      (is (= ["(+ 1 2)"] (plan "(+ 1 2)"))
+          "unchanged valid input is not repaired")
+      (is (= ["{:a 1 :b}" "(+ 2 3)"] (plan "{:a 1 :b}\n(+ 2 3)"))
+          "a still-invalid form stays one source and the next form follows it")
+      (is (= [fixed] (plan fixed))
+          "an accepted repair is idempotent")))
   (testing "one missing defn closer is fixed, evaluated, and stored as the history form"
     (with-cluster
       (fn [cluster]
@@ -2635,12 +2628,9 @@
               write-nanos (atom 0)
               write-count (atom 0)
               transact! db/transact!
-              install-nanos (atom 0)
-              install-var (ns-resolve 'seon.turn 'gate-function-install)
-              install @install-var
               test-thread (Thread/currentThread)
               reply-arrived (atom nil)
-              read-sources reply/sources]
+              read-segments forgive/segments]
           (settled! cluster
                     (turn/turn
                      {:seon.turn.loop/cluster cluster
@@ -2649,22 +2639,11 @@
                      now))
           (let [call-work (turn/next-agent-work @connection
                                                 (request connection))]
-            (with-redefs-fn
-              {install-var
-               (fn [& arguments]
-                 (if (= test-thread (Thread/currentThread))
-                   (let [started (System/nanoTime)]
-                     (try (apply install arguments)
-                          (finally
-                            (swap! install-nanos +
-                                   (- (System/nanoTime) started)))))
-                   (apply install arguments)))}
-              (fn []
-               (with-redefs [ai/complete (fn [_projection _] {:seon.ai/text original})
-                          reply/sources
+            (with-redefs [ai/complete (fn [_projection _] {:seon.ai/text original})
+                          forgive/segments
                           (fn [& arguments]
                             (reset! reply-arrived (System/nanoTime))
-                            (apply read-sources arguments))
+                            (apply read-segments arguments))
                           db/transact!
                           (fn [& arguments]
                             (let [measure? (and (= test-thread (Thread/currentThread))
@@ -2679,9 +2658,8 @@
                         (turn/turn
                          {:seon.turn.loop/cluster cluster
                           :seon.turn.work/next call-work}
-                         now)))))
+                         now)))
             (let [bookkeeping-ms (/ (double @write-nanos) 1000000.0)
-                  install-ms (/ (double @install-nanos) 1000000.0)
                   ;; THE SUBJECT IS THE AGENT'S OWN SIX FORMS. System turn 0
                   ;; stores the generated opening in the same evaluation
                   ;; family, so an absolute count over every evaluation
@@ -2699,7 +2677,7 @@
                     :seon.sci.admit/caps (:seon.sci.admit/caps cluster)})]
               (is (= 6 (count evaluations)))
               (is (= (str "(defn ^{:malli/schema [:=> [:cat :int] :int]}"
-                          " repaired [x]\n  (+ x 1))\n")
+                          " repaired [x]\n  (+ x 1))")
                      (first sources)))
               (is (= "(+ 40 2)" (second sources))
                   "the adjacent good form remains byte-identical")
@@ -2720,15 +2698,12 @@
                            (db/pull (db/db connection) [:seon.fn/calls]
                                     (:db/id (nth evaluations 2)))))
                   "a receipt asserts no program call edge; the definition entity owns its edges")
-              (is (pos? @install-nanos) "the definition install was observed")
               ;; WANTED (55b5b580f, 8cedbee81): the intent is the one
               ;; `db/transact!` write; each form then settles through the
               ;; applied writer (`seon.db/transact-applied!`), not this Var.
               (is (pos? @write-count) "the intent write was observed")
-              (is (< install-ms 300.0)
-                  (str "definition installation took " install-ms " ms"))
               (is (< bookkeeping-ms 300.0)
-                  (str "six-form settlement and writes took " bookkeeping-ms " ms"))))))))
+                  "six-form settlement and writes stay within their bound")))))))
   (testing "indent mode repairs a mismatched closer type"
     (with-cluster
       (fn [cluster]
@@ -2737,7 +2712,7 @@
           (with-redefs [ai/complete (fn [_projection _] {:seon.ai/text source})]
             (drive! cluster 6))
           (let [evaluations (agent-evaluations @connection)]
-            (is (= "(let [x 1]\n  x)\n"
+            (is (= "(let [x 1]\n  x)"
                    (:seon.cluster.eval/source (first evaluations))))
             (is (= "1" (:seon.eval/shown (first evaluations)))))))))
   (testing "an odd map stays an error and the following form still settles"
@@ -2748,7 +2723,7 @@
           (with-redefs [ai/complete (fn [_projection _] {:seon.ai/text source})]
             (drive! cluster 6))
           (let [evaluations (agent-evaluations @connection)]
-            (is (= "{:a 1 :b}\n"
+            (is (= "{:a 1 :b}"
                    (:seon.cluster.eval/source (first evaluations))))
             ;; WANTED (737fe0a5d): the failure shows as the flat error map,
             ;; naming the reader's member rather than prose.
@@ -2854,8 +2829,7 @@
     (is (seq used) "the registry exposes actual singleton enum uses")
     (is (every? (fn [[enum-key member]]
                   (contains? (get declared enum-key) member))
-                used)
-        (seon.print.value/bounded-text used))))
+                used))))
 
 (deftest generated-membership-failure-never-advances-the-run-to-call
   (with-cluster
@@ -3317,19 +3291,14 @@
             (.start pass)
             (.join pass (long (* 1000 test-support/event-backstop-seconds)))
             (is (not (.isAlive pass))
-                (str "the turn did not finish within "
-                     test-support/event-backstop-seconds
-                     "s on a thread carrying no ambient projection"))
+                "the turn finishes within its bound on a thread carrying no ambient projection")
             (let [report (deref outcome 0 ::never-delivered)]
               (is (not (instance? Throwable report))
-                  (str "the turn threw on a bare thread: " (seon.print.value/bounded-text report)))
+                  "the turn threw on a bare thread")
               (is (= :open (:seon.turn.work/situation report))
                   "the pass ran the situation the work derived"))
             (is (zero? @derivations)
-                (str "the turn rebuilt the schema projection "
-                     @derivations
-                     " time(s); it must receive the cluster's projection "
-                     "state instead of re-deriving it per commit"))))))))
+                "the turn must receive the cluster's projection state instead of re-deriving it per commit")))))))
 
 (deftest generated-opening-preserves-one-provider-turn-budget
   (with-cluster
@@ -3347,7 +3316,7 @@
                             :seon.turn/opened-tx "datomic.tx"
                             :seon.turn/starting-ns [:seon.ns/name 'my.agents.agent-a]
                             :seon.turn/trigger [:seon.message/id "m-1"]})))]
-        (is (some? (:db-after seeded)) (seon.print.value/bounded-text (:seon.db.write.attempt/request-id seeded)))
+        (is (some? (:db-after seeded)))
         (when (:seon.db.write.attempt/request-id seeded) (throw (ex-info "Budget fixture refused" seeded)))
         (is (= 0 (turn/episode-runs (db/db connection) "agent-a")))
         (is (= 1 (turn/turns-left (db/db connection) "agent-a")))

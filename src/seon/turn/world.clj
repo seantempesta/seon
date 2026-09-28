@@ -15,9 +15,15 @@
 ;; generator are registered by the world's owner.
 (schema/register-core-predicate! 'seon.batch/sink? seon.batch/sink?)
 
+(schema/register-core-predicate! 'seon.batch/owned? seon.batch/owned?)
+
 (def sink-generator
   "Fresh, empty call sinks."
   (gen/fmap (fn [_] (seon.batch/sink)) (gen/return nil)))
+
+(def owned-generator
+  "Fresh owned-work counts at zero."
+  (gen/fmap (fn [_] (java.util.concurrent.atomic.AtomicLong.)) (gen/return nil)))
 
 ;;; ---------------------------------------------------------------------------
 
@@ -99,9 +105,12 @@
   {:malli/schema [:=> [:cat :seon.batch/world [:=> [:cat] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary :seon.schema.admission/reason "Any body runs in the world: its value passes through unchanged." :gen/elements [nil false 0 "" :k [] {}]}]]] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary :seon.schema.admission/reason "Any body runs in the world: its value passes through unchanged." :gen/elements [nil false 0 "" :k [] {}]}]]}
   [world f]
   (db/call-with-custody (select-keys world [:seon.db/connection])
-                        #(with-bindings (merge (:seon.batch/scope world {})
-                                               {#'db/*read-database* (:seon.db/db world)
-                                                #'seon.batch/*world* world})
+                        #(with-bindings (cond-> (merge (:seon.batch/scope world {})
+                                                       {#'db/*read-database* (:seon.db/db world)
+                                                        #'seon.batch/*world* world})
+                                          ;; a form's reads land in its own sink
+                                          (:seon.batch/reads world)
+                                          (assoc #'db/*read-evidence-sink* (:seon.batch/reads world)))
                            (f))))
 
 

@@ -13,11 +13,14 @@
   thread that actually runs the work. The deadline is a latch shared by the
   arm's value, so every thread serving one evaluation observes one deadline,
   counts into one entrance total, and is reachable by one `interrupt!`."
+  (:refer-clojure :exclude [future-call pmap])
   (:require [clojure.main :as main]
             [clojure.string :as str]
             [clojure.test.check.generators :as gen]
             [sci.core :as sci]
             [sci.impl.utils :as sci.utils]
+            [sci.impl.vars :as sci.vars]
+            [seon.batch]
             [sci.interrupt :as sci.interrupt]
             [seon.db :as db]
             [seon.error.refusal :as error.refusal]
@@ -639,15 +642,82 @@
             (.set thread-arm displaced)
             (.remove thread-arm)))))))
 
+(defonce ^:private pending-work
+  (java.util.concurrent.ConcurrentHashMap.))
+
+(defn own-pending!
+  "Hold the owned-work count of a recorded evaluation whose futures had not
+  exited when it was recorded, under the evaluation's id: the one process
+  roster the refresh asks before running that unit again. A count that reaches
+  zero is released by the next `pending?`. A restart forgets the roster, and
+  with it the work."
+  {:malli/schema [:=> [:cat :seon.cluster.eval/id :seon.batch/owned] :nil]}
+  [evaluation-id ^AtomicLong owned]
+  (when (pos? (.get owned))
+    (.put ^java.util.concurrent.ConcurrentHashMap pending-work evaluation-id owned))
+  nil)
+
+(defn pending?
+  "Whether work a recorded evaluation owns is still running in this process:
+  its unit is not run again until that work exits."
+  {:malli/schema [:=> [:cat [:maybe :seon.cluster.eval/id]] :boolean]}
+  [evaluation-id]
+  (boolean
+   (when-let [^AtomicLong owned (and evaluation-id (.get ^java.util.concurrent.ConcurrentHashMap pending-work evaluation-id))]
+     (or (pos? (.get owned))
+         (do (.remove ^java.util.concurrent.ConcurrentHashMap pending-work evaluation-id owned) false)))))
+
 (defn future-call
   "`clojure.core/future-call` carrying the arm governing this thread
   (`current-arm`, `adopt-arm`): the future's interpreted work counts into the
   evaluation's one entrance total and is cut by its one deadline, instead of
-  running unbounded on a pool thread. Unarmed callers get a plain future."
+  running unbounded on a pool thread. Unarmed callers get a plain future.
+
+  The future is the calling form's owned work: it is counted in the form's
+  world (`seon.batch/*world*`'s `:seon.batch/in-flight`, which the future
+  carries) from submission until its body exits, however it exits, so the
+  form's evidence is :pending while it runs. A submission the executor refuses
+  is uncounted before its refusal rethrows."
   {:malli/schema [:=> [:cat [:fn clojure.core/ifn?]] [:fn clojure.core/future?]]}
   [f]
-  (let [carried (current-arm)]
-    (clojure.core/future-call #(adopt-arm carried f))))
+  (let [carried (current-arm)
+        ^AtomicLong owned (:seon.batch/in-flight seon.batch/*world*)]
+    (some-> owned .incrementAndGet)
+    (try
+      (clojure.core/future-call
+       #(try (adopt-arm carried f)
+             (finally (some-> owned .decrementAndGet))))
+      (catch Throwable refused
+        (some-> owned .decrementAndGet)
+        (throw refused)))))
+
+(defn pmap
+  "`pmap` over this kernel's `future-call`, as SCI's future addon defines it
+  (reference-code/sci/src/sci/addons/future.clj:16-31) but for the future
+  each element runs in: the addon calls the host `future-call`, so its
+  threads escaped the arm and the form's owned work. SCI's bindings are
+  conveyed the same way (`sci.impl.vars/binding-conveyor-fn`)."
+  ;; the contract never walks a collection: pmap is lazy over what may be
+  ;; infinite, and a walked result derefs every element's future
+  {:malli/schema [:function
+                  [:=> [:cat [:fn clojure.core/ifn?] [:fn clojure.core/seqable?]] [:fn clojure.core/seq?]]
+                  [:=> [:cat [:fn clojure.core/ifn?] [:fn clojure.core/seqable?] [:* [:fn clojure.core/seqable?]]] [:fn clojure.core/seq?]]]}
+  ([f coll]
+   (let [n (+ 2 (.availableProcessors (Runtime/getRuntime)))
+         rets (map #(future-call (sci.vars/binding-conveyor-fn (fn [] (f %)))) coll)
+         step (fn step [[x & xs :as vs] fs]
+                (lazy-seq
+                 (if-let [s (seq fs)]
+                   (cons (deref x) (step xs (rest s)))
+                   (map deref vs))))]
+     (step rets (drop n rets))))
+  ([f coll & colls]
+   (let [step (fn step [cs]
+                (lazy-seq
+                 (let [ss (map seq cs)]
+                   (when (every? identity ss)
+                     (cons (map first ss) (step (map rest ss)))))))]
+     (pmap #(apply f %) (step (cons coll colls))))))
 
 (defn- without-interrupt-marker
   "One cause-chain link without SCI's private interrupt marker.

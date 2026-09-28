@@ -250,7 +250,8 @@
                          (not (code-line? (subs text ls le))))
                     (let [{t :text rep :repair} (comment-rest-of-line text start)]
                       [:redo t start rep])
-                    :else (done {:seon.batch/unread-from start :seon.batch/reason msg}))))))]
+                    :else (done {:seon.batch/unread-from start :seon.batch/reason msg
+                                 :seon.batch/cause (:error r)}))))))]
       (if (vector? step)
         (let [[_ t at rep] step] (recur (version t at) (conj repairs rep) (inc guard)))
         step))))
@@ -265,18 +266,106 @@
 (defn forms
   "Every form of `text` through `next-form`, read only.
 
-  Answers the accepted sources, the repaired text, the repairs and where
-  reading stopped (tests and the refresh classifier)."
+  Answers the accepted sources with their spans in the repaired text, the
+  repaired text, the repairs and where reading stopped (tests, the refresh
+  classifier and the structural segmentation of a reply)."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :map [:enum :reply :code] :string] :map]}
   [ctx opts mode text]
-  (loop [state (read-state text) out []]
+  (loop [state (read-state text) out [] spans []]
     (let [r (next-form ctx opts mode state)
           v (:seon.batch/version r)
           t (:seon.batch/text v)]
       (if (or (:seon.batch/eof r) (contains? r :seon.batch/unread-from))
-        (cond-> {:forms out :text t :repairs (:seon.batch/repairs r)}
+        (cond-> {:forms out :spans spans :text t :repairs (:seon.batch/repairs r)}
           (contains? r :seon.batch/unread-from)
           (assoc :unread-from (:seon.batch/unread-from r) :reason (:seon.batch/reason r)))
         (recur (assoc state :seon.batch/version v :seon.batch/repairs (:seon.batch/repairs r)
                       :seon.batch/last-code-end (:seon.batch/end r))
-               (conj out (str/trimr (subs t (:seon.batch/start r) (:seon.batch/end r)))))))))
+               (conj out (str/trimr (subs t (:seon.batch/start r) (:seon.batch/end r))))
+               (conj spans [(:seon.batch/start r) (:seon.batch/end r)]))))))
+
+(def ^:private structural-ctx
+  "A bare SCI context for structural reads: they resolve no alias and invoke
+  no tag reader, so they need no live program."
+  (delay (sci/init {})))
+
+(defn- comment-of
+  "The prose before a form as its comment: the `;` lines between the previous
+  form and this one, their markers removed; fence lines dropped."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [^String between]
+  (->> (str/split-lines between)
+       (map str/trim)
+       (remove fence-line?)
+       (keep (fn [l] (when (str/starts-with? l ";") (str/trim (str/replace-first l #"^;+" "")))))
+       (remove str/blank?)
+       (str/join "\n")))
+
+(defn- balanced-end
+  "The offset just past the balanced collection starting at `start` (strings,
+  character literals and `;` comments skipped), after any dispatch or quote
+  prefix (`#`, `#=`, `'`, `` ` ``, `~`, `@`), or nil when `start` opens no
+  collection or it never closes."
+  {:malli/schema [:=> [:cat :string nat-int?] [:maybe nat-int?]]}
+  [^String text start]
+  (when-let [open (loop [i start]
+                    (when (< i (count text))
+                      (let [c (.charAt text (int i))]
+                        (cond (#{\( \[ \{} c) i
+                              (#{\# \= \' \` \~ \@} c) (recur (inc i))
+                              :else nil))))]
+    (loop [i open depth 0]
+      (when (< i (count text))
+        (let [c (.charAt text (int i))]
+          (case c
+            \" (let [close (loop [j (inc i)]
+                             (cond (>= j (count text)) nil
+                                   (= \\ (.charAt text (int j))) (recur (+ j 2))
+                                   (= \" (.charAt text (int j))) j
+                                   :else (recur (inc j))))]
+                 (when close (recur (inc close) depth)))
+            \\ (recur (+ i 2) depth)
+            \; (let [nl (.indexOf text "\n" (int i))] (if (neg? nl) nil (recur (inc nl) depth)))
+            (\( \[ \{) (recur (inc i) (inc depth))
+            (\) \] \}) (if (= 1 depth) (inc i) (recur (inc i) (dec depth)))
+            (recur (inc i) depth)))))))
+
+(defn segments
+  "A reply's forms read structurally (edamame, every semantic hook neutral:
+  tags unread, any alias), with the forgiving stage's repairs: each form's
+  source text and the prose above it as its comment. A balanced form the
+  structural read refuses (an odd map) is one form whose evaluation-time read
+  answers its error once, and reading continues after it; an unbalanced rest
+  is the unread rest. The one semantic read of each form happens later, at
+  the live cursor, when it is evaluated.
+
+  ## Costs
+
+  - 52 recorded replies: 64 ms total (default, 2026-09-28, unarmed)."
+  {:malli/schema [:=> [:cat :string]
+                  [:map [:seon.batch/segments [:vector [:map [:seon.batch/source :string]
+                                                        [:seon.batch/comment {:optional true} :string]]]]
+                   [:seon.batch/unread {:optional true} :string]]]}
+  [text]
+  (let [ctx @structural-ctx
+        opts {:all true :read-cond :preserve :auto-resolve (constantly 'seon.sci.forgive.trial)
+              :suppress-read true :end-location true}
+        {sources :forms :keys [spans unread-from] repaired :text} (forms ctx opts :reply text)
+        ends (into [0] (map second) spans)
+        found (mapv (fn [source [start _] previous-end]
+                     (let [c (comment-of (subs repaired previous-end start))]
+                       (cond-> {:seon.batch/source source}
+                         (not (str/blank? c)) (assoc :seon.batch/comment c))))
+                   sources spans ends)
+        start (when unread-from (skip-to repaired unread-from))
+        end (when start (balanced-end repaired start))]
+    (cond
+      (nil? unread-from) {:seon.batch/segments found}
+      end (let [c (comment-of (subs repaired (peek ends) start))
+                rest-segments (segments (subs repaired end))]
+            (update rest-segments :seon.batch/segments
+                    #(into (conj found (cond-> {:seon.batch/source (subs repaired start end)}
+                                        (not (str/blank? c)) (assoc :seon.batch/comment c)))
+                           %)))
+      (str/blank? (subs repaired unread-from)) {:seon.batch/segments found}
+      :else {:seon.batch/segments found :seon.batch/unread (str/trim (subs repaired unread-from))})))

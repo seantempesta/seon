@@ -7,6 +7,14 @@
                     [:string {:min 1, :seon.db/no-history? true :seon.wake/context-inert true
                               :description "The flat errors a later stage (printing, a renderer, settlement) attached beside this evaluation's unchanged value, as the floor printed them: a vector of :seon.error/base values that reads back as data. Present only when the evaluation itself returned a value."}],
                     :read-basis-transaction [:and {:seon.wake/context-inert true} :seon.db/basis-t],
+                    :executed
+                    [:set {:seon.wake/context-inert true
+                              :description "The definitions this evaluation entered, each as the symbol and the definition digest its installed callable held: its code evidence. The refresh re-runs a kept unit when one of them is no longer its symbol's current definition."}
+                     [:tuple :qualified-symbol :seon.program/definition-digest]],
+                    :code-evidence
+                    [:enum {:seon.wake/context-inert true
+                            :description "Whether :seon.cluster.eval/executed is all this evaluation ran: :complete; :unknown when a definition it entered had no known digest where it ran; :pending when work it owned had not exited when it was recorded. Absent (recorded before the one path) is unknown."}
+                     :complete :unknown :pending],
                     :error [:and {:seon.wake/context-inert true} :string],
                     :read-evidence
                     [:vector #:seon.db{:component true :seon.db/component-schema :seon.cluster.eval/read-evidence-entity :seon.wake/context-inert true} :seon.db/ref],
@@ -106,6 +114,8 @@
                      [:seon.cluster.eval/read-basis-transaction
                       {:optional true}
                       :seon.cluster.eval/read-basis-transaction]
+                     [:seon.cluster.eval/executed {:optional true} :seon.cluster.eval/executed]
+                     [:seon.cluster.eval/code-evidence {:optional true} :seon.cluster.eval/code-evidence]
                      [:seon.test.accretion/gate-tests
                       {:optional true}
                       :seon.test.accretion/gate-tests]
@@ -168,6 +178,8 @@
                      [:seon.cluster.eval/read-basis-transaction
                       {:optional true}
                       :seon.cluster.eval/read-basis-transaction]
+                     [:seon.cluster.eval/executed {:optional true} :seon.cluster.eval/executed]
+                     [:seon.cluster.eval/code-evidence {:optional true} :seon.cluster.eval/code-evidence]
                      [:seon.cluster.eval/ns
                       {:optional true}
                       :seon.cluster.eval/ns]

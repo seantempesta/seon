@@ -25,11 +25,9 @@
             [clojure.test.check.properties :as prop]
             [seon.error :as error]
             [seon.env :as env]
-            [seon.fault :as fault]
             [seon.fn :as seon.fn]
             [seon.schema]
-            [seon.program :as program]
-            [seon.print.value]))
+            [seon.program :as program]))
 
 (defn- namespace-entity
   "A namespace row absent from the fixture branch, carrying the required
@@ -73,7 +71,7 @@
             attempt (db/q '[:find ?attempt .
                             :where [?attempt :seon.ai.attempt/ordinal 0]]
                           database)]
-        (is (nil? recorded) (seon.print.value/bounded-text recorded))
+        (is (nil? recorded))
         (is (= {:seon.ai.model/id model} descriptor))
         (is (int? attempt))
         (support/transacted! connection
@@ -176,8 +174,7 @@
            fault (try (turn/evaluate-sources request) nil
                       (catch clojure.lang.ExceptionInfo failure (ex-data failure)))]
        ;; The whole fault can carry the request's world; name it, never print it.
-       (is (seq (:seon.turn/generated-read-attributes fault))
-           (seon.print.value/bounded-text (select-keys fault [:seon.error/operation :seon.error/layer :seon.error/message])))
+       (is (seq (:seon.turn/generated-read-attributes fault)))
        (is (= source (get-in fault [:seon.error/offending])))
        (is (= #{:seon.turn/id}
               (get-in fault [:seon.error/data :datahike.read/attributes])))
@@ -187,14 +184,14 @@
        (checked-transact! connection
                           [[:db/add [:seon.cluster.eval/id evaluation-id]
                             :seon.cluster.eval/author :agent]])
-       (is (seq (get-in (first (turn/evaluate-sources request))
+       (is (seq (get-in (first (:seon.turn.loop/evaluated-sources (turn/evaluate-sources request)))
                         [:seon.sci.eval/evaluation :seon.cluster.eval/read-evidence]))
            "an agent may explicitly inspect its own history")
        (checked-transact! connection
                           [[:db/add [:seon.cluster.eval/id evaluation-id]
                             :seon.cluster.eval/author :system]
                            [:db/add [:seon.turn/id run-id] :seon.turn.work/situation :call]])
-       (is (seq (get-in (first (turn/evaluate-sources request))
+       (is (seq (get-in (first (:seon.turn.loop/evaluated-sources (turn/evaluate-sources request)))
                         [:seon.sci.eval/evaluation :seon.cluster.eval/read-evidence]))
            "a virtual reply is authored input, not generated context")))))
 
@@ -219,7 +216,8 @@
                     :seon.db.process/id cluster/boot-process-identity
                     :seon.sci.eval/ctx ctx})
            [pure reading]
-           (turn/evaluate-sources
+           (:seon.turn.loop/evaluated-sources
+            (turn/evaluate-sources
             {:seon.turn.loop/cluster handle
              :seon.sci.eval/ctx ctx
              :seon.agent/id "reader"
@@ -227,7 +225,7 @@
              :seon.ns/name 'my.agents.reader
              :seon.cluster.reply/sources
              [{:seon.cluster.eval/source "(inc 1)"}
-              {:seon.cluster.eval/source (str "(seon.db/q '" (pr-str query) ")")}]})
+              {:seon.cluster.eval/source (str "(seon.db/q '" (pr-str query) ")")}]}))
            evidence #(get-in % [:seon.sci.eval/evaluation :seon.cluster.eval/read-evidence])]
        (is (= "2" (get-in pure [:seon.sci.eval/evaluation :seon.eval/shown])))
        (is (empty? (evidence pure)) "a form that reads nothing records no read")
@@ -238,46 +236,6 @@
                            (get-in % [:datahike.read/dependency-plan :datahike.query.dependency/sources]))
                     (evidence reading)))
            "a form's one query is its one read")))))
-
-(deftest a-refused-batch-whose-restoration-fails-answers-the-stored-restoration-error
-  ;; `restore-evaluations!` discarded each restoration's answer, so a refused
-  ;; settlement reported only its refusal (Astra e19adf392 finding 5).
-  (support/with-database
-   (fn [connection]
-     (support/seed-cluster! connection "restoration-proof")
-     (let [caps (config/result-caps (support/effective-config))
-           outcomes (atom [])
-           ctx (assoc (sci/init {})
-                      :seon.sci.kernel/program-snapshot
-                      (atom {:seon.sci.eval/loaded-database (db/db connection)
-                             :seon.flow/commit-fault!
-                             (fn [observation]
-                               (let [outcome (fault/record! connection "restoration-proof"
-                                                            "restoration-test" caps observation)]
-                                 (swap! outcomes conj outcome)
-                                 outcome))}))
-           ;; The one restoration producer, planning a restoration that throws.
-           restore (fn [_ refused]
-                     (#'sci.eval/restore-or-unavailable!
-                      ctx (db/db connection) #(throw (ex-info "planning broke" {})) refused))
-           refusal {:seon.error/at (java.util.Date.)
-                    :seon.error/layer :seon.turn/settlement
-                    :seon.error/operation 'seon.turn/settle-batch!
-                    :seon.error/message "The batch was refused."}
-           unrun (sci.eval/unrun-evaluation
-                  {:seon.sci.admit/value refusal :seon.cluster.eval/ns [:seon.ns/name 'user]})
-           answered (#'turn/restore-evaluations!
-                     [{:seon.sci.eval/evaluation (assoc unrun :seon.sci.eval/restore restore)}
-                      {:seon.sci.eval/evaluation unrun}]
-                     refusal)]
-       (is (= :restore-failed (:seon.sci.eval/unavailable answered)))
-       (is (= ["Restoring a refused program change threw." "The batch was refused."]
-              (mapv :seon.error/message (:seon.error/chain answered)))
-           "the chain is the restoration's failure, then the refusal it was restoring")
-       (is (= [:seon.flow/committed] (mapv second @outcomes))
-           "the restoration error is stored and delivered once")
-       (is (nil? (#'turn/restore-evaluations! [{:seon.sci.eval/evaluation unrun}] refusal))
-           "a batch with nothing to restore answers nothing")))))
 
 (deftest a-refused-generated-form-records-its-refusal
   (testing "an appended form whose evaluation is refused never stays bare"
@@ -324,17 +282,16 @@
                              [:seon.eval/shown :seon.cluster.eval/error
                               :seon.cluster.eval/source]
                              [:seon.cluster.eval/id evaluation-id])]
-        (is (= :error (:seon.turn.loop/outcome report)) (seon.print.value/bounded-text report))
+        (is (= :error (:seon.turn.loop/outcome report)))
         ;; The class this pins: a form the loop appended and then refused
         ;; must carry a terminal fact. Neither shown nor error is absence
         ;; of signal read as health — no query can say what happened to it.
-        (is (string? (:seon.eval/shown settled)) (seon.print.value/bounded-text settled))
-        (is (string? (:seon.cluster.eval/error settled)) (seon.print.value/bounded-text settled))
+        (is (string? (:seon.eval/shown settled)))
+        (is (string? (:seon.cluster.eval/error settled)))
         ;; Errors carry no kind name (9bf22ecd9); the declared message is
         ;; what the shown refusal says.
         (is (str/includes? (str (:seon.eval/shown settled))
-                           "A generated context read depends on the agent's own turn-taking.")
-            (seon.print.value/bounded-text settled))
+                           "A generated context read depends on the agent's own turn-taking."))
         (is (some? (:seon.turn/closed-tx
                     (db/pull (db/db connection) [:seon.turn/closed-tx]
                              [:seon.turn/id run-id])))))))))
@@ -354,7 +311,7 @@
      (let [before (db/basis-t @connection)
            result (turn/compact! {:seon.db/connection connection
                                   :seon.agent/id "busy"})]
-       (is (some? (or (:seon.db/invalid-read result) (:seon.schema/expected-value result) (:seon.db.write.attempt/request-id result))) (seon.print.value/bounded-text result))
+       (is (some? (or (:seon.db/invalid-read result) (:seon.schema/expected-value result) (:seon.db.write.attempt/request-id result))))
        (is (= before (db/basis-t @connection)))
        (is (= 1 (count (evaluations @connection "busy"))))))))
 
@@ -440,9 +397,8 @@
          ;; apply must still commit the durable outcome. Re-issuing the close
          ;; that just refused made the second refusal identical by
          ;; construction and threw into the agent's flow proc.
-         (is (map? settlement) (seon.print.value/bounded-text settlement))
-         (is (some? (:db-after (:seon.turn.loop/outcome settlement)))
-             (seon.print.value/bounded-text settlement))
+         (is (map? settlement))
+         (is (some? (:db-after (:seon.turn.loop/outcome settlement))))
          (is (contains? rules :seon.turn/no-such-run)
              "the refusal the loop actually met is the durable fact")
          (is (nil? (db/pull database [:db/id] [:seon.turn/id run-id]))
@@ -497,8 +453,8 @@
          ;; by the `:t` rule. Nothing is claimed and nothing is lost, so the
          ;; fence firing is the design — not a durable core fault that also
          ;; wakes the steward through `:seon.error/steward`.
-         (is (= [[:released 0]] @reported) (seon.print.value/bounded-text @reported))
-         (is (empty? refusals) (seon.print.value/bounded-text refusals))
+         (is (= [[:released 0]] @reported))
+         (is (empty? refusals))
          (is (= "already-running"
                 (db/q '[:find ?id . :where
                         [?agent :seon.agent/id "reader"]
@@ -557,7 +513,7 @@
                                            (db/pull @connection
                                                     [:seon.turn/closed-tx]
                                                     [:seon.turn/id turn-id])))]
-                      (is (string? turn-id) (seon.print.value/bounded-text result))
+                      (is (string? turn-id))
                       (when-not (closed?)
                         (support/await-event! events ::closed (fn [_] (closed?))))
                       (is (closed?))
@@ -579,7 +535,7 @@
                seeded (checked-transact!
                        connection
                        [{:seon.turn/id previous-id :seon.turn/agent [:seon.agent/id "a"] :seon.turn/opened-tx "datomic.tx"}])]
-           (is (some? (:db-after seeded)) (seon.print.value/bounded-text seeded))
+           (is (some? (:db-after seeded)))
            (is (nil? (:seon.turn/closed-tx
                       (db/pull @connection '[*]
                                [:seon.turn/id previous-id]))))
@@ -616,11 +572,11 @@
                  rendered (transcript/render-ledger-turn render-request)
                  text (apply str (filter string? (tree-seq sequential? seq rendered)))
                  html (hiccup/->string rendered)]
-             (is (str/includes? html "data-ledger-loaded") html)
-             (is (str/includes? html "seon-ledger-full-context") html)
-             (is (str/includes? text "(+ 1 1)") html)
-             (is (not (str/includes? html "items, depth")) html)
-             (is (not (str/includes? html "read-evidence")) html))
+             (is (str/includes? html "data-ledger-loaded"))
+             (is (str/includes? html "seon-ledger-full-context"))
+             (is (str/includes? text "(+ 1 1)"))
+             (is (not (str/includes? html "items, depth")))
+             (is (not (str/includes? html "read-evidence"))))
            (is (= basis (db/basis-t @connection)))
            (is (string? (:seon.agent/no-such-agent (evaluation/of-agent database "absent")))))
          (let [a (evaluations @connection "a")
@@ -702,8 +658,8 @@
                opening-sources (mapv :seon.cluster.eval/source
                                      (filter #(= :none (:seon.turn/status %))
                                              (:seon.turn/forms opening)))]
-           (is (vector? (:seon.turn/forms opening)) (seon.print.value/bounded-text opening))
-           (is (seq opening-sources) (seon.print.value/bounded-text opening))
+           (is (vector? (:seon.turn/forms opening)))
+           (is (seq opening-sources))
            (is (string? (:seon.turn/id opening)))
            (let [rendered (transcript/render-ledger-turn
                         (merge handle
@@ -719,7 +675,7 @@
              (is (not (str/includes? html "items, depth"))))
            (let [basis (db/basis-t @connection)
                  unchanged (turn/system-turn (assoc request :seon.turn/write? false))]
-             (is (seq (:seon.turn/forms unchanged)) (seon.print.value/bounded-text unchanged))
+             (is (seq (:seon.turn/forms unchanged)))
              (is (= #{}
                     (set (map (comp first edn/read-string :seon.cluster.eval/source)
                               (filter #(= :changed (:seon.turn/status %))
@@ -743,7 +699,7 @@
            (checked-transact! connection
                          [{:seon.message/id "to-b" :seon.message/to [:seon.agent/id "b"] :seon.message/content "For B"}])
            (let [other (turn/system-turn (assoc request :seon.turn/write? false))]
-             (is (seq (:seon.turn/forms other)) (seon.print.value/bounded-text other))
+             (is (seq (:seon.turn/forms other)))
              (is (= #{}
                     (set (map (comp first edn/read-string :seon.cluster.eval/source)
                               (filter #(= :changed (:seon.turn/status %))
@@ -763,11 +719,10 @@
                                   (:seon.turn/forms preview))]
              (is (= basis (db/basis-t @connection)))
              (is (= #{'seon.db/pull 'my.message/inbox}
-                    (set (map (comp first edn/read-string :seon.cluster.eval/source) changed)))
-                 (seon.print.value/bounded-text preview))
+                    (set (map (comp first edn/read-string :seon.cluster.eval/source) changed))))
              (is (string? (:seon.turn/text (first changed))))
              (let [stored (turn/system-turn request)]
-               (is (string? (:seon.turn/id stored)) (seon.print.value/bounded-text stored))
+               (is (string? (:seon.turn/id stored)))
                (is (= 2 (count (db/q '[:find [?e ...] :in $ ?id
                                       :where [?turn :seon.turn/id ?id]
                                       [?e :seon.cluster.eval/run ?turn]]
@@ -829,7 +784,7 @@
                       :seon.cluster.eval/interrupted-at
                       (java.util.Date. 1785500000000)})]
     (is (str/starts-with? interrupted "user=> (side-effect)"))
-    (is (str/includes? interrupted ":interrupted #inst") interrupted)
+    (is (str/includes? interrupted ":interrupted #inst"))
     (is (not (str/includes? interrupted ":value"))
         "an interrupted evaluation answers no value"))
   (let [rendered
@@ -839,7 +794,7 @@
           :seon.cluster.eval/error "Divide by zero"
           :seon.eval/shown (pr-str {:seon.error/message "Divide by zero"
                                     :seon.error/exception-class 'java.lang.ArithmeticException})})]
-    (is (str/includes? rendered ":error #:seon.error{:message \"Divide by zero\"") rendered)
+    (is (str/includes? rendered ":error #:seon.error{:message \"Divide by zero\""))
     (is (str/includes? rendered "java.lang.ArithmeticException"))
     (is (not (str/includes? rendered "Form ")))
     (is (not (str/includes? rendered "failed:")))))
@@ -940,7 +895,7 @@
                             (range 2) entities)))
              saved (db/pull @connection '[:seon.test/subject]
                             [:seon.test/sym 'fixture.batch/target-test])]
-         (is (some? (:db-after result)) (seon.print.value/bounded-text result))
+         (is (some? (:db-after result)))
          (is (= 'fixture.batch/target (:seon.test/subject saved))))))))
 
 ;; Deterministic clock: every generated time is an offset from t0.
@@ -992,7 +947,7 @@
         (is (and (map? refusal)
                  (contains? refusal :seon.error/at)
                  (contains? refusal :seon.error/layer)
-                 (contains? refusal :seon.error/operation)) (seon.print.value/bounded-text refusal))
+                 (contains? refusal :seon.error/operation)))
         (is (= refusal result)
             "the serial eligibility read is the refusal; it is never absence or an open turn")
         (is (= before (db/basis-t (db/db connection)))
@@ -1013,7 +968,7 @@
         (is (and (map? refusal)
                  (contains? refusal :seon.error/at)
                  (contains? refusal :seon.error/layer)
-                 (contains? refusal :seon.error/operation)) (seon.print.value/bounded-text refusal))
+                 (contains? refusal :seon.error/operation)))
         (with-redefs [db/q
                       (fn [form & arguments]
                         (if (= issue-budget-query form)
@@ -1044,7 +999,7 @@
         (is (and (map? refusal)
                  (contains? refusal :seon.error/at)
                  (contains? refusal :seon.error/layer)
-                 (contains? refusal :seon.error/operation)) (seon.print.value/bounded-text refusal))
+                 (contains? refusal :seon.error/operation)))
         (is (= refusal result)
             "an unreadable history is the divergence refusal, never evidence that the run wrote the declaration")))))
 
@@ -1337,7 +1292,7 @@
                       :seon.eval/shown "nil"
                       :seon.program/row entity}))
             report (seon.fn/unresolved-callers @connection)]
-        (is (some? (:db-after result)) (seon.print.value/bounded-text result))
+        (is (some? (:db-after result)))
         (is (not-any? #(= 'missing.target/nope (:seon.fn/callee %))
                       (:seon.program/unresolved-callers report))
             "a namespace without a program entity is outside the unresolved-call report")
@@ -1800,7 +1755,7 @@
                                false))))))))))
          :seed 20260727)]
     (is (true? (:result check))
-        (str "state-machine property failed: " (seon.print.value/bounded-text check)))))
+        "state-machine property failed")))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Recovery preserves every terminal receipt byte-for-byte
@@ -1898,7 +1853,7 @@
                     (nil? (open-run-id connection agent-id))))))))
          :seed 20260727)]
     (is (true? (:result check))
-        (str "recovery property failed: " (seon.print.value/bounded-text check)))))
+        "recovery property failed")))
 
 (deftest recovery-closes-a-turn-with-no-evaluations
   (with-model-database
@@ -2159,13 +2114,12 @@
                                [?e :seon.cluster.eval/run ?run]
                                [?run :seon.turn/id "unbound-receipt-turn"]]
                              (db/db connection) ordinal)]
-           (is (string? (:seon.eval/shown receipt)) (seon.print.value/bounded-text receipt))
-           (is (= red? (turn/red-receipt? receipt)) source)
+           (is (string? (:seon.eval/shown receipt)))
+           (is (= red? (turn/red-receipt? receipt)))
            (is (= red? (= :unrouted-red
                           (:seon.turn.work/form-state
                            (turn/form-settlement (db/db connection)
-                                                 (:seon.cluster.eval/id receipt)))))
-               source)))))))
+                                                 (:seon.cluster.eval/id receipt))))))))))))
 
 (deftest an-agent-dial-read-that-refuses-is-not-an-absent-dial
   ;; THE CLASS: `(or overlay carried effective)` read a refused config as an
@@ -2185,7 +2139,7 @@
            refused (try (turn/write-refusal-bound (db/db connection) handle "dial-reader")
                         nil
                         (catch clojure.lang.ExceptionInfo error (ex-data error)))]
-       (is (= :seon.config/cluster (:seon.config/error-key refused)) (seon.print.value/bounded-text refused))
+       (is (= :seon.config/cluster (:seon.config/error-key refused)))
        (is (= "no-such-dial-cluster" (:seon.config/missing-effective refused)))
        (is (= 3 (turn/write-refusal-bound
                  (db/db connection)
@@ -2219,7 +2173,7 @@
                                               :seon.sci.admit/caps (:seon.sci.admit/caps handle)})
                refused (get-in preview [:seon.turn.loop/evaluated-sources 0 :seon.sci.eval/evaluation])
                value (:seon.sci.admit/value refused)]
-           (is (:seon.turn/invalid-disposition-source value) (seon.print.value/bounded-text (keys refused)))
+           (is (:seon.turn/invalid-disposition-source value))
            (is (= (owner database value) (:seon.eval/shown refused)))
            (is (not= (pr-str value) (:seon.eval/shown refused)) "the retired raw printer's text is gone")))
        (testing "a terminal refusal saves the owner's rendering of the recorded error"
@@ -2240,7 +2194,7 @@
                                            :seon.cluster.eval/ordinal 0 :seon.error/value refusal})
                after (db/db connection)
                shown (:seon.eval/shown (db/pull after [:seon.eval/shown] [:seon.cluster.eval/id evaluation-id]))]
-           (is (some? (:db-after (:seon.turn.loop/outcome settlement))) (seon.print.value/bounded-text (keys settlement)))
+           (is (some? (:db-after (:seon.turn.loop/outcome settlement))))
            (is (string? shown))
            (is (= (owner after (:seon.error/value settlement)) shown))))))))
 
@@ -2286,11 +2240,9 @@
        (is (instance? Throwable terminal))
        ;; The producer declares the error's identity; the completion event
        ;; that missed its bound is the evidence it names.
-       (is (= 'seon.turn/turn-completion-error (:seon.error/operation (ex-data failure)))
-           (seon.print.value/bounded-text (ex-data terminal)))
+       (is (= 'seon.turn/turn-completion-error (:seon.error/operation (ex-data failure))))
        (is (= :seon.agent/turn-transform
-              (get-in (ex-data failure) [:seon.error/data :seon.error/operation]))
-           (seon.print.value/bounded-text (ex-data terminal)))
+              (get-in (ex-data failure) [:seon.error/data :seon.error/operation])))
        (when (and receipt (not (:seon.fault/committed? receipt)))
          (is (= 1 @stops) "an unstorable fault requested the owner's stop once"))))))
 
@@ -2374,7 +2326,7 @@
                         (catch clojure.lang.ExceptionInfo failure (ex-data failure)))
            settled (#'turn/settle-batch-refusal! handle requests prepared refusal)
            receipts (settled-receipts connection run-id)]
-       (is (some? (:db-after (:outcome settled))) (seon.print.value/bounded-text (keys settled)))
+       (is (some? (:db-after (:outcome settled))))
        (is (= ["2" "9"] (mapv :seon.eval/shown receipts)) "each form shows the value it evaluated")
        (is (every? #(str/includes? (str (:seon.cluster.eval/error %)) (:seon.error/message refusal)) receipts)
            "each receipt names the refused publication")
@@ -2406,6 +2358,6 @@
        (is (nil? (:db-after (:outcome settled))) "the refusal settlement itself was refused")
        (is (= (:seon.error/message refusal) (:seon.error/message (:refused-outcome settled)))
            "the caller keeps the refusal its run caused")
-       (is (true? (:seon.fault/committed? receipt)) (seon.print.value/bounded-text receipt))
+       (is (true? (:seon.fault/committed? receipt)))
        (is (some? (:seon.turn/closed-tx (db/pull (db/db connection) [:seon.turn/closed-tx] [:seon.turn/id run-id])))
            "the run is closed, so the agent's next run can open")))))
