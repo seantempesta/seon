@@ -27,7 +27,6 @@
             [clojure.test.check.generators :as gen]
             [seon.cache]
             [seon.batch :as batch]
-            [seon.cluster.process :as process]
             [seon.env :as env]
             [seon.error.refusal :as error.refusal]
             [seon.id :as id]
@@ -3569,14 +3568,16 @@
 
 (defn- stamp-transaction
   "Attach writer observations once, including the first schema-installing write.
-  Process and agent names are historical observations, not living entity refs.
+  Agent names are historical observations, not living entity refs. The writing
+  process is not stamped: it repeated one value on every commit of a process
+  and nothing read it (store-structure 2026-09-28).
   A caller may name its operation; otherwise the first named transaction function
   identifies it, or `transact!` does. No agent is invented for a system caller."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/transaction
-                       [:maybe :map] :seon.db.process/id] :seon.store/transaction]}
-  [database transaction world process-id]
+                       [:maybe :map]] :seon.store/transaction]}
+  [database transaction world]
   (let [request (if (map? transaction) transaction {:tx-data transaction})
-        attributes [:seon.db.transaction/process :seon.db.transaction/operation :seon.db.transaction/agent
+        attributes [:seon.db.transaction/operation :seon.db.transaction/agent
                     :seon.db.transaction/ms :seon.db.transaction/calls :seon.db.transaction/hot :seon.db.transaction/repeated]
         missing (filterv #(nil? (get (dbi/-schema database) %)) attributes)
         forms (when (seq missing) (select-keys (schema.edn/packaged-forms) attributes))
@@ -3598,7 +3599,6 @@
         agent (or (:seon.db.transaction/agent request) (:seon.agent/id world))
         stamp (cond-> (merge (profile/transaction-observation world)
                              {:db/id :db/current-tx
-                              :seon.db.transaction/process process-id
                               :seon.db.transaction/operation operation})
                 agent (assoc :seon.db.transaction/agent agent)
                 *receipt* (assoc ::receipt *receipt*))]
@@ -5668,8 +5668,7 @@
                   (apply min configured-bounds)
                   declared-bound)
                 request (prepared-write projection database
-                                        (stamp-transaction database transaction batch/*world*
-                                                           (process/id (process/current-identity))))
+                                        (stamp-transaction database transaction batch/*world*))
                 timeout (Object.)
                 ;; One deadline covers admission and acknowledgement: the
                 ;; writer's put! into its transaction queue runs inside the

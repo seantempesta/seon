@@ -2258,7 +2258,7 @@
      (test-support/with-database
       (fn [other]
         (let [receipt [:seon.cluster.eval/id "custody-receipt"]
-              stamp #(get (last (:tx-data (#'db/stamp-transaction (db/db connection) [] nil "test-process"))) ::db/receipt)]
+              stamp #(get (last (:tx-data (#'db/stamp-transaction (db/db connection) [] nil))) ::db/receipt)]
           (is (not (identical? connection other)))
           (with-bindings {#'db/*conn* connection #'db/*receipt* receipt}
             (is (= receipt (stamp))
