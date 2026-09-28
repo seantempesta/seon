@@ -232,7 +232,7 @@
                  [:seon.sci.eval/ctx
                   {:optional true}
                   :seon.sci.eval/ctx]
-                 [:seon.db/db {:optional true} :seon.db/database-value]
+                 [:seon.db/db {:optional true} :seon.sci.eval/database]
                  [:seon.db/read-evidence-sink
                   {:optional true}
                   :seon.db/read-evidence-sink]
@@ -418,6 +418,9 @@
  [:=> [:cat [:maybe [:=> [:cat :qualified-symbol] :any]] [:maybe :seon.error/throwable]]
   [:maybe :seon.sci.eval/execution-unavailable-error]]]
 :current-db :seon.db/database-value
+:database
+[:and {:description "The database an evaluation reads when its caller hands one. Absent, the evaluation reads its context's custody, so this is not a world member (seon.batch/world-members): a bound world never supplies it."}
+ :seon.db/database-value]
 :reader-row :map
 :namespace-row :map
 :admission-request
