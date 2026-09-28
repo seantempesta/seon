@@ -6,7 +6,7 @@ updated: 2026-09-27
 
 # Open items (living list — root rewrites it in place; ledger of file owners: tmp/orchestrator/file-ownership.md)
 
-## Now (current state — rewritten in place 2026-09-27 ~17:30Z; never append; ledger: tmp/orchestrator/file-ownership.md)
+## Now (current state — rewritten in place 2026-09-28; never append; ledger: tmp/orchestrator/file-ownership.md)
 
 ### Resume here — read everything, don't tail
 **Milestone (owner 2026-09-26): dogfood first.** One lane completes a real change entirely through the REPL path — MCP
@@ -112,177 +112,80 @@ duplicates deleted. Unverified commits are debt. Two lessons from 2026-09-25: a 
 real values against the declared contract before committing); a new attribute must install before its first write on an
 EXISTING store (prove adoption on a branch of the live store, never only on a fresh one).
 
-### Platform state (rewritten in place 2026-09-27 ~17:30Z; update 23:00Z: default OOM ~17:29Z from the corpus (range) probe — fixed by the safety slice; restarted, now at f73937596-era HEAD, healthy)
-- Default: pid 53231 at f4af60b0f (HEAD ahead only by docs/tasks), ready 14.2 s; health **faulted** — 10 open faults (newest
-  `settle-batch-refusal!` = root's P0.1 probe; 5× `test.runner/record-tx`; `flow/stop-work-launcher!`), 77 failed + 64 unknown
-  tests (mostly suites first run centrally today). Central cache 116 MB / 512 MB. Arming intact (0 planless wrappers).
-- Outage 05:23–05:40Z: a dial retirement refused at boot (retirement checked against stale referrer rows; fixed f9fc0e0d0,
-  retirement re-landed da10c8912 and adopted in place) and the fallback program crashed (`Datom` from two classloaders: archives
-  linked submodules to the live checkout; fixed 93b342cc0 — every submodule is a `git archive` of its pin under data/source/pins).
-- Restart costs: unchanged 9.4 s total / 3.7 s ready; a src change 20–34 s total / 10–16 s ready (full re-analysis only when an
-  analyzer DEFINITION changes, 2a0223130; class cache keyed on the whole src tree adds 6–8 s total — owner option, b77a3fa63).
-- Proven today (central runs tests-0627m…x): instrument/eval/db/error/repl/render.value/program/program-change/runner/
-  html-views/mcp/schema/branch-execution/call-preparation/registry-isolation/schema-in-place/datahike-fork/message/effect/
-  gen.loop green; turn-test 5f/2e (from 66/24), agent-test 9f/2e (from 14/6), reconcile 2, background-blob 2,
-  incremental-publication 15 (first real run; its test redefines process-wide Vars, task e4f90fb37e0c).
+### Platform state (rewritten in place 2026-09-28)
+- **Default:** 29bdfce8d, ready in 16.6 s. Moves (`start --head`) boot. A FROM-SCRATCH build or nuke may still fail on
+  "Program indexing found conflicting entity maps" from 6f7cee1f2 onward. Root fixed that class in 29bdfce8d (a
+  ref-by-identity is a reference), but it is not yet re-drilled from scratch.
+- **Last night's out-of-memory:** default died at 21:07 during test round r13 ("Requested array size exceeds VM
+  limit"). Dump `data/heap/java_pid3360.hprof` (10.6 GB), unanalyzed. The earlier OOM of the same class was an
+  unbounded `pr-str` in a probe.
+- **Last full signal:** r13 was cut by that OOM, with 22 green among those that ran. No full central round has run on
+  the current HEAD. Unrun: sci.eval, sci.kernel, turn, test.*.
 
-### Component status (2026-09-27)
-| Component | State |
-|---|---|
-| Test isolation | no test re-arms the whole JVM (b86a85c36, f64a60ada); runner drift check names any wrapper that loses its supplied-default plan; test drivers await settlement commit |
-| Supplied defaults | only REQUIRED inputs; a call matching a declared arity is never prefixed (value dispatch deleted 614623295, −58); world read only when the call can receive a default (b7d99125c); db from the custody in force (68c721fbb) |
-| Floor printer | counted seqs cut with count+requery (c32b272f9); open: a count printed as an entity ref (task d7d185a7e), a throwing lazy seq shows `()` (ab99646a3) |
-| Acquisition | unchanged core row SCI can't interpret refuses by name when called (c4dbc48c5); refer to a missing definition likewise (3f7096f7c); gate copy keeps the run's program (5fffb1b48) |
-| Publication | retirement after the program rows that convert its writers (f9fc0e0d0); byte-only analyzer change no longer re-analyzes all (2a0223130); declare edges (b3f1a7ae7); runtime rows carry arity facts (9dd373901) |
-| Operator | hermetic program classpath from pins (93b342cc0); fallback proven by the next move |
-| Datahike fork | fe1d4e26: values of different classes order by class name (in-place retype); pushed; gitlink 916394523 |
+### Reflection (2026-09-28): what worked, what didn't, and the rule each lesson became
+- **Worked:**
+  - **REPL workbenches as specs:** the prototype is the code, as a map of named proofs. Astra falsifying at the REPL
+    caught real defects before landing: B1–B7, C1–C6, A1–A6.
+  - **Owner pivots taken early:** render forms → data; the gate → Var render; the value printer as last stage; supply
+    fills what's missing. These cut code instead of adding it.
+  - **Measure, then delete:** `:seon.turn/changes` (7.9 s → 92 ms); per-file boot keys (43 → 8 s); precise currency;
+    reach digests (16.7 → 1.0 s).
+  - **Class-killing guards:** the print lint, the schema-placement gate, override shapes, union refusals.
+- **Didn't work, and the rule each became:**
+  1. **HEAD failed boot about 7 times.** Each landing was rehearsed unarmed, or only as a `start --head` move, never
+     from scratch. Rule: every commit touching schema resources, publication, indexing, boot or arming runs an ARMED
+     real-boot drill on a disposable root, BOTH a move and from scratch, before commit, with one scripted command (see
+     d0). Root restarts right after each landing batch, so a break is caught in minutes.
+  2. **Central test rounds were cut short** (restarts, OOM) and never gave full signal. Rule: a round runs on a
+     frozen HEAD window with no restarts until it ends. Rounds get shorter via test agents (concurrency). Reds are
+     triaged by the commit that changed them, per round.
+  3. **Two OOMs from unbounded prints**, in probes and test paths. Rule: the print lint covers `test/` and `tmp/`
+     probe scripts. A test assertion message prints through the value printer. Every OOM dump is analyzed before
+     the next round.
+  4. **Lanes swept foreign hunks** (3 times) and loaded files into default (twice). Rule: `git diff <file>` before
+     every commit (it is in every brief), plus a commit helper that refuses a hunk touching a file the ledger assigns
+     to another lane (d0).
+  5. **Too many lanes on shared files:** root spent much of its time routing patches. Rule: fewer lanes, each owning
+     a whole subsystem, run in sequence where files overlap; patch routing is an exception.
+  6. **Code growth:** vectors +1,057 against 312, and renders added lines. Rule: every landing reports net lines, and
+     a shrink pass follows each feature before the next feature in that subsystem.
+  7. **Lane context and rate limits** killed work mid-flight. Rule: lanes commit early and small; handoff state lives
+     in the spec, the ledger and committed proofs, never in a transcript.
 
-### The order (rewritten in place 2026-09-27 late night)
-**0. THE ONE SIMPLE PATH — today's major work (owner: "How hard is it to parse and eval and save the results? It's data
-being generated and then passed … one transaction to write it all correctly"; "Everything should be using this one simple
-system").** Pipeline (AGENTS "There is one REPL path"): text → read ONCE (forms with exact spans) → SCI evaluates each form
-(no evaluator of ours) → observations (Vars interned/unmapped AT definition, ending namespace, schema registrations via an
-always-open delta) → clj-kondo analysis of the same text joined by EXACT (ns, name, span) — total by construction, no
-exception lists; runtime-only definitions recorded as data → gates → ONE transaction (upserting every namespace it names) →
-TOTAL reply. Every entrant uses it: agent turns, MCP jvm/sci, the test harness, render forms in context assembly and the
-debug page (a view of that assembly), register!, the install gate, merge/write-back — none keeps its own reader, evaluator,
-printer or recording.
-Evidence: `valid-clojure-corpus-probe-2026-09-27.md` (plain SCI runs every case but definterface; ALL failures are Seon
-layers F1–F12); `eval-path-audit-2-2026-09-27.md` (verdict NO: 52 shape branches, 21 syntax-decided facts, 17 lossy
-boundaries, our own do-evaluator; ~16k lines around the path); `landing/register-anywhere-diagnosis-2026-09-27.md`;
-`landing/oom-63809-2026-09-27.md` (default OOM = corpus `(range)` realized by unbound-value?'s post-eval walk).
-**Reframing (owner, 2026-09-27 night): everything goes through this pipeline, which accommodates every behavior with no
-parallel code.** MCP tools are thin wrappers around it ("Do not improve one without improving the other"): every behavior
-is proven through BOTH an MCP eval and a Seon agent turn (scripted local provider stub, no paid calls). Tests are *test
-agents*: an ordinary agent with its own Flow graph, SCI fork and branch, running its body through the path, so N clusters'
-non-platform tests run concurrently in one JVM (owner: "if we can't then we have a bad design"). Feedback (missing
-contracts, reaching test results, linked faults) is a query over the batch's db-after that the reply carries, fed by
-everything the language spec makes parsable. Goal: "working with the repl is the best way to build in the system."
-Method: REPL workbenches. The prototype IS the code that lands. Proofs are a map of named, schema-validated, armed-timed
-values. Astra falsifies by adding counterexamples at the REPL. Proofs become the deftests. Say entities, facts and values,
-never rows.
-Sequence:
-  a. Safety slice LANDED 9e61340b2.
-  b. **Spec rev 3 (running: one-path-spec-opus)**, `one-repl-path-spec-2026-09-27.md`:
-     - rev 2 eb590e3ec;
-     - Astra rev-2 review a531e47ab REVISE V2-1..8, all accepted;
-     - owner OQ1: execute all forms, commit only facts validated per form; a bad form's error is its logged value, with no
-       whole-batch rejection;
-     - rev 3 is done when tmp/one-path/proof.clj is all green across the corpus, every counterexample, the owner behaviors,
-       every entrant on both sides and the timings.
-  c. Beside it, feeding the spec (all docs, REPL-proven):
-     - test-agents-concurrency-2026-09-27.md (running): audit of every serializer, a concurrent measurement, and the
-       test-agent design with three priced options;
-     - feedback-from-facts-2026-09-27.md (running): inventory of the language constructs parsed and stored; feedback
-       queries with ms and tokens;
-     - repl-dogfood-2026-09-27.md (running): one real change entirely through the REPL, MCP versus agent turn, measured
-       against the file workflow.
-  d. **ONE core rewrite: GO (owner 2026-09-27: "push and get it done right").** The spec lane implements its own
-     prototype in the 14 steps; per step it lints and compiles from an archive, re-runs the proof map and commits with
-     --only; root batches restarts and focused tests. Astra reviews each step's diff at the REPL. The entity-vocabulary
-     renames inside those files come after.
-     Rev 3 5205cd9b2 has 63/63 proofs. Now being added:
-     - the world value;
-     - the §12 projection-cache fix (option B);
-     - the dogfood blockers: the gate runs reaching tests as test agents and judges the change, not absolute results
-       (ruling), gate evidence goes in the reply, and auto-check covers only the changed definitions;
-     - turn overhead: 5–9 s per agent turn against 13–112 ms through MCP;
-     - four MCP-versus-agent gaps.
-  d2. **Var render replaces feedback and the REPL gate (owner, 2026-09-27 night).** "Rather than doing explicit checking
-      and warning with defn … a render function that renders the return value of a defn … check it for schemas … autorun
-      the tests … show the test output"; "Everything that we care about is rendered both ways" (AI and HTML).
-      - A defn returns its Var. The Var's render pair shows contract status and the reaching test results at its digest.
-        Test results are derived values keyed by exercised digests, so a missing one runs test agents. It shows only the
-        delta.
-      - Late results arrive by the ordinary changed-read refresh.
-      - Deleted: the :seon.eval/feedback stage, the uncontracted-defn warning code and the REPL install gate. Merge
-        acceptance is the one refusal point.
-      - The same pattern follows for ns-unmap, register!, in-ns, errors, deftest, tasks and merge proposals.
-  d3. **Feedback render pairs for every core entity (owner).** "useful renders that pull in better info for the ai and html
-      for each core piece of data". Rules for every render:
-      - delta first;
-      - health inline;
-      - one hop of context, with the rest as runnable requery forms;
-      - next actions as data;
-      - one query with two outputs (AI and HTML);
-      - numbers stay numbers.
-      Design: `feedback-renders-2026-09-27.md` (feedback-renders-opus).
-      SCHEDULE:
-      - NOW (feedback-renders-opus, REPL-driven, judged on concise and fixable-from-the-reply): the ERROR render, then the
-        SCHEMA render.
-      - After the one-path S3a fix and C1–C6 (one-path lane): the Var render, which replaces the feedback stage and the
-        REPL gate.
-      - Then, one lane each once their files are free, in order:
-        - test and test-run;
-        - namespace;
-        - removals;
-        - task;
-        - merge proposal;
-        - agent, session and turn;
-        - message, branch, config dial, blob and read evidence.
-  d4. **Refused reads (owner, 2026-09-28): unions, not exceptions.**
-      - `seon.db/q` and `pull` already declare rows-or-read-error.
-      - The gap is consumers: loose output contracts let an error map treated as rows pass as garbage.
-      - Sweep: each caller either passes the refusal on (declares it in its output union and returns it unchanged) or
-        handles it. Its output schema is precise enough that misuse is refused at its own boundary.
-      - Error contracts require the context keys the agent needs: operation, read and basis.
-      - Census: `tmp/one-path/db-read-refusal-callers.edn`, 219 callers. Order: turn.clj 42, cluster.clj 15,
-        sci/eval.clj 12, then by file, each by its owner.
-      - Confirmed bugs: `seon.error/names-in` (feedback-renders), plus two already fixed in 80a02b4a4.
-  e. Beside it:
-     - test agents: design 38e5a6d47 and prototype 33e878596, 13/13 proofs; Astra is re-reviewing; it lands after spec
-       step S12;
-     - test seams (JVM-global test state; one writer key :seon.db/writer, e999fdd1b);
-     - reaching-test feedback under 50 ms (test-feedback-perf);
-     - boot per-file keyed publication: the analyzer seal is one stamp that re-analyzes all 827 files; owner: "why are
-       we throwing away the cache";
-     - r6 red triage.
-  Open corpus classes the rewrite must close: F1 copied JVM import hides SCI's (defrecord/deftype/import), F3 defmacro in
-  let loses location (SCI fork), F4 two defns per form, F5 nested register!, F8 generated-input gate refuses valid code,
-  F10 ns-unmap! within a run, F11 non-defn definitions store no entity, F12 cost (0.7–1.1 s per contracted defn).
-**Stability and speed (owner, standing: "nothing should panic"; "nothing in the system should be slow";
-"prioritize correctness and perf improvements while we are designing").** State at 2026-09-27 19:40Z (default at
-4c3960692):
-- Landed today:
-  - Safety slice 9e61340b2.
-  - Vocabulary sweep 799cd62a7.
-  - Stability 9f4f43443, b7e148de6, c83911c82.
-  - Per-test GC deleted and health read 152ceb62c.
-  - Harness 4dea3b95a.
-  - Printer 46be90e36.
-  - Errors 9e051dba7..12804ce27: frames are the first code we wrote, evidence is stored as EDN, the offending-digest.
-  - Instrumentation text 2014f98b6.
-  - Publication cost 296dede99, c932dd4b4, 49ce45859.
-  - Toolkit 48cded8ba; message acknowledgement 89629b13c; debug branch read ef25df00c.
-  - Boot stamp aa545fe21.
-- Running (ledger tail):
-  - red triage of the focused batch (r3: tmp/orchestrator/tests/r3);
-  - contract-rule apply: the edit hook refuses, merge refuses, the REPL warns (warning built in the rewrite);
-  - MCP/runner evidence;
-  - boot perf 2 (request! 6.6 s, footprint 6.5 s, refresh-source! 5.2 s; target ≤10 s unchanged start);
-  - vector implementation S1–S11 (design rev 2 4c3960692; owner chose to run S11 with the rest);
-  - one-path spec revision (owner answers Q1–Q5) plus Astra's review.
-- Queued: fault resolution implementation (design ef9043b32, 10 steps, cutover list), after the red triage.
-- Evidence docs: stability-sweep, perf-audit, boot-branch-open, fault-resolution-design, contract-coverage-spec,
-  review-vector-and-fault-resolution.
-- Rulings:
-  - Contracts are added per bug at the producer, with no back-fill.
-  - The edit hook refuses uncontracted new or changed functions; the REPL warns progressively; merge refuses.
-  - Plans are REPL-proven specs whose steps execute in hours, not days.
-  - State is written down; there are no self check-in crons.
-
-**1. Supporting cuts (design done / running):** entity vocabulary sweep (running: entity-vocabulary-opus; excludes the 9
-eval-path files) + the intentional Malli→Datahike mapping section in the data-modeling guide; first-class vectors
-(`vector-storage-design-2026-09-27.md`, 67b982219: cell entities with position, element keeps its declared kind — Astra
-review after the eval redesign; owner: conversion is transparent — an agent puts a vector in and gets the same vector back;
-skills and the guide are updated only once the vector type is implemented and fully tested); adoption member validation LANDED (bd3d35b19).
-**2. THE AGENT DATA MODEL — after 0.** Authority `repl-session-entity-design-2026-09-27.md` (4400c9c47 → e9877da0f/a2fd4676c
-§5d one context assembly), review `repl-session-entity-review-2026-09-27.md` (REVISE, 12 findings folded). Demo on branch
-design-1: http://127.0.0.1:7994/agent/root/debug?n=3&branch=design-1&root=[:seon.agent/id%20"demo"] (loaded via the
-agent path; settings base made optional on the branch because root's overlay lacks one — the live change must backfill).
-Next there: render content design (tight data; identity render still asks for :seon.agent/namespace).
-**3. Earlier queue (after 0–2):** derive-once + contracts-out; shrink plans; dogfood merge loop; docs parser; render
-specificity; face vocabulary; history acquisition 1.5–1.8 s (P1 read plans); definition-row projection discard.
+### The order (rewritten in place 2026-09-28)
+**d0. Stability tooling, first:**
+- a scripted armed boot drill (move and from scratch, on a disposable root) that every schema, publication or boot
+  commit runs;
+- re-drill from scratch on HEAD, which proves nuke has a fallback;
+- analyze the 21:07 OOM and fix its producer;
+- the print lint extended to test/ and tmp/;
+- a ledger-aware commit helper.
+**d1. The one REPL path (one-path-impl-2):**
+- S4a lands after Astra's final verdict on §10.0 rev 2 (turn onto the fold, per-form code evidence, the publish
+  stage, future counting);
+- then the shared-fork preview cut, since the turn prelude must reach 50 ms;
+- then S4b and S5–S14;
+- then delete the text-evaluation stage.
+Refused-read consumer unions (d4) go into each file as its step touches it.
+**d2. Test agents** (design 38e5a6d47 and prototype 33e878596, Astra REVISE addressed): land after S12. Then central
+rounds run concurrently in one JVM.
+**d3. Renders:**
+- value→schema identification from instrumented outputs (the wrapper's validated output schema), target 95% of values;
+- the effortless agent-authored render flow (defn in own namespace → promote by ref → discover);
+- remaining render pairs by owner: test, namespace, task, merge proposal;
+- renders for the value printer's "needs a render" list.
+**d4. Refused reads:** precise consumer output unions (census `tmp/one-path/db-read-refusal-callers.edn`, 219 callers).
+**d5. A full central round** on a frozen HEAD, triaged by commit.
+**d6. Performance:**
+- `/agent/root` 1.5 s and `/agent/root/debug` 18.7 s, after P1;
+- the first-population cost (54.9 s, task 50134301bf4e);
+- `seon.test/run` of one test: 2–5 s of harness.
+**d7. Shrink:**
+- vectors (+1,057 net);
+- the print-census sweep (1,816 lint sites);
+- "floor" vocabulary left in other files.
+**d8. The agent data model** (Q1–Q7), after the path.
+**Owner decisions pending:** deleting the heap dumps (about 47 GB in data/heap).
 
 ### Designs (authorities; each revised in place)
 | Design | Verdict |
