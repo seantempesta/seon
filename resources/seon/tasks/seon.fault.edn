@@ -14,4 +14,14 @@
              :kind :function
              :intent "seon.fault-test/a-fault-stores-the-whole-fault-and-wakes-the-responsible-agent asserts (< elapsed-ms 1000.0) for one synchronous fault write; serial it passes, at six concurrent test requests it measured 1,026 and 1,040 ms (CPU and store I/O contention; transact-call averaged 149 ms against 95 ms serial). Done when the write's cost is proportional to the fault (measure where the ~1 s goes) and the bound holds under the declared test admission bound."
              :must-read #{seon.fault/fault!}
-             :evidence #{"docs/research/agent-platform/test-agents-concurrency-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/test-agents-concurrency-2026-09-27.md"}}
+ #:seon.task{:name "a-repeated-fault-commits-once-per-failure"
+             :kind :function
+             :intent "Since 7781d115c a fault's occurrences are capped per signature and producer digest and a further repeat writes only the noHistory count and last instant (2 datoms), but seon.fault/fault! still commits once per failure on its branch and once on the cluster copy: 1,000 identical failures are about 2,000 commits at 1-2 MB each (model proof: ~2.3 MB per commit regardless of datoms), far past the ~1 GB/day storage rule. Done when a repeat beyond the cap rides a commit that happens anyway (fold repeats per [signature slot] in the recording owner and bump the count on the next fault or settle commit), measured as bytes per 1,000 failures."
+             :must-read #{seon.fault/fault! seon.error/commit-call}
+             :evidence #{"docs/research/agent-platform/health-plan-2026-09-28.md" "tmp/health-model-proof/findings.md"}}
+ #:seon.task{:name "an-auto-task-recorded-only-on-an-agent-branch-cannot-be-claimed"
+             :kind :function
+             :intent "seon.error/commit-call writes a producer's task with the fault on each branch the fault is recorded on; a fault the cluster does not copy (its agent is not placed on the origin branch by the cluster) leaves the task only on the agent branch, while seon.task/assign! (my.task/claim!) writes the assignment on the task home, which refuses :unknown-task. Done when the producer task is written where tasks live (the task home) or the claim reads the fault's own branch, with a regression claiming a branch-recorded fault's task."
+             :must-read #{seon.error/commit-call seon.task/assign! my.task/claim!}
+             :evidence #{"tmp/health-attribution/RESUME.md"}}]
