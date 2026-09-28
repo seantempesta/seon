@@ -117,8 +117,9 @@ root.
    sweeps once across the full set, then lint, load and hand-fix exceptions. HEAD must boot: before committing, lint
    `src script test` with `--cache false` and compile touched contracts, schema and configuration resources with
    their consumers (shipped defaults included) from a `git archive` of HEAD plus the diff, with zero findings.
-   A change to schema resources, publication, indexing, adoption, boot or arming also passes `bin/seon drill --with
-   <paths>` (armed; a move plus a from-scratch build on a disposable root) before it is committed.
+   A change to schema resources, publication, indexing, adoption, boot or arming is proven by publishing and adopting
+   it on a branch of the live store: a fresh install is adoption onto an empty store, the same path, never a second
+   one to rehearse. Root's batched `start --head` restores the previous commit when a new JVM cannot boot.
    Designs and plans are revised in place — corrections go into their owning sections, never a parallel spec or
    appended ruling log. Correct false current claims in the same commit; keep dated audits and evidence outside plans.
 6. **Prove the installed change.** Verify publication, adoption, reload and arming, then repeat the probe. A shell
