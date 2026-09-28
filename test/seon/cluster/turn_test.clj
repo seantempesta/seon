@@ -1637,11 +1637,7 @@
                         (fn [_projection _] {:seon.ai/text reply-text
                                  :seon.ai/usage usage
                                  :seon.ai/finish-reason "stop"})]
-            ;; the run closes in its own settlement (close-folded-call,
-            ;; 8b44bdd2e); an accepted reply with no disposition continues
-            ;; (continuing-reply?, 57f1a8c23), so the third pass opens the
-            ;; next run, which answers the saved diagnostic
-            (is (= [:open :call :open]
+            (is (= [:open :call :close]
                    (mapv :seon.turn.work/situation
                          (drive-agent! cluster "agent-a" 3)))))
           (let [database (db/db connection)
