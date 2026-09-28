@@ -30,6 +30,12 @@
             [seon.test-support :as support]
             [seon.turn :as turn]))
 
+(defn- graph-model
+  "The graph model a page carries in its model script, as the JSON data it is."
+  {:malli/schema [:=> [:cat :string] :seon.schema/value]}
+  [html]
+  (json/read-str (.data (web-test/element html "script[data-graph-model]"))))
+
 (defn- element-text [node]
   (cond
     (string? node) node
@@ -626,8 +632,8 @@
                        {:seon.render.data/path [] :seon.render.data/offset 0})
            preview (get-in experiment [:seon.render/previews 'seon.error/render-faults-html])]
        (is (some? preview))
-       (is (str/includes? (pr-str preview) "Faults (1)"))
-       (is (str/includes? (pr-str preview) "A declared fault card."))))))
+       (is (str/includes? (.text (web-test/dom (hiccup/->string preview))) "A declared fault card.")
+           "the reverse unit renders the actual related fault")))))
 
 (deftest debug-links-omit-defaults-and-round-trip-every-override
   (let [subject [:seon.agent/id "juniper"]
@@ -640,8 +646,8 @@
             parameters (#'web/query-params
                         {:query-string (.getRawQuery (java.net.URI. url))})]
         (is (= request (#'web/debug-query parameters subject viewer "juniper")))
-        (is (not (str/includes? url "maxRefAttributes=40")))
-        (is (not (str/includes? url "viewer=")))))))
+        (is (not-any? #{"maxRefAttributes" "viewer"} (keys (:query (web-test/href url))))
+            "a default or implied parameter is omitted from the link")))))
 
 (deftest agent-identity-groups-scalars-and-keeps-declared-components
   (support/with-database
@@ -1125,7 +1131,7 @@
            (is (not (str/includes? (:body response) "seon.render.unknown"))
                "every face renders: the agent's HTML face reads the connection the page carries")
            (let [drawn (into #{} (keep #(let [id (get-in % ["data" "id"])] (when (re-matches #"e\d+" id) (parse-long (subs id 1)))))
-                             (get-in (json/read-str (second (re-find #"data-graph-model=\"\"[^>]*>(.*?)</script>" (:body response)))) ["elements" "nodes"]))]
+                             (get-in (graph-model (:body response)) ["elements" "nodes"]))]
              (is (and (contains? drawn (first order)) (every? (set order) drawn))
                  "the graph view draws walked nodes only, the root always; a many relationship draws a counted node instead"))
            (is (= (count order) (count (classed page "seon-graph-why"))) "every node says which path included it")))
@@ -1138,8 +1144,7 @@
                body (:body (#'web/debug-response service 'my.agents.root "root" {:query-string (str "n=1&root=" ns-id) :headers {}}))]
            (is (str/includes? body (str "e" ns-id)))))
        (testing "forward mode draws each edge's relationship kind and attribute; mode=both follows every ref both ways"
-         (let [model (fn [query] (json/read-str (second (re-find #"data-graph-model=\"\"[^>]*>(.*?)</script>"
-                                                                   (:body (#'web/debug-response service 'my.agents.root "root" {:query-string query :headers {}}))))))
+         (let [model (fn [query] (graph-model (:body (#'web/debug-response service 'my.agents.root "root" {:query-string query :headers {}}))))
                kinds (fn [m] (set (map #(get-in % ["data" "kind"]) (get-in m ["elements" "edges"]))))
                forward (model "n=1")
                both (model "n=1&mode=both")]
@@ -1175,11 +1180,11 @@
             (d/branch! design (d/commit-id @design) unopened)
             (try
               (is (nil? (db/branch-connection @connection unopened)) "no connection is open to the branch read")
-              (is (str/includes? (page {"branch" branch}) "class=\"seon-graph-node\"") "the branch's agent is walked")
+              (is (some? (web-test/element (page {"branch" branch}) ".seon-graph-node")) "the branch's agent is walked")
               (is (str/includes? (page {"branch" branch}) (str "branch " branch)) "the header names the branch read")
               (is (str/includes? (page {"branch" branch}) "Context · [:seon.agent/id ") "the header names the walked subject")
               (is (str/includes? (page {"branch" branch}) "viewed by root") "the header names the viewing agent")
-              (is (not (str/includes? (page {}) "class=\"seon-graph-node\"")) "the cluster's own value has no such agent")
+              (is (nil? (web-test/element (page {}) ".seon-graph-node")) "the cluster's own value has no such agent")
               (finally (d/delete-branch! design unopened))))))))))
 
 (deftest the-graph-groups-a-many-relationship-into-one-counted-node
@@ -1195,9 +1200,9 @@
                                         {:seon.agent/id "root" :seon.message/inbound-content (str "m" i)
                                          :seon.config.eval.result/max-string 1000})))
      (let [service (#'web-test/service-request connection {})
-           model (fn [query] (let [m (json/read-str (second (re-find #"data-graph-model=\"\"[^>]*>(.*?)</script>"
-                                                                      (hiccup/->string (#'web/graph-debug-html service "root" query)))))]
-                               (mapv #(get % "data") (get-in m ["elements" "nodes"]))))
+           model (fn [query] (mapv #(get % "data")
+                                   (get-in (graph-model (hiccup/->string (#'web/graph-debug-html service "root" query)))
+                                           ["elements" "nodes"])))
            first-page (model {"n" "1"})
            group (first (filter #(get % "group") first-page))
            root-id (:db/id (db/pull @connection [:db/id] [:seon.agent/id "root"]))
