@@ -18,36 +18,37 @@
 
   ## Costs
 
-  One query over the tasks with faults or signals, then per task one pull and
-  its resolution (indexed queries per fault)."
+  One query pulling the tasks with faults or signals, then per task its
+  resolution from that pull (`seon.task/task-resolution`: indexed queries per
+  fault)."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:or [:vector :seon.task/open-view] :seon.db/error-result]]}
   [database]
-  (let [handles (db/q '[:find [?handle ...]
-                             :where [?task :seon.task/id ?handle]
-                                    (or-join [?task] [?task :seon.task/faults _] [?task :seon.task/signal _])
-                                    (not [_ :seon.task/assigned ?handle])]
-                           database)
-        view (fn [handle]
-               (let [task (db/pull database [:seon.task/id :seon.task/name :seon.task/ns :seon.task/intent
-                                                  {:seon.task/faults [:seon.error/signature
-                                                                      {:seon.error/occurrences [:seon.error.occurrence/count]}]}]
-                                        [:seon.task/id handle])
-                     closed (task/resolution database handle)]
+  (let [tasks (db/q '[:find [(pull ?task ?selector) ...]
+                      :in $ ?selector
+                      :where [?task :seon.task/id ?handle]
+                             (or-join [?task] [?task :seon.task/faults _] [?task :seon.task/signal _])
+                             (not [_ :seon.task/assigned ?handle])]
+                    database
+                    (into task/resolution-selector
+                          [:seon.task/name :seon.task/ns :seon.task/intent
+                           {:seon.task/faults [:seon.error/signature
+                                               {:seon.error/occurrences [:seon.error.occurrence/count]}]}]))
+        view (fn [task]
+               (let [closed (task/task-resolution database task)]
                  (cond
-                   (:seon.error/at task) task
                    (:seon.error/at closed) closed
                    (nil? closed)
-                   (cond-> {:seon.task/id handle :seon.task/name (:seon.task/name task) :seon.task/ns (:seon.task/ns task)
+                   (cond-> {:seon.task/id (:seon.task/id task) :seon.task/name (:seon.task/name task) :seon.task/ns (:seon.task/ns task)
                             :seon.task/intent (:seon.task/intent task)
                             :seon.task/occurrences (reduce + 0 (for [fault (:seon.task/faults task)
                                                                      occurrence (:seon.error/occurrences fault)]
                                                                  (:seon.error.occurrence/count occurrence)))
-                            :seon.render/operations [(list 'my.task/claim! {:seon.task/assigned handle})]}
+                            :seon.render/operations [(list 'my.task/claim! {:seon.task/assigned (:seon.task/id task)})]}
                      (seq (:seon.task/faults task))
                      (assoc :seon.task/faults (mapv :seon.error/signature (:seon.task/faults task)))))))]
-    (if (map? handles)
-      handles
-      (let [views (keep view handles)]
+    (if (map? tasks)
+      tasks
+      (let [views (keep view tasks)]
         (or (first (filter :seon.error/at views))
             (vec (sort-by (juxt (comp - :seon.task/occurrences) :seon.task/id) views)))))))
 

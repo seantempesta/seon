@@ -211,6 +211,37 @@
   (let [report (written connection [[:db/add [:seon.task/id merge-task] :seon.task/outcome outcome]])]
     (if (:seon.error/at report) report {:seon.task/id merge-task :seon.task/outcome outcome})))
 
+(def resolution-selector
+  "The pull selector of what `resolution` reads of a task: a caller that
+  pulls tasks for its own view adds this and passes each pulled task to
+  `task-resolution`, instead of `resolution` pulling it again."
+  [:seon.task/id :seon.task/outcome :seon.task/signal {:seon.task/subject [:db/id]}
+   {:seon.task/faults [:seon.error/signature]}])
+
+(defn task-resolution
+  "`resolution` of a task already pulled with `resolution-selector` on
+  `database`: the same derivation without the pull.
+
+  ## Costs
+
+  Per fault signature three indexed queries and two pulls
+  (`seon.error/resolution`); none for a task with an outcome or no faults."
+  {:malli/schema [:=> [:cat :seon.db/database-value :map]
+                  [:or :nil :seon.task/resolution :seon.db/error-result]]}
+  [database task]
+  (let [signatures (keep :seon.error/signature (:seon.task/faults task))]
+    (cond
+      (:seon.error/at task) task
+      (:seon.task/outcome task) {:seon.task/closed-by :seon.task/outcome}
+      (seq signatures)
+      (let [resolved (mapv #(error/resolution database %) signatures)]
+        (cond (some :seon.error/at resolved) (some #(when (:seon.error/at %) %) resolved)
+              (every? some? resolved) {:seon.task/closed-by :seon.task/faults :seon.task/resolutions resolved}))
+      (and (:seon.task/signal task) (:db/id (:seon.task/subject task)))
+      (let [subject (db/stored-entity database (:db/id (:seon.task/subject task)))
+            satisfied? (schema/projection-validator (db/carried-projection database) (:seon.task/signal task))]
+        (when-not (satisfied? subject) {:seon.task/closed-by :seon.task/signal})))))
+
 (defn resolution
   "Why task `handle` is closed, or nil while it is open: derived from what
   the task answers, never a stored flag (health plan §5).
@@ -232,18 +263,4 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle]
                   [:or :nil :seon.task/resolution :seon.db/error-result]]}
   [database handle]
-  (let [task (db/pull database [:seon.task/outcome :seon.task/signal {:seon.task/subject [:db/id]}
-                                {:seon.task/faults [:seon.error/signature]}]
-                      [:seon.task/id handle])
-        signatures (keep :seon.error/signature (:seon.task/faults task))]
-    (cond
-      (:seon.error/at task) task
-      (:seon.task/outcome task) {:seon.task/closed-by :seon.task/outcome}
-      (seq signatures)
-      (let [resolved (mapv #(error/resolution database %) signatures)]
-        (cond (some :seon.error/at resolved) (some #(when (:seon.error/at %) %) resolved)
-              (every? some? resolved) {:seon.task/closed-by :seon.task/faults :seon.task/resolutions resolved}))
-      (and (:seon.task/signal task) (:db/id (:seon.task/subject task)))
-      (let [subject (db/stored-entity database (:db/id (:seon.task/subject task)))
-            satisfied? (schema/projection-validator (db/carried-projection database) (:seon.task/signal task))]
-        (when-not (satisfied? subject) {:seon.task/closed-by :seon.task/signal})))))
+  (task-resolution database (db/pull database resolution-selector [:seon.task/id handle])))
