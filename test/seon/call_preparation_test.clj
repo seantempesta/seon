@@ -7,6 +7,7 @@
             [datahike.api :as d]
             [seon.plan :as plan]
             [sci.core :as sci]
+            [seon.batch]
             [seon.call-preparation :as cp]
             [seon.db :as db]
             [seon.env :as env]
@@ -954,9 +955,15 @@
                   :seon.call-preparation/supplier-symbol 'sample/nowhere-at-all}]
        (is (every? (comp seq :seon.call-preparation/entries) (:seon.call-preparation/arities optional-plan))
            "the optional connection, a world member, is an entry the plan fills")
+       ;; an optional entry is filled from a world only (e44ce97ff): with none
+       ;; bound it stays absent, never read from the thread's custody
        (is (= [{:sample/label "caller" :seon.db/connection connection}]
+              (binding [seon.batch/*world* {:seon.db/connection connection}]
+                (cp/prepare current environment optional-plan [{:sample/label "caller"}])))
+           "the omitted connection is filled from the evaluation's world")
+       (is (= [{:sample/label "caller"}]
               (cp/prepare current environment optional-plan [{:sample/label "caller"}]))
-           "the omitted connection is filled from the evaluation's custody")
+           "with no evaluation's world the optional connection stays absent")
        (is (= [{:sample/label "caller" :seon.db/connection ::the-callers}]
               (cp/prepare current environment optional-plan [{:sample/label "caller" :seon.db/connection ::the-callers}]))
            "a connection the caller passes is never replaced")

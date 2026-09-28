@@ -2066,7 +2066,11 @@
                     :seon.db/connection connection :seon.cluster/name "one-print"
                     :seon.db.process/id cluster/boot-process-identity :seon.sci.eval/ctx ctx})
            database (db/db connection)
-           owner #(:seon.eval/shown (#'turn/final-shown handle %1 "printer" %2))]
+           ;; a failure shows its small error map, printed structurally by the
+           ;; owner (`seon.sci.eval/shown-failure`, 737fe0a5d); the whole error
+           ;; stays the value
+           owner #(:seon.eval/shown (#'turn/final-shown handle %1 "printer" (error/reply-value %2)
+                                                        {:seon.render.value/options {:seon.render.value/structural? true}}))]
        (testing "a disposition that is not the last form is refused, and the refusal is the owner's text"
          (let [preview (turn/preview-sources {:seon.turn.loop/cluster handle :seon.db/db database
                                               :seon.sci.eval/ctx ctx :seon.agent/id "printer"
@@ -2367,5 +2371,5 @@
                      :seon.batch/start-ns 'user
                      :seon.batch/text "(my.agent/branches)"})
            entry (first (:seon.batch/entries (seon.batch/evaluate-batch (dissoc request :seon.batch/settle))))]
-       (is (contains? (get-in entry [:seon.batch/evaluation :seon.sci.admit/value]) :my.agent/roster)
+       (is (contains? (:seon.batch/value entry) :my.agent/roster)
            "the one-argument call answers the store's roster")))))

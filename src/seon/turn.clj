@@ -3906,8 +3906,11 @@
                   (:seon.cluster.eval/error evaluation)
                   (assoc :seon.cluster.eval/error (:seon.cluster.eval/error evaluation)))})
              requests)
-       (seon.error.refusal/diagnostic (Date.) :seon.turn/settlement 'seon.turn/settle-batch!
-                                      {:seon.error/throwable failure})
+       ;; a refusal carrier is the refused phase its commit would have been
+       (if (instance? clojure.lang.ExceptionInfo failure)
+         (phase #(throw failure))
+         (seon.error.refusal/diagnostic (Date.) :seon.turn/settlement 'seon.turn/settle-batch!
+                                        {:seon.error/throwable failure}))
        (:seon.batch/changes program [])))))
 
 ;;; A REFUSED PHASE ESCALATES THROUGH `seon.error/commit-tx`, LIKE EVERY OTHER
