@@ -377,6 +377,37 @@
       (when (and (string? file) line)
         (str file ":" line)))))
 
+(defn- closest-alternatives
+  "Each union's problems narrowed to its closest alternative, with how many
+  other branches were dropped. Closest: a branch the value's type matched
+  (every problem lies deeper than the union's own value, e.g. one missing
+  key of a map branch) before one it did not, then the fewest problems, then
+  the first. Malli explains an `:or` with every branch's errors under the
+  union's path plus the branch index; a refusal that led with the first
+  branch said 'expected nil, got a map' for a map that failed a map branch
+  by one key, and carried every branch's problems (365 for render-call)."
+  {:malli/schema [:=> [:cat [:fn malli.core/schema?] [:sequential :map]]
+                  [:tuple [:vector :map] nat-int?]]}
+  [schema problems]
+  (reduce (fn [[problems others] {path :path at :in union :schema}]
+            (if-not (= :or (m/type union))
+              [problems others]
+              (let [n (count path)
+                    branch (fn [problem]
+                             (let [p (vec (:path problem))]
+                               (when (and (> (count p) n) (= path (subvec p 0 n)) (int? (nth p n)))
+                                 (nth p n))))
+                    {inside true outside false} (group-by #(some? (branch %)) problems)
+                    branches (group-by branch inside)]
+                (if (< (count branches) 2)
+                  [problems others]
+                  (let [mismatched? (fn [branch-problems]
+                                      (if (some #(<= (count (:in %)) (count at)) branch-problems) 1 0))
+                        [_ closest] (first (sort-by (fn [[i ps]] [(mismatched? ps) (count ps) i]) branches))]
+                    [(into (vec outside) closest) (+ others (dec (count branches)))])))))
+          [(vec problems) 0]
+          (mu/subschemas schema)))
+
 (defn- violation
   "Retain the actual offending values with every world in them referenced
   (`seon.error.refusal/references` under the arming projection): a database,
@@ -400,8 +431,10 @@
                               (filter #(and (= :or (m/type (:schema %)))
                                             (:error/message (m/properties (:schema %))))
                                       (mu/subschemas offended)))
-           explained-problems
-           (distinct
+           [explained-problems other-alternatives]
+           (closest-alternatives
+            offended
+            (distinct
             (map (fn [problem]
                    (let [union (some #(when (= (:in problem) (:in %)) %) described-unions)]
                      (if union
@@ -412,7 +445,7 @@
                            (and (not (:check problem))
                                 (some #(and (:check %) (= (:in %) (:in problem)))
                                       (:errors explanation))))
-                         (:errors explanation))))
+                         (:errors explanation)))))
            arm (case kind :malli.core/invalid-output :output
                           :malli.core/invalid-guard :guard :input)
            supplied-entries (when (= :input arm) (supplied-entry-problems function-symbol))
@@ -525,6 +558,7 @@
                   :seon.error/problems problems}
            arity? (assoc ::arity (:arity data))
            arglists (assoc ::arglists arglists)
+           (pos? other-alternatives) (assoc ::other-alternatives other-alternatives)
            (seq paths) (assoc ::problem-paths paths)
            caller (assoc ::caller caller))
           (when arity?

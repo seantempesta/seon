@@ -1225,6 +1225,20 @@
         :turn (:seon.turn/id r) :rendered (count rendered)
         :failure (or (:threw r) (:seon.error/message r))}))))
 
+(defproof :union-refusal-leads-with-closest :totality
+  "A union's refusal leads with its closest alternative (the branch the value's type matched, then the fewest problems), carries only that branch's problems, and counts the others (:seon.instrument/other-alternatives)"
+  (let [d (wdb (world))
+        proj (db/carried-projection d)
+        caps (:seon.sci.admit/caps (#'eval/instrumentation-config d))
+        w (#'seon.instrument/compiled-wrapper proj 'user/probe-closest
+            [:=> [:cat :any] [:or :nil :string [:map [:a :int] [:b :int]]]]
+            (fn [_] {:a 1}) caps)
+        r (try (w 1) nil (catch clojure.lang.ExceptionInfo t (ex-data t)))
+        problems (:seon.error/problems r)]
+    {:pass? (and (= 1 (count problems)) (= 2 (:seon.instrument/other-alternatives r))
+                 (str/includes? (str (:seon.error/message r)) ":b"))
+     :message (:seon.error/message r) :problems (count problems) :others (:seon.instrument/other-alternatives r)}))
+
 (def landing-files
   "The six namespaces and the schema resource step S3 copies into the tree."
   ["src/seon/batch.clj" "src/seon/sci/forgive.clj" "src/seon/sci/batch.clj" "src/seon/sci/arm.clj"

@@ -111,13 +111,17 @@
   [:seon.error/location :seon.error/location]
   [:seon.error/offending-projection
    {:optional true}
-   :seon.error/offending-projection]]]
+   :seon.error/offending-projection]
+  [:seon.instrument/other-alternatives {:optional true} :seon.instrument/other-alternatives]]]
 
  :seon.instrument/declared-arities
  [:set
  {:seon.db/component true,
   :seon.db/component-schema :seon.instrument.arity/bounds}
  :seon.db/ref]
+
+ :seon.instrument/other-alternatives
+ [:int {:min 1 :description "How many other alternatives of a refused union the refusal leaves out: its problems are the closest alternative's."}]
 
  :seon.instrument/declared-arity-count
  [:int {:min 1}]
