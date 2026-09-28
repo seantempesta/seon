@@ -220,3 +220,22 @@
         (is (= ['(my.program/callers {:seon.program/subject 'seon.db/q})] (:seon.render/operations query))
             "a widely called function names its callers by count and offers the call that lists them")
         (is (hiccup/hiccup? (sut/function-html (unit 'seon.flow/start-work-launcher! 1))))))))
+
+(deftest an-agents-namespace-concern-is-its-name-requires-and-definition-count
+  ;; The :seon.agent/namespace concern printed the raw pulled namespace entity
+  ;; (:db/id, the escaped ns source; 366 tokens for root on default); its
+  ;; render is the namespace's name, doc line, requires and definition count.
+  (support/with-database
+   (fn [connection]
+     (support/transacted! connection (support/agent-tx @connection "ns-owner" 'my.agents.ns-owner))
+     (let [database @connection
+           by-agent (sut/agent-namespace-ai {:seon.db/db database :seon.agent/id "ns-owner"})
+           by-value (sut/agent-namespace-ai {:seon.db/db database
+                                             :seon.render/value (db/pull database '[*] [:seon.ns/name 'my.agents.ns-owner])})]
+       (is (= 'my.agents.ns-owner (:seon.ns/name by-agent)))
+       (is (= 0 (:seon.render.ns/definition-count by-agent)))
+       (is (vector? (:seon.ns/requires by-agent)))
+       (is (not (contains? by-agent :db/id)))
+       (is (= by-agent by-value) "the walked namespace and the agent's assignment render alike")
+       (is (= '(dir my.agents.ns-owner) (sut/agent-namespace-form {:seon.db/db database :seon.agent/id "ns-owner"}))
+           "the form face is the namespace's dir")))))

@@ -1,4 +1,10 @@
-{:seon.render.ns/namespace-view
+{:seon.render.ns/agent-namespace-view
+ [:map {:description "An agent's own namespace as its AI face shows it: name, doc line, requires, and how many definitions it holds."}
+  [:seon.ns/name [:maybe :seon.ns/name]]
+  [:seon.ns/doc {:optional true} :seon.ns/doc]
+  [:seon.ns/requires [:vector :symbol]]
+  [:seon.render.ns/definition-count [:int {:min 0}]]]
+ :seon.render.ns/namespace-view
  [:map {:description "A namespace node as its AI face shows it: named, and beyond distance zero its requires and its public functions with their contracts as `dir` reads them."}
   [:seon.ns/name :seon.ns/name]
   [:seon.ns/doc {:optional true} :seon.ns/doc]

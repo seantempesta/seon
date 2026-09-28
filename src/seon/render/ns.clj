@@ -5,6 +5,7 @@
   Distance is inverse detail: zero names the node; one and beyond show its
   content, with its neighbours as names. The walk renders the neighbours."
   (:require [clojure.string :as str]
+            [seon.error.refusal]
             [seon.db :as db]
             [seon.issue :as issue]
             [seon.sci.eval :as sci.eval]
@@ -257,6 +258,62 @@
       (nil? listed) named
       (:seon.error/at listed) listed
       :else (merge named {:seon.ns/requires (vec (sort requires))} listed))))
+
+(defn- agent-namespace-ref
+  "The namespace an agent-namespace unit names: the walked namespace itself,
+  else the unit agent's `:seon.agent/namespace`."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe [:or :int [:tuple :keyword :symbol]]]]}
+  [{database :seon.db/db agent-id :seon.agent/id :as unit}]
+  (let [value (:seon.render/value unit)]
+    (cond
+      (:seon.ns/name value) [:seon.ns/name (:seon.ns/name value)]
+      (int? (:db/id value)) (:db/id value)
+      (int? value) value
+      agent-id (let [found (db/q '[:find ?n . :in $ ?id :where [?a :seon.agent/id ?id] [?a :seon.agent/namespace ?n]]
+                                 database agent-id)]
+                 (when (int? found) found)))))
+
+(defn- unassigned
+  "The declared refusal for an agent-namespace unit that names no namespace."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.error/value]}
+  [unit]
+  (seon.error.refusal/diagnostic
+   (java.util.Date.) :seon.render/invocation 'seon.render.ns/agent-namespace-ai
+   {:seon.error/message "This unit names no namespace: neither the walked namespace nor its agent's assignment."
+    :seon.error/member :seon.agent/namespace :seon.error/expected :seon.ns/name
+    :seon.error/offending (select-keys unit [:seon.agent/id :seon.render/value])}))
+
+(defn agent-namespace-ai
+  "The agent's own namespace as data: its name, doc line, requires, and how
+  many definitions it holds; `dir` reads its functions (the form face)."
+  {:malli/schema [:=> [:cat :seon.render/unit]
+                  [:or :seon.render.ns/agent-namespace-view :seon.db/error-result :seon.error/value]]}
+  [unit]
+  (let [reference (agent-namespace-ref unit)
+        pulled (when reference
+                 (db/pull (:seon.db/db unit)
+                          [:seon.ns/name :seon.ns/doc :seon.ns/requires {[:seon.fn/_ns :limit nil] [:db/id]}]
+                          reference))
+        {namespace-name :seon.ns/name doc :seon.ns/doc requires :seon.ns/requires defs :seon.fn/_ns} pulled]
+    (cond
+      (nil? reference) (unassigned unit)
+      (db/read-refusal? pulled) pulled
+      :else
+      (cond-> {:seon.ns/name namespace-name
+               :seon.ns/requires (vec (sort requires))
+               :seon.render.ns/definition-count (count defs)}
+        (first-doc-line doc) (assoc :seon.ns/doc (first-doc-line doc))))))
+
+(defn agent-namespace-form
+  "The `dir` of the agent's own namespace. Shown, never executed."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.render/read-form :seon.db/error-result :seon.error/value]]}
+  [unit]
+  (let [reference (agent-namespace-ref unit)
+        pulled (when reference (db/pull (:seon.db/db unit) [:seon.ns/name] reference))]
+    (cond
+      (nil? reference) (unassigned unit)
+      (db/read-refusal? pulled) pulled
+      :else (list 'dir (:seon.ns/name pulled)))))
 
 (defn render-html
   "Render a namespace node: its doc, requires and public functions by name."

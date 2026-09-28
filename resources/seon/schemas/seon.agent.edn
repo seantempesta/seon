@@ -120,7 +120,9 @@
                      :namespace
                      [:and
                       {:description
-                       "The namespace this agent is assigned to work in by default; not unique — several agents may share one, and an agent may `in-ns` anywhere its REPL reaches."}
+                       "The namespace this agent is assigned to work in by default; not unique — several agents may share one, and an agent may `in-ns` anywhere its REPL reaches."
+                       :seon.render/ai seon.render.ns/agent-namespace-ai
+                       :seon.render/form seon.render.ns/agent-namespace-form}
                       :seon.db/ref],
                      :routing
                      [:fn
