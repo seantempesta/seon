@@ -1,7 +1,7 @@
 ---
 type: plan
 date: 2026-09-28
-status: draft; research 3 of 4 in (substrate, flow-render, entities); loop pending
+status: draft for owner review; all four research notes in
 evidence: tmp/health-research/{substrate,flow-render,entities,loop}.md
 ---
 
@@ -124,12 +124,55 @@ branch, evaluation or test member), the reproduction (the test member, else the 
 - **Lockup rules kept:** listeners only `offer!`; nothing new on the writer thread; no monitor across commits; no
   timer pings (control-mult wedge); unknown is never green.
 
-## 5. Finding → task → agent → proof → merge
+## 5. Finding → task → agent → proof → merge (loop research)
 
-Pending loop research (end-to-end example from a real stored violation or fault). Shape: violation / slow bucket /
-error → finding (entity refs + reproduction form) → task on the entity, deduped by cause → agent with a branch and the
-reproduction as its failing test → fix the producer in SCI, tighten its contract → green on the branch → propose →
-root merges → the task closes when the measurement proves it.
+Every link has an owner except three, and in each the data is computed and then thrown away: who produced the bad
+value lives only in message text; no operation above one evaluation leaves a stored record; nothing turns a finding
+into a task or closes a task from evidence (no code calls `seon.task/create!`; runtime tasks close only by merge).
+
+**Real example (fault 103511, open 16 h, one of default's 17):** a contract refusal in `seon.turn/record-evaluated-tx`
+whose bad value came from its caller `seon.turn/system-turn` (only in "Called from …" text). The caller was fixed
+(3a168b8c9) 2m45s after the last occurrence, with no regression; resolution watches the refuser, whose digest never
+changes, so the fault never closes. Under this plan: blame → `system-turn` at its digest; task auto-created; the
+reproduction is the recorded evaluation; the fix's proof is a test red before, green after; the producer's new digest
+plus the green proof closes it.
+
+**The loop, on existing owners only (~180 added, 130+ deleted):**
+1. **A finding is a fault** (no new entity kind). `seon.fault/record!` gains: the producing definition ref + digest (by
+   the blame rule, read from the stack only when recording — zero cost on ordinary calls), the reproducing turn,
+   evaluation or test member, the schema path and refused schema as data, and measurements for slow findings.
+2. **Task:** the first occurrence of a signature auto-creates a runtime task on the producing definition, deduped by
+   signature and by open tasks on that definition, riding the fault's own write (no extra commit).
+3. **Claim:** one `my.task/open` query + `seon.task/assign!`, the same queue for Seon agents and our MCP lanes (outside
+   agents are Seon agents: `eval_clj` with `agent`).
+4. **Fix:** on the agent's branch in SCI; per the B8 ruling a platform function is proven by calling it directly.
+5. **Proof:** a test red before the fix and green after; for slow findings the test asserts call counts
+   (deterministic), wall time kept as evidence beside it.
+6. **Close:** derived, never a stored flag: resolved when the producer's digest changed *and* the proof tests are green
+   on it; merge carries it to the cluster.
+
+**Operator visibility:** the JVM records its own boot layers, adoption and publication phases on commits that already
+happen (boot, adoption, publication records), with what each was proportional to (files, changed files, cache
+hits); the bb operator passes its phase times as data in the launch request it already sends. A drill's record is one
+commit on default per drill (~1.15 MB; drills are rare and consequential), no longer deleted when it passes.
+
+**Second real finding, from existing counters in 11–42 ms:** `seon.db/arity-base` rebuilds from the whole program on
+every write revision (116 calls, 142 ms mean, 1.3 s max, ∝ 108,130 call-arity datoms); its three cache kinds report
+misses = evictions and 0 bytes kept — a ~58 MB single entry is likely rejected while `decoded-edn` holds 397 of 512 MB
+(hypothesis; probe in loop.md). Belongs on task `0caf995ddc22`.
+
+## 8. Build order (REPL-first per slice, then files, then docs)
+
+1. **Attribution at the producer** (§3 changes 1–3, §5 step 1): the refusal as data with digest and structured caller;
+   blame rule; stored on existing transactions; test member → violation + executed. Proof: fault 103511's class closes
+   from evidence.
+2. **Findings → tasks → claim → close** (§5 steps 2–6). Proof: one auto-created task, fixed by an agent on a branch,
+   red→green, merged, closed without a flag.
+3. **Significance recording** (§2): histogram cells, per-digest buckets on settle/test-batch commits, test member times.
+4. **Operator records** (§5 operator visibility), then query-identity cells (§3 change 5).
+5. **The health value and page** (§4): `:seon.health/report` units, attribute-keyed cache, non-blocking read,
+   `:pending`, HTML face; collapse the duplicate fault lists and status surfaces (§3 change 6).
+Each slice lands through the ordinary loop: an agent on a branch, proof tests, merge, write-back, drill.
 
 ## 6. Found while researching (to become tasks)
 
@@ -138,7 +181,9 @@ root merges → the task closes when the measurement proves it.
 - `seon.cluster.status/agents` 324 ms; `status/snapshot` writes a JVM thread dump to a file on every call.
 - `:seon.config.flow/ping-timeout-ms` is 20 ms on default, the audit cites 3 s, the schema declares no default.
 - Process cache at 92% of 512 MB; `seon.cache` cannot remove entries.
-- Drill 6–15 min (base-from-scratch 185–208 s); `start --head` 24 s to ready (boot-perf lane).
+- Drill 6–15 min (base-from-scratch 185–208 s); `start --head` 24 s to ready (boot-perf lane); a drill spends ~200 s
+  before static analysis could have refused it.
+- `seon.db/arity-base` whole-program rebuild per write revision; arity caches keep 0 bytes (§5).
 
 ## 7. Owner questions
 
@@ -150,3 +195,6 @@ root merges → the task closes when the measurement proves it.
 6. The blame rule in §3 (input violation → caller; output violation → the function; an agent's own form → the agent):
    agree?
 7. A fault on an agent branch: ref the branch's function entity (same digest joins the cluster's when unchanged)?
+8. Red-first proofs: required for auto-created tasks only (recommended), or everywhere?
+9. Slow findings: call counts as the done condition, wall time as evidence (recommended)?
+10. Drill record as one commit on default per drill (~1.15 MB)?
