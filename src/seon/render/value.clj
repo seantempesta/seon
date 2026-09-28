@@ -1122,6 +1122,28 @@
       (assoc cut ::print/href href)
       cut)))
 
+(defn- fold-collapsed-tail
+  "The selected nodes with each sequence's trailing members that show nothing
+  but their own cut (collapsed, not one member admitted) folded into the
+  sequence's tail cut, which already names their count and reads them: a
+  row with no identity says less than the count. The text only shrinks, so
+  the charge still bounds it."
+  {:malli/schema [:=> [:cat [:map-of :int :map]] [:map-of :int :map]]}
+  [nodes]
+  (reduce-kv
+   (fn [nodes id node]
+     (let [kids (:kids node)
+           folded (when (and (= :coll (:kind node)) (not (:indexed? node)) (seq kids))
+                    (take-while #(let [kid (get nodes %)]
+                                   (and (#{:map :coll} (:kind kid)) (zero? (:n kid)) (more? kid)))
+                                (rseq kids)))
+           kept (- (count kids) (count folded))]
+       (if (and (seq folded) (pos? kept))
+         (-> (apply dissoc nodes folded)
+             (assoc id (assoc node :kids (subvec kids 0 kept) :n kept)))
+         nodes)))
+   nodes nodes))
+
 (defn- tree
   "The selected nodes as one print-node tree, built with an explicit stack."
   {:malli/schema [:=> [:cat :map :map] :map]}
@@ -1272,7 +1294,8 @@
          ;; The selection answers its node state or its budget refusal.
          (if-not (:nodes state)
            state
-       (let [cut? (boolean (some more? (vals (:nodes state))))
+       (let [state (update state :nodes fold-collapsed-tail)
+             cut? (boolean (some more? (vals (:nodes state))))
              failed (sort-by :id (filter :diagnostic (vals (:nodes state))))
              ;; Render data's cuts name no handle (`select-nodes`).
              context (assoc context :requery (:requery state))
