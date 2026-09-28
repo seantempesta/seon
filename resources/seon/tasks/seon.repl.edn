@@ -29,4 +29,8 @@
              :kind :function
              :intent "render-directory-ai (src/seon/repl.clj) is dir's :seon.render/ai face but returns pr-str text (contract :string), so the value printer charges it as one leaf and clips it by characters: (dir my.message) in a fresh cluster is shown as 3,199 characters ending \"render-a…+646\" inside an unclosed schema map, which no reader can read back (EOF while reading), and its tail rows and :seon.repl/schemas are unreachable data. Return the {:seon.repl/columns :seon.repl/rows :seon.repl/schemas} map itself so the printer spreads its one budget over the shape and names each cut with a dig form; the HTML face renders the same map (test-data-assertions lane, 2026-09-28)."
              :must-read #{seon.repl/render-directory-ai seon.repl/render-directory-html seon.render.value/render-ai}
-             :evidence #{"test/seon/supplied_documentation_test.clj"}}]
+             :evidence #{"test/seon/supplied_documentation_test.clj"}}
+ #:seon.task{:name "a-jvm-def-is-told-it-lives-in-sci"
+             :kind :function
+             :intent "def-note judges the source text alone, so a def evaluated in MCP JVM mode (a host Var in a real namespace) is told it \"lives only in your SCI context\", which is false for a host Var, and the note is printed beside a def whose evaluation failed (observed 2026-09-28, flow-processes-opus: (def routing (... inst ...)) with inst unresolved returned the compile error and the persistence note). Decide the note from the evaluation's surface (SCI vs JVM) and its outcome, not from the text: no note on a failed def; a JVM def names the host Var and that it lasts until the JVM restarts."
+             :must-read #{seon.repl/def-note seon.repl/text}}]

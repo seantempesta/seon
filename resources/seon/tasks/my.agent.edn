@@ -1,0 +1,4 @@
+[#:seon.task{:name "a-context-only-branch-read-is-not-supplied"
+             :kind :function
+             :intent "8871a5f77 made :seon.store/store and :seon.agent/routing world members, and its regression covers one-argument calls (a request plus the supplied context), but my.agent/branches takes only :my.agent/branch-context, so its documented call (my.agent/branches) has zero arguments and still refuses its argument count on default running fd293bdd7, which includes 8871a5f77 (2026-09-28, flow-processes-opus, root agent via MCP: \"expected a declared argument count (1), got an argument count of 0\"). Done when the zero-argument call answers my branch and the roster through the one path: the armed wrapper supplies a wholly omitted map argument whose declared schema's members are all world members, and the regression is that call from an agent's evaluation."
+             :must-read #{my.agent/branches seon.call-preparation/preparing}}]
