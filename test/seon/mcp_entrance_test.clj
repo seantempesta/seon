@@ -61,14 +61,25 @@
                              (:seon.turn.loop/completion handle)]]
               (when channel (async/close! channel)))))))))
 
-(defn- latest-run
-  "The agent's newest run id on `connection` (the latest transaction naming one)."
-  {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id] [:maybe :seon.turn/id]]}
-  [connection agent-id]
+(defn- latest-run-in
+  "The agent's newest run id in `database` (the latest transaction naming one)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:maybe :seon.turn/id]]}
+  [database agent-id]
   (->> (db/q '[:find ?id ?tx :in $ ?agent-id
                :where [?agent :seon.agent/id ?agent-id] [?run :seon.turn/agent ?agent] [?run :seon.turn/id ?id ?tx]]
-             (db/db connection) agent-id)
+             database agent-id)
        (sort-by second) last first))
+
+(defn- settled-run
+  "The agent's newest run once one other than `previous` is durable on
+  `connection`. An MCP reply answers when its run's settlement is applied;
+  readers of the connection see the run when its commit lands
+  (`seon.db/transact-applied!`), so the test waits for that, as a reader must."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id [:maybe :seon.turn/id]] :seon.turn/id]}
+  [connection agent-id previous]
+  (latest-run-in (support/await-event! connection :seon.mcp-entrance-test/run-durable
+                                       #(when-let [run (latest-run-in % agent-id)] (not= run previous)))
+                 agent-id))
 
 (deftest tools-derive-each-input-schema-from-its-argument-schema
   (let [tools (json/read-str (mcp/tools))
@@ -95,7 +106,7 @@
   (with-running-agent
    (fn [running agent-id connection]
      (let [result (answer "eval_clj" {"code" "(+ 1 2) (str \"a\" \"b\")" "agent" agent-id "cluster" running})
-           run (latest-run connection agent-id)]
+           run (settled-run connection agent-id nil)]
        (is (false? (get result "isError")))
        (is (= (mapv :seon.repl/response
                     (agent/run-observation {:seon.turn/id run :seon.db/db (db/db connection)} agent-id
@@ -107,9 +118,10 @@
   (with-running-agent
    (fn [running agent-id connection]
      (let [jvm (answer "eval_clj" {"code" "(+ 1 2)" "agent" agent-id "cluster" running "mode" "jvm"})
-           handle (admit/result-handle (id/evaluation (latest-run connection agent-id) 0))
+           jvm-run (settled-run connection agent-id nil)
+           handle (admit/result-handle (id/evaluation jvm-run 0))
            dug (answer "eval_clj" {"code" (str "(inc " handle ")") "agent" agent-id "cluster" running})
-           run (latest-run connection agent-id)]
+           run (settled-run connection agent-id jvm-run)]
        (is (false? (get jvm "isError")))
        (is (false? (get dug "isError")))
        (is (= ["4"] (mapv :seon.eval/shown
