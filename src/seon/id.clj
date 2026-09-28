@@ -5,8 +5,19 @@
   (:require [clojure.string :as str])
   (:import [java.io BufferedWriter OutputStream OutputStreamWriter StringWriter Writer]
            [java.nio.charset StandardCharsets]
-           [java.security MessageDigest]
-           [java.util HexFormat]))
+           [java.security MessageDigest]))
+
+(defn- hex
+  "Lowercase hexadecimal of `bs` (babashka has no java.util.HexFormat)."
+  {:malli/schema [:=> [:cat bytes?] :string]}
+  [^bytes bs]
+  (let [digits "0123456789abcdef"
+        sb (StringBuilder. (* 2 (alength bs)))]
+    (doseq [b bs]
+      (let [v (bit-and (int b) 0xff)]
+        (.append sb (.charAt digits (bit-shift-right v 4)))
+        (.append sb (.charAt digits (bit-and v 0xf)))))
+    (str sb)))
 
 (def default-length
   "Default number of lowercase hexadecimal characters in an identity."
@@ -25,7 +36,7 @@
   (let [digester (MessageDigest/getInstance "SHA-256")]
     (doseq [bytes byte-arrays]
       (.update digester ^bytes bytes))
-    (.formatHex (HexFormat/of) (.digest digester))))
+    (hex (.digest digester))))
 
 (defn writer?
   "True for a `java.io.Writer`."
@@ -79,7 +90,7 @@
         writer (BufferedWriter. (OutputStreamWriter. ^OutputStream sink StandardCharsets/UTF_8) 8192)]
     (print-canonical! data writer)
     (.flush writer)
-    (.formatHex (HexFormat/of) (.digest digester))))
+    (hex (.digest digester))))
 
 (defn id
   "SHA-256 of the canonical EDN text of data ([[printed]]), truncated to n
