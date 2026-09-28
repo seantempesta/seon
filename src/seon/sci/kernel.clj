@@ -836,7 +836,9 @@
                          (= (:seon.error/message link) (:seon.error/message existing))
                          (dissoc :seon.error/message)))
             uncarried? (not-every? (set links) (:seon.error/chain existing))]
-        (cond-> (located existing)
+        ;; who produced it (the blame rule): the interpreted caller its SCI
+        ;; frames name, and the failing world by reference
+        (cond-> (error.refusal/attributed (located existing) throwable)
           ;; A refusal whose own chain holds links the throwable does not
           ;; carry (a rejection it records, never a Throwable cause) keeps that
           ;; chain whole after the links wrapping it; the carrier link is the

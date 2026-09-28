@@ -576,16 +576,33 @@
 ;;; After the loop
 ;;; ---------------------------------------------------------------------------
 
+(defn- produced-failures
+  "A diagnostic for each form whose failure a definition produced: its error
+  value (`:seon.batch/error-value`) names `:seon.error/producer`, the blame
+  rule stated where the value was built. The failure is handed as that value,
+  so the recorder keeps its producer. A failure the agent's own form produced
+  names none: it returns to the agent and is no fault."
+  {:malli/schema [:=> [:cat :seon.batch/batch] [:vector :seon.batch/diagnostic]]}
+  [batch]
+  (into []
+        (keep (fn [{failure :seon.batch/error ordinal :seon.batch/ordinal}]
+                (let [error (:seon.batch/error-value (ex-data failure))]
+                  (when (:seon.error/producer error)
+                    (diagnostic :evaluate ordinal
+                                (ex-info (str (:seon.error/message error "The evaluation failed.")) error))))))
+        (:seon.batch/entries batch)))
+
 (defn- record-faults
-  "Each diagnostic recorded through the fault stage. Its own failure is one
-  more diagnostic, never recorded again."
+  "Each diagnostic, and each form's failure a definition produced
+  ([[produced-failures]]), recorded through the fault stage. Its own failure
+  is one more diagnostic, never recorded again."
   {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/batch] :seon.batch/batch]}
   [request batch]
   (if-let [fault (:seon.batch/fault request)]
     (reduce (fn [b d]
               (try (update b :seon.batch/faults (fnil conj []) (fault request d))
                    (catch Throwable t (update b :seon.batch/diagnostics conj (diagnostic :fault nil t)))))
-            batch (:seon.batch/diagnostics batch))
+            batch (into (vec (:seon.batch/diagnostics batch)) (produced-failures batch)))
     batch))
 
 (defn- settled-into

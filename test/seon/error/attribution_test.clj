@@ -17,8 +17,11 @@
             [seon.error.refusal :as refusal]
             [seon.fault :as fault]
             [seon.problems :as problems]
+            [seon.sci.eval :as sci.eval]
             [seon.task :as task]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support]
+            [seon.turn.batch :as turn.batch]
+            [seon.turn.world :as turn.world]))
 
 (def ^:private context
   {:seon.error/layer ::boundary
@@ -175,3 +178,42 @@
              (finally
                (store/release-branch! cluster)
                (registry/retire-branch! {:seon.store/store store :seon.store/branch home})))))))))
+
+(deftest a-definitions-failure-in-an-evaluation-is-its-fault-and-task
+  ;; Health loop E1 (fault 103511's class): an evaluation whose definition
+  ;; handed an armed contract a bad value. The agent reads the producer in
+  ;; its error value; the fold records it as that definition's fault, whose
+  ;; task the queue offers. An agent's own form producing it is no fault.
+  (test-support/with-database
+   (fn [connection]
+     (let [environment (world connection "attribution-evaluation")
+           run (fn [text]
+                 (seon.batch/evaluate-batch
+                  (dissoc (turn.batch/code-request
+                           {:seon.batch/world (turn.world/agent-world
+                                               {:seon.db/connection connection :seon.cluster/name "attribution-evaluation"
+                                                :seon.env/environment environment
+                                                :seon.sci.eval/base-ctx (sci.eval/base-ctx (db/db connection))}
+                                               {:seon.agent/id "root" :seon.db.process/id "attribution-test"})
+                            :seon.batch/start-ns 'user
+                            :seon.batch/text text})
+                          :seon.batch/settle)))
+           faults-of (fn [producer]
+                       (db/q '[:find [?signature ...] :in $ ?producer
+                               :where [?e :seon.error/producer ?producer] [?e :seon.error/signature ?signature]]
+                             (db/db connection) producer))
+           batch (run "(defn make-row [] (seon.problems/open-faults {:seon.error/at (java.util.Date.)} {})) (make-row)")
+           error (:seon.batch/error-value (ex-data (get-in batch [:seon.batch/entries 1 :seon.batch/error])))
+           [signature] (faults-of 'user/make-row)]
+       (testing "the error value names the definition that produced the bad value"
+         (is (= 'user/make-row (:seon.error/producer error)))
+         (is (= 'seon.problems/open-faults (:seon.instrument/fn error))))
+       (testing "the fold records it as the producer's fault, answered by its task"
+         (is (string? signature))
+         (is (= [['user/make-row]] (mapv :seon.task/must-read (:seon.task/_faults (signature-row connection signature)))))
+         (is (some #(= (:seon.task/id (first (:seon.task/_faults (signature-row connection signature)))) (:seon.task/id %))
+                   (my.task/open (db/db connection)))))
+       (testing "the agent's own form is its mistake, returned and never recorded"
+         (let [before (db/basis-t (db/db connection))]
+           (run "(seon.problems/open-faults {:seon.error/at (java.util.Date.)} {})")
+           (is (= before (db/basis-t (db/db connection))))))))))
