@@ -2,7 +2,7 @@
              [:tuple
               {:description "What `seon.fault/record!` observed: the recorded fact (or the pre-fact message), the write outcome, and the occurrence lookup ref."}
               :map
-              [:or [:= :seon.flow/committed] :map :seon.error/throwable]
+              [:or [:= :seon.flow/committed] [:= :seon.fault/folded] :map :seon.error/throwable]
               [:or :nil [:tuple [:= :seon.error.occurrence/id] :seon.error.occurrence/id]]
               [:or :nil :seon.fault/delivered-to]],
              :delivered-to
@@ -36,4 +36,7 @@
               [:seon.fault/committed? :seon.fault/committed?]
               [:seon.error/signature {:optional true} :seon.error/signature]
               [:seon.error.occurrence/id {:optional true} :seon.error.occurrence/id]
-              [:seon.fault/delivered-to {:optional true} :seon.fault/delivered-to]]}
+              [:seon.fault/delivered-to {:optional true} :seon.fault/delivered-to]
+              [:seon.fault/folded? {:optional true} :seon.fault/folded?]],
+             :folded?
+             [:boolean {:description "The recording was a repeat the writer would only count: it made no commit, and its count rides the next commit on its branch (seon.fault/folded-tx)."}]}

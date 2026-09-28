@@ -1313,6 +1313,52 @@
               (nil? held) slot
               :else (recur more))))))
 
+(defn repeat-of
+  "The occurrence `recording` would only count, read on `database` (the
+  target branch's value) by the writer's own rule (`commit-call`): its last
+  capped slot is written and the signature is open, so the write would add
+  one to a noHistory count and nothing else. Nil when it would write more (a
+  free slot, a reopening, an obligation), or the read's refusal.
+
+  ## Costs
+
+  - One pull per slot and the signature's `opening` (its `resolution`
+    queries); failure path only."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.error/recording]
+                  [:or :nil :seon.error.occurrence/id :seon.db/error-result]]}
+  [database recording]
+  (let [[_ _ request] (some #(when (and (vector? %) (= :db.fn/call (first %))) %) (:seon.db/tx-data recording))
+        slots (:seon.error.occurrence/slots request)]
+    (when (and (seq slots) (not (:seon.error/obligation request)))
+      (let [slot (occurrence-slot database request)
+            held (when (= slot (peek slots)) (db/pull database [:db/id] [:seon.error.occurrence/id slot]))]
+        (cond
+          (map? slot) slot
+          (:seon.error/at held) held
+          (:db/id held) (let [opened (opening database (:seon.error/signature (:seon.error/fact request)))]
+                          (cond (map? opened) opened
+                                (nil? opened) slot)))))))
+
+(defn bump-call
+  "Add `:seon.error.occurrence/count` folded repeats to the stored occurrence
+  at the writer, keeping the later last instant: how repeats a recorder held
+  in memory (`seon.fault/folded-tx`) ride a commit that happens anyway. An
+  occurrence no longer stored takes nothing."
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       [:map [:seon.error.occurrence/id :seon.error.occurrence/id]
+                        [:seon.error.occurrence/count :seon.error.occurrence/count]
+                        [:seon.error.occurrence/last-at :seon.error.occurrence/last-at]]]
+                  [:or :seon.store/transaction-data :seon.db/error-result]]}
+  [database {id :seon.error.occurrence/id n :seon.error.occurrence/count at :seon.error.occurrence/last-at}]
+  (let [old (db/pull database [:seon.error.occurrence/count :seon.error.occurrence/last-at] [:seon.error.occurrence/id id])]
+    (cond
+      (:seon.error/at old) old
+      (nil? (:seon.error.occurrence/count old)) []
+      :else [{:seon.error.occurrence/id id
+              :seon.error.occurrence/count (+ (:seon.error.occurrence/count old) n)
+              :seon.error.occurrence/last-at (let [stored (:seon.error.occurrence/last-at old)]
+                                               (if (and stored (.after ^java.util.Date stored at)) stored at))}])))
+
 (defn commit-call
   "Upsert one error occurrence and its bounded notifications at the writer.
 

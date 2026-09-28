@@ -14,6 +14,7 @@
     [[seon.error.refusal/diagnostic]]. The wake is the writer's decision,
     [[seon.error/commit-call]]."
   (:require [clojure.core.async.flow :as-alias flow.core]
+            [seon.batch]
             [seon.blob :as blob]
             [seon.cluster.branch :as cluster.branch]
             [seon.config :as config]
@@ -76,6 +77,63 @@
               (when-let [id (:seon.error.occurrence/id (db/pull db-after [:seon.error.occurrence/id] (:e datom)))]
                 [:seon.error.occurrence/id id])))
           tx-data)))
+
+;;; FOLDED REPEATS (task e33c4c026538, owner's storage rule 2026-09-28). A
+;;; repeat the writer would only count (`seon.error/repeat-of`) makes no commit
+;;; of its own: its count waits here, per branch and occurrence, and rides the
+;;; next commit on that branch (the next fault write here, or the settle of the
+;;; running evaluation through `folded-tx`). No stored place holds a count not
+;;; yet written, so this process-lifetime map does; a restart loses at most
+;;; those counts, as every in-memory accumulator restarts from zero (health
+;;; plan §2.6).
+(defonce ^:private folded (java.util.concurrent.ConcurrentHashMap.))
+
+(defn- fold!
+  "Count one repeat of `occurrence` on `branch`, held until a commit carries it."
+  {:malli/schema [:=> [:cat :seon.store/branch :seon.error.occurrence/id :inst] :nil]}
+  [branch occurrence at]
+  (.merge ^java.util.concurrent.ConcurrentHashMap folded [branch occurrence] [1 at]
+          (reify java.util.function.BiFunction
+            (apply [_ [n held-at] [m at]] [(+ n m) (if (.after ^java.util.Date held-at at) held-at at)])))
+  nil)
+
+(defn folded-counts
+  "The repeats held for `branch`, by occurrence: `[count last-at]` not yet
+  written. What a health read adds to the stored counts."
+  {:malli/schema [:=> [:cat :seon.store/branch]
+                  [:map-of :seon.error.occurrence/id [:tuple pos-int? :inst]]]}
+  [branch]
+  (into {} (keep (fn [[[held occurrence] counted]] (when (= held branch) [occurrence counted]))) folded))
+
+(defn folded-tx
+  "Take the repeats held for `connection`'s branch as transaction data for a
+  commit that happens anyway: one `seon.error/bump-call` per occurrence. A
+  caller whose commit then fails hands them back with `unfold!`.
+
+  ## Examples
+
+  (into settle-tx (seon.fault/folded-tx connection))"
+  {:malli/schema [:=> [:cat :seon.db/connection] :seon.store/transaction-data]}
+  [connection]
+  (let [branch (get-in (db/db connection) [:config :branch])]
+    (into []
+          (keep (fn [occurrence]
+                  (when-let [[n at] (.remove ^java.util.concurrent.ConcurrentHashMap folded [branch occurrence])]
+                    [:db.fn/call #'error/bump-call {:seon.error.occurrence/id occurrence
+                                                    :seon.error.occurrence/count n
+                                                    :seon.error.occurrence/last-at at}])))
+          (keys (folded-counts branch)))))
+
+(defn unfold!
+  "Hand back repeats `folded-tx` took when the commit carrying them failed."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.store/transaction-data] :nil]}
+  [connection tx]
+  (let [branch (get-in (db/db connection) [:config :branch])]
+    (doseq [[_ _ {occurrence :seon.error.occurrence/id n :seon.error.occurrence/count at :seon.error.occurrence/last-at}] tx]
+      (.merge ^java.util.concurrent.ConcurrentHashMap folded [branch occurrence] [n at]
+              (reify java.util.function.BiFunction
+                (apply [_ [a held-at] [b at]] [(+ a b) (if (.after ^java.util.Date held-at at) held-at at)]))))
+    nil))
 
 (defn record!
   "Commit one escaped Throwable as one durable fact per delivery.
@@ -186,13 +244,21 @@
                                      (db/db target)
                                      (cond-> (assoc request :seon.error/fact prepared-fact)
                                        (not= branch origin) (assoc :seon.error.occurrence/branch origin))))
-                      result (when (:seon.db/tx-data data)
+                      ;; a repeat the writer would only count is folded, no commit
+                      only-count (when (and target (:seon.db/tx-data data))
+                               (error/repeat-of (db/db target) data))
+                      carried (when (and target (:seon.db/tx-data data) (not (string? only-count)))
+                                (folded-tx target))
+                      result (when (and (:seon.db/tx-data data) (not (string? only-count)))
                                ;; the target's own custody: a write to another branch is refused otherwise
                                (db/call-with-custody
                                 {:seon.db/connection target}
                                 #(blob/with-publication! target staged
-                                   (fn [] (db/transact! target (:seon.db/tx-data data))))))]
+                                   (fn [] (db/transact! target (into (vec (:seon.db/tx-data data)) carried))))))]
+                  (when (string? only-count) (fold! branch only-count (:seon.error/at prepared-fact)))
+                  (when (and (seq carried) (not (db/database-value? (:db-after result)))) (unfold! target carried))
                   [(cond
+                     (string? only-count) :seon.fault/folded
                      (nil? target)
                      {:seon.error/at (java.util.Date.) :seon.error/layer :seon.fault/record
                       :seon.error/operation `record! :seon.store/branch branch
@@ -202,7 +268,8 @@
                      (db/database-value? (:db-after result)) :seon.flow/committed
                      :else result)
                    (or (when (db/database-value? (:db-after result)) (landed-occurrence result))
-                       (:seon.error.occurrence/ref data))
+                       (:seon.error.occurrence/ref data)
+                       (when (string? only-count) [:seon.error.occurrence/id only-count]))
                    (when (db/database-value? (:db-after result))
                      (delivered-to result (:seon.error/signature prepared-fact)))]))
               home (cluster.branch/cluster-branch cluster-name)
@@ -218,7 +285,7 @@
               copy? (and (keyword? agent-branch) (not= home origin) (some? home-connection)
                          (= origin (placed-on (db/db home-connection))))
               [[outcome occurrence recipients] :as outcomes] (mapv commit-on (cond-> [origin] copy? (conj home)))]
-          [fact (or (some #(when (not= :seon.flow/committed %) %) (map first outcomes)) outcome)
+          [fact (or (some #(when-not (#{:seon.flow/committed :seon.fault/folded} %) %) (map first outcomes)) outcome)
            occurrence recipients])
         (catch Throwable failure
           [fact failure (:seon.error.occurrence/ref recording) nil])))
@@ -299,6 +366,13 @@
     thrown fault as suppressed.
   - `:seon.fault/delivered-to` names the recipients the writer selected for
     the fault's current opening, read from the transaction's own report.
+  - A repeat the writer would only count (every capped occurrence of its
+    signature and producer digest written, the signature open) makes no
+    commit: `record!` folds it (`folded-tx`) and the receipt says
+    `:seon.fault/folded? true` beside `:seon.fault/committed? true`, the count
+    riding the next commit on its branch.
+  - Without an agent in its context, the fault is attributed to the failing
+    world's agent (`seon.batch/*world*`), so its cluster copy is written.
 
   ## Recommendations
 
@@ -323,7 +397,10 @@
         ;; derive them from the cluster's declared config, as boot does
         caps (or carried-caps
                  (config/result-caps (config/effective (db/db connection) cluster-name)))
-        agent-id (:seon.agent/id context)
+        ;; the failing world's agent when the boundary names none: its cluster
+        ;; copy then carries the fault and its producer's task to the task home,
+        ;; where the task can be claimed (task 00c9e7a97e1b)
+        agent-id (or (:seon.agent/id context) (:seon.agent/id seon.batch/*world*))
         throwable? (instance? Throwable failure)
         [fact outcome occurrence recipients]
         (record! connection cluster-name (:seon.db.process/id context) caps
@@ -342,13 +419,14 @@
                         (some #(:seon.error/declared-schema (meta (ex-data %)))
                               (refusal/cause-links failure)))
                       :seon.flow/exception-error)})
-        committed? (= :seon.flow/committed outcome)
+        committed? (contains? #{:seon.flow/committed :seon.fault/folded} outcome)
         receipt (cond-> {:seon.boot/cluster-name cluster-name
                          :seon.error/layer (:seon.error/layer context)
                          :seon.error/operation (:seon.error/operation context)
                          :seon.fault/committed? committed?}
                   (:seon.error/signature fact) (assoc :seon.error/signature (:seon.error/signature fact))
                   occurrence (assoc :seon.error.occurrence/id (second occurrence))
+                  (= :seon.fault/folded outcome) (assoc :seon.fault/folded? true)
                   recipients (assoc :seon.fault/delivered-to recipients))]
     (if committed?
       receipt
