@@ -11,10 +11,10 @@
   evaluate it, the HTML face renders it. Test results are a derived value
   keyed by the exercised digests, so a read of them is ordinary read evidence
   and a later recording refreshes the next context."
-  (:require [clojure.test.check.generators :as gen]
+  (:require [clojure.string]
+            [clojure.test.check.generators :as gen]
             [seon.db :as db]
             [seon.fn :as sfn]
-            [seon.repl :as repl]
             [seon.schema :as schema]
             [seon.test.runner :as runner]))
 
@@ -101,14 +101,13 @@
       (seq (newly :fail :pass)) (assoc :seon.render.var/newly-green (newly :fail :pass)))))
 
 (defn render-ai
-  "The Var as REPL entries: the Var itself, then its status when it says something."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
+  "The Var as REPL entries, data forms: the Var itself, then its status when it says something."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/entries]}
   [unit]
-  (let [v (:seon.render/value unit)
-        sym (var-symbol v)
+  (let [sym (var-symbol (:seon.render/value unit))
         said (when (and sym (:seon.db/db unit)) (status (:seon.db/db unit) sym))]
-    (str (repl/source-text (list 'var sym))
-         (when (seq said) (str "\n" (repl/source-text (list 'seon.render.var/status (list 'quote sym))))))))
+    (cond-> [(list 'var sym)]
+      (seq said) (conj (list 'seon.render.var/status (list 'quote sym))))))
 
 (defn render-html
   "The Var and, when it says something, its status: the AI face's value as hiccup."
@@ -117,7 +116,7 @@
   (let [sym (var-symbol (:seon.render/value unit))
         {:seon.render.var/keys [contract example pending newly-red newly-green]}
         (when (and sym (:seon.db/db unit)) (status (:seon.db/db unit) sym))
-        tests (fn [label ts] (when (seq ts) [:li label ": " [:code (pr-str ts)]]))]
+        tests (fn [label ts] (when (seq ts) [:li label ": " [:code (clojure.string/join " " ts)]]))]
     [:div {:class "seon-var"}
      [:code (str "#'" sym)]
      (when (or contract (seq pending) (seq newly-red) (seq newly-green))

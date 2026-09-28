@@ -1076,7 +1076,7 @@
     (if (:seon.error/at r) r (mapv #(select-keys % [:seon.test/sym :seon.test/fail-count]) (:seon.test/results r)))))
 
 (defproof :v1-uncontracted-admitted :render
-  "V1: an uncontracted defn is admitted and stored through both entrants (MCP code and an agent turn), and its Var render shows the missing contract in the AI face (REPL entries evaluating its status) and the HTML face (the same status as hiccup)"
+  "V1: an uncontracted defn is admitted and stored through both entrants (MCP code and an agent turn), and its Var render shows the missing contract in the AI face (REPL entries as data forms evaluating its status) and the HTML face (the same status as hiccup)"
   (var-render-load!)
   (let [go (fn [mode] (on-fresh-branch
                        #(let [b (run (world) "(defn v1-open [x] x)" (if (= mode :agent) {:mode :reply} {}))
@@ -1090,7 +1090,7 @@
         m (go :mcp) g (go :agent)
         ok? (fn [r] (and (:stored? r) (empty? (:errors r))
                          (= :missing (:seon.render.var/contract (:status r)))
-                         (str/includes? (:ai r) "(seon.render.var/status 'user/v1-open)")
+                         (= ['(var user/v1-open) '(seon.render.var/status (quote user/v1-open))] (:ai r))
                          (str/includes? (pr-str (:html r)) "contract missing")))]
     {:pass? (and (ok? m) (ok? g) (= (dissoc m :html) (dissoc g :html))) :mcp (dissoc m :html) :html (:html m)}))
 
@@ -1137,6 +1137,38 @@
                     (true? current-before) (false? current-after)
                     (= {} (status (db/db conn) 'user/v1-p)))
         :evidence (count evidence) :current [current-before current-after]}))))
+
+(defn- tree-evaluated-source
+  "seon.sci.eval/evaluated-source as the working tree has it, evaluated in a
+  scratch namespace over the installed evaluator (no live Var redefined)."
+  []
+  (let [src (slurp "/Users/sean/src/seon/src/seon/sci/eval.clj")
+        form-at (fn [start] (-> (subs src (str/index-of src start))
+                                (str/replace "::rendering?" ":seon.sci.eval/rendering?")
+                                read-string))
+        forms [(form-at "(defn- entry-forms") (form-at "(defn- evaluated-source")]]
+    (binding [*ns* (create-ns 'one-path-proof.eval)]
+      (refer-clojure)
+      (require '[sci.core :as sci] '[seon.sci.reader :as reader] '[seon.error.refusal] '[clojure.string])
+      (eval '(def reader-context @#'seon.sci.eval/reader-context))
+      (eval '(def evaluate seon.sci.eval/evaluate))
+      (run! eval forms))
+    @(ns-resolve 'one-path-proof.eval 'evaluated-source)))
+
+(defproof :b1-data-entries :render
+  "B1: a render's AI face may be data forms (:seon.render/entries): one expression, one REPL entry or a vector of them, evaluated read-only in the viewer's world with no text read; each shows its form and its result"
+  (let [evaluated-source (tree-evaluated-source)
+        w (world)
+        request {:seon.sci.eval/ctx (wctx w) :seon.db/db (wdb w) :seon.cluster.eval/ns [:seon.ns/name 'user]
+                 :seon.sci.eval/time-limit-ms 30000
+                 :seon.sci.admit/caps (:seon.sci.admit/caps (#'eval/instrumentation-config (wdb w)))}
+        one (evaluated-source request {} '(+ 1 2))
+        many (evaluated-source request {} ['(var clojure.core/inc) {:seon.repl/comment "twice" :seon.repl/form '(* 2 21)}])
+        text (evaluated-source request {} "(+ 1 2)")]
+    {:pass? (and (= "(+ 1 2)\n;=> 3" (:seon.render/source one))
+                 (= "(var clojure.core/inc)\n;=> #'clojure.core/inc\n;; twice\n(* 2 21)\n;=> 42" (:seon.render/source many))
+                 (= "(+ 1 2)\n;=> 3" (:seon.render/source text)))
+     :one one :many many :text text}))
 
 (def landing-files
   "The six namespaces and the schema resource step S3 copies into the tree."
