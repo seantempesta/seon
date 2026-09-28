@@ -6,7 +6,8 @@
             :seon.render/html seon.render.var/render-html}
        seon.render.var/var-value?]
  :contract [:enum {:description "A definition's contract when it is not present (a malformed contract joins when its stored form lands, :seon.fn/malformed-spec)."} :missing]
- :example [:string {:description "A contract form to start from."}]
+ :example [:any {:description "A contract form to start from, as data: the defn with an example :malli/schema." :gen/elements [(defn f {:malli/schema [:=> [:cat :int] :int]} [x] x)]}]
+ :symbol [:qualified-symbol {:description "The symbol the rendered Var names."}]
  :pending [:vector {:description "Reaching tests with no result at their current reach digest."} :qualified-symbol]
  :newly-red [:vector {:description "Reaching tests that passed before this digest and fail at it."} :qualified-symbol]
  :newly-green [:vector {:description "Reaching tests that failed before this digest and pass at it."} :qualified-symbol]
@@ -15,4 +16,12 @@
           [:seon.render.var/example {:optional true} :seon.render.var/example]
           [:seon.render.var/pending {:optional true} :seon.render.var/pending]
           [:seon.render.var/newly-red {:optional true} :seon.render.var/newly-red]
-          [:seon.render.var/newly-green {:optional true} :seon.render.var/newly-green]]}
+          [:seon.render.var/newly-green {:optional true} :seon.render.var/newly-green]]
+ :view [:map {:description "A Var's AI face, data for the value printer: its symbol, its status, and the forms that act on it (never run by the render)."}
+        [:seon.render.var/symbol [:maybe :seon.render.var/symbol]]
+        [:seon.render.var/contract {:optional true} :seon.render.var/contract]
+        [:seon.render.var/example {:optional true} :seon.render.var/example]
+        [:seon.render.var/pending {:optional true} :seon.render.var/pending]
+        [:seon.render.var/newly-red {:optional true} :seon.render.var/newly-red]
+        [:seon.render.var/newly-green {:optional true} :seon.render.var/newly-green]
+        [:seon.render/operations {:optional true} :seon.render/operations]]}

@@ -65,12 +65,8 @@
                 {:optional true}
                 :seon.turn/id]],
               :source [:string {:min 1}],
-              :entries
-              [:or {:description "An AI face as data forms: one expression, one REPL entry, or a vector of them. The REPL path evaluates each read-only in the viewer's world with no text read: data forms have none."}
-               :seon.repl/expression :seon.repl/entry
-               [:vector [:or :seon.repl/expression :seon.repl/entry]]],
               :operations
-              [:vector {:description "The REPL forms a rendered entry offers its viewer (a message's (my.message/received! id)): expressions to evaluate, never text."}
+              [:vector {:description "The REPL forms a rendered value offers its viewer (a message's (my.message/received! id)), as data: shown for the agent to run, never run by the render step."}
                :seon.repl/expression],
               :source-blocks
               [:map {:description "Generated source blocks retaining the entity whose renderer declared each read. This is source output, not an alternate evaluation path."}
@@ -183,7 +179,11 @@
               :namespace :symbol,
               :output
               [:enum :seon.render/ai :seon.render/html :seon.render/form],
-              :rendered [:or :string :seon.render/hiccup :seon.render/form],
+              :rendered [:or :string :seon.render/hiccup :seon.render/form :seon.render/ai-data],
+              :ai-data [:any {:description "An AI face: the pruned, processed data an agent cares about, printed by the value printer and never evaluated; offered operations and requery forms are data inside it."
+                              :seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                              :seon.schema.admission/reason "A render's AI face is whatever data its schema-specific render selects."
+                              :gen/elements [{:k 1} [1 2] "text"]}],
               :profile :seon.render.profile/profile,
               :output-schema :qualified-keyword,
               :package

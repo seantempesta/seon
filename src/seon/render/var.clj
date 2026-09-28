@@ -7,14 +7,17 @@
   at the function's current definition: a result recorded at the test's
   current reach digest is read; none is pending; a test whose result at this
   digest differs from its result before (newly red, newly green) is named.
-  Both faces read one value, `status`; the AI face is REPL entries that
-  evaluate it, the HTML face renders it. Test results are a derived value
+  Both faces read one value, `status`: the AI face returns it as data for the
+  value printer, the HTML face as hiccup. Neither runs anything; the
+  definition's batch schedules its reaching tests, the render only reads
+  their results. Test results are a derived value
   keyed by the exercised digests, so a read of them is ordinary read evidence
   and a later recording refreshes the next context."
   (:require [clojure.string]
             [clojure.test.check.generators :as gen]
             [seon.db :as db]
             [seon.fn :as sfn]
+            [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.test.runner :as runner]))
 
@@ -95,19 +98,23 @@
         pending (vec (sort (for [[t o] now :when (= :pending o)] t)))]
     (cond-> {}
       contract (assoc :seon.render.var/contract contract
-                      :seon.render.var/example (str "(defn " (name sym) " {:malli/schema [:=> [:cat :int] :int]} [x] x)"))
+                      :seon.render.var/example (list 'defn (symbol (name sym)) {:malli/schema [:=> [:cat :int] :int]} '[x] 'x))
       (seq pending) (assoc :seon.render.var/pending pending)
       (seq (newly :pass :fail)) (assoc :seon.render.var/newly-red (newly :pass :fail))
       (seq (newly :fail :pass)) (assoc :seon.render.var/newly-green (newly :fail :pass)))))
 
 (defn render-ai
-  "The Var as REPL entries, data forms: the Var itself, then its status when it says something."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/entries]}
+  "The Var as data for the value printer: its symbol and, when it says
+  something, its status, with the forms that act on it as data (a contract
+  to start from, the check that shows a red or pending test). Nothing here is
+  evaluated by the render step."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render.var/view]}
   [unit]
   (let [sym (var-symbol (:seon.render/value unit))
         said (when (and sym (:seon.db/db unit)) (status (:seon.db/db unit) sym))]
-    (cond-> [(list 'var sym)]
-      (seq said) (conj (list 'seon.render.var/status (list 'quote sym))))))
+    (cond-> (assoc said :seon.render.var/symbol sym)
+      (or (seq (:seon.render.var/pending said)) (seq (:seon.render.var/newly-red said)))
+      (assoc :seon.render/operations [(list 'my.test/check {:seon.test/changed [sym]})]))))
 
 (defn render-html
   "The Var and, when it says something, its status: the AI face's value as hiccup."
@@ -121,7 +128,7 @@
      [:code (str "#'" sym)]
      (when (or contract (seq pending) (seq newly-red) (seq newly-green))
        [:ul
-        (when contract [:li (str "contract " (name contract) ": ") [:code example]])
+        (when contract [:li (str "contract " (name contract) ": ") [:code (render.value/bounded-text example)]])
         (tests "newly red" newly-red)
         (tests "newly green" newly-green)
         (tests "pending" pending)])]))

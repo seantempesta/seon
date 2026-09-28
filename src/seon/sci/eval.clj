@@ -4033,24 +4033,14 @@
 
 (declare evaluate)
 
-(defn- entry-forms
-  "A render's data entries as [comment form] pairs: one expression, one REPL
-  entry, or a vector of them."
-  {:malli/schema [:=> [:cat :seon.render/entries] [:vector [:tuple [:maybe :string] :seon.repl/expression]]]}
-  [entries]
-  (let [one (fn [e] (if (map? e) [(:seon.repl/comment e) (:seon.repl/form e)] [nil e]))]
-    (if (vector? entries) (mapv one entries) [(one entries)])))
-
 (defn- evaluated-source
   "A render's REPL entries as the viewing agent's REPL shows them: each form
-  evaluated once through `evaluate` in `request`'s SCI world, then `;=> ` and
-  its shown result. Entries are text (each form read once; comments keep their
-  place) or data forms (`:seon.render/entries`: evaluated as they are, no text
-  read; a comment shows above its form). Answers `{:seon.render/source text}`,
-  or `{:seon.error/value refusal}` naming the first form that could not be
-  read or evaluated, so the floor prints the value beside that one diagnostic:
-  a form is never shown without its result."
-  {:malli/schema [:=> [:cat :seon.sci.eval/shown-request :seon.render/unit [:or :string :seon.render/entries]]
+  read once and evaluated through `evaluate` in `request`'s SCI world, then
+  `;=> ` and its shown result; comments keep their place. Answers
+  `{:seon.render/source text}`, or `{:seon.error/value refusal}` naming the
+  first form that could not be read or evaluated, so the floor prints the
+  value beside that one diagnostic: a form is never shown without its result."
+  {:malli/schema [:=> [:cat :seon.sci.eval/shown-request :seon.render/unit :string]
                   [:or [:map [:seon.render/source :seon.render/source]]
                    [:map [:seon.error/value :seon.error/base]]]]}
   [request _unit source]
@@ -4064,53 +4054,34 @@
                      :seon.error/member :seon.render/source
                      :seon.error/expected :seon.sci.eval/evaluation
                      :seon.error/offending offending})})
-        run (fn [event]
-              (evaluate
-               (-> request
-                   (dissoc :seon.turn/id :seon.cluster.eval/ordinal :seon.repl/handle
-                           :seon.render.call/function :seon.sci.eval/output-prefix
-                           :seon.render.value/options)
-                   (assoc :seon.cluster.eval/source (:seon.sci.reader/source event)
-                          :seon.cluster.eval/ns [:seon.ns/name namespace-name]
-                          :seon.sci.eval/event event
-                          ::rendering? true))))
-        failed (fn [event evaluation]
-                 (refused (:seon.sci.reader/source event)
-                          (str "A render form failed: "
-                               (or (:seon.cluster.eval/error evaluation)
-                                   (get-in event [:seon.sci.reader/error :seon.error/message])))))]
-    (if-not (string? source)
-      ;; data forms: evaluated as they are; their printed text is what shows,
-      ;; never what is read
-      (loop [[[note form] & more] (entry-forms source) shown []]
-        (if-not form
-          {:seon.render/source (clojure.string/join "\n" shown)}
-          (let [text (pr-str form)
-                event {:seon.sci.reader/form form :seon.sci.reader/source text :seon.sci.reader/ns namespace-name
-                       :seon.sci.reader/start 0 :seon.sci.reader/end (count text)
-                       :seon.sci.reader/source-start 0 :seon.sci.reader/source-end (count text)
-                       :seon.sci.reader/line 1 :seon.sci.reader/column 1}
-                evaluation (run event)]
+        events (sci/binding [sci/ns (sci/create-ns namespace-name)]
+                 (reader/read (assoc (reader-context ctx namespace-name)
+                                     :seon.sci.reader/ctx ctx
+                                     :seon.sci.reader/text source
+                                     :seon.config.eval.result/max-source (count source))))]
+    (if-not (vector? events)
+      (refused source (str "The render's entries could not be read: " (:seon.error/message events)))
+      (loop [[event & more] events offset 0 shown []]
+        (if-not event
+          {:seon.render/source (apply str (conj shown (subs source offset)))}
+          (let [end (:seon.sci.reader/source-end event)
+                evaluation (when-not (:seon.sci.reader/error event)
+                             (evaluate
+                              (-> request
+                                  (dissoc :seon.turn/id :seon.cluster.eval/ordinal :seon.repl/handle
+                                          :seon.render.call/function :seon.sci.eval/output-prefix
+                                          :seon.render.value/options)
+                                  (assoc :seon.cluster.eval/source (:seon.sci.reader/source event)
+                                         :seon.cluster.eval/ns [:seon.ns/name namespace-name]
+                                         :seon.sci.eval/event event
+                                         ::rendering? true))))]
             (if (or (nil? evaluation) (:seon.cluster.eval/error evaluation))
-              (failed event evaluation)
-              (recur more (conj shown (str (when note (str ";; " note "\n")) text "\n;=> "
-                                           (:seon.eval/shown evaluation))))))))
-      (let [events (sci/binding [sci/ns (sci/create-ns namespace-name)]
-                     (reader/read (assoc (reader-context ctx namespace-name)
-                                         :seon.sci.reader/ctx ctx
-                                         :seon.sci.reader/text source
-                                         :seon.config.eval.result/max-source (count source))))]
-        (if-not (vector? events)
-          (refused source (str "The render's entries could not be read: " (:seon.error/message events)))
-          (loop [[event & more] events offset 0 shown []]
-            (if-not event
-              {:seon.render/source (apply str (conj shown (subs source offset)))}
-              (let [end (:seon.sci.reader/source-end event)
-                    evaluation (when-not (:seon.sci.reader/error event) (run event))]
-                (if (or (nil? evaluation) (:seon.cluster.eval/error evaluation))
-                  (failed event evaluation)
-                  (recur more end (conj shown (subs source offset end) "\n;=> "
-                                        (:seon.eval/shown evaluation))))))))))))
+              (refused (:seon.sci.reader/source event)
+                       (str "A render form failed: "
+                            (or (:seon.cluster.eval/error evaluation)
+                                (get-in event [:seon.sci.reader/error :seon.error/message]))))
+              (recur more end (conj shown (subs source offset end) "\n;=> "
+                                    (:seon.eval/shown evaluation))))))))))
 
 (defn shown-result
   "The one print of a final value: its admitted value and exact shown text.
