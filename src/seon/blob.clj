@@ -107,11 +107,13 @@
   (.formatHex (HexFormat/of) (.digest digest)))
 
 (defn- stored-binary
-  "Unwrap Konserve's binary callback value."
+  "Unwrap Konserve's binary callback value: the file store hands an input
+  stream under `:input-stream`, the memory store (test requests' overlay,
+  bb34631d0) its stored bytes there (`konserve/memory.cljc:82`)."
   {:malli/schema
    [:=>
     [:cat [:or :seon.blob/octet-array
-           [:map [:input-stream :seon.blob/input-stream]]]]
+           [:map [:input-stream [:or :seon.blob/octet-array :seon.blob/input-stream]]]]]
     [:or :seon.blob/octet-array :seon.blob/input-stream]]}
   [binary]
   (if (map? binary) (:input-stream binary) binary))
