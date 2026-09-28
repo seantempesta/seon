@@ -133,7 +133,11 @@
   [database lookup]
   (db/pull database '[*] lookup))
 
-(deftest render-without-a-carried-profile-or-projection-refuses
+(deftest render-without-a-carried-profile-or-cluster-context-refuses
+  ;; A database value always carries its own projection (db/carried-projection,
+  ;; 0e69bd5ab), so the refusal a request can still earn is the missing profile
+  ;; source: no carried profile and a context whose environment names no cluster
+  ;; (an omitted ctx is supplied from the world, so the test carries a bare one).
   (let [world (atom nil)]
     (support/with-database
      (fn [connection]
@@ -141,12 +145,11 @@
        (let [database @connection]
          (reset! world
                  {:database database
-                  :ctx (support/fork-cluster-ctx connection)
                   :value (pulled database
                                  [:seon.config/cluster cluster-name])}))))
-    (let [{:keys [database ctx value]} @world
-          result (with-redefs [schema/handed-projection (constantly nil)]
-                   (render/render-ai (render-request database ctx value)))]
+    (let [{:keys [database value]} @world
+          result (render/render-ai
+                  (render-request database (sci/init {}) value))]
       (is (some? (:seon.render/refused-member result)))
       (is (= 'seon.render/request-profile
              (get-in result
