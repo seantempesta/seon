@@ -1,5 +1,6 @@
 (ns seon.sci.branch-execution-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [seon.print.value]
+            [clojure.test :refer [deftest is]]
             [datahike.api :as d]
             [sci.core :as sci]
             [seon.cache]
@@ -23,7 +24,7 @@
                  :seon.sci.eval/time-limit-ms 5000
                  :seon.sci.admit/caps (config/result-caps config/defaults)})]
     (when (:seon.cluster.eval/error result)
-      (println "REALITIES-EVAL-REFUSAL" (pr-str (select-keys result [:seon.cluster.eval/error :seon.cluster.eval/triage-edn])))
+      (println "REALITIES-EVAL-REFUSAL" (seon.print.value/bounded-text (select-keys result [:seon.cluster.eval/error :seon.cluster.eval/triage-edn])))
       (throw (ex-info "Agent evaluation refused." result)))
     result))
 
@@ -157,7 +158,7 @@
                         :seon.sci.eval/interpretation-error) refused))
                  (is (nil? (sci/resolve a-ctx 'seon.env/->Environment)))
                  (is (some? (sci/resolve b-ctx 'seon.env/->Environment)))
-                 (println "REALITIES-HOST-REFUSAL" (pr-str refused))))))))))))))
+                 (println "REALITIES-HOST-REFUSAL" (seon.print.value/bounded-text refused))))))))))))))
 
 (defn- declared!
   "Transact one analyzed declaration through the turn's declaration writer."
@@ -266,7 +267,7 @@
            (is (= :agent (:seon.schema.admission/source
                           (db/pull (db/db connection) [:seon.schema.admission/source] [:seon.fn/sym subject])))
                "the declaration writer admits the override as the agent's own change")
-           (is (= :unavailable (:seon.sci.eval/load-state installed)) (pr-str installed))
+           (is (= :unavailable (:seon.sci.eval/load-state installed)) (seon.print.value/bounded-text installed))
            (is (string? (get-in installed [:seon.sci.eval/load-result :seon.error/message])))
            (is (= subject (:seon.sci.eval/refused-function refused)))
            (is ((schema/projection-validator
@@ -477,7 +478,7 @@
          (is (= [] (filterv #(re-find #"Unable to resolve|does not name an installed SCI Var" %)
                             (map :seon.error/message
                                  (:seon.test/acquisition-refusals (eval/acquired-program ctx)))))
-             (pr-str {:ms (:ms acquired) :interpreted (:interpreted-count view)}))))))))
+             (seon.print.value/bounded-text {:ms (:ms acquired) :interpreted (:interpreted-count view)}))))))))
 
 (deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program interpreting two changed entities and their reverse closures; measured 1,090 ms on default."
            :seon.test/long-ms 12000}
@@ -505,7 +506,7 @@
          (is (= [] (filterv #(re-find #"Unable to resolve|does not name an installed SCI Var" %)
                             (map :seon.error/message
                                  (:seon.test/acquisition-refusals (eval/acquired-program ctx)))))
-             (pr-str {:ms (:ms acquired)}))))))))
+             (seon.print.value/bounded-text {:ms (:ms acquired)}))))))))
 
 (deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program after one analyzed declaration."
            :seon.test/long-ms 8000}
