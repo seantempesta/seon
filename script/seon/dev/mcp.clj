@@ -435,7 +435,20 @@
               ;; connection value.
               (assoc (dissoc result# :seon.db/db :seon.db/durable) :seon.dev.mcp/evaluations
                      ((requiring-resolve 'seon.cluster.agent/run-observation)
-                      result# (:seon.agent/id custody#) ~cluster)))))))))
+                      result# (:seon.agent/id custody#) ~cluster)
+                     ;; the namespace the run started in, read from its run: a
+                     ;; run with no requested one starts where the last ended
+                     :seon.dev.mcp/namespace
+                     (some-> ((requiring-resolve 'seon.db/pull) (:seon.db/db result#)
+                              [{:seon.turn/starting-ns [:seon.ns/name]}] [:seon.turn/id (:seon.turn/id result#)])
+                             :seon.turn/starting-ns :seon.ns/name str)))))))))
+
+(defn- run-namespace
+  "The namespace a root run started in, from its terminal value, else nil."
+  {:malli/schema [:=> [:cat [:vector :map]] [:maybe :string]]}
+  [events]
+  (let [terminal (some #(when (= :ret (:tag %)) %) events)]
+    (:seon.dev.mcp/namespace (try (edn/read-string (:val terminal)) (catch Throwable _ nil)))))
 
 (defn- run-events
   "The prepl events of a root run: one per settled evaluation whose value is the
@@ -581,7 +594,9 @@
                           :seon.dev.mcp/cluster-state
                           (:seon.dev.mcp/cluster-state endpoint)
                           :seon.dev.mcp/mode mode
-                          :seon.dev.mcp/namespace (str namespace-symbol)
+                          ;; a run reports the namespace it actually used
+                          :seon.dev.mcp/namespace (or (when root-run? (run-namespace collected))
+                                                      (str namespace-symbol))
                           :seon.dev.mcp/session-id session-id
                           :seon.dev.mcp/form code
                           :seon.dev.mcp/events events}]

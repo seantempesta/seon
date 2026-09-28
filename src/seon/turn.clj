@@ -108,10 +108,8 @@
   ;; unbound Var's value is a value, as in Clojure, shown `#object[...]`.
   (let [error (or (:seon.cluster.eval/error evaluation)
                   (:seon.cluster.eval/error form-problem)
-                  ;; A refused install settles its refusal as the value
-                  ;; (`seon.sci.eval/refuse-install`), and its admitted record
-                  ;; says the outcome is an error: the stored error is that
-                  ;; refusal's shown text, so every reader sees a refusal.
+                  ;; A record whose outcome is an error stores that error's
+                  ;; shown text, so every reader sees the failure.
                   (when (= :error (get-in evaluation [:seon.sci.admit/record :seon.eval/outcome]))
                     (:seon.eval/shown evaluation)))]
     (cond-> {:seon.turn/id id
@@ -3494,8 +3492,12 @@
   ;; compare a keyword with its keys throws on that lookup: a symbol-keyed
   ;; `(sorted-map 'a 1)` wedged its run. Walking a map's entries never calls
   ;; its comparator, so only a map that names the discriminator is validated.
+  ;; A disposition is a plain map: a record is never one, and a record's seq
+  ;; need not be its entries (a Datahike DB seqs its datoms), so it is not
+  ;; walked; any other map's seq is checked entry by entry.
   (when (and (map? value)
-             (some #(= :my.turn/disposition (key %)) value)
+             (not (record? value))
+             (some #(and (instance? java.util.Map$Entry %) (= :my.turn/disposition (key %))) value)
              (schema/valid-candidate-value? projection :my.turn/value value))
     value))
 
@@ -5522,9 +5524,9 @@
                                      reader-event
                                      (assoc :seon.sci.eval/event reader-event)))))
                       evaluations)}))]
-        ;; Admission analyzed each declaration once, against the namespace
-        ;; SCI evaluated it in (`seon.sci.eval/admit-program-change!`); its
-        ;; row is the evaluation's, and the settlement writer re-derives it.
+        ;; The fold derived each form's program change against the namespace
+        ;; SCI evaluated it in (`seon.turn.batch/derive-form`); the
+        ;; settlement writer re-derives its facts.
         (if (:seon.turn.loop/phase-failed evaluated)
           ;; THE REFUSAL BELONGS ON THE FORM THAT EARNED IT: `settle!`
           ;; carries the ordinal through `refusal-terminal-data`.

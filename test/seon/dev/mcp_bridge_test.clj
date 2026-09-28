@@ -677,6 +677,19 @@
              (sci (str "(defn " probe " \"Add 41.\" {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 41))") branch)))
       (is (= "42" (sci (str "(" probe " 1)") branch)) "the hosted agent's next run on the branch calls the def")
       (is (= "hi\n" (printed "(println \"hi\")" branch)) "the run's receipts carry what it printed")
+      (let [started (fn [source namespace-symbol]
+                      (let [form ((bridge-var 'run-form) source cluster namespace-symbol false branch)
+                            result (try ((requiring-resolve 'seon.db/call-with-custody) {} #(eval (read-string form)))
+                                        (finally (consume)))]
+                        [(-> result :seon.dev.mcp/evaluations last :seon.eval/shown) (:seon.dev.mcp/namespace result)]))
+            fresh (str "mcp.lane-fresh-" (subs (str (random-uuid)) 0 8))]
+        (sci "(in-ns 'seon.id)" branch)
+        (is (= ["\"seon.id\"" "seon.id"] (started "(str *ns*)" nil))
+            "a run with no namespace starts where the last ended and reports that namespace")
+        (is (= [(pr-str fresh) fresh] (started "(str *ns*)" (symbol fresh)))
+            "a requested namespace the branch has not seen is where the run starts, as in-ns")
+        (is (= ["\"user\"" "user"] (started "(str *ns*)" 'user))
+            "a requested namespace is honored after a run that moved elsewhere"))
       (is (nil? ((requiring-resolve 'sci.core/resolve) (:seon.sci.eval/ctx (get instances cluster)) (symbol "user" probe)))
           "the shared context never sees it")
       (is (contains? (:my.agent/roster (run "list" nil)) (keyword branch)))

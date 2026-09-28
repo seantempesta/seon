@@ -1,0 +1,10 @@
+;; Rehearsal root tmp/one-path/s4a/work-root, clone commits af8269e52 (MCP namespace) and 81f69903b (total disposition) on 056a91f9e, 2026-09-28.
+{:before-disposition-fix {:mcp-branch "(seon.db/db)" :result "run failed: class datahike.datom.Datom cannot be cast to class java.util.Map$Entry"}
+ :after {:mcp-branch {:shown ["#object[datahike.db.DB ...]" "#:seon.db{:tx ... :datoms [...]}" "nil" "{a 1}"] :ms 4144 :note "first run on a new branch hosts the agent"}
+         :mcp-root {:shown ["#object[datahike.db.DB ...]" "#:seon.db{:tx ... :datoms [...]}" "nil" "{a 1}"] :ms 617}
+         :agent-turn {:entrant seon.turn/virtual-turn! :run "283fbe28da5f" :shown ["#object[datahike.db.DB ...]" "#:seon.db{:tx ...}" "{a 1}"] :ms 1367}}
+ :mcp-namespace {:in-ns-then-no-namespace ["\"seon.id\"" "seon.id" 552]
+                 :fresh-namespace-requested ["\"mcp.lane-fresh-f2ab42\"" "mcp.lane-fresh-f2ab42" 403]
+                 :defn-in-fresh ["#'mcp.lane-fresh-f2ab42/in-fresh" "mcp.lane-fresh-f2ab42" 1440]
+                 :explicit-user-after-move ["\"user\"" "user" 347]
+                 :before-fix {:no-namespace-after-in-ns "reply said user, ran in seon.id" :fresh "Source submission requires an agent with an assigned namespace."}}}

@@ -695,13 +695,18 @@
         segment (segmenter stage agent-id)
         database @connection
         namespace-name
-        (if starting-ns
+        (cond
+          ;; a requested name is where the run starts, as `in-ns` would: the
+          ;; run writer creates its namespace entity when it has none yet
+          (vector? starting-ns) (second starting-ns)
+          starting-ns
           (let [namespace-row (db/pull database [:seon.ns/name] starting-ns)]
             (if (:seon.db/invalid-read namespace-row)
               namespace-row
               (:seon.ns/name namespace-row)))
           ;; segmentation reads where the writer will start the run: where
           ;; the agent's previous run ended, else its assigned namespace
+          :else
           (or (some->> (db/pull database [:db/id] [:seon.agent/id agent-id]) :db/id
                        (turn/previous-ending-namespace database))
               (db/q '[:find ?namespace-name .

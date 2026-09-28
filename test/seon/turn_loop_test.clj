@@ -174,9 +174,6 @@
                 :seon.turn/id run-id
                 :seon.cluster.eval/ordinal 0})]
           (is (= ending-ns (:seon.sci.eval/ending-ns first-evaluation)))
-          (is (= ending-ns
-                 (get-in first-evaluation
-                         [:seon.program/row :seon.ns/name])))
           (test-support/transacted!
                        connection
                        ;; ABSENT MEANS NO KEY: the settle request marks every terminal
@@ -189,8 +186,7 @@
                                (select-keys first-evaluation
                                             [:seon.eval/shown
                                              :seon.cluster.eval/ns
-                                             :seon.sci.eval/ending-ns
-                                             :seon.program/row]))))
+                                             :seon.sci.eval/ending-ns]))))
           (is (= ending-ns
                  (:seon.sci.eval/ending-ns
                   (db/pull @connection
@@ -240,8 +236,8 @@
             ;; the function it is evaluating, recursively running the fixture
             ;; under the generated namespace.
             (is (= (symbol (str ending-ns) "attributed-after-resume")
-                   (get-in evaluation
-                           [:seon.program/row :seon.fn/sym])))))))))
+                   (get-in outcome
+                           [:seon.batch/change :seon.batch/entities 0 :seon.fn/sym])))))))))
 
 (deftest two-agents-resolve-one-config-entity-with-ordinary-inheritance
   (test-support/with-database
@@ -706,7 +702,15 @@
                    {:seon.error/message "boom" }
                    {:my.turn/disposition :completed}]]
       (is (nil? (turn/disposition (seon.schema/handed-projection) value))
-          "must not read as a disposition"))))
+          "must not read as a disposition")))
+  (testing "a host value at a form's root is a value, never a crash: a database seqs its datoms, not entries"
+    (test-support/with-database
+      (fn [connection]
+        (let [database (db/db connection)]
+          (doseq [value [database connection (db/with database []) (sorted-map 'a 1)
+                         (reify clojure.lang.IPersistentMap (seq [_] (list 1 2)))]]
+            (is (nil? (turn/disposition (seon.schema/handed-projection) value))
+                "a host value is not a disposition")))))))
 
 (deftest a-clean-last-form-without-a-disposition-is-loud-terminal-evidence
   (test-support/with-database
