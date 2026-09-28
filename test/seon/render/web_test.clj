@@ -566,6 +566,8 @@ handle))}}
                        (.attr "action")))
             "the page offers the explicit create control, posting to the namespace's agent")))))
 
+(declare service-request)
+
 (deftest a-request-that-throws-answers-its-error-value-never-a-stack-trace
   ;; Class regression (2026-09-27): POST action=system-turn answered HTTP 500
   ;; whose body was the Throwable printed with 163 stack frames. Every throw
@@ -576,7 +578,7 @@ handle))}}
                              {:seon.error/at (java.util.Date.) :seon.error/layer :seon.turn/turn
                               :seon.error/operation 'seon.turn/record-evaluated-tx
                               :seon.error/message "The record refused its request."})
-            response (#'web/failure-response {:seon.store/connection-object connection} failure)]
+            response (#'web/failure-response (service-request connection {}) failure)]
         (is (= {:status 500 :content-type "text/html; charset=utf-8"}
                {:status (:status response)
                 :content-type (get-in response [:headers "content-type"])}))
@@ -817,8 +819,8 @@ handle))}}
                      (filter #(= css-class (:class (second %))))
                      first support/hiccup-elements
                      (filter #(= :a (first %)))
-                     (mapv last)))]
-    (is (= '[my.render/other-ai my.render/other-html]
+                     (mapv #(apply str (support/hiccup-leaves %)))))]
+    (is (= ["my.render/other-ai" "my.render/other-html"]
            (links "seon-debug-alternative-renderers"))
         "compatible alternatives are listed; a rejected candidate is absent")
     (is (= [[:pre "selected AI"] [:p "selected HTML"]] (mapv last previews))
@@ -1570,8 +1572,6 @@ handle))}}
             (async/untap (:pages-mult context) slow)
             (.close fast)))))))
 
-(declare service-request)
-
 (deftest failed-ephemeral-bind-preserves-the-bind-failure
   (support/with-database
     (fn [connection]
@@ -1942,7 +1942,7 @@ handle))}}
                          (support/agent-tx @connection "alice"))
       (let [response
             (fetch server
-                   "/data?entity=%5B%3Aseon.cluster.agent%2Fid+%22alice%22%5D&path=%5B%5D&offset=0")
+                   "/data?entity=%5B%3Aseon.agent%2Fid+%22alice%22%5D&path=%5B%5D&offset=0")
             body (.body response)
             default-body (.body (fetch server "/data"))]
         (is (= 200 (.statusCode response)))
@@ -1951,7 +1951,7 @@ handle))}}
         (is (some-> (element default-body ".seon-data-panel [data-seon-path=\"[]\"]")
                     (.hasClass "seon-print-vector"))
             "without entity the schema vector remains the drill root")
-        (is (= #{"[:seon.cluster.agent/id \"alice\"]"}
+        (is (= #{"[:seon.agent/id \"alice\"]"}
                (set (map #(get-in % [:query "entity"]) (data-links body))))
             "every floor handle preserves the selected entity root")))))
 

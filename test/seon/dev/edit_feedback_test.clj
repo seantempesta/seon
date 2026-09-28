@@ -1,4 +1,5 @@
-(ns seon.dev.edit-feedback-test
+(ns ^{:seon.test/golden "The edit hook answers Claude Code and Codex with a decision and a reason string: the reason, naming each finding type and path, is the external protocol the agent reads."}
+  seon.dev.edit-feedback-test
   (:require [cheshire.core :as json]
             [clojure.edn :as edn]
             [clojure.java.io :as io]

@@ -953,9 +953,7 @@
     (is (= [["java.io.IOException" "closed"]
             ["java.io.IOException" "connection reset by peer"]]
            (mapv (juxt :seon.error/throwable-class :seon.error/message)
-                 (:seon.error/chain completion))))
-    (is (not (str/includes? (:seon.error/message completion) "readable JSON"))
-        "nothing blames the body for a transport that ended")))
+                 (:seon.error/chain completion))))))
 
 (deftest a-reasoning-only-time-limit-names-the-missing-assistant-text
   (let [body
@@ -1005,8 +1003,8 @@
                                                   {:seon.ai/text "must not happen"})))]
     (is (= :seon.ai/request (:seon.error/layer outcome)))
     (is ((schema/projection-validator (schema/handed-projection) :seon.ai/no-credential-error) outcome))
-    (is (re-find #"SEON_AI_TEST_KEY_ABSENT" (:seon.error/message outcome))
-        "the message names the variable that is unset")
+    (is (= "SEON_AI_TEST_KEY_ABSENT" (:seon.ai/missing-credential-variable outcome))
+        "the refusal names the variable that is unset")
     (is (empty? @requests)
         "a hosted target refuses before constructing or sending a request")))
 
@@ -1046,8 +1044,9 @@
     (is (= :seon.ai/request (:seon.error/layer outcome)))
     (is (or (contains? outcome :seon.ai/transport-failure)
             (contains? outcome :seon.ai/timeout)))
-    (is (not (re-find #"(?i)bug" (:seon.error/message outcome)))
-        "a slow model is a condition, not a defect report")))
+    (is (contains? #{:timeout :transport-before-send :transport-unknown}
+                   (get-in outcome [:seon.error/data :seon.ai/error-class]))
+        "a slow model is a transport condition, not a defect report")))
 
 (deftest one-attempt-means-one-attempt
   ;; nothing retries a paid call — the count is the contract

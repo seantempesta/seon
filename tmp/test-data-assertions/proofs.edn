@@ -1,0 +1,87 @@
+;; Proofs of the test-data-assertions phase-2 conversions, 2026-09-28, run by
+;; tmp/test-data-assertions/proof.clj at default's JVM (loaded commit 29bdfce8d;
+;; src differs from HEAD only in db.clj and turn.clj). Each entry: the
+;; working-tree deftest on an isolated member branch, [pass fail error ms], at
+;; :head and with :broken, a scratch copy of the named owner or observed value
+;; substituted in the body (no Var redefined). A proof is its :broken run
+;; failing on the converted assertion.
+{:transcript-test
+ {stored-evaluations-are-terminal-transcript-values
+  {:head [1 0 0] :broken [0 1 0] :breaker "history-entries drops :out from each response"}
+  error-receipt-without-shown-text-names-its-message
+  {:head [2 0 0] :broken [1 1 0] :breaker "history-entries adds :value nil beside :error"}
+  history-unit-derives-both-projections-from-one-bounded-derivation
+  {:head [6 0 0] :broken [3 1 2] :breaker "render-history-html appends a source leaf"}
+  durable-history-entries-never-invent-executions {:head [2 0 0] :note "removal only: the exact bytes assertion already guards it"}
+  selected-evaluations-project-only-their-stored-source-and-result {:head [11 0 0] :note "removal only: history-entries data guards it"}}
+ :value-test
+ {a-pulled-function-entity-is-its-attributes-not-steering-prose
+  {:head [5 0 0] :broken [4 1 0] :breaker "evaluate shows steering prose"}
+  settings-remain-data-when-block-and-problem-renderers-match
+  {:head [2 0 0] :broken [0 2 0] :breaker "render-ai wraps the value in an ambiguous map"}
+  explicit-structural-results-retain-attributes-through-real-evaluation
+  {:head [68 0 0] :broken [64 4 0] :breaker "prepare wraps html in seon-data-capped"}
+  block-pairs-remain-explicit {:head [8 0 0] :note "removal only"}}
+ :web-test
+ {debug-compatible-candidate-discloses-retained-read-dependencies {:head [1 0 0] :broken [0 1 0]}
+  debug-read-dependencies-distinguishes-empty-from-absent {:head [1 0 0] :broken [0 1 0]}
+  debug-graph-model-preserves-datom-identity-and-direction {:head [8 0 0] :broken [7 1 0] :breaker "model script unescaped"}
+  debug-header-identifies-the-handed-program-and-projection {:head [4 0 0] :broken [3 1 0]}
+  debug-reference-links-select-another-entity-and-preserve-the-view {:head [1 0 0] :broken [0 1 0] :breaker "link carries outgoingCursor"}
+  debug-renderer-definition-accepts-the-acquired-program-entity {:head [2 0 0] :broken [1 1 0]}
+  debug-renderer-definition-uses-retained-program-source {:head [2 0 0] :broken [1 1 0] :breaker "source as hiccup/raw"}
+  debug-selected-renderer-metadata-is-outside-preview {:head [2 0 0] :broken [1 1 0]}
+  applicable-render-functions-list-alternatives-and-hide-rejections
+  {:head [2 0 0] :broken [1 1 0] :note "first conversion was red (link label is [:code sym]); fixed to the link's leaves"}
+  a-request-that-throws-answers-its-error-value-never-a-stack-trace
+  {:head [3 0 0] :broken [2 1 0] :note "red on HEAD before conversion: its partial service map is refused by failure-response's armed contract; now passes the declared service"}
+  a-five-megabyte-value-is-one-bounded-selection-in-both-faces {:head [10 0 0] :broken [9 1 0]}
+  the-feed-opener-is-a-sibling-of-the-morph-targets {:head [2 0 0] :broken [1 1 0]}
+  an-agent-page-is-the-same-mechanism-as-root {:head [2 0 0] :broken [1 1 0]}
+  static-resources-come-off-the-classpath {:head [5 0 0] :broken [4 1 0]}
+  a-get-of-an-unowned-namespace-page-never-writes {:head [6 0 0] :broken [5 1 0]}
+  canonical-debug-inspects-without-creating-a-namespace-owner {:head [7 0 0] :broken [6 1 0]}
+  data-resolves-an-entity-root-and-preserves-it-in-floor-links
+  {:head [5 0 0] :broken [4 1 0] :note "was vacuous: it looked up :seon.cluster.agent/id (not installed) and matched \"alice\" in its own URL; now :seon.agent/id"}
+  data-selects-a-stored-value-artifact-by-digest {:head [4 0 0] :broken [3 1 0]}
+  data-serves-a-five-megabyte-attribute-as-one-page-that-continues {:head [4 0 0] :broken [3 1 0]}
+  debug-algorithm-carries-the-render-evaluation-inputs {:head [5 0 0] :broken [4 1 0]}
+  each-agent-has-an-isolated-debug-route {:head [4 0 0] :broken [3 1 0]}
+  a-refusal-emits-no-morph-test {:head [6 0 0] :broken [5 1 0]}
+  reconnect-is-repaint {:head [6 0 0] :broken [5 1 0]}
+  reconnect-mid-stream-is-a-fact-only-repaint {:head [7 0 0] :broken [6 1 0]}
+  a-terminal-fact-supersedes-a-partial-after-the-lost-clear-ordering {:head [9 0 0] :broken [8 1 0]}
+  canonical-debug-feed-repaints-when-the-subject-changes {:head [2 0 0] :broken [1 1 0]}
+  an-undeclared-incoming-reference-is-reachable-from-the-page {:head [2 0 0] :broken [1 1 0]}
+  reconnect-is-repaint-wire-test {:head [248 0 0 200627] :note "no negative run: 200 s per run (its as-of walk over the window); finding"}
+  a-reconnect-refuses-a-pass-derived-before-it-connected
+  {:head [7 1 0 22773] :note "red in the harness on an assertion this lane did not change (the held pass is not observed in its renderer); unverified"}}
+ :web-debug-test
+ {debug-links-omit-defaults-and-round-trip-every-override {:head [4 0 0] :broken [2 2 0]}
+  reverse-declarations-receive-the-actual-relationship-value {:head [2 0 0] :broken [1 1 0]}
+  the-graph-debug-page-reads-a-named-branch-read-only {:head [6 0 0] :broken [5 1 0]}
+  the-graph-debug-page-shows-both-faces-in-graph-order-at-every-n {:head [40 0 0] :broken [36 4 0]}
+  the-graph-groups-a-many-relationship-into-one-counted-node {:head [4 0 0] :broken [3 1 0]}}
+ :error-test
+ {error-identity-and-occurrences-are-owned-by-the-writer {:head [39 0 0] :broken [36 3 0] :broken-status [38 1 0]}
+  agent-fault-read-is-a-short-call-that-shows-each-recorded-message
+  {:head [6 0 0] :broken [5 1 0] :note "first conversion was red: render-ai of a stored fault is a map; asserts its :seon.error/message"}
+  a-body-on-its-own-branch-is-supplied-that-branchs-database {:head [2 0 0] :broken [1 1 0]}
+  a-contract-violations-fault-keeps-the-value-that-broke-it {:head [6 0 0] :broken [5 1 0]}
+  fault-preparation-bounds-the-fact-and-omits-disposable-flow-state {:head [9 0 0] :broken [7 2 0]}
+  the-default-renderers-accept-an-attribute-shaped-error {:head [4 0 0] :broken [3 1 0]}
+  an-unstored-error-renders-its-own-message {:head [2 0 0] :broken [1 1 0]}
+  a-held-error-observation-renders-as-held-without-a-read {:head [4 0 0] :broken [3 1 0]}
+  a-refused-name-read-is-shown-as-its-refusal {:head [2 0 0] :broken [1 1 0]}
+  specialist-renderers-use-their-declared-evidence {:head [19 0 0] :golden true}}
+ :ai-test
+ {a-missing-credential-is-loud-in-the-value {:head [4 0 0] :broken [2 2 0]}
+  the-deadline-fires-as-an-outcome-not-a-bug-report {:head [3 0 0] :broken [2 1 0]}
+  a-stream-that-ends-before-any-text-is-named-truncation-not-bad-json {:head [3 0 0] :note "removal only: the declared-schema assertion guards it"}}
+ :unverified
+ ;; with-redefs bodies are never run in the shared JVM: their redefinitions
+ ;; reach every thread. They wait on the seam conversion.
+ [seon.render.web-test/selected-ai-experiment-reuses-the-canonical-executed-call
+  seon.render.web-test/data-uses-the-one-floor-and-keeps-the-cursor-in-the-url
+  seon.render.web-test/session-acquisition-failure-replaces-the-loading-panel
+  seon.render.web-test/a-reconnect-refuses-a-pass-derived-before-it-connected]}

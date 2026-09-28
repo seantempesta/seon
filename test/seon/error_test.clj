@@ -158,21 +158,21 @@
             (is (= 6 (get (into {} (:seon.cluster.status/faults status))
                           (second (:seon.error/ref a)))))
             (is ((schema/projection-validator (schema/handed-projection) :seon.error/base) (:seon.cluster.status/store-bytes status)))
-            (is (str/includes? (:seon.error/message (:seon.cluster.status/store-bytes status))
-                               "not scanned")))
+            (is (some? (:seon.cluster.status/unavailable-observation (:seon.cluster.status/store-bytes status)))
+                "store bytes are an unavailable observation, never a scanned number"))
           (is (str/includes? (pr-str (#'seon.render.transcript/fault-problems database "error-graph-steward" [])) "occurrences: 6"))
           (is (= 6 (:seon.error/occurrence-count (error/render-ai entity))))
-          (is (str/includes? (pr-str (error/render-html {:seon.db/db database :seon.render/value entity})) "Open"))
+          (is (some #{"Open"} (test-support/hiccup-leaves (error/render-html {:seon.db/db database :seon.render/value entity}))))
           (is (= '(seon.error/for-agent (seon.db/db) "error-graph-steward") read-form))
           (let [observed (error/for-agent database "error-graph-steward")]
             (is (= 1 (count observed))))
           (is (str/includes? (pr-str (error/render-faults-html [:seon.agent/id "error-graph-steward"] database)) "same error"))
           (is (= 1 (:seon.render.transcript/count (first (#'seon.render.transcript/fault-problems database "error-graph-steward" [])))))
           (is (:db-after (db/transact! connection [[:db/add (:seon.error/ref a) :seon.error/resolved-tx "datomic.tx"]])))
-          (is (str/includes? (pr-str (error/render-html {:seon.db/db (db/db connection) :seon.render/value (read-error)})) "Resolved"))
+          (is (some #{"Resolved"} (test-support/hiccup-leaves (error/render-html {:seon.db/db (db/db connection) :seon.render/value (read-error)}))))
           ;; A render always has a database (`:seon.render/unit` requires it): one
           ;; omitted is supplied from this body's own branch as it is now.
-          (is (str/includes? (pr-str (error/render-html (read-error))) "Resolved"))
+          (is (some #{"Resolved"} (test-support/hiccup-leaves (error/render-html (read-error)))))
           (is ((schema/projection-validator (schema/handed-projection) :seon.error/fact) (:seon.error/fact (first (#'seon.problems/error-signatures (db/db connection)))))))
         (let [flat (error/recording (db/db connection)
                                   (commit-request {:seon.error/message "flat error", :seon.error/operation (quote seon.id/valid?)} {}))]
@@ -206,7 +206,8 @@
                             [?o :seon.error.occurrence/agent ?a] [?e :seon.error/occurrences ?o]]
                           database "agent-3"))))
         (is (:seon.error/capped? (error/latest-fact (first errors))))
-        (is (str/includes? (pr-str (error/render-ai (first errors))) "capped evidence message"))
+        (is (= "capped evidence message" (:seon.error/message (error/render-ai (first errors))))
+            "a capped occurrence still shows its recorded message")
         ;; An unstewarded fault is delivered to its escalation owner: the
         ;; writer notifies root, so root's faults hold exactly this one.
         (is (= #{(second (:seon.error/ref recorded))}
@@ -229,7 +230,7 @@
             entity (db/pull (db/db connection) '[*] (:seon.error/ref recorded))]
         (is (= (:max-tx (db/db connection))
                (:max-tx (:seon.db/db (instrument/calling-environment)))))
-        (is (str/includes? (pr-str (error/render-html entity)) "Resolved"))))))
+        (is (some #{"Resolved"} (test-support/hiccup-leaves (error/render-html entity))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Fixtures — the three families, plus arbitrary observed values
@@ -530,10 +531,8 @@
              fact (:seon.error/fact prepared)
              fact-bytes (alength (.getBytes (pr-str fact) "UTF-8"))]
          (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) (ex-data thrown)))
-         (is (str/includes? (:seon.instrument/actual fact) ":seon.ns/name")
-             "the value at the violation path is kept, bounded by what it is")
-         (is (not (str/includes? (:seon.instrument/actual fact) "wide evidence"))
-             "the offending value is the leaf, never the request it rode in")
+         (is (= [:seon.ns/name 'user] (edn/read-string (:seon.instrument/actual fact)))
+             "the value at the violation path is kept: the leaf, never the request it rode in")
          (is (pos? (:seon.instrument/actual-size fact))
              "the offending value's own size is recorded")
          (is (< (:seon.instrument/actual-size fact)
@@ -568,17 +567,21 @@
         "stored fault fact was UTF-8 bytes")
     (is (<= (alength (.getBytes (:seon.error/data-edn fact) "UTF-8"))
             inline-limit))
-    (is (not (str/includes? content "DISPOSABLE-PROC-STATE-")))
-    (is (str/includes? content "seon.render.data/at"))
-    (is (str/includes? content large)
-        "the original diagnostic string remains available for blob retrieval")
+    ;; The evidence content is the print tree of the evidence value: its
+    ;; leaves are the values it keeps.
+    (let [leaves (set (remove coll? (tree-seq coll? seq (edn/read-string content))))]
+      (is (not (contains? leaves ::flow/state)) "disposable flow state is omitted")
+      (is (contains? leaves 'seon.render.data/at))
+      (is (contains? leaves large)
+          "the original diagnostic string remains available for blob retrieval"))
     ;; A FIELD OVER THE FAULT'S OWN DECLARED BYTE BOUND IS MARKED, never
     ;; silently kept: the same `:seon.sci.admit/reason` data every other surface
     ;; reports an absent value with, and the whole field stays reachable in
     ;; the evidence content beside it.
-    (is (str/includes? (:seon.error/message fact) ":reason :over-bound"))
-    (is (str/includes? (:seon.instrument/expected fact) ":reason :over-bound"))
-    (is (str/includes? (:seon.instrument/args fact) ":reason :over-bound"))
+    (is (= [:over-bound :over-bound :over-bound]
+           (mapv #(:seon.sci.admit/reason (edn/read-string (get fact %)))
+                 [:seon.error/message :seon.instrument/expected :seon.instrument/args]))
+        "each field over the bound is the over-bound marker")
     (is (true? (:seon.error/capped? fact))
         "a fact whose evidence was replaced says so")
     (is (every? #(some? (get fact %))
@@ -1418,11 +1421,11 @@
                   :seon.error/message "No file exists at that path."}
            ai (error/render-ai value)
            html (error/render-html value)]
-       (is (str/includes? ai (:seon.error/message value))
+       (is (= (:seon.error/message value) ai)
            "AI explains the failure without dumping internal evidence")
        (is (= :article (first html)))
        (is ((schema/projection-validator (schema/handed-projection) :seon.render/hiccup) html))
-       (is (str/includes? (pr-str html) (:seon.error/message value)))))))
+       (is (some #{(:seon.error/message value)} (test-support/hiccup-leaves html)))))))
 
 (deftest an-unstored-error-renders-its-own-message
   ;; A refusal carries its signature before, or without, its recording: the
@@ -1438,10 +1441,9 @@
                   :seon.error/message "The refusal's own message."}
            unit {:seon.render/value value :seon.db/db (db/db connection)}
            ai (error/render-ai unit)
-           html (pr-str (error/render-html unit))]
-       (is (str/includes? ai (:seon.error/message value)))
-       (is (not (str/includes? ai "Contract finding")))
-       (is (str/includes? html (:seon.error/message value)))))))
+           html (error/render-html unit)]
+       (is (= (:seon.error/message value) ai) "the AI face is the message, with no appended finding")
+       (is (some #{(:seon.error/message value)} (test-support/hiccup-leaves html)))))))
 
 (deftest a-held-error-observation-renders-as-held-without-a-read
   ;; Render-specificity audit slice 1: the pair used to re-pull every value
@@ -1461,7 +1463,7 @@
            bare (binding [db/*read-evidence-sink* bare-reads]
                   (error/render-ai (assoc unit :seon.render/value
                                           (dissoc value :seon.error/message))))]
-       (is (str/includes? ai (:seon.error/message value)))
+       (is (= (:seon.error/message value) ai))
        (is (some? bare))
        (is (empty? @reads) "the held observation is not read again")
        (is (seq @bare-reads) "a bare identity is read")))))
@@ -1493,7 +1495,8 @@
             :seon.error/offending {:seon.fs/path "src/a.clj"}}
            reply))))
 
-(deftest specialist-renderers-use-their-declared-evidence
+(deftest ^{:seon.test/golden "The specialist *-prose functions produce prose by definition; their text is their output."}
+  specialist-renderers-use-their-declared-evidence
   (test-support/with-database
    (fn [_connection]
     (testing "a stored contract fault names what was expected and received"
@@ -1660,7 +1663,7 @@
         names (get-in (error/reply-value (datahike.db/empty-db) unresolved)
                       [:seon.error/in-namespace 'scratch.fbr])]
     (is (db/read-refusal? names))
-    (is (str/includes? (:seon.error/message names) ":seon.ns/name"))))
+    (is (= :seon.ns/name (get-in names [:seon.error/data :seon.db/attribute])))))
 
 (deftest a-contract-problem-shows-an-example-never-a-synthesized-call
   ;; The reply shows the failing path, its expectation, the offending value
