@@ -55,7 +55,8 @@ happens anyway costs ~0 bytes (+240 B) and +2–4 ms per 100 upserts.
 5. **A new definition digest is a new baseline:** buckets are per definition version, so "this change moved `f`'s p99
    from [1,2) to [64,128) ms" is a direct comparison and a ready finding.
 6. **Work outside evaluations** (procs, boot, JVM-mode calls) stays in memory and is read on demand; it publishes on
-   the next commit that touches it, or one snapshot blob at shutdown (owner question 1).
+   the next commit that touches it. **Owner ruling:** what is stored in the database is enough; on restart every
+   in-memory accumulator starts from zero, cleanly (no snapshot blob).
 7. **Transaction metadata carries the rest** that a commit observed: violations (fn, schema, path, value blob, caller,
    test/evaluation refs) and errors, on the transaction that happened anyway. The seam exists: 089ac703a stamps every
    write with process, operation and agent (`src/seon/db.clj:3523`, astra fixer's transaction provenance; not yet in
@@ -85,7 +86,7 @@ Never: a commit of its own, per event or per timer.
   `seon.db/q` is one cell (53,453 calls, 93.5 s total, max 5.5 s); the normalized query form Datahike already
   memoizes (`src/seon/db.clj:2776`) is a ready query identity.
 
-**Blame follows the producer (root's proposal).** An input violation means the *caller* produced the bad value: the
+**Blame follows the producer (owner ruling 2026-09-28).** An input violation means the *caller* produced the bad value: the
 cause is the calling definition (or, when the caller is an agent's own form, the agent's mistake, delivered to it and
 not counted against the function). An output violation means the function itself is wrong: the cause is the function
 at its digest. This is AGENTS.md "fix the producer" applied to attribution, and it answers "which symbol is the cause".
@@ -146,15 +147,16 @@ plus the green proof closes it.
 3. **Claim:** one `my.task/open` query + `seon.task/assign!`, the same queue for Seon agents and our MCP lanes (outside
    agents are Seon agents: `eval_clj` with `agent`).
 4. **Fix:** on the agent's branch in SCI; per the B8 ruling a platform function is proven by calling it directly.
-5. **Proof:** a test red before the fix and green after; for slow findings the test asserts call counts
+5. **Proof:** a test red before the fix and green after (owner ruling: required for auto-created tasks; hand-written
+   tasks keep today's rule); for slow findings the test asserts call counts
    (deterministic), wall time kept as evidence beside it.
 6. **Close:** derived, never a stored flag: resolved when the producer's digest changed *and* the proof tests are green
    on it; merge carries it to the cluster.
 
 **Operator visibility:** the JVM records its own boot layers, adoption and publication phases on commits that already
 happen (boot, adoption, publication records), with what each was proportional to (files, changed files, cache
-hits); the bb operator passes its phase times as data in the launch request it already sends. A drill's record is one
-commit on default per drill (~1.15 MB; drills are rare and consequential), no longer deleted when it passes.
+hits); the bb operator passes its phase times as data in the launch request it already sends. The drill itself is under
+review (owner: if it is an artifact of doing something the wrong way, delete it): see §9.
 
 **Second real finding, from existing counters in 11–42 ms:** `seon.db/arity-base` rebuilds from the whole program on
 every write revision (116 calls, 142 ms mean, 1.3 s max, ∝ 108,130 call-arity datoms); its three cache kinds report
@@ -185,16 +187,28 @@ Each slice lands through the ordinary loop: an agent on a branch, proof tests, m
   before static analysis could have refused it.
 - `seon.db/arity-base` whole-program rebuild per write revision; arity caches keep 0 bytes (§5).
 
+## 9. The drill: an artifact of two boot paths
+
+`bin/seon drill` rehearses a change by building a store from scratch, moving it onto the change, and building from
+scratch again (`script/seon/operator.clj:1585`). It was added after HEAD failed to boot about seven times, each from a
+change proven only incrementally: vector ordering, an eid attribute, a misplaced schema key, the logging-hook contract,
+indexing a ref as an entity, a derivation digest read before install, conflicting render maps. Each passed the
+incremental path and failed the from-scratch one, i.e. **boot-from-files and adoption are two paths that diverge**.
+AGENTS.md already says the opposite should hold: prove schema changes incrementally on a branch of a live store;
+inability to adopt is a publication defect, never a reason to boot from zero. The fix is one path: a from-scratch boot
+is adoption of every file onto an empty store, so a change proven by adoption on a branch of the live store (seconds)
+is proven for a fresh install too, and the drill is deleted. The boot-perf lane measures what differs between the two
+paths and what the from-scratch build redoes, to cost that cut.
+
 ## 7. Owner questions
 
-1. Must performance totals survive a restart (one snapshot blob at shutdown), or are settle-carried buckets enough?
+1. ~~Restart~~ ruled: stored buckets are enough; accumulators restart from zero.
 2. Is "no extra commits" enough, or should health rows fall under a retention cutoff?
 3. Make the 300 KB commit record a task now?
 4. Per-query counters keyed by query form in bounded memory, or per-function time only?
 5. Should heap, ping and cache readings refresh on an idle cluster, or only on commit or reconnect?
-6. The blame rule in §3 (input violation → caller; output violation → the function; an agent's own form → the agent):
-   agree?
+6. ~~Blame~~ ruled: producer.
 7. A fault on an agent branch: ref the branch's function entity (same digest joins the cluster's when unchanged)?
-8. Red-first proofs: required for auto-created tasks only (recommended), or everywhere?
+8. ~~Red-first~~ ruled: auto-created tasks only.
 9. Slow findings: call counts as the done condition, wall time as evidence (recommended)?
-10. Drill record as one commit on default per drill (~1.15 MB)?
+10. ~~Drill record~~ superseded by §9 (delete the drill by making boot one path).
