@@ -194,3 +194,45 @@ Root's focused tests:
 - `seon.db-test/durable-pull-digests-replay-without-retaining-read-results`
 
 Foreign boundary and installation limits remain as above.
+
+## Arity gate: reuse Datahike's exact attribute revisions
+
+`arity-base` now first looks up the base with the raw database's connection,
+generation, conservative revision and the gate's selected attribute revisions.
+These are Datahike's own change-tracking identities, including speculative
+values (`datahike.db/speculative-cache-context` and
+`datahike.query/source-context-unchanged?`). Temporal/detached values retain
+the content fallback. Commit and datom-content caches remain for cross-lineage
+reuse; report validation seeds both the content and revision entries.
+No contract or validation is skipped.
+
+Previously each speculative lookup materialized and compared all D arity
+datoms even on a cache hit. Repeated unchanged lookups now take O(A), where A
+is the fixed set of gate attributes, and scan zero datoms. A new lineage or
+changed arity report still builds a content key once; this does not claim that
+every changed write is O(delta). Alias entries conservatively charge the
+base's weight again, so the bounded cache can evict earlier; retained memory
+was not measured.
+
+MCP scratch `scratch.astra.arity`, one immutable `db/with` value with no tx
+data, 125,701 relevant datoms. Final warm 1/10/100 lookup timings:
+2.801→0.021, 26.522→0.052, 269.779→0.235 ms; complete bases equal.
+Reproduction body: `tmp/astra-algorithmic-fixes-20260928/arity-probe.clj`.
+This optimizes writer lookup reuse, not publication/boot/arming machinery;
+no additional drill or test request was started for this slice.
+
+Final archive `682edab18` plus only db source/test: lint 0 errors, 1,725
+warnings, 6.944 s; contracts 498 files, the same 10 foreign script findings,
+zero source/test findings, 4.853 s. An earlier check took 34.624 s while drills
+were active; that is contention evidence, not warm operation latency.
+Source/test delta: +51/−8 lines.
+
+Root's focused tests:
+
+- `seon.db-test/repeated-speculative-arity-reads-do-not-rescan-program-datoms`
+  (new, exact zero key scans at 1/10/100 repeated reads, equal bases).
+- `seon.db-test/a-write-seeds-its-final-values-arity-base`
+- `seon.db-test/a-report-touching-no-function-reuses-the-committed-arity-comparison`
+- `seon.db-test/arity-components-and-callers-are-checked-in-the-final-state`
+
+Foreign boundary and installation limits remain as above.

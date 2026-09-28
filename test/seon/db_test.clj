@@ -2083,6 +2083,25 @@
              (is (some #{expected} (vals entity)))
              (is (= basis (db/basis-t (db/db connection)))))))))))
 
+(deftest repeated-speculative-arity-reads-do-not-rescan-program-datoms
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           speculative (db/with database [])
+           query-fn (partial @#'db/storage-q-in (db/carried-projection database))
+           expected (@#'db/arity-base query-fn database)
+           first-read (@#'db/arity-base query-fn speculative)]
+       (is (false? (get-in speculative [:cache-context :datahike.cache/committed?])))
+       (is (= expected first-read))
+       (doseq [n [1 10 100]]
+         (let [[values calls]
+               (test-support/armed-calls
+                '#{seon.db/arity-content-key}
+                #(mapv (fn [_] (@#'db/arity-base query-fn speculative)) (range n)))]
+           (is (every? #(= expected %) values))
+           (is (zero? (get calls 'seon.db/arity-content-key))
+               "an unchanged speculative read set never builds a whole-program key")))))))
+
 (deftest a-write-seeds-its-final-values-arity-base
   ;; CLASS: whole-program rederivation per branch. A fork of a just-written head
   ;; (a publication's scratch branch) read the head's arity base, which no report

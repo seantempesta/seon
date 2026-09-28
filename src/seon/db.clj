@@ -4450,6 +4450,21 @@
                                         [])])
                          arity-attributes)])
 
+(defn- arity-revision-key
+  "Datahike's exact change-tracking identity for the gate's read attributes.
+  Raw committed and speculative values carry it; temporal/detached values do
+  not. The generation and conservative revision fence unknown/schema changes
+  (datahike.db/speculative-cache-context; query/source-context-unchanged?)."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:maybe [:tuple :qualified-keyword :map :map]]]}
+  [database]
+  (let [context (when (instance? DB database) (:cache-context database))]
+    (when (and (:datahike.cache/connection-id context) (:datahike.cache/generation context))
+      [::arity-revisions
+       (select-keys context [:datahike.cache/connection-id :datahike.cache/generation
+                            :datahike.cache/conservative-revision])
+       (select-keys (:datahike.cache/attribute-revisions context) arity-attributes)])))
+
 (defn- arity-base
   "The arity gate's whole-program input for a value, memoized by the datoms it
   reads: edges, bounds, the comparison, and the edge sets indexed by caller and
@@ -4482,10 +4497,13 @@
                             key-datoms (arity-key-datoms content-key)]
                         (seon.cache/lookup ::arity-base content-key
                                            (fn [base] (arity-base-weight base key-datoms)) derive))
-          {:datahike.cache/keys [committed? commit-id]} (:cache-context database)]
-      (if (and committed? commit-id)
-        (seon.cache/lookup ::arity-commit commit-id (fn [base] (arity-base-weight base 0)) by-content)
-        (by-content)))))
+          {:datahike.cache/keys [committed? commit-id]} (:cache-context database)
+          held #(if (and committed? commit-id)
+                  (seon.cache/lookup ::arity-commit commit-id (fn [base] (arity-base-weight base 0)) by-content)
+                  (by-content))]
+      (if-let [revision (arity-revision-key database)]
+        (seon.cache/lookup ::arity-revision revision (fn [base] (arity-base-weight base 0)) held)
+        (held)))))
 
 (defn- advanced-arity-base
   "The final value's base from its `:db-before` base: `removed` edges leave,
@@ -4580,10 +4598,16 @@
                 ;; the prior base): a later write whose `:db-before` holds
                 ;; these datoms (a fork of this head) hits.
                 (let [content-key (arity-content-key after)
-                      key-datoms (arity-key-datoms content-key)]
-                  (seon.cache/lookup ::arity-base content-key
-                                     (fn [base] (arity-base-weight base key-datoms))
-                                     #(advanced-arity-base base removed affected comparison)))
+                      key-datoms (arity-key-datoms content-key)
+                      advanced (seon.cache/lookup ::arity-base content-key
+                                                  (fn [base] (arity-base-weight base key-datoms))
+                                                  #(advanced-arity-base base removed affected comparison))]
+                  ;; The next writer value keeps these precise revisions even
+                  ;; without a committed id. Do not rebuild its datom key.
+                  (when-let [revision (arity-revision-key after)]
+                    (seon.cache/lookup ::arity-revision revision
+                                      (fn [base] (arity-base-weight base 0))
+                                      (constantly advanced))))
                 comparison))))))
 
 (defn- prepared-arity-bounds
