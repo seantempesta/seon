@@ -246,6 +246,13 @@ root.
 
 ## Failure and execution
 
+- **Nothing crashes.** No evaluation, reply, turn, page, tool call, test run or boot step ever ends in an uncaught
+  exception. A function that can fail declares each failure as a named alternative of its output union and RETURNS it
+  as an error value that says what went wrong and how to fix it. `throw` is reserved for internal control flow that
+  its own boundary converts to that value in the same function or its declared caller. Every entrant boundary (the
+  one-path fold, MCP, the web handler, Flow procs, schedule handlers, boot, the test runner) converts any exception
+  that still reaches it into the one error value, records it as a fault, and delivers it as data beside whatever value
+  exists. A throw that escapes to an entrant is a defect of its producer: fix it there and add its union alternative.
 - **Errors are ordinary values of one shape.** An error is one flat map under one named extension of
   `:seon.error/base`: the producer's fields, message, source location and the whole cause chain (class, message,
   `ex-data` per link); a refusal adds operation/member, expected shape, offending value and fix. Arities enumerate
