@@ -545,7 +545,7 @@
     selection :seon.program/identities root :seon.fn/root}]
   (let [prepared (source/prepare-merge! context (:seon.store/store context) branch (into #{} (map first) proved)
                                         selection root)]
-    (cond-> prepared (:seon.source/candidate prepared) (assoc :seon.task/merge merge-task))))
+    (cond-> prepared (:seon.source/candidate prepared) (assoc :seon.task/merge merge-task :seon.task/branch branch))))
 
 (defn accept-merge!
   "Merge exactly the program `prepare-merge!` tested into my cluster
@@ -553,16 +553,18 @@
   and answer the accepted merge `write-back!` takes: the merged identities,
   the commit before it, its merge commit and the run. Refuses when a proof is
   not green, or when a merged declaration itself changed since the prepare,
-  naming it with both digests. The tested branch is unlinked
-  afterwards as detached io work, off this call. Only the cluster's own custody
-  (root) accepts.
+  naming it with both digests. The merge closes the proposing branch: the
+  tested branch and the proposal's own branch (its hosted agent first,
+  `my.agent/retire-branch!`) retire afterwards as detached io work, off this
+  call. Only the cluster's own custody (root) accepts.
 
   Example:
   (def accepted (my.program/accept-merge! proposal))"
   {:malli/schema [:=> [:cat :my.program/accept-request]
                   [:or :seon.source/accepted :seon.source/test-evidence-error :seon.error/value
                    :my.program/custody-refused-error]]}
-  [{context :my.program/context tested :seon.source/candidate merge-task :seon.task/merge :as proposal}]
+  [{context :my.program/context tested :seon.source/candidate merge-task :seon.task/merge
+    proposing :seon.task/branch :as proposal}]
   (or (cluster-custody 'my.program/accept-merge! context)
       (let [store (:seon.store/store context)
             accepted (source/accept-merge! context store (dissoc proposal :my.program/context))
@@ -570,7 +572,13 @@
             closed (when (:seon.source/commit-id accepted)
                      (task/decide! (:seon.db/connection context) merge-task :accepted))
             environment (:seon.env/environment context)
-            retire! #(registry/retire-branch! {:seon.store/store store :seon.store/branch tested})]
+            retire! #(do (registry/retire-branch! {:seon.store/store store :seon.store/branch tested})
+                         ;; The agent's branch retires when its merge closes (AGENTS.md, merge).
+                         (when proposing
+                           (let [retired ((requiring-resolve 'my.agent/retire-branch!)
+                                          {:seon.store/branch proposing}
+                                          (select-keys context [:seon.store/store :seon.db/connection :seon.agent/routing]))]
+                             (when (:seon.error/at retired) (throw (ex-info (:seon.error/message retired) retired))))))]
         ;; Unlinking takes the store's roster permit, which a running
         ;; collection holds for seconds: the launcher's io work, off this call.
         (when (and (:seon.source/commit-id accepted)

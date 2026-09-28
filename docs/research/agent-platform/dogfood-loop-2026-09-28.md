@@ -1,6 +1,6 @@
 ---
 type: research
-status: in progress — loop blocked at step 2 until default runs HEAD (≥ bb47fd6d1); merge and write-back blockers fixed
+status: in progress — loop 1 blocked at step 2 on a held-file defect (seon.turn.batch/span-of), patch with regression handed to root
 created: 2026-09-28
 lane: dogfood-loop-opus
 jvm: default pid 9778, program 29bdfce8d (22 commits behind HEAD 90828bb93)
@@ -41,6 +41,26 @@ Evidence of the previous attempt: [repl-dogfood-2026-09-27.md](repl-dogfood-2026
   :note "a task is not an issue: propose-merge! records a task proposal, but prepare-merge! took :seon.issue/id and refused \"The issue is absent on the candidate\". Fixed below (B1)."}]
 ```
 
+### Loop 1, attempt 2 (default 088497b3e, S4a and 0db8bf035 installed)
+
+```clojure
+[{:step 1 :form "(branch create loop1-uncut-total)" :ms nil :tok 60 :verdict :ok}
+ {:step 2 :form "(totals of prepare over \"abcdef\"@0 @2, \"abc\"@3, \"\"@0)" :ms 17 :tok 90 :verdict :ok :note "[nil nil nil nil]: reproduced"}
+ {:step 3 :form "(seon.task/assign! {... \"36aa005ffd4e\" mcp/loop1-uncut-total :loop1-uncut-total})" :ms 287 :tok 70
+  :verdict :ugly :note "answers #object[datahike.db.TxReport]: no entity, no next step"}
+ {:step 4 :form "(defn- tree ... +total)" :ms 18 :tok 330 :verdict :blocker
+  :note "returns the Var, writes NO entity (branch digest = cluster digest); fault: seon.turn.batch/span-of refused nil. clj-kondo records usages inside macro expansions (-> of cond->, if of case) with no position; join-write scans every usage for an expanded definition (defn, defn-), so ANY definition whose body uses cond->/case is not persisted, and its whole batch with it."}
+ {:step 5 :form "(defn p-solo ...) with MCP namespace user" :ms 0 :tok 40 :verdict :confusing
+  :note "the Var landed in seon.render.value: the hosted agent keeps its namespace across calls and the MCP namespace argument is ignored while the reply says user (09-27 #15, still open)"}
+ {:step 6 :form "(defn ...) in a namespace that does not exist yet" :ms 2 :tok 80 :verdict :confusing
+  :note "refused 'Source submission requires an agent with an assigned namespace'; the agent has one, the target namespace is new"}
+ {:step 7 :form "(my.program/ns-unmap! 'seon.render.value/p-solo)" :ms 378 :tok 150 :verdict :confusing
+  :note "succeeded, but the reply labels the value :error with exception true; 69,414 armed calls for one deletion"}]
+```
+
+Loop 1 so far: 13 SCI evaluations and 1 JVM probe, about 6k tokens read, 4 replies needed a second evaluation to
+understand, 0 manual steps outside the REPL (the fix itself went to a patch because its file is held).
+
 ## 2. Blockers and fixes
 
 | # | Step | Blocker | Root cause | Fix |
@@ -50,6 +70,9 @@ Evidence of the previous attempt: [repl-dogfood-2026-09-27.md](repl-dogfood-2026
 | B2 | 4 (accept) | accept refused unless every reaching member was green | `accept-merge!` gated the whole run; AGENTS: "reaching-test counts are shown, not gated" | accept gates on the proofs; prepare names the run's red members as `:seon.source/red` |
 | B3 | 4 (close) | an accepted proposal stays open forever | no writer for `:seon.task/outcome` | `seon.task/decide!`; `my.program/accept-merge!` records `:accepted` |
 | B4 | 5 (write-back) | every real change refuses `:one-file` | a function and the test proving it live in two files; write-back proved exactly one | `proven-files` groups the changes by file and proves each; `write-back!` installs each and answers one entry per file (`:seon.source/files`) |
+
+| B5 | 2 (prototype) | a `defn` whose body uses `cond->`/`case` returns its Var but writes no entity | `seon.turn.batch/span-of`'s output contract demanded ints; positionless expansion usages are real analyzer data | contract admits the positionless span (`tmp/dogfood-loop-opus/span-of-positionless-usages.patch`, with regression `host-test/a-definition-whose-body-expands-macros-persists`; batch.clj is one-path-impl-2's) |
+| B6 | 4 (close) | the agent's branch lives on after its merge | nothing retired it | `my.program/accept-merge!` retires the proposing branch through `my.agent/retire-branch!` with the tested one |
 
 Regressions: `seon.cluster.host-test/a-proposal-waits-for-its-assigned-tasks-proofs-then-reaches-root` (extended: root
 prepares the proposal it read; a decided merge task is closed), `seon.cluster.write-back-test/a-merge-writes-each-change-into-its-own-file`
