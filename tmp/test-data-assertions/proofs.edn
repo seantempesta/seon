@@ -138,4 +138,8 @@
  :my-plan-test
  {an-empty-plan-renders-in-both-projections {:head [6 0 0] :broken [5 1 0]}
   the-whole-plan-renders-once-in-both-projections {:head [6 0 0] :broken [5 1 0] :note "first conversion red: the plan is a class token, not an id"}
-  the-example-fixture-shape-installs-and-renders {:head [12 0 0] :broken [11 1 0]}}}
+  the-example-fixture-shape-installs-and-renders {:head [12 0 0] :broken [11 1 0]}}
+ :db-test-patch
+ {"phase2-db-test.patch"
+  {unique-rejection-names-the-existing-owner-as-data {:head [10 0 0] :broken [7 3 0] :note "red on 52e163bee before conversion: the rejection message is the raw Datahike exception (task a-unique-rejection-message-is-the-raw-exception); the owner is asserted as data"}
+   a-write-naming-another-clusters-branch-is-refused-naming-both {:head [8 0 0] :note "removal only: the branches are asserted as data"}}}}

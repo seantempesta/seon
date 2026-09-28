@@ -87,4 +87,14 @@
              :kind :function
              :intent "seon.db/q of [:find [?a ...] :in $ ?e :where [?e ?a]] with ?e 34746 (a task) exceeds the 65,536 query-work bound in 9.7 ms, and [?e ?a ?t] with a collection of 259 ref attributes does too, where (seon.db/datoms db :eavt 34746) reads its 12 datoms in 0.12 ms (default, 2026-09-28): the pattern does not use EAVT when only the entity is bound, so the cost grows with the entity id. seon.render.walk reads frontier datoms by EAVT instead. Done when a query binding only the entity reads EAVT (in the Datahike fork's planner) or refuses by name, with a regression."
              :must-read #{seon.db/q}
-             :evidence #{"tmp/related_data/proof.clj"}}]
+             :evidence #{"tmp/related_data/proof.clj"}}
+ #:seon.task{:name "a-unique-rejection-message-is-the-raw-exception"
+             :kind :function
+             :intent "A unique-constraint rejection from seon.db/transact! carries as its :seon.error/message Datahike's printed exception (\"clojure.lang.ExceptionInfo: Cannot add #datahike/Datom [...] because of unique constraint ...\"), and render-rejection-ai shows that text; seon.db-test/unique-rejection-names-the-existing-owner-as-data asserted the message named the owner and no ExceptionInfo and was red on 52e163bee (test-data-assertions proofs, 2026-09-28). The conflict owner is data under :seon.error/problems; the message should say what was refused and how to fix it, not print the cause (the cause belongs in :seon.error/chain)."
+             :must-read #{seon.db/transact! seon.db/render-rejection-ai}
+             :evidence #{"tmp/test-data-assertions/proofs.edn"}}
+ #:seon.task{:name "the-missing-connection-refusal-has-no-fix-key"
+             :kind :function
+             :intent "seon.db/missing-connection-error answers a refusal whose fix (pass the database value, or (seon.cluster.boot/connection \"default\") at a development REPL) exists only inside :seon.error/message prose, so a test or agent can read it only as text. A refusal adds its fix as :seon.error/fix (AGENTS.md, errors are ordinary values of one shape)."
+             :must-read #{seon.db/missing-connection-error}
+             :evidence #{"tmp/test-data-assertions/proofs.edn"}}]

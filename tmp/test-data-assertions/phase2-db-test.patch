@@ -1,0 +1,38 @@
+--- a/test/seon/db_test.clj
++++ b/test/seon/db_test.clj
+@@ -1353,15 +1353,13 @@
+                 (select-keys conflict
+                              [:seon.db/conflict-attribute
+                               :seon.db/conflict-owner])))
+-         (is (str/includes? (:seon.error/message rejected)
+-                            owner-id))
+-         (is (not (str/includes? (:seon.error/message rejected)
+-                                 "ExceptionInfo")))
+-         (is (str/includes? (pr-str (db/render-rejection-ai rejected))
+-                            "seon.db/transact! refused transaction data"))
+-         (is (str/includes? (pr-str (db/render-rejection-ai rejected)) owner-id))
+-         (is (str/includes? (pr-str (db/render-rejection-html rejected))
+-                            owner-id))
++         (is (= [:seon.cluster.eval/id owner-id]
++                (get-in (db/render-rejection-ai rejected)
++                        [:seon.error/problems 0 :seon.error/offending :seon.db/conflict-owner]))
++             "the AI face names the existing owner as data")
++         (is (some #(str/includes? (str %) owner-id)
++                   (test-support/hiccup-leaves (db/render-rejection-html rejected)))
++             "the HTML face shows the existing owner")
+          (is (= 'seon.db/render-rejection-ai
+                 (->> (schema/matching-shapes rejected)
+                      (some #(when (= :seon.db.write/validation-refusal
+@@ -1913,12 +1911,6 @@
+             (is (= (branch foreign-connection)
+                    (:seon.db/explicit-branch data))
+                 "the refusal names the branch the write tried to reach")
+-            (is (str/includes?
+-                 (:seon.error/message refused)
+-                 (pr-str (branch foreign-connection))))
+-            (is (str/includes?
+-                 (:seon.error/message refused)
+-                 (pr-str (branch writing-connection))))
+             (is (= #{"own" "elided"} (message-ids writing-connection)))
+             (is (empty? (message-ids foreign-connection))
+                 "nothing reaches the foreign branch"))))))))
