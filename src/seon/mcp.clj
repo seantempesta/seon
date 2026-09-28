@@ -136,19 +136,31 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- instance
-  "The running instance `cluster-name` names (default: the only one, else
-  \"default\"), or a refusal naming the running ones. Its
+  "The instance of the roster `running` (this JVM's running instances by
+  name) that `cluster-name` names (default: the only one, else
+  \"default\"), or a refusal naming the running ones, or one saying it is
+  still starting or already stopping (not ready to evaluate). Its
   `:seon.cluster/name` is the one its handle carries (what configuration is
   read under); `:seon.mcp/cluster` is the name it runs under."
-  {:malli/schema [:=> [:cat [:maybe :string]] :map]}
-  [cluster-name]
-  (let [running @runtime/running-instances
-        chosen (or cluster-name (if (= 1 (count running)) (key (first running)) "default"))]
-    (if-let [found (get running chosen)]
-      (assoc found :seon.mcp/cluster chosen
-             :seon.cluster/name (get-in found [:seon.turn.loop/cluster :seon.cluster/name] chosen))
+  {:malli/schema [:=> [:cat [:map-of :string :map] [:maybe :string]] :map]}
+  [running cluster-name]
+  (let [chosen (or cluster-name (if (= 1 (count running)) (key (first running)) "default"))
+        found (get running chosen)]
+    (cond
+      (nil? found)
       (refused (str "No cluster " chosen " is running in this JVM.") :seon.mcp/cluster
-               (vec (sort (keys running))) chosen))))
+               (vec (sort (keys running))) chosen)
+      ;; the roster holds a start's partial instance from its first layer and
+      ;; a stopping one until its exit: neither can evaluate yet or still
+      (or (:seon.boot/stopping found) (not (contains? found :seon.boot/ready-ms)))
+      (refused (str "Cluster " chosen " is not ready: it is "
+                    (if (:seon.boot/stopping found) "stopping" "starting")
+                    " (layers reached: " (mapv :seon.boot/layer (:seon.boot/layers found))
+                    "). Retry when bin/seon status reports it ready.")
+               :seon.boot/ready-ms :seon.boot/ready-ms chosen)
+      :else
+      (assoc found :seon.mcp/cluster chosen
+               :seon.cluster/name (get-in found [:seon.turn.loop/cluster :seon.cluster/name] chosen)))))
 
 (defn- execution
   "Where `agent-id` runs: an agent with no home branch (root) or homed on the
@@ -290,7 +302,7 @@
   {:malli/schema [:=> [:cat :map] [:tuple [:vector :string] :boolean]]}
   [{code :seon.mcp/code agent-id :seon.mcp/agent cluster :seon.mcp/cluster mode :seon.mcp/mode
     start :seon.mcp/namespace}]
-  (let [found (instance cluster)
+  (let [found (instance @runtime/running-instances cluster)
         namespace-name (some-> start symbol)
         custody (when-not (:seon.error/at found)
                   (execution found (or agent-id "root") namespace-name))
@@ -306,7 +318,7 @@
   "`runtime_status`: the cluster's health report through its AI face, printed."
   {:malli/schema [:=> [:cat :map] [:tuple [:vector :string] :boolean]]}
   [{cluster-name :seon.mcp/cluster}]
-  (let [found (instance cluster-name)
+  (let [found (instance @runtime/running-instances cluster-name)
         running-name (:seon.mcp/cluster found cluster-name)
         source (str "(seon.health/report {:seon.boot/cluster-name " (id/printed running-name) "})")]
     (if (:seon.error/at found)
@@ -371,7 +383,7 @@
                (:seon.error/at valid) [[(printed valid request nil nil)] true]
                :else (answer valid))))
     (catch Throwable failure
-      (let [found (try (instance nil) (catch Throwable _ nil))
+      (let [found (try (instance @runtime/running-instances nil) (catch Throwable _ nil))
             receipt (fault-receipt failure found)
             source (str/trim (subs request 0 (min 200 (count request))))]
         ;; the receipt rides the reply beside the error it records

@@ -50,7 +50,8 @@
                      :seon.db.process/id cluster/boot-process-identity})
             request {:seon.turn.loop/cluster handle :seon.agent/routing routing :seon.agent/id agent-id}]
         (support/transacted! connection (support/agent-tx @connection agent-id))
-        (swap! running-instances assoc running {:seon.turn.loop/cluster (assoc handle :seon.agent/routing routing)})
+        (swap! running-instances assoc running {:seon.turn.loop/cluster (assoc handle :seon.agent/routing routing)
+                                                  :seon.boot/ready-ms 0})
         (try
           (body running agent-id connection)
           (finally
@@ -135,3 +136,17 @@
    (fn [running agent-id connection]
      (support/transacted! connection [[:db/add [:seon.agent/id agent-id] :seon.agent/admission-closed-tx "datomic.tx"]])
      (is (true? (get (answer "eval_clj" {"code" "(+ 1 2)" "agent" agent-id "cluster" running}) "isError"))))))
+
+(deftest a-cluster-still-starting-or-stopping-refuses-by-name
+  ;; During a restart the roster holds the start's partial instance (its
+  ;; first layers, no routing yet): an eval answered a bare
+  ;; NullPointerException "Cannot invoke Future.get() because fut is null".
+  ;; It refuses, saying the cluster is not ready.
+  (let [starting {"c" {:seon.boot/layers [{:seon.boot/layer :seon.store/store :seon.boot/at-ms 3}]}}
+        stopping {"c" {:seon.boot/ready-ms 10 :seon.boot/stopping true}}]
+    (is (= :seon.boot/ready-ms (:seon.error/member (#'mcp/instance starting "c")))
+        "a starting instance is refused as not ready")
+    (is (= :seon.boot/ready-ms (:seon.error/member (#'mcp/instance stopping "c")))
+        "a stopping instance is refused as not ready")
+    (is (= "c" (:seon.mcp/cluster (#'mcp/instance {"c" {:seon.boot/ready-ms 10}} "c")))
+        "a ready instance is the one named")))
