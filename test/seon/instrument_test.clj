@@ -35,6 +35,7 @@
             [sci.core :as sci]
             [seon.ai :as ai]
             [seon.ai.tokens :as tokens]
+            [seon.batch]
             [seon.config :as config]
             [seon.cluster :as cluster]
             [seon.fault :as fault]
