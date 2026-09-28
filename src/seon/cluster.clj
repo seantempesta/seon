@@ -1564,6 +1564,9 @@
   each closed over `:seon.schema.projection/schema-dependencies`. A publication
   re-derives exactly the inputs whose stored key differs.
 
+  Shared schema forms are hashed once per declaration world; each file selects
+  those digests. No per-file copy of the shared schema digest map is retained.
+
   # Known issues
   - Cross-file inputs (the symbols a file's calls resolve to, a callee's
     host-bound flag, an invoked attribute's targets, clj-kondo findings over
@@ -1591,9 +1594,11 @@
                       reached)))
         row-shapes (program/shapes-in projection)
         world (cache/lookup
-               ::derivation-world [forms dependencies row-shapes]
+               ::derivation-inputs [forms dependencies row-shapes]
                (constantly (* 4096 (count forms)))
                #(hash-map ::key (id/digest 64 [forms dependencies row-shapes])
+                          ::absent (id/digest 64 [nil])
+                          ::digests (into {} (map (fn [[k form]] [k (id/digest 64 [form])])) forms)
                           ::shapes (closure (into #{} (filter (partial contains? forms))
                                                 (tree-seq coll? seq row-shapes)))))
         kondo [(get (source/loaded-dependencies) "reference-code/clj-kondo")
@@ -1608,13 +1613,9 @@
                      (constantly (+ 512 (* 64 (count start))))
                      #(file-derivation-key
                        code kondo input
-                       (cache/lookup
-                        ::derivation-forms [(::key world) start]
-                        (fn [held] (* 256 (count held)))
-                        (fn []
-                          (into (sorted-map)
-                                (map (fn [k] [k (id/digest 64 [(get forms k)])]))
-                                (into (::shapes world) (closure start)))))))])))
+                       (into (sorted-map)
+                             (map (fn [k] [k (get (::digests world) k (::absent world))]))
+                             (into (::shapes world) (closure start)))))])))
           paths)))
 
 
