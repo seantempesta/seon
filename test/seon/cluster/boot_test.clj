@@ -525,17 +525,17 @@
                                                :seon.operator/managed-root
                                                (or (store/declared-operator-root) (System/getProperty "user.dir"))}))
                elapsed-ms (/ (- (System/nanoTime) started) 1e6)
-               observed (some #(when (= cluster-name (:seon.dev.mcp/cluster %)) %)
+               observed (some #(when (= cluster-name (:seon.health/cluster %)) %)
                               (:seon.operator/clusters response))]
            (is (nil? (:seon.error/at response)))
-           (is (= :faulted (:seon.dev.mcp/health observed)))
+           (is (= :faulted (:seon.health/state observed)))
            (is (nat-int? (:seon.agent/count (boot/readiness (get @runtime/running-instances cluster-name))))
                "an agentless world counts 0 agents, never nil")
-           ;; status prints the observation's AI face; the fixture's fault is the
-           ;; newest, so it is among the face's top entries, named by signature
-           (is (some #{(:seon.error/signature receipt)}
-                     (map :seon.error/signature
-                          (get-in observed [:seon.dev.mcp/open-faults :seon.dev.mcp/top]))))
+           ;; status prints the health report's AI face: the fixture's open
+           ;; fault is counted under its finding schema (the ranked top may
+           ;; hold the live JVM's heavier findings)
+           (is (:seon.error/signature receipt))
+           (is (pos? (get-in observed [:seon.health/counts :seon.problems/open-fault] 0)))
            (println "STATUS-FAULTED" elapsed-ms "ms"))
          (finally (swap! runtime/running-instances dissoc cluster-name)))))))
 

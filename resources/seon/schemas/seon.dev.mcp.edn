@@ -1,16 +1,4 @@
 {:seon.dev.mcp/cluster-degraded :seon.cluster/name
- :seon.dev.mcp/health [:enum :observed :faulted :unknown]
- :seon.dev.mcp/runtime-observation
- [:map {:description "One cluster's whole runtime observation. Its AI face selects the status a reader sees; the value printer clips."
-        :seon.render/ai seon.cluster/runtime-observation-ai}
-  [:seon.dev.mcp/cluster :seon.boot/cluster-name]
-  [:seon.dev.mcp/health :seon.dev.mcp/health]
-  [:seon.cache/status {:optional true} :seon.cache/status]]
- :seon.dev.mcp/runtime-status
- [:map {:description "The selected face of a runtime observation: health, counts and the newest whole entries of each family, each with its total."}
-  [:seon.dev.mcp/cluster :seon.boot/cluster-name]
-  [:seon.dev.mcp/health :seon.dev.mcp/health]
-  [:seon.cache/status {:optional true} :seon.cache/status]]
  :seon.dev.mcp/cluster-degraded-error [:map {:seon.render/ai seon.error/mcp-prose :seon.render/html seon.error/render-html :error/message "must identify the cluster whose MCP surface is degraded"} [:seon.dev.mcp/cluster-degraded :seon.dev.mcp/cluster-degraded] [:seon.error/message :seon.error/message]]
  :seon.dev.mcp/value-not-found :seon.blob/digest
  :seon.dev.mcp/value-not-found-error [:map {:seon.render/ai seon.error/mcp-prose :seon.render/html seon.error/render-html :error/message "must identify the value digest that MCP could not find"} [:seon.dev.mcp/value-not-found :seon.dev.mcp/value-not-found] [:seon.error/message :seon.error/message]]

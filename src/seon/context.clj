@@ -24,8 +24,8 @@
   `get`, never `contains?`). Each owns both its facts-query and its
   guidance — the colocation rule — so the query and the prose that
   explains it can never drift. The stored block symbol is the
-  authority; a projection may later move beside its facts owner
-  (`seon.problems/block` already models that) with only a data edit.
+  authority; a projection may later move beside its facts owner with only
+  a data edit.
 
   THE CAPTURE is ruling 4: the exact prompt text, the rendered database
   basis, the ordered contribution records and the trusted-input
