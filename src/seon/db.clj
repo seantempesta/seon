@@ -557,16 +557,32 @@
   what the read returned. Patterns bound per pulled entity grow with the
   result: root's opening `(seon.error/for-agent (seon.db/db) \"root\")` kept
   30,729, stored as 4.5 M characters and decoded on every turn (default,
-  2026-09-27). Past the bound the read keeps its attributes and revision, the
-  evidence a read over `:all` already has: freshness replays or regenerates
-  the read and the shown-value comparison decides."
+  2026-09-27). Past the bound, patterns bound to one entity collapse to that
+  entity; a read still past it keeps its request and the digest of its answer,
+  which `read-evidence-current?` replays, so the plan stays exactly as precise
+  as its read, never \"any write of these attributes\"."
   {:malli/schema [:=> [:cat :map] :nil]}
   [evidence]
   (when *read-evidence-sink*
-    (swap! *read-evidence-sink* conj
-           (cond-> evidence
-             (< read-index-pattern-bound (count (:seon.db/read-index-patterns evidence)))
-             (dissoc :seon.db/read-index-patterns))))
+    (let [patterns (:seon.db/read-index-patterns evidence)
+          ;; Patterns bound to one pulled entity collapse to that entity: the
+          ;; root pull's 1,280 patterns name one entity (r8, root-pull-test).
+          collapsed (when (< read-index-pattern-bound (count patterns))
+                      (into [] (comp (map #(if-let [entity (:seon.db/pattern-entity %)]
+                                             {:seon.db/pattern-entity entity}
+                                             %))
+                                     (distinct))
+                            patterns))]
+      (swap! *read-evidence-sink* conj
+             (cond
+               (nil? collapsed) evidence
+               (<= (count collapsed) read-index-pattern-bound)
+               (assoc evidence :seon.db/read-index-patterns collapsed)
+               ;; Still past the bound: the plan keeps its read instead (the
+               ;; request and the digest of its answer), which currency replays.
+               :else (-> evidence
+                         (dissoc :seon.db/read-index-patterns)
+                         (assoc ::replay-past-bound true))))))
   nil)
 
 (defn- append-database-evidence!
@@ -991,8 +1007,9 @@
                source-position :seon.db/source-argument-position
                plan :datahike.read/dependency-plan
                :as entry}]
-           (let [retain? (:seon.db/retain-read-results? options)
-                 request (when retain? (:seon.db/read-request entry))
+           (let [past-bound? (::replay-past-bound entry)
+                 retain? (:seon.db/retain-read-results? options)
+                 request (when (or retain? past-bound?) (:seon.db/read-request entry))
                  stable (when (and request (find entry :seon.db/read-result))
                           (stable-value (:seon.db/read-result entry)))
                  [replayable? stable-result]
@@ -1021,7 +1038,9 @@
              result-digest
              (assoc :seon.db/read-result-digest result-digest)
 
-             replayable?
+             ;; A read kept past the pattern bound is replayed and compared by
+             ;; its digest; its result is never copied into the plan.
+             (and replayable? (not past-bound?))
              (assoc :seon.db/read-result stable-result))))
          captured)))
 
@@ -1232,10 +1251,15 @@
         installed (dbi/-schema database)
         history? (fn [attribute] (not (:db/noHistory (get installed attribute))))
         changed (changed-read-attributes revision current)
+        ;; An entity-only pattern (a pulled entity collapsed past the bound,
+        ;; `append-read-evidence!`) reads every attribute of its entity, so it
+        ;; covers any changed attribute and is always checked.
+        entity-only? #(and (:seon.db/pattern-entity %) (nil? (:seon.db/pattern-attribute %)))
         checked (if changed
-                  (let [covered (into #{} (keep :seon.db/pattern-attribute) patterns)]
-                    (when (and (every? covered changed) (every? history? changed))
-                      (filterv #(contains? changed (:seon.db/pattern-attribute %)) patterns)))
+                  (let [covered (into #{} (keep :seon.db/pattern-attribute) patterns)
+                        whole-entities? (some entity-only? patterns)]
+                    (when (and (or whole-entities? (every? covered changed)) (every? history? changed))
+                      (filterv #(or (entity-only? %) (contains? changed (:seon.db/pattern-attribute %))) patterns)))
                   (when (every? (fn [pattern]
                                   (when-let [attribute (:seon.db/pattern-attribute pattern)]
                                     (history? attribute)))
@@ -1719,7 +1743,18 @@
                    @cell))]
     (or
      (when view-key (cached value-projection-cache [@builder view-key]))
-     (when committed (cached projection-cache [::commit (:datahike.value/commit-id committed) @builder]))
+     (when committed
+       ;; A commit hit on a new connection (a fresh branch of a seen commit)
+       ;; also names the cell by this connection's revision key, so the
+       ;; speculative values the branch derives (`with`, a transaction
+       ;; function's argument) find their basis without reading the
+       ;; declaration datoms.
+       (when-let [cell (cache/lookup projection-cache [::commit (:datahike.value/commit-id committed) @builder])]
+         (cache/hit projection-cache [::commit (:datahike.value/commit-id committed) @builder])
+         (when (:datahike.cache/connection-id (:cache-context source))
+           (cache/lookup-or-miss projection-cache (assoc (projection-cache-key source) ::builder @builder)
+                                 (fn [_] cell)))
+         @cell))
      (cond
       (not (declares-program? source))
       (construction-projection database)
@@ -4370,7 +4405,7 @@
   (let [storage-q (partial storage-q-in projection)
         before (:db-before report)
         after (:db-after report)
-        tx-data (logical-datoms report)]
+        tx-data (logical-datoms projection report)]
     (if-not (every? #(get (dbi/-schema before) %) arity-attributes)
       (let [edges (call-edges storage-q after)
             bounds (declared-arity-bounds storage-q after)]

@@ -43,7 +43,7 @@
            warnings (java.io.StringWriter.)
            lookup [:seon.agent/id "p1-carriage"]
            namespace-lookup [:seon.ns/name 'seon.db.carriage]]
-       (is (some? (:db-after report)) (pr-str report))
+       (is (some? (:db-after report)) (:seon.error/message report))
        (is (= "p1-carriage"
               (:seon.ns/doc (db/pull (:db-after report) [:seon.ns/doc]
                                     [:seon.ns/name 'seon.db.carriage]))))
@@ -113,17 +113,17 @@
                            database 'seon.db.carriage)))
               (is (some #(= 'seon.db.carriage (:v %))
                         (db/datoms database :avet :seon.ns/name))))))
-         (testing "missing input refuses without reconstructing declarations"
-           (let [failure (binding [*err* warnings]
-                           (schema/call-with-projection-state
-                            (atom {}) #(db/pull raw [:seon.agent/id] lookup)))]
-             (is ((schema/projection-validator projection :seon.schema/validation-refusal)
-                  failure))
-             (is (= :seon.schema/projection (:seon.schema/expected-value failure)))
-             (is (= {:seon.db/operation 'seon.db/pull}
-                    (:seon.schema/refused-value failure)))
-             (is (= 1 (count (str/split-lines (str warnings)))))
-             (is (str/includes? (str warnings) "projection-fallback"))))
+         ;; A committed value holding declaration rows derives its own
+         ;; projection (ca9c40639), and a pull that reads no vector storage
+         ;; needs none (18ce1b1a4): the raw value answers, with no fallback.
+         ;; A value holding NO declaration rows still refuses by name
+         ;; (`seon.db/construction-projection`).
+         (testing "a raw committed value answers from its own declarations"
+           (let [answer (binding [*err* warnings]
+                          (schema/call-with-projection-state
+                           (atom {}) #(db/pull raw [:seon.agent/id] lookup)))]
+             (is (= {:seon.agent/id "p1-carriage"} answer))
+             (is (not (str/includes? (str warnings) "projection-fallback")))))
          (testing "fixture connection carriage survives a fresh worker thread"
            (let [completed (atom nil)
                  worker (Thread.
@@ -139,7 +139,7 @@
                                (reset! completed failure)))))]
              (.start worker)
              (let [result (test-support/await-event! completed ::worker-carriage some?)]
-               (is (nil? (:error result)) (pr-str result))
+               (is (nil? (:error result)) (str (:error result)))
                (is (identical? projection (:projection result)))
                (is (identical? projection (:report-projection result))))))))]
          (is (= {'seon.schema/projection-from-database 0 'seon.schema.edn/read-schema-resource 0} calls)

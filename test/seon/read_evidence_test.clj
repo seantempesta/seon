@@ -147,7 +147,11 @@
 
 (deftest a-plan-references-its-read-and-never-copies-the-result
   ;; Root's opening fault read kept one pattern per pulled datom: 30,729,
-  ;; stored as 4.5 M characters and decoded on every turn (2026-09-27).
+  ;; stored as 4.5 M characters and decoded on every turn (2026-09-27). Past
+  ;; the bound (128) a read stays precise: patterns bound to one entity
+  ;; collapse to it, and a read still past it keeps its request and the digest
+  ;; of its answer, which currency replays; never "any write of these
+  ;; attributes" (the root pull, r8).
   (test-support/with-database
    (fn [connection]
      (test-support/transacted!
@@ -155,19 +159,31 @@
       (into (test-support/agents-tx @connection ["juniper"])
             (map (fn [n] {:seon.message/id (str "m" n) :seon.message/content (str "c" n)
                           :seon.message/to [:seon.agent/id "juniper"]}))
-            (range 80)))
-     (let [captured (atom [])
-           result (binding [db/*read-evidence-sink* captured]
-                    (db/q '[:find [(pull ?m [:seon.message/id :seon.message/content]) ...]
-                            :in $ ?recipient :where [?m :seon.message/to ?recipient]]
-                          @connection [:seon.agent/id "juniper"]))
-           evidence (db/read-evidence @captured)
-           sources (mapcat #(get-in % [:datahike.read/dependency-plan
-                                       :datahike.query.dependency/sources])
-                           evidence)]
-       (is (= 80 (count result)))
-       (is (seq sources))
-       (is (not-any? :seon.db/read-index-patterns sources) (pr-str sources))
-       (is (true? (db/read-evidence-current? @connection evidence)))
+            (range 200)))
+     (let [read-of (fn [ids]
+                     (let [captured (atom [])
+                           result (binding [db/*read-evidence-sink* captured]
+                                    (db/pull-many @connection [:seon.message/id :seon.message/content]
+                                                  (mapv #(vector :seon.message/id (str "m" %)) ids)))]
+                       [result (db/read-evidence @captured)]))
+           sources (fn [evidence] (mapcat #(get-in % [:datahike.read/dependency-plan
+                                                      :datahike.query.dependency/sources])
+                                          evidence))
+           [collapsed-result collapsed] (read-of (range 80))
+           [replayed-result replayed] (read-of (range 200))]
+       (is (= 80 (count collapsed-result)))
+       (is (every? #(= [:seon.db/pattern-entity] (keys %))
+                   (mapcat :seon.db/read-index-patterns (sources collapsed)))
+           "160 attribute patterns collapse to the 80 pulled entities")
+       (is (= 200 (count replayed-result)))
+       (is (not-any? :seon.db/read-index-patterns (sources replayed)))
+       (is (every? :seon.db/read-request replayed) "past the bound the plan keeps its read")
+       (is (every? :seon.db/read-result-digest replayed))
+       (is (not-any? :seon.db/read-result replayed) "and never the answer itself")
+       (test-support/transacted! connection [{:seon.message/id "unrelated" :seon.message/content "x"
+                                              :seon.message/to [:seon.agent/id "juniper"]}])
+       (is (true? (db/read-evidence-current? @connection collapsed)) "an unrelated entity's write")
+       (is (true? (db/read-evidence-current? @connection replayed)) "an unrelated entity's write")
        (test-support/transacted! connection [[:db/add [:seon.message/id "m0"] :seon.message/content "changed"]])
-       (is (false? (db/read-evidence-current? @connection evidence)))))))
+       (is (false? (db/read-evidence-current? @connection collapsed)))
+       (is (false? (db/read-evidence-current? @connection replayed)))))))
