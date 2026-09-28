@@ -403,8 +403,8 @@
    (fn [connection]
      (db/call-with-custody {:seon.db/connection connection}
       (fn []
-       (let [changed 'seon.render.value/datum
-             caller 'seon.render.value/bounded-text
+       (let [changed 'seon.print.value/datum
+             caller 'seon.print.value/bounded-text
              unloaded-changed 'seon.cluster.reload-measure/measured-request
              unloaded 'seon.cluster.reload-measure/-main
              before (db/db connection)
