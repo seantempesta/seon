@@ -106,7 +106,9 @@
                  [:map [:seon.test.run/provenance :seon.test.run/provenance]]],
                 :run
                 [:map
-                 #:seon.db{:attributes true :seon.program/partition :seon.data}
+                 {:seon.db/attributes true :seon.program/partition :seon.data
+                  :seon.render/ai seon.render.test/render-run-ai
+                  :seon.render/form seon.render.test/render-run-form}
                  [:seon.test.run/published-base-digest {:optional true} :seon.test.run/published-base-digest]
                  [:seon.test.run/overlay-input-digest {:optional true} :seon.test.run/overlay-input-digest]
                  [:seon.test.run/callers-at-head {:optional true} :seon.test.run/callers-at-head]

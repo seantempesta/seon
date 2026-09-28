@@ -452,6 +452,19 @@
                                                  :seon.render/value {:seon.test/sym cheap}})]
                   (is (= :seon.test.host/in-process (get-in ai [:seon.render.test/host :seon.test/host]))))))))))))
 
+(deftest a-run-renders-its-outcomes-counted-and-its-reds-by-name
+  (let [member (fn [sym fails errors] {:seon.test.member/symbol sym :seon.test.member/completed-tx {:db/id 1}
+                                       :seon.test.member/fail-count fails :seon.test.member/error-count errors})
+        run {:seon.test.run/id "run-1" :seon.test.run/basis-t 7 :seon.test.run/policy :fixed
+             :seon.test.run/members [(member 'a/ok 0 0) (member 'a/red 1 0) (member 'a/erred 0 1)
+                                     {:seon.test.member/symbol 'a/cut}]}]
+    (is (= {:seon.test.run/id "run-1" :seon.test.run/basis-t 7
+            :seon.render.test/outcomes {:pass 1 :fail 1 :error 1 :unfinished 1}
+            :seon.render.test/red ['a/erred 'a/red]}
+           (render.test/render-run-ai {:seon.render/value run})))
+    (is (= '(seon.db/pull '[*] [:seon.test.run/id "run-1"]) (render.test/render-run-form {:seon.render/value run}))
+        "the form face reads the run whole")))
+
 (deftest reused-results-render-the-recording-basis-as-data
   (let [unit {:seon.render/value
               {:seon.test/sym 'seon.test-reaching-test/reused-results-render-the-recording-basis-as-data

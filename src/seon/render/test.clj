@@ -67,6 +67,34 @@
   (list 'seon.test/recorded-result '(seon.db/db)
         (list 'quote (:seon.test/sym (or (:seon.render/value unit) unit)))))
 
+(defn- member-outcome
+  "One run member's outcome: :error, :fail, :pass, or :unfinished before it completed."
+  {:malli/schema [:=> [:cat :map] [:enum :error :fail :pass :unfinished]]}
+  [member]
+  (cond
+    (not (:seon.test.member/completed-tx member)) :unfinished
+    (pos? (get member :seon.test.member/error-count 0)) :error
+    (pos? (get member :seon.test.member/fail-count 0)) :fail
+    :else :pass))
+
+(defn render-run-ai
+  "A test run as data: when, at what basis on which branch, how many members
+  passed, failed, erred or did not finish, and which were red by name."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render.test/run-view]}
+  [unit]
+  (let [run (or (:seon.render/value unit) unit)
+        outcomes (group-by member-outcome (:seon.test.run/members run))
+        red (sort (map :seon.test.member/symbol (concat (:error outcomes) (:fail outcomes))))]
+    (cond-> (assoc (select-keys run [:seon.test.run/id :seon.test.run/at :seon.test.run/basis-t :seon.test.run/branch])
+                   :seon.render.test/outcomes (update-vals outcomes count))
+      (seq red) (assoc :seon.render.test/red (vec red)))))
+
+(defn render-run-form
+  "The read that finds this run whole again. Shown, never executed."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
+  [unit]
+  (list 'seon.db/pull ''[*] [:seon.test.run/id (:seon.test.run/id (or (:seon.render/value unit) unit))]))
+
 (defn- function-link [target]
   [:a {:href (str (route/path :seon.render.route/namespace
                              {:namespace (namespace (symbol target))})
