@@ -44,6 +44,13 @@ and graph, its agent — with the database read fresh per step. A turn proc's ev
 as today. Listeners and boot get the same from the value each already holds (the connection's cluster, the boot
 record).
 
+**Every process is a Flow proc (owner, 2026-09-28).** "As much of the system that we can identify as different
+processes, like agents, should be Flow; this will only increase with time." So the health system's coverage of
+execution is exactly Flow's: a process that runs as a proc built by `var-process` gets the world, capture, linked
+faults, ping and awaited stop for free, and a process outside Flow is itself a finding. Callbacks (Datahike listeners,
+http-kit handlers) stay callbacks that only hand work to a proc. The inventory of execution outside Flow and its
+conversion order is `tmp/health-research/processes.md` (in progress).
+
 ## 1. Detection: schemas and timings on the code graph
 
 - **Schemas are the primary detector.** A contract violation already knows the function and digest, the schema and
