@@ -3494,8 +3494,12 @@
                        (:seon.test.accretion/advisories report))
         (sci.eval/refuse-install
          form evaluation (accretion/install-refusal report))))
-    (cond-> evaluation
-      (get-in evaluation [:seon.program/row :seon.fn/sym]) (dissoc :seon.program/row))))
+    ;; an uncontracted function is admitted and stored ungated (owner, rev 5);
+    ;; any other row stays the evaluation's, as before
+    (let [row (:seon.program/row evaluation)]
+      (cond-> evaluation
+        (and (:seon.fn/sym row) (or (:seon.fn/macro? row) (:seon.fn/constant? row) (:seon.fn/host-bound? row)))
+        (dissoc :seon.program/row)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The proc

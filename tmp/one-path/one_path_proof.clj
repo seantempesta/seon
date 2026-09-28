@@ -253,18 +253,6 @@
                  (= [[42 {:k 41}]] got) (empty? (diags acq)))
      :calls (mapv (comp vec :seon.fn/calls) rs) :acquired got}))
 
-(defproof :contract-warning :owner
-  "Contract coverage, on a branch with no agent definitions yet: one uncontracted function gives the note; two more give the growing warning naming all three; nothing is refused"
-  (on-fresh-branch
-   #(let [b1 (run (world) "(defn nc1 [x] x)")
-          b2 (run (world) "(defn nc2 [x] x)\n(defn nc3 [x] x)")]
-    {:pass? (and (str/includes? (str (:seon.eval/contract-note b1)) "user/nc1")
-                 (= #{'user/nc1 'user/nc2 'user/nc3} (set (:seon.eval/contract-warning b2)))
-                 (applied? b1) (applied? b2))
-     :note (:seon.eval/contract-note b1) :warning (:seon.eval/contract-warning b2)})))
-
-;;; --- The world ------------------------------------------------------------------
-
 (defn- branch-of [conn] (:seon.agent/branch (meta conn) (get-in @conn [:config :branch])))
 
 (defn- world-members
@@ -453,23 +441,6 @@
 
 ;;; --- Feedback from facts ---------------------------------------------------
 
-(defproof :feedback-from-facts :owner
-  "The reply's :seon.eval/feedback is queried from the batch's validated working value, scoped by the definitions it changed: those still missing a contract, and the tests reaching them (never run here); the growing warning rides beside it"
-  (let [b (run (world) "(require '[clojure.test :refer [deftest is]])\n(defn fb-f [x] x)\n(defn fb-g {:malli/schema [:=> [:cat :int] :int]} [x] (fb-f x))\n(deftest fb-t (is (= 1 (fb-g 1))))")
-        fb (:seon.eval/feedback b)]
-    {:pass? (and (applied? b)
-                 (= ['user/fb-f] (:seon.feedback/missing-contracts fb))
-                 (= {'user/fb-t :never-run} (:seon.feedback/tests fb))
-                 (some? (or (:seon.eval/contract-note b) (:seon.eval/contract-warning b))))
-     :feedback fb :contract (or (:seon.eval/contract-note b) (:seon.eval/contract-warning b))}))
-
-(defproof :jvm-gets-feedback :entrant
-  "MCP JVM mode receives the same feedback key as every other entrant (it changed no definition, so its feedback names none)"
-  (let [w (world)
-        b (batch/evaluate-batch (turn.batch/jvm-request (request w "(+ 1 2)" {})))]
-    {:pass? (and (= [3] (values b)) (contains? (turn.batch/reply b) :seon.eval/feedback))
-     :feedback (:seon.eval/feedback b)}))
-
 (defproof :ns-and-defn-in-one-form :effects
   "(do (ns …) (defn …)) in one form: the namespace and its function are stored in one transaction (found refused at HEAD by the feedback lane)"
   (let [b (run (world) "(do (ns op3.onef (:require [clojure.string :as s])) (defn up [x] (s/upper-case x)))\n(op3.onef/up \"a\")")
@@ -488,48 +459,6 @@
      :values (mapv str (values b))}))
 
 ;;; --- The install gate judges the change (REPL dogfood items 2-4) -------------------
-
-(defproof :gate-callee-contract-is-feedback :gate
-  "Dogfood 4: a callee's contract refusing a generated argument does not block the changed function; it is a contract finding in the reply's feedback, with its arguments"
-  (on-fresh-branch
-   #(let [b (run (world) "(defn cal2 {:malli/schema [:=> [:cat [:int {:min 0}]] :int]} [x] x)\n(defn usr2 {:malli/schema [:=> [:cat :int] :int]} [x] (cal2 x))")
-          a (after b)
-          findings (get-in b [:seon.eval/feedback :seon.feedback/contract-findings])]
-      {:pass? (and (applied? b) (stored? a 'user/usr2) (empty? (facts-errors b))
-                   (= 'user/cal2 (:seon.gate/contract (first findings))))
-       :findings findings})))
-
-(defproof :gate-judges-the-change :gate
-  "Dogfood 2-3: a reaching test red before the change and still red after does not block (it is named as still red); a change that turns a green reaching test red blocks, and the refusal names the test and its counts as data"
-  (on-fresh-branch
-   #(let [_ (run (world) "(require '[clojure.test :refer [deftest is]])\n(defn gj {:malli/schema [:=> [:cat :int] :int]} [x] x)\n(deftest gj-red (is (= 99 (gj 1))))\n(deftest gj-green (is (= 1 (gj 1))))")
-          still (run (world) "(defn gj {:malli/schema [:=> [:cat :int] :int]} [x] (identity x))")
-          broke (run (world) "(defn gj {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
-          still-gate (first (get-in still [:seon.batch/entries 0 :seon.batch/gates]))
-          refusal (get-in broke [:seon.batch/entries 0 :seon.batch/facts-error])]
-      {:pass? (and (applied? still) (empty? (facts-errors still))
-                   (= ['user/gj-red] (mapv :seon.test/sym (:seon.gate/still-red still-gate)))
-                   (some? refusal)
-                   (= ['user/gj-green] (mapv :seon.test/sym (:seon.gate/newly-red refusal)))
-                   (= ['user/gj-red] (mapv :seon.test/sym (:seon.gate/still-red refusal))))
-       :still-red-gate still-gate
-       :refusal (dissoc refusal :seon.error/operation)})))
-
-;; Dogfood 1: the reaching test lives in its own namespace with its own
-;; aliases (as a FILE test does); the change comes from another namespace.
-(defproof :gate-runs-tests-in-their-namespace :gate
-  "Dogfood 1: a reaching test in its own namespace, calling through aliases, runs as a test agent in that namespace with its aliases acquired: an unchanged behaviour passes the gate from user, a broken one is refused naming the test"
-  (on-fresh-branch
-   #(let [_ (run (world) "(ns gjf.core)\n(defn f {:malli/schema [:=> [:cat :string] :string]} [x] x)\n(ns gjf.core-test (:require [clojure.test :refer [deftest is]] [clojure.string :as s] [gjf.core :as c]))\n(deftest upper (is (= \"A\" (s/upper-case (c/f \"a\")))))")
-          same (run (world) "(in-ns 'gjf.core)\n(defn f {:malli/schema [:=> [:cat :string] :string]} [x] (str x))")
-          broke (run (world) "(in-ns 'gjf.core)\n(defn f {:malli/schema [:=> [:cat :string] :string]} [x] (str x x))")
-          gate (first (get-in same [:seon.batch/entries 1 :seon.batch/gates]))
-          refusal (get-in broke [:seon.batch/entries 1 :seon.batch/facts-error])]
-      {:pass? (and (applied? same) (empty? (facts-errors same))
-                   (= 1 (:seon.gate/tests gate)) (false? (:seon.gate/blocks? gate))
-                   (= ['gjf.core-test/upper] (mapv :seon.test/sym (:seon.gate/newly-red refusal))))
-       :gate gate
-       :refusal (dissoc refusal :seon.error/operation)})))
 
 (defn tree-expansion-hooks
   "seon.fn.analyzer/expansion-hooks as the working tree has it, evaluated in a
@@ -627,19 +556,17 @@
        :reply (select-keys (turn.batch/reply code) [:seon.batch/commit :seon.batch/diagnostics :seon.batch/faults])})))
 
 (defproof :b4-moved-head-feedback :effects
-  "B4: settlement on a moved head that refuses a deletion answers the committed state: the feedback names no removal the head refused"
+  "B4: settlement on a moved head that refuses a deletion answers the committed state: the refused removal leaves its definition stored and the other change committed"
   (on-fresh-branch
    #(let [w (world)
           _ (run w "(defn review-base [x] x)")
           old (wdb (world))
           _ (run (world) "(defn review-dep [x] (review-base x))")
           b (run (assoc w :seon.db/db old) "(defn review-new [x] x)\n(ns-unmap *ns* 'review-base)\n(review-new 9)")
-          fb (:seon.eval/feedback b)]
+]
       {:pass? (and (applied? b) (stored? (after b) 'user/review-base) (stored? (after b) 'user/review-new)
-                   (= 9 (last (values b)))
-                   (= ['user/review-new] (:seon.feedback/changed fb))
-                   (empty? (:seon.feedback/removed fb)))
-       :errors (facts-errors b) :feedback fb})))
+                   (= 9 (last (values b))))
+       :errors (facts-errors b)})))
 
 (defn- jvm-run [text]
   (let [w (world)]
@@ -1069,27 +996,6 @@
        {:pass? (and (applied? b) (every? some? srcs) (= [[1 2]] got))
         :sources srcs :private (private-reasons b) :reacquired got}))))
 
-(defproof :c4-deferred-gates :gate
-  "C4: a form whose deferred definitions fail their gate is withdrawn whole (no member stored), its refusal names both, the survivors fold again, and the stored evaluation, the MCP reply and the next agent reply all carry the refusal; the feedback names no withdrawn definition"
-  (on-fresh-branch
-   (fn []
-     (let [text "(declare late)\n(do\n  (defn deferred-a {:malli/schema [:=> [:cat] :int]} [] (late))\n  (defn deferred-b {:malli/schema [:=> [:cat] :int]} [] (late)))\n(defn late {:malli/schema [:=> [:cat] :string]} [] \"bad\")\n42"
-           w (world)
-           b (run w text)
-           a (after b)
-           r (turn.batch/reply b)
-           refusal (get-in r [:seon.batch/evaluations 1 :seon.batch/facts-error])
-           stored-error (first (filter #(str/includes? % "deferred-a")
-                                       (db/q '[:find [?e ...] :where [?ev :seon.cluster.eval/ordinal 1] [?ev :seon.cluster.eval/error ?e]] a)))
-           agent (on-fresh-branch #(turn.batch/reply (run (world) text {:mode :reply})))]
-       {:pass? (and (applied? b) (= 42 (last (values b)))
-                    (not (stored? a 'user/deferred-a)) (not (stored? a 'user/deferred-b))
-                    (some? refusal) (str/includes? refusal "deferred-a") (str/includes? refusal "deferred-b")
-                    (some? stored-error)
-                    (not-any? #{'user/deferred-a 'user/deferred-b} (get-in b [:seon.eval/feedback :seon.feedback/changed]))
-                    (str/includes? (str (get-in agent [:seon.batch/evaluations 1 :seon.batch/facts-error])) "deferred-a"))
-        :refusal refusal :stored-error stored-error :feedback (:seon.eval/feedback b)}))))
-
 (defproof :c5-constructor-absence :world
   "C5: a world built without an agent holds no :seon.agent/id (never nil); a read-only world holds no call sink; both validate"
   (let [aw (world/agent-world *exec* {})
@@ -1155,10 +1061,87 @@
             :values (mapv str (values b))})
          (finally (.shutdown pool)))))))
 
+;;; --- V1: the Var render (owner, rev 5) -------------------------------------------
+
+(defn- var-render-load! []
+  (load-file "/Users/sean/src/seon/src/seon/render/var.clj"))
+
+(defn- run-tests!
+  "The reaching tests' cache-miss compute: `tests` run and recorded on the
+  world's branch (a test agent's recording, until S12 makes the Var render
+  start it)."
+  [w tests]
+  (let [r ((requiring-resolve 'seon.test/run) {:seon.test/execution *exec* :seon.test/recording-connection (:seon.db/connection w)
+                                               :seon.test/policy :named :seon.test/identities (set tests)})]
+    (if (:seon.error/at r) r (mapv #(select-keys % [:seon.test/sym :seon.test/fail-count]) (:seon.test/results r)))))
+
+(defproof :v1-uncontracted-admitted :render
+  "V1: an uncontracted defn is admitted and stored through both entrants (MCP code and an agent turn), and its Var render shows the missing contract in the AI face (REPL entries evaluating its status) and the HTML face (the same status as hiccup)"
+  (var-render-load!)
+  (let [go (fn [mode] (on-fresh-branch
+                       #(let [b (run (world) "(defn v1-open [x] x)" (if (= mode :agent) {:mode :reply} {}))
+                              a (after b)
+                              v (first (values b))
+                              unit {:seon.render/value v :seon.db/db a}]
+                          {:stored? (stored? a 'user/v1-open) :errors (facts-errors b)
+                           :status ((requiring-resolve 'seon.render.var/status) a 'user/v1-open)
+                           :ai ((requiring-resolve 'seon.render.var/render-ai) unit)
+                           :html ((requiring-resolve 'seon.render.var/render-html) unit)})))
+        m (go :mcp) g (go :agent)
+        ok? (fn [r] (and (:stored? r) (empty? (:errors r))
+                         (= :missing (:seon.render.var/contract (:status r)))
+                         (str/includes? (:ai r) "(seon.render.var/status 'user/v1-open)")
+                         (str/includes? (pr-str (:html r)) "contract missing")))]
+    {:pass? (and (ok? m) (ok? g) (= (dissoc m :html) (dissoc g :html))) :mcp (dissoc m :html) :html (:html m)}))
+
+(defproof :v1-red-delta :render
+  "V1: a contracted function whose reaching test passes at its digest says nothing; a change that turns the test red is pending, then named newly red once its result at the new digest exists; changing it back is named newly green"
+  (var-render-load!)
+  (on-fresh-branch
+   (fn []
+     (let [status (requiring-resolve 'seon.render.var/status)
+           w (world) conn (:seon.db/connection w)
+           _ (run w "(require '[clojure.test :refer [deftest is]])\n(defn v1-g {:malli/schema [:=> [:cat :int] :int]} [x] x)\n(deftest v1-t (is (= 1 (v1-g 1))))")
+           s0 (status (db/db conn) 'user/v1-g)
+           r0 (run-tests! w '[user/v1-t])
+           s1 (status (db/db conn) 'user/v1-g)
+           _ (run (world) "(defn v1-g {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
+           s2 (status (db/db conn) 'user/v1-g)
+           r2 (run-tests! w '[user/v1-t])
+           s3 (status (db/db conn) 'user/v1-g)
+           _ (run (world) "(defn v1-g {:malli/schema [:=> [:cat :int] :int]} [x] x)")
+           _ (run-tests! w '[user/v1-t])
+           s4 (status (db/db conn) 'user/v1-g)]
+       {:pass? (and (= {:seon.render.var/pending '[user/v1-t]} s0) (= {} s1)
+                    (= {:seon.render.var/pending '[user/v1-t]} s2)
+                    (= {:seon.render.var/newly-red '[user/v1-t]} s3)
+                    (= {:seon.render.var/newly-green '[user/v1-t]} s4))
+        :statuses [s0 s1 s2 s3 s4] :runs [r0 r2]}))))
+
+(defproof :v1-pending-refreshes :render
+  "V1: the Var render's read of the test results is ordinary read evidence: when the results are recorded, that evidence is no longer current, so the changed-read refresh re-renders it into the next context"
+  (var-render-load!)
+  (on-fresh-branch
+   (fn []
+     (let [status (requiring-resolve 'seon.render.var/status)
+           w (world) conn (:seon.db/connection w)
+           _ (run w "(require '[clojure.test :refer [deftest is]])\n(defn v1-p {:malli/schema [:=> [:cat :int] :int]} [x] x)\n(deftest v1-pt (is (= 1 (v1-p 1))))")
+           before (db/db conn)
+           sink (atom [])
+           pending (binding [db/*read-evidence-sink* sink] (status before 'user/v1-p))
+           evidence (db/read-evidence @sink)
+           current-before (db/read-evidence-current? before evidence)
+           _ (run-tests! w '[user/v1-pt])
+           current-after (db/read-evidence-current? (db/db conn) evidence)]
+       {:pass? (and (= {:seon.render.var/pending '[user/v1-pt]} pending) (seq evidence)
+                    (true? current-before) (false? current-after)
+                    (= {} (status (db/db conn) 'user/v1-p)))
+        :evidence (count evidence) :current [current-before current-after]}))))
+
 (def landing-files
   "The six namespaces and the schema resource step S3 copies into the tree."
   ["src/seon/batch.clj" "src/seon/sci/forgive.clj" "src/seon/sci/batch.clj" "src/seon/sci/arm.clj"
-   "src/seon/sci/observe.clj" "src/seon/turn/world.clj" "src/seon/turn/gate.clj" "src/seon/turn/batch.clj"
+   "src/seon/sci/observe.clj" "src/seon/turn/world.clj" "src/seon/turn/batch.clj"
    "resources/seon/schemas/seon.batch.edn"])
 
 (defn gate-root!
@@ -1403,13 +1386,6 @@
     {:pass? (and (applied? b) (stored? a 'user/mcp1) (= 2 (count evals)))
      :evaluations (count evals) :commit (commit-of b)}))
 
-(defproof :entrant-gate :entrant
-  "Install gate: a contracted function whose seeded contract check fails keeps its value and live Var; its facts are refused and logged; a passing one is stored"
-  (let [b (run (world) "(defn gt1 {:malli/schema [:=> [:cat :int] :int]} [x] (str x))\n(defn gt3 {:malli/schema [:=> [:cat :int] :int]} [x] x)\n(gt3 4)")
-        a (after b)]
-    {:pass? (and (= 4 (last (values b))) (not (stored? a 'user/gt1)) (stored? a 'user/gt3) (= 1 (count (facts-errors b))))
-     :facts-errors (facts-errors b)}))
-
 (defproof :entrant-merge-write-back :entrant
   "Merge/write-back entrant: neither evaluates (merge moves entities by identity through my.program, unchanged by this cut). A committed row re-analyzed from its stored source, write-back's reindex, derives the same definition digest"
   (let [w (world)
@@ -1427,7 +1403,7 @@
 ;;; --- Static proofs: the cut's names and requires --------------------------------
 
 (defn- new-contracts []
-  (for [n '[seon.batch seon.sci.batch seon.sci.arm seon.sci.forgive seon.sci.observe seon.turn.world seon.turn.gate seon.turn.batch]
+  (for [n '[seon.batch seon.sci.batch seon.sci.arm seon.sci.forgive seon.sci.observe seon.turn.world seon.turn.batch]
         [s v] (ns-interns n) :let [c (:malli/schema (meta v))] :when c]
     [(symbol (str n) (str s)) c]))
 
@@ -1647,31 +1623,6 @@
      :remaining {:largest-plan "seon.error/for-agent's read stores one whole vector in :datahike.query.dependency/sources (4.5 M chars, ~400 ms to decode)"
                  :prompt-cold "seon.cluster.prompt/prompt 7.6 s: seon.eval/of-agent 3.7 s (the same decode), seon.db/call-reach x143 3.1 s"
                  :tasks ["a-trivial-agent-turn-takes-eleven-seconds" "history-acquisition-decodes-stored-read-plans" "call-reach-is-recomputed-per-render"]}}))
-
-(defproof :feedback-hub-fresh :timing
-  "Reaching-test feedback for a changed hub (10 and 22 reaching tests) on a freshly committed head, from the batch's changed definition and digest (no reach digest re-derived): under 50 ms for the first call on the fresh head, with the armed breakdown; a 150-test hub reported. A later call on the same head reuses the head's declaration reads (content-keyed), so only the first is fresh"
-  (on-fresh-branch
-   #(let [reaching @#'turn.batch/reaching-tests
-          fresh (fn [hub i]
-                  (let [_ (run (world) (str "(def feedback-fresh-head " i ")"))
-                        db (wdb (world))
-                        m (seon.profile/begin)
-                        t0 (System/nanoTime)
-                        r (reaching db db {hub "a moved digest"})
-                        ms (ms-since t0)]
-                    {:fresh-ms ms :tests (count (:seon.feedback/tests r)) :counts (:seon.feedback/counts r)
-                     :armed (vec (take 6 (drop 2 (:seon.profile/lines (seon.profile/explain m 8)))))}))
-          small (fresh 'seon.render.value/bounded-text 0)
-          mid (fresh 'seon.repl/shown-value 1)
-          big (fresh 'seon.config/effective 2)
-          head (live-db)
-          t0 (System/nanoTime)
-          on-head (reaching head head {'seon.repl/shown-value "a moved digest"})
-          head-ms (ms-since t0)]
-      {:pass? (and (< (:fresh-ms small) 50) (< (:fresh-ms mid) 50) (pos? (:tests mid))
-                   (pos? (get-in on-head [:seon.feedback/counts :stale] 0)) (< head-ms 50))
-       :bounded-text small :shown-value mid :config-effective big
-       :default-head {:ms head-ms :counts (:seon.feedback/counts on-head)}})))
 
 (defn- used-heap []
   (System/gc) (System/gc)

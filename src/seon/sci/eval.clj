@@ -1003,13 +1003,8 @@
       (let [rows (mapv #(definition-row database projection namespace-row
                                         (::row %) (::var %))
                        matched)]
-      (when-let [missing (first (sort-by str (for [row rows
-                                                   :when (and (:seon.fn/sym row)
-                                                              (not (:seon.fn/spec row))
-                                                              (not (:seon.fn/macro? row))
-                                                              (not (:seon.fn/host-bound? row)))]
-                                               (:seon.fn/sym row))))]
-        (refuse! (missing-contract missing)))
+      ;; An uncontracted definition is admitted (owner, rev 5): its Var render
+      ;; shows the missing contract; merge acceptance is the one refusal.
       ;; Arming belongs to the live Var, not to durability: an evaluation that
       ;; never commits must refuse invalid input all the same. The commit's
       ;; later install re-wraps the interpreted original idempotently.
@@ -2456,24 +2451,6 @@
     :seon.error/offending attribute
     ::missing-declaration attribute
     :seon.error/expected :seon.sci.eval/present-declaration}))
-
-(defn- missing-contract
-  "The refusal of a function definition that declares no `:malli/schema`.
-
-  Entry defaults to the gate: `admit-program-change!` refuses the evaluation
-  and restores every definition it made, so the function neither stays in the
-  context nor replaces an already armed root. No entry dial exists yet; a
-  `:warn` admission needs its owner's ruling first."
-  {:malli/schema [:=> [:cat :qualified-symbol] :seon.sci.eval/declaration-absent-error]}
-  [function-symbol]
-  (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.eval/program 'seon.sci.eval/evaluate
-   {:seon.error/message
-    (str function-symbol " declares no :malli/schema; add a complete contract to its "
-         "attribute map, e.g. (defn f \"Doc.\" {:malli/schema [:=> [:cat :int] :int]} [x] x).")
-    :seon.error/member :malli/schema
-    :seon.error/offending function-symbol
-    ::missing-declaration :seon.fn/spec
-    :seon.error/expected :malli/schema}))
 
 (defn docstring-parts
   "Split a declared docstring into its summary, body, and final Example section."

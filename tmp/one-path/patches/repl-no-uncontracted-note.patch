@@ -1,0 +1,34 @@
+--- a/src/seon/repl.clj
++++ b/src/seon/repl.clj
+@@ -133,15 +133,7 @@
+              " restarts. Nothing defined with def is persisted, atoms"
+              " included; they are for temporary data-modeling experiments."
+              " To keep something, write a function, schema, or test, or"
+-             " transact the data into the database.")
+-          (and (#{'defn 'defn- 'clojure.core/defn 'clojure.core/defn-}
+-                (first form))
+-               (not (:malli/schema (meta (second form))))
+-               (not (:malli/schema
+-                     (first (drop-while string? (nnext form))))))
+-          (str (second form)
+-               " was not installed: every function needs a :malli/schema"
+-               " contract to become part of the program."))))))
++             " transact the data into the database."))))))
+ 
+ (defn value-text
+   "Return the saved shown text unchanged."
+diff --git a/test/seon/repl_test.clj b/test/seon/repl_test.clj
+index 926eb1334..360645906 100644
+--- a/test/seon/repl_test.clj
++++ b/test/seon/repl_test.clj
+@@ -149,8 +149,8 @@
+         "a def carries the note, naming the var")
+     (is (str/includes? def-response "transact the data into the database.\"")
+         "the note ends by saying what persists")
+-    (is (str/includes? defn-response
+-                       "hello was not installed: every function needs a :malli/schema contract to become part of the program."))
++    (is (not (str/includes? defn-response ":note"))
++        "an uncontracted defn is admitted: its Var render, not a note, names the missing contract")
+     (is (not (str/includes?
+               (repl/response
+                (emission "(defn hello {:malli/schema [:=> [:cat] :int]} [] 42)"))

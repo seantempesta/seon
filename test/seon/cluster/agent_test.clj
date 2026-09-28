@@ -34,7 +34,6 @@
             [seon.flow :as seon.flow]
             [seon.problems :as problems]
             [seon.render :as render]
-            [seon.repl :as repl]
             [sci.core :as sci]
             [seon.id :as id]
             [seon.render.web :as web]
@@ -432,7 +431,9 @@
               (:seon.cluster.agent-test/listener-key event-source))
   (async/close! (:seon.cluster.agent-test/events event-source)))
 
-(deftest a-function-without-a-contract-never-enters-the-program
+(deftest a-function-without-a-contract-is-admitted-and-stored
+  ;; Owner, rev 5: the REPL always admits; the Var render shows the missing
+  ;; contract, and merge acceptance is the one refusal point.
   (with-connection
     (fn [connection ctx]
       (let [routing (armory connection)
@@ -465,12 +466,8 @@
                       database run-id)]
             (is (string? run-id))
             (is (= source (:seon.cluster.eval/source evaluation)))
-            (is (nil? (db/entity database [:seon.fn/sym function-symbol])))
-            (is (nil? (sci/resolve ctx function-symbol)))
-            (is (str/includes?
-                 (repl/response (assoc evaluation :seon.ns/name
-                                       'my.agents.contract-probe))
-                 "uncontracted was not installed: every function needs a :malli/schema contract to become part of the program.")))
+            (is (some? (db/entity database [:seon.fn/sym function-symbol])) "stored without a contract")
+            (is (nil? (:seon.fn/spec (db/pull database [:seon.fn/spec] [:seon.fn/sym function-symbol])))))
           (finally
             (stop-database-events! connection events)
             (disarm-all! routing)))))))

@@ -19,8 +19,6 @@
                            the refusal
     :seon.batch/fold       an applied change folded into the batch's program
                            by identity (what the one transaction proposes)
-    :seon.batch/conclude   feedback queried from the validated working value
-                           (:seon.eval/feedback, the contract note or warning)
     :seon.batch/settle     the one recording transaction
     :seon.batch/show       one entry's shown text
     :seon.batch/fault      records one diagnostic as a fault
@@ -330,16 +328,14 @@
       (let [t1 (System/nanoTime)
             working (:seon.batch/working batch)
             tx ((:seon.batch/facts request) request working change)
-            {after :seon.batch/working refusal :seon.batch/refusal gates :seon.batch/gates}
+            {after :seon.batch/working refusal :seon.batch/refusal}
             ((:seon.batch/apply request) request working tx change)]
         (-> batch
             (cond-> (not refusal)
               (-> (assoc :seon.batch/working after)
                   (update :seon.batch/program #((:seon.batch/fold request) request % change))))
-            (last-entry #(cond-> (merge % (select-keys change [:seon.batch/notes :seon.batch/private
-                                                               :seon.batch/uncontracted]))
+            (last-entry #(cond-> (merge % (select-keys change [:seon.batch/notes :seon.batch/private]))
                            refusal (assoc :seon.batch/facts-error refusal)
-                           (seq gates) (assoc :seon.batch/gates gates)
                            (not refusal) (assoc :seon.batch/change change)))
             (clock :apply t1))))))
 
@@ -422,10 +418,6 @@
                   (assoc :seon.batch/text (get-in folded [:seon.batch/read-state :seon.batch/version :seon.batch/text]
                                                   (:seon.batch/text request))
                          :seon.batch/repairs (get-in folded [:seon.batch/read-state :seon.batch/repairs] []))
-                  ;; feedback is queried from the validated working value, so its shown
-                  ;; text can ride the one settlement
-                  (cond-> (:seon.batch/conclude request)
-                    (guard :conclude #(merge % ((:seon.batch/conclude request) request %))))
                   (cond-> (:seon.batch/settle request)
                     (guard :settle #(let [t1 (System/nanoTime)
                                           commit ((:seon.batch/settle request) request %)]

@@ -14,7 +14,6 @@
            already validated form by form; a writer refusal of it (a
            concurrent write changed a checked basis) re-derives each form's
            facts on the new head and drops only the forms now refused
-  conclude the contract note or warning, from the batch and branch facts
   show     each entry's shown text through the one printer
 
   Entrants (`turn-request`, `code-request`, `jvm-request`, `test-request`,
@@ -37,7 +36,6 @@
             [seon.sci.batch :as sci.batch]
             [seon.sci.eval :as eval]
             [seon.sci.forgive :as forgive]
-            [seon.turn.gate :as gate]
             [seon.turn.world :as world]
             [seon.sci.kernel :as kernel]
             [seon.test.accretion :as accretion])
@@ -274,15 +272,6 @@
               (into (set (keys forms)) (keys held)))))
     #{}))
 
-(defn- unbound-callees
-  "The row's callees that are declared but not yet bound in the batch's
-  context (a `declare` awaiting its definition): its gate runs at settlement."
-  {:malli/schema [:=> [:cat :seon.batch/request :seon.program/row] [:set :qualified-symbol]]}
-  [{{ctx :seon.sci.eval/ctx} :seon.batch/world} row]
-  (into #{} (filter (fn [s] (when-let [v (and (qualified-symbol? s) (sci/resolve ctx s))]
-                              (and (instance? sci.lang.Var v) (not (sci.impl.vars/hasRoot v))))))
-        (:seon.fn/calls row)))
-
 (defn- schema-notes
   "Each registered key the bridge cannot store: not installed, with its reason."
   {:malli/schema [:=> [:cat :seon.batch/request :seon.db/database-value [:set :qualified-keyword]] [:vector :seon.batch/note]]}
@@ -362,13 +351,7 @@
                 :seon.batch/notes (into (schema-notes request working schema-keys)
                                         (keep (fn [w] (when-let [e (:seon.batch/arm-error w)]
                                                         {:seon.batch/sym (:seon.batch/sym w) :seon.batch/arm-error e})))
-                                        writes)
-                :seon.batch/deferred (vec (keep #(when (seq (unbound-callees request %)) (:seon.fn/sym %)) entities))
-                :seon.batch/uncontracted (vec (keep #(when (and (:seon.fn/sym %) (not (:seon.fn/spec %))
-                                                                (not (:seon.fn/macro? %)) (not (:seon.fn/host-bound? %))
-                                                                (fn? (some-> (sci/resolve ctx (:seon.fn/sym %)) deref)))
-                                                       (:seon.fn/sym %))
-                                                    entities))}]
+                                        writes)}]
     {:seon.batch/change change :seon.batch/derive-state (assoc state :declared declared)}))
 
 ;;; ---------------------------------------------------------------------------
@@ -506,35 +489,19 @@
         (into (mapcat #(removal-facts db' %)) removals))))
 
 (defn apply-facts
-  "`tx` on `working` through the writer's own validation, then the install
-  gate for each contracted function the change defines. A refusal of either
-  is the form's facts error; the gate's values ride the entry either way."
+  "`tx` on `working` through the writer's own validation. A refusal is the
+  form's facts error. The REPL admits every definition the writer accepts; a
+  definition's contract and its reaching tests are what its Var render shows
+  (`seon.render.var`), and merge acceptance is the one refusal point."
   {:malli/schema [:=> [:cat :seon.batch/request :seon.db/database-value :seon.store/transaction-data :seon.batch/change]
                   [:or [:map [:seon.batch/working :seon.db/database-value]] [:map [:seon.batch/refusal :map]]]]}
-  [request working tx change]
+  [_request working tx _change]
   (if (empty? tx)
     {:seon.batch/working working}
     (let [after (db/with working tx)]
       (if (and (map? after) (:seon.error/message after))
         {:seon.batch/refusal after}
-        (let [gated (try (vec (for [row (:seon.batch/entities change)
-                                    :when (and (:seon.fn/sym row) (:seon.fn/spec row)
-                                               (not (contains? (set (:seon.batch/deferred change)) (:seon.fn/sym row))))]
-                                (gate/gate-entity request after row)))
-                         (catch Throwable t t))
-              blocking (when (vector? gated) (first (filter :seon.gate/blocks? gated)))]
-          (cond
-            (instance? Throwable gated)
-            {:seon.batch/refusal {:seon.error/message (str "The install gate could not run: " (ex-message gated))
-                                  :seon.error/operation `gate/gate-entity :seon.error/data (ex-data gated)}}
-            blocking {:seon.batch/refusal (assoc blocking
-                                                 :seon.error/message (str "The install gate refused " (:seon.gate/sym blocking)
-                                                                          (when (:seon.gate/own-failures blocking) ": its own contract check failed")
-                                                                          (when (:seon.gate/newly-red blocking)
-                                                                            (str ": newly red " (mapv :seon.test/sym (:seon.gate/newly-red blocking)))))
-                                                 :seon.error/operation `gate/gate-entity)
-                      :seon.batch/gates gated}
-            :else {:seon.batch/working after :seon.batch/gates gated}))))))
+        {:seon.batch/working after}))))
 
 (defn fold-change
   "An applied change folded into the batch's program by identity."
@@ -616,8 +583,6 @@
                 [head {} []] (:seon.batch/entries batch))]
     (assoc batch :seon.batch/working working :seon.batch/program program :seon.batch/entries entries)))
 
-(declare conclude)
-
 (defn settle
   "Commit the batch: its recording and its folded program in one transaction
   on the head of the world's settlement connection, through the world's
@@ -630,13 +595,6 @@
   (let [conn (world/settlement-connection world)
         writer (:seon.db/writer world)
         head (db/db conn)
-        ;; a form whose deferred gate refuses is withdrawn whole: the survivors
-        ;; fold again on the head and the feedback is concluded from them
-        gated (gate/gate-deferred request batch)
-        batch (if (= (map :seon.batch/facts-error (:seon.batch/entries gated))
-                     (map :seon.batch/facts-error (:seon.batch/entries batch)))
-                gated
-                (let [r (rebase request gated head)] (merge r (conclude request r))))
         commit! (fn [tx] (let [r (writer conn tx)]
                            (if (and (map? r) (:seon.error/message r)) r (:db-after r))))
         attempt (fn [b]
@@ -649,95 +607,17 @@
                               (if (and (map? r) (:seon.error/message r))
                                 {:seon.batch/writer-refusal r}
                                 {:seon.batch/applied true :seon.batch/tx-count (count tx) :seon.batch/after r})))))
-        settled (fn [b] (select-keys b [:seon.batch/entries :seon.batch/program :seon.batch/working
-                                        :seon.eval/feedback :seon.eval/contract-note :seon.eval/contract-warning]))
+        settled (fn [b] (select-keys b [:seon.batch/entries :seon.batch/program :seon.batch/working]))
         first-try (try (attempt batch) (catch Throwable t {:seon.batch/storage-error (ex-message t)}))]
     (if-not (:seon.batch/writer-refusal first-try)
       ;; every path answers the state it settled
       (assoc first-try :seon.batch/settled (settled batch))
-      ;; the head moved: re-derive on it, and conclude again from the state
-      ;; that will commit, so the feedback is the committed facts' feedback
+      ;; the head moved: re-derive on it; the settled state is what commits
       (let [rebased (rebase request batch head)
-            rebased (merge rebased (conclude request rebased))
             second-try (try (attempt rebased) (catch Throwable t {:seon.batch/storage-error (ex-message t)}))]
         (assoc second-try
                :seon.batch/settled (settled rebased)
                :seon.batch/first-refusal (:seon.batch/writer-refusal first-try))))))
-
-(defn- reaching-tests
-  "The tests reaching the definitions this batch changed, each with its
-  status, from the definitions and digests the batch already holds
-  (`changed`: symbol -> its new definition digest). A definition whose digest
-  equals the basis's changed nothing and seeds nothing. A reached test with no
-  latest result is :never-run, one whose latest result could not complete is
-  :unknown, and any other is :stale: its closure holds a changed definition,
-  so no reach digest is re-derived.
-
-  ## Costs
-
-  One digest read per changed definition on the basis, one reverse walk
-  from the moved ones (seon.fn/gate-sets) and one read of the reached tests'
-  latest results."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value
-                       [:map-of :qualified-symbol [:maybe :string]]]
-                  [:map [:seon.feedback/tests [:map-of :qualified-symbol [:enum :stale :never-run :unknown]]]
-                   [:seon.feedback/counts [:map-of :keyword nat-int?]]]]}
-  [basis db-after changed]
-  (let [moved (filterv (fn [[s digest]]
-                         (not= digest (:seon.program/definition-digest
-                                       (db/pull basis [:seon.program/definition-digest] [:seon.fn/sym s]))))
-                       changed)
-        tests (if (seq moved)
-                (let [t (sfn/gate-sets {:seon.db/db db-after :seon.fn/seeds (set (map first moved))})]
-                  (if (vector? t) t []))
-                [])
-        latest (if (seq tests)
-                 (let [r ((requiring-resolve 'seon.test.runner/latest-results) db-after tests)]
-                   ;; a refused read is every reached test's unknown, never "never run"
-                   (if (map? r)
-                     (zipmap tests (repeat {:seon.test/result-unknown true}))
-                     (into {} (map (juxt (some-fn :seon.test/sym :seon.test/error-test-symbol) identity)) r)))
-                 {})
-        statuses (into (sorted-map) (for [t tests
-                                          :let [r (get latest t)]]
-                                      [t (cond (nil? r) :never-run
-                                               (:seon.test/result-unknown r) :unknown
-                                               :else :stale)]))]
-    {:seon.feedback/tests statuses :seon.feedback/counts (frequencies (vals statuses))}))
-
-(defn conclude
-  "The batch's feedback, one query each over its validated working value (the
-  facts the one transaction commits), scoped by the definitions it changed:
-  those still missing a contract, the tests reaching each (stale by
-  construction when they have results, else never run), and the contract
-  note or the growing warning over the branch's agent definitions. Its shown
-  text rides the batch's last evaluation in the same settlement."
-  {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/batch] :map]}
-  [{{basis :seon.db/db} :seon.batch/world} batch]
-  (let [db-after (:seon.batch/working batch)
-        changed (vec (keep (fn [[s e]] (when (and (map? e) (:seon.fn/sym e)) s)) (get-in batch [:seon.batch/program :entities])))
-        removed (vec (keep (fn [[s e]] (when (= :removed e) s)) (get-in batch [:seon.batch/program :entities])))
-        missing (vec (sort (filter #(let [e (get-in batch [:seon.batch/program :entities %])]
-                                      (not (or (:seon.fn/spec e) (:seon.fn/macro? e) (:seon.fn/constant? e))))
-                                   changed)))
-        reaching (reaching-tests basis db-after
-                                 (into {} (for [s changed]
-                                            [s (get-in batch [:seon.batch/program :entities s :seon.program/definition-digest])])))
-        mine (vec (distinct (mapcat :seon.batch/uncontracted (:seon.batch/entries batch))))
-        prior (when (seq mine)
-                (db/q '[:find [?s ...] :where [?f :seon.fn/sym ?s] [?f :seon.schema.admission/source :agent]
-                        (not [?f :seon.fn/spec _])] basis))
-        all (vec (distinct (concat mine prior)))
-        findings (vec (distinct (mapcat (fn [e] (mapcat :seon.gate/contract-findings (concat (:seon.batch/gates e) [(:seon.batch/facts-error e)])))
-                                        (:seon.batch/entries batch))))
-        feedback (cond-> {:seon.feedback/changed changed}
-                   (seq findings) (assoc :seon.feedback/contract-findings findings)
-                   (seq removed) (assoc :seon.feedback/removed removed)
-                   (seq missing) (assoc :seon.feedback/missing-contracts missing)
-                   (seq (:seon.feedback/tests reaching)) (merge reaching))]
-    (cond-> {:seon.eval/feedback feedback}
-      (= 1 (count all)) (assoc :seon.eval/contract-note (str (first all) " has no :malli/schema; specify it before proposing a merge."))
-      (< 1 (count all)) (assoc :seon.eval/contract-warning all))))
 
 (defn- printed
   "The show stage's answer from the one printer's shown value."
@@ -786,7 +666,7 @@
   "The one reply, as data: what a Seon agent's next context reads and what the
   MCP tool encodes as JSON, identical but for transport. Each evaluation's
   shown text (the one print), its outcome, its facts error and notes; the
-  reading repairs; and the feedback queried from the committed value."
+  reading repairs; the settlement and the faults."
   {:malli/schema [:=> [:cat :seon.batch/batch] :seon.batch/reply]}
   [batch]
   (merge
@@ -800,8 +680,7 @@
               (seq private) (assoc :seon.batch/private (mapv #(select-keys % [:seon.batch/sym :seon.batch/join :seon.batch/reason]) private))))
           (:seon.batch/entries batch))
     :seon.batch/diagnostics (mapv :seon.error/message (:seon.batch/diagnostics batch))}
-   (select-keys batch [:seon.batch/repairs :seon.batch/unread :seon.eval/feedback
-                       :seon.eval/contract-note :seon.eval/contract-warning :seon.batch/faults])
+   (select-keys batch [:seon.batch/repairs :seon.batch/unread :seon.batch/faults])
    (when-let [c (:seon.batch/commit batch)]
      {:seon.batch/commit (cond-> (select-keys c [:seon.batch/applied :seon.batch/tx-count :seon.batch/storage-error])
                            (:seon.batch/writer-refusal c)
@@ -831,7 +710,7 @@
 
 (defn program-request
   "An evaluation that records program facts: derive, facts, apply, fold,
-  conclude and settle over the SCI stages, all reading the request's world
+  and settle over the SCI stages, all reading the request's world
   (`:seon.batch/world`); `observe` is the write observer stage."
   {:malli/schema [:=> [:cat :map] :seon.batch/request]}
   [request]
@@ -839,7 +718,6 @@
                       :seon.batch/facts form-facts
                       :seon.batch/apply apply-facts
                       :seon.batch/fold fold-change
-                      :seon.batch/conclude conclude
                       :seon.batch/settle settle}
                      request)))
 
@@ -924,7 +802,6 @@
           :seon.batch/fault world/record-fault
           :seon.batch/within world/with-world
           :seon.batch/settle settle
-          :seon.batch/conclude conclude
           :seon.batch/start-ns 'user}
          request
          ;; the host evaluates: no SCI write observer, no program facts
