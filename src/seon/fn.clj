@@ -3514,15 +3514,19 @@
                                  eid (assoc :db/id eid))
                                value)]
                 (if eid
-                  (do
-                    (when-let [prior (get @entities eid)]
-                      (when-not (= prior entity)
-                        (throw
-                         (ex-info
-                          "Program indexing found conflicting entity maps."
-                          {::identity eid
-                           :seon.fn/index-refused true}))))
-                    (vswap! entities assoc eid entity)
+                  (let [prior (get @entities eid)
+                        reference {:db/id eid}]
+                    ;; A map naming only its identity (a ref by identity, e.g. a
+                    ;; schema's render pair naming a function) is a reference to
+                    ;; the entity, never a second description of it.
+                    (cond
+                      (or (nil? prior) (= prior reference)) (vswap! entities assoc eid entity)
+                      (or (= prior entity) (= entity reference)) nil
+                      :else (throw
+                             (ex-info
+                              "Program indexing found conflicting entity maps."
+                              {::identity eid
+                               :seon.fn/index-refused true})))
                     eid)
                   entity)))]
       (let [keyword-operations
