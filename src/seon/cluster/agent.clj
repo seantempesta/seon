@@ -952,7 +952,8 @@
   records, through this same function; a failed join or a failed descendant
   throws before anything closes, so the subtree stays reachable for a retry.
   Live handles own nothing; borrowed branches persist. Then the connection release,
-  the branch unlink and the removal of its roster from the parent's children are
+  the branch unlink, the removal of the handle's own context entry and of its
+  roster from the parent's children are
   each attempted even when an earlier one throws; the first cause is then
   rethrown whole, carrying every later cause as suppressed."
   {:malli/schema [:=> [:cat :seon.agent/execution-handle] :nil]}
@@ -979,6 +980,12 @@
                   (registry/retire-branch!
                    {:seon.store/store (:seon.store/store handle)
                     :seon.store/branch (:seon.agent/branch handle)}))
+               ;; the handle's own context entry leaves the roster it was
+               ;; acquired in, borrowed handles included: a released handle
+               ;; that stayed recorded held its branch for every later
+               ;; retire (reds-triage, 2026-09-28)
+               #(swap! (:seon.agent/routing handle) update :seon.agent/contexts dissoc
+                       [(:seon.agent/branch handle) (:seon.agent/id handle)])
                #(let [roster (:seon.agent/routing handle)]
                   (when-let [parent (and (or owns-connection? owns-branch?)
                                          (:seon.agent/parent @roster))]

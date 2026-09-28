@@ -1897,17 +1897,23 @@
   shapes say MAY, because rows 6 and 7 of the crash walk are
   indistinguishable from the facts and a confident claim would be a lie
   the agent then reasons from."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  {:malli/schema [:=> [:cat :seon.render/unit] [:or [:maybe :string] :seon.db/error-result]]}
   [unit]
   (let [db (get unit :seon.db/db)
-        id (get unit ::id)]
-    (when id
+        id (get unit ::id)
+        ;; a unit carrying the run's id but no entity id (a transacted run
+        ;; map) reads its receipts through the run's identity
+        receipts (when (and db id) (run-receipts db (or (:db/id unit) [::id id])))]
+    (cond
+      (not id) nil
+      ;; a refused read is the answer, never receipts to derive from
+      (db/read-refusal? receipts) receipts
+      :else
       (let [;; A unit naming no opened transaction (a partial run map) says
             ;; nothing about when it opened; pulling nil is a refused read.
             opened-ref (let [ref (get unit ::opened-tx)] (if (map? ref) (:db/id ref) ref))
             opened (when (and db opened-ref)
                      (:db/txInstant (db/pull db [:db/txInstant] opened-ref)))
-            receipts (when db (run-receipts db (:db/id unit)))
             cut (when db (interrupted-warning receipts))
             never-started
             (when (and db
