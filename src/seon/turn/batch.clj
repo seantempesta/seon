@@ -268,7 +268,14 @@
       (seq captured) {:seon.batch/private {:seon.batch/sym sym :seon.batch/join :unanalyzed
                                            :seon.batch/reason :captures-locals
                                            :seon.batch/captured captured}}
-      row {:seon.batch/row (cond-> row (and contract (fn? @v)) (assoc :seon.fn/spec (pr-str contract)))}
+      ;; a contracted function's row carries its parsed contract facts
+      ;; (:seon.fn/arities, their input/output refs), as the index's rows do:
+      ;; the schema usage guard and arity checks read them
+      row {:seon.batch/row (if (and contract (fn? @v))
+                             (sfn/contract-facts-row (db/carried-projection db)
+                                                     (namespace-entity ctx (symbol (namespace sym)))
+                                                     (assoc row :seon.fn/spec (pr-str contract)))
+                             row)}
       :else {:seon.batch/private (-> j (dissoc :seon.batch/definition) (assoc :seon.batch/sym sym))})))
 
 (defn- changed-schema-keys

@@ -4952,17 +4952,13 @@
                      waits
                      ;; THE PROJECTION, over the fact that is now
                      ;; durable — never a notice written at this call
-                     ;; site. The backup reads exactly what the agent,
-                     ;; the escalation owner and the log read.
-                     (render/render-ai
-                      {:seon.db/db (db/db connection)
-                       :seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
-                       :seon.render/value
-                       (error/notice {:seon.error/fact fact
-                                      :seon.error/reason :failover})
-                       :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
-                       :seon.sci.eval/time-limit-ms
-                       (:seon.config.eval/time-limit-ms cluster)}))
+                     ;; site: the notice's declared AI render as the
+                     ;; system text the provider takes (render-ai answers
+                     ;; data for the value printer, and without a block
+                     ;; identity its refusal map became the system text)
+                     (error/ai-prose
+                      (error/notice {:seon.error/fact fact
+                                     :seon.error/reason :failover})))
 
               (and (= :backoff disposition) (seq waits))
               (do
@@ -5042,8 +5038,14 @@
     {:seon.batch/eof true :seon.batch/version (:seon.batch/version state) :seon.batch/repairs []}
     (let [text (:seon.cluster.eval/source row)
           v (forgive/version text 0)
-          r (if (and max-source (> (count text) max-source))
+          ;; a reply the segmenter found no form in is carried as one row with
+          ;; its reader event: that refusal is the row's read, never its prose read as code
+          carried (get-in row [:seon.sci.eval/event :seon.sci.reader/error])
+          r (cond
+              carried {:seon.batch/reason (:seon.error/message carried)}
+              (and max-source (> (count text) max-source))
               {:seon.batch/reason (str "This form is " (count text) " characters; the reader's bound is " max-source ".")}
+              :else
               (sci/binding [sci/ns (sci/create-ns @current)]
                 (forgive/next-form ctx (sci.batch/parse-options ctx) :code {:seon.batch/version v :seon.batch/repairs []})))
           next-state (assoc state :seon.batch/rows (vec more))]
@@ -5051,8 +5053,10 @@
         (assoc r :seon.batch/read-state next-state)
         (let [message (str (or (:seon.batch/reason r) "The row holds no form."))
               ;; the reader's own refusal of this form's text
-              refusal (if-let [cause (:seon.batch/cause r)]
-                        (#'reader/reader-error text cause)
+              refusal (cond
+                        carried carried
+                        (:seon.batch/cause r) (#'reader/reader-error text (:seon.batch/cause r))
+                        :else
                         (#'reader/error-value :seon.sci.reader/form message {:seon.sci.reader/text text}
                                               {:seon.sci.reader/unreadable-member :seon.sci.reader/form}))]
           {:seon.batch/read-error (ex-info message {:seon.batch/error-value refusal})
@@ -5309,8 +5313,11 @@
                                               :seon.cluster.eval/read-basis-transaction (db/basis-t basis)})
                                 (get handles ordinal) (assoc :seon.repl/handle (get handles ordinal))
                                 (seq (entry-bindings batch ordinal)) (assoc :seon.sci.eval/bindings (entry-bindings batch ordinal))
-                                facts-error (update :seon.cluster.eval/error
-                                                    #(or % (str "Its program facts were not proposed: " (:seon.error/message facts-error)))))
+                                facts-error (-> (update :seon.cluster.eval/error
+                                                        #(or % (str "Its program facts were not proposed: " (:seon.error/message facts-error))))
+                                                ;; the refusal whole beside the value: its offending
+                                                ;; referrers are what the agent repairs from
+                                                (with-diagnostic facts-error)))
                    ;; A generated read whose reads now depend on the agent's own
                    ;; turn-taking (`generated-read-fault`) keeps its value: the
                    ;; fault rides beside it as a diagnostic, and its stored
