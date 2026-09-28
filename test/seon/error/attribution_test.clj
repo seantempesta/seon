@@ -211,7 +211,7 @@
      (let [environment (world connection "attribution-evaluation")
            run (fn [text]
                  (seon.batch/evaluate-batch
-                  (dissoc (turn.batch/code-request
+                  (dissoc (test-support/code-request
                            {:seon.batch/world (turn.world/agent-world
                                                {:seon.db/connection connection :seon.cluster/name "attribution-evaluation"
                                                 :seon.env/environment environment

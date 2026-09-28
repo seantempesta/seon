@@ -2259,7 +2259,7 @@
   (support/with-database
    (fn [connection]
      (let [basis (db/db connection)
-           request (turn.batch/code-request
+           request (support/code-request
                     {:seon.batch/world (world/agent-world {:seon.db/connection connection :seon.cluster/name "default"
                                                            :seon.sci.eval/base-ctx (sci.eval/base-ctx basis)}
                                                           {:seon.agent/id "stale-writer"})
@@ -2291,7 +2291,7 @@
   (support/with-database
    (fn [connection]
      (let [basis (db/db connection)
-           request (turn.batch/code-request
+           request (support/code-request
                     {:seon.batch/world (world/agent-world {:seon.db/connection connection :seon.cluster/name "default"
                                                            :seon.sci.eval/base-ctx (sci.eval/base-ctx basis)}
                                                           {:seon.agent/id "empty-removal"})
@@ -2339,7 +2339,7 @@
   (support/with-database
    (fn [connection]
      (let [execution (support/execution-handle connection)
-           request (turn.batch/code-request
+           request (support/code-request
                     {:seon.batch/world (world/agent-world execution {:seon.agent/id "branch-lister"})
                      :seon.batch/observe observe/observe
                      :seon.batch/start-ns 'user
@@ -2355,7 +2355,7 @@
   (support/with-database
    (fn [connection]
      (support/transacted! connection (support/agent-tx @connection "sees-own-write"))
-     (let [request (turn.batch/code-request
+     (let [request (support/code-request
                     {:seon.batch/world (world/agent-world {:seon.db/connection connection :seon.cluster/name "default"
                                                            :seon.sci.eval/base-ctx (sci.eval/base-ctx (db/db connection))}
                                                           {:seon.agent/id "sees-own-write"})
@@ -2372,7 +2372,7 @@
   ;; checked both; the fold's guard checked only definitions).
   (support/with-database
    (fn [connection]
-     (let [request (turn.batch/code-request
+     (let [request (support/code-request
                     {:seon.batch/world (world/agent-world {:seon.db/connection connection :seon.cluster/name "default"
                                                            :seon.sci.eval/base-ctx (sci.eval/base-ctx (db/db connection))}
                                                           {:seon.agent/id "stale-schema-writer"})

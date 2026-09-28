@@ -1,17 +1,13 @@
 (ns seon.sci.batch
   "The SCI stage values of the one REPL path: the live reader behind the
-  forgiving input stage, one evaluation under the kernel arm against the
-  working database value, the current namespace, and the batch's namespace
-  and registration-delta binding.
+  forgiving input stage, the current namespace, and the batch's namespace
+  binding. Evaluation is `seon.sci.eval/evaluate`.
 
   Arming and the write observer are `seon.sci.arm` and `seon.sci.observe`.
   This namespace requires no evaluator owner, so `seon.sci.eval` builds its
   acquisition entrant from it."
   (:require [sci.core :as sci]
-            [seon.db :as db]
-            [seon.schema :as schema]
             [seon.sci.forgive :as forgive]
-            [seon.sci.kernel :as kernel]
             [seon.sci.reader :as reader]))
 
 (defn parse-options
@@ -35,35 +31,6 @@
   {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/read-state] :seon.batch/read-step]}
   [{{ctx :seon.sci.eval/ctx} :seon.batch/world} state]
   (forgive/next-form ctx (parse-options ctx) :code state))
-
-(defn evaluate
-  "Evaluate `form` once in the request's context under the kernel arm, and
-  answer its outcome (`:seon.batch/value`).
-
-  The form reads `working` as its database, and registers into the batch's
-  registration delta over `working`'s projection. A failure throws with its
-  complete error value (`kernel/failure-value` under the arm's record) as
-  `:seon.batch/error-value`, the thrown cause kept."
-  {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/form :seon.db/database-value] :seon.batch/outcome]}
-  [{{ctx :seon.sci.eval/ctx limit :seon.sci.eval/time-limit-ms} :seon.batch/world delta :seon.sci.batch/delta} form working]
-  (kernel/with-arm
-   ctx (or limit 30000)
-   (fn [armed]
-     (try
-       (binding [db/*read-database* working]
-         (let [run #(sci/eval-form (assoc ctx :main-thread-id (.getId (Thread/currentThread))) form)]
-           {:seon.batch/value
-            (if delta
-              (schema/call-with-registration-delta
-               (assoc delta :seon.schema.delta/projection (db/carried-projection working)) run)
-              (run))}))
-       (catch Throwable t
-         (throw (ex-info (or (ex-message t) (.getName (class t)))
-                         {:seon.batch/error-value
-                          (kernel/failure-value {::kernel/time-limit-kind :seon.sci.eval/time-limit
-                                                 ::kernel/failure-kind :seon.sci.eval/evaluation-failed}
-                                                t ((::kernel/record armed) (if (kernel/interrupted? t) :time :error)))}
-                         t)))))))
 
 (defn current-ns
   "The namespace the batch is in now."

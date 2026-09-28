@@ -343,6 +343,30 @@
                    (assoc :seon.store/store (:seon.store/store handle)))))))))))
 
 
+(defn code-request
+  "An MCP-shaped SCI run over the real evaluator: `turn.batch/code-request`
+  with the turn's evaluate stage (`seon.turn/evaluate-row`, so
+  `seon.sci.eval/evaluate` runs each form) and its namespace cursor and frame
+  request, drawn from the request's world. The request's own keys win."
+  {:malli/schema [:=> [:cat :map] :seon.batch/request]}
+  [{world :seon.batch/world start :seon.batch/start-ns :as request}]
+  (let [start (or start 'user)
+        {ctx :seon.sci.eval/ctx limit :seon.sci.eval/time-limit-ms connection :seon.db/connection} world]
+    (turn.batch/code-request
+     (merge {:seon.batch/start-ns start
+             :seon.batch/evaluate #'seon.turn/evaluate-row
+             :seon.batch/ns-name (fn [{current :seon.turn/namespace-cursor}] @current)
+             :seon.turn/namespace-cursor (volatile! start)
+             :seon.turn/frame-request
+             (fn [_ordinal namespace-name]
+               {:seon.cluster.eval/source ""
+                :seon.cluster.eval/ns [:seon.ns/name namespace-name]
+                :seon.sci.eval/ctx ctx
+                :seon.db/connection connection
+                :seon.sci.admit/caps (config/result-caps config/defaults)
+                :seon.sci.eval/time-limit-ms limit})}
+            request))))
+
 (defn evaluate
   "`:seon.cluster.eval/source` evaluated through the one REPL path (the fold,
   with the turn's evaluate and show stages) in the request's context: the

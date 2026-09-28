@@ -804,7 +804,6 @@
   (merge {:seon.batch/basis db
           :seon.batch/read-state forgive/read-state
           :seon.batch/read-next sci.batch/read-next
-          :seon.batch/evaluate sci.batch/evaluate
           :seon.batch/ns-name sci.batch/current-ns
           :seon.batch/around sci.batch/around
           :seon.batch/show show

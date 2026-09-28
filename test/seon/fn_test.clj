@@ -516,7 +516,7 @@
                                           :seon.sci.eval/base-ctx (sci.eval/base-ctx (db/db connection))}
                                          {:seon.agent/id "settlement-parity-agent"})
                 batch (seon.batch/evaluate-batch
-                       (dissoc (turn.batch/code-request
+                       (dissoc (test-support/code-request
                                 {:seon.batch/world world :seon.batch/observe observe/observe
                                  :seon.batch/start-ns namespace-name
                                  :seon.batch/text source})
@@ -1680,7 +1680,7 @@
                                           :seon.sci.eval/base-ctx (sci.eval/base-ctx (db/db connection))}
                                          {:seon.agent/id "observation-probe"})
                 batch (seon.batch/evaluate-batch
-                       (dissoc (turn.batch/code-request
+                       (dissoc (test-support/code-request
                                 {:seon.batch/world world :seon.batch/observe observe/observe
                                  :seon.batch/start-ns namespace-name
                                  :seon.batch/text (str "(clojure.test/deftest ^{:seon.test/fixture-observation " (pr-str reason) "}"
