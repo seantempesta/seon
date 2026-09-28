@@ -88,7 +88,11 @@
                              [:seon.fn/sym "seon.cluster.agent/whoami"])
             arities (:seon.fn/arities indexed)
             expected (agent/whoami {:seon.db/db database :seon.agent/id agent-id})
-            acquired (sci.eval/cluster-ctx database connection)
+            ;; A built context holds no program until it acquires one: evaluate
+            ;; stopped acquiring on demand in 04e329e21.
+            acquired (let [built (sci.eval/cluster-ctx database connection)]
+                       (sci.eval/acquire! {:seon.sci.eval/ctx built :seon.db/db database})
+                       built)
             environment (env/refuse-incomplete-environment!
                          (env/environment
                           {:seon.boot/cluster-name cluster-name
