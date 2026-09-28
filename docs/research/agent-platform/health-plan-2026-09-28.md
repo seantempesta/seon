@@ -33,9 +33,16 @@ nothing. Four existing owners do all of it:
    fills in the linked context.
 4. **The writers of commits that already happen** (settle, test batch, fault record, publication, adoption) attach
    the findings and significant buckets as transaction data, linked by ref.
-A producer declaring its own error extension is optional (the base carries the common part). The one gap is work with
-no evaluation around it (Flow procs, listeners, boot): each such owner binds a world value it already holds (a proc's
-environment, the boot record) so the same capture links it too.
+A producer declaring its own error extension is optional (the base carries the common part).
+
+**Flow procs get their world at the one proc seam.** Every proc is built by `seon.flow/var-process`
+(`src/seon/flow.clj:278`), which already refuses args without a `:seon.env/environment` (Flow conveys no bindings by
+design) and already wraps every step arity to convert a throw into one fault. It does not yet bind
+`seon.batch/*world*` around the step, so capture, supply and error context see no world inside procs. The fix is in
+that wrapper, about ten lines: bind a world derived from the args it already holds — the environment, the proc's pid
+and graph, its agent — with the database read fresh per step. A turn proc's evaluation rebinds its own world inside,
+as today. Listeners and boot get the same from the value each already holds (the connection's cluster, the boot
+record).
 
 ## 1. Detection: schemas and timings on the code graph
 
