@@ -1150,6 +1150,15 @@
                  (not (str/includes? text ":x 1")))
      :shown text}))
 
+(defproof :p1-opening-calls-supplied :supply
+  "P1: the opening's calls that elide their world, (help), (seon.plan/plan {}) and (seon.agent/settings), are supplied their database and agent by declared schema name through an agent's evaluation: no arity or missing-database refusal"
+  (on-fresh-branch
+   #(let [b (run (world) "(help)\n(seon.plan/plan {})\n(seon.agent/settings)" {:mode :reply})
+          shown (shown b)]
+      {:pass? (and (= 3 (count shown)) (not-any? (fn [t] (re-find #"refused (argument|:request)" (str t))) shown)
+                   (every? (fn [e] (not (contains? e :seon.batch/error))) (:seon.batch/entries b)))
+       :shown (mapv (fn [t] (subs (str t) 0 (min 120 (count (str t))))) shown)})))
+
 (def landing-files
   "The six namespaces and the schema resource step S3 copies into the tree."
   ["src/seon/batch.clj" "src/seon/sci/forgive.clj" "src/seon/sci/batch.clj" "src/seon/sci/arm.clj"
