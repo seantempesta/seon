@@ -465,7 +465,7 @@
   "Render the grouped teaching face of an install refusal."
   {:malli/schema
    [:=> [:cat :seon.test.accretion/install-refused-error]
-    :string]}
+    :seon.render/ai]}
   [unit]
   (when (false? (:seon.test.accretion/install? unit))
     (str/join

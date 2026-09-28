@@ -33,31 +33,29 @@
                         :seon.program.probe/bound-count (count bound)
                         :seon.program.probe/direct-count (count direct)}))))))
 
-(deftest scalar-attribute-bindings-preserve-an-encoded-value-type
+(deftest scalar-attribute-bindings-preserve-the-renderer-value-type
   (test-support/with-database
    (fn [connection]
      (let [database (db/db connection)
-           ;; An EDN-codec property lifted onto a schema row (render faces are
-           ;; refs since render-selection slice A; a print default stays encoded).
-           schema-key :seon.print/length
-           pulled (db/pull database [:seon.print/default] [:seon.schema/key schema-key])
+           schema-key :seon.program/breakage
+           pulled (db/pull database [:seon.render/ai] [:seon.schema/key schema-key])
            scalar (db/q database
                         '[:find ?renderer . :in $ ?key ?property :where
                           [?schema :seon.schema/key ?key]
                           [?schema ?property ?renderer]]
-                        schema-key :seon.print/default)
+                        schema-key :seon.render/ai)
            literal (db/q database
                          '[:find ?renderer . :in $ ?key :where
                            [?schema :seon.schema/key ?key]
-                           [?schema :seon.print/default ?renderer]] schema-key)
+                           [?schema :seon.render/ai ?renderer]] schema-key)
            collection (db/q database
                             '[:find ?property ?renderer
                               :in $ ?key [?property ...] :where
                               [?schema :seon.schema/key ?key]
                               [?schema ?property ?renderer]]
-                            schema-key [:seon.print/default])]
-       (is (integer? (:seon.print/default pulled)))
-       (is (= (:seon.print/default pulled) scalar literal))
+                            schema-key [:seon.render/ai])]
+       (is (= 'seon.render.value/render-ai (:seon.render/ai pulled)))
+       (is (= (:seon.render/ai pulled) scalar literal))
        (println (pr-str {:seon.program.probe/pulled pulled
                         :seon.program.probe/scalar scalar
                         :seon.program.probe/literal literal

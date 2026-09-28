@@ -799,7 +799,7 @@
 
 (defn message-form
   "Return the ordinary message read form for one message entity."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/read-form]}
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
   [unit]
   (list 'my.message/read {:my.message/id (:seon.message/id unit)}))
 

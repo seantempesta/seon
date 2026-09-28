@@ -688,7 +688,7 @@
         (if (find request :seon.render/viewer-functions) request (viewer request))
         ;; A face is a render output, never the schema's declaration of its
         ;; renderer (the face keys name functions).
-        output-schema (case output :seon.render/ai :string :seon.render/html :seon.render/hiccup :seon.render/form :seon.render/read-form)
+        output-schema (case output :seon.render/ai :string :seon.render/html :seon.render/hiccup output)
         argument (delay (producer-argument request))
         evidence (mapv (fn [candidate]
                          (if (or (schema/function-accepts-and-returns-in?
@@ -1264,7 +1264,7 @@
      :seon.render/ai (and (some? rendered)
                           (not ((schema/projection-validator projection :seon.error/base) rendered)))
      :seon.render/html (hiccup/hiccup? rendered)
-     ((schema/projection-validator projection :seon.render/read-form) rendered))))
+     ((schema/projection-validator projection :seon.render/form) rendered))))
 
 (defn- declared-return?
   "Does the selected producer's contract declare returning `rendered` for
@@ -1467,7 +1467,7 @@
 (defn render-form
   "Spell the structural read that reproduces one reached database value."
   {:malli/schema [:=> [:cat :seon.render/unit]
-                  [:or :seon.render/read-form :seon.render/request-error :seon.db/error-result]]}
+                  [:or :seon.render/form :seon.render/request-error :seon.db/error-result]]}
   [unit]
   (let [value (:seon.render/value unit)
         root (or (:seon.render.value/root unit)
@@ -1494,7 +1494,7 @@
 (defn render-form-value
   "Render one value as the Clojure form that reads it."
   {:malli/schema [:=> [:cat :seon.render/call-request]
-                  [:or :seon.render/read-form :seon.render/error-result]]}
+                  [:or :seon.render/form :seon.render/error-result]]}
   [request]
   (let [profile (request-profile request)]
     (if (:seon.render/refused-member profile)
@@ -1509,7 +1509,7 @@
   {:seon/tasks #{"c5e9496b4cb1"}
    :malli/schema [:=> [:cat :seon.render/call-request]
                   [:or :nil :string :seon.render/hiccup
-                   :seon.render/read-form :seon.render/error-result]]}
+                   :seon.render/form :seon.render/error-result]]}
   [{database :seon.db/db
     output :seon.render/output
     call-id :seon.render.call/id

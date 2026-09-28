@@ -132,7 +132,7 @@
 
 (defn render-note-form
   "Render the current database read for one note."
-  {:malli/schema [:=> [:cat :my.note/note] :seon.render/read-form]}
+  {:malli/schema [:=> [:cat :my.note/note] :seon.render/form]}
   [note]
   (list 'seon.db/pull
         (list 'quote '[*])
@@ -140,7 +140,7 @@
 
 (defn render-notes-form
   "Render the current database read for this agent's notes."
-  {:malli/schema [:=> [:cat [:or :my.note/notes :seon.render/unit]] :seon.render/read-form]}
+  {:malli/schema [:=> [:cat [:or :my.note/notes :seon.render/unit]] :seon.render/form]}
   [_notes]
   (list 'my.note/notes))
 

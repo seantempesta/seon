@@ -77,7 +77,7 @@
 
 (deftest refusal-renderers-accept-the-declaring-error-shape
   (is (= [:=> [:cat :seon.test.accretion/install-refused-error]
-          :string]
+          :seon.render/ai]
          (:malli/schema (meta #'accretion/render-ai))))
   (is (= [:=> [:cat :seon.test.accretion/install-refused-error]
           :seon.render/hiccup]
@@ -99,7 +99,7 @@
          contracts
          {:seon.schema/validate-render-contracts? true})]
     (is (= [:=> [:cat :seon.test.accretion/install-refused-error]
-            :string]
+            :seon.render/ai]
            (get-in projection
                    [:seon.schema.projection/function-contracts
                     'seon.test.accretion/render-ai])))

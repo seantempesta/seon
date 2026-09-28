@@ -286,7 +286,7 @@ transacts the result; nothing else writes Datahike schema. Probe (JVM, default,
 | `[:or …]` whose members share one native type | that type (`:122-127`) | e.g. `[:or [:= :a] [:= :b]]` is a keyword |
 | `[:or …]` of mixed or non-scalar members (maps, vectors, symbol-or-string, symbol-or-hiccup) | `:db.type/string` holding canonical EDN (`:128-129`); encoded at the transaction seam (`encode-transaction-in`, `:506-523`) and decoded, validated and canonical-checked on read (`decode-attribute-value-in`, `:559-575`) | A heterogeneous value has no native Datahike type; the codec keeps the logical value whole. Two-keyword many-values are split into `:db/add`s so Datahike does not read them as a lookup ref (`explicit-value-members`, `:440-468`) |
 | `[:map {:seon.db/attributes true} …]` (an entity schema) | no attribute of its own; each entry's attribute is selected for installation (`:229-240`) | The entity schema describes the entity; it stamps no kind. Required entries must be storable (`src/seon/schema/internal.cljc:290-299`) |
-| entity-schema properties: `:seon.program/partition`, `:seon.render/ai`, `:seon.render/html`, `:seon.render/form`, `:seon.render/units`, `:seon.db/component-schema`, … | each qualified property whose own declaration is storable is installed (`:244-249`) and written onto the schema's own entity (identity `:seon.schema/key`) beside `:seon.schema/form` (`storable-properties-in`, `:268-287`; `canonical-schema-entities`, `src/seon/schema.clj:3689-3716`) | The schema declaration is itself an entity, so the program graph can query which schemas are program (`:seon.program/partition :seon.program`, read at `src/seon/program.cljc:50-56`) and which render pair each declares. Readers of the live program read the same properties from the compiled projection (`internal/entity-properties`, `src/seon/schema/internal.cljc:122`). A property whose attribute declares `:seon.fn/reference-to` (the render faces `:seon.render/ai`, `:html`, `:form`) is stored as its EFFECTIVE value along Malli's reference chain (`declared-reference`: own properties, a pointer's target, an `:and`'s later arm first) and as a ref to that function's entity, so inherited pairs are rows too, "which schemas render with f" is one AVET read, and the writer refuses by name a declaration whose function is absent (`write-render-target-error`, `src/seon/db.clj`) |
+| entity-schema properties: `:seon.program/partition`, `:seon.render/ai`, `:seon.render/html`, `:seon.render/form`, `:seon.render/units`, `:seon.db/component-schema`, … | each qualified property whose own declaration is storable is installed (`:244-249`) and written onto the schema's own entity (identity `:seon.schema/key`) beside `:seon.schema/form` (`storable-properties-in`, `:268-287`; `canonical-schema-entities`, `src/seon/schema.clj:3689-3716`) | The schema declaration is itself an entity, so the program graph can query which schemas are program (`:seon.program/partition :seon.program`, read at `src/seon/program.cljc:50-56`) and which render pair each declares. Readers of the live program read the same properties from the compiled projection (`internal/entity-properties`, `src/seon/schema/internal.cljc:122`) |
 
 ### Open questions (accidental or contradicting mappings)
 
@@ -300,12 +300,12 @@ Each is evidence for an owner decision; the bridge is unchanged.
    `:my.shell/failed-argv` (argv order and repeated arguments),
    `:seon.render/candidates`, `:seon.config.ai/stop`, `:seon.config.fs/roots`,
    `:seon.ai/wire`, `:seon.test/failing-assertions`. Owner: the vector-storage design.
-2. **Render pairs are refs (resolved).** The faces are declared
-   `[:and {:seon.fn/reference-to :seon.fn/sym} :seon.db/ref]`; a schema row
-   stores each effective face as a ref to its function (row above), and a
-   render function's output schemas are `:string` or `:seon.render/ai-data`
-   (AI), `:seon.render/hiccup` (HTML) and `:seon.render/read-form` (form), never
-   the face keys.
+2. **Render pairs stored as EDN strings.** `:seon.render/ai` is
+   `[:or :qualified-symbol :string]` and `:seon.render/html`
+   `[:or :qualified-symbol :seon.render/hiccup]`, so every schema entity stores
+   its renderer symbol as an EDN string (`:122-129`). The decoded value is a
+   symbol, but a Datalog clause over the raw datom cannot match
+   `'seon.render.ns/schema-ai`, against AGENTS "symbols stay Datahike symbols".
 3. **Hand-encoded EDN strings beside the codec.** `:seon.effect/request-edn`,
    `result-edn` and `:seon.test.accretion/report-edn` are declared `:string` and
    encoded by their writers; §6 forbids a hand-encoded EDN mirror of a declared

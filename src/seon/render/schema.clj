@@ -196,7 +196,7 @@
 (defn render-form
   "The form that finds this data again: the `usage` read for the registered
   key and form, over the viewer's database. Shown, never executed."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.render/read-form]]}
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.render/form]]}
   [unit]
   (when-let [[schema-key definition] (subject unit)]
     (list 'seon.render.schema/usage '(seon.db/db) schema-key (list 'quote definition))))

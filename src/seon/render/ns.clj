@@ -108,7 +108,7 @@
 
 (defn namespace-form
   "Return the ordinary `dir` form for a namespace entity."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/read-form]}
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
   [unit]
   (list 'dir (list 'quote (:seon.ns/name unit))))
 
