@@ -10,11 +10,11 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [sci.core :as sci]
-            [seon.ai.tokens :as tokens]
             [seon.config :as config]
             [seon.db :as db]
             [seon.schema :as schema]
             [seon.error :as error]
+            [seon.print.value :as print.value]
             [seon.sci.eval :as eval]
             [seon.sci.kernel :as kernel]
             [seon.test-support :as test-support]))
@@ -113,41 +113,18 @@
   [ctx source]
   (:seon.sci.admit/value (evaluate ctx source 5000)))
 
-(defn- shown
-  "`source`'s forms evaluated where `handle` names `value`, and the size of
-  the transcript they print (source plus results) in estimated tokens."
-  [source handle value]
-  (let [world (sci/init {:namespaces {(symbol (namespace handle)) {(symbol (name handle)) value}}})
-        results (mapv #(sci/eval-form world %) (read-string (str "[" source "\n]")))]
-    {:results results
-     :tokens (long (Math/ceil (/ (+ (count source) (count (pr-str results)))
-                                 tokens/shipped-chars-per-token)))}))
-
-(deftest an-agents-exception-is-whole-and-its-pair-shows-what-clojure-main-shows
+(deftest an-agents-exception-is-whole-and-its-reply-is-the-authors-evidence
+  ;; The value keeps its whole chain and first-party frames; the base error
+  ;; pair (seon.error/render-ai) shows the exception's class, message and the
+  ;; author's SCI stacktrace as data, with no evaluator frame.
   (let [ctx (eval/build-base-ctx (schema/handed-projection))
-        handle 'result/e1
         divide (failure ctx "(/ 1 0)")
-        thrown (failure ctx "(throw (ex-info \"boom\" {:a 1}))")
-        source (kernel/render-ai {:seon.render/value divide :seon.repl/handle handle})
-        {:keys [results tokens]} (shown source handle divide)]
-    (testing "the value keeps its first-party frames: nothing is trimmed for presentation"
-      (is (seq (mapcat :seon.error/frames (:seon.error/chain divide))) (pr-str divide)))
-    (testing "the pair: clojure.main's message, then the author's location read from the held value"
-      (is (= [";; Execution error (ArithmeticException) at (REPL:1:1)." ";; Divide by zero"]
-             (take 2 (str/split-lines source))) source)
-      (is (= [(:seon.sci.eval/stacktrace divide)] results) source)
-      (is (str/includes? source (str "(:seon.error/chain " handle ")")) "the whole chain is one read away")
-      ;; The author's location is read as `(:seon.sci.eval/stacktrace handle)`;
-      ;; an evaluator frame would print as its class or file.
-      (is (not-any? #(str/includes? source %) ["seon.sci.eval$" "sci/eval.clj" "sci.impl."])
-          "no evaluator frame is shown")
-      (is (<= tokens 200) source))
-    (testing "an ex-info's data is shown per cause"
-      (let [source (kernel/render-ai {:seon.render/value thrown :seon.repl/handle handle})]
-        (is (= [{:a 1}] (peek (:results (shown source handle thrown)))) source)))
-    (testing "without a handle only bounded comments are said"
-      (is (every? #(str/starts-with? % ";; ")
-                  (str/split-lines (kernel/render-ai {:seon.render/value divide})))))))
+        reply (error/reply-value nil divide)]
+    (is (seq (mapcat :seon.error/frames (:seon.error/chain divide))) (print.value/bounded-text divide))
+    (is (= 'java.lang.ArithmeticException (symbol (str (:seon.error/exception-class reply)))) (print.value/bounded-text reply))
+    (is (= (:seon.sci.eval/stacktrace divide) (:seon.sci.eval/stacktrace reply)))
+    (is (not-any? #(str/includes? (print.value/bounded-text reply 100000) %) ["seon.sci.eval$" "sci/eval.clj" "sci.impl."])
+        "no evaluator frame is shown")))
 
 (deftest a-contract-refusals-reply-is-the-failing-path-and-an-example
   ;; A program function resolves in an acquired agent context (a bare

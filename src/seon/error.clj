@@ -2057,18 +2057,6 @@
       (held? root) root
       (and (seq? root) (= 'seon.print/value-at (first root)) (held? (second root))) root)))
 
-(defn source-entries
-  "REPL entries in order: a string is a `;;` comment (one per line), any
-  other entry a form printed as runnable source."
-  {:malli/schema [:=> [:cat [:sequential {:min 1} [:or :string :seon.repl/expression]]]
-                  :seon.render/source]}
-  [entries]
-  (str/join "\n" (mapcat (fn [entry]
-                           (if (string? entry)
-                             (map #(str ";; " %) (str/split-lines entry))
-                             [(str/trimr (repl/source-text entry))]))
-                         entries)))
-
 (defn render-form
   "The form that finds this data again: the reply over the held error, when
   the viewer holds it. Shown, never executed."

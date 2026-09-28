@@ -14,7 +14,7 @@
  ; that fired, a symbol with no installed Var, an unadmittable failure).
  :seon.sci.kernel/error
  [:and
- {:seon.db/attributes true :seon.render/ai seon.sci.kernel/render-ai}
+ {:seon.db/attributes true}
  :seon.error/base
  [:map
   {:seon.db/attributes true}
@@ -28,7 +28,7 @@
  ; duration, allocation and outcome stay on the evaluation record.
  :seon.sci.kernel/execution-error
  [:and
- {:seon.db/attributes true :seon.render/ai seon.sci.kernel/render-ai}
+ {:seon.db/attributes true}
  :seon.error/base
  [:map
   {:seon.db/attributes true}
