@@ -20,6 +20,23 @@ occurrence count. A whole health value exists, `seon.cluster/mcp-runtime-observa
 recomputed from scratch on every call (~300 ms), AI face only. Operator phases (boot, drill, publication) are printed
 once and never stored.
 
+## 0. Transparent by construction (owner, 2026-09-28)
+
+"Handle everything transparently so the rest of the system doesn't have to do anything." Ordinary functions change
+nothing. Four existing owners do all of it:
+1. **The armed wrapper** (`seon.instrument`) captures every call: timings, histogram, throws, contract refusals with
+   digest and path, and the sampled tiers (§10).
+2. **The one-path fold** binds the world (agent, branch, evaluation or test member, task) around every evaluation, so
+   whatever is captured already knows where it happened.
+3. **Entrant boundaries** (the fold, MCP, web, Flow procs, schedule handlers, boot, the test runner) already must
+   convert every escaping failure (AGENTS.md "Nothing crashes"); they do it through the one constructor (§3), which
+   fills in the linked context.
+4. **The writers of commits that already happen** (settle, test batch, fault record, publication, adoption) attach
+   the findings and significant buckets as transaction data, linked by ref.
+A producer declaring its own error extension is optional (the base carries the common part). The one gap is work with
+no evaluation around it (Flow procs, listeners, boot): each such owner binds a world value it already holds (a proc's
+environment, the boot record) so the same capture links it too.
+
 ## 1. Detection: schemas and timings on the code graph
 
 - **Schemas are the primary detector.** A contract violation already knows the function and digest, the schema and
