@@ -980,6 +980,42 @@
 
                 :else nil))))))))
 
+(defn- task-file-path?
+  "True for one task file, `resources/seon/tasks/<ns>.edn` (`seon.issue/task-path?`)."
+  [file-path]
+  (when-let [absolute (absolute-file-path file-path)]
+    (let [file (io/file absolute)]
+      (and (str/ends-with? (.getName file) ".edn")
+           (= (.getCanonicalFile (root-file "resources/seon/tasks"))
+              (.getCanonicalFile (.getParentFile file)))))))
+
+(defn- validate-task-edit
+  "Block a task-file edit whose prospective text is not exactly one vector:
+  publication's task indexing refuses it (`seon.issue/file-declarations`
+  :not-one-vector / :unreadable-file) and with it the next boot (91f8cbe40
+  appended entries after the vector). Parsed with the owner's reader,
+  edamame's all-forms parse; nothing is evaluated."
+  [event]
+  (let [file-path (get-file-path event)]
+    (when (and (= (:hook_event_name event) "PreToolUse")
+               (task-file-path? file-path))
+      (let [reconstruction (reconstruct-file-content event)]
+        (when (= :available (:seon.hook.reconstruction/status reconstruction))
+          (let [forms (try ((requiring-resolve 'edamame.core/parse-string-all)
+                            (:seon.hook.reconstruction/source reconstruction))
+                           (catch Exception error error))]
+            (cond
+              (instance? Exception forms)
+              {:decision "block"
+               :reason (str "BLOCKED: this task file would not read, so publication refuses it "
+                            "and the next boot with it: " (.getMessage ^Exception forms))}
+              (not (and (= 1 (count forms)) (vector? (first forms))))
+              {:decision "block"
+               :reason (str "BLOCKED: a task file is exactly one vector of task maps; this edit "
+                            "leaves " (count forms) " top-level forms, so publication refuses it "
+                            "(:not-one-vector) and the next boot with it. Put new entries inside "
+                            "the vector.")})))))))
+
 (defn- validate-contract-edit
   "Block a reconstructed Clojure edit whose contracts do not compile."
   [event]
@@ -1952,7 +1988,8 @@
           (if (= event-name "PreToolUse")
             (let [path-events (map #(assoc event :seon.hook/file-path %)
                                    file-paths)
-                  schema-blocked (some validate-schema-edit path-events)
+                  schema-blocked (or (some validate-task-edit path-events)
+                                     (some validate-schema-edit path-events))
                   lint-blocked
                   (when (get-in config [:lint :enabled] true)
                     (some validate-clojure-edit path-events))
