@@ -89,14 +89,14 @@
        (is (seq (:tx-data report)) (pr-str report))
        (is (map? installed) (pr-str installed))
        (is (map? completed) (pr-str completed))
-       (let [shown-plan (edn/read-string (plan/format-plan-ai whole-plan))]
+       (let [shown-plan (plan/format-plan-ai whole-plan)]
          (is (str/includes? (:seon.plan/current-line shown-plan) "Current criterion"))
          (is (= #{"later" "finished"} (set (keys (:seon.plan/step-lines shown-plan)))))
          (is (not (str/includes? (pr-str shown-plan) "Later criterion")))
          (is (not (str/includes? (pr-str shown-plan) "Finished criterion")))
          (is (str/includes? (get-in shown-plan [:seon.plan/step-lines "finished"])
                             "completed — Finished task — "))
-         (is (= 'my.plan/current! (first (edn/read-string (:seon.plan/update-example shown-plan))))))
+         (is (= 'my.plan/current! (first (last (:seon.render/operations shown-plan))))))
        (is (seq (:functions directory)))
        (is (str/starts-with? (db/render-transaction-ai report)
                              "Wrote 5 facts on 2 entities:"))
