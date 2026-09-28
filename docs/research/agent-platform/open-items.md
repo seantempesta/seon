@@ -220,6 +220,15 @@ Sequence:
         - merge proposal;
         - agent, session and turn;
         - message, branch, config dial, blob and read evidence.
+  d4. **Refused reads (owner, 2026-09-28): unions, not exceptions.**
+      - `seon.db/q` and `pull` already declare rows-or-read-error.
+      - The gap is consumers: loose output contracts let an error map treated as rows pass as garbage.
+      - Sweep: each caller either passes the refusal on (declares it in its output union and returns it unchanged) or
+        handles it. Its output schema is precise enough that misuse is refused at its own boundary.
+      - Error contracts require the context keys the agent needs: operation, read and basis.
+      - Census: `tmp/one-path/db-read-refusal-callers.edn`, 219 callers. Order: turn.clj 42, cluster.clj 15,
+        sci/eval.clj 12, then by file, each by its owner.
+      - Confirmed bugs: `seon.error/names-in` (feedback-renders), plus two already fixed in 80a02b4a4.
   e. Beside it:
      - test agents: design 38e5a6d47 and prototype 33e878596, 13/13 proofs; Astra is re-reviewing; it lands after spec
        step S12;
