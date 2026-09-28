@@ -717,20 +717,17 @@
                     (:seon.sci.admit/bytes marker)
                     (blob/utf8-size full-edn))
         base-fact
-        (cond-> {:seon.error/id signature
-                 :seon.error/at at
-                 :seon.error/process process
-                 :seon.error/layer (:seon.error/layer observation)
-                 :seon.error/operation (:seon.error/operation observation)
-                 :seon.error/signature signature
-                 :seon.error/declared-schema declared-schema
-                 :seon.error/capped? true}
+        (cond-> (assoc (select-keys observation [:seon.error/layer :seon.error/operation
+                                                 :seon.error/exception-class :seon.error/producer])
+                       :seon.error/id signature
+                       :seon.error/at at
+                       :seon.error/process process
+                       :seon.error/signature signature
+                       :seon.error/declared-schema declared-schema
+                       :seon.error/capped? true)
           (int? data-size) (assoc :seon.error/data-size (long data-size))
           class-name (assoc :seon.error/throwable-class class-name)
-          (:seon.error/exception-class observation)
-          (assoc :seon.error/exception-class (:seon.error/exception-class observation))
           frame (assoc :seon.error/frame frame)
-          (:seon.error/producer observation) (assoc :seon.error/producer (:seon.error/producer observation))
           (and flow? (::flow/pid source))
           (assoc :seon.error/proc (::flow/pid source))
           (and flow? (::flow/op source)) (assoc :seon.error/op (::flow/op source))
@@ -741,10 +738,7 @@
           ;; (the blame rule); writing the frame that threw here named the
           ;; recorder itself (`seon.turn.world/record-fault`) on 41 of 47
           ;; faults, and resolution watched it (health plan §3).
-          (:seon.instrument/fn instrument-data)
-          (assoc :seon.instrument/fn (:seon.instrument/fn instrument-data))
-          (:seon.instrument/arm instrument-data)
-          (assoc :seon.instrument/arm (:seon.instrument/arm instrument-data))
+          instrument-data (into (select-keys instrument-data [:seon.instrument/fn :seon.instrument/arm]))
           ;; MEASURE THE OFFENDING VALUE, NOT THE REQUEST IT RODE IN. The
           ;; fact already reports the whole source's size; this one answers
           ;; how much of the value that broke the contract the inline field
@@ -815,17 +809,12 @@
   (`seon.turn`) states one. A recorded fault's notification carries the
   error's value, not a notice (`message-tx`)."
   {:malli/schema [:=> [:cat :seon.error/notice-request] :seon.error/notice]}
-  [{:seon.error/keys [fact reason occurrence occurrence-count notification-limit
-                      notification]
-    agent-id :seon.agent/id}]
-  (cond-> {:seon.error/fact fact
-           :seon.error/evidence [:seon.error/id (:seon.error/id fact)]}
-    reason (assoc :seon.error/reason reason)
-    occurrence (assoc :seon.error/occurrence occurrence)
-    occurrence-count (assoc :seon.error/occurrence-count occurrence-count)
-    notification-limit (assoc :seon.error/notification-limit notification-limit)
-    notification (assoc :seon.error/notification notification)
-    agent-id (assoc :seon.agent/id agent-id)))
+  [{:seon.error/keys [fact] :as request}]
+  (into {:seon.error/fact fact
+         :seon.error/evidence [:seon.error/id (:seon.error/id fact)]}
+        (filter val)
+        (select-keys request [:seon.error/reason :seon.error/occurrence :seon.error/occurrence-count
+                              :seon.error/notification-limit :seon.error/notification :seon.agent/id])))
 
 (defn- fact-source
   {:malli/schema [:=> [:cat :map]
@@ -1097,21 +1086,23 @@
 ;;; — the messaging rung records one refusal per undeliverable message
 ;;; and a form may hold several. The id is already unique per fact, so
 ;;; deriving from it costs nothing and makes the function compose.
+(defn- observation?
+  "Whether `candidate` is a recorded error observation: a map naming when, in
+  which layer and at which operation it happened."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                                   :seon.schema.admission/reason "A total predicate accepts any read result, an entity or a refusal, and returns false for what is not an observation."
+                                   :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
+  [candidate]
+  (and (map? candidate)
+       (inst? (:seon.error/at candidate))
+       (qualified-keyword? (:seon.error/layer candidate))
+       (qualified-symbol? (:seon.error/operation candidate))))
+
 (defn- fact-tempid
   {:malli/schema [:=> [:cat :seon.error/id]
                   :string]}
   [id]
   (str "seon.error/fact-" id))
-
-(defn- agent-exists?
-  "Return presence or the database's declared read refusal."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
-                  [:or :boolean :seon.db/error-result]]}
-  [database agent-id]
-  (let [result (db/pull database [:db/id] [:seon.agent/id agent-id])]
-    (cond (nil? result) false
-          (:db/id result) true
-          :else result)))
 
 (defn- entity-exists?
   "Return presence or the database's declared read refusal."
@@ -1382,19 +1373,14 @@
         agent-id (or (second (:seon.error/agent fact)) (:seon.agent/id world))
         turn-id (or (second (:seon.error/run fact)) (:seon.turn/id world))
         escalate-to (:seon.config.error/escalate-to request)
-        root-present (agent-exists? database "root")
-        agent-present (when agent-id (agent-exists? database agent-id))
+        root-present (entity-exists? database :seon.agent/id "root")
+        agent-present (when agent-id (entity-exists? database :seon.agent/id agent-id))
         turn-present (when turn-id (entity-exists? database :seon.turn/id turn-id))
-        escalation-present (when escalate-to (agent-exists? database escalate-to))
+        escalation-present (when escalate-to (entity-exists? database :seon.agent/id escalate-to))
         steward-id (steward database fact)
-        steward-present (when (string? steward-id) (agent-exists? database steward-id))
+        steward-present (when (string? steward-id) (entity-exists? database :seon.agent/id steward-id))
         opened (opening database signature)
-        read-refusal (some (fn [observation]
-                             (when (and (map? observation)
-                                        (inst? (:seon.error/at observation))
-                                        (qualified-keyword? (:seon.error/layer observation))
-                                        (qualified-symbol? (:seon.error/operation observation)))
-                               observation))
+        read-refusal (some #(when (observation? %) %)
                            [(when-not (:seon.error.occurrence/id old) old)
                             (when (map? notified) notified)
                             agent-present turn-present escalation-present root-present
@@ -1583,10 +1569,7 @@
                     (db/pull database
                              (observation-selector (:seon.schema/projection request))
                              [:seon.error/signature (:seon.error/signature source)]))
-         read-refusal (when (and acquiring? (map? acquired)
-                                (inst? (:seon.error/at acquired))
-                                (qualified-keyword? (:seon.error/layer acquired))
-                                (qualified-symbol? (:seon.error/operation acquired))) acquired)]
+         read-refusal (when (and acquiring? (observation? acquired)) acquired)]
      (cond
        read-refusal read-refusal
        (and acquiring? (nil? acquired))
@@ -2237,11 +2220,9 @@
                  blob (conj (list 'seon.render.value/artifact-value
                                   (list 'seon.render.value/read-artifact (list 'seon.blob/get blob))))
                  task (conj (list 'my.task/claim! {:seon.task/assigned task})))}
-        producer (assoc :seon.error/producer producer)
-        (:seon.error/producer-digest latest) (assoc :seon.error/producer-digest (:seon.error/producer-digest latest))
-        (:seon.instrument/fn fault) (assoc :seon.instrument/fn (:seon.instrument/fn fault))
-        (:seon.error/caller latest) (assoc :seon.error/caller (:seon.error/caller latest))
-        (:seon.error/expected-key latest) (assoc :seon.error/expected-key (:seon.error/expected-key latest))
+        true (into (concat (select-keys fault [:seon.error/producer :seon.instrument/fn])
+                           (select-keys latest [:seon.error/producer-digest :seon.error/caller
+                                                :seon.error/expected-key])))
         (seq path) (assoc :seon.error/path path)
         evaluation (assoc :seon.error.occurrence/evaluation evaluation)
         task (assoc :seon.task/id task)
@@ -2472,9 +2453,7 @@
   [unit]
   (when-let [entity (faults-input unit)]
    (let [entity-map (db/pull (:seon.db/db unit) [:seon.agent/id] entity)]
-    (if (and (map? entity-map) (inst? (:seon.error/at entity-map))
-             (qualified-keyword? (:seon.error/layer entity-map))
-             (qualified-symbol? (:seon.error/operation entity-map)))
+    (if (observation? entity-map)
       entity-map
       (when-let [agent-id (:seon.agent/id entity-map)]
       {:seon.repl/comment
@@ -2507,9 +2486,7 @@
                   (for-agent database agent-id)
                   identity-entity)))
         references (cond acquired? faults
-                         (and (map? entity) (inst? (:seon.error/at entity))
-                              (qualified-keyword? (:seon.error/layer entity))
-                              (qualified-symbol? (:seon.error/operation entity))) [entity]
+                         (observation? entity) [entity]
                          :else entity)
         entities (fault-entities references)]
     (into [:section {:class "seon-family-entry seon-error-faults"}
@@ -2520,6 +2497,19 @@
               (if acquired? "No fault is recorded against this agent."
                   "No fault is routed to this agent.")]])))))
 
+(defn- prose
+  "The lines of one error's AI prose: the parts present, joined by `separator`."
+  {:malli/schema [:=> [:cat :string [:vector [:maybe :string]]] :string]}
+  [separator parts]
+  (str/join separator (remove nil? parts)))
+
+(defn- evidence-of
+  "The diagnostic evidence one prose shows: the error's `:seon.error/data` and
+  the producer's own `extra-keys` members."
+  {:malli/schema [:=> [:cat :map [:vector :qualified-keyword]] :map]}
+  [observed extra-keys]
+  (merge (:seon.error/data observed) (select-keys observed extra-keys)))
+
 (defn time-limit-prose
   "`:seon.render/ai` — evaluation time-limit evidence without guessing cause."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 1}]]}
@@ -2527,13 +2517,10 @@
   (let [value (rendered-error-value unit)
         entries (or (:seon.eval/fn-entries value)
                     (:seon.sci.eval/time-limit value))]
-    (str/join
-     " "
-     (remove nil?
-             [(:seon.error/message value)
-              (when (some? entries)
-                (str "Recorded function-body entries: " entries "."))
-              "Many entries indicate a spin; few indicate time spent inside a host call. Inspect the called function before retrying."]))))
+    (prose " " [(:seon.error/message value)
+           (when (some? entries)
+             (str "Recorded function-body entries: " entries "."))
+           "Many entries indicate a spin; few indicate time spent inside a host call. Inspect the called function before retrying."])))
 
 (defn- evidence-text
   "Present the supplied diagnostic evidence without a classification lookup."
@@ -2547,14 +2534,10 @@
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 1}]]}
   [unit]
   (let [value (rendered-error-value unit)
-        evidence (merge (:seon.error/data value)
-                        (select-keys value [:my.edit/error-path :my.edit/edit-observation]))]
-    (str/join
-     "\n"
-     (remove nil?
-             [(:seon.error/message value)
-              (evidence-text evidence)
-              "Re-read the exact source and narrow the edit selection before applying it again."]))))
+        evidence (evidence-of value [:my.edit/error-path :my.edit/edit-observation])]
+    (prose "\n" [(:seon.error/message value)
+           (evidence-text evidence)
+           "Re-read the exact source and narrow the edit selection before applying it again."])))
 
 (defn elision-prose
   "`:seon.render/ai` — a neutral account of bounded render-walk elision."
@@ -2562,12 +2545,9 @@
   [unit]
   (let [value (rendered-error-value unit)
         evidence (:seon.error/data value)]
-    (str/join
-     " "
-     (remove nil?
-             ["Additional render-walk content was elided by the active render profile."
-              (evidence-text evidence)
-              "Request the next offset when more detail is needed."]))))
+    (prose " " ["Additional render-walk content was elided by the active render profile."
+           (evidence-text evidence)
+           "Request the next offset when more detail is needed."])))
 
 (defn elision-html
   "`:seon.render/html` — a neutral elision notice, never an error card."
@@ -2592,41 +2572,30 @@
   [unit]
   (let [value (rendered-error-value unit)
         evidence (:seon.error/data value)]
-    (str/join
-     "\n"
-     (remove nil?
-             [(:seon.error/message value)
-              "The original boundary did not supply complete domain evidence."
-              (evidence-text evidence)
-              "Inspect the observation and its boundary contract before retrying."]))))
+    (prose "\n" [(:seon.error/message value)
+           "The original boundary did not supply complete domain evidence."
+           (evidence-text evidence)
+           "Inspect the observation and its boundary contract before retrying."])))
 
 (defn mcp-prose
   "`:seon.render/ai` — retrieval evidence for a failed MCP value lookup."
   {:malli/schema [:=> [:cat :seon.render/unit] [:string {:min 1}]]}
   [unit]
   (let [value (rendered-error-value unit)
-        evidence (merge (:seon.error/data value)
-                        (select-keys value [:seon.dev.mcp/error-cluster :seon.dev.mcp/request-observation]))]
-    (str/join
-     "\n"
-     (remove nil?
-             [(:seon.error/message value)
-              (evidence-text evidence)
-              "Re-read the current cluster status or value identity before requesting the data again."]))))
+        evidence (evidence-of value [:seon.dev.mcp/error-cluster :seon.dev.mcp/request-observation])]
+    (prose "\n" [(:seon.error/message value)
+           (evidence-text evidence)
+           "Re-read the current cluster status or value identity before requesting the data again."])))
 
 (defn index-refusal-prose
   "`:seon.render/ai` — the precise evidence that stopped program indexing."
   {:malli/schema [:=> [:cat :seon.render/unit] [:string {:min 1}]]}
   [unit]
   (let [value (rendered-error-value unit)
-        evidence (merge (:seon.error/data value)
-                        (select-keys value [:seon.fn/error-subject :seon.fn/analysis-phase]))]
-    (str/join
-     "\n"
-     (remove nil?
-             [(:seon.error/message value)
-              (evidence-text evidence)
-              "Repair the named source or declaration evidence, then rerun initialization."]))))
+        evidence (evidence-of value [:seon.fn/error-subject :seon.fn/analysis-phase])]
+    (prose "\n" [(:seon.error/message value)
+           (evidence-text evidence)
+           "Repair the named source or declaration evidence, then rerun initialization."])))
 
 ;;; Complete owned error observations.
 
