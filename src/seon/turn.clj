@@ -2584,11 +2584,17 @@
                 database agent-eid))))
 
 (defn compact!
-  "Retract an idle agent's evaluations; the next system walk is fresh."
+  "Retract an idle agent's evaluations; the next system walk is fresh.
+  Answers the agent and the transaction that compacted it (its caller, the
+  agent page, re-reads the database), or the writer's refusal."
   {:malli/schema [:=> [:cat :seon.turn/compaction-request]
-                  [:or :seon.db/transaction-report :seon.db/transaction-refused-error]]}
+                  [:or [:map [:seon.agent/id :seon.agent/id] [:seon.db/tx :seon.db/tx]]
+                   :seon.db/transaction-refused-error]]}
   [{connection :seon.db/connection agent-id :seon.agent/id}]
-  (db/transact! connection [[:db.fn/call #'compact-call agent-id]]))
+  (let [report (db/transact! connection [[:db.fn/call #'compact-call agent-id]])]
+    (if (:db-after report)
+      {:seon.agent/id agent-id :seon.db/tx (db/basis-t (:db-after report))}
+      report)))
 
 (defn- await-durable!
   "Wait for `pending`, the commit of a settlement the writer answered when

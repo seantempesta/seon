@@ -588,8 +588,8 @@
                       (:seon.eval/shown
                        (db/pull @connection [:seon.eval/shown]
                                 (first a))))))
-           (is (some? (:db-after (turn/compact! {:seon.db/connection connection
-                                      :seon.agent/id "a"}))))
+           (is (= "a" (:seon.agent/id (turn/compact! {:seon.db/connection connection
+                                                      :seon.agent/id "a"}))))
            (is (empty? (evaluations @connection "a")))
            (is (= b (evaluations @connection "b")))
            (submit "a")
