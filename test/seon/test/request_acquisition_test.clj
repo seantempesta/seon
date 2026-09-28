@@ -1,5 +1,6 @@
 (ns seon.test.request-acquisition-test
   (:require [clojure.test :refer [deftest is]]
+            [sci.lang]
             [seon.db :as db]
             [seon.test :as sut]
             [seon.test-support :as support]))
@@ -40,3 +41,27 @@
        (is (= 3 (count (set (map :seon.agent/branch timings)))) "every member ran on its own branch")
        (is (empty? (support/file-store-markers connection marker))
            "no member write reaches the execution branch")))))
+
+(deftest a-member-installs-its-program-unobserved-by-the-calling-evaluation
+  ;; A merge candidate's new function is installed into the MEMBER's context;
+  ;; the SCI write observer of the evaluation that called `run` (root's
+  ;; prepare-merge!) must see none of it, or it arms the function in a
+  ;; context holding no such Var (merge-in-sci).
+  (support/with-database
+   (fn [connection]
+     (let [ns-sym 'seon.test.request-acquisition-test]
+       (support/transacted! connection [(support/namespace-entity (db/db connection) ns-sym)])
+       (support/transacted!
+        connection
+        [(support/program-entity (db/db connection) [:seon.fn/sym 'seon.test.request-acquisition-test/plus-one]
+                                 "(defn plus-one {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
+         (support/program-entity (db/db connection) [:seon.test/sym 'seon.test.request-acquisition-test/uses-plus-one]
+                                 "(clojure.test/deftest uses-plus-one (clojure.test/is (= 2 (seon.test.request-acquisition-test/plus-one 1))))")])
+       (let [observed (atom [])
+             result (binding [sci.lang/*write-observer* #(swap! observed conj (:op %))]
+                      (sut/run {:seon.test/execution (support/execution-handle connection)
+                                :seon.test/recording-connection connection
+                                :seon.test/policy :named
+                                :seon.test/identities #{'seon.test.request-acquisition-test/uses-plus-one}}))]
+         (is (true? (:seon.test/passed? result)))
+         (is (= [] @observed) "no member write reaches the caller's observer"))))))
