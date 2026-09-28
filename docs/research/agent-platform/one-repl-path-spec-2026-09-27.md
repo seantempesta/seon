@@ -526,6 +526,12 @@ Root files these; this lane edits no task file.
   effect depends on what else the cache held). Commit-key hits never re-insert a revision entry, so a JVM stays
   degraded until a new declaration commit or restart. This lane's probes ran such batches in default repeatedly.
   Owner question §12.
+- **F-T (S12, 2026-09-28, default pid 77505).** `seon.test/run` of ONE named test costs 4,657 ms cold and 2,244 ms warm
+  around a 147 ms body (`member-result`). Cold, by inclusive time: `select` 1,274 ms (`selection-facts` 1,092 ms x4; 239
+  `seon.db/q`, 786 `with-declarations`), 8 transactions 1,786 ms (`encode-call-output-in` 1,220 ms x7),
+  `clean-request-handle` 1,532 ms (`fork-cluster-ctx` 553, `seed-cluster-facts!` 500, `config/apply-compiled!` 409),
+  `program-written-since?` 1,096 ms. Warm: `select` 1,336, transactions 524, `clean-request-handle` 362. Task
+  `one-test-run-costs-seconds-around-a-147-ms-body` (seon.test.edn).
 - **F-B.** `seon.db/with` on a value first seen costs 65–250 ms (then 11–24 ms warm); per-form threading pays it once per
   schema version (h36: 22 × ~110 ms).
 - **F-C.** The floor prints a lazy seq whose realization throws as `()` (`v2-3-show-fails`): an error shown as an empty

@@ -3,16 +3,15 @@
   nothing changed.
 
   A `defn` returns its Var. The Var's declared render pair (`:seon.render.var/var`)
-  shows its contract when it is missing, and its reaching tests
-  at the function's current definition: a result recorded at the test's
-  current reach digest is read; none is pending; a test whose result at this
-  digest differs from its result before (newly red, newly green) is named.
+  shows its contract when it is missing, and its reaching tests at the
+  function's current definition: a result recorded against a program holding
+  it is read; none is pending; a test whose result differs from its result
+  before the definition (newly red, newly green) is named.
   Both faces read one value, `status`: the AI face returns it as data for the
   value printer, the HTML face as hiccup. Neither runs anything; the
   definition's batch schedules its reaching tests, the render only reads
-  their results. Test results are a derived value
-  keyed by the exercised digests, so a read of them is ordinary read evidence
-  and a later recording refreshes the next context."
+  their results. A read of the results is ordinary read evidence, so a later
+  recording refreshes the next context."
   (:require [clojure.string]
             [clojure.test.check.generators :as gen]
             [seon.db :as db]
@@ -48,31 +47,55 @@
                (:seon.test.member/error-count r (:seon.test/error-count r 0))))
     :fail :pass))
 
+(def ^:private shown-tests
+  "How many test names each status list shows; the counts say the rest, and
+  the check form reads them."
+  5)
+
+(defn- definition-tx
+  "The transaction that wrote `sym`'s current definition digest, or nil."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol] [:maybe :int]]}
+  [database sym]
+  (let [tx (db/q '[:find (max ?tx) . :in $ ?s
+                   :where [?f :seon.fn/sym ?s] [?f :seon.program/definition-digest _ ?tx]]
+                 database sym)]
+    (when (int? tx) tx)))
+
 (defn- before
-  "Each test's latest recorded outcome at a reach digest other than `now`."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:map-of :qualified-symbol :string]]
+  "Each of `tests`' latest recorded outcome completed before transaction `since`."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :qualified-symbol] :int]
                   [:map-of :qualified-symbol [:enum :pass :fail]]]}
-  [database now]
-  (into {}
-        (for [[t digest] now
-              :let [earlier (->> (db/q '[:find ?tx ?d ?f ?e :in $ ?t
-                                         :where [?m :seon.test.member/symbol ?t]
-                                                [?m :seon.test.member/completed-tx ?tx]
-                                                [?m :seon.test.member/reach-digest ?d]
-                                                [?m :seon.test.member/fail-count ?f]
-                                                [?m :seon.test.member/error-count ?e]]
-                                       database t)
-                                 (filter (fn [[_ d]] (not= d digest)))
-                                 (sort-by first) last)]
-              :when earlier]
-          [t (outcome {:seon.test.member/fail-count (nth earlier 2) :seon.test.member/error-count (nth earlier 3)})])))
+  [database tests since]
+  (let [rows (if (seq tests)
+               (db/q '[:find ?t ?tx ?f ?e :in $ [?t ...]
+                       :where [?m :seon.test.member/symbol ?t]
+                              [?m :seon.test.member/completed-tx ?tx]
+                              [?m :seon.test.member/fail-count ?f]
+                              [?m :seon.test.member/error-count ?e]]
+                     database tests)
+               [])]
+    (if-not (coll? rows)
+      {}
+      (into {}
+            (for [[t group] (group-by first rows)
+                  :let [[_ _ f e] (->> group (filter #(< (second %) since)) (sort-by second) last)]
+                  :when f]
+              [t (outcome {:seon.test.member/fail-count f :seon.test.member/error-count e})])))))
 
 (defn status
   "What the definition `sym` has to say, empty when nothing is worth saying.
 
-  Its contract when missing, and its reaching tests at their
-  current reach digests: pending when no result is recorded there, newly red
-  or green against the result before."
+  Its contract when missing, and its reaching tests: pending when no result
+  was recorded against a program holding its current definition (the run's
+  basis is before the transaction that wrote it), newly red or green against
+  the latest result before that definition. Each list shows its first five
+  names; `:seon.render.var/counts` says how many there are when more.
+
+  ## Costs
+
+  Proportional to the reaching tests: one gate-set read, the indexed latest
+  results and one query over the tests with a current result; no reach
+  digests are derived."
   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol] :seon.render.var/status]}
   [database sym]
   (let [entity (db/pull database [:db/id :seon.fn/spec :seon.fn/macro? :seon.fn/constant?] [:seon.fn/sym sym])
@@ -81,27 +104,26 @@
                             (not (or (:seon.fn/spec entity) (:seon.fn/macro? entity) (:seon.fn/constant? entity))))
                    :missing)
         tests (let [t (sfn/gate-sets {:seon.db/db database :seon.fn/seeds #{sym}})] (if (vector? t) t []))
-        digests (if (seq tests) (runner/reach-digests database tests) {})
-        digests (if (map? digests) (select-keys digests tests) {})
-        latest (if (seq tests)
+        since (when (seq tests) (definition-tx database sym))
+        latest (if (and (seq tests) since)
                  (let [r (runner/latest-results database tests)]
                    ;; a refused read is every test's pending, never a result
                    (if (map? r) {} (into {} (map (juxt :seon.test/sym identity)) r)))
                  {})
         now (into {} (for [t tests
-                           :let [r (get latest t)]]
-                       [t (if (and r (some? (get digests t))
-                                   (= (get digests t) (:seon.test.member/reach-digest r)))
-                            (outcome r) :pending)]))
-        was (before database (select-keys digests (keys (filter (comp #{:pass :fail} val) now))))
+                           :let [r (get latest t)
+                                 basis (:seon.test.run/basis-t r (:seon.test/run-basis-t r))]]
+                       [t (if (and (int? basis) (>= basis since)) (outcome r) :pending)]))
+        was (if since (before database (vec (keys (filter (comp #{:pass :fail} val) now))) since) {})
         newly (fn [from to] (vec (sort (for [[t o] now :when (and (= to o) (= from (get was t)))] t))))
-        pending (vec (sort (for [[t o] now :when (= :pending o)] t)))]
-    (cond-> {}
+        lists {:seon.render.var/pending (vec (sort (for [[t o] now :when (= :pending o)] t)))
+               :seon.render.var/newly-red (newly :pass :fail)
+               :seon.render.var/newly-green (newly :fail :pass)}
+        counts (into {} (for [[k v] lists :when (< shown-tests (count v))] [k (count v)]))]
+    (cond-> (into {} (for [[k v] lists :when (seq v)] [k (vec (take shown-tests v))]))
       contract (assoc :seon.render.var/contract contract
                       :seon.render.var/example (list 'defn (symbol (name sym)) {:malli/schema [:=> [:cat :int] :int]} '[x] 'x))
-      (seq pending) (assoc :seon.render.var/pending pending)
-      (seq (newly :pass :fail)) (assoc :seon.render.var/newly-red (newly :pass :fail))
-      (seq (newly :fail :pass)) (assoc :seon.render.var/newly-green (newly :fail :pass)))))
+      (seq counts) (assoc :seon.render.var/counts counts))))
 
 (defn render-ai
   "The Var as data for the value printer: its symbol and, when it says
@@ -121,14 +143,17 @@
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
   (let [sym (var-symbol (:seon.render/value unit))
-        {:seon.render.var/keys [contract example pending newly-red newly-green]}
+        {:seon.render.var/keys [contract example pending newly-red newly-green counts]}
         (when (and sym (:seon.db/db unit)) (status (:seon.db/db unit) sym))
-        tests (fn [label ts] (when (seq ts) [:li label ": " [:code (clojure.string/join " " ts)]]))]
+        tests (fn [label ts k]
+                (when (seq ts)
+                  [:li label (when-let [n (get counts k)] (str " (" n ")")) ": "
+                   [:code (clojure.string/join " " ts)]]))]
     [:div {:class "seon-var"}
      [:code (str "#'" sym)]
      (when (or contract (seq pending) (seq newly-red) (seq newly-green))
        [:ul
         (when contract [:li (str "contract " (name contract) ": ") [:code (render.value/bounded-text example)]])
-        (tests "newly red" newly-red)
-        (tests "newly green" newly-green)
-        (tests "pending" pending)])]))
+        (tests "newly red" newly-red :seon.render.var/newly-red)
+        (tests "newly green" newly-green :seon.render.var/newly-green)
+        (tests "pending" pending :seon.render.var/pending)])]))

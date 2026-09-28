@@ -1140,6 +1140,16 @@
                     (= {} (status (db/db conn) 'user/v1-p)))
         :evidence (count evidence) :current [current-before current-after]}))))
 
+(defproof :r7-ai-data-face-prints-as-data :render
+  "rev 6: an AI face that returns data is printed by the value printer as data (its keys shown, the value's own keys not), and a :seon.render/ai inside that data is never called (no nested re-dispatch). Green once render-selection lands render-ai-data-face.patch"
+  (let [b (run (world) (str "{:x 1 :seon.render/ai (fn [_] {:outer 1"
+                            " :nested {:seon.render/ai (fn [_] (throw (ex-info \"nested render called\" {})))}})}"))
+        text (first (shown b))]
+    {:pass? (and (string? text) (str/includes? text ":outer 1")
+                 (not (str/includes? text "nested render called"))
+                 (not (str/includes? text ":x 1")))
+     :shown text}))
+
 (def landing-files
   "The six namespaces and the schema resource step S3 copies into the tree."
   ["src/seon/batch.clj" "src/seon/sci/forgive.clj" "src/seon/sci/batch.clj" "src/seon/sci/arm.clj"

@@ -54,4 +54,9 @@
              :kind :function
              :intent "A named request whose members are all reusable greens still pays about 1.2 s before answering: seon.fault-test on default, 8 members, 0 executed, 1,223 ms wall; profiled, selection-admission 1,178 ms of which selection-facts 1,015 ms (4 calls), with-declarations x1,363. At six concurrent requests selection averaged 2,483 ms. Done when a request answering only recorded greens answers in time proportional to its members (tens of ms), measured by the same probe."
              :must-read #{seon.test/selection-admission seon.test/selection-facts}
-             :evidence #{"docs/research/agent-platform/test-agents-concurrency-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/test-agents-concurrency-2026-09-27.md"}}
+ #:seon.task{:name "one-test-run-costs-seconds-around-a-147-ms-body"
+             :kind :function
+             :intent "seon.test/run of ONE named test costs 4.7 s cold and 2.2 s warm on default (2026-09-28, pid 77505, seon.sci.eval-test/require-context-entities-carry-namespace-symbols) while its body (seon.test/member-result) takes 147 ms. Profiled cold: seon.test/select 1,274 ms (selection-facts 1,092 ms x4, 239 seon.db/q and 786 with-declarations calls), 8 transactions 1,786 ms (encode-call-output-in 1,220 ms x7), clean-request-handle 1,532 ms (fork-cluster-ctx 553 ms, seed-cluster-facts! 500 ms, config apply-compiled! 409 ms), program-written-since? 1,096 ms. Warm: select 1,336 ms, transactions 524 ms, clean-request-handle 362 ms. The one-path proofs pay this per run (v1-red-delta 13.5 s for three runs). Done when a one-test run under a test agent (S12: the defn's batch schedules it, its settle records the result) answers in well under a second, measured by the same probe."
+             :must-read #{seon.test/run seon.test/select seon.test/clean-request-handle seon.test.runner/program-written-since?}
+             :evidence #{"docs/research/agent-platform/one-repl-path-spec-2026-09-27.md"}}]

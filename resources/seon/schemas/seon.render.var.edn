@@ -8,15 +8,17 @@
  :contract [:enum {:description "A definition's contract when it is not present (a malformed contract joins when its stored form lands, :seon.fn/malformed-spec)."} :missing]
  :example [:any {:description "A contract form to start from, as data: the defn with an example :malli/schema." :gen/elements [(defn f {:malli/schema [:=> [:cat :int] :int]} [x] x)]}]
  :symbol [:qualified-symbol {:description "The symbol the rendered Var names."}]
- :pending [:vector {:description "Reaching tests with no result at their current reach digest."} :qualified-symbol]
- :newly-red [:vector {:description "Reaching tests that passed before this digest and fail at it."} :qualified-symbol]
- :newly-green [:vector {:description "Reaching tests that failed before this digest and pass at it."} :qualified-symbol]
+ :pending [:vector {:description "Reaching tests with no result recorded against a program holding the current definition (the first five)."} :qualified-symbol]
+ :newly-red [:vector {:description "Reaching tests that passed before the current definition and fail at it (the first five)."} :qualified-symbol]
+ :newly-green [:vector {:description "Reaching tests that failed before the current definition and pass at it (the first five)."} :qualified-symbol]
+ :counts [:map-of {:description "How many names a status list holds, for a list longer than it shows."} [:enum :seon.render.var/pending :seon.render.var/newly-red :seon.render.var/newly-green] [:int {:min 1}]]
  :status [:map {:description "What a definition has to say; empty when nothing changed."}
           [:seon.render.var/contract {:optional true} :seon.render.var/contract]
           [:seon.render.var/example {:optional true} :seon.render.var/example]
           [:seon.render.var/pending {:optional true} :seon.render.var/pending]
           [:seon.render.var/newly-red {:optional true} :seon.render.var/newly-red]
-          [:seon.render.var/newly-green {:optional true} :seon.render.var/newly-green]]
+          [:seon.render.var/newly-green {:optional true} :seon.render.var/newly-green]
+          [:seon.render.var/counts {:optional true} :seon.render.var/counts]]
  :view [:map {:description "A Var's AI face, data for the value printer: its symbol, its status, and the forms that act on it (never run by the render)."}
         [:seon.render.var/symbol [:maybe :seon.render.var/symbol]]
         [:seon.render.var/contract {:optional true} :seon.render.var/contract]
@@ -24,4 +26,5 @@
         [:seon.render.var/pending {:optional true} :seon.render.var/pending]
         [:seon.render.var/newly-red {:optional true} :seon.render.var/newly-red]
         [:seon.render.var/newly-green {:optional true} :seon.render.var/newly-green]
+        [:seon.render.var/counts {:optional true} :seon.render.var/counts]
         [:seon.render/operations {:optional true} :seon.render/operations]]}
