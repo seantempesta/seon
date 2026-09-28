@@ -290,9 +290,11 @@
             admitted (schema.edn/admit {:seon.schema/forms forms})
             refusal
             (try
-              (schema.edn/admit
-               {:seon.schema/forms (mutate-population forms mutation)})
-              test-support/committed
+              (let [answered (schema.edn/admit
+                              {:seon.schema/forms (mutate-population forms mutation)})]
+                ;; a declared refusal is answered as a value; a compilation
+                ;; failure admit does not declare still resurfaces whole
+                (if (:seon.error/at answered) answered test-support/committed))
               (catch clojure.lang.ExceptionInfo failure
                 (ex-data failure)))]
         (and (= (set (keys forms))
@@ -332,20 +334,17 @@
 
 (deftest an-unregistered-predicate-refusal-names-its-reload-owner
   (let [predicate 'seon.schema.edn-test/no-such-predicate?
-        failure
-        (try
-          (schema.edn/admit
-           {:seon.schema/forms
-            {:seon.schema.edn.gate/missing
-             [:fn {:gen/schema :inst} predicate]}})
-          nil
-          (catch clojure.lang.ExceptionInfo cause
-            cause))]
-    (is (some? failure))
-    (is (= predicate (::schema.edn/predicate (ex-data failure))))
+        refused
+        (schema.edn/admit
+         {:seon.schema/forms
+          {:seon.schema.edn.gate/missing
+           [:fn {:gen/schema :inst} predicate]}})]
+    (is (= ::schema.edn/unregistered-predicate (:seon.error/member refused))
+        "the refusal is answered as a value naming its kind")
+    (is (= predicate (::schema.edn/predicate refused)))
     (is (= 'seon.schema.edn-test
-           (::schema.edn/predicate-owner (ex-data failure))))
-    (is (str/includes? (ex-message failure)
+           (::schema.edn/predicate-owner refused)))
+    (is (str/includes? (:seon.error/message refused)
                        "load or reload that namespace before schema admission"))))
 
 (deftest register!-flows-through-the-same-gate

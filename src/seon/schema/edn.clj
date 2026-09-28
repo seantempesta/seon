@@ -18,6 +18,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [malli.core :as m]
+            [seon.error.refusal :as error.refusal]
             [seon.schema :as schema])
   (:import [java.net JarURLConnection]))
 
@@ -448,31 +449,38 @@
 
     :else []))
 
-(defn- refusal!
-  {:malli/schema [:=> [:cat :qualified-keyword :keyword :seon.schema/definition :map] :nil]}
+(defn- refusal
+  "The population's refusal of `identity` as one error value: the refused
+  kind (`error`, also its member), the declaration as authored (an
+  unregistered predicate or an unresolved reference is exactly what fails
+  `:seon.schema/definition`), the resource file when known and `extra`."
+  {:malli/schema [:=> [:cat :qualified-keyword :keyword :seon.schema/value :map]
+                  :seon.schema.edn/population-refused-error]}
   [error identity declaration extra]
   (let [file (get (::files-by-key (resource-population default-resource))
                   identity)
         predicate (::predicate extra)
         predicate-owner (::predicate-owner extra)]
-    (throw
-     (ex-info
-      (str "Schema population refused " identity " (" (name error) ")."
-           (when (= error ::unregistered-predicate)
-             (str " Predicate " predicate " is owned by namespace "
-                  predicate-owner "; load or reload that namespace before "
-                  "schema admission."))
-           (when-let [missing (::unresolved-reference extra)]
-             (str " It names " missing ", which no schema declares.")))
-      (cond->
-       (merge
-        {::error error
-         ::attribute identity
-         error (if (= ::unreadable-file error) file identity)
-         :seon.schema/definition declaration
-         }
-        extra)
-        file (assoc ::file file))))))
+    (error.refusal/diagnostic
+     (cond->
+      (merge
+       {::error error
+        ::attribute identity
+        error (if (= ::unreadable-file error) file identity)
+        :seon.error/offending declaration}
+       extra
+       {:seon.error/at (java.util.Date.) :seon.error/layer ::admission
+        :seon.error/operation 'seon.schema.edn/admit
+        :seon.error/member error
+        :seon.error/message
+        (str "Schema population refused " identity " (" (name error) ")."
+             (when (= error ::unregistered-predicate)
+               (str " Predicate " predicate " is owned by namespace "
+                    predicate-owner "; load or reload that namespace before "
+                    "schema admission."))
+             (when-let [missing (::unresolved-reference extra)]
+               (str " It names " missing ", which no schema declares.")))})
+       file (assoc ::file file)))))
 
 (defn- predicate-registered?
   "True when the `[:fn]` symbol resolves to a callable Var.
@@ -492,19 +500,25 @@
   [predicate]
   (schema/core-predicate-registered? predicate))
 
-(defn- assert-predicates!
+(defn- predicate-refusal
+  "The refusal of the first `[:fn]` declaration in `forms` with no honest
+  generator or no registered predicate, or nil."
+  {:malli/schema [:=> [:cat :map] [:maybe :seon.schema.edn/population-refused-error]]}
   [forms]
-  (doseq [[identity definition] (sort-by key forms)
-          {::keys [predicate honest-generator? path]}
-          (predicate-declarations definition [])]
-    (when-not honest-generator?
-      (refusal! ::dishonest-generator identity definition
-                {::predicate predicate ::path path}))
-    (when-not (predicate-registered? predicate)
-      (refusal! ::unregistered-predicate identity definition
-                {::predicate predicate
-                 ::predicate-owner (some-> predicate namespace symbol)
-                 ::path path}))))
+  (first
+   (for [[attribute definition] (sort-by key forms)
+         {::keys [predicate honest-generator? path]} (predicate-declarations definition [])
+         :let [refused (cond
+                         (not honest-generator?)
+                         (refusal ::dishonest-generator attribute definition
+                                  {::predicate predicate ::path path})
+                         (not (predicate-registered? predicate))
+                         (refusal ::unregistered-predicate attribute definition
+                                  {::predicate predicate
+                                   ::predicate-owner (some-> predicate namespace symbol)
+                                   ::path path}))]
+         :when refused]
+     refused)))
 
 (defn- unresolved-candidate-reference
   [error projection forms]
@@ -561,9 +575,11 @@
   absent from the population), `::unregistered-predicate` (a `[:fn]`
   symbol with no `register-core-predicate!`), and
   `::dishonest-generator` (a `[:fn]` form carrying neither
-  `:gen/schema` nor `:gen/gen`)."
+  `:gen/schema` nor `:gen/gen`), each RETURNED as a
+  `:seon.schema.edn/population-refused-error`; any other failure of the
+  population's compilation resurfaces whole."
   {:malli/schema [:=> [:cat [:map [:seon.schema/forms :map]]]
-                  [:vector :map]]}
+                  [:or [:vector :map] :seon.schema.edn/population-refused-error]]}
   [{:seon.schema/keys [forms identity admission]}]
   (let [original-forms forms
         forms (if identity (derive-config-forms forms) forms)
@@ -580,9 +596,9 @@
             :seon.config/effective
             :seon.config/agent-overlay
             :seon.config/entity]))]
-    (assert-predicates!
-     (if identity (select-keys forms changed-identities) forms))
-    (try
+    (or
+     (predicate-refusal (if identity (select-keys forms changed-identities) forms))
+     (try
       (if identity
         ;; Runtime registration admits the new declaration against the complete
         ;; active projection one changed identity at a time. A config leaf may
@@ -607,6 +623,7 @@
         ;; Activation has no distinguished producer: every declaration must
         ;; compile and resolve in the complete population before publication.
         (schema/build-projection forms))
+      nil
       (catch Exception e
         (let [data (ex-data e)
               offending (or (:seon.schema/identity data)
@@ -619,11 +636,12 @@
             ;; whole cause chain), not only the declaration that named it:
             ;; the one fact the author needs to fix the declaration.
             (let [missing (#'schema/unresolved-reference-in e)]
-              (refusal! ::unresolved-reference offending definition
-                        (cond-> {::cause data}
-                          missing (assoc ::unresolved-reference missing
-                                         :seon.schema/missing-reference missing))))
+              (refusal ::unresolved-reference offending definition
+                       (cond-> {::cause data}
+                         missing (assoc ::unresolved-reference missing
+                                        :seon.schema/missing-reference missing))))
             (throw e)))))
+     (do
     ;; `schema/register!` owns the leaf write. When that one registration
     ;; changes a derived config composite, contribute only those projections
     ;; after admission succeeds; no hand-written caller can fall between the
@@ -651,4 +669,4 @@
     (mapv (fn [[registered-identity definition]]
             {:seon.schema/key registered-identity
              :seon.schema/definition definition})
-          (sort-by key forms))))
+          (sort-by key forms))))))

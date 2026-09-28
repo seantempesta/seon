@@ -354,15 +354,19 @@
   "Nil, or the finding for the refusal `schema/register!` gives
   `declaration-key`: its nilable-value check, then `schema.edn/admit` with the
   declaration's admission source."
+  {:malli/schema [:=> [:cat [:map-of :keyword [:maybe :string]] :map :keyword :keyword] [:maybe :map]]}
   [files-by-key forms declaration-key source]
   (try
     (internal/assert-non-nilable-value-schema!
      forms declaration-key
      (schema/structural-schema (get forms declaration-key)))
-    (schema.edn/admit {:seon.schema/forms forms
-                       :seon.schema/identity declaration-key
-                       :seon.schema/admission
-                       {:seon.schema.admission/source source}})
+    (let [admitted (schema.edn/admit {:seon.schema/forms forms
+                                      :seon.schema/identity declaration-key
+                                      :seon.schema/admission
+                                      {:seon.schema.admission/source source}})]
+      ;; admit answers its refusal as a value; it becomes this finding below
+      (when (:seon.error/at admitted)
+        (throw (ex-info (:seon.error/message admitted) admitted))))
     nil
     (catch Throwable error
       (let [data (ex-data error)

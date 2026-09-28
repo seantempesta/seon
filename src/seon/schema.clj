@@ -1813,11 +1813,14 @@
   ;; namespace has finished loading; there is no hand-maintained exception set.
   (when-let [admit (some-> (find-ns 'seon.schema.edn)
                            (ns-resolve 'admit))]
-    (admit
-     {:seon.schema/forms (assoc (candidate-forms) k v)
-      :seon.schema/identity k
-      :seon.schema/admission
-      {:seon.schema.admission/source *registration-admission-source*}}))
+    (let [admitted (admit
+                    {:seon.schema/forms (assoc (candidate-forms) k v)
+                     :seon.schema/identity k
+                     :seon.schema/admission
+                     {:seon.schema.admission/source *registration-admission-source*}})]
+      ;; the population's refusal value, raised to register!, which answers it
+      (when (:seon.error/at admitted)
+        (throw (ex-info (:seon.error/message admitted) admitted)))))
   (update-candidate-forms! assoc k v)
   ;; The stored-data check runs here, once, in the registering evaluation
   ;; (never in its render): `seon.db` is resolved without loading it, as

@@ -23,4 +23,8 @@
  :seon.schema.edn/unregistered-predicate-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the predicate that is not registered"} [:seon.schema.edn/unregistered-predicate :seon.schema.edn/unregistered-predicate] [:seon.error/message :seon.error/message]]
  :seon.schema.edn/unresolved-reference [:qualified-keyword {:description "The registry key a declaration names that no schema declares (the declaration itself is :seon.schema.edn/attribute)."}]
  :seon.schema.edn/attribute [:keyword {:description "The declaration a schema population refusal is about."}]
+ :seon.schema.edn/population-refused-error
+ [:and {:description "seon.schema.edn/admit refused the population: the refused kind as :seon.error/member (:seon.schema.edn/unresolved-reference, unregistered-predicate, dishonest-generator), the declaration as :seon.schema.edn/attribute, the authored form as :seon.error/offending and its resource file when known."}
+  :seon.error/base
+  [:map [:seon.schema.edn/attribute :seon.schema.edn/attribute]]]
  :seon.schema.edn/unresolved-reference-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the schema reference that cannot be resolved and the declaration naming it"} [:seon.schema.edn/unresolved-reference :seon.schema.edn/unresolved-reference] [:seon.schema.edn/attribute :seon.schema.edn/attribute] [:seon.error/message :seon.error/message]]}

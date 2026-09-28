@@ -819,8 +819,9 @@
                  [:or :string [:vector [:ref local-node]]]}}
                [:ref local-node]]]
           (is (= local
-                 (schema/call-with-registration-delta
-                  delta (fn [] (schema/register! local definition)))))
+                 (:seon.schema/key
+                  (schema/call-with-registration-delta
+                   delta (fn [] (schema/register! local definition))))))
           (schema/call-with-registration-delta
            delta
            (fn []

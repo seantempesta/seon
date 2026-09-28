@@ -27,6 +27,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [clojure.walk :as walk]
             [edamame.core :as edamame]
             [malli.core :as m]
             [seon.error.refusal :as error.refusal]
@@ -182,6 +183,17 @@
 
 ;;; ---------------------------------------------------------------------------
 ;;; Completeness: every function an edit adds or changes is specified
+
+(defn- same-definition?
+  "True when two read definition forms are the same source. A regex literal
+  reads as a `java.util.regex.Pattern`, whose equality is identity, so every
+  function holding one read as changed; patterns compare by their text."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A definition form is arbitrary read data.", :gen/elements [nil 0 :k [] {}]}]
+                       [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A definition form is arbitrary read data.", :gen/elements [nil 0 :k [] {}]}]]
+                  :boolean]}
+  [a b]
+  (let [text (fn [form] (walk/postwalk #(if (instance? java.util.regex.Pattern %) (list 're-pattern (str %)) %) form))]
+    (= (text a) (text b))))
 ;;; ---------------------------------------------------------------------------
 
 (def ^:private function-heads
@@ -223,7 +235,7 @@
     (into []
           (keep (fn [form]
                   (when (and (function-heads (first form))
-                             (not= form (get before (second form))))
+                             (not (same-definition? form (get before (second form)))))
                     (let [authored (declared-schema form)
                           {:keys [row col]} (meta form)
                           function-symbol (symbol (str namespace-name) (name (second form)))
@@ -553,7 +565,7 @@
     []
     (let [before (into {} (map (juxt second identity))
                        (definition-forms (read-source baseline)))
-          changed (into #{} (comp (filter #(not= % (get before (second %)))) (map second))
+          changed (into #{} (comp (remove #(same-definition? % (get before (second %)))) (map second))
                         (definition-forms (read-source text)))]
       (into []
             (keep (fn [{::keys [row escaping declared? caller-converted?] function-symbol ::symbol}]
@@ -902,9 +914,11 @@
   ;; changes without a complete contract; unchanged functions are untouched.
   (let [baseline "(ns seon.probe)
 (defn legacy [x] x)
+(defn with-regex [x] (re-matches #\"a+\" x))
 (defn- kept {:malli/schema [:=> [:cat :int] :int]} [x] x)"
         edited "(ns seon.probe)
 (defn legacy [x] x)
+(defn with-regex [x] (re-matches #\"a+\" x))
 (defn- kept {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))
 (defn fresh [x] x)
 (defn- private-fresh [x] x)
@@ -921,6 +935,7 @@
     (is (named "adds seon.probe/loose (defn) with :any standing in"))
     (is (every? #(str/includes? (:message %) "registered schema") refused))
     (is (not (named "seon.probe/legacy")) "an unchanged uncontracted function is untouched")
+    (is (not (named "seon.probe/with-regex")) "a regex literal does not make an unchanged function read as changed")
     (is (not (named "seon.probe/justified")) "a declared polymorphic boundary is complete")
     (testing "without a baseline the corpus check judges compilation only"
       (is (empty? (filter #(= :incomplete-contract (:type %))
