@@ -2363,3 +2363,24 @@
            entry (first (:seon.batch/entries (seon.batch/evaluate-batch (dissoc request :seon.batch/settle))))]
        (is (= 4321 (:seon.config.eval/time-limit-ms (:seon.batch/value entry)))
            "the read after the write, omitting its database, sees the write")))))
+
+(deftest a-schema-key-changed-since-the-run-read-it-is-refused-at-the-writer
+  ;; Root ruling 2026-09-28: the writer's stale guard covers the schema keys a
+  ;; batch registers as well as its definitions (the old path's row writer
+  ;; checked both; the fold's guard checked only definitions).
+  (support/with-database
+   (fn [connection]
+     (let [request (turn.batch/code-request
+                    {:seon.batch/world (world/agent-world {:seon.db/connection connection :seon.cluster/name "default"
+                                                           :seon.sci.eval/base-ctx (sci.eval/base-ctx (db/db connection))}
+                                                          {:seon.agent/id "stale-schema-writer"})
+                     :seon.batch/observe observe/observe
+                     :seon.batch/start-ns 'user
+                     :seon.batch/text "(seon.schema/register! :stale.schema/label :string)"})
+           batch (seon.batch/evaluate-batch (dissoc request :seon.batch/settle))
+           _ (is (contains? (get-in batch [:seon.batch/program :schema-keys]) :stale.schema/label)
+                 "the batch registers the key")
+           _ (support/transacted! connection (support/schema-entities @connection [[:stale.schema/label :int]]))
+           refused (turn.batch/program-facts request (db/db connection) (:seon.batch/program batch))]
+       (is (= [[:seon.schema/key :stale.schema/label]] (:seon.error/offending refused))
+           "the writer refuses a schema key another writer changed since the basis")))))

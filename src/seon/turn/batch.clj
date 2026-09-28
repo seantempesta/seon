@@ -551,25 +551,32 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- changed-since-basis
-  "The refusal of a change whose definitions another writer changed after the
-  batch read them: an entity whose stored `:seon.program/definition-digest`
-  on `head` differs from the one on the batch's basis (its world's value).
-  Detect and push back, never lock: the author re-evaluates against the
-  current definition. nil when nothing changed underneath."
-  {:malli/schema [:=> [:cat :seon.batch/request :seon.db/database-value [:vector :seon.program/row]]
+  "The refusal of a change whose declarations another writer changed after
+  the batch read them: an entity whose stored `:seon.program/definition-digest`
+  on `head` differs from the one on the batch's basis, or a schema key the
+  batch registers whose stored `:seon.schema/form` differs. Detect and push
+  back, never lock: the author re-evaluates against the current declaration.
+  nil when nothing changed underneath."
+  {:malli/schema [:=> [:cat :seon.batch/request :seon.db/database-value [:vector :seon.program/row]
+                       [:set :qualified-keyword]]
                   [:maybe :seon.error/value]]}
-  [request head entities]
+  [request head entities schema-keys]
   (when-let [basis (:seon.batch/basis request)]
     (when-not (identical? basis head)
-      (let [digest (fn [database lookup]
-                     (:seon.program/definition-digest
-                      (db/pull database [:seon.program/definition-digest] lookup)))
-            changed (into []
-                          (keep (fn [row]
-                                  (let [lookup (program/row-identity row)]
-                                    (when (and lookup (not= (digest basis lookup) (digest head lookup)))
-                                      lookup))))
-                          entities)]
+      (let [stored (fn [database attribute lookup]
+                     (get (db/pull database [attribute] lookup) attribute))
+            differs? (fn [attribute lookup]
+                       (not= (stored basis attribute lookup) (stored head attribute lookup)))
+            changed (-> []
+                        (into (keep (fn [row]
+                                      (let [lookup (program/row-identity row)]
+                                        (when (and lookup (differs? :seon.program/definition-digest lookup))
+                                          lookup))))
+                              entities)
+                        (into (keep (fn [k]
+                                      (let [lookup [:seon.schema/key k]]
+                                        (when (differs? :seon.schema/form lookup) lookup))))
+                              (sort schema-keys)))]
         (when (seq changed)
           (seon.error.refusal/diagnostic
            (java.util.Date.) :seon.turn.batch/program 'seon.turn.batch/program-facts
@@ -588,7 +595,7 @@
   [request head {:keys [entities schema-keys namespaces removed-namespaces]}]
   (let [rows (vec (keep (fn [[_ r]] (when (map? r) r)) entities))]
     ;; decided at the writer: a definition changed underneath the run refuses
-    (or (changed-since-basis request head rows)
+    (or (changed-since-basis request head rows (or schema-keys #{}))
         (form-facts request head
                     {:seon.batch/entities rows
                      :seon.batch/removals (into (vec (keep (fn [[s r]] (when (= :removed r) s)) entities))
@@ -655,7 +662,8 @@
   [request head entries]
   (reduce (fn [[w p es] e]
             (if-let [change (:seon.batch/change e)]
-              (let [facts (or (changed-since-basis request head (:seon.batch/entities change))
+              (let [facts (or (changed-since-basis request head (:seon.batch/entities change)
+                                                        (or (:seon.batch/schema-keys change) #{}))
                               (form-facts request w change))
                     ;; the removal's refusal whole, with its referrers: the
                     ;; refactoring data it exists to give (a message alone lost it)
