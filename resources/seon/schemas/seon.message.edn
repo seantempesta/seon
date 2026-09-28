@@ -45,6 +45,16 @@
                 [:seon.config.eval.result/max-string
                  :seon.config.eval.result/max-string]],
                :id [:string {:min 1, :seon.db/identity true :seon.program/row-schema :seon.message/message}],
+               :unread-entry
+               [:map {:description "One unread message as its recipient's AI face shows it: who sent what, and the acknowledgement offered. Order carries time; its instant is one inbox read away."}
+                [:my.message/id :my.message/id]
+                [:my.message/from {:optional true} :my.message/from]
+                [:my.message/content :my.message/content]
+                [:seon.render/operations :seon.render/operations]]
+               :inbox-view
+               [:map {:description "Acquired messages as their recipient's AI face shows them: the unread oldest first, and how many were received."}
+                [:seon.message/unread [:vector :map]]
+                [:seon.message/received [:int {:min 0}]]]
                :inbox-unit
                [:sequential
                 {:description

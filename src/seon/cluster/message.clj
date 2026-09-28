@@ -2,7 +2,7 @@
   "Durable messages with permanent routing and settlement claims."
   (:refer-clojure :exclude [read send])
   (:require [seon.db :as db]
-            [seon.repl :as repl]
+            [seon.error.refusal]
             [seon.id :as id]
             [clojure.string :as str]
             [seon.render.route :as route]
@@ -397,10 +397,10 @@
   Its recipient is offered `(my.message/received! id)` until it acknowledges;
   its sender sees whether it was received. Renders the value it was handed,
   so a reply shows the message its write returned."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :map]]}
   [unit]
   (when (get unit :seon.message/id)
-    (pr-str (message-view (get unit :seon.db/db) (get unit :seon.agent/id) unit))))
+    (message-view (get unit :seon.db/db) (get unit :seon.agent/id) unit)))
 
 (defn render-html
   "`:seon.render/html` — one message, with the same facts as its AI twin."
@@ -503,34 +503,38 @@
                        (list 'seon.db/pull [:seon.agent/id]
                              (if (map? recipient) (:db/id recipient) recipient))))}))
 
+(declare inbox*)
+
 (defn render-inbox-ai
-  "Show an inbox from the agent's side.
+  "Show an inbox from the agent's side, as data.
 
   An agent's own `:seon.message/_to` concern hands its recipient reference:
-  the render is the REPL entry reading its unread messages ([[inbox-form]]),
-  so the opening evaluates the read and its read evidence names the inbox and
-  its acknowledgements; a new, changed or acknowledged message is then a
-  changed read in the next context.
-  Handed the acquired messages, it shows them as data: the unread oldest
-  first, each offering `(my.message/received! id)`, and the received count.
-
-  ## Edge cases
-  The reference arity declares `:seon.render/source`, which is how
-  `seon.render` knows to evaluate it; returning the reference itself (as
-  89629b13c did) leaves the opening without its inbox read."
-  {:malli/schema [:function
-                  [:=> [:cat :seon.message/to] :seon.render/source]
-                  [:=> [:cat :seon.message/inbox-unit :seon.db/database-value] :string]]}
-  ([recipient]
-   (repl/source-text (inbox-form recipient)))
-  ([inbox database]
-   (let [ordered (sort-by #(message-order database %) inbox)
-         views (map #(message-view database
-                                   (agent-reference-id database (:seon.message/to %)) %)
-                    ordered)
-         received? #(or (contains? % :seon.message/received-tx) (:seon.message/received? %))]
-     (pr-str #:seon.message{:unread (vec (remove received? views))
-                            :received (count (filter received? views))}))))
+  the render reads its unread messages, oldest first, as [[inbox-form]]
+  finds them, each its sender, content and `(my.message/received! id)`;
+  order carries the time, so the instant is left to the read. The
+  read names `:seon.message/to` and `:seon.message/received-tx`, so a new,
+  changed or acknowledged message changes the shown read.
+  Handed the acquired messages, it shows the unread oldest first and the
+  received count."
+  {:malli/schema [:=> [:cat [:or :seon.message/to :seon.message/inbox-unit] :seon.db/database-value]
+                  [:or [:vector :seon.message/unread-entry] :seon.message/inbox-view :seon.error/value]]}
+  [recipient-or-inbox database]
+  ;; A LOOKUP REF IS ALSO SEQUENTIAL (as in `render-inbox-html`).
+  (if (and (sequential? recipient-or-inbox) (every? map? recipient-or-inbox))
+    (let [ordered (sort-by #(message-order database %) recipient-or-inbox)
+          views (map #(message-view database (agent-reference-id database (:seon.message/to %)) %)
+                     ordered)
+          received? #(or (contains? % :seon.message/received-tx) (:seon.message/received? %))]
+      #:seon.message{:unread (vec (remove received? views))
+                     :received (count (filter received? views))})
+    (if-let [agent-id (agent-reference-id database recipient-or-inbox)]
+      (let [unread (inbox* database agent-id nil)]
+        (if (vector? unread) (mapv #(dissoc % :my.message/at) unread) unread))
+      (seon.error.refusal/diagnostic
+       (java.util.Date.) :seon.message/delivery 'seon.cluster.message/render-inbox-ai
+       {:seon.error/message "The inbox's recipient names no agent."
+        :seon.error/member :seon.message/to :seon.error/expected :seon.agent/id
+        :seon.error/offending recipient-or-inbox}))))
 
 (defn inbox-html
   "Render every message addressed to one agent, oldest first.
