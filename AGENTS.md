@@ -97,17 +97,20 @@ root.
    deletions is presumed wrong: stop before writing and report the smaller alternative. Net deletion does not excuse
    new machinery; code that still grows is justified to the owner before integration: what it adds, why nothing
    smaller works, what it lets go later.
-4. **Prototype in a branch at the REPL; the prototype is the change; review the diff.** Opus designs and implements
-   by dogfooding: in its own Seon branch it tries alternatives at the REPL (defn, tests reaching the change, timings),
-   keeps what worked, and proposes it through the ordinary merge; write-back then updates only the files that
-   changed. REPL proofs are the design evidence. Astra, an outside model trained on a different distribution, reviews
-   the landed or proposed DIFF and the implementation, not REPL sessions: it reviews from an unbiased perspective for
-   correctness, simplicity and these laws, and above all for large algorithmic gains. Every transformation should be
-   O(n) or O(n log n) in what changed. Repeated work is refused: the same derivation executed thousands of times,
-   whole-program work per change, or re-reading what the caller already holds. Root rules on every finding. Resolve
-   already-ruled questions at once by citing their authority; ask genuinely new ones promptly. For a new decision
-   with hours of cross-owner work or unclear guarantees, offer exactly three priced options: simplest viable
-   constraint first, recommendation marked, each with guarantee, cost and sacrifice.
+4. **Opus builds at the REPL; Astra profiles and fixes.**
+   - **Opus designs and implements by dogfooding.** In its own Seon branch it tries alternatives at the REPL (defn,
+     the tests reaching the change, timings), keeps what worked, and proposes it through the ordinary merge;
+     write-back then updates only the files that changed.
+   - **Astra, an outside model trained on a different distribution, follows each landed slice.** It profiles the
+     slice at the REPL and FIXES what it finds directly, with no review round to wait on: super-linear
+     transformations (everything O(n) or O(n log n) in what changed), repeated work (the same derivation executed
+     thousands of times, whole-program work per change, re-reading what the caller holds), and correctness or law
+     violations.
+   - **Both refuse bad changes on sight,** so feedback is immediate and designs iterate fast.
+   - **Root** assigns file ownership so the two never edit the same file at once, rules on disputes, and resolves
+     already-ruled questions by citing their authority. For a new decision with hours of cross-owner work, root
+     offers three priced options: the simplest viable first, the recommendation marked, each with its guarantee,
+     cost and sacrifice.
 5. **Change one loadable slice.** Edit the owner in place: no second registry, renderer, runner, retry, cache or
    version-two namespace. A moved, renamed or deleted function converts every caller in the same commit — tests,
    quoted symbols, error operations and schema references included — and retires the old path. Script mechanical
