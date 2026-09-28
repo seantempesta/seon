@@ -1,10 +1,4 @@
-[#:seon.task{:id "132fee0467c8"
-             :name "definitions-bypass-entry-gate"
-             :kind :function
-             :intent "Every definition an evaluation makes passes the entry gate and is armed, not only a top-level clojure.core/defn the reader matched: (do (defn …)), (let [..] (defn …)), (def f (fn …)) and defn-expanding macros must be refused when uncontracted. Keep an unindexed change distinct from an absent contract. A call inside the defining form still runs before the check."
-             :must-read #{seon.sci.eval/evaluate}
-             :evidence #{"docs/research/agent-platform/language-requirements-2026-09-24.md"
-                         "docs/prds/agent-platform/landing/lane-impl-task-slice2-2026-09-25.md"}}
+[
  #:seon.task{:id "e5af812dbf95"
              :name "doc-and-dir-erase-request-keys"
              :kind :function

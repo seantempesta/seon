@@ -21,7 +21,6 @@
             [seon.error :as error]
             [seon.fault :as fault]
             [seon.flow :as seon.flow]
-            [seon.fn :as seon.fn]
             [seon.id :as id]
             [seon.plan :as plan]
             [seon.program :as program]
@@ -169,8 +168,7 @@
       :always (merge (select-keys evaluation [:seon.eval/value-tokens :seon.eval/shown-tokens
                                               :seon.eval/elisions :seon.eval/full
                                               :seon.eval/unstored :seon.eval/value-class
-                                              :seon.eval/unadmitted :seon.eval/replaced
-                                              :seon.eval/ungeneratable]))
+                                              :seon.eval/replaced]))
       ;; A FORM'S OWN `set!` OF *print-length* / *print-level*. Captured
       ;; while sci's binding is still installed (`sci/eval.clj` print-options
       ;; volatile), it is what the response must print the value under.
@@ -180,62 +178,18 @@
       (int? (get-in evaluation [:seon.print/options :seon.print/level]))
       (assoc :seon.print/level
              (get-in evaluation [:seon.print/options :seon.print/level]))
-      (:seon.test.accretion/gate-tests settlement-evaluation)
-      (assoc :seon.test.accretion/gate-tests
-             (vec (:seon.test.accretion/gate-tests settlement-evaluation)))
-      (some? (:seon.test.accretion/gate-test-count settlement-evaluation))
-      (assoc :seon.test.accretion/gate-test-count
-             (:seon.test.accretion/gate-test-count settlement-evaluation))
-      (some? (:seon.test.accretion/gate-pass-count settlement-evaluation))
-      (assoc :seon.test.accretion/gate-pass-count
-             (:seon.test.accretion/gate-pass-count settlement-evaluation))
-      (some? (:seon.test.accretion/gate-fail-count settlement-evaluation))
-      (assoc :seon.test.accretion/gate-fail-count
-             (:seon.test.accretion/gate-fail-count settlement-evaluation))
-      (:seon.test.accretion/seed settlement-evaluation)
-      (assoc :seon.test.accretion/seed
-             (:seon.test.accretion/seed settlement-evaluation))
-      (some? (:seon.test.accretion/case-count settlement-evaluation))
-      (assoc :seon.test.accretion/case-count
-             (:seon.test.accretion/case-count settlement-evaluation))
-      (some? (:seon.test.accretion/executed-count settlement-evaluation))
-      (assoc :seon.test.accretion/executed-count
-             (:seon.test.accretion/executed-count settlement-evaluation))
-      (:seon.test.accretion/status settlement-evaluation)
-      (assoc :seon.test.accretion/status
-             (:seon.test.accretion/status settlement-evaluation))
       (:seon.eval/value-digest settlement-evaluation)
       (assoc :seon.eval/value-digest (:seon.eval/value-digest settlement-evaluation))
-      (:seon.test.accretion/report-blob settlement-evaluation)
-      (assoc :seon.test.accretion/report-blob
-             (:seon.test.accretion/report-blob settlement-evaluation))
-      (:seon.test.accretion/report-size settlement-evaluation)
-      (assoc :seon.test.accretion/report-size
-             (:seon.test.accretion/report-size settlement-evaluation))
-      (:seon.program/row evaluation)
-      (assoc :seon.program/row
-             (:seon.program/row evaluation))
       value (assoc :my.turn/value value))))
 
 (defn settlement-projection
-  "Preserve evaluation evidence and stage an optional test report blob."
+  "Preserve evaluation evidence and stage a cut value's artifact blob."
   {:malli/schema
    [:=> [:cat [:map [:seon.db/connection :seon.db/connection]] :seon.turn.loop/evaluation]
     [:tuple :map :map [:vector :seon.blob/staged-write]]]}
   [cluster evaluation]
   ;; Shown text is already projected; settlement preserves its exact bytes.
   (let [receipt evaluation
-        receipt
-        (if-let [report-edn (:seon.test.accretion/report-edn receipt)]
-          (let [staged (blob/stage! (:seon.db/connection cluster) report-edn)]
-            (-> receipt
-                (dissoc :seon.test.accretion/report-edn)
-                (assoc :seon.test.accretion/report-blob
-                       (:seon.blob/digest staged)
-                       :seon.test.accretion/report-size
-                       (long (count report-edn)))
-                (update :seon.blob/staged-writes (fnil conj []) staged)))
-          receipt)
         ;; A cut value's artifact (`seon.sci.eval/shown-result`) settles into
         ;; the blob tier under the same publication permit as its evaluation.
         receipt
@@ -629,22 +583,14 @@
 
 (defn- namespace-rows
   "One row per distinct namespace a plan's sources run in, keyed by the
-  `namespace:` tempid. An existing namespace is only referenced. An absent one
-  is its evaluation's own declared row when an `ns` form declared it, else its
-  identity alone: a namespace the plan's declarations reference exists whether
-  or not a form declared it, and a namespace switch declares nothing."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.ns/name
-                       [:sequential :map] [:sequential :map]]
-                  [:vector :map]]}
-  [database starting-namespace sources program-rows]
+  `namespace:` tempid. An existing namespace is only referenced; an absent
+  one is its identity alone (the fold's facts declare its entity)."
+  {:malli/schema [:=> [:cat :seon.ns/name [:sequential :map]] [:vector :map]]}
+  [starting-namespace sources]
   (into []
         (comp (map #(or (:seon.ns/name %) starting-namespace)) (keep identity) (distinct)
               (map (fn [namespace-name]
-                     (assoc (or (when-not (db/q '[:find ?n . :in $ ?name :where [?n :seon.ns/name ?name]]
-                                                database namespace-name)
-                                  (some #(when (= namespace-name (:seon.ns/name %)) %) program-rows))
-                                {:seon.ns/name namespace-name})
-                            :db/id (str "namespace:" namespace-name)))))
+                     {:seon.ns/name namespace-name :db/id (str "namespace:" namespace-name)})))
         (cons {:seon.ns/name starting-namespace} sources)))
 
 (defn- evaluated-namespaces
@@ -673,7 +619,7 @@
   identity fence is the one `receipt-start-call` keeps — an ordinal that
   ever had an evaluation refuses forever, so nothing re-executes."
   [db id run-eid first-ordinal starting-namespace author at sources]
-  (let [namespaces (namespace-rows db starting-namespace sources [])
+  (let [namespaces (namespace-rows starting-namespace sources)
           evaluations
           (into []
                 (map-indexed
@@ -1028,62 +974,15 @@
       (refuse! `receipt-start-call ::receipt-exists request))
     [(receipt-row (:db/id run) request)]))
 
-(defn- settlement-form
-  [database request]
-  (let [form (db/pull database
-                      [:db/id :seon.cluster.eval/source :seon.cluster.eval/ns]
-                      [:seon.cluster.eval/id
-                       (receipt-identity (::id request)
-                                         (:seon.cluster.eval/ordinal request))])]
-    (when (:db/id form)
-      (update form :seon.cluster.eval/ns :db/id))))
-
-(defn- analyze-settlement
-  "Analyze a settling declaration's source at the writer's database.
-
-  Only a declaration is analyzed. An ordinary form's static call edges are
-  not evidence that a call executed and are never program rows, so its
-  settlement runs no analysis and asserts no `:seon.fn/calls`: a receipt then
-  advances no program attribute's revision."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.cluster.eval/settle-request]
-                  :seon.cluster.eval/settle-request]}
-  [database request]
-  (let [program-row (:seon.program/row request)
-        form (when program-row (settlement-form database request))]
-    (if form
-      (let [analysis (seon.fn/analyze-form
-                      database
-                      (:seon.cluster.eval/source form)
-                      (:seon.cluster.eval/ns form)
-                      program-row)]
-        (if (:seon.fn/namespace-unresolvable analysis)
-          (throw (ex-info (:seon.error/message analysis) analysis))
-          (assoc request :seon.program/row (second analysis))))
-      request)))
-
-(defn- receipt-settle-tx*
-  "Build evaluation settlement transaction data at its writer authority."
+(defn receipt-settle-tx
+  "Transaction data settling one running receipt exactly once, at its writer
+  authority. Settling IS asserting terminal facts: `result-edn`, `error`,
+  and/or `interrupted-at` — at least one, and there is no status label.
+  Program facts are the fold's (`seon.turn.batch/program-facts-call`), never
+  an evaluation's."
+  {:malli/schema [:=> [:cat :seon.cluster.eval/settle-request] :seon.store/transaction-data]}
   [request]
   [[:db.fn/call #'receipt-settle-call request]])
-
-(defn receipt-settle-tx
-  "Transaction data settling one running receipt exactly once.
-  Settling IS asserting terminal facts: `result-edn`, `error`, and/or
-  `interrupted-at` — at least one, and there is no status label."
-  {:malli/schema
-   [:function
-    [:=> [:cat :seon.cluster.eval/settle-request]
-     :seon.store/transaction-data]
-    [:=> [:cat :seon.db/database-value
-          :seon.cluster.eval/settle-request]
-     :seon.store/transaction-data]]}
-  ([request]
-   (receipt-settle-tx* request))
-  ([database request]
-   (receipt-settle-tx*
-    (if database
-      (analyze-settlement database request)
-      request))))
 
 (defn receipt-settle-batch-call
   "Settle independent evaluations together, retaining each terminal fence."
@@ -1091,9 +990,6 @@
    [:=> [:cat :seon.db/database-value
          [:vector :seon.cluster.eval/settle-request]] :seon.store/transaction-data]}
   [database requests]
-  (when (some :seon.program/row requests)
-    (refuse! `receipt-settle-batch-call ::ordered-declarations-required
-             {::evaluations requests}))
   (let [identities (mapv (juxt ::id :seon.cluster.eval/ordinal) requests)]
     (when-not (= (count identities) (count (set identities)))
       (refuse! `receipt-settle-batch-call ::receipt-terminal
@@ -1101,18 +997,13 @@
     (into [] (mapcat #(receipt-settle-call database %)) requests)))
 
 (defn receipt-settle-batch-tx
-  "Transaction data settling an ordered turn batch in one commit.
-
-  Ordinary evaluations share one writer call. Program declarations retain
-  ordered calls: a later declaration must see earlier declarations in the
-  same transaction. Requests carry the turn's already analyzed rows."
+  "Transaction data settling an ordered turn batch in one commit: every
+  evaluation in one writer call, after the namespaces they ran in."
   {:malli/schema
    [:=> [:cat [:vector :seon.cluster.eval/settle-request]] :seon.store/transaction-data]}
   [requests]
-  (into (evaluated-namespaces requests)
-        (if (some :seon.program/row requests)
-          (mapcat receipt-settle-tx requests)
-          [[:db.fn/call #'receipt-settle-batch-call requests]])))
+  (conj (evaluated-namespaces requests)
+        [:db.fn/call #'receipt-settle-batch-call requests]))
 
 (defn- affected-schema-attributes
   "Database attributes derived by the affected schema forms."
@@ -1469,28 +1360,16 @@
    :seon.eval/value-digest
    :seon.eval/unstored
    :seon.eval/value-class
-   :seon.eval/unadmitted
    :seon.eval/replaced
-   :seon.eval/ungeneratable
    :seon.print/length
-   :seon.print/level
-   :seon.test.accretion/gate-test-count
-   :seon.test.accretion/gate-pass-count
-   :seon.test.accretion/gate-fail-count
-   :seon.test.accretion/seed
-   :seon.test.accretion/case-count
-   :seon.test.accretion/executed-count
-   :seon.test.accretion/status
-   :seon.test.accretion/report-blob
-   :seon.test.accretion/report-size])
+   :seon.print/level])
 
 (defn- receipt-reference-assertions
-  "One assertion per reference of `request`'s cardinality-many reference
-  attributes (gate tests, the settlement window's faults), targeting `receipt`."
+  "One assertion per reference of the settlement window's faults, targeting
+  `receipt`."
   [receipt request]
-  (vec (for [attribute [:seon.test.accretion/gate-tests :seon.cluster.eval/faults]
-             reference (get request attribute)]
-         [:db/add (:db/id receipt) attribute reference])))
+  (mapv (fn [reference] [:db/add (:db/id receipt) :seon.cluster.eval/faults reference])
+        (:seon.cluster.eval/faults request)))
 
 (defn- receipt-terminal-assertions
   "Terminal assertions present in `request`, targeting `receipt`. A set is a
@@ -1614,8 +1493,7 @@
         expected {::recorded-run (recorded-run run)
                   ::evaluations (mapv recorded-evaluation prepared-evaluations)}
         namespaces
-        (namespace-rows database starting-namespace (evaluated-namespaces evaluations)
-                        (keep :seon.program/row evaluations))]
+        (namespace-rows starting-namespace (evaluated-namespaces evaluations))]
     (when-not agent-eid
       (refuse! `record-evaluated-call ::no-such-agent request))
     (when (db/q '[:find ?turn . :in $ ?agent
@@ -1739,29 +1617,7 @@
            :seon.cluster.eval/read-basis-transaction]
           [:seon.cluster.eval/ns {:optional true} :seon.cluster.eval/ns]
           [:seon.sci.eval/ending-ns {:optional true}
-           :seon.sci.eval/ending-ns]
-          [:seon.test.accretion/gate-tests {:optional true}
-           :seon.test.accretion/gate-tests]
-          [:seon.test.accretion/gate-test-count {:optional true}
-           :seon.test.accretion/gate-test-count]
-          [:seon.test.accretion/gate-pass-count {:optional true}
-           :seon.test.accretion/gate-pass-count]
-          [:seon.test.accretion/gate-fail-count {:optional true}
-           :seon.test.accretion/gate-fail-count]
-          [:seon.test.accretion/seed {:optional true}
-           :seon.test.accretion/seed]
-          [:seon.test.accretion/case-count {:optional true}
-           :seon.test.accretion/case-count]
-          [:seon.test.accretion/executed-count {:optional true}
-           :seon.test.accretion/executed-count]
-          [:seon.test.accretion/status {:optional true}
-           :seon.test.accretion/status]
-          [:seon.test.accretion/report-blob {:optional true}
-           :seon.test.accretion/report-blob]
-          [:seon.test.accretion/report-size {:optional true}
-           :seon.test.accretion/report-size]
-          [:seon.program/row {:optional true}
-           :seon.program/row]]]
+           :seon.sci.eval/ending-ns]]]
     :seon.store/transaction-data]}
   [db request]
   (let [{::keys [id]
@@ -1783,12 +1639,10 @@
 
       (not (terminal? request))
       (refuse! `receipt-settle-call ::no-terminal-fact request))
-    (let [program-row (:seon.program/row request)]
-      (into [] cat
-            [(if program-row (row-tx db request program-row) [])
-             (receipt-read-evidence-tx receipt request)
-             (receipt-reference-assertions receipt request)
-             (receipt-terminal-assertions receipt request)]))))
+    (into [] cat
+          [(receipt-read-evidence-tx receipt request)
+           (receipt-reference-assertions receipt request)
+           (receipt-terminal-assertions receipt request)])))
 
 (defn recover-tx
   "Transaction data closing one interrupted turn at boot."
@@ -3794,7 +3648,7 @@
          (:seon.error/values-tx delivery))
         tx-data (if batch?
                   (vec side-tx)
-                  (conj (into (receipt-settle-tx database receipt) side-tx)
+                  (conj (into (receipt-settle-tx receipt) side-tx)
                         [:db.fn/call #'plan/settle-call agent-id]))]
     {:seon.turn.loop/settled settled
      :seon.turn.loop/undisposed? undisposed?
@@ -4010,7 +3864,7 @@
     ;; a refused phase included, is the refusal the arm below settles.
     (if (:db-after outcome)
       {:prepared prepared :outcome outcome}
-      (settle-batch-refusal! cluster requests prepared outcome))))
+      (settle-batch-refusal! cluster requests prepared outcome changes))))
 
 ;;; A REFUSED PHASE ESCALATES THROUGH `seon.error/commit-tx`, LIKE EVERY OTHER
 ;;; FAILURE. This site used to `dissoc` the escalation dial — silencing the one
@@ -4057,7 +3911,6 @@
         receipt-tx
         (when ordinal
           (receipt-settle-tx
-           database
            (cond-> {:seon.turn/id run-id
                     :seon.cluster.eval/ordinal ordinal
                     :seon.cluster.eval/error (:seon.error/message value)}
@@ -4090,7 +3943,7 @@
 
 (defn- deletion-proposals
   "The deletions a refused run settlement's writer named, each associated with
-  the one evaluation whose settled row proposed it, else with why none is.
+  the one form whose fold change proposed it, else with why none is.
 
   AN ASSOCIATION, NEVER A CAUSE. The writer reports broken final relations
   (removed identity, surviving referrer), not which operation removed what,
@@ -4101,9 +3954,10 @@
   refusal family associates nothing (nil). Pure over values in hand: no
   replay, no writer trial, O(named referrers + row identities)."
   {:malli/schema [:=> [:cat :seon.schema/projection :seon.error/value
-                       [:vector :seon.turn.loop/settle-evaluation-request]]
+                       [:vector [:map [:seon.batch/ordinal :seon.cluster.eval/ordinal]
+                                 [:seon.batch/change :seon.batch/change]]]]
                   [:maybe :seon.turn/deletion-proposals]]}
-  [projection refusal requests]
+  [projection refusal changes]
   (let [named (:seon.db.write/validator-schema refusal)]
     (cond
       (nil? named) nil
@@ -4113,14 +3967,19 @@
       (not (schema/valid-candidate-value? projection named refusal))
       [{:seon.turn/unattributed :invalid-deletion-evidence}]
       :else
-      (let [rows (keep (fn [{ordinal :seon.cluster.eval/ordinal evaluation :seon.sci.eval/evaluation}]
-                         (some->> (:seon.program/row evaluation) (vector ordinal)))
-                       requests)
-            deleting (reduce (fn [deleting [ordinal row]]
+      (let [;; a removed symbol names its declaration's identity: a qualified
+            ;; one a function or test, an unqualified one a namespace
+            identities (fn [removed]
+                         (if (qualified-symbol? removed)
+                           [[:seon.fn/sym removed] [:seon.test/sym removed]]
+                           [[:seon.ns/name removed]]))
+            deleting (reduce (fn [deleting {ordinal :seon.batch/ordinal change :seon.batch/change}]
                                (reduce #(update %1 %2 (fnil conj (sorted-set)) ordinal)
-                                       deleting (:seon.program/delete-identities row)))
-                             {} rows)
-            declared (into #{} (keep (comp program/row-identity second)) rows)]
+                                       deleting (mapcat identities (:seon.batch/removals change))))
+                             {} changes)
+            declared (into #{} (comp (mapcat (comp :seon.batch/entities :seon.batch/change))
+                                     (keep program/row-identity))
+                           changes)]
         (->> (group-by :seon.program/identity (:seon.program/referrers refusal))
              (sort-by (comp pr-str key))
              (mapv (fn [[identity referrers]]
@@ -4153,19 +4012,20 @@
   {:malli/schema
    [:=> [:cat :seon.turn.loop/cluster [:vector :seon.turn.loop/settle-evaluation-request]
          [:vector [:map [:seon.turn.loop/receipt :seon.turn.loop/terminal-request]]]
-         :seon.error/value]
+         :seon.error/value
+         [:vector [:map [:seon.batch/ordinal :seon.cluster.eval/ordinal] [:seon.batch/change :seon.batch/change]]]]
     [:map
      [:prepared [:vector [:map [:seon.turn.loop/receipt :seon.turn.loop/terminal-request]]]]
      [:outcome [:or :seon.db/transaction-report :seon.error/value]]
      [:refused-outcome :seon.error/value]]]}
-  [cluster requests prepared refusal]
+  [cluster requests prepared refusal changes]
   (let [connection (:seon.db/connection cluster)
         {now :seon.turn.loop/now
          agent-id :seon.agent/id
          run-id :seon.turn/id}
         (first requests)
         process (:seon.db.process/id cluster)
-        proposals (deletion-proposals (db/carried-projection (db/db connection)) refusal requests)
+        proposals (deletion-proposals (db/carried-projection (db/db connection)) refusal changes)
         ;; the association is recorded on the refused write's error occurrence
         ;; (printed whole, as its declared -edn member), and the receipts'
         ;; text is rendered from that same value

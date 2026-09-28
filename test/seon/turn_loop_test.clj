@@ -33,7 +33,6 @@
 
             [seon.flow :as seon.flow]
             [seon.eval.drive :as eval.drive]
-            [seon.problems :as problems]
             [seon.render.transcript :as transcript]
             [seon.render.web :as web]
             [seon.schema :as schema]
@@ -919,68 +918,6 @@
                                  (= :interrupted state)
                                  (assoc :seon.cluster.eval/interrupted-at now)))
                              receipts)))}))
-
-(deftest install-gate-failure-settles-the-started-receipt-as-a-failure
-  (with-database
-    (fn [connection]
-      (commit-run! connection
-                   {:held? true
-                    :planned? true})
-      ;; The freeze already minted ordinal 0 with its start instant; there is
-      ;; no separate receipt to start.
-      (let [cluster (test-support/cluster-handle
-                    {:seon.env/environment (test-support/environment (:seon.cluster/name (test-support/execution-handle connection)) connection)
-                     :seon.db/connection connection
-                     :seon.cluster/name (:seon.cluster/name (test-support/execution-handle connection))
-                     :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)
-                     :seon.db.process/id process
-                     :seon.config.error/recurrence-limit 3})
-            gate-refusal
-            ((private-loop-fn 'phase)
-             #(throw
-               (ex-info "install gate broke after evaluation"
-                        {:seon.test/install-gate-broke true})))
-            receipt-settle-tx @#'turn/receipt-settle-tx
-            terminal
-            (with-redefs [turn/receipt-settle-tx
-                          (fn
-                            ([_request]
-                             (throw
-                              (ex-info
-                               "failure settlement omitted its database"
-                               {:seon.test/missing-database true})))
-                            ([database request]
-                             (receipt-settle-tx database request)))
-                          problems/form-problem
-                          (fn [& _]
-                            (throw
-                             (ex-info
-                              "a gate refusal must not re-enter evaluation"
-                              {:seon.test/fake-evaluation true})))]
-              (turn/settle!
-               {:seon.turn.loop/cluster cluster
-                :seon.turn.loop/now now
-                :seon.agent/id "agent-a"
-                :seon.turn/id "run-1"
-                :seon.cluster.eval/ordinal 0
-                :seon.error/value gate-refusal}))
-            receipt
-            (db/q '[:find (pull ?receipt [*]) .
-                    :in $ ?run-id ?ordinal
-                    :where
-                    [?run :seon.turn/id ?run-id]
-                    [?receipt :seon.cluster.eval/run ?run]
-                    [?receipt :seon.cluster.eval/ordinal ?ordinal]]
-                  @connection "run-1" 0)
-            stored-value (edn/read-string
-                          (:seon.eval/shown receipt))]
-        (is (= true
-               (:seon.turn.loop/phase-failed gate-refusal)
-               (get-in terminal [:seon.error/value :seon.turn.loop/phase-failed])
-               (:seon.turn.loop/phase-failed stored-value)))
-        (is (= "install gate broke after evaluation"
-               (:seon.cluster.eval/error receipt)))
-        (is (inst? (test-support/turn-closed-at @connection "run-1")))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; A staged blob settles, and a failed commit still closes the run

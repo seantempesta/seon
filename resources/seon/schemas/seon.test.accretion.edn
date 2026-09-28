@@ -149,64 +149,8 @@
                          [:seon.test.accretion/failure
                           {:optional true}
                           :seon.test.accretion/failure]],
-                        :auto-check-request
-                        [:map
-                         [:seon.sci.eval/ctx :seon.sci.eval/ctx]
-                         [:seon.db/db :seon.db/database-value]
-                         [:seon.program/row :seon.program/row]
-                         [:seon.schema/projection
-                          :seon.schema/projection]
-                         [:seon.config.test/auto-check-cases
-                          :seon.config.test/auto-check-cases]
-                         [:seon.test.accretion/seed
-                          :seon.test.accretion/seed]
-                         [:seon.sci.eval/time-limit-ms
-                          :seon.sci.eval/time-limit-ms]
-                         [:seon.sci.admit/caps :seon.sci.admit/caps]],
-                        :candidate-auto-check-request
-                        [:map
-                         [:seon.sci.eval/ctx :seon.sci.eval/ctx]
-                         [:seon.db/db :seon.db/database-value]
-                         [:seon.program/row :seon.program/row]
-                         [:seon.config.test/auto-check-cases
-                          :seon.config.test/auto-check-cases]
-                         [:seon.test.accretion/seed
-                          :seon.test.accretion/seed]
-                         [:seon.sci.eval/time-limit-ms
-                          :seon.sci.eval/time-limit-ms]
-                         [:seon.sci.admit/caps :seon.sci.admit/caps]],
-                        :candidate-request
-                        [:map
-                         [:seon.test.accretion/evaluation
-                          :seon.test.accretion/evaluation]
-                         [:seon.sci.eval/ctx :seon.sci.eval/ctx]
-                         [:seon.db/db :seon.db/database-value]
-                         [:seon.db/connection :seon.db/connection]
-                         [:seon.agent/id :seon.agent/id]
-                         [:seon.test.accretion/gate-set
-                          :seon.test.accretion/gate-set]
-                         [:seon.program/row {:optional true}
-                          :seon.program/row]
-                         [:seon.config.test/auto-check-cases {:optional true}
-                          :seon.config.test/auto-check-cases]
-                         [:seon.test.accretion/seed {:optional true}
-                          :seon.test.accretion/seed]
-                         [:seon.sci.eval/time-limit-ms
-                          :seon.sci.eval/time-limit-ms]
-                         [:seon.sci.admit/caps :seon.sci.admit/caps]],
                         :candidate-ctx :seon.sci.eval/ctx,
-                        :evaluation :seon.sci.eval/evaluation,
-                        :results :seon.test.runner/captured-results,
-                        :candidate-result
-                        [:map
-                         [:seon.test.accretion/candidate-ctx
-                          :seon.test.accretion/candidate-ctx]
-                         [:seon.test.accretion/evaluation
-                          :seon.test.accretion/evaluation]
-                         [:seon.test.accretion/results
-                          :seon.test.accretion/results]
-                         [:seon.test.accretion/auto-check {:optional true}
-                          :seon.test.accretion/auto-check]]
+                        :results :seon.test.runner/captured-results
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.test.accretion/error

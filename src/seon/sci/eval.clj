@@ -3839,8 +3839,7 @@
   observed — is present exactly when the time limit fired. The record
   rides through with `fn-entries` and `allocated-bytes` intact."
   {:malli/schema [:=> [:cat :seon.sci.eval/request]
-                  :seon.sci.eval/evaluation]
-   :seon/tasks #{"132fee0467c8"}}
+                  :seon.sci.eval/evaluation]}
   [{:keys [:seon.cluster.eval/source :seon.sci.admit/caps]
     ctx :seon.sci.eval/ctx
     agent-id :seon.agent/id

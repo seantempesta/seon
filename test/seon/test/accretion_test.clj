@@ -15,56 +15,6 @@
       (throw (ex-info "Auto-check fixture admission failed." result)))
     result))
 
-(deftest refused-install-feedback-is-complete-grouped-and-renderable
-  (let [test-result
-        (fn [test-symbol]
-          {:seon.test/sym test-symbol
-           :seon.test/pass-count 0
-           :seon.test/fail-count 1
-           :seon.test/error-count 0
-           :seon.test/failing-assertions [(apply str (repeat 64 "a"))]
-           :seon.test/failure-message "expected: 2\n  actual: 1"})
-        report
-        (accretion/gate-report
-         {:seon.fn/sym 'fixture.feedback/target
-          :seon.test.accretion/results
-          (mapv test-result (map #(symbol "fixture.feedback" (str "red-" %)) (range 5)))
-          :seon.test.accretion/auto-check
-          {:seon.test.accretion/seed 42
-           :seon.test.accretion/case-count 25
-           :seon.test.accretion/executed-count 7
-           :seon.test.accretion/capabilities #{}
-           :seon.test.accretion/status :failed
-           :seon.test.accretion/failure
-           {:seon.test.accretion/arguments [0]
-            :seon.test.accretion/actual "wrong"
-            :seon.test.accretion/expected ":int"
-            :seon.test.accretion/pass? false}}})
-        refusal (accretion/install-refusal report)
-        rendered (accretion/render-ai refusal)]
-    (is (= "Gate: 5 tests · 0 passed · 5 failed · auto-check 7/25 · install refused"
-           (:seon.test.accretion/orientation report)))
-    (is (= :seon.test.accretion/install-refused-error
-           (:seon.error/declared-schema (meta refusal)))
-        "the producer declares the identity its renderer pair is declared on")
-    (is (= 6
-           (reduce + (map (comp count :seon.test.accretion/failures)
-                          (:seon.test.accretion/failure-groups report))))
-        "the complete value retains every example and auto-check failure")
-    (test-support/with-database
-      (fn [connection]
-        (is (schema/valid-candidate-value?
-             (seon.db/carried-projection @connection)
-             :seon.test.accretion/install-refused-error refusal))))
-    (is (= 3 (count (re-seq #"Test fixture.feedback/red-" rendered))))
-    (is (re-find #"2 more in the complete gate-report blob" rendered))
-    (is (re-find #"Auto-check seed 42" rendered))
-    (is (= [:article {:class "seon-family-entry seon-test-gate-refusal"}
-            [:pre rendered]]
-           (accretion/render-html refusal)))
-    (is (= (accretion/seed-for "receipt-id")
-           (accretion/seed-for "receipt-id")))))
-
 (deftest refusal-renderers-accept-the-declaring-error-shape
   (is (= [:=> [:cat :seon.test.accretion/install-refused-error]
           :string]

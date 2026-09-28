@@ -568,10 +568,9 @@
               max-source (:seon.config.eval.result/max-source (config/result-caps (config/effective (db/db connection) cluster-name)))
               evaluate (fn [first-ordinal sources]
                          (as-host hosted
-                           #(mapv (fn [{ordinal :seon.cluster.eval/ordinal evaluation :seon.sci.eval/evaluation}]
-                                    {:seon.turn.loop/cluster cluster :seon.turn.loop/now (java.util.Date.)
-                                     :seon.agent/id agent-id :seon.turn/id "proposal-boundary"
-                                     :seon.cluster.eval/ordinal ordinal :seon.sci.eval/evaluation evaluation})
+                           ;; the fold's change per form, as settle-batch! hands it
+                           #(into [] (keep (fn [{ordinal :seon.cluster.eval/ordinal change :seon.batch/change}]
+                                             (when change {:seon.batch/ordinal ordinal :seon.batch/change change})))
                                   (:seon.turn.loop/evaluated-sources
                                    (turn/evaluate-sources
                                    {:seon.turn.loop/cluster cluster :seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
@@ -592,10 +591,9 @@
               (is (every? #(nil? (db/pull @connection [:db/id] [:seon.fn/sym (named %)])) ["h" "c1" "c2"]))))
           (evaluate 0 [(fn-source "h" "(inc x)")])
           (let [unmapped (evaluate 5 [(unmap "h")])]
-            (is (= [5] (mapv :seon.cluster.eval/ordinal unmapped)) "the run's evaluation ordinals, not from zero")
-            (is (= [[:seon.fn/sym (named "h")] [:seon.test/sym (named "h")]]
-                   (get-in (first unmapped) [:seon.sci.eval/evaluation :seon.program/row :seon.program/delete-identities]))
-                "the settled entity deletes both typed identities; only the one the writer names is associated")
+            (is (= [5] (mapv :seon.batch/ordinal unmapped)) "the run's evaluation ordinals, not from zero")
+            (is (= [(named "h")] (get-in (first unmapped) [:seon.batch/change :seon.batch/removals]))
+                "the form's change removes the symbol; only the typed identity the writer names is associated")
             (let [proposals (proposals-of refusal unmapped)]
               (is (= [{:seon.program/identity [:seon.fn/sym (named "h")] :seon.cluster.eval/ordinal 5}
                       {:seon.program/identity [:seon.fn/sym (named "k")] :seon.turn/unattributed :no-deleting-form}]

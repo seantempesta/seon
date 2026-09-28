@@ -427,19 +427,3 @@
     (is (not (contains? reply :seon.repl/value)))
     (is (= 0 (:seon.repl/ms reply)))))
 
-(deftest a-failure-is-a-small-error-map-and-its-unadmitted-definitions-a-finding
-  ;; Owner 2026-09-27: :error holds the small selection an agent acts on, as
-  ;; data; the NOT ADMITTED notice is a finding, not :out prose; a failure has
-  ;; no value size, so no size finding fires on it.
-  (let [reply (one-map (repl/response {:seon.cluster.eval/source "(do (defn f [] 1) (/ 1 0))"
-                                       :seon.eval/shown (pr-str {:seon.error/message "Divide by zero"
-                                                                 :seon.error/exception-class 'java.lang.ArithmeticException
-                                                                 :seon.sci.eval/stacktrace [['clojure.core// 1022 1] ['user 1 1]]})
-                                       :seon.cluster.eval/error "Divide by zero"
-                                       :seon.eval/unadmitted #{'user/f}
-                                       :seon.repl/handle (admit/result-handle "e64f")
-                                       :seon.eval/duration-ms 1}))]
-    (is (= "Divide by zero" (get-in reply [:seon.repl/error :seon.error/message])))
-    (is (= [:not-admitted] (mapv :seon.repl/finding (:seon.repl/findings reply))))
-    (is (= #{'user/f} (get-in reply [:seon.repl/findings 0 :seon.eval/unadmitted])))
-    (is (not (contains? reply :seon.repl/out)))))

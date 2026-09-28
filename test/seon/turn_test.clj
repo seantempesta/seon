@@ -20,6 +20,7 @@
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as support]
             [seon.turn :as turn]
+            [seon.turn.batch :as turn.batch]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
@@ -829,13 +830,15 @@
                          {::turn/id run-id
                           :seon.cluster.eval/ordinal 0
                           :seon.cluster.eval/at now}))
+                ;; the definition's facts are the fold's (`seon.turn.batch`),
+                ;; the receipt only its terminal facts
+                (support/transacted! connection (#'turn.batch/entity-facts @connection entity))
                 (support/transacted!
                         connection
                         (turn/receipt-settle-tx
                          {::turn/id run-id
                           :seon.cluster.eval/ordinal 0
-                          :seon.eval/shown "nil"
-                          :seon.program/row entity}))))]
+                          :seon.eval/shown "nil"}))))]
         (support/transacted! connection [(support/namespace-entity @connection namespace-name)])
         (settle-entity!
          "pending-test-run" "pending-test-agent"
@@ -861,42 +864,6 @@
               "the value edge needs no repair when the function arrives")
           (is (some #{test-symbol}
                     (seon.fn/gate-set @connection function-symbol))))))))
-
-(deftest batch-settlement-preserves-declaration-order
-  (support/with-database
-   (fn [connection]
-     (let [now (java.util.Date.)]
-       (support/transacted! connection
-                            (into [(namespace-entity 'fixture.batch)]
-                                  cat
-                                  [(support/agent-tx @connection "batch")
-                                   [{:seon.turn/id "batch" :seon.turn/agent [:seon.agent/id "batch"] :seon.turn/opened-tx "datomic.tx"}]]))
-       (doseq [ordinal (range 2)]
-         (support/transacted! connection
-                              (turn/receipt-start-tx
-                               {::turn/id "batch" :seon.cluster.eval/ordinal ordinal
-                                :seon.cluster.eval/at now})))
-       (let [entities [(support/program-entity
-                    @connection '[:seon.test/sym fixture.batch/target-test]
-                    (str "(clojure.test/deftest "
-                         "^{:seon.test/subject fixture.batch/target} "
-                         "target-test (clojure.test/is true))")
-                    {:seon.schema.admission/source :agent})
-                   (support/program-entity
-                    @connection '[:seon.fn/sym fixture.batch/target]
-                    "(defn ^{:malli/schema [:=> [:cat] :int]} target [] 1)"
-                    {:seon.schema.admission/source :agent})]
-             result (db/transact!
-                     connection
-                     (turn/receipt-settle-batch-tx
-                      (mapv (fn [ordinal entity]
-                              {::turn/id "batch" :seon.cluster.eval/ordinal ordinal
-                               :seon.eval/shown "nil" :seon.program/row entity})
-                            (range 2) entities)))
-             saved (db/pull @connection '[:seon.test/subject]
-                            [:seon.test/sym 'fixture.batch/target-test])]
-         (is (some? (:db-after result)))
-         (is (= 'fixture.batch/target (:seon.test/subject saved))))))))
 
 ;; Deterministic clock: every generated time is an offset from t0.
 (def ^:private t0-ms 1785000000000)
@@ -1213,7 +1180,6 @@
             (db/transact!
              connection
              (turn/receipt-settle-tx
-              @connection
               {::turn/id "macro-call-run"
                :seon.cluster.eval/ordinal 0
                :seon.eval/shown "nil"}))]
@@ -1229,7 +1195,6 @@
             (db/transact!
              connection
              (turn/receipt-settle-tx
-              @connection
               {::turn/id "macro-call-run"
                :seon.cluster.eval/ordinal 1
                :seon.cluster.eval/error "Could not resolve missing.target/nope"}))]
@@ -1251,16 +1216,10 @@
       (let [result
             (db/transact!
              connection
-             (turn/receipt-settle-tx
-              @connection
-              {::turn/id "macro-call-run"
-               :seon.cluster.eval/ordinal 2
-               :seon.eval/shown "nil"
-               :seon.program/row
-               {:seon.ns/name 'my.macro-caller
-                :seon.ns/source "(require 'unindexed.required)"
-                :seon.ns/requires
-                #{'unindexed.required}}}))]
+             ;; the namespace facts the fold writes for a require
+             [{:seon.ns/name 'my.macro-caller
+               :seon.ns/source "(require 'unindexed.required)"
+               :seon.ns/requires #{'unindexed.required}}])]
         (is (some? (:db-after result))
             "an unresolved required namespace stores as a symbol value"))
       (is (nil? (:db/id (db/pull @connection [:db/id]
@@ -1286,11 +1245,8 @@
                   preliminary-entity))
             result (db/transact!
                     connection
-                    (turn/receipt-settle-tx
-                     {::turn/id "macro-call-run"
-                      :seon.cluster.eval/ordinal 3
-                      :seon.eval/shown "nil"
-                      :seon.program/row entity}))
+                    ;; the definition's facts, as the fold writes them
+                    (#'turn.batch/entity-facts @connection entity))
             report (seon.fn/unresolved-callers @connection)]
         (is (some? (:db-after result)))
         (is (not-any? #(= 'missing.target/nope (:seon.fn/callee %))
@@ -1395,70 +1351,6 @@
                 "and `(run, ordinal)` identity makes re-execution
                  unrepresentable: an ordinal that ever had a receipt
                  refuses forever, across any custody change")))))))
-
-(deftest settlement-refuses-a-divergent-program-change-since-opening
-  (with-model-database
-    (fn [connection]
-      (let [namespace-name 'my.defs.shared
-            agent-a "def-agent-a"
-            agent-b "def-agent-b"
-            run-a "defs-run-a"
-            run-b "defs-run-b"
-            qualified-id 'my.defs.shared/scratch
-            agent-ref (fn [agent-id]
-                        [:seon.agent/id agent-id])
-            function-entity
-            (memoize
-             (fn [result]
-               (support/program-entity
-                @connection [:seon.fn/sym qualified-id]
-                (str "(defn ^{:malli/schema [:=> [:cat] :int]} "
-                     "scratch [] " result ")")
-                {:seon.schema.admission/source :agent})))
-            start!
-            (fn [run-id ordinal]
-              (db/transact!
-               connection
-               (turn/receipt-start-tx
-                {::turn/id run-id
-                 :seon.cluster.eval/ordinal ordinal
-                 :seon.cluster.eval/at (at ordinal)})))
-            settle!
-            (fn [run-id ordinal request]
-              (transact-or-refusal
-               connection
-               (turn/receipt-settle-tx
-                (merge {::turn/id run-id
-                        :seon.cluster.eval/ordinal ordinal
-                        :seon.eval/shown "nil"}
-                       request))))]
-        (support/transacted!
-                connection
-                (into (support/agents-tx @connection [agent-a agent-b])
-                  [(support/namespace-entity @connection namespace-name)]))
-        (doseq [[run-id agent-id] [[run-a agent-a] [run-b agent-b]]]
-          (support/transacted!
-                  connection
-                  (turn/open-tx {::turn/id run-id ::turn/agent (agent-ref agent-id) :seon.turn/opened-tx "datomic.tx"})))
-
-        (start! run-a 0)
-        (is (= ::committed
-               (settle! run-a 0 {:seon.program/row (function-entity 1)})))
-
-        (testing "a divergent definition from an older opening basis refuses"
-          (start! run-b 1)
-          (is (= ::turn/program-row-changed-after-open
-                 (::turn/rule
-                  (settle! run-b 1
-                           {:seon.program/row (function-entity 2)}))))
-          (is (= (:seon.fn/source (function-entity 1))
-                 (:seon.fn/source
-                  (db/pull @connection '[*]
-                           [:seon.fn/sym qualified-id]))))
-          (is (= ::committed
-                 (settle! run-b 1
-                          {:seon.program/row (function-entity 1)}))
-              "an identical declaration is an assertion-free success"))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The state machine — generated command sequences against a pure model
@@ -2322,7 +2214,7 @@
                           requests)
            refusal (try (#'turn/refuse! `turn/close-call :seon.turn/no-such-run {:seon.turn/id run-id})
                         (catch clojure.lang.ExceptionInfo failure (ex-data failure)))
-           settled (#'turn/settle-batch-refusal! handle requests prepared refusal)
+           settled (#'turn/settle-batch-refusal! handle requests prepared refusal [])
            receipts (settled-receipts connection run-id)]
        (is (some? (:db-after (:outcome settled))))
        (is (= ["2" "9"] (mapv :seon.eval/shown receipts)) "each form shows the value it evaluated")
@@ -2351,7 +2243,7 @@
                      {:seon.turn.loop/receipt {:seon.turn/id run-id :seon.cluster.eval/ordinal 0 :seon.eval/shown "2"}}]
            refusal (try (#'turn/refuse! `turn/close-call :seon.turn/no-such-run {:seon.turn/id run-id})
                         (catch clojure.lang.ExceptionInfo failure (ex-data failure)))
-           settled (#'turn/settle-batch-refusal! handle requests prepared refusal)
+           settled (#'turn/settle-batch-refusal! handle requests prepared refusal [])
            receipt (:seon.fault/recorded (:refused-outcome settled))]
        (is (nil? (:db-after (:outcome settled))) "the refusal settlement itself was refused")
        (is (= (:seon.error/message refusal) (:seon.error/message (:refused-outcome settled)))

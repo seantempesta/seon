@@ -216,7 +216,7 @@
      (let [files (issue/task-files "." nil)
            basis (issue/task-basis @connection files)]
        (issue/index-tasks! {:seon.db/connection connection :seon.task/files files :seon.task/basis basis})
-       (doseq [[id aspect] {"132fee0467c8" '[seon.sci.eval "definitions-bypass-entry-gate" :function]
+       (doseq [[id aspect] {"d215b1ebde7c" '[seon.sci.eval "acquisition-rebuilds-the-whole-program" :function]
                                 "cea47b015b23" '[seon.schema "agents-can-validate" :namespace]}]
          (is (= aspect ((juxt :seon.task/ns :seon.task/name :seon.task/kind)
                         (db/pull @connection [:seon.task/ns :seon.task/name :seon.task/kind] [:seon.task/id id]))))

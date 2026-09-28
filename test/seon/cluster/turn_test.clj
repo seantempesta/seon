@@ -23,6 +23,7 @@
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.turn :as turn]
+            [seon.turn.batch :as turn.batch]
             [seon.error :as error]
             [seon.cluster.message :as message]
             [seon.sci.forgive :as forgive]
@@ -828,14 +829,12 @@
                        deletion?
                        (some
                         (fn [operation]
+                          ;; the fold's one program-facts call removing a definition
                           (and (vector? operation)
                                (= :db.fn/call (first operation))
-                               (= #'turn/receipt-settle-call
+                               (= #'turn.batch/program-facts-call
                                   (second operation))
-                               (seq
-                                (get-in operation
-                                        [2 :seon.program/row
-                                         :seon.program/delete-identities]))))
+                               (some #{:removed} (vals (:entities (nth operation 3))))))
                         tx-data)]
                    (if (and (identical? target connection) deletion?)
                      {:seon.db.write.attempt/request-id "program-refusal" :seon.error/at (java.util.Date.) :seon.error/layer :seon.db/invocation :seon.error/operation 'seon.db/transact!
@@ -1389,13 +1388,11 @@
                    refused-definition?
                    (some
                     (fn [operation]
+                      ;; the fold's one program-facts call defining the function
                       (and (vector? operation)
                            (= :db.fn/call (first operation))
-                           (= #'turn/receipt-settle-call (second operation))
-                           (= function-sym
-                              (get-in operation
-                                      [2 :seon.program/row
-                                       :seon.fn/sym]))))
+                           (= #'turn.batch/program-facts-call (second operation))
+                           (contains? (:entities (nth operation 3)) function-sym)))
                     tx-data)]
                (when refused-definition?
                  {:seon.db.write.attempt/request-id "definition-refusal" :seon.error/at (java.util.Date.) :seon.error/layer :seon.db/invocation :seon.error/operation 'seon.db/transact!

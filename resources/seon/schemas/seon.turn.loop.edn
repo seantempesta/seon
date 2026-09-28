@@ -79,9 +79,6 @@
                   [:seon.sci.eval/ending-ns
                    {:optional true}
                    :seon.sci.eval/ending-ns]
-                  [:seon.program/row
-                   {:optional true}
-                   :seon.program/row]
                   [:my.turn/value {:optional true} :my.turn/value]],
                  :completion :seon.flow/channel,
                  :phase-failed-error
@@ -129,9 +126,6 @@
                   [:seon.sci.eval/ending-ns
                    {:optional true}
                    :seon.sci.eval/ending-ns]
-                  [:seon.program/row
-                   {:optional true}
-                   :seon.program/row]
                   [:seon.sci.eval/bindings
                    {:optional true}
                    :seon.sci.eval/bindings]

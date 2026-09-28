@@ -37,13 +37,11 @@
                                     :seon.cluster.eval/ordinal 0
                                     :seon.eval/shown "{:seon.error/message \"refused\"}"
                                     :seon.cluster.eval/error "refused"
-                                    :seon.eval/unadmitted #{'my.agents.receipt-sets/a 'my.agents.receipt-sets/b}
-                                    :seon.eval/replaced #{'my.agents.receipt-sets/c}
-                                    :seon.eval/ungeneratable #{}}))
-        (is (= {:seon.eval/unadmitted #{'my.agents.receipt-sets/a 'my.agents.receipt-sets/b}
-                :seon.eval/replaced #{'my.agents.receipt-sets/c}}
-               (-> (db/pull @connection [:seon.eval/unadmitted :seon.eval/replaced :seon.eval/ungeneratable]
+                                    :seon.eval/replaced #{'my.agents.receipt-sets/a 'my.agents.receipt-sets/b}
+                                    :seon.cluster.eval/repeated-calls #{}}))
+        (is (= {:seon.eval/replaced #{'my.agents.receipt-sets/a 'my.agents.receipt-sets/b}}
+               (-> (db/pull @connection [:seon.eval/replaced :seon.cluster.eval/repeated-calls]
                             [:seon.cluster.eval/id (turn/receipt-identity run-id 0)])
-                   (select-keys [:seon.eval/unadmitted :seon.eval/replaced :seon.eval/ungeneratable])
+                   (select-keys [:seon.eval/replaced :seon.cluster.eval/repeated-calls])
                    (update-vals set)))
             "each element is one datom; an empty set writes nothing")))))

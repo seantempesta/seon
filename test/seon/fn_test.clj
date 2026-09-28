@@ -499,7 +499,7 @@
       (is (not-any? #(= (quote clojure.string/trim) (:seon.fn/sym %)) entities))))
   (is (= ["src" "test"] seon.fn/source-roots)))
 
-(deftest settled-agent-form-has-static-index-edge-parity
+(deftest a-fold-derived-definition-has-static-index-edge-parity
   (let [root (fixture-root)
         namespace-name 'sample.settlement-parity
         source
@@ -532,80 +532,25 @@
                              [[(test-support/namespace-entity @connection namespace-name)
                                (test-support/program-fn-entity (db/db connection) (quote sample.settlement-parity/helper) "(defn helper [value] value)")]
                               (test-support/agent-tx @connection "settlement-parity-agent" namespace-name)]))
-          (test-support/transacted!
-                       connection
-                       (turn/open-tx
-                        {:seon.turn/id "settlement-parity-run" :seon.turn/agent [:seon.agent/id "settlement-parity-agent"] :seon.turn/opened-tx "datomic.tx"}))
-
-          (test-support/transacted!
-                       connection
-                       (turn/plan-tx
-                        {:seon.turn/id "settlement-parity-run" :seon.db.process/id (second boot-process) :seon.turn/starting-ns [:seon.ns/name namespace-name] :seon.turn/sources [{:seon.cluster.eval/source source}]}))
-          (let [settlement
-                (db/transact!
-                 connection
-                 (turn/receipt-settle-tx
-                  @connection
-                  {:seon.turn/id "settlement-parity-run"
-                   :seon.cluster.eval/ordinal 0
-                   :seon.eval/shown ":defined"
-                   :seon.program/row indexed}))]
-            (is (some? (:db-after settlement))))
-          (let [edge-facts
-                (fn [identity-attribute identity-value]
-                  (let [entity
-                        (db/q '[:find ?entity .
-                                :in $ ?attribute ?value
-                                :where [?entity ?attribute ?value]]
-                              @connection identity-attribute identity-value)
-                        _ (when-not entity
-                            (throw (ex-info "Expected fixture entity was not installed"
-                                            {:seon.test/identity [identity-attribute identity-value]})))
-                        calls
-                        (db/q '[:find [?symbol ...]
-                                :in $ ?entity
-                                :where
-                                [?entity :seon.fn/calls ?symbol]]
-                              @connection entity)
-                        keywords
-                        (db/q '[:find [?keyword ...]
-                                :in $ ?entity
-                                :where
-                                [?entity :seon.fn/keywords ?keyword]]
-                              @connection entity)
-                        subject
-                        (db/q '[:find ?symbol .
-                                :in $ ?entity
-                                :where
-                                [?entity :seon.test/subject ?symbol]]
-                              @connection entity)]
-                    (merge
-                     (when (seq calls)
-                       {:seon.fn/calls
-                        (set calls)})
-                     (when (seq keywords)
-                       {:seon.fn/keywords (set keywords)})
-                     (when subject
-                       {:seon.test/subject subject}))))
-                program-facts
-                (edge-facts :seon.fn/sym
-                            (quote sample.settlement-parity/contracted))
-                form-facts
-                (edge-facts :seon.cluster.eval/id
-                            (turn/receipt-identity "settlement-parity-run" 0))]
-            (is (= expected program-facts))
-            (is (nil? form-facts)
-                "the definition entity is the sole owner of graph facts")
-            (is (= :agent
-                   (db/q '[:find ?author .
-                           :in $ ?form-id
-                           :where
-                           [?form :seon.cluster.eval/id ?form-id]
-                           [?form :seon.cluster.eval/author ?author]]
-                         @connection
-                         (turn/receipt-identity
-                          "settlement-parity-run" 0)))
-                "the authored form and its queryable edges settle together")))))))
+          ;; the fold derives the agent's definition from its runtime
+          ;; analysis; its edges equal the static index's for the same source
+          (let [world (world/agent-world {:seon.db/connection connection :seon.cluster/name "default"
+                                          :seon.sci.eval/base-ctx (sci.eval/base-ctx (db/db connection))}
+                                         {:seon.agent/id "settlement-parity-agent"})
+                batch (seon.batch/evaluate-batch
+                       (dissoc (turn.batch/code-request
+                                {:seon.batch/world world :seon.batch/observe observe/observe
+                                 :seon.turn.batch/row-tx @#'turn/row-tx
+                                 :seon.batch/start-ns namespace-name
+                                 :seon.batch/text source})
+                               :seon.batch/settle))
+                derived (first (mapcat (comp :seon.batch/entities :seon.batch/change) (:seon.batch/entries batch)))
+                edges (fn [entity] (into {} (keep (fn [[k v]] (when (some? v) [k (if (coll? v) (set v) v)])))
+                                         (select-keys entity [:seon.fn/calls :seon.fn/keywords :seon.test/subject])))]
+            (is (empty? (:seon.batch/diagnostics batch)))
+            (is (= 'sample.settlement-parity/contracted (:seon.fn/sym derived)))
+            (is (= (edges expected) (edges derived))
+                "the fold's derived definition carries the static index's edges")))))))
 
 (deftest requires-preserve-namespace-symbols-without-minting-targets
   (test-support/with-database
