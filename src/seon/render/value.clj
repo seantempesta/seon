@@ -767,13 +767,24 @@
         ;; RE-DISPATCHES (AGENTS.md, renders return data): only the root is
         ;; offered to its render; every value beneath prints as data.
         answer (when (zero? id) (declared unit value path output))
-        declared (::print/node answer)
-        value (if (contains? answer :value) (:value answer) value)
+        face (::print/node answer)
+        ;; A RENDER RETURNS DATA (AGENTS.md): an AI face that is not text is
+        ;; printed by these same rules in the value's place, and nothing in it
+        ;; is offered to a render again.
+        render-data? (and (= ::print/projected (::print/face face))
+                          (= :seon.render/ai (:seon.render/output face))
+                          (not (string? (::print/value face))))
+        declared (when-not render-data? face)
+        value (cond render-data? (::print/value face)
+                    (contains? answer :value) (:value answer)
+                    :else value)
         base (cond-> {:id id :depth depth :path path :parent parent :indent (:indent position 0)
                       :outside (:outside position) :kids [] :n 0 :sum 0}
                (:diagnostic answer) (assoc :diagnostic (:diagnostic answer))
+               render-data? (assoc :render-data? true
+                                   :producer (:seon.render.call/selected-producer face))
                ;; The source a cut's continuation form reads from.
-               (get-in context [:requery ::print/requery-id])
+               (and (not render-data?) (get-in context [:requery ::print/requery-id]))
                (assoc :requery-id (get-in context [:requery ::print/requery-id])))
         node (if declared
                (let [text (when (and (= ::print/projected (::print/face declared))
@@ -1010,6 +1021,12 @@
   [value context]
   (let [offset (:offset context 0)
         root (make-node context value 0 0 (:root-path context []) nil {:indent 0 :outside nil})
+        ;; Render data is not the value its handle names: its cuts offer no
+        ;; dig form on the handle, and say so.
+        context (cond-> context
+                  (:render-data? root)
+                  (assoc :requery {::print/requery-refusal
+                                   "render data; read the value itself through its result handle"}))
         text-key (if (= :name (:kind root)) :text :value)
         ;; A continuation starts the root at its absolute offset (design
         ;; §3g): a string or name at its character, a collection at its
@@ -1048,7 +1065,7 @@
                         state)))]
         (if (and (:first-refused state) (zero? (get-in state [:nodes 0 :n])))
           (insufficient-budget context (:first-refused state))
-          state)))))
+          (assoc state :requery (:requery context)))))))
 
 (defn- cut-node
   "The one tail cut of a node that shows less than it holds."
@@ -1238,7 +1255,11 @@
            state
        (let [cut? (boolean (some more? (vals (:nodes state))))
              failed (sort-by :id (filter :diagnostic (vals (:nodes state))))
-             selected (tree (:nodes state) context)
+             ;; Render data's cuts name no handle (`select-nodes`).
+             context (assoc context :requery (:requery state))
+             selected (cond-> (tree (:nodes state) context)
+                        (get-in state [:nodes 0 :producer])
+                        (assoc :seon.render.call/selected-producer (get-in state [:nodes 0 :producer])))
              emitted (print/emit-both selected options)
              ;; NO LEGEND (owner 2026-09-27): each cut carries the form that
              ;; reads its rest, which says what `…N` means at every cut.
