@@ -1,0 +1,15 @@
+#:seon.db.report{:view
+                 [:map {:description "A transaction report as its AI face shows it: the transaction and its bases, the facts counted, each changed entity by identity with its changed attributes, and tempids resolved; references only."}
+                  [:seon.db.report/tx {:optional true} :int]
+                  [:seon.db.report/basis-before {:optional true} :seon.db/basis-t]
+                  [:seon.db.report/basis-after {:optional true} :seon.db/basis-t]
+                  [:seon.db.report/facts [:int {:min 0}]]
+                  [:seon.db.report/entities [:vector :seon.db.report/entity-change]]
+                  [:seon.db.report/tempids {:optional true} [:map-of :string :seon.db.report/identity]]
+                  [:seon.render/operations {:optional true} :seon.render/operations]]
+                 :identity [:tuple {:description "An entity's identity: its identity attribute and value."} :qualified-keyword :seon.schema/value]
+                 :entity-change
+                 [:map {:description "One changed entity: its identity (or its entity id when it has none) and the attributes the transaction changed."}
+                  [:seon.db.report/identity {:optional true} :seon.db.report/identity]
+                  [:seon.db.report/entity {:optional true} :int]
+                  [:seon.db.report/changed [:vector :keyword]]]}

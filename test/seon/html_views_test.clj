@@ -208,7 +208,9 @@
         (readable! (db/render-transaction-html report) ["Committed transaction" "Prepare" "Changes"])
         (readable! (db/render-rejection-html refusal)
                    ["seon.db/transact!" "Supply :my.plan.item/title with a string of length at least 1."])
-        (is (= (golden :transaction) (db/render-transaction-ai shown-report)))
+        (is (= {:seon.db.report/facts 0 :seon.db.report/entities []}
+               (select-keys (db/render-transaction-ai shown-report) [:seon.db.report/facts :seon.db.report/entities]))
+            "a report is data: its facts counted and its changed entities by identity")
         (is (str/includes? (db/render-rejection-ai refusal)
                            "Supply :my.plan.item/title with a string of length at least 1."))))))
 

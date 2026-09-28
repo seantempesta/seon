@@ -429,3 +429,51 @@ files were released by their former lane and are changed directly. The S4a
 patch is validated but **not installed**: `batch.clj` remains owned by
 one-path-impl-2, and no held file or session was changed. Root must apply that
 patch and run its focused regression. MCP/turn/schema work remains foreign.
+
+## Transaction reports: data, with shared identity reads
+
+Applied `tmp/data-renders/patches/transaction-report-data.patch`: the AI face
+returns declared report data rather than a prose summary. Entity changes,
+identities, temporary names, bases and offered pull forms remain values.
+The supplied patch pulled both before/after databases for every changed entity
+and again for every tempid. The final implementation derives distinct ids once,
+reads each database once, and shares the identity map. A one-entity report uses
+two scalar pulls; larger reports use two `pull-many` calls. Read errors remain
+named alternatives of the output contract.
+
+| Changed entities and tempids | Supplied patch reads | Final reads | Lint-row report ms, before / after | Test-row report ms, before / after |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 4 | 2 | 0.932 / 1.093 | 2.012 / 0.570 |
+| 10 | 40 | 2 | 5.814 / 2.588 | 9.744 / 3.750 |
+| 100 | 400 | 2 | 54.966 / 22.013 | 79.155 / 30.311 |
+
+These were real writer reports on disposable branches; the complete old/new
+map answers matched. The renderer itself commits zero transactions and writes
+zero bytes. Sorting distinct ids costs O((E + T) log(E + T)); identity reads
+are O(E + T) data in two calls, rather than repeated calls for the same ids.
+The scratch outer candidates were unarmed; their database helpers remained
+installed and armed. The one-row lint case increased 17.2%, within the stated
+20%/50 ms regression threshold; no uniform single-row speedup is claimed.
+
+The queued `tmp/test-data-assertions/phase2-db-test.patch` is also applied:
+refusals are asserted by their data and HTML leaves, not prose substrings.
+The new report regression accounts for retractions when replacing an existing
+pass count, including counts written by its earlier 1/10 cases.
+
+Focused tests for root, not run here:
+
+- `seon.transaction-report-test/changed-entities-and-tempids-share-two-reads-at-one-ten-and-one-hundred`
+- `seon.html-views-test/transactions-render-values-without-entity-id-dumps`
+- `seon.schema.vector-storage-test/reports-name-the-vector-owner`
+- `seon.db-test/unique-rejection-names-the-existing-owner-as-data`
+- `seon.db-test/a-write-naming-another-clusters-branch-is-refused-naming-both`
+
+Archive `8d7f2b43d` plus the seven owned files: final lint 0 errors, 1,663
+warnings, 6.933 s; contract compilation reports only the same ten foreign
+script findings. The first drill (`e3db8a784371`) failed in its base boot on a
+socket read timeout, before any candidate verdict; evidence is retained in
+its named drill root. The retry produced base and move evidence but no final verdict before the
+owner pause. The final combined arity/report drill `f92f54f4ebe7` passed all
+three stages: base 232.650 s, move 59.131 s, fresh candidate 196.935 s, total
+612.342 s. It includes the final assertion and queued DB assertion patch.
+MCP, operator and turn work is excluded from this slice.

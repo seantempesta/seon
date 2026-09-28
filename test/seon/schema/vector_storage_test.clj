@@ -645,7 +645,7 @@
                "the stored report holds only position datoms")
            (is (contains? (seon.fn/report-identities reorder) [:seon.vector-test.p/id "p"]))))
        (testing "a transaction's rendering counts logical facts on the parent"
-         (is (re-find #"on 1 entities" (db/render-transaction-ai report))))))))
+         (is (= 1 (count (:seon.db.report/entities (db/render-transaction-ai report))))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; S9: comparisons see order where storage keeps it

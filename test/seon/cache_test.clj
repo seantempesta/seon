@@ -95,3 +95,16 @@
       (is (<= weighted-bytes 2000))
       (is (< (count (cache/retained held ::empty)) 50))
       (is (pos? (get-in kinds [::empty :seon.cache/evictions]))))))
+
+(deftest retiring-kinds-removes-only-their-entries
+  (doseq [n [1 10 100]]
+    (let [held (cache/create 1000000)]
+      (doseq [kind [::retired-a ::retired-b ::kept] k (range n)]
+        (cache/lookup held kind k (constantly 10) (constantly k) some?))
+      (is (= (* 2 n) (cache/evict-kinds! held #{::retired-a ::retired-b})))
+      (settle held)
+      (is (empty? (cache/retained held ::retired-a)))
+      (is (empty? (cache/retained held ::retired-b)))
+      (is (= (zipmap (range n) (range n)) (cache/retained held ::kept)))
+      (is (zero? (get-in (cache/status held) [:seon.cache/kinds ::retired-a :seon.cache/bytes])))
+      (is (= 0 (cache/evict-kinds! held #{::retired-a ::retired-b}))))))

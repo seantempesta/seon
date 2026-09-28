@@ -5,7 +5,6 @@
   bound per evaluation). Failures return flat `:seon.error` values."
   (:require [clojure.core.cache.wrapped :as cache]
             [clojure.set :as set]
-            [clojure.string :as str]
             [clojure.walk :as walk]
             [editscript.core :as editscript]
             [editscript.edit :as editscript.edit]
@@ -4440,11 +4439,6 @@
                (if (read-refusal? entity-maps) (reduced entity-maps) (into edges entity-maps))))
            #{} (:callers call-edges-queries))))
 
-(def ^:private arity-attributes
-  "Every attribute the arity gate reads."
-  [:seon.fn/call-arities :seon.fn/sym :seon.test/sym :seon.fn/arities
-   :seon.fn.arity/min :seon.fn.arity/max])
-
 (defn- arity-comparison
   "Candidate edges of `edges` under `bounds`: callees declaring arities none
   of which admits the recorded count, with the comparison's coverage."
@@ -4456,193 +4450,70 @@
      ::checked (count checked)
      ::edges (count edges)}))
 
-(defn- arity-base-weight
-  "Estimated retained bytes of an arity base and the content key naming it.
-
-  Calibrated on default's heap (data/heap/live-1725, 2026-09-26: a base of
-  99,659 edges retained 54 MB, about 540 bytes per edge across the edge set and
-  its caller and callee indexes); a key datom about 100 bytes. The two caches
-  that held bases (LRU 4 by content, LRU 16 by commit) retained 271 MB outside
-  any byte budget in the OOM dump of pid 42397 (2026-09-27)."
-  {:malli/schema [:=> [:cat :map [:int {:min 0}]] [:int {:min 0}]]}
-  [base key-datoms]
-  (+ (* 540 (count (::edge-set base))) (* 100 key-datoms)))
-
-(defn- arity-key-datoms
-  "The datom count of an arity content key."
-  {:malli/schema [:=> [:cat [:tuple :qualified-keyword [:vector :seon.schema/value]]] [:int {:min 0}]]}
-  [[_ attribute-datoms]]
-  (reduce + 0 (map (comp count second) attribute-datoms)))
-
-(defn- arity-content-key
-  "The arity cache key naming a value by the datoms the gate reads."
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:tuple :qualified-keyword [:vector :seon.schema/value]]]}
-  [database]
-  [::arity-content (mapv (fn [attribute]
-                           [attribute (if (get (dbi/-schema database) attribute)
-                                        (vec (d/datoms database :aevt attribute))
-                                        [])])
-                         arity-attributes)])
-
-(defn- arity-revision-key
-  "Datahike's exact change-tracking identity for the gate's read attributes.
-  Raw committed and speculative values carry it; temporal/detached values do
-  not. The generation and conservative revision fence unknown/schema changes
-  (datahike.db/speculative-cache-context; query/source-context-unchanged?)."
-  {:malli/schema [:=> [:cat :seon.db/database-value]
-                  [:maybe [:tuple :qualified-keyword :map :map]]]}
-  [database]
-  (let [context (when (instance? DB database) (:cache-context database))]
-    (when (and (:datahike.cache/connection-id context) (:datahike.cache/generation context))
-      [::arity-revisions
-       (select-keys context [:datahike.cache/connection-id :datahike.cache/generation
-                            :datahike.cache/conservative-revision])
-       (select-keys (:datahike.cache/attribute-revisions context) arity-attributes)])))
-
-(defn- arity-base
-  "The arity gate's whole-program input for a value, memoized by the datoms it
-  reads: edges, bounds, the comparison, and the edge sets indexed by caller and
-  callee so a report can replace only the ones it touched. `query-fn` reads
-  (`storage-q-in` under the write's judging projection)."
-  {:malli/schema [:=> [:cat [:=> [:cat :seon.db/query :seon.db/database-value [:* :seon.schema/value]] :seon.schema/value]
-                       :seon.db/database-value] :map]}
-  [query-fn database]
-  (let [derive (fn []
-                 (let [edges (call-edges query-fn database)
-                       bounds (declared-arity-bounds query-fn database)]
-                   (merge (arity-comparison edges bounds)
-                          {::edge-set edges
-                           ::bounds bounds
-                           ::by-caller (update-vals (group-by first edges) set)
-                           ::by-callee (update-vals (group-by (comp first second) edges) set)})))]
-    ;; Keyed by the datoms it reads. The writer's own `:db-before` carries no
-    ;; committed identity (Datahike's writer loop threads each report's
-    ;; `:db-after`, `datahike/writer.cljc:118`, whose context is speculative,
-    ;; `datahike/db.cljc:444`), so no commit id can name it; its datoms can. Datom equality compares e, a
-    ;; and v (`datahike/datom.cljc:106`), which is all the gate reads.
-    ;; Keyed by content; a committed value is also named by its commit id
-    ;; (Datahike derives it from content), so a later write on a fresh branch
-    ;; of a seen commit hits without reading its ~78,000 arity datoms (114 ms)
-    ;; to build the content key, and a new commit of seen content still hits.
-    ;; A report seeds its final value's base (`report-arity-comparison`), so
-    ;; the first write on a fork of a just-written head hits too.
-    ;; Both kinds live in the one byte-bounded process cache (`seon.cache`).
-    (let [by-content #(let [content-key (arity-content-key database)
-                            key-datoms (arity-key-datoms content-key)]
-                        (seon.cache/lookup ::arity-base content-key
-                                           (fn [base] (arity-base-weight base key-datoms)) derive))
-          {:datahike.cache/keys [committed? commit-id]} (:cache-context database)
-          held #(if (and committed? commit-id)
-                  (seon.cache/lookup ::arity-commit commit-id (fn [base] (arity-base-weight base 0)) by-content)
-                  (by-content))]
-      (if-let [revision (arity-revision-key database)]
-        (seon.cache/lookup ::arity-revision revision (fn [base] (arity-base-weight base 0)) held)
-        (held)))))
-
-(defn- advanced-arity-base
-  "The final value's base from its `:db-before` base: `removed` edges leave,
-  `affected` edges enter, and `comparison` is the report's own answer."
-  {:malli/schema [:=> [:cat :map [:set :seon.schema/value] [:set :seon.schema/value] :map] :map]}
-  [base removed affected comparison]
-  (let [index (fn [by key-of]
-                (as-> by by
-                  (reduce (fn [by edge]
-                            (let [k (key-of edge) remaining (disj (get by k) edge)]
-                              (if (seq remaining) (assoc by k remaining) (dissoc by k))))
-                          by removed)
-                  (reduce (fn [by edge] (update by (key-of edge) (fnil conj #{}) edge)) by affected)))]
-    (assoc comparison
-           ::edge-set (into (reduce disj (::edge-set base) removed) affected)
-           ::by-caller (index (::by-caller base) first)
-           ::by-callee (index (::by-callee base) (comp first second)))))
+;; Retire the former producers' entries when this owner is reloaded.
+(seon.cache/evict-kinds! #{::arity-base ::arity-revision ::arity-commit})
 
 (defn- report-arity-comparison
-  "The arity comparison of a report's final value from its `:db-before`'s
-  memoized base: only edges and bounds under a caller or callee
-  symbol this report touched are read again on `:db-after`. An edge belongs to
-  its caller's symbol and a bound to its callee's, so every other edge and
-  bound is unchanged. Without every read attribute installed before, the
-  final value is compared whole. Both values are read by `projection`, the one
-  the write is judged by: a first population's `:db-before` holds no
-  declaration rows to derive one from."
+  "Check only final call edges whose caller or callee this write changes.
+
+  EAVT reads written callers; the calls AVET index finds callers of changed
+  callees. Schema/default changes follow reverse schema references to the
+  arities using them. Bounds are read only for the reached callees. No
+  whole-program base or cache key is retained; coverage names this write."
   {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/transaction-report] :map]}
   [projection report]
-  (let [storage-q (partial storage-q-in projection)
-        before (:db-before report)
-        after (:db-after report)
-        tx-data (logical-datoms projection report)]
-    (if-not (every? #(get (dbi/-schema before) %) arity-attributes)
-      (let [edges (call-edges storage-q after)
-            bounds (declared-arity-bounds storage-q after)]
-        (assoc (arity-comparison edges bounds) ::bounds bounds))
-      (let [base (arity-base storage-q before)
-              symbols (fn [database entities attributes]
-                          (into #{}
-                                (for [entity entities attribute attributes
-                                      :when (get (dbi/-schema database) attribute)
-                                      datom (d/datoms database :eavt entity attribute)]
-                                  (:v datom))))
-                touched (fn [attributes] (into #{} (comp (filter (comp attributes :a)) (map :e)) tx-data))
-                callers (touched #{:seon.fn/call-arities :seon.fn/sym :seon.test/sym})
-                arity-owners (into #{}
-                                   (for [arity (touched #{:seon.fn.arity/min :seon.fn.arity/max})
-                                         database [before after]
-                                         owner (attribute-holders database :seon.fn/arities arity)]
-                                     owner))
-                callees (into (touched #{:seon.fn/arities :seon.fn/sym}) arity-owners)
-                caller-symbols (into (symbols before callers [:seon.fn/sym :seon.test/sym])
-                                     (symbols after callers [:seon.fn/sym :seon.test/sym]))
-                callee-symbols (into (symbols before callees [:seon.fn/sym])
-                                     (symbols after callees [:seon.fn/sym]))]
-            (if (and (empty? caller-symbols) (empty? callee-symbols))
-              (select-keys base [::candidates ::checked ::edges ::bounds])
-              (let [removed (into #{} (concat (mapcat (::by-caller base) caller-symbols)
-                                              (mapcat (::by-callee base) callee-symbols)))
-                    after-callers
-                    (when (seq caller-symbols)
-                      (call-edges storage-q after caller-symbols))
-                    after-bounds
-                    (when (seq callee-symbols)
-                      (reduce
-                       (fn [bounds [function-symbol minimum maximum]]
-                         (update bounds function-symbol (fnil conj #{})
-                                 (cond-> {:seon.fn.arity/min minimum}
-                                   (nat-int? maximum) (assoc :seon.fn.arity/max maximum))))
-                       {}
-                       (storage-q '[:find ?function-symbol ?minimum ?maximum
-                              :in $ [?function-symbol ...]
-                              :where
-                              [?function :seon.fn/sym ?function-symbol]
-                              [?function :seon.fn/arities ?arity]
-                              [?arity :seon.fn.arity/min ?minimum]
-                              [(get-else $ ?arity :seon.fn.arity/max -1) ?maximum]]
-                            after callee-symbols)))
-                    bounds (merge (apply dissoc (::bounds base) callee-symbols) after-bounds)
-                    affected (into (set after-callers)
-                                   (remove #(caller-symbols (first %)))
-                                   (mapcat (::by-callee base) callee-symbols))
-                    prior (arity-comparison removed (::bounds base))
-                    current (arity-comparison affected bounds)
-                    comparison
-                    {::candidates (into (reduce disj (::candidates base) removed) (::candidates current))
-                     ::checked (+ (- (::checked base) (::checked prior)) (::checked current))
-                     ::edges (+ (- (::edges base) (::edges prior)) (::edges current))
-                     ::bounds bounds}]
-                ;; Seed the final value's base (an O(changed edges) update of
-                ;; the prior base): a later write whose `:db-before` holds
-                ;; these datoms (a fork of this head) hits.
-                (let [content-key (arity-content-key after)
-                      key-datoms (arity-key-datoms content-key)
-                      advanced (seon.cache/lookup ::arity-base content-key
-                                                  (fn [base] (arity-base-weight base key-datoms))
-                                                  #(advanced-arity-base base removed affected comparison))]
-                  ;; The next writer value keeps these precise revisions even
-                  ;; without a committed id. Do not rebuild its datom key.
-                  (when-let [revision (arity-revision-key after)]
-                    (seon.cache/lookup ::arity-revision revision
-                                      (fn [base] (arity-base-weight base 0))
-                                      (constantly advanced))))
-                comparison))))))
+  (let [before (:db-before report) after (:db-after report)
+        tx-data (logical-datoms projection report)
+        touched (fn [attributes] (into #{} (comp (filter (comp attributes :a)) (map :e)) tx-data))
+        values (fn [database entities attributes]
+                 (into #{} (for [e entities a attributes :when (get (dbi/-schema database) a)
+                                 datom (d/datoms database :eavt e a)] (:v datom))))
+        holders (fn [database attribute value]
+                  (when (get (dbi/-schema database) attribute)
+                    (attribute-holders database attribute value)))
+        both (fn [entities attributes]
+               (into (values before entities attributes) (values after entities attributes)))
+        changed-schemas (both (touched #{:seon.schema/key :seon.schema/form}) [:seon.schema/key])
+        defaults (touched #(= "seon.call-preparation" (namespace %)))
+        supplied (into #{} (for [database [before after]
+                                 e (values database defaults [:seon.call-preparation/schema])
+                                 k (values database [e] [:seon.schema/key])] k))
+        schemas (loop [pending (into changed-schemas supplied) seen #{}]
+                  (if-let [k (first pending)]
+                    (recur (into (disj pending k)
+                                 (remove (conj seen k))
+                                 (values after (holders after :seon.schema/references k) [:seon.schema/key]))
+                           (conj seen k))
+                    seen))
+        arities (into (touched #{:seon.fn.arity/min :seon.fn.arity/max})
+                      (mapcat #(holders after :seon.fn.arity/input-refs %)) schemas)
+        owners (into #{} (for [database [before after] arity arities
+                               e (holders database :seon.fn/arities arity)] e))
+        callees (both (into owners (touched #{:seon.fn/arities :seon.fn/sym :seon.fn/spec})) [:seon.fn/sym])
+        written (touched #{:seon.fn/call-arities :seon.fn/sym :seon.test/sym})
+        written-symbols (values after written [:seon.fn/sym :seon.test/sym])
+        callers (into written-symbols
+                      (values after (mapcat #(holders after :seon.fn/calls %) callees)
+                              [:seon.fn/sym :seon.test/sym]))
+        storage-q (partial storage-q-in projection)
+        edges (if (seq callers)
+                (into #{} (filter (fn [[caller [callee _]]]
+                                    (or (written-symbols caller) (callees callee))))
+                      (call-edges storage-q after callers))
+                #{})
+        targets (into #{} (map (comp first second)) edges)
+        bounds (if (seq targets)
+                 (reduce (fn [out [sym minimum maximum]]
+                           (update out sym (fnil conj #{})
+                                   (cond-> {:seon.fn.arity/min minimum}
+                                     (nat-int? maximum) (assoc :seon.fn.arity/max maximum))))
+                         {}
+                         (storage-q '[:find ?sym ?minimum ?maximum :in $ [?sym ...]
+                                      :where [?f :seon.fn/sym ?sym] [?f :seon.fn/arities ?a]
+                                             [?a :seon.fn.arity/min ?minimum]
+                                             [(get-else $ ?a :seon.fn.arity/max -1) ?maximum]] after targets))
+                 {})]
+    (assoc (arity-comparison edges bounds) ::bounds bounds)))
 
 (defn- prepared-arity-bounds
   "The call counts `callee`'s STORED arities admit once its invocation plan's
@@ -5866,29 +5737,54 @@
     unit))
 
 (defn render-transaction-ai
-  "Summarize the facts and identified entities changed by a transaction."
+  "A transaction's identities, changed attributes, tempids and bases as data.
+  Pull each distinct entity once per database value, sharing the identities
+  between changed-entity rows and tempids. No database contents are returned."
   {:malli/schema
-   [:=> [:cat :seon.db/transaction-report] [:string {:min 1}]]}
+   [:=> [:cat :seon.db/transaction-report]
+    [:or :seon.db.report/view :seon.db/invalid-read-error :seon.db/pull-budget-error]]}
   [unit]
-  (let [{database :db-after before :db-before :as report} (rendered-value unit)
+  (let [{database :db-after before :db-before tempids :tempids :as report} (rendered-value unit)
         transaction-data (if (database-value? database) (logical-datoms report) (:tx-data report))
-        facts (remove #(= (:e %) (:tx %)) transaction-data)
-        entities (sort (distinct (map :e facts)))
-        identities (when (and (seq entities) (database-value? database))
-                     (vec (sort (identity-attributes database))))
-        labels (mapv (fn [entity]
-                       (let [entity-map (when identities
-                                   (merge (when (database-value? before)
-                                            (pull before identities entity))
-                                          (pull database identities entity)))
-                             identity (first (sort-by (comp str key)
-                                                      (dissoc entity-map :db/id)))]
-                         (if identity
-                           (str (namespace (key identity)) " " (pr-str (val identity)))
-                           (str "entity " entity))))
-                     entities)]
-    (str "Wrote " (count facts) " facts on " (count entities) " entities"
-         (when (seq labels) (str ": " (str/join ", " labels))) ".")))
+        facts (filterv #(not= (:e %) (:tx %)) transaction-data)
+        grouped (group-by :e facts)
+        temporary (into {} (filter (fn [[k _]] (and (string? k) (not= "datomic.tx" k)))) tempids)
+        ids (vec (sort (into (set (keys grouped)) (vals temporary))))
+        selector (when (and (seq ids) (database-value? database))
+                   (vec (sort (identity-attributes database))))
+        read-rows (fn [basis]
+                    (if (= 1 (count ids))
+                      (let [row (pull basis selector (first ids))]
+                        (if (or (:seon.db/invalid-read row) (:datahike.budget/name row)) row [row]))
+                      (pull-many basis selector ids)))
+        old-rows (if (and selector (database-value? before)) (read-rows before) [])
+        new-rows (if (and selector (vector? old-rows)) (read-rows database) [])]
+    (cond
+      (not (vector? old-rows)) old-rows
+      (not (vector? new-rows)) new-rows
+      :else
+      (let [rows (merge-with merge (zipmap ids old-rows) (zipmap ids new-rows))
+            priority (sort-by str selector)
+            identities (into {} (keep (fn [[entity row]]
+                                        (when-let [identity (some #(find row %) priority)]
+                                          [entity (vec identity)]))) rows)
+            entities (mapv (fn [[entity datoms]]
+                             (assoc (if-let [identity (get identities entity)]
+                                      {:seon.db.report/identity identity} {:seon.db.report/entity entity})
+                                    :seon.db.report/changed (vec (sort (distinct (map :a datoms))))))
+                           (sort-by key grouped))
+            resolved (into (sorted-map) (keep (fn [[tempid entity]]
+                                               (when-let [identity (get identities entity)] [tempid identity]))) temporary)
+            tx (some :tx transaction-data)]
+        (cond-> {:seon.db.report/facts (count facts) :seon.db.report/entities entities}
+          tx (assoc :seon.db.report/tx tx)
+          (database-value? before) (assoc :seon.db.report/basis-before (basis-t before))
+          (database-value? database) (assoc :seon.db.report/basis-after (basis-t database))
+          (seq resolved) (assoc :seon.db.report/tempids resolved)
+          (some :seon.db.report/identity entities)
+          (assoc :seon.render/operations
+                 (into [] (comp (keep :seon.db.report/identity) (take 3)
+                                (map #(list 'seon.db/pull ''[*] %))) entities)))))))
 
 (defn- transaction-value-html
   [value]

@@ -1353,15 +1353,13 @@
                 (select-keys conflict
                              [:seon.db/conflict-attribute
                               :seon.db/conflict-owner])))
-         (is (str/includes? (:seon.error/message rejected)
-                            owner-id))
-         (is (not (str/includes? (:seon.error/message rejected)
-                                 "ExceptionInfo")))
-         (is (str/includes? (pr-str (db/render-rejection-ai rejected))
-                            "seon.db/transact! refused transaction data"))
-         (is (str/includes? (pr-str (db/render-rejection-ai rejected)) owner-id))
-         (is (str/includes? (pr-str (db/render-rejection-html rejected))
-                            owner-id))
+         (is (= [:seon.cluster.eval/id owner-id]
+                (get-in (db/render-rejection-ai rejected)
+                        [:seon.error/problems 0 :seon.error/offending :seon.db/conflict-owner]))
+             "the AI face names the existing owner as data")
+         (is (some #(str/includes? (str %) owner-id)
+                   (test-support/hiccup-leaves (db/render-rejection-html rejected)))
+             "the HTML face shows the existing owner")
          (is (= 'seon.db/render-rejection-ai
                 (->> (schema/matching-shapes rejected)
                      (some #(when (= :seon.db.write/validation-refusal
@@ -1913,12 +1911,6 @@
             (is (= (branch foreign-connection)
                    (:seon.db/explicit-branch data))
                 "the refusal names the branch the write tried to reach")
-            (is (str/includes?
-                 (:seon.error/message refused)
-                 (pr-str (branch foreign-connection))))
-            (is (str/includes?
-                 (:seon.error/message refused)
-                 (pr-str (branch writing-connection))))
             (is (= #{"own" "elided"} (message-ids writing-connection)))
             (is (empty? (message-ids foreign-connection))
                 "nothing reaches the foreign branch"))))))))
@@ -2083,51 +2075,24 @@
              (is (some #{expected} (vals entity)))
              (is (= basis (db/basis-t (db/db connection)))))))))))
 
-(deftest repeated-speculative-arity-reads-do-not-rescan-program-datoms
+(deftest a-report-compares-only-the-written-callers-edges
   (test-support/with-database
    (fn [connection]
-     (let [database (db/db connection)
-           speculative (db/with database [])
-           query-fn (partial @#'db/storage-q-in (db/carried-projection database))
-           expected (@#'db/arity-base query-fn database)
-           first-read (@#'db/arity-base query-fn speculative)]
-       (is (false? (get-in speculative [:cache-context :datahike.cache/committed?])))
-       (is (= expected first-read))
+     (let [database (db/db connection) projection (db/carried-projection database)
+           caller (:db/id (db/pull database [:db/id] [:seon.fn/sym 'seon.id/evaluation]))
+           existing (count (d/datoms database :eavt caller :seon.fn/call-arities))]
        (doseq [n [1 10 100]]
-         (let [[values calls]
-               (test-support/armed-calls
-                '#{seon.db/arity-content-key}
-                #(mapv (fn [_] (@#'db/arity-base query-fn speculative)) (range n)))]
-           (is (every? #(= expected %) values))
-           (is (zero? (get calls 'seon.db/arity-content-key))
-               "an unchanged speculative read set never builds a whole-program key")))))))
-
-(deftest a-write-seeds-its-final-values-arity-base
-  ;; CLASS: whole-program rederivation per branch. A fork of a just-written head
-  ;; (a publication's scratch branch) read the head's arity base, which no report
-  ;; had derived: the gate rebuilt every call edge (1.2 s measured). The report
-  ;; seeds its final value's base by content, and that base equals a full build.
-  (test-support/with-database
-   (fn [connection]
-     (test-support/transacted!
-      connection
-      [(test-support/namespace-entity (db/db connection) 'sample.seed)
-       (test-support/program-fn-entity (db/db connection) 'sample.seed/caller "(defn caller [x] (str x))"
-                                    {:seon.fn/call-arities #{['clojure.core/str 1]}})])
-     (let [head (db/db connection)
-           content-key (@#'db/arity-content-key head)
-           seeded? (contains? (seon.cache/retained ::db/arity-base) content-key)
-           ;; The writer's own questions read arities through their cells.
-           storage-q (partial @#'db/storage-q-in (db/carried-projection head))
-           edges (@#'db/call-edges storage-q head)
-           bounds (@#'db/declared-arity-bounds storage-q head)
-           built (merge (@#'db/arity-comparison edges bounds)
-                        {::db/edge-set edges ::db/bounds bounds
-                         ::db/by-caller (update-vals (group-by first edges) set)
-                         ::db/by-callee (update-vals (group-by (comp first second) edges) set)})]
-       (is seeded? "the write's report seeded the head's base before any read")
-       (is (contains? edges ['sample.seed/caller ['clojure.core/str 1]]))
-       (is (= built (@#'db/arity-base storage-q head)))))))
+         (let [tx (into [[:db/add caller :seon.fn/calls 'seon.id/id]]
+                        (map #(vector :db/add caller :seon.fn/call-arities ['seon.id/id (+ 1000 %)])) (range n))
+               report (d/with database tx)
+               [comparison calls] (test-support/armed-calls
+                                   '#{seon.db/storage-q-in}
+                                   #(#'db/report-arity-comparison projection report))]
+           (is (= (+ existing n) (::db/edges comparison))
+               "only the written caller's edges are compared")
+           (is (= n (count (::db/candidates comparison))))
+           (is (= 3 (get calls 'seon.db/storage-q-in))
+               "two caller-family reads and one bound read serve the whole write")))))))
 
 ;; CLASS: a silent empty from an index the attribute does not have. Datahike
 ;; answers an AVET read of an unindexed attribute with no datoms, which every
@@ -2973,27 +2938,18 @@
        (is (= renderer (:e (first (d/datoms (db/db connection) :avet :seon.fn/sym 'seon.error/render-ai))))
            "refused, nothing was removed")))))
 
-(deftest a-report-touching-no-function-reuses-the-committed-arity-comparison
-  ;; The arity gate compares only call edges and bounds under a caller or
-  ;; callee this report touched; every other edge is its committed basis's.
-  ;; A plain write to a declaration entity runs the gate (its root is a schema
-  ;; key) and leaves the arity attributes' revisions equal. A transaction
-  ;; function's commit advances Datahike's conservative revision instead
-  ;; (datahike/writer.cljc:249), so that basis is compared again.
+(deftest an-unrelated-report-reads-no-arity-edges
   (test-support/with-database
    (fn [connection]
-     (let [compare-edges @#'seon.db/arity-comparison
-           compared (atom [])
-           toggle! (fn [value]
-                     (test-support/transacted!
-                      connection
-                      [[:db/add [:seon.schema/key :seon.error/base] :seon.schema/generatable? value]]))]
-       (toggle! false)
-       (toggle! true)
-       (with-redefs [seon.db/arity-comparison
-                     (fn [edges bounds] (swap! compared conj (count edges)) (compare-edges edges bounds))]
-         (toggle! false))
-       (is (empty? @compared) "the committed basis's comparison is reused")))))
+     (let [database (db/db connection) projection (db/carried-projection database)
+           report (d/with database [[:db/add [:seon.fn/sym 'seon.id/evaluation]
+                                    :seon.fn/doc "An unrelated declaration observation."]])]
+       (doseq [n [1 10 100]]
+         (let [[comparisons calls] (test-support/armed-calls
+                                    '#{seon.db/call-edges seon.db/storage-q-in}
+                                    #(mapv (fn [_] (#'db/report-arity-comparison projection report)) (range n)))]
+           (is (every? #(= {::db/candidates #{} ::db/checked 0 ::db/edges 0 ::db/bounds {}} %) comparisons))
+           (is (every? zero? (vals calls)) "unrelated writes read no program edges or bounds")))))))
 
 (deftest call-reach-includes-the-root-ends-cycles-and-treats-absent-symbols-as-leaves
   (is (= '#{a/x a/y a/z} (db/call-reach '{a/x [a/y] a/y [a/x a/z]} 'a/x)))

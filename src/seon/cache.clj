@@ -197,6 +197,24 @@
                      (when-not thrown [content-key value])))))
          (.asMap cache))))
 
+(defn evict-kinds!
+  "Remove the entries of retired producer kinds, leaving other kinds intact.
+
+  Reload calls this when it deletes a cache producer. This is O(cache entries)
+  once at retirement, not an invalidation on reads or writes. In-flight values
+  may finish for their existing callers but are no longer retained."
+  {:malli/schema [:function
+                  [:=> [:cat [:set :qualified-keyword]] nat-int?]
+                  [:=> [:cat :seon.cache/cache [:set :qualified-keyword]] nat-int?]]}
+  ([kinds] (evict-kinds! @process kinds))
+  ([{::keys [^AsyncCache cache]} kinds]
+   (let [entries (.asMap cache)
+         removed (reduce (fn [n [k pending]]
+                           (if (and (kinds (first k)) (.remove entries k pending)) (inc n) n))
+                         0 entries)]
+     (.cleanUp (.synchronous cache))
+     removed)))
+
 (defn status
   "The byte budget, the estimated bytes held, and per-kind counters.
 
