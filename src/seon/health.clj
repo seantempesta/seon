@@ -409,6 +409,131 @@
        :seon.health/requery '(seon.problems/problems (seon.db/db) {})}
       value)))
 
+;;; ---------------------------------------------------------------------------
+;;; What regressed: newest stored value beside the value before its change
+;;; ---------------------------------------------------------------------------
+
+(defn- phase-costs
+  "Each layer of a boot `timeline` (`#{[layer at-ms]}`, cumulative) with its
+  own cost, the milliseconds since the layer before it in `order`, and the
+  whole timeline as `:seon.boot/layers`."
+  {:malli/schema [:=> [:cat [:set [:tuple :qualified-keyword [:int {:min 0}]]] [:vector :qualified-keyword]]
+                  [:map-of :qualified-keyword [:int {:min 0}]]]}
+  [timeline order]
+  (let [rank (zipmap order (range))
+        ordered (sort-by (fn [[layer ms]] [ms (rank layer (count order))]) timeline)]
+    (into {:seon.boot/layers (reduce max 0 (map second timeline))}
+          (map (fn [[before [layer ms]]] [layer (max 0 (- ms (if before (second before) 0)))]))
+          (map vector (cons nil ordered) ordered))))
+
+(defn boot-comparisons
+  "Each boot phase of the newest process record in `records` beside the same
+  phase of the newest record of the previous distinct program (source commit):
+  empty with fewer than two programs recorded."
+  {:malli/schema [:=> [:cat [:sequential [:map {:description "A pulled process record: its layers arrive as a vector of [layer at-ms]."}
+                                           [:seon.db.process/id :seon.db.process/id]]]
+                       [:vector :qualified-keyword]]
+                  [:vector :seon.health/boot-comparison]]}
+  [records order]
+  (let [recorded (sort-by :seon.db.process/start-instant
+                          (filter #(and (:seon.db.process/start-instant %) (:seon.source/commit-id %) (seq (:seon.db.process/layers %)))
+                                  records))
+        after (last recorded)
+        before (last (remove #(= (:seon.source/commit-id %) (:seon.source/commit-id after)) recorded))]
+    (if-not (and after before)
+      []
+      (let [was (phase-costs (set (:seon.db.process/layers before)) order)
+            now (phase-costs (set (:seon.db.process/layers after)) order)]
+        (into []
+              (keep (fn [[phase after-ms]]
+                      (when-some [before-ms (get was phase)]
+                        {:seon.health/phase phase
+                         :seon.health/before-ms before-ms
+                         :seon.health/after-ms after-ms
+                         :seon.health/increase-ms (- after-ms before-ms)
+                         :seon.health/increase-percent (quot (* 100 (- after-ms before-ms)) (max 1 before-ms))
+                         :seon.health/before-program (:seon.source/commit-id before)
+                         :seon.health/after-program (:seon.source/commit-id after)
+                         :seon.health/before-process (:seon.db.process/id before)
+                         :seon.health/after-process (:seon.db.process/id after)
+                         :seon.health/changed-at (:seon.db.process/start-instant after)})))
+              (sort-by key now))))))
+
+(defn definition-comparisons
+  "For each symbol measured under more than one digest in `measurements`, its
+  newest digest's p50 and p99 buckets beside its previous digest's. A
+  digest's value is its newest measurement; digests order by it."
+  {:malli/schema [:=> [:cat [:sequential :seon.profile.measurement/measurement]]
+                  [:vector :seon.health/definition-comparison]]}
+  [measurements]
+  (into []
+        (mapcat (fn [[sym rows]]
+                  (let [by-digest (->> rows
+                                       (group-by :seon.profile.measurement/digest)
+                                       vals
+                                       (map #(apply max-key (comp inst-ms :seon.profile.measurement/at) %))
+                                       (sort-by (comp inst-ms :seon.profile.measurement/at)))
+                        [before after] (take-last 2 by-digest)]
+                    (when after
+                      (for [q [:seon.profile.measurement/p50 :seon.profile.measurement/p99]]
+                        {:seon.profile.measurement/sym sym
+                         :seon.health/quantile q
+                         :seon.health/before-bucket (q before)
+                         :seon.health/after-bucket (q after)
+                         :seon.health/buckets-up (- (q after) (q before))
+                         :seon.health/before-us (quot (bit-shift-left 1 (q before)) 1000)
+                         :seon.health/after-us (quot (bit-shift-left 1 (q after)) 1000)
+                         :seon.health/before-digest (:seon.profile.measurement/digest before)
+                         :seon.health/after-digest (:seon.profile.measurement/digest after)
+                         :seon.profile.measurement/calls (:seon.profile.measurement/calls after)
+                         :seon.health/changed-at (:seon.profile.measurement/at after)})))))
+        (sort-by key (group-by :seon.profile.measurement/sym measurements))))
+
+(defn- stored
+  "Every entity of `database` carrying `identity`, pulled by `attributes`:
+  empty while `identity` or the first attribute is not installed (a store
+  that has not adopted the producer's schema yet)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword [:vector :qualified-keyword]]
+                  [:or [:vector :map] :seon.db/error-result]]}
+  [database identity-attribute attributes]
+  (if-not (every? #(get (:schema database) %) [identity-attribute (first attributes)])
+    []
+    (let [entities (db/q {:find '[[?e ...]] :where [['?e (first attributes)]]} database)]
+      (if (db/read-refusal? entities)
+        entities
+        (let [pulled (db/pull-many database (into [identity-attribute] attributes) (vec entities))]
+          (if (db/read-refusal? pulled) pulled (vec pulled)))))))
+
+(defn regressions
+  "Every comparison of a stored measure's newest value with its value before
+  the change that moved it: boot phases from the process records boot writes
+  at seeding (`boot-comparisons`), definition buckets from the stored
+  measurements (`definition-comparisons`). A regression is the finding schema
+  a comparison satisfies (`:seon.health/boot-regression`,
+  `:seon.health/definition-regression`); nothing is stored.
+
+  ## Examples
+
+      (seon.health/regressions (seon.db/db))
+
+  ## Costs
+
+  Proportional to the process records and the measurements stored: one
+  query and one pull each."
+  {:malli/schema [:=> [:cat :seon.db/database-value] :seon.health/regressions]}
+  [database]
+  (let [records (stored database :seon.db.process/id
+                        [:seon.db.process/layers :seon.db.process/start-instant :seon.source/commit-id])
+        measurements (stored database :seon.profile.measurement/id
+                             [:seon.profile.measurement/sym :seon.profile.measurement/digest
+                              :seon.profile.measurement/p50 :seon.profile.measurement/p99
+                              :seon.profile.measurement/errors :seon.profile.measurement/calls
+                              :seon.profile.measurement/at])]
+    (cond (db/read-refusal? records) records
+          (db/read-refusal? measurements) measurements
+          :else (into (boot-comparisons records @(requiring-resolve 'seon.cluster.boot/boot-layers))
+                      (definition-comparisons measurements)))))
+
 (defn- state
   "The report's one word: faulted at the ranking's faulted severity; unknown
   while a unit is pending or an error; degraded with any other match."
@@ -471,7 +596,9 @@
                            :seon.health/maintenance (collected :seon.health/maintenance
                                                                #(derived database ::maintenance maintenance/report))
                            :seon.health/replaced-roots (collected :seon.health/replaced-roots
-                                                                  #(replaced-roots database))}
+                                                                  #(replaced-roots database))
+                           :seon.health/regressions (collected :seon.health/regressions
+                                                               #(derived database ::regressions regressions))}
                     (:seon.agent/routing instance)
                     (assoc :seon.health/fleet (collected :seon.health/fleet
                                                          #(:seon.render/value
@@ -516,6 +643,7 @@
       :seon.health/profile {:seon.health/observed (count value)}
       :seon.health/maintenance {:seon.health/entries (count (:seon.maintenance/entries value))}
       :seon.health/replaced-roots {:seon.health/count (count value)}
+      :seon.health/regressions {:seon.health/count (count value)}
       value)))
 
 (def ^:private shown
@@ -551,7 +679,7 @@
                                 (keep (fn [k] (when-some [v (get value k)] [k (unit-summary k v)])))
                                 [:seon.health/readiness :seon.health/problems :seon.health/fleet :seon.health/status
                                  :seon.health/cache :seon.health/profile :seon.health/maintenance
-                                 :seon.health/replaced-roots :seon.health/program])
+                                 :seon.health/replaced-roots :seon.health/regressions :seon.health/program])
        :seon.render/operations
        [(list 'seon.health/report {:seon.boot/cluster-name cluster})
         '(seon.problems/open-faults (seon.db/db))

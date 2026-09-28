@@ -103,7 +103,7 @@
            "a stored schema constraining only an identity is refused")
        (is (not (#'health/identity-only? database projection ::uncontracted)))))))
 
-(deftest a-replaced-root-rides-the-report-as-instrument-reports-it
+(deftest ^{:seon/tasks #{"1d75e484543a"}} a-replaced-root-rides-the-report-as-instrument-reports-it
   ;; bin/seon status refused its own report on default (2026-09-28): the report
   ;; declared symbols where seon.instrument/replaced-roots answers its values.
   (let [projection (schema/handed-projection)
@@ -113,3 +113,56 @@
     (is (not ((schema/projection-validator projection :seon.health/replaced-roots)
               [(:seon.instrument/replaced-var root)]))
         "a bare Var name is not a replaced root")))
+
+(deftest a-slower-boot-phase-is-a-regression-until-it-recovers
+  ;; Default 2026-09-28: the source-current phase took 15.5 s on one program
+  ;; and 27.8 s on the next (bin/seon start 20.0 s -> 32.1 s ready), and
+  ;; nothing said so. Records as boot writes them at seeding.
+  (let [projection (schema/handed-projection)
+        regression? (schema/projection-validator projection :seon.health/boot-regression)
+        record (fn [id at program source-current]
+                 {:seon.db.process/id id :seon.db.process/start-instant at :seon.source/commit-id program
+                  :seon.db.process/layers [[:seon.boot/prepl-server 409] [:seon.store/store 474]
+                                           [:seon.source/current source-current]]})
+        a #uuid "6abad9d6-eb00-5dd4-aafc-6ee8ed005767"
+        b #uuid "6abadd62-42f1-5e33-96a2-af68e8f85790"
+        c #uuid "6abadefe-c452-5f3e-9784-56d7b065d137"
+        slower (health/boot-comparisons [(record "1-1" #inst "2026-09-28T21:29Z" a 16007)
+                                         (record "2-2" #inst "2026-09-28T21:30Z" a 16100)
+                                         (record "3-3" #inst "2026-09-28T21:33Z" b 28224)]
+                                        boot/boot-layers)
+        by-phase (into {} (map (juxt :seon.health/phase identity)) slower)
+        phase (by-phase :seon.source/current)]
+    (is ((schema/projection-validator projection :seon.health/regressions) slower))
+    (is (= [15626 27750 a b "2-2"] ((juxt :seon.health/before-ms :seon.health/after-ms :seon.health/before-program
+                                         :seon.health/after-program :seon.health/before-process) phase))
+        "the newest boot beside the newest boot of the previous program")
+    (is (regression? phase))
+    (is (not (regression? (by-phase :seon.store/store))) "an unchanged phase is no regression")
+    (is (not-any? regression? (health/boot-comparisons [(record "3-3" #inst "2026-09-28T21:33Z" b 28224)
+                                                        (record "4-4" #inst "2026-09-28T21:40Z" c 17788)]
+                                                       boot/boot-layers))
+        "it disappears when the numbers recover")
+    (is (= [] (health/boot-comparisons [(record "1-1" #inst "2026-09-28T21:29Z" a 16007)] boot/boot-layers))
+        "one program has nothing to compare")))
+
+(deftest a-definition-slower-under-its-new-digest-is-a-regression
+  (let [projection (schema/handed-projection)
+        regression? (schema/projection-validator projection :seon.health/definition-regression)
+        measured (fn [digest p99 at]
+                   {:seon.profile.measurement/id (subs digest 0 16) :seon.profile.measurement/sym 'seon.db/q
+                    :seon.profile.measurement/digest digest :seon.profile.measurement/p50 19
+                    :seon.profile.measurement/p99 p99 :seon.profile.measurement/errors :none
+                    :seon.profile.measurement/calls 84 :seon.profile.measurement/at at})
+        older (apply str (repeat 64 "a"))
+        newer (apply str (repeat 64 "b"))
+        compared (health/definition-comparisons [(measured older 23 #inst "2026-09-28T20:00Z")
+                                                 (measured newer 25 #inst "2026-09-28T21:00Z")])
+        p99 (some #(when (= :seon.profile.measurement/p99 (:seon.health/quantile %)) %) compared)]
+    (is ((schema/projection-validator projection :seon.health/regressions) compared))
+    (is (= [2 older newer] ((juxt :seon.health/buckets-up :seon.health/before-digest :seon.health/after-digest) p99)))
+    (is (regression? p99))
+    (is (not-any? regression? (filter #(= :seon.profile.measurement/p50 (:seon.health/quantile %)) compared))
+        "an unmoved quantile is no regression")
+    (is (= [] (health/definition-comparisons [(measured older 23 #inst "2026-09-28T20:00Z")]))
+        "one digest has nothing to compare")))
