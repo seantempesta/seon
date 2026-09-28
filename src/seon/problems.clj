@@ -493,8 +493,10 @@
 (defn- resolution-text
   "Why a fault reads resolved, so a reader can check a false resolution; nil while open."
   {:malli/schema [:=> [:cat [:maybe :seon.error/resolution]] [:maybe :string]]}
-  [{:seon.error/keys [digest-then digest-now resolved-tx] function :seon.instrument/fn :as resolution}]
-  (cond digest-now (str "by change to " function " (" (subs digest-then 0 8) "→" (subs digest-now 0 8) ")")
+  [{:seon.error/keys [digest-then digest-now resolved-tx producer] :as resolution}]
+  ;; `seon.error/resolution` names the definition by `:seon.error/producer`
+  ;; since 7781d115c; `:seon.instrument/fn` is only the refuser, never here.
+  (cond digest-now (str "by change to " producer " (" (subs digest-then 0 8) "→" (subs digest-now 0 8) ")")
         resolution (str "by resolve! in transaction " resolved-tx)))
 
 (defn stale-var-html

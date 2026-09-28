@@ -1235,8 +1235,9 @@
     not comparable (datahike/query.cljc:3008-3012) and every pattern is.
   - A checked pattern must be witnessable in the since view: its attribute
     keeps history, or is `:db/txInstant` (asserted once per transaction,
-    never retracted). An entity-only pattern (a pulled entity collapsed past
-    the bound, `append-read-evidence!`) reads the plan's every attribute.
+    never retracted). An entity-only pattern (a pulled `:db/id`, or an entity
+    collapsed past the bound, `append-read-evidence!`) reads the plan's every
+    attribute: within a generation it is checked on the moved ones only.
 
   A speculative value keeps its basis's connection and generation
   (`datahike.db/speculative-cache-context`, datahike db.cljc:444), so a read
@@ -1265,8 +1266,17 @@
                                  (= instant (:v (first (dbi/search database [basis :db/txInstant])))))))
         changed (when same-generation? (changed-read-attributes revision current))
         entity-only? #(and (:seon.db/pattern-entity %) (nil? (:seon.db/pattern-attribute %)))
+        ;; An entity-only pattern stands for that entity's read attributes;
+        ;; within a generation only the moved ones can have changed, so it
+        ;; is checked as one pattern per moved attribute. Whole, it needed
+        ;; every read attribute to keep history, so a pulled `:db/id` beside
+        ;; an unmoved no-history attribute replayed on any unrelated write.
         checked (if changed
-                  (filterv #(or (entity-only? %) (contains? changed (:seon.db/pattern-attribute %))) patterns)
+                  (into [] (comp (mapcat #(cond (entity-only? %) (map (fn [attribute] (assoc % :seon.db/pattern-attribute attribute))
+                                                                     (sort changed))
+                                                (contains? changed (:seon.db/pattern-attribute %)) [%]))
+                                 (distinct))
+                        patterns)
                   patterns)
         witnessable? (fn [pattern]
                        (if-let [attribute (:seon.db/pattern-attribute pattern)]
