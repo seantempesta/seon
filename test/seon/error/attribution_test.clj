@@ -112,8 +112,10 @@
                                  {:seon.error/at (java.util.Date.) :seon.error/layer ::boundary
                                   :seon.error/operation 'seon.problems/problems :seon.error/message "refused"
                                   :seon.error/producer 'seon.problems/problems
-                                  :seon.error/producer-digest (apply str (repeat 64 "0"))}
-                                 (assoc context :seon.error/declared-schema :seon.error/base))
+                                  :seon.error/producer-digest (apply str (repeat 64 "0"))
+                                  :seon.task/refused :unproven :seon.task/holder 'seon.problems}
+                                 ;; a declared value names its extension of the base
+                                 (assoc context :seon.error/declared-schema :seon.task/refused-error))
            signature (:seon.error/signature receipt)
            handle (-> (signature-row connection signature) :seon.task/_faults first :seon.task/id)]
        (is (string? handle) "the producer's task answers the fault")

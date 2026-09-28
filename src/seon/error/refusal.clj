@@ -670,7 +670,12 @@
      :seon.error/base]]}
   ([{:seon.error/keys [throwable message] :as observation}]
   (let [projection (operation-projection)
-        observation (attributed (references projection (dissoc observation :seon.error/throwable)) throwable)]
+        observation (attributed (references projection (dissoc observation :seon.error/throwable)) throwable)
+        ;; a producer that is only the operation says nothing more here; the
+        ;; recorder states it on the stored fault (seon.error/prepare)
+        observation (cond-> observation
+                      (= (:seon.error/producer observation) (:seon.error/operation observation))
+                      (dissoc :seon.error/producer :seon.error/producer-digest))]
   (if throwable
     (let [links (chain throwable projection)
           primary (subvec links 0 (count (cause-links throwable)))

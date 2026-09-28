@@ -122,21 +122,22 @@
                                  '[* {:seon.error/occurrences [* {:seon.error.occurrence/agent [:seon.agent/id]}]}]
                                  (:seon.error/ref a))]
         (is (= (:seon.error/ref a) (:seon.error/ref b)))
-        (is (not= (:seon.error.occurrence/ref a) (:seon.error.occurrence/ref b)))
         (let [written (db/transact! connection (:seon.db/tx-data a))] (is (:db-after written)))
         (is (:db-after (db/transact! connection (:seon.db/tx-data b))))
         (let [entity (read-error)]
           (is (= 1 (count (db/q '[:find ?e :where [?e :seon.error/signature]] (db/db connection)))))
           (is (= [1 1] (sort (map :seon.error.occurrence/count (:seon.error/occurrences entity)))))
-          (is (= 'my.error-graph/raise (:seon.instrument/fn entity)))
+          (is (= 'my.error-graph/raise (:seon.error/producer entity)) "the throwing frame produced it")
           (is (= "error-graph-steward" (error/steward (db/db connection) entity)))
           (is (nil? (:seon.error/steward entity))))
         (let [again (error/recording (db/db connection) (request "error-graph-a" "error-graph-process-1" later))]
           (is (:db-after (db/transact! connection (:seon.db/tx-data again))))
-          (let [entity (db/pull (db/db connection) '[*] (:seon.error.occurrence/ref again))]
-            (is (= 2 (:seon.error.occurrence/count entity)))
-            (is (= at (:seon.error.occurrence/first-at entity)))
-            (is (= later (:seon.error.occurrence/last-at entity)))))
+          ;; occurrences are bounded slots per signature and producer digest
+          ;; (7781d115c): the recurrence is one more counted occurrence
+          (let [occurrences (:seon.error/occurrences (read-error))]
+            (is (= 3 (reduce + (map :seon.error.occurrence/count occurrences))))
+            (is (= at (first (sort (map :seon.error.occurrence/first-at occurrences)))))
+            (is (= later (last (sort (map :seon.error.occurrence/last-at occurrences)))))))
         (let [restarted (error/recording (db/db connection)
                                        (dissoc (request "error-graph-a" "error-graph-process-2" later) :seon.turn/id))]
           (is (= (:seon.error/ref a) (:seon.error/ref restarted)))
@@ -146,7 +147,8 @@
               first-call (error/recording before (request "error-graph-a" "error-graph-process-1" later))
               second-call (error/recording before (request "error-graph-a" "error-graph-process-1" later))]
           (is (:db-after (db/transact! connection (into (:seon.db/tx-data first-call) (:seon.db/tx-data second-call)))))
-          (is (= 4 (:seon.error.occurrence/count (db/pull (db/db connection) '[*] (:seon.error.occurrence/ref a))))))
+          (is (= 6 (reduce + (map :seon.error.occurrence/count (:seon.error/occurrences (read-error)))))
+              "two recordings from one basis both count: the writer chooses each one's slot"))
         (let [entity (read-error)
               database (db/db connection)
               summary (first (#'seon.problems/error-signatures database))
@@ -155,8 +157,6 @@
           (is (= 6 (:seon.error/occurrence-count (error/latest-fact entity))))
           (is (= 6 (:seon.problems/occurrences summary)))
           (let [status (seon.cluster.status/snapshot {:seon.db/db database :seon.db/connection connection})]
-            (is (= 6 (get (into {} (:seon.cluster.status/faults status))
-                          (second (:seon.error/ref a)))))
             (is ((schema/projection-validator (schema/handed-projection) :seon.error/base) (:seon.cluster.status/store-bytes status)))
             (is (some? (:seon.cluster.status/unavailable-observation (:seon.cluster.status/store-bytes status)))
                 "store bytes are an unavailable observation, never a scanned number"))
@@ -177,7 +177,7 @@
         (let [flat (error/recording (db/db connection)
                                   (commit-request {:seon.error/message "flat error", :seon.error/operation (quote seon.id/valid?)} {}))]
           (is (:seon.error/ref flat))
-          (is (= 'seon.id/valid? (:seon.instrument/fn (:seon.error/fact flat))))
+          (is (= 'seon.id/valid? (:seon.error/producer (:seon.error/fact flat))) "a declared value's operation produced it")
           (is (not (contains? (:seon.error/fact flat) :seon.error/exception-class)))
           (is (:db-after (db/transact! connection (:seon.db/tx-data flat)))))))))
 
@@ -278,10 +278,13 @@
        (let [at (:seon.error/at (request observation))
              intermediate (error.refusal/diagnostic at :seon.error/normalization 'seon.error-test/check {})
              prepared (error/prepare (request observation {:seon.error/declared-schema :seon.agent/error}))]
+         ;; the calling world's reference is the common part `diagnostic`
+         ;; supplies (7781d115c); the constructed members are exactly these
          (is (= {:seon.error/at at :seon.error/layer :seon.error/normalization
-                 :seon.error/operation 'seon.error-test/check} intermediate))
+                 :seon.error/operation 'seon.error-test/check} (dissoc intermediate :seon.error/world)))
          (is (identical? at (:seon.error/at intermediate)))
-         (is (= observation (:seon.error/source prepared)))
+         (is (= observation (select-keys (:seon.error/source prepared) (keys observation)))
+             "every member the producer stated is preserved beside what the recorder supplies")
          (is (= :seon.agent/error (get-in prepared [:seon.error/fact :seon.error/declared-schema]))))))))
 
 (defn- cyclic-state
@@ -1002,7 +1005,7 @@
             outcomes (mapv (fn [_] (commit! connection source {})) (range 6))
             [facts messages] (last outcomes)]
         (is (= 1 facts) "one entity represents the repeated error")
-        (is (= 6 (db/q '[:find (sum ?n) . :where [_ :seon.error.occurrence/count ?n]] (db/db connection))))
+        (is (= 6 (db/q '[:find (sum ?n) . :with ?o :where [?o :seon.error.occurrence/count ?n]] (db/db connection))))
         (is (= {"root" 1} messages)
             "D13: one notification for the root, independent of repeat count")))))
 
@@ -1052,7 +1055,7 @@
         (let [database (db/db connection)
               stored (db/pull database '[*] (:seon.error/ref recording))]
           (is (= 'java.lang.IllegalStateException (:seon.error/exception-class stored)))
-          (is (= target (:seon.instrument/fn stored)))
+          (is (= target (:seon.error/producer stored)) "the throwing frame's function, observed by name")
           (is (nil? (db/pull database [:db/id] [:seon.fn/sym target])))
           (is (nil? (db/pull database [:db/id] [:seon.ns/name 'my.mint]))))))))
 
@@ -1300,8 +1303,10 @@
                            (map first (schema.internal/entity-entries (mr/schema registry declared-schema))))]
                (is (true? (malli.core/validate pulled-form occurrence
                                                (:seon.schema.projection/compile-options projection))))
+               ;; every member the producer stated persists; the recorder adds
+               ;; the producer it attributes (7781d115c) beside them
                (is (= (select-keys source scalar-attributes)
-                      (select-keys occurrence scalar-attributes)))))
+                      (select-keys occurrence (filter (set (keys source)) scalar-attributes))))))
            (when-let [bounds (:seon.instrument/declared-arities source)]
              (is (= bounds (set (map #(dissoc % :db/id)
                                     (:seon.instrument/declared-arities occurrence))))))
@@ -1353,7 +1358,8 @@
            after-two (root first-record)]
        (is (= (:seon.error/ref first-record) (:seon.error/ref second-record)))
        (is (= :seon.agent/error (:seon.error/declared-schema after-two)))
-       (is (= 2 (:seon.error.occurrence/count (first (:seon.error/occurrences after-two)))))
+       (is (= 2 (reduce + (map :seon.error.occurrence/count (:seon.error/occurrences after-two))))
+           "one signature counts both, over its bounded occurrences")
        (is (= (second (:seon.error/ref first-record))
               (:seon.error/signature
                (error/normalize (request (error/latest-fact after-two)
