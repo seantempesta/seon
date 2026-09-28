@@ -75,7 +75,9 @@
           (fn [ns-sym path alias]
             (keep (fn [form]
                     (let [n (second form)]
-                      (when-not (ns-resolve (the-ns ns-sym) n)
+                      ;; the test's own file: every helper (a loaded one may be stale);
+                      ;; another file: those the loaded namespace lacks
+                      (when (or (nil? alias) (not (ns-resolve (the-ns ns-sym) n)))
                         [(if alias (symbol alias (str n)) n) (symbol (str "local-" n))
                          (qualify-aliases (file-aliases ns-sym path) form)])))
                   (defns (read-forms ns-sym path))))
@@ -86,7 +88,8 @@
                          (some #(when (and (seq? %) (= 'deftest (first %)) (= test-name (second %))) %)
                                (read-forms ns-sym path)))
                   _ (when-not form (throw (ex-info "no such deftest in file" {:path path :test test-name})))
-                  aliases (into {} (map (fn [[a n]] [(str (ns-name n)) (str a)])) (ns-aliases (the-ns ns-sym)))
+                  ;; the working-tree file's own aliases: the loaded namespace may lack one
+                  aliases (into {} (map (fn [[a n]] [(str n) (str a)])) (file-aliases ns-sym path))
                   support-alias (get aliases "seon.test-support")
                   web-alias (get aliases "seon.render.web-test")
                   helpers (concat (missing-helpers ns-sym path nil)

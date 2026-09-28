@@ -140,8 +140,8 @@
         payload {:seon.dev.mcp/events [{:tag :ret :val large}]}
         encoded ((bridge-var 'content-text) payload)
         decoded (json/read-str encoded :key-fn keyword)]
-    (is (= large (get-in decoded [:seon.dev.mcp/events 0 :val])))
-    (is (not (str/includes? encoded "truncated by MCP bridge")))))
+    (is (= large (get-in decoded [:seon.dev.mcp/events 0 :val]))
+        "the bridge carries the value whole: no second truncation budget")))
 
 (deftest jvm-mode-reads-through-the-one-reader
   ;; The bridge holds no reader: the JVM form reads with `seon.sci.reader/read`
@@ -362,11 +362,13 @@
     (try
       (is (= [42 namespace-symbol] (eval (read-string jvm-form))))
       (is (= 41 (var-get (ns-resolve namespace-symbol 'answer))))
-      (is (str/includes? sci-form
-                         "[:seon.ns/name (quote mcp.chosen.namespace)]"))
-      (is (str/includes? sci-form "seon.cluster.agent/evaluate-source!")
-          "SCI without a branch is one ordinary run of root, not a bridge evaluator")
-      (is (str/includes? sci-form "seon.cluster.reply/code-sources"))
+      ;; The SCI form is read as the data it is.
+      (let [parts (set (tree-seq coll? seq (read-string sci-form)))]
+        (is (contains? parts [:seon.ns/name '(quote mcp.chosen.namespace)])
+            "the run names its namespace coordinate")
+        (is (= #{'seon.cluster.agent/evaluate-source! 'seon.cluster.reply/code-sources}
+               (into #{} (filter #{'seon.cluster.agent/evaluate-source! 'seon.cluster.reply/code-sources}) parts))
+            "SCI without a branch is one ordinary run of root, not a bridge evaluator"))
       (finally
         (in-ns original-namespace)
         (when (find-ns namespace-symbol)
@@ -415,14 +417,15 @@
 (deftest registrations-use-one-jvm-neutral-server-name
   (let [claude-registration (slurp (io/file project-root ".mcp.json"))
         codex-registration (slurp (io/file project-root ".codex/config.toml"))]
-    (is (str/includes? claude-registration "\"seon\""))
-    (is (str/includes? claude-registration "bin/mcp-server\""))
+    (is (str/ends-with? (get-in (json/read-str claude-registration) ["mcpServers" "seon" "command"]) "bin/mcp-server")
+        "Claude's registration names the one server, seon, launched by bin/mcp-server")
     (is (str/includes? codex-registration "[mcp_servers.seon]"))
     (is (str/includes? codex-registration "bin/mcp-server\""))
     (is (not (str/includes? claude-registration "cljs")))
     (is (not (str/includes? codex-registration "cljs")))))
 
-(deftest tool-discovery-advertises-only-live-jvm-operations
+(deftest ^{:seon.test/golden "A tool's description is the prose an MCP client shows its model; the advertised semantics are that text."}
+  tool-discovery-advertises-only-live-jvm-operations
   (let [[initialized listed]
         (rpc-responses
          [{:jsonrpc "2.0" :id 1 :method "initialize" :params {}}

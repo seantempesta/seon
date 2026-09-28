@@ -10,4 +10,14 @@
              :kind :function
              :intent "page-response reads (db/db connection) of a released connection and passes the refusal map on as :seon.db/db, so transcript/render-agent-header refuses its input instead of the page answering the read refusal. It happened when seon.render.web-test's server kept serving after its cluster's connection was released (member two-tabs-each-get-their-own-complete-paint left unexited). A read refusal answers the request as that refusal; a server outliving its cluster's connection is the second defect."
              :must-read #{seon.render.web/page-response seon.render.transcript/render-agent-header}
-             :evidence #{"docs/research/agent-platform/landing/oom-array-opus-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/oom-array-opus-2026-09-27.md"}}
+ #:seon.task{:name "reconnect-wire-test-walks-the-whole-window"
+             :kind :function
+             :intent "seon.render.web-test/reconnect-is-repaint-wire-test takes about 200 s per run (200,627 ms, 248 assertions, test-data-assertions proof harness 2026-09-28): its check that no partial text exists at ANY basis walks every basis of the window as-of, so its cost follows the window, not the change, and it is far over its declared bound. Bound the check by what the change can reach (the bases the test itself committed, or one since-query over the window) so it runs sub-second."
+             :must-read #{seon.render.web/render-step}
+             :evidence #{"tmp/test-data-assertions/proofs.edn"}}
+ #:seon.task{:name "an-unreportable-page-failure-is-only-a-log-line"
+             :kind :function
+             :intent "When a page derivation throws and failed-page-result cannot record it, unreportable-page-result (src/seon/render/web.clj) logs a WARN text line and paints a string; no fault reaches anyone. It fired for every debug-tab registration in a render state without its environment (test-data-assertions harness, 2026-09-28: fault! refused a nil environment, then a nil connection). A log line alone is a defect: deliver the failure as data to whoever can act on it."
+             :must-read #{seon.render.web/failed-page-result seon.render.web/unreportable-page-result}
+             :evidence #{"tmp/test-data-assertions/proofs.edn"}}]

@@ -6,7 +6,8 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [seon.repl :as repl]
-            [seon.sci.admit :as admit]))
+            [seon.sci.admit :as admit]
+            [seon.test-support :as support]))
 
 (defn- text-nodes [node]
   (cond
@@ -129,9 +130,9 @@
                                  ;; value key, exactly as admission emits it
                                  "nil"
                                  :seon.eval/duration-ms 1})]
-    (is (str/includes? response ":out \"hi\\n\"")
-        "output is its own pr-str'd key, never folded into the value")
-    (is (str/includes? response ":value"))))
+    (is (= {:seon.repl/out "hi\n" :seon.repl/value nil}
+           (select-keys (support/reply response) [:seon.repl/out :seon.repl/value]))
+        "output is its own key, never folded into the value")))
 
 (deftest every-def-says-it-is-not-persisted
   ;; THE CLASS: an agent told nothing keeps defining data it expects to keep.
@@ -167,28 +168,27 @@
                                  :seon.cluster.eval/ordinal 4
                                  :seon.cluster.eval/error "Divide by zero"
                                  :seon.eval/duration-ms 0})]
-    (is (str/includes? response ":error"))
-    (is (not (str/includes? response ":value"))
-        "exactly one of :value and :error is ever present")
-    (is (str/includes? response "Divide by zero"))))
+    (is (= {:seon.repl/error "Divide by zero"}
+           (select-keys (support/reply response) [:seon.repl/error :seon.repl/value]))
+        "exactly one of :value and :error is ever present")))
 
 (deftest the-namespace-appears-only-when-the-form-changed-it
   (testing "a form that moved the session says where it landed"
-    (is (str/includes?
-         (repl/response {:seon.cluster.eval/source "(in-ns 'my.agents.probe)"
-                         :seon.ns/name 'my.agents.juniper
-                         :seon.cluster.eval/ordinal 1
-                         :seon.sci.eval/ending-ns 'my.agents.probe
-                         :seon.eval/shown "1"})
-         ":ns my.agents.probe")))
+    (is (= 'my.agents.probe
+           (:seon.repl/ns (support/reply
+                           (repl/response {:seon.cluster.eval/source "(in-ns 'my.agents.probe)"
+                                           :seon.ns/name 'my.agents.juniper
+                                           :seon.cluster.eval/ordinal 1
+                                           :seon.sci.eval/ending-ns 'my.agents.probe
+                                           :seon.eval/shown "1"}))))))
   (testing "a form that stayed put does not repeat its own prompt"
-    (is (not (str/includes?
-              (repl/response {:seon.cluster.eval/source "(+ 1 1)"
-                              :seon.ns/name 'my.agents.juniper
-                              :seon.cluster.eval/ordinal 1
-                              :seon.sci.eval/ending-ns 'my.agents.juniper
-                              :seon.eval/shown "2"})
-              ":ns ")))))
+    (is (not (contains? (support/reply
+                         (repl/response {:seon.cluster.eval/source "(+ 1 1)"
+                                         :seon.ns/name 'my.agents.juniper
+                                         :seon.cluster.eval/ordinal 1
+                                         :seon.sci.eval/ending-ns 'my.agents.juniper
+                                         :seon.eval/shown "2"}))
+                        :seon.repl/ns)))))
 
 (deftest history-preserves-shown-text-without-applying-a-later-profile
   (let [shown "[my.turn/complete my.turn/wait]"
@@ -196,7 +196,8 @@
                   :seon.ns/name 'my.agents.juniper
                   :seon.eval/shown shown}
         response (repl/response emission)]
-    (is (str/includes? response (str ":value " shown)))
+    (is (= '[my.turn/complete my.turn/wait] (:seon.repl/value (support/reply response)))
+        "the stored shown text is the value, as it was shown")
     (doseq [settings [{:seon.print/length 1}
                       {:seon.print/level 0}
                       {:seon.print/options {:seon.print/length 0}}]]
@@ -286,9 +287,10 @@
                             :seon.cluster.eval/interrupted-at
                             (java.util.Date. 1785500000000)
                             :seon.eval/duration-ms 30000})]
-    (is (str/includes? emitted ":interrupted #inst"))
-    (is (not (str/includes? emitted ":interrupted \"")))
-    (is (str/includes? emitted ":ms 30000"))))
+    (is (= {:seon.repl/interrupted (java.util.Date. 1785500000000) :seon.repl/ms 30000}
+           (select-keys (support/reply (last (str/split-lines emitted)))
+                        [:seon.repl/interrupted :seon.repl/ms]))
+        "an interrupted evaluation says so with its instant as data")))
 
 (deftest the-handle-is-the-evaluations-own-identity
   (testing "a stored evaluation names its value by its stable identity"

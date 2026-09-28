@@ -77,4 +77,9 @@
              :kind :function
              :intent "A publication reuses every file entity whose derivation key is unchanged (seon.cluster/derivation-keys), so a storage encoding change without a schema change (seon.schema.datahike's codec, vector cells) leaves reused entities in the old encoding. Storage migration owns it: an encoding change ships its migration transaction (as seon.db/vector-migration-tx did), never a re-derivation."
              :must-read #{seon.db/vector-migration-tx seon.cluster/derivation-keys}
-             :evidence #{"tmp/boot-source-perf/evidence.md"}}]
+             :evidence #{"tmp/boot-source-perf/evidence.md"}}
+ #:seon.task{:name "projection-fallback-prints-instead-of-returning"
+             :kind :function
+             :intent "seon.db/projection-fallback (src/seon/db.clj:1364) prints `WARN seon.db/projection-fallback caller= ... missing-projection count=1` to stderr as a text line. It fires when seon.error/prepare runs inside a test member (test-data-assertions harness, 2026-09-28): the refusal value it also returns carries the fact, but the printed line is a second, undelivered channel. A log line alone is a defect: deliver the missing projection as the returned refusal (and record it where it is consumed), and have seon.error/prepare's caller supply the member's projection."
+             :must-read #{seon.db/projection-fallback seon.error/prepare}
+             :evidence #{"tmp/test-data-assertions/proofs.edn"}}]

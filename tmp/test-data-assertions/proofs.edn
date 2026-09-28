@@ -84,4 +84,26 @@
  [seon.render.web-test/selected-ai-experiment-reuses-the-canonical-executed-call
   seon.render.web-test/data-uses-the-one-floor-and-keeps-the-cursor-in-the-url
   seon.render.web-test/session-acquisition-failure-replaces-the-loading-panel
-  seon.render.web-test/a-reconnect-refuses-a-pass-derived-before-it-connected]}
+  seon.render.web-test/a-reconnect-refuses-a-pass-derived-before-it-connected]
+ :repl-test
+ {printed-output-is-separate-from-the-value {:head [1 0 0] :broken [0 1 0] :breaker "output folded out of the response"}
+  an-error-response-carries-no-value {:head [1 0 0] :broken [0 1 0] :breaker ":value beside :error"}
+  the-namespace-appears-only-when-the-form-changed-it {:head [2 0 0] :broken [0 1 1]}
+  history-preserves-shown-text-without-applying-a-later-profile {:head [4 0 0] :broken [3 1 0]}
+  an-interrupted-evaluation-says-so-as-readable-data {:head [1 0 0] :broken [0 1 0] :breaker "instant printed as a string"}}
+ :mcp-bridge-test
+ {namespace-coordinate-shapes-both-evaluation-modes {:head [4 0 0] :broken [3 1 0]}
+  registrations-use-one-jvm-neutral-server-name {:head [5 0 0] :broken [4 1 0]}
+  bridge-content-has-no-second-truncation-budget {:head [1 0 0] :note "removal only: the whole-value equality guards it"}
+  tool-discovery-advertises-only-live-jvm-operations {:golden true}}
+ :web-test-seams
+ {selected-ai-experiment-reuses-the-canonical-executed-call {:head [3 0 0] :broken [1 2 0] :note "world is data: an agent-authored render function competing with the floor"}
+  a-page-failing-every-pass-records-one-fault-and-the-proc-survives {:head [3 0 0] :broken [1 2 0] :note "failing page is data: a debug registration without its bounds"}
+  the-pass-oracle-awaits-a-held-derivation {:head [5 0 0] :broken [3 2 0] :note "hold is agent code"}
+  a-code-event-drops-an-unwatched-pages-package {:head [1 0 0] :broken [0 1 0] :note "the render state as a value"}
+  data-uses-the-one-floor-and-keeps-the-cursor-in-the-url {:head [6 0 0] :broken [5 1 0] :note "armed counter; the context-identity claim is dropped"}
+  :pending-adoption
+  [accepted-socket-writes-have-a-loud-drain-backstop a-feed-writer-failure-enters-the-cluster-fault-path
+   two-tabs-each-get-their-own-complete-paint failed-ephemeral-bind-preserves-the-bind-failure
+   start-refuses-a-flat-process-write-before-binding an-unchanged-head-re-derives-no-block-and-an-input-change-re-derives-its-block
+   runtime-evaluation-cannot-be-displaced-by-a-database-wake]}}
