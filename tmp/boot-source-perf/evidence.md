@@ -111,3 +111,18 @@ Recorded with JFR (`JAVA_TOOL_OPTIONS=-XX:FlightRecorderOptions=stackdepth=1024 
   nuke's archive kept a private `.clj-kondo/.cache` while the next archive linked
   the root's shared analysis cache. default keeps the shared cache and does not
   pay this.
+
+## First boot after a move; first population (2026-09-27, work root)
+
+- After a `start --head` move, 466 of the shared clj-kondo cache's 491
+  first-party entries named the pruned archive they were written from. The first
+  analysis that used them rebuilt each one from the classpath. JFR of that move
+  boot (12 changed inputs, ready 61.7 s): kondo accounted for 2,622 of 4,053
+  publication samples.
+- `analyzer-content-cache.patch` judges an entry by the content digest recorded
+  beside it. An 18-file analysis after a simulated move: 1 stale entry and
+  2.8 s with the patch, against 41 stale entries rebuilt and 5.9 s without it
+  (warm).
+- Armed first population into a memory store (task 50134301bf4e): `index!`
+  took 54.9 s for 13,606 operations, down from 102.5 s before cd769af69;
+  building the source manifest took 43.2 s.

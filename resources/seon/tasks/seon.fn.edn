@@ -101,4 +101,9 @@
              :kind :function
              :intent "An armed first population of the whole program into a memory store (seon.fn/index! with the source manifest after accrete-schema-population!, as seon.fn-test/fresh-population-flattens-with-its-supplied-declarations does) took 102.5 s and admitted 13,372 operations (disposable root at 866eef6f5, 2026-09-27); a nuke's unarmed first population is about 128 s of its 136 s ready. cd769af69 removed one per-read whole-program derivation from the writer (an uncommitted value's builder identity); re-measure after it and profile the writer thread (JFR stackdepth 1024, tmp/boot-source-perf/evidence.md) before choosing a fix. Over the ten-second rule."
              :must-read #{seon.fn/index! seon.fn/reconcile-tx-in seon.db/carried-projection}
-             :evidence #{"tmp/boot-source-perf/evidence.md"}}]
+             :evidence #{"tmp/boot-source-perf/evidence.md"}}
+ #:seon.task{:name "refused-publication-reads-have-no-redefinition-free-regression"
+             :kind :function
+             :intent "Two regressions refused a read by redefining seon.db Vars, and both seams moved: selection's declared-edge query became fn/declared-callers reading datoms (39d94eef0), so selection-test's injected refusal was deleted in red-triage r8; reconcile-tx-in reads through db/pull-many (296dede99), so fn-test refused-index-reads-never-become-publication-entities redefines a pull it no longer calls and answers transaction data. Prove refusal propagation with a genuinely refused read (a world whose read refuses), not a redefinition."
+             :must-read #{seon.fn/index! seon.fn/tests-reaching}
+             :evidence #{"test/seon/fn_test.clj" "test/seon/test/selection_test.clj"}}]
