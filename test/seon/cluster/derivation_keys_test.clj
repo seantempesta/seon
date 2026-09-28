@@ -24,3 +24,16 @@
     (is (= (original "right.clj") (schema-change "right.clj")))
     (is (= (original "left.clj") (file-change "left.clj")))
     (is (not= (original "right.clj") (file-change "right.clj")))))
+
+(deftest root-render-properties-do-not-rederive-schema-consumers
+  (let [forms (assoc (schema.edn/packaged-forms) :derivation.probe/rendered [:int])
+        code (apply str (repeat 64 "a"))
+        key-for (fn [form]
+                  (#'cluster/derivation-keys
+                   code (schema/declaration-projection (assoc forms :derivation.probe/rendered form))
+                   {"consumer.clj" code} {"consumer.clj" #{:derivation.probe/rendered}} #{"consumer.clj"}))]
+    (is (= (key-for [:int]) (key-for [:int {:seon.render/ai 'example/ai
+                                          :seon.render/html 'example/html}])))
+    (is (not= (key-for [:int]) (key-for [:int {:min 1}])))
+    (is (= [:enum nil {:seon.render/ai 'example/ai}]
+           (#'cluster/derivation-form [:enum nil {:seon.render/ai 'example/ai}])))))

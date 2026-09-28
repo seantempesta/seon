@@ -1561,6 +1561,17 @@
   [code kondo input form-digests]
   (id/digest 64 [code kondo input form-digests]))
 
+(defn- derivation-form
+  "The schema form read by entity derivation, without its root render pair.
+  Invoker edges follow population targets separately through invoker-paths."
+  {:malli/schema [:=> [:cat :seon.schema/value] :seon.schema/value]}
+  [form]
+  (if (and (vector? form) (map? (second form)))
+    (let [properties (dissoc (second form) :seon.render/ai :seon.render/html :seon.render/form)]
+      (if (seq properties) (assoc form 1 properties)
+          (into [(first form)] (nnext form))))
+    form))
+
 (defn- derivation-keys
   "Each derivation input's key, stored as `:seon.fn.file/derivation-digest`:
   its bytes, the identity of the code deriving it (`selected-analyzer-digest`),
@@ -1599,13 +1610,14 @@
                       reached)))
         row-shapes (program/shapes-in projection)
         world (cache/lookup
-               ::derivation-inputs [forms dependencies row-shapes]
+               ::derivation-schema-values [forms dependencies row-shapes]
                (constantly (* 4096 (count forms)))
-               #(hash-map ::key (id/digest 64 [forms dependencies row-shapes])
+               #(let [forms (update-vals forms derivation-form)]
+                  (hash-map ::key (id/digest 64 [forms dependencies row-shapes])
                           ::absent (id/digest 64 [nil])
                           ::digests (into {} (map (fn [[k form]] [k (id/digest 64 [form])])) forms)
                           ::shapes (closure (into #{} (filter (partial contains? forms))
-                                                (tree-seq coll? seq row-shapes)))))
+                                                (tree-seq coll? seq row-shapes))))))
         kondo [(get (source/loaded-dependencies) "reference-code/clj-kondo")
                (into (sorted-map) (filter #(str/starts-with? (key %) ".clj-kondo/")) inputs)]]
     (into {}

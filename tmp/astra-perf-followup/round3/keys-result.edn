@@ -1,0 +1,1 @@
+{:files 482, :changed-schema-properties 128, :results {:parent {:before-ms 343.097959, :after-ms 344.840917, :changed-files 291, :one-file-change {:ms 4.08475, :paths ["src/seon/fn.clj"]}}, :candidate {:before-ms 381.211667, :after-ms 39.357084, :changed-files 0, :one-file-change {:ms 4.493833, :paths ["src/seon/fn.clj"]}}}, :dependencies-equal true}
