@@ -74,7 +74,7 @@
                               [?m :seon.test.member/error-count ?e]]
                      database tests)
                [])]
-    (if (or (map? rows) (not (coll? rows)))
+    (if (db/read-refusal? rows)
       {}
       (into {}
             (for [[t group] (group-by first rows)

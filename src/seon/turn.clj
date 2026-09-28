@@ -157,6 +157,7 @@
       ;; The shown value's size (whole estimate, shown, cuts, full opt-in).
       :always (merge (select-keys evaluation [:seon.eval/value-tokens :seon.eval/shown-tokens
                                               :seon.eval/elisions :seon.eval/full
+                                              :seon.eval/unstored :seon.eval/value-class
                                               :seon.eval/unadmitted :seon.eval/replaced
                                               :seon.eval/ungeneratable]))
       ;; A FORM'S OWN `set!` OF *print-length* / *print-level*. Captured
@@ -1469,6 +1470,8 @@
    :seon.eval/elisions
    :seon.eval/full
    :seon.eval/value-digest
+   :seon.eval/unstored
+   :seon.eval/value-class
    :seon.eval/unadmitted
    :seon.eval/replaced
    :seon.eval/ungeneratable

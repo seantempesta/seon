@@ -88,7 +88,9 @@
  [:map [:seon.sci.eval/missing-function-row :seon.sci.eval/missing-function-row]]],
                 :time-limit-ms [:int {:min 1}],
                 :defs-fork-result
-                [:map [:seon.sci.eval/ctx :seon.sci.eval/ctx]],
+                [:map [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+                 [:seon.sci.eval/unbound-results {:optional true} :seon.sci.eval/unbound-results]],
+                :unbound-results [:and {:description "The refused read that left a fresh fork's result handles unbound, for the entrant to deliver."} :seon.db/invalid-read-error],
                 :namespace-binding-cycle-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
  :seon.error/base
  [:map [:seon.sci.eval/pending-namespaces :seon.sci.eval/pending-namespaces]]],
@@ -129,6 +131,8 @@
                  [:seon.eval/value-tokens {:optional true} :seon.eval/value-tokens]
                  [:seon.eval/elisions {:optional true} :seon.eval/elisions]
                  [:seon.eval/value-edn {:optional true} :seon.eval/value-edn]
+                 [:seon.eval/unstored {:optional true} :seon.eval/unstored]
+                 [:seon.eval/value-class {:optional true} :seon.eval/value-class]
                  [:seon.eval/full {:optional true} :seon.eval/full]
                  [:seon.eval/renderer {:optional true} :seon.eval/renderer]
                  [:seon.cluster.eval/diagnostics {:optional true} :seon.cluster.eval/diagnostics]
