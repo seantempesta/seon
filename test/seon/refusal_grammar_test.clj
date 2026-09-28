@@ -14,17 +14,17 @@
   (let [check (m/schema :seon.cluster.eval/run
                         {:registry (:seon.schema.projection/registry
                                     (schema/handed-projection))})]
-    (doseq [category [:malli.core/missing-key :malli.core/invalid-type]]
+    (doseq [[category expected]
+            {:malli.core/missing-key
+             "the required key :seon.cluster.eval/run with an integer or a string or a tuple with 2 entries or a map"
+             :malli.core/invalid-type
+             "an integer or a string or a tuple with 2 entries or a map"}]
       (let [description (error/explain-problem
                          {:seon.error/problem {:schema check :type category :value false}
                           :seon.error/path [:seon.cluster.eval/run]
                           :seon.error/argument "transaction data"})]
-        (is (str/includes? (:seon.error/expected-description description)
-                           "an integer or a string or a tuple with 2 entries"))
-        (is (not (str/includes? (:seon.error/expected-description description)
-                                "invalid type")))
-        (is (not (str/includes? (:seon.error/expected-description description)
-                                "unknown error")))))))
+        (is (= expected (:seon.error/expected-description description))
+            "the expectation describes the reference schema, never the failure category")))))
 
 (deftest collection-refusals-name-the-failing-member-and-element-form
   (let [description
@@ -92,16 +92,21 @@
           ;; The refusal names its first problem as a sentence; concrete enum
           ;; choices are proven below on the enum itself (the fixture's
           ;; admission-source enum is no longer its first problem).
-          (is (str/includes? (:seon.error/message refusal)
-                             "expected a namespaced symbol, got a string"))
+          (is (= #:seon.error{:path [0 :seon.fn/sym]
+                              :expected-description "a namespaced symbol"
+                              :actual-description "a string"}
+                 (select-keys (first (get-in refusal [:seon.error/data :seon.error/problems]))
+                              [:seon.error/path :seon.error/expected-description :seon.error/actual-description]))
+              "the refusal's first problem names the expected and actual shapes")
           (is (= "either :core or :agent"
                  (:seon.error/expected-description
                   (error/explain-problem
                    {:seon.error/problem {:schema (m/schema [:enum :core :agent]) :value :x}
                     :seon.error/path [0 :seon.schema.admission/source]
                     :seon.error/argument "transaction data"}))))
-          (is (not (str/includes? (:seon.error/message refusal)
-                                  "with a value satisfying missing required key"))))
+          (is (not-any? #(str/includes? (str (:seon.error/expected-description %)) "missing required key")
+                        (get-in refusal [:seon.error/data :seon.error/problems]))
+              "no problem describes a missing key as a value to satisfy"))
         (let [compiled (m/schema [:=> [:cat [:= 7]] :int]
                                 {::m/function-checker mg/function-checker
                                  ::mg/=>iterations 1})
@@ -117,7 +122,7 @@
           (is (= :int (:seon.error/expected description)))
           (is (= "wrong" (:seon.error/offending description)))
           (is (= [7] (get-in text [:seon.error/problems 0 :seon.error/input])))
-          (is (not (str/includes? (pr-str text) "AFunction"))))
+          (is (not-any? fn? (tree-seq coll? seq text)) "the rendered refusal holds no function object"))
         (let [wrapped (instrument/wrap-interpreted
                        'example/guard
                        "[:=> [:cat :int] :int [:fn {:error/message \"arguments and result must agree\"} clojure.core/map?]]"
