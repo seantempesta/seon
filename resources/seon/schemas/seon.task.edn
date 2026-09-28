@@ -21,7 +21,8 @@
                [:seon.task/evidence {:optional true} :seon.task/evidence]]
  :basis [:map-of {:description "The declarations the caller read, by handle; an absent handle was read as absent."} :seon.task/handle :seon.task/declaration]
  :task [:map {:seon.db/attributes true :seon.program/partition :seon.data
-              :seon.render/ai seon.render.ns/task-ai :seon.render/html seon.render.ns/task-html}
+              :seon.render/ai seon.render.ns/task-ai :seon.render/html seon.render.ns/task-html
+              :seon.render/form seon.render.ns/task-form}
         [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name] [:seon.task/kind :seon.task/kind]
         [:seon.task/intent :seon.task/intent] [:seon.task/must-read {:optional true} :seon.task/must-read]
         [:seon.task/evidence {:optional true} :seon.task/evidence]
@@ -67,6 +68,11 @@
          [:seon.fn/see-also {:optional true} :seon.fn/see-also]]
  :subjects [:set :symbol] :proofs [:set :symbol] :referrers [:set [:or :symbol :seon.task/handle]]
  :edges [:map [:seon.task/subjects :seon.task/subjects] [:seon.task/proofs :seon.task/proofs] [:seon.task/referrers :seon.task/referrers]]
+ :view [:map {:description "A task as its AI face shows it: named, and beyond distance zero its intent, proofs, subjects and must-reads."}
+        [:seon.task/id :seon.task/id] [:seon.task/name {:optional true} :seon.task/name]
+        [:seon.task/kind {:optional true} :seon.task/kind] [:seon.task/ns {:optional true} :seon.task/ns]
+        [:seon.task/intent {:optional true} :seon.task/intent] [:seon.task/must-read {:optional true} :seon.task/must-read]
+        [:seon.task/proofs {:optional true} :seon.task/proofs] [:seon.task/subjects {:optional true} :seon.task/subjects]]
  :dangling [:map-of :seon.task/handle [:set :symbol]] :triage [:set :seon.task/handle]
  :findings [:map [:seon.task/dangling :seon.task/dangling] [:seon.task/triage :seon.task/triage]]
  :request [:map [:seon.db/connection :seon.db/connection] [:seon.task/files :seon.task/files] [:seon.task/basis {:optional true} :seon.task/basis]]

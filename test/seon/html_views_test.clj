@@ -33,7 +33,7 @@
     (doseq [literal ["#inst" ":db/id" "[:seon.agent/id"]]
       (is (not (str/includes? printed literal)) literal))))
 
-(deftest plan-pairs-are-readable-with-unchanged-ai
+(deftest plan-pairs-are-readable-and-ai-is-data
   (support/with-database
     (fn [connection]
       (support/transacted! connection (support/agent-tx @connection "alice"))
@@ -49,15 +49,18 @@
         (readable! (plan/render-plan-html unit) ["Ship a clear plan" "Blocked on: " "Prepare" "pending"])
         (readable! (plan/render-item-html step) ["Prepare" "pending"])
         (readable! (plan/render-ready-items-html [step]) ["Ready work (1)" "Prepare"])
-        (is (= (golden :plan) (plan/render-plan-ai unit)))
+        (is (= {:seon.agent/id "alice" :my.plan/objective "Ship a clear plan"
+                :seon.plan/step-lines {"first" "1. ready — Prepare" "second" "2. blocked — Ship"}
+                :seon.render/operations ['(my.plan/current! {:my.plan.item/id "first"})]}
+               (plan/render-plan-ai unit)))
         (is (= (golden :item) (plan/render-item-ai step)))
-        (is (= (golden :ready) (plan/render-ready-items-ai [step])))
+        (is (= [{:my.plan.item/id "first" :my.plan.item/title "Prepare"}] (plan/render-ready-items-ai [step])))
       (plan/complete! "first" connection "alice")
       (plan/start! "second" connection "alice")
       (readable! (plan/render-plan-html {:seon.agent/id "alice" :seon.db/db @connection})
                  ["done" "current" "datetime=" "The page reads clearly"])))))
 
-(deftest settings-pair-omits-absences-and-preserves-ai
+(deftest settings-pair-omits-absences-and-ai-is-data
   (support/with-database
     (fn [connection]
       (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "html-views"})
@@ -73,9 +76,12 @@
         (is (= 1 (count (re-seq #"<table" printed))))
         (is (not (str/includes? printed "Not set")))
         (is (not (str/includes? printed "settings!")))
-        (is (= (golden :settings) (agent/render-settings-ai unit)))))))
+        (is (= {:my.agent/settings (agent/settings @connection "alice")
+                :seon.render/operations ['(seon.agent/effective-settings (seon.db/db) "alice")]}
+               (agent/render-settings-ai unit)))
+        (is (= 10000 (get-in (agent/render-settings-ai unit) [:my.agent/settings :seon.config.eval/time-limit-ms])))))))
 
-(deftest message-pairs-derive-unread-and-preserve-ai
+(deftest message-pairs-derive-unread-and-ai-is-data
   (support/with-database
     (fn [connection]
       (support/transacted! connection (support/agents-tx @connection ["alice" "bob"]))
@@ -88,15 +94,15 @@
         (readable! (message/render-inbox-html [entity] @connection) ["Messages (1)" "unread"])
         (is (= {:seon.message/id "hello" :seon.message/from "bob" :seon.message/to "alice"
                 :seon.message/content "Hello\nagain" :seon.message/received? false}
-               (dissoc (edn/read-string (message/render-ai unit)) :seon.message/at)))
+               (dissoc (message/render-ai unit) :seon.message/at)))
         (is (= [['(my.message/received! "hello")]]
                (mapv :seon.render/operations
-                     (:seon.message/unread (edn/read-string (message/render-inbox-ai [entity] @connection))))))
+                     (:seon.message/unread (message/render-inbox-ai [entity] @connection)))))
         (message/received! "hello" connection "alice")
         (readable! (message/render-html (assoc (db/pull @connection '[*] [:seon.message/id "hello"])
                                               :seon.db/db @connection)) ["received"])))))
 
-(deftest note-pairs-link-titles-and-preserve-ai
+(deftest note-pairs-link-titles-and-ai-is-data
   (support/with-database
     (fn [connection]
       (support/transacted! connection (into (support/agent-tx @connection "alice")
@@ -108,10 +114,12 @@
             unit {:seon.agent/id "alice" :seon.db/db @connection}]
         (readable! (note/render-note-html entity) ["observation" "Verified" "Prepare" "datetime="])
         (readable! (note/render-notes-html unit) ["Current notes (1)" "Prepare"])
-        (is (= (golden :note) (note/render-note-ai {:my.note/id (:my.note/id entity)
-                                                   :my.note/content (:my.note/content entity)
-                                                   :my.note/agent [:seon.agent/id "alice"]})))
-        (is (= (golden :notes) (note/render-notes-ai unit)))))))
+        (is (= {:my.note/id "observation" :my.note/content "Verified"}
+               (note/render-note-ai {:my.note/id (:my.note/id entity)
+                                     :my.note/content (:my.note/content entity)
+                                     :my.note/agent [:seon.agent/id "alice"]})))
+        (is (= [{:my.note/id "observation" :my.note/content "Verified" :my.note/about {:my.plan.item/id "first"}}]
+               (note/render-notes-ai unit)))))))
 
 (deftest help-preserves-lines-and-ai
   (support/with-database
@@ -146,7 +154,7 @@
         (readable! (error/render-html fault) ["example/connect" "Connection lost"])
         (readable! (error/render-faults-html [fault] @connection) ["Faults (1)" "Connection lost"])
         (is (= (golden :fault) (error/render-ai fault)))
-        (is (= (golden :faults) (error/render-faults-ai {:seon.render/value [fault]})))
+        (is (= [(golden :faults)] (error/render-faults-ai {:seon.render/value [fault]})))
         ;; THE PAIR RENDERS THE FACT, NOT ITS EDN. The frozen bytes were
         ;; `(pr-str ...)` output until `render-ai` became prose over the
         ;; error's own data (`src/seon/error.clj:1558`); the golden kept
@@ -155,9 +163,8 @@
         ;; side can go stale silently again.
         (is (not (str/includes? (error/render-ai fault) "#:seon.error{"))
             "an AI pair renders the fact's data, never its attribute dump")
-        (is (str/includes?
-             (error/render-ai (assoc fault :seon.error/occurrence-count 3))
-             "occurrence-count 3")
+        (is (= 3 (:seon.error/occurrence-count
+                  (error/render-ai (assoc fault :seon.error/occurrence-count 3))))
             "and it carries the recorded occurrence evidence")))))
 
 (deftest maintenance-pair-preserves-ai
@@ -172,18 +179,18 @@
                    ["collect" "not run"])
         (is (= (golden :maintenance) (maintenance/render-report-ai report @connection)))))))
 
-(deftest namespace-binding-pairs-preserve-ai
+(deftest namespace-binding-pairs-show-the-binding-as-data
   (support/with-database
     (fn [_]
-      (doseq [[key value ai html expected]
-              [[:alias {:seon.ns.alias/local 'db :seon.ns.alias/target-ns 'seon.db}
+      (doseq [[value ai html expected]
+              [[{:seon.ns.alias/local 'db :seon.ns.alias/target-ns 'seon.db}
                 render.ns/render-alias-ai render.ns/render-alias-html "seon.db"]
-               [:refer {:seon.ns.refer/local 'q :seon.ns.refer/target-ns 'seon.db :seon.ns.refer/target-name 'q}
+               [{:seon.ns.refer/local 'q :seon.ns.refer/target-ns 'seon.db :seon.ns.refer/target-name 'q}
                 render.ns/render-refer-ai render.ns/render-refer-html "seon.db/q"]
-               [:import {:seon.ns.import/local 'Date :seon.ns.import/target-class 'java.util.Date}
+               [{:seon.ns.import/local 'Date :seon.ns.import/target-class 'java.util.Date}
                 render.ns/render-import-ai render.ns/render-import-html "java.util.Date"]]]
         (readable! (html value) [expected])
-        (is (= (golden key) (ai value)))))))
+        (is (= value (ai value)))))))
 
 (deftest transactions-render-values-without-entity-id-dumps
   (support/with-database

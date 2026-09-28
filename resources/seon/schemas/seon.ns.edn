@@ -40,4 +40,11 @@
           [:and
            {:description
             "The one agent that stewards this namespace: faults in its functions, complaints, and feature requests from other agents route here. Assignment is not stewardship; several agents may work a namespace."}
-           :seon.db/ref]}
+           :seon.db/ref]
+          :seon.render.ns/namespace-view
+          [:map {:description "A namespace node as its AI face shows it: named, and beyond distance zero its requires and its public functions with their contracts as `dir` reads them."}
+           [:seon.ns/name :seon.ns/name]
+           [:seon.ns/doc {:optional true} :seon.ns/doc]
+           [:seon.ns/requires {:optional true} [:vector :symbol]]
+           [:seon.repl/columns {:optional true} [:vector :keyword]]
+           [:seon.repl/rows {:optional true} [:vector [:vector :seon.schema/value]]]]}

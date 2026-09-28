@@ -3,7 +3,6 @@
             [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
             [seon.cluster.agent :as agent]
-            [seon.config :as config]
             [seon.render.hiccup :as hiccup]
             [seon.render.ns :as sut]
             [seon.render.schema :as render.schema]
@@ -57,49 +56,36 @@
          :seon.render/profile
          {:seon.render.profile/token-budget token-budget}))
 
-(deftest a-large-namespace-renders-less-and-names-how-to-continue
-  ;; Root ruling 2026-09-26: a pair must not fail on a large namespace. The
-  ;; members are one reverse pull; the AI face shows the first
-  ;; max-collection names with the total and `dir`; HTML shows them all.
-  (support/with-database
-    (fn [connection]
-      (let [caps (assoc (config/result-caps (support/effective-config))
-                        :seon.config.eval.result/max-collection 1)
-            unit (assoc (namespace-unit @connection 'seon.flow 1 100000)
-                        :seon.sci.admit/caps caps)
-            ai (sut/render-ai unit)]
-        (is (string? ai) (pr-str ai))
-        (is (re-find #"\n;; public functions \(first 1 of \d+ by name; `dir` below lists every one\): \S+\n" ai) ai)
-        (is (str/includes? ai "(dir seon.flow)"))
-        (is (vector? (sut/render-html unit)))))))
-
 (deftest a-namespace-renders-as-one-graph-node
   ;; Class regression (the namespace page dump): the node is its declaration,
-  ;; doc and public functions by name; never member sources or schemas.
+  ;; doc and public functions with their contracts, as data; never member
+  ;; sources or schemas. The value printer bounds a large namespace (root
+  ;; ruling 2026-09-26), so the render reads it whole.
   (support/with-database
     (fn [connection]
       (support/transacted! connection (support/agent-tx @connection "fresh" 'my.agents.fresh))
       (let [db @connection
             flow (sut/render-ai (namespace-unit db 'seon.flow 1 100000))
             html (hiccup/->string (sut/render-html (namespace-unit db 'seon.flow 1 100000)))
-            fresh (sut/render-ai (namespace-unit db 'my.agents.fresh 1 256))]
-        (testing "distance zero is its one header line"
-          (is (str/starts-with? (sut/render-ai (namespace-unit db 'seon.flow 0 100000)) ";; Namespace seon.flow — "))
-          (is (= 1 (count (str/split-lines (sut/render-ai (namespace-unit db 'seon.flow 0 100000)))))))
-        (testing "distance one is the stored ns form, public functions by name, then dir"
-          (is (str/includes? flow (:seon.ns/source (namespace-unit db 'seon.flow 1 100000))))
-          (is (re-find #"\n;; public functions: .*start-work-launcher!" flow))
-          (is (not (str/includes? flow "work-launcher-step")) "private functions are not named")
-          (is (not (str/includes? flow "(defn ")) "no member source")
-          (is (str/ends-with? flow "(dir seon.flow)")))
+            fresh (sut/render-ai (namespace-unit db 'my.agents.fresh 1 256))
+            names (set (map first (:seon.repl/rows flow)))]
+        (testing "distance zero is its name and doc line"
+          (is (= #{:seon.ns/name :seon.ns/doc} (set (keys (sut/render-ai (namespace-unit db 'seon.flow 0 100000))))))
+          (is (= 'seon.flow (:seon.ns/name flow))))
+        (testing "distance one is its requires and dir's columns and rows"
+          (is (= (sort (:seon.ns/requires (namespace-unit db 'seon.flow 1 100000))) (:seon.ns/requires flow)))
+          (is (= [:sym :arglists :doc :in :out] (:seon.repl/columns flow)))
+          (is (contains? names 'seon.flow/start-work-launcher!))
+          (is (not-any? #(= "work-launcher-step" (name %)) names) "private functions are not listed")
+          (is (every? #(= 5 (count %)) (:seon.repl/rows flow)) "one row per function, no member source"))
         (testing "HTML is the same node: a namespace link, requires and function names"
           (is (str/includes? html "href=\"/ns/seon.flow\""))
           (is (str/includes? html "<code>start-work-launcher!</code>"))
           (is (not (str/includes? html "seon-namespace-source"))))
-        (testing "an empty agent namespace names no functions and is no error"
-          (is (str/includes? fresh ";; public functions: none"))
-          (is (str/ends-with? fresh "(dir my.agents.fresh)")))))))
-
+        (testing "an empty agent namespace lists no functions and is no error"
+          (is (= [] (:seon.repl/rows fresh)))
+          (is (= '(dir (quote my.agents.fresh)) (sut/namespace-form {:seon.ns/name 'my.agents.fresh}))
+              "the form face is the dir that reads it again"))))))
 
 (deftest namespace-bindings-render-in-clojures-own-words
   (testing "an alias names its target namespace, a refer names its Var"
@@ -123,20 +109,19 @@
            (sut/render-import-html
             {:seon.ns.import/local 'Date
              :seon.ns.import/target-class 'java.util.Date}))))
-  (testing "each AI projection is source: a teaching comment, then a form"
-    (is (= (str ";; Here `str` is an alias for clojure.string, so `str/name`"
-                " reads a Var\n"
-                ";; in that namespace — the `:as` half of"
-                " [clojure.string :as str].\n"
-                "(dir (quote clojure.string))")
-           (sut/render-alias-ai {:seon.ns.alias/local 'str
+  (testing "each AI projection is the binding as data; its form face looks there"
+    (is (= {:seon.ns.alias/local 'str :seon.ns.alias/target-ns 'clojure.string}
+           (sut/render-alias-ai {:db/id 7 :seon.ns.alias/local 'str
                                  :seon.ns.alias/target-ns 'clojure.string})))
-    (is (= (str ";; Here the bare symbol `q` is seon.db/q —\n"
-                ";; the `:refer` half of [seon.db :refer [q]].\n"
-                "(doc seon.db/q)")
-           (sut/render-refer-ai {:seon.ns.refer/local 'q
-                                 :seon.ns.refer/target-ns 'seon.db
-                                 :seon.ns.refer/target-name 'q})))))
+    (is (= '(dir clojure.string) (sut/render-alias-form {:seon.ns.alias/local 'str
+                                                          :seon.ns.alias/target-ns 'clojure.string})))
+    (is (= '(doc seon.db/q)
+           (sut/render-refer-form {:seon.ns.refer/local 'q
+                                   :seon.ns.refer/target-ns 'seon.db
+                                   :seon.ns.refer/target-name 'q})))
+    (is (= {:seon.ns.import/local 'Date :seon.ns.import/target-class 'java.util.Date}
+           (sut/render-import-ai {:seon.ns.import/local 'Date
+                                  :seon.ns.import/target-class 'java.util.Date})))))
 
 ;; DELETED 2026-08-29 (owner gate ruling): compact registered-map
 ;; rendering is the filed issue
@@ -150,13 +135,7 @@
         same-name {:seon.ns.alias/local 'seon.fn
                    :seon.ns.alias/target-ns 'seon.fn}
         html (sut/render-alias-html alias-entity)]
-    ;; THE AI PROJECTION IS SOURCE (owner ruling 2026-09-07): teaching
-    ;; comments, then a form the agent can rerun. It stopped being a bare
-    ;; quoted libspec, which told the agent nothing it could act on.
-    (is (str/includes? (sut/render-alias-ai alias-entity)
-                       "(dir (quote clojure.string))"))
-    (is (str/includes? (sut/render-alias-ai same-name)
-                       "(dir (quote seon.fn))"))
+    (is (= same-name (sut/render-alias-ai same-name)) "an alias may equal its target")
     (is (str/includes? (hiccup/->string html) "<code>str</code> → <code>clojure.string</code>"))
     (is (not (str/includes? (hiccup/->string html)
                             "[clojure.string :as str]")))))
@@ -176,15 +155,16 @@
                     (assoc value :seon.db/db database :seon.render/value value :seon.render/distance distance)))
            forms (fn [source] (read-string (str "[" source "]")))]
        (is (:seon.task/changed? indexed) (pr-str indexed))
-       (testing "a task at distance 0 is its one header line"
-         (is (= (str ";; Task " handle " \"render-node\": a function task in tn.a")
+       (testing "a task at distance 0 is its name"
+         (is (= {:seon.task/id handle :seon.task/name "render-node" :seon.task/kind :function :seon.task/ns 'tn.a}
                 (sut/task-ai (unit [:seon.task/id handle] 0)))))
-       (testing "a task at distance 1 shows its intent, derived done-when and names, then the expansion call"
-         (let [source (sut/task-ai (unit [:seon.task/id handle] 1))]
-           (is (str/includes? source ";; Intent: Render one node.\n;;         Then stop."))
-           (is (str/includes? source ";; Done when these proofs pass: none"))
-           (is (str/includes? source ";; Must read: tn.a/f"))
-           (is (= [(list 'seon.issue/task-edges (list 'seon.db/db) handle)] (forms source)))
+       (testing "a task at distance 1 shows its intent, derived proofs and subjects, and must-reads"
+         (let [shown (sut/task-ai (unit [:seon.task/id handle] 1))]
+           (is (= "Render one node.\nThen stop." (:seon.task/intent shown)))
+           (is (= #{} (:seon.task/proofs shown)))
+           (is (= #{'tn.a/f} (:seon.task/must-read shown)))
+           (is (= (list 'seon.issue/task-edges (list 'seon.db/db) handle) (sut/task-form (unit [:seon.task/id handle] 1)))
+               "the form face is the edges read")
            (is (hiccup/hiccup? (sut/task-html (unit [:seon.task/id handle] 1))))))
        (testing "a schema's usage is data: the form it replaces and the stored values a new form refuses"
          (let [usage (render.schema/usage database :seon.task/intent [:string {:min 400}])]
@@ -214,8 +194,12 @@
                      (assoc value :seon.db/db db :seon.render/value value :seon.render/distance distance)))
             launcher (sut/function-ai (unit 'seon.flow/start-work-launcher! 1))
             query (sut/function-ai (unit 'seon.db/q 1))]
-        (is (= (str ";; seon.flow/start-work-launcher! — " (first (str/split-lines (:seon.fn/doc (unit 'seon.flow/start-work-launcher! 1)))))
+        (is (= {:seon.fn/sym 'seon.flow/start-work-launcher!
+                :seon.fn/doc (first (str/split-lines (:seon.fn/doc (unit 'seon.flow/start-work-launcher! 1))))}
                (sut/function-ai (unit 'seon.flow/start-work-launcher! 0))))
-        (is (str/includes? launcher (str "\n" (:seon.fn/source (unit 'seon.flow/start-work-launcher! 1)) "\n;; calls: ")))
-        (is (re-find #"\n;; called by: \d+ functions, listed by \(my\.program/callers \{:seon\.program/subject 'seon\.db/q\}\)$" query))
+        (is (= (:seon.fn/source (unit 'seon.flow/start-work-launcher! 1)) (:seon.fn/source launcher)))
+        (is (vector? (:seon.render.ns/calls launcher)))
+        (is (< 20 (:seon.render.ns/called-by-count query)))
+        (is (= ['(my.program/callers {:seon.program/subject 'seon.db/q})] (:seon.render/operations query))
+            "a widely called function names its callers by count and offers the call that lists them")
         (is (hiccup/hiccup? (sut/function-html (unit 'seon.flow/start-work-launcher! 1))))))))

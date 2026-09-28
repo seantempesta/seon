@@ -56,7 +56,7 @@
                units (walk/neighborhood request)
                unit (first (filter #(= entity-lookup (:seon.render.walk/lookup %)) units))]
            (is (= expected (:seon.render.selection/selected decision)) (pr-str decision))
-           (is (if (= output :seon.render/ai) (string? rendered) (hiccup/hiccup? rendered))
+           (is (if (= output :seon.render/ai) (some? rendered) (hiccup/hiccup? rendered))
                (pr-str rendered))
            (is unit (pr-str units))
            (is (nil? (:seon.error/value unit)) (pr-str unit))
@@ -64,11 +64,10 @@
        (when (= :seon.fn/sym (first entity-lookup))
          ;; The function node is its authored source with its neighbours by name
          ;; (renderers read the supplied database value: owner ruling 2026-09-25).
-         (let [source (render.ns/function-ai {:seon.db/db database :seon.render/value entity})]
-           (is (= '(do (defn function [] true))
-                  (read-string (str "(do\n" source "\n)"))))
-           (is (str/includes? source "\n;; calls: none\n;; called by: none"))
-           (is (= ";; entity-pairs.fixture/function"
+         (let [shown (render.ns/function-ai {:seon.db/db database :seon.render/value entity})]
+           (is (= '(defn function [] true) (read-string (:seon.fn/source shown))))
+           (is (= [[] []] [(:seon.render.ns/calls shown) (:seon.render.ns/called-by shown)]))
+           (is (= {:seon.fn/sym 'entity-pairs.fixture/function}
                   (render.ns/function-ai {:seon.db/db database :seon.render/value entity :seon.render/distance 0})))))
        (when (= :seon.test/sym (first entity-lookup))
          (doseq [[facts expected] [[{} "unrun or incomplete"]
@@ -77,19 +76,12 @@
                                    [{:seon.test/error-count 1} "error"]]]
            (let [value (merge entity facts)
                  test-name (:seon.test/sym value)
-                 source (render.test/render-ai {:seon.render/value value})
-                 [summary evidence changed host] (rest (read-string (str "(do\n" source "\n)")))]
-             (is (every? #(not (str/starts-with? (str/triml %) ";")) (str/split-lines source))
-                 "Rendered source carries no comment-prefixed prose")
-             (is (= 'clojure.core/identity (first summary)) (pr-str summary))
-             (is (= (str "Test " test-name ": " expected)
-                    (first (str/split-lines (second summary))))
-                 (pr-str summary))
-             (is (= (list 'seon.test/recorded-result (list 'seon.db/db) (list 'quote test-name)) evidence)
-                 (pr-str evidence))
-             (is (= (list 'seon.test/changed-since-green (list 'seon.db/db) (list 'quote test-name)) changed)
-                 (pr-str changed))
-             (is (= (list 'seon.test/host (list 'seon.db/db) (list 'quote test-name)) host) (pr-str host))
+                 shown (render.test/render-ai {:seon.render/value value})]
+             (is (= {:seon.test/sym test-name :seon.render.test/state expected}
+                    (select-keys shown [:seon.test/sym :seon.render.test/state])))
+             (is (= (list 'seon.test/recorded-result (list 'seon.db/db) (list 'quote test-name))
+                    (render.test/render-form {:seon.render/value value}))
+                 "the form face is the recorded-result read")
              (is (hiccup/hiccup? (render.test/render-html {:seon.render/value value}))))))))))
 
 (deftest function-entity-pair-is-selected-through-the-issue-walk
