@@ -2416,7 +2416,13 @@
                         captured (fn [{::keys [results exited]}]
                                    (mapv #(assoc % :seon.test.run/terminated?
                                                 (or (true? (:seon.test.run/terminated? %))
-                                                    (contains? exited (:seon.test/sym %)))) results))]
+                                                    (contains? exited (:seon.test/sym %)))) results))
+                        handoff! (fn [results]
+                                   (let [[before] (swap-vals! observed assoc ::recorded? true)
+                                         folded (into #{} (keep #(when (:seon.test.run/terminated? %) (:seon.test/sym %))) results)]
+                                     ;; Exits racing capture are separate; later exits belong to the callback.
+                                     (doseq [sym (remove folded (::exited before))]
+                                       (own-write! `runner/record-exit! (runner/record-exit! recording run-id sym)))))]
                     ;; A throw leaves no admitted member open: each unrecorded
                     ;; member is recorded red with the throwable, which is rethrown.
                     (try
@@ -2454,21 +2460,18 @@
                       (if (:seon.error/at committed)
                         (assoc outcome :seon.test/recording-refusal committed
                                        ::stopped [] ::stop-cause :recording-refused)
-                        (let [[before] (swap-vals! observed assoc ::recorded? true)
-                              folded (into #{} (keep #(when (:seon.test.run/terminated? %) (:seon.test/sym %))) results)
-                              by-symbol (into {} (map (juxt :seon.test/sym identity)) committed)]
-                          ;; An exit between capture and commit was not in the
-                          ;; transaction; later exits are owned by the callback.
-                          (doseq [sym (remove folded (::exited before))]
-                            (own-write! `runner/record-exit! (runner/record-exit! recording run-id sym)))
+                        (let [by-symbol (into {} (map (juxt :seon.test/sym identity)) committed)]
+                          (handoff! results)
                           (update outcome :seon.test/results
                                   #(mapv (fn [result] (merge result (by-symbol (:seon.test/sym result)))) %)))))
                     (catch Throwable failure
                       (try
-                        (let [recorded (runner/record-interrupted!
-                                        recording (recording-completion batch-provenance (captured @observed) true) failure)]
-                          (when (:seon.error/at recorded)
-                            (.addSuppressed failure (ex-info (:seon.error/message recorded) recorded))))
+                        (let [results (captured @observed)
+                              recorded (runner/record-interrupted!
+                                        recording (recording-completion batch-provenance results true) failure)]
+                          (if (:seon.error/at recorded)
+                            (.addSuppressed failure (ex-info (:seon.error/message recorded) recorded))
+                            (handoff! results)))
                         (catch Throwable recording-failure
                           (.addSuppressed failure recording-failure)))
                       (throw failure)))))

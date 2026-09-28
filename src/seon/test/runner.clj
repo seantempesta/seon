@@ -1456,7 +1456,8 @@
   Called by record-tx after the existing blob preparation. Only failing
   outcomes produce reports, keyed by the captured content signature. Program
   rows are never created. A later observation of termination may add its
-  transaction without changing the recorded outcome."
+  transaction without changing the recorded outcome. A member's explicit
+  termination observation overrides the completion's default."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.test.run/completion]
                   :seon.store/transaction-data]}
   [database {run :seon.test.run/provenance results :seon.test.runner/results
@@ -1536,7 +1537,7 @@
                (execution-refusal! operation run-id :seon.test/population-unknown
                                    :complete-outcome-events result))
              {:seon.test.member/value member :seon.test.member/outcome outcome
-              :seon.test.run/terminated? (or terminated? (true? (:seon.test.run/terminated? result)))
+              :seon.test.run/terminated? (true? (get result :seon.test.run/terminated? terminated?))
               :seon.test.report/values reports})) results)
         _ (when (not= (count results) (count (set (map :seon.test/sym results))))
             (execution-refusal! operation run-id :seon.test.run/immutable
