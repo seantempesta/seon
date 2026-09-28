@@ -95,11 +95,11 @@
 
 (defn- refuse-constraint!
   {:malli/schema [:=> [:cat :seon.error/operation :string :keyword :map :keyword :seon.schema/value :string] :nil]}
-  [operation & fields]
+  [operation message member offending marker value expected]
   (refuse! (into {:seon.error/at (java.util.Date.)
                   :seon.error/layer :my.plan/constraint
                   :seon.error/operation operation}
-                 (apply constraint fields))))
+                 (constraint message member offending marker value expected))))
 
 (defn- flat-refusal
   {:malli/schema [:=> [:cat :seon.error/throwable] :seon.plan/refusal]}
