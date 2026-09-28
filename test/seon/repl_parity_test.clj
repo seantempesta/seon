@@ -4,6 +4,7 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is use-fixtures]]
             [seon.config :as config]
+            [seon.repl]
             [seon.sci.reader :as sci.reader]
             [seon.test-support :as test-support]
             [seon.turn :as turn]))
@@ -582,8 +583,42 @@
              result
              (and (= (count symbols) (count (set symbols)))
                   (some #{'seon.db/q} symbols)
-                  (every? #(and (seq (:arglists %)) (string? (:doc %))) functions)
+                  (every? #(and (seq (:arglists %)) (or (nil? (:doc %)) (string? (:doc %)))) functions)
                   (= "" (:out result))))))
+
+(defparity "D10" :passing
+  ;; `seon.profile/explain` destructures `::cells` in its arglists: the doc reader
+  ;; resolves auto-resolved keywords in the namespace's aliases and never throws.
+  (let [result (first (repl-session ["(doc seon.profile/explain)"]))
+        value (:value result)]
+    (checked "arglists read as data"
+             result
+             (and (nil? (:err result)) (seq (:arglists value)) (:in value) (:out value)))))
+
+(defparity "D11" :passing
+  ;; A private function is data too: arglists and contract, with the summary
+  ;; absent when the function is undocumented.
+  (let [value (:value (first (repl-session ["(doc seon.plan/refuse-constraint!)"])))]
+    (checked "documentation data, not a refusal"
+             value
+             (and (nil? (:seon.error/message value)) (seq (:arglists value)) (contains? value :in)))))
+
+(defparity "D12" :passing
+  (let [{:keys [summary body]} (:value (first (repl-session ["(doc my.task/open)"])))]
+    (checked "the first sentence, whole"
+             summary
+             (and (str/ends-with? summary ".")
+                  (str/includes? summary "no assignment names")
+                  (not (str/includes? body summary))))))
+
+(defparity "D13" :passing
+  (let [result (first (repl-session ["(dir seon.db)"]))
+        rendered (seon.repl/render-directory-ai (:value result))]
+    (checked "the directory renders as a vector of maps, never a string"
+             rendered
+             (and (vector? rendered)
+                  (some #{'seon.db/q} (map :sym rendered))
+                  (every? #(and (seq (:arglists %)) (not (contains? % :in))) rendered)))))
 
 (defparity "D8" :passing
   (let [value (:value (first (repl-session ["(dir parity.no-such-ns)"])))]

@@ -17,7 +17,7 @@
                    :description "The existing dir API's function and schema data."}
              [:functions [:vector [:map [:sym :qualified-symbol]
                                     [:arglists :seon.schema/value]
-                                    [:doc :string]
+                                    [:doc {:optional true} :string]
                                     [:in :seon.schema/value]
                                     [:out :seon.schema/value]
                                     [:supplied {:optional true} [:vector :qualified-keyword]]]]]

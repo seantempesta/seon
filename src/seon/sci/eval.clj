@@ -1852,11 +1852,6 @@
     :seon.error/member :seon.fn/sym
     :seon.error/expected :seon.sci.eval/public-documentation}))
 
-(defn- declaration-statement
-  "The sentence `doc` and `dir` show in place of a declaration this row lacks."
-  [attribute]
-  (str "This program row carries no " attribute "."))
-
 (defn- declaration-absent
   "The typed unknown `doc` and `dir` show for an absent declaration.
 
@@ -1873,16 +1868,40 @@
     :seon.error/expected :seon.sci.eval/present-declaration}))
 
 (defn docstring-parts
-  "Split a declared docstring into its summary, body, and final Example section."
+  "Split a declared docstring into its summary (the first sentence of its first
+  paragraph, whole), the body that follows, and the final Example section."
   {:malli/schema [:=> [:cat :string] :map]}
   [docstring]
-  (let [[summary & lines] (str/split-lines (or docstring ""))
-        lines (mapv str/trim lines)
+  (let [lines (mapv str/trim (str/split-lines (or docstring "")))
+        lines (vec (drop-while str/blank? lines))
+        [paragraph after] (split-with (complement str/blank?) lines)
+        flat (str/join " " paragraph)
+        stop (str/index-of flat ". ")
+        summary (if stop (subs flat 0 (inc stop)) flat)
+        leftover (when stop (str/trim (subs flat (+ stop 2))))
+        lines (vec (concat (when (seq leftover) [leftover]) after))
         example-index (last (keep-indexed #(when (= "Example:" %2) %1) lines))]
-    {:summary (or summary "")
+    {:summary summary
      :body (str/trim (str/join "\n" (if example-index (subvec lines 0 example-index) lines)))
      :example (if example-index
                 (str/trim (str/join "\n" (subvec lines (inc example-index)))) "")}))
+
+(defn- arglists-reader
+  "The function that reads one arglists text as the namespace's own source
+  reads it: the one reader resolves auto-resolved keywords (`{id ::id}`) in
+  the namespace's aliases."
+  {:malli/schema [:=> [:cat :seon.db/database-value :symbol] ifn?]}
+  [database namespace-name]
+  (let [row (db/pull database '[{:seon.ns/aliases [:seon.ns.alias/local :seon.ns.alias/target-ns]}]
+                     [:seon.ns/name namespace-name])]
+    (if (or (:seon.db/invalid-read row) (:seon.schema/expected-value row))
+      (constantly row)
+      (let [aliases (into {} (map (juxt :seon.ns.alias/local :seon.ns.alias/target-ns))
+                          (:seon.ns/aliases row))]
+        (fn [text]
+          (let [read (reader/read {::reader/text text ::reader/ns namespace-name ::reader/aliases aliases
+                                   :seon.config.eval.result/max-source (count text)})]
+            (if (vector? read) (::reader/form (first read)) read)))))))
 
 (defn- documentation-schemas
   {:malli/schema [:=> [:cat :seon.db/database-value :map] [:map-of :qualified-keyword :seon.schema/definition]]}
@@ -1960,11 +1979,10 @@
        (function-doc-map database row
                          (boolean (some #{(:seon.fn/sym row)} overrides))))))
   ([database row overridden?]
-   (merge (if-let [doc (:seon.fn/doc row)]
-               (docstring-parts doc)
-               {:summary (declaration-statement :seon.fn/doc) :body "" :example ""})
+   (merge (when-let [doc (:seon.fn/doc row)]
+            (docstring-parts doc))
              {:arglists (if-let [arglists (:seon.fn/arglists row)]
-                          (edn/read-string arglists)
+                          ((arglists-reader database (symbol (namespace (:seon.fn/sym row)))) arglists)
                           (declaration-absent :seon.fn/arglists))}
              (agent-documentation-contract database row)
              (when overridden?
@@ -1981,14 +1999,7 @@
                                {:seon.schema/_ns [:seon.schema/key :seon.schema/form]}]
                              [:seon.ns/name namespace-name])
         functions (program-documentation database namespace-name)
-        ;; Arglists are source text: the one reader resolves their
-        ;; auto-resolved keywords (`{id ::id}`) in the namespace's own aliases.
-        aliases (into {} (map (juxt :seon.ns.alias/local :seon.ns.alias/target-ns))
-                      (:seon.ns/aliases namespace-row))
-        read-arglists (fn [text]
-                        (let [read (reader/read {::reader/text text ::reader/ns namespace-name ::reader/aliases aliases
-                                                 :seon.config.eval.result/max-source (count text)})]
-                          (if (vector? read) (::reader/form (first read)) read)))]
+        read-arglists (arglists-reader database namespace-name)]
     (cond
       (or (:seon.db/invalid-read namespace-row) (:seon.schema/expected-value namespace-row)) namespace-row
       (or (:seon.db/invalid-read functions) (:seon.schema/expected-value functions)) functions
@@ -2008,10 +2019,9 @@
                             (merge {:sym (:seon.fn/sym row)
                                     :arglists (if-let [arglists (:seon.fn/arglists row)]
                                                 (read-arglists arglists)
-                                                (declaration-absent :seon.fn/arglists))
-                                    :doc (if-let [doc (:seon.fn/doc row)]
-                                           (:summary (docstring-parts doc))
-                                           (declaration-statement :seon.fn/doc))}
+                                                (declaration-absent :seon.fn/arglists))}
+                                   (when-let [doc (:seon.fn/doc row)]
+                                     {:doc (:summary (docstring-parts doc))})
                                    (agent-documentation-contract database row)))
                           functions)})
       :else (documentation-unavailable namespace-name))))
@@ -2022,7 +2032,7 @@
   [database requested qualified]
   (if (namespace qualified)
     (let [row (db/pull database
-                       (conj program-documentation-selector :seon.fn/private?)
+                       program-documentation-selector
                        [:seon.fn/sym qualified])
           overrides (when (= :agent (:seon.schema.admission/source row))
                       (program/overrides database))
@@ -2030,8 +2040,7 @@
       (cond
         (or (:seon.db/invalid-read row) (:seon.schema/expected-value row)) row
         (or (:seon.db/invalid-read overrides) (:seon.schema/expected-value overrides)) overrides
-        (and (:seon.fn/sym row)
-             (or (false? (:seon.fn/private? row)) overridden?))
+        (:seon.fn/sym row)
         (function-doc-map database row overridden?)
         :else (documentation-unavailable requested)))
     (let [row (db/pull database [:seon.ns/doc] [:seon.ns/name requested])]

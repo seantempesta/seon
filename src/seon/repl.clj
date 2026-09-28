@@ -35,22 +35,23 @@
 (schema.edn/load! {})
 
 (defn render-directory-ai
-  "Print directory columns once while retaining every summary and contract."
-  {:malli/schema [:=> [:cat :seon.repl/directory] :string]}
+  "The namespace's public functions as data, one entry each: symbol, arglists
+  and the summary sentence (absent when undocumented). Contracts are one
+  `(doc sym)` away."
+  {:malli/schema [:=> [:cat :seon.repl/directory]
+                  [:vector [:map [:sym :qualified-symbol] [:arglists :seon.schema/value] [:summary {:optional true} :string]]]]}
   [directory]
-  (let [columns (cond-> [:sym :arglists :doc :in :out]
-                  (some :supplied (:functions directory)) (conj :supplied))]
-    (binding [*print-length* nil *print-level* nil *print-readably* true]
-      (pr-str (array-map
-               :seon.repl/columns columns
-               :seon.repl/rows (mapv #(mapv % columns) (:functions directory))
-               :seon.repl/schemas (into (sorted-map) (:schemas directory)))))))
+  (mapv (fn [{:keys [sym arglists doc]}]
+          (cond-> {:sym sym :arglists arglists} doc (assoc :summary doc)))
+        (:functions directory)))
 
 (defn render-directory-html
   "Show complete directory data using the same named columns."
   {:malli/schema [:=> [:cat :seon.repl/directory] :seon.render/hiccup]}
   [directory]
-  [:pre (render-directory-ai directory)])
+  [:table
+   (for [{:keys [sym arglists summary]} (render-directory-ai directory)]
+     [:tr [:td [:code (str sym)]] [:td [:code (str arglists)]] [:td summary]])])
 
 (defn frame
   "Derive the current turn budget outside the saved evaluation history.
