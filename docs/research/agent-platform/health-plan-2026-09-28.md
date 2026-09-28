@@ -115,13 +115,24 @@ the transaction that already records the work (settle, test batch, fault record,
 per-write provenance stamp of 089ac703a: process, operation, agent). "Declared" = already in the schema resources,
 mostly never written today; "new" = to add.
 
-**One base, one pipeline (owner question: "what is the common thing … or are we writing the instrumentation stuff
-separately?").** Every named error and warning shares one base: the **occurrence context** — where (agent, branch,
+**Errors are events; warnings are signals (owner, 2026-09-28).** An error happened — something was refused or thrown
+at a moment, in a world — so it gets an occurrence with its context and blob. A warning did not happen: it is a state
+of a subject the database already describes (a function's p99 bucket over its bound, a function with no contract or
+hot with no reaching test, a cache kind with a high byte share and low hit rate, a proc whose backlog grows, a boot
+phase proportional to the whole program). **No warning entities and no warning writes:** only the measurements and facts
+themselves are written (buckets on significant change, contracts, test reach, operator phase records). A named warning
+schema is a predicate over a subject's attributes; the health view derives its matches by a query built from the
+schema, cached by the revisions of the attributes it reads. A warning disappears when the data changes — nothing to
+resolve or close; a task made from a signal refs the subject and the named warning schema, and its done condition is
+"the subject no longer satisfies it". The pipeline below applies to errors; warnings are read, never recorded.
+
+**One base, one pipeline for errors (owner question: "what is the common thing … or are we writing the
+instrumentation stuff separately?").** Every named error shares one base: the **occurrence context** — where (agent, branch,
 evaluation / turn / test member / proc, task: from the bound world), who (producer function + digest, caller function +
 digest: from the armed wrapper, whose cell is already keyed `[sym digest]`), what (schema ref + Malli path, when a
 contract was involved), evidence (one blob digest: cause chain, offending value), and when (the transaction it rides,
 with its provenance stamp). The declared `:seon.error.occurrence/*` attributes are nearly this set. A named error
-(`:seon.error/base` extensions) or named warning adds only its specific attributes; its named schema validates the
+(`:seon.error/base` extensions) adds only its specific attributes; its named schema validates the
 whole. Instrumentation is not a separate writer — three stages, each owned once:
 detect (armed wrapper, entrant boundary, significance check) → build (`seon.error.refusal/diagnostic`: base from world
 + wrapper, specifics from the producer, bulk to a blob) → store (one recorder: upsert the signature by identity, add an
@@ -355,9 +366,9 @@ which already restores the previous commit on failure.
 
 ## 10. Warnings, and what the armed wrapper can capture
 
-**Warnings use the same path.** A warning is a finding that does not change the value: the same constructor, the same
-supplied context, the same links and blob references, identified by the named warning schema its attributes satisfy
-(no kind or severity field; severity is declared on the schema). It is recorded only when its measurement
+**Warnings are signals read from stored data (§2b), never recorded as entities.** A named warning schema is a
+predicate over a subject's attributes (severity declared on the schema); the health view and the reply of the
+evaluation that touched the subject show the matches. It is recorded only when its measurement
 crosses a significance threshold (§2), deduplicated by signature, delivered beside the value of the evaluation that
 triggered it (as the contract warning is today), and shown in the health view. A task is created only above a declared
 severity. Nothing is a string in a log.
