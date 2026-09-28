@@ -42,6 +42,8 @@
             :replaced [:set {:seon.wake/context-inert true :description "The agent's own definitions the program advanced over at this evaluation (their changed program entities replaced them in its context). A declared bound makes it a finding."} :qualified-symbol],
             :ungeneratable [:set {:seon.wake/context-inert true :description "Schemas this evaluation admitted that have no Malli generator, so functions using them skip auto-check. A declared bound makes it a finding."} :qualified-keyword],
             :elisions [:int {:min 0 :seon.wake/context-inert true :description "How many cuts the floor made showing the evaluation's value; the data that says whether the token budget elides too often."}],
+            :value-digest [:and {:seon.wake/context-inert true :description "The blob digest of a cut value's artifact (its admitted print node as canonical EDN), settled with its evaluation so `result/eN` and the dig forms its print offered answer after a restart (seon.sci.eval/fork-for-turn binds it again). A value shown whole stores none."} :seon.blob/digest],
+            :value-edn [:string {:min 1 :description "A cut value's artifact EDN between its print and its settlement, which stages it as :seon.eval/value-digest; never stored."}],
             :full [:boolean {:seon.wake/context-inert true :description "The evaluation opted into printing its value whole (seon.print/full)."}],
             :outcome [:enum {:seon.wake/context-inert true} :ok :time :error],
             :shown

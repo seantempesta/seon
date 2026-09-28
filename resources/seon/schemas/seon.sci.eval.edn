@@ -128,6 +128,7 @@
                  [:seon.eval/shown-tokens {:optional true} :seon.eval/shown-tokens]
                  [:seon.eval/value-tokens {:optional true} :seon.eval/value-tokens]
                  [:seon.eval/elisions {:optional true} :seon.eval/elisions]
+                 [:seon.eval/value-edn {:optional true} :seon.eval/value-edn]
                  [:seon.eval/full {:optional true} :seon.eval/full]
                  [:seon.eval/renderer {:optional true} :seon.eval/renderer]
                  [:seon.cluster.eval/diagnostics {:optional true} :seon.cluster.eval/diagnostics]

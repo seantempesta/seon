@@ -60,6 +60,7 @@
                      [:seon.eval/value-tokens {:optional true} :seon.eval/value-tokens]
                      [:seon.eval/shown-tokens {:optional true} :seon.eval/shown-tokens]
                      [:seon.eval/elisions {:optional true} :seon.eval/elisions]
+                     [:seon.eval/value-digest {:optional true} :seon.eval/value-digest]
                      [:seon.eval/full {:optional true} :seon.eval/full]
                      [:seon.eval/unadmitted {:optional true} :seon.eval/unadmitted]
                      [:seon.eval/replaced {:optional true} :seon.eval/replaced]

@@ -192,6 +192,8 @@
       (:seon.test.accretion/status settlement-evaluation)
       (assoc :seon.test.accretion/status
              (:seon.test.accretion/status settlement-evaluation))
+      (:seon.eval/value-digest settlement-evaluation)
+      (assoc :seon.eval/value-digest (:seon.eval/value-digest settlement-evaluation))
       (:seon.test.accretion/report-blob settlement-evaluation)
       (assoc :seon.test.accretion/report-blob
              (:seon.test.accretion/report-blob settlement-evaluation))
@@ -220,6 +222,16 @@
                        (:seon.blob/digest staged)
                        :seon.test.accretion/report-size
                        (long (count report-edn)))
+                (update :seon.blob/staged-writes (fnil conj []) staged)))
+          receipt)
+        ;; A cut value's artifact (`seon.sci.eval/shown-result`) settles into
+        ;; the blob tier under the same publication permit as its evaluation.
+        receipt
+        (if-let [value-edn (:seon.eval/value-edn receipt)]
+          (let [staged (blob/stage! (:seon.db/connection cluster) value-edn)]
+            (-> receipt
+                (dissoc :seon.eval/value-edn)
+                (assoc :seon.eval/value-digest (:seon.blob/digest staged))
                 (update :seon.blob/staged-writes (fnil conj []) staged)))
           receipt)]
     [(dissoc receipt :seon.blob/staged-writes)
@@ -1456,6 +1468,7 @@
    :seon.eval/shown-tokens
    :seon.eval/elisions
    :seon.eval/full
+   :seon.eval/value-digest
    :seon.eval/unadmitted
    :seon.eval/replaced
    :seon.eval/ungeneratable

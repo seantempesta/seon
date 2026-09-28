@@ -74,7 +74,7 @@
                               [?m :seon.test.member/error-count ?e]]
                      database tests)
                [])]
-    (if-not (coll? rows)
+    (if (or (map? rows) (not (coll? rows)))
       {}
       (into {}
             (for [[t group] (group-by first rows)

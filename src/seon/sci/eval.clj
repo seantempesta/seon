@@ -118,6 +118,7 @@
             [sci.interrupt :as sci.interrupt]
             [seon.call-preparation :as call-preparation]
             [seon.config :as config]
+            [seon.blob :as blob]
             [seon.cache]
             [seon.db :as db]
             [seon.id :as id]
@@ -131,6 +132,7 @@
             [seon.render :as render]
             [seon.ai.tokens :as tokens]
             [seon.render.value :as render.value]
+            [seon.sci.admit :as admit]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.sci.kernel :as kernel]
@@ -3295,8 +3297,39 @@
             @(::kernel/program-snapshot regenerated))
     ctx))
 
+(defn- settled-results
+  "The agent's settled cut values, `{evaluation-id artifact-digest}`: what a
+  fresh context binds again under their handles (`result/eN`)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:map-of :string :seon.blob/digest]]}
+  [db agent-id]
+  (let [rows (db/q '[:find ?id ?digest :in $ ?agent-id
+                     :where [?agent :seon.agent/id ?agent-id]
+                            [?agent :seon.agent/runtime ?runtime]
+                            [?runtime :seon.runtime/turns ?turn]
+                            [?evaluation :seon.cluster.eval/run ?turn]
+                            [?evaluation :seon.eval/value-digest ?digest]
+                            [?evaluation :seon.cluster.eval/id ?id]]
+                   db agent-id)]
+    ;; a refused read (an error map) binds nothing
+    (if (and (coll? rows) (not (map? rows))) (into {} rows) {})))
+
+(defn- bind-settled-results!
+  "Bind each settled cut value of the agent in a context that holds none (a
+  fresh fork: after a restart, the handles its earlier replies printed). A
+  blob that cannot be read binds nothing; its handle stays unresolved."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value [:maybe :seon.agent/id]] :nil]}
+  [ctx db agent-id]
+  (when-let [connection (and agent-id (:seon.db/connection (env/of ctx)))]
+    (doseq [[evaluation-id digest] (settled-results db agent-id)
+            :let [artifact (some-> (blob/get connection digest) render.value/read-artifact)]
+            :when (:seon.sci.admit/print-node artifact)]
+      (bind-result! ctx (admit/result-handle evaluation-id) (render.value/artifact-value artifact))))
+  nil)
+
 (defn fork-for-turn
-  "Fork the current base and reapply the agent's in-memory private layer."
+  "Fork the current base and reapply the agent's in-memory private layer.
+  A fresh fork (no carried agent context: a restart) binds the agent's
+  settled cut values under their handles again."
   {:malli/schema [:=> [:cat :seon.sci.eval/defs-fork-request]
                   :seon.sci.eval/defs-fork-result]}
   [{base-ctx :seon.sci.eval/ctx
@@ -3326,6 +3359,7 @@
     (advance-context-projection! ctx db (context-projection base-ctx))
     (when (and assigned-namespace (not (sci/find-ns ctx assigned-namespace)))
       (sci/add-namespace! ctx assigned-namespace {}))
+    (when-not agent-ctx (bind-settled-results! ctx db agent-id))
     {:seon.sci.eval/ctx ctx
      :seon.sci.eval/private-state
      (if carried? :preserved-in-memory :absent)}))
@@ -4083,6 +4117,22 @@
               (recur more end (conj shown (subs source offset end) "\n;=> "
                                     (:seon.eval/shown evaluation))))))))))
 
+(defn- stored-value-edn
+  "The value artifact a cut value settles into the blob tier (canonical EDN of
+  its admitted print node), so its handle and the dig forms its print offers
+  outlive this process; nil when admission stored nothing (its bound)."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                                   :seon.schema.admission/reason "Any value the floor cut is admitted here."
+                                   :gen/elements [nil false 0 "" :k [] {}]}]
+                       :seon.sci.admit/caps]
+                  [:maybe :string]]}
+  [value caps]
+  (let [admitted (admit/admit-value {:seon.sci.admit/value value
+                                     :seon.sci.admit/interrupt-fn (fn [])
+                                     :seon.sci.admit/caps caps})]
+    (when (and (:seon.sci.admit/print-node admitted) (not (:seon.sci.admit/reason admitted)))
+      (render.value/artifact-edn (render.value/artifact admitted)))))
+
 (defn shown-result
   "The one print of a final value: its admitted value and exact shown text.
 
@@ -4154,6 +4204,15 @@
              (tokens/estimate-of-characters (:seon.render.value/whole-characters projection)))
       (int? (:seon.render.value/elisions projection))
       (assoc :seon.eval/elisions (:seon.render.value/elisions projection))
+      ;; A CUT VALUE OUTLIVES THE PROCESS: its artifact settles into the blob
+      ;; tier with the evaluation (`seon.turn/settlement-projection`), so
+      ;; `result/eN` and its dig forms answer after a restart. A value shown
+      ;; whole needs no dig form and stores nothing (a blob write is ~10 ms).
+      (and (pos-int? (:seon.render.value/elisions projection)) (:seon.sci.admit/caps request)
+           (not (::rendering? request)))
+      (as-> m (if-let [edn (stored-value-edn value (:seon.sci.admit/caps request))]
+                (assoc m :seon.eval/value-edn edn)
+                m))
       (:seon.render.value/full? projection) (assoc :seon.eval/full true)
       (:seon.render.call/selected-producer projection)
       (assoc :seon.eval/renderer (:seon.render.call/selected-producer projection))
@@ -4179,13 +4238,13 @@
                             record)]
     (when (and ctx handle) (bind-result! ctx handle error))
     (-> (apply dissoc shown [:seon.eval/value-tokens :seon.eval/shown-tokens
-                             :seon.eval/elisions :seon.eval/full])
+                             :seon.eval/elisions :seon.eval/full :seon.eval/value-edn])
         (assoc :seon.sci.admit/value error))))
 
 (def ^:private value-size-keys
   "The shown value's recorded size, carried from `shown-result` to the
   evaluation and settled onto its receipt."
-  [:seon.eval/value-tokens :seon.eval/shown-tokens :seon.eval/elisions :seon.eval/full])
+  [:seon.eval/value-tokens :seon.eval/shown-tokens :seon.eval/elisions :seon.eval/full :seon.eval/value-edn])
 
 (defn- success-evaluation
   [{admitted :seon.sci.eval/admitted
@@ -4957,7 +5016,7 @@
     (throw (ex-info (:seon.error/message unavailable) unavailable)))
   (merge (dissoc evaluation :seon.program/row :seon.sci.eval/bindings :seon.eval/renderer
                  :seon.eval/value-tokens :seon.eval/shown-tokens :seon.eval/elisions :seon.eval/full
-                 :seon.eval/replaced :seon.eval/ungeneratable)
+                 :seon.eval/value-edn :seon.eval/replaced :seon.eval/ungeneratable)
          ;; A refusal is its small error map as data, like the agent's own failure.
          (shown-failure refusal request
                         (assoc (:seon.sci.admit/record evaluation)
