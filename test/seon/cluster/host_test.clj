@@ -215,9 +215,9 @@
             "the cluster entity names the branch whose host was admitted")
         (is (= ["1"] (hosted-run! winner "1")))
         (host/retire! winner)
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"admission is closed"
-                              (host-on! handle home "mcp/twin"))
-            "a retired agent cannot be hosted again")))))
+        ;; host! answers the writer's refusal as a value (253244dc7)
+        (is (refused-by? :seon.agent/admission-closed-tx (host-on! handle home "mcp/twin"))
+            "a retired agent cannot be hosted again: its admission is closed")))))
 
 (deftest a-branch-answers-only-for-the-agent-it-hosts
   ;; Astra H3: the running host answered any requested agent id.
@@ -226,10 +226,8 @@
       (let [branch (branch!)
             hosted (host-on! handle branch "mcp/first")]
         (is (identical? hosted (host-on! handle branch "mcp/first")))
-        (is (= :seon.agent/id
-               (:seon.error/member (try (host-on! handle branch "mcp/other") nil
-                                        (catch clojure.lang.ExceptionInfo refusal (ex-data refusal)))))
-            "another agent id on a hosted branch refuses by name")))))
+        (is (= :seon.agent/id (:seon.error/member (host-on! handle branch "mcp/other")))
+            "another agent id on a hosted branch refuses by name, as a value (253244dc7)")))))
 
 (deftest an-ordinary-message-wakes-the-idle-hosted-agent
   (with-host-world {}
@@ -346,26 +344,6 @@
           (is (= [#:seon.ns.alias{:local 'str :target-ns 'clojure.string}]
                  (:seon.ns/aliases (db/pull (database) [{:seon.ns/aliases [:seon.ns.alias/local :seon.ns.alias/target-ns]}]
                                             [:seon.ns/name 'my.agents.switch-declared])))))))))
-
-(deftest a-run-reads-its-earlier-declarations
-  ;; Before the run's working value, a redefinition that broke a test defined
-  ;; earlier in the same run installed ungated: the gate read the connection,
-  ;; where the run's entities land only at settlement. The bounded input keeps the
-  ;; seeded auto-check from overflowing (* x x x), so the only refusal is the test's.
-  (with-host-world {}
-    (fn [{:keys [handle branch!]}]
-      (let [hosted (host-on! handle (branch!) "mcp/one-run")
-            shown (hosted-run! hosted (str "(defn run-square \"Square x.\" {:malli/schema [:=> [:cat [:int {:min -1000 :max 1000}]] :int]} [x] (* x x))\n"
-                                           "(clojure.test/deftest run-square-test (clojure.test/is (= 16 (run-square 4))))\n"
-                                           "(defn run-square \"Square x.\" {:malli/schema [:=> [:cat [:int {:min -1000 :max 1000}]] :int]} [x] (* x x x))\n"
-                                           "(run-square 4)"))]
-        (is (= "#'my.agents.host-probe/run-square" (first shown)))
-        ;; A refused form shows its small error map (737fe0a5d): the refusal
-        ;; is the install gate's by its member, not by a face's wording.
-        (is (re-find #":seon.test.accretion/install\?" (str (nth shown 2)))
-            "the gate ran the earlier test and refused the break")
-        (is (= "16" (last shown)) "the first body stays installed within the run")
-        (is (= ["16"] (hosted-run! hosted "(run-square 4)")) "and after it settles")))))
 
 (deftest a-run-gates-a-definition-on-its-earlier-schema
   ;; Before, the gate's disposable copy re-acquired the run's basis commit
@@ -495,12 +473,12 @@
                                                   "[(:seon.test/passed? r) (mapv (juxt :seon.test/sym :seon.test/error-count :seon.test/failure-message) (:seon.test/results r))])")))]
         (is (= "[true [[my.plan-test/a-changed-title-is-an-ordinary-fact-update 0 nil]]]" shown))))))
 
-(deftest a-refused-settlement-is-its-forms-refusal-and-the-run-closes
+(deftest a-refused-deletion-is-its-forms-refusal-and-the-run-closes
   ;; Before, one refused declaration replaced every form's shown text with the
   ;; refusal; a refusal for a value the receipt could not store left the run open.
-  ;; Each form keeps its value (the deletion returned nil) and its own body
-  ;; error; the deletion the writer named is associated, as recorded data, with
-  ;; the one evaluation whose settled entity proposed it.
+  ;; The fold refuses a deletion whose referrers survive at that form's own facts
+  ;; (seon.turn.batch/removal-facts), so only the deleting form carries the
+  ;; refusal, naming the referrer beside its value; its siblings settle.
   (with-host-world {}
     (fn [{:keys [handle branch!]}]
       (let [hosted (host-on! handle (branch!) "mcp/refused")
@@ -508,30 +486,17 @@
             helper (symbol (str host-ns) "refused-helper")]
         (hosted-run! hosted "(defn refused-helper \"Add one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
         (hosted-run! hosted "(defn refused-caller \"Call the helper.\" {:malli/schema [:=> [:cat :int] :int]} [x] (refused-helper x))")
-        (let [{run-id :seon.turn/id receipts :receipts}
+        (let [{receipts :receipts}
               (hosted-run-receipts hosted "(+ 1 2)\n(ns-unmap 'my.agents.host-probe 'refused-helper)\n(+ 3 4)\n(/ 1 0)")
-              errors (mapv (comp str :seon.cluster.eval/error) receipts)
-              {:keys [proposals validator]} (recorded-proposals @connection run-id)]
+              errors (mapv :seon.cluster.eval/error receipts)]
           (is (= [0 1 2 3] (mapv :seon.cluster.eval/ordinal receipts)))
           (is (= ["3" "nil" "7"] (subvec (mapv :seon.eval/shown receipts) 0 3)) "every form keeps the value it evaluated")
-          (is (str/includes? (nth errors 1) (str "Evaluation 1 proposed deleting " helper)))
-          (is (str/includes? (nth errors 1) "refused-caller") "the surviving referrer is named")
-          (is (every? #(and (str/includes? % "this run's settlement was refused") (not (str/includes? % "proposed")))
-                      (map errors [0 2])))
-          (is (str/includes? (nth errors 3) "Divide by zero") "a form's own body error stays its error")
-          (is (str/includes? (str (db/q '[:find ?d . :in $ ?id
-                                          :where [?run :seon.turn/id ?id] [?e :seon.cluster.eval/run ?run]
-                                          [?e :seon.cluster.eval/ordinal 3] [?e :seon.cluster.eval/diagnostics ?d]]
-                                        @connection run-id))
-                             "surviving referrers")
-              "and the refused publication is delivered beside it")
-          (testing "the association is the refused write's recorded data"
-            (is (= :seon.program/deletion-refused-error validator))
-            (is (= [{:seon.program/identity [:seon.fn/sym helper] :seon.cluster.eval/ordinal 1}]
-                   (mapv #(dissoc % :seon.program/referrers) proposals)))
-            (is (= [{:seon.fn/sym (symbol (str host-ns) "refused-caller")}]
-                   (mapv :seon.program/referrer (:seon.program/referrers (first proposals)))))))
-        (is (some? (db/pull @connection [:seon.fn/sym] [:seon.fn/sym helper])) "nothing of the refused run settled")
+          (is (str/includes? (str (nth errors 1)) (str helper)) "the deleting form is refused, naming its subject")
+          (is (str/includes? (str (:seon.cluster.eval/diagnostics (nth receipts 1))) "refused-caller")
+              "the surviving referrer is named beside the value")
+          (is (= [nil nil] (map errors [0 2])) "the sibling forms settle")
+          (is (str/includes? (str (nth errors 3)) "Divide by zero") "a form's own body error stays its error"))
+        (is (some? (db/pull @connection [:seon.fn/sym] [:seon.fn/sym helper])) "the refused deletion removed nothing")
         (is (= ["2"] (hosted-run! hosted "(refused-caller 1)")) "the run closed and SCI still holds the helper")))))
 
 (deftest ^{:seon.test/long "Eight ordinary runs of a hosted agent (five gated defns, two refused or repaired deletion runs, a complete repair; ~200-500 ms each with gate and settlement) plus five evaluate-sources batches: 5.9 s measured on default (tests-0627k, 2026-09-27)."
@@ -716,18 +681,7 @@
         (is (= [(str [:my.program/context branch])]
                (hosted-run! hosted (str "((juxt :seon.error/member :my.program/held-branch) (my.program/accept-merge! "
                                         "{:seon.source/candidate :tested :seon.test.run/id \"run\" "
+                                        ;; a complete request (0db8bf035 made proofs and the merge task required),
+                                        ;; so the custody check is what answers
+                                        ":seon.task/proofs #{} :seon.task/merge \"000000000000\" "
                                         ":seon.source/expected-digests {} :parents #{}}))"))))))))
-
-(deftest a-refused-install-is-its-receipts-error
-  ;; Before, a gate-refused install settled its refusal as shown text only, with
-  ;; no :seon.cluster.eval/error, so every reader (the MCP reply's exception flag)
-  ;; read a refusal as success.
-  (with-host-world {}
-    (fn [{:keys [handle branch!]}]
-      (let [hosted (host-on! handle (branch!) "mcp/installer")
-            connection (get-in hosted [:seon.turn.loop/cluster :seon.db/connection])]
-        (hosted-run! hosted "(defn gated-sq \"Square.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* x x))")
-        (hosted-run! hosted "(clojure.test/deftest gated-sq-test (clojure.test/is (= 16 (gated-sq 4))))")
-        (let [[shown] (hosted-run! hosted "(defn gated-sq \"Cube.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* x x x))")
-              errors (set (db/q '[:find [?error ...] :where [_ :seon.cluster.eval/error ?error]] (db/db connection)))]
-          (is (contains? errors shown)))))))

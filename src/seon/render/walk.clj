@@ -1315,8 +1315,8 @@
   "The root value's declared render `answer` with its entity's
   `:seon.related/data` beside the render, never inside it: assoc'd onto the AI
   face's data, a section after the HTML face. Unchanged when the value names
-  no entity, the render is at distance 0, or the face is neither (REPL
-  entries text)."
+  no entity or one the database does not hold yet, the render is at
+  distance 0, or the face is neither (REPL entries text)."
   {:malli/schema [:=> [:cat :seon.render/unit :seon.render/value :seon.render/output :map] :map]}
   [unit value output answer]
   (let [face (:seon.print/node answer)
@@ -1329,8 +1329,12 @@
                  (if html? (vector? shown) (map? shown)))
       answer
       (let [data (related (assoc (apply dissoc unit item-unit-keys) :seon.render.walk/lookup lookup :seon.render/output output))]
-        (assoc-in answer [:seon.print/node :seon.print/value]
-                  (if html?
-                    [:div {:class "seon-related-entity"} shown (related-html data)]
-                    (assoc shown :seon.related/data data)))))))
+        ;; a value whose identity no stored entity holds yet (a schema a run
+        ;; registered before it settled) has no one hop: nothing exists to show
+        (if (:seon.render.walk/missing-lookup data)
+          answer
+          (assoc-in answer [:seon.print/node :seon.print/value]
+                    (if html?
+                      [:div {:class "seon-related-entity"} shown (related-html data)]
+                      (assoc shown :seon.related/data data))))))))
 

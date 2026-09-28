@@ -51,6 +51,9 @@
         ;; environment reference, as `:seon.turn.loop/cluster` does.
         parent (env/carry-state member (:seon.sci.eval/projection-state parent-ctx))
         parent-connection (:seon.db/connection parent)
+        ;; a test member's world holds no agent, root included: the page's
+        ;; agent is created in it, so the fork inherits it
+        _ (support/transacted! parent-connection (support/agent-tx @parent-connection "root"))
         _ (#'web/render-pass (root-render-state parent))
         parent-cache (render/shared-cache parent-ctx)
         parent-package (root-package parent-ctx)
