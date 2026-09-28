@@ -55,11 +55,20 @@
                         (throw (ex-info (:seon.error/message recovery) recovery)))
                     instance (publish! (merge instance recovery))
                     process (cluster/process-identity (:seon.boot/advertisement instance))
+                    ;; The process record carries this boot's timeline so far
+                    ;; and the program it runs, on the commit that establishes
+                    ;; the process: the health report compares boot phases
+                    ;; across programs (seon.health/regressions).
+                    record {:seon.db.process/id process
+                            :seon.db.process/start-instant (:seon.boot/start-instant (:seon.boot/advertisement instance))
+                            :seon.source/commit-id (get-in instance [:seon.source/current :seon.source/commit-id])
+                            :seon.db.process/layers (into #{} (map (juxt :seon.boot/layer :seon.boot/at-ms))
+                                                          (:seon.boot/layers instance))}
                     instance (publish!
                               (assoc instance
                                      :seon.boot/config-result
                                      (cluster/seed-cluster-facts!
-                                      connection cluster-name compiled-config process)))]
+                                      connection cluster-name compiled-config process record)))]
                 (cluster/seed-root-agent! connection cluster-name process)
                 [instance process])))
            ;; Boot's dials are the compiled config it just applied: the store's
