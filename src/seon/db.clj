@@ -2250,12 +2250,25 @@
                                     (decode-attribute-maps declarations value))
 
     (and (vector? attribute) (some? value))
-    (loop [[candidate & remaining] attribute]
-      (let [attempt (try {::value (decode-attribute-value declarations candidate value)}
-                         (catch Exception failure {::failure failure}))]
-        (if-let [failure (::failure attempt)]
-          (if (seq remaining) (recur remaining) (throw failure))
-          (::value attempt))))
+    ;; One variable binds values of several attributes: a plain string of a
+    ;; later attribute can read as EDN under an earlier EDN-backed one, so an
+    ;; earlier candidate is taken only when its decoded value fits its schema.
+    ;; This picks the producing attribute; it judges no committed value (a
+    ;; decode never re-applies the write schema).
+    (let [projection @(::read-projection declarations)]
+      (loop [[candidate & remaining] attribute]
+        (let [attempt (try {::value (decode-attribute-value declarations candidate value)}
+                           (catch Exception failure {::failure failure}))]
+          (cond
+            (::failure attempt)
+            (if (seq remaining) (recur remaining) (throw (::failure attempt)))
+
+            (and (seq remaining)
+                 (schema.datahike/edn-encoded-attr-in? projection candidate)
+                 (not ((schema/projection-validator projection candidate) (::value attempt))))
+            (recur remaining)
+
+            :else (::value attempt)))))
     (and attribute (some? value)) (decode-attribute-value declarations attribute value)
     :else (decode-attribute-maps declarations value)))
 
