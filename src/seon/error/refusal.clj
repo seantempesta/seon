@@ -2,7 +2,8 @@
   "Diagnostic construction and cause-chain reading for error boundaries. An
   error holds references, never copies: every world in it is referenced here."
   (:require [clojure.edn :as edn]
-            [clojure.java.io :as io]))
+            [clojure.java.io :as io]
+            [seon.id :as id]))
 
 (defn- machinery-namespace?
   "Whether `frame-ns` is Seon's own fault machinery or the operator's prepl
@@ -177,7 +178,7 @@
   [frame]
   (boolean (seq (first-party-in (authored-prefixes [frame]) [frame]))))
 
-(defn- cause-links
+(defn cause-links
   "`throwable` and its causes, outermost to root, each once: a cause cycle
   (`initCause` permits one) ends at its first repeat, as `printStackTrace`'s
   own guard does."
@@ -494,10 +495,165 @@
                (renumber :seon.error/cause-of))
           kept)))
 
+;;; WHO PRODUCED IT (health plan §3, owner ruling 2026-09-28: blame follows the
+;;; producer). Read only when an error is built, so an ordinary call pays nothing.
+
+(defn var-digest
+  "The definition digest the armed Var of `function` runs: its profile cell's,
+  the key a world's call sink counts it under. Nil when `function` is not a
+  loaded, armed Var.
+
+  ## Costs
+
+  - A namespace lookup, a Var resolution and two map reads; failure path only."
+  {:malli/schema [:=> [:cat :qualified-symbol] [:maybe :seon.program/definition-digest]]}
+  [function]
+  (when-let [namespace-object (find-ns (symbol (namespace function)))]
+    (let [target (ns-resolve namespace-object (symbol (name function)))]
+      (when (var? target)
+        (some-> ^clojure.lang.Var target .getRawRoot meta :seon.instrument/cell :seon.profile/digest)))))
+
+(defn current-frames
+  "The calling thread's complete stack frames as `[class method file line]`,
+  innermost first: what a refusal is built on, read once on the failure path."
+  {:malli/schema [:=> [:cat] [:vector :seon.error/frame]]}
+  []
+  (into []
+        (keep (fn [^StackTraceElement frame]
+                (when-let [file (.getFileName frame)]
+                  [(symbol (.getClassName frame)) (symbol (.getMethodName frame))
+                   file (long (.getLineNumber frame))])))
+        (.getStackTrace (Thread/currentThread))))
+
+(defn calling-definition
+  "The authored definition a compiled call came from: the first of `frames`
+  (innermost first) in code an agent or Seon wrote, outside the fault and
+  contract machinery ([[first-party-frame?]]), named as the Var it belongs to
+  ([[frame-function]]). Nil when that frame names no Var (an evaluated form:
+  `user$eval123`) or when SCI's interpreter is reached first: then the caller
+  is interpreted and its SCI frames name it."
+  {:malli/schema [:=> [:cat [:sequential :seon.error/frame]] [:maybe :qualified-symbol]]}
+  [frames]
+  (reduce (fn [_ [class-name :as frame]]
+            (cond
+              (.startsWith (str class-name) "sci.") (reduced nil)
+              (first-party-frame? frame) (reduced (frame-function class-name))))
+          nil frames))
+
+(defn- contract-refusal
+  "The armed wrapper's refusal `error` is or carries: itself, else the deepest
+  in `throwable`'s cause chain, else in its recorded chain's link data."
+  {:malli/schema [:=> [:cat :map [:maybe :seon.error/throwable]] [:maybe :map]]}
+  [error throwable]
+  (let [refusal? #(and (map? %) (qualified-symbol? (:seon.instrument/fn %)) (keyword? (:seon.instrument/arm %)))]
+    (or (when (refusal? error) error)
+        (when throwable (some #(let [data (ex-data %)] (when (refusal? data) data)) (rseq (cause-links throwable))))
+        (some #(let [data (:seon.error/data %)] (when (refusal? data) data)) (rseq (vec (:seon.error/chain error)))))))
+
+(defn- interpreted-frames
+  "An interpreted failure's SCI frames, innermost first, as `[where]`: the
+  error's `:seon.sci.eval/stacktrace`, else read once from `throwable`
+  (`sci.core/stacktrace`); nil where SCI is not loaded."
+  {:malli/schema [:=> [:cat :map [:maybe :seon.error/throwable]] [:maybe [:sequential [:cat :symbol [:* :any]]]]]}
+  [error throwable]
+  (or (:seon.sci.eval/stacktrace error)
+      (when-let [stacktrace (and throwable (find-ns 'sci.core) (resolve 'sci.core/stacktrace))]
+        (keep (fn [{frame-ns :ns frame-name :name}]
+                (when frame-ns [(if frame-name (symbol (str frame-ns) (str frame-name)) (symbol (str frame-ns)))]))
+              (try (stacktrace throwable) (catch Exception _ nil))))))
+
+(defn- authored-function?
+  "Whether `function` names code an agent or Seon wrote, outside the fault
+  machinery (`authored-namespace?`): a dependency's or the host's operation
+  (`clojure.core/eval`) produced nothing an agent can edit."
+  {:malli/schema [:=> [:cat :qualified-symbol] :boolean]}
+  [function]
+  (let [function-ns (namespace function)]
+    (and (not (machinery-namespace? function-ns))
+         (authored-namespace? function-ns (symbol (str (clojure.lang.Compiler/munge function-ns) "$"
+                                                       (clojure.lang.Compiler/munge (name function))))))))
+
+(defn producer
+  "The definition that produced a failure, by the blame rule: an input or
+  arity violation's caller passed the bad value, an output or guard
+  violation's function returned it, a throw's first authored frame threw it,
+  a declared error value's operation returned it. Returns
+  `:seon.error/producer` and, when known, `:seon.error/producer-digest` (the
+  version that ran), plus the refused call's `:seon.error/caller`; empty when
+  the agent's own evaluated form produced it, or nothing authored did.
+
+  The armed wrapper names a compiled caller itself (`seon.instrument`); an
+  interpreted caller is the first SCI frame that is not the refusing
+  function, and its digest is the recording branch's, never the host Var's.
+
+  ## Examples
+
+  (producer (ex-data refusal) refusal)
+  ;; => {:seon.error/producer seon.turn/system-turn :seon.error/caller seon.turn/system-turn}"
+  {:malli/schema [:=> [:cat :map [:maybe :seon.error/throwable]]
+                  [:map [:seon.error/producer {:optional true} :seon.error/producer]
+                   [:seon.error/producer-digest {:optional true} :seon.error/producer-digest]
+                   [:seon.error/caller {:optional true} :seon.error/caller]
+                   [:seon.error/caller-digest {:optional true} :seon.error/caller-digest]]]}
+  [error throwable]
+  (let [refusal (contract-refusal error throwable)
+        refuser (:seon.instrument/fn refusal)
+        interpreted (delay (some (fn [[where]] (when (and (qualified-symbol? where) (not= where refuser)) where))
+                                 (interpreted-frames error throwable)))
+        named (fn [function digest]
+                (if (and function (authored-function? function))
+                  (cond-> {:seon.error/producer function} digest (assoc :seon.error/producer-digest digest))
+                  {}))
+        called (select-keys refusal [:seon.error/caller :seon.error/caller-digest])
+        called (if (and refusal (empty? called) @interpreted) {:seon.error/caller @interpreted} called)]
+    (merge called
+           (cond
+             (:seon.error/producer refusal) (select-keys refusal [:seon.error/producer :seon.error/producer-digest])
+             (#{:output :guard} (:seon.instrument/arm refusal)) (named refuser (:seon.instrument/digest refusal))
+             refusal (named @interpreted nil)
+             throwable (let [function (some-> (root-frame throwable) first frame-function)]
+                         (named function (some-> function var-digest)))
+             (qualified-symbol? (:seon.error/operation error))
+             (named (:seon.error/operation error) (var-digest (:seon.error/operation error)))
+             :else {}))))
+
+(defn world-reference
+  "The world an evaluation runs in (`seon.batch/*world*`, bound by the one
+  REPL path and by every Flow proc step), as the identities of its agent,
+  branch, turn, evaluation and task: an error holds references, never the
+  world. Nil outside any world."
+  {:malli/schema [:=> [:cat [:maybe :map]] [:maybe :seon.error/world]]}
+  [world]
+  (let [{agent-id :seon.agent/id branch :seon.agent/branch turn :seon.turn/id ordinal :seon.batch/ordinal
+         task :seon.task/id} world]
+    (not-empty
+     (cond-> {}
+       agent-id (assoc :seon.agent/id agent-id)
+       branch (assoc :seon.agent/branch branch)
+       turn (assoc :seon.turn/id turn)
+       (and turn (int? ordinal)) (assoc :seon.cluster.eval/id (id/evaluation turn ordinal))
+       task (assoc :seon.task/id task)))))
+
+(defn- current-world
+  "The calling world, read where `seon.batch` is loaded (never in the operator)."
+  {:malli/schema [:=> [:cat] [:maybe :map]]}
+  []
+  (some-> (find-ns 'seon.batch) (ns-resolve '*world*) deref))
+
+(defn attributed
+  "`error` with the common part every recorded failure carries supplied where
+  it states none: the blame rule's [[producer]] and the calling world's
+  reference ([[world-reference]]). What the producer stated wins."
+  {:malli/schema [:=> [:cat :map [:maybe :seon.error/throwable]] :map]}
+  [error throwable]
+  (let [world (when-not (:seon.error/world error) (world-reference (current-world)))]
+    (cond-> (merge (producer error throwable) error)
+      world (assoc :seon.error/world world))))
+
 (defn diagnostic
   "Preserve the supplied observation, consuming only its optional Throwable,
   with every world in it referenced (`references`, under the operation's
-  handed projection).
+  handed projection), and the common part supplied ([[attributed]]).
   From the Throwable derive the outermost exception class, the whole cause
   `:seon.error/chain`, the ROOT cause's first complete stack frame, and —
   when the observation states none — the root cause's message."
@@ -514,7 +670,7 @@
      :seon.error/base]]}
   ([{:seon.error/keys [throwable message] :as observation}]
   (let [projection (operation-projection)
-        observation (references projection (dissoc observation :seon.error/throwable))]
+        observation (attributed (references projection (dissoc observation :seon.error/throwable)) throwable)]
   (if throwable
     (let [links (chain throwable projection)
           primary (subvec links 0 (count (cause-links throwable)))

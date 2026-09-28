@@ -19,6 +19,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.error :as error]
+            [seon.error.refusal :as refusal]
             [seon.render.value :as render.value]))
 
 (defn- tagged-run
@@ -61,6 +62,20 @@
     (into #{} (keep #(get-in (db/pull db-after [{:seon.message/to [:seon.agent/id]}] %)
                              [:seon.message/to :seon.agent/id]))
           messages)))
+
+(defn- landed-occurrence
+  "The occurrence a committed recording landed on: the writer chooses among
+  the recording's slots (`seon.error/commit-call`), and every landing writes
+  its last instant."
+  {:malli/schema [:=> [:cat :seon.db/transaction-report]
+                  [:or :nil [:tuple [:= :seon.error.occurrence/id] :seon.error.occurrence/id]]]}
+  [{:keys [tx-data db-after]}]
+  (let [attribute (fn [datom] (let [a (:a datom)] (if (keyword? a) a (:db/ident (db/pull db-after [:db/ident] a)))))]
+    (some (fn [datom]
+            (when (and (:added datom) (= :seon.error.occurrence/last-at (attribute datom)))
+              (when-let [id (:seon.error.occurrence/id (db/pull db-after [:seon.error.occurrence/id] (:e datom)))]
+                [:seon.error.occurrence/id id])))
+          tx-data)))
 
 (defn record!
   "Commit one escaped Throwable as one durable fact per delivery.
@@ -186,7 +201,8 @@
                      (nil? result) data
                      (db/database-value? (:db-after result)) :seon.flow/committed
                      :else result)
-                   (:seon.error.occurrence/ref data)
+                   (or (when (db/database-value? (:db-after result)) (landed-occurrence result))
+                       (:seon.error.occurrence/ref data))
                    (when (db/database-value? (:db-after result))
                      (delivered-to result (:seon.error/signature prepared-fact)))]))
               home (cluster.branch/cluster-branch cluster-name)
@@ -319,7 +335,12 @@
                   :seon.error/operation (:seon.error/operation context)
                   :seon.error/declared-schema
                   (or (:seon.error/declared-schema context)
-                      (when throwable? (:seon.error/declared-schema (meta (ex-data failure))))
+                      ;; the producer's declaration, wherever its link sits: an
+                      ;; interpreted caller's refusal arrives inside SCI's
+                      ;; location wrapper, whose own data declares nothing
+                      (when throwable?
+                        (some #(:seon.error/declared-schema (meta (ex-data %)))
+                              (refusal/cause-links failure)))
                       :seon.flow/exception-error)})
         committed? (= :seon.flow/committed outcome)
         receipt (cond-> {:seon.boot/cluster-name cluster-name

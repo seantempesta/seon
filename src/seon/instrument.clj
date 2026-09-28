@@ -8,7 +8,7 @@
   Host calls without cluster custody use the supplied program captured at
   arming; they never consult Malli's global registry."
   {:seon/tasks #{"f985bfc97116" "96ac997dcf2f"}}
-  (:require [seon.error.refusal]
+  (:require [seon.error.refusal :as refusal]
             [clojure.edn :as edn]
             [clojure.set :as set]
             [malli.core :as m]
@@ -377,18 +377,31 @@
       (when (and (string? file) line)
         (str file ":" line)))))
 
+(defn- declared-keys
+  "The keys a map branch declares, through `:and` and named references."
+  {:malli/schema [:=> [:cat [:fn malli.core/schema?]] [:set :any]]}
+  [schema]
+  (let [resolved (m/deref-all schema)]
+    (case (m/type resolved)
+      :map (set (m/explicit-keys resolved))
+      :and (into #{} (mapcat declared-keys) (m/children resolved))
+      #{})))
+
 (defn- closest-alternatives
   "Each union's problems narrowed to its closest alternative, with how many
-  other branches were dropped. Closest: a branch the value's type matched
-  (every problem lies deeper than the union's own value, e.g. one missing
-  key of a map branch) before one it did not, then the fewest problems, then
-  the first. Malli explains an `:or` with every branch's errors under the
-  union's path plus the branch index; a refusal that led with the first
-  branch said 'expected nil, got a map' for a map that failed a map branch
-  by one key, and carried every branch's problems (365 for render-call)."
-  {:malli/schema [:=> [:cat [:fn malli.core/schema?] [:sequential :map]]
+  other branches were dropped. Closest: the branch declaring the most of the
+  value's own keys (a map carrying `:seon.render.profile/*` keys is refused as
+  a profile, never as the error base it shares fewer keys with), then one the
+  value's type matched (every problem lies deeper than the union's own value,
+  e.g. one missing key of a map branch) before one it did not, then the
+  fewest problems, then the first. Malli explains an `:or` with every
+  branch's errors under the union's path plus the branch index; a refusal
+  that led with the first branch said 'expected nil, got a map' for a map
+  that failed a map branch by one key, and carried every branch's problems
+  (365 for render-call)."
+  {:malli/schema [:=> [:cat [:fn malli.core/schema?] :seon.schema/value [:sequential :map]]
                   [:tuple [:vector :map] nat-int?]]}
-  [schema problems]
+  [schema value problems]
   (reduce (fn [[problems others] {path :path at :in union :schema}]
             (if-not (= :or (m/type union))
               [problems others]
@@ -398,12 +411,17 @@
                                (when (and (> (count p) n) (= path (subvec p 0 n)) (int? (nth p n)))
                                  (nth p n))))
                     {inside true outside false} (group-by #(some? (branch %)) problems)
-                    branches (group-by branch inside)]
+                    branches (group-by branch inside)
+                    held (get-in value at)
+                    shared (fn [i] (if (map? held)
+                                     (count (filter (declared-keys (nth (m/children union) i)) (keys held)))
+                                     0))]
                 (if (< (count branches) 2)
                   [problems others]
                   (let [mismatched? (fn [branch-problems]
                                       (if (some #(<= (count (:in %)) (count at)) branch-problems) 1 0))
-                        [_ closest] (first (sort-by (fn [[i ps]] [(mismatched? ps) (count ps) i]) branches))]
+                        [_ closest] (first (sort-by (fn [[i ps]] [(- (shared i)) (mismatched? ps) (count ps) i])
+                                                    branches))]
                     [(into (vec outside) closest) (+ others (dec (count branches)))])))))
           [(vec problems) 0]
           (mu/subschemas schema)))
@@ -434,6 +452,7 @@
            [explained-problems other-alternatives]
            (closest-alternatives
             offended
+            value
             (distinct
             (map (fn [problem]
                    (let [union (some #(when (= (:in problem) (:in %)) %) described-unions)]
@@ -608,7 +627,10 @@
                                     (some-> f meta interpreted-original) original)
                prior
                (profile/cell callable-identity))
-        arm-request (dissoc arm-request :seon.program/definition-digest :seon.profile/context)]
+        digest (:seon.program/definition-digest arm-request)
+        arm-request (cond-> (dissoc arm-request :seon.program/definition-digest :seon.profile/context)
+                      ;; the interpreted definition's digest, which its refusals name
+                      digest (assoc ::digest digest))]
     (when-not (and (map? caps)
                    (pos-int? (:seon.config.eval.result/max-bytes caps))
                    (pos-int? (:seon.config.eval.result/max-source caps)))
@@ -662,6 +684,28 @@
 
 (def ^:dynamic ^:private *compiling-contract* false)
 
+(defn- problem-location
+  "Where in the checked value the first problem lies, as the declared error
+  location (`:seon.error/location`): one ordered segment per key of `path`,
+  each key held as its scalar. The location enters the fault's signature, so
+  two paths are two problems. A path holding a key that is not a scalar has
+  no stored location (length 0)."
+  {:malli/schema [:=> [:cat [:maybe :seon.render.data/path]] :seon.error.location/entity]}
+  [path]
+  (let [scalar? #(or (keyword? %) (symbol? %) (string? %) (int? %) (boolean? %))]
+    (if (and (seq path) (every? scalar? path))
+      {:seon.error.location/length (count path)
+       :seon.error.location/segments
+       (set (map-indexed (fn [ordinal k]
+                           (let [printed (seon.id/printed k)]
+                             {:seon.error.location.segment/ordinal ordinal
+                              :seon.error.location.segment/key {:seon.error.key/projection printed
+                                                                :seon.error.key/capped? false
+                                                                :seon.error.key/bound-bytes 256
+                                                                :seon.error.key/scalar k}}))
+                         path))}
+      {:seon.error.location/length 0})))
+
 (defn- boundary-refusal
   "Construct boundary evidence independently of the body's output contract.
 
@@ -672,12 +716,28 @@
   compiled predicate is a callable, not a name."
   {:malli/schema [:=> [:cat :seon.schema/projection :qualified-keyword :map [:vector :map]] :seon.instrument/refusal-result]}
   [projection kind data arities]
-  (let [base (merge (violation projection kind (assoc data ::boundary? true))
-                    {:seon.error/at (java.util.Date.)
-                     :seon.error/layer :seon.instrument/invocation
-                     :seon.error/operation (:fn-name data)
-                     :seon.instrument/fn (:fn-name data)
-                     :seon.instrument/arity (count (:args data))})]
+  (let [function (:fn-name data)
+        ;; WHO PRODUCED THE VALUE, from this call's own stack (failure path
+        ;; only): the compiled caller and each definition's digest from its
+        ;; armed Var's profile cell, the version that ran. An interpreted
+        ;; caller is SCI's to name (`seon.error.refusal/producer`).
+        caller (refusal/calling-definition (refusal/current-frames))
+        caller-digest (some-> caller refusal/var-digest)
+        digest (or (::digest data) (refusal/var-digest function))
+        own? (#{:malli.core/invalid-output :malli.core/invalid-guard} kind)
+        [producer producer-digest] (if own? [function digest] [caller caller-digest])
+        base (cond-> (merge (violation projection kind (assoc data ::boundary? true))
+                            {:seon.error/at (java.util.Date.)
+                             :seon.error/layer :seon.instrument/invocation
+                             :seon.error/operation function
+                             :seon.instrument/fn function
+                             :seon.instrument/arity (count (:args data))
+                             :seon.render/operations [(list 'doc function)]})
+               digest (assoc :seon.instrument/digest digest)
+               caller (assoc :seon.error/caller caller)
+               caller-digest (assoc :seon.error/caller-digest caller-digest)
+               producer (assoc :seon.error/producer producer)
+               producer-digest (assoc :seon.error/producer-digest producer-digest))]
     (if (= :malli.core/invalid-arity kind)
       (assoc base :seon.instrument/declared-arity-count (count arities)
              :seon.instrument/declared-arities
@@ -694,9 +754,12 @@
         ;; strings nested seven levels deep: one missing key printed as
         ;; 34,518 bytes over MCP (2026-09-26). Values stay values; the
         ;; floor printer bounds them at the edge.
-        (assoc base :seon.instrument/check check
+        (cond-> (assoc base :seon.instrument/check check
                :seon.error/expected-shape (seon.id/digest 64 [(:fn-name data) (::arity-ordinal data) check])
-               :seon.error/location {:seon.error.location/length 0})))))
+               :seon.error/location (problem-location (:seon.error/path (first (:seon.error/problems base)))))
+          ;; the named schema the offending value failed, joinable to its entity
+          (qualified-keyword? (:seon.error/expected (first (:seon.error/problems base))))
+          (assoc :seon.error/expected-key (:seon.error/expected (first (:seon.error/problems base)))))))))
 
 (defn calling-environment
   "The world of the evaluation calling now: its context's environment, naming
@@ -818,8 +881,9 @@
                         (minimal kind data (:exception data)))
                     (try
                       (let [value (boundary-refusal projection kind
-                                                    (assoc data :fn-name function-symbol
-                                                           ::arity-ordinal (arity-ordinal data))
+                                                    (cond-> (assoc data :fn-name function-symbol
+                                                                   ::arity-ordinal (arity-ordinal data))
+                                                      (::digest policy) (assoc ::digest (::digest policy)))
                                                     arities)]
                         (if (@refusal? value)
                           [(if (= :malli.core/invalid-arity kind)

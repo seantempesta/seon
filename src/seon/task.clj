@@ -4,9 +4,11 @@
   the task home through the one task writer (`seon.issue/adopt-tasks-tx`)."
   {:seon/tasks #{"2fe9c6b7fe31"}}
   (:require [seon.db :as db]
+            [seon.error :as error]
             [seon.error.refusal :as refusal]
             [seon.id :as id]
-            [seon.issue :as issue]))
+            [seon.issue :as issue]
+            [seon.schema :as schema]))
 
 (defn home
   "The connection tasks live on, seen from `database`: root's home branch (root's
@@ -152,10 +154,32 @@
           :else (refused 'seon.task/assignment :unassigned 'seon.task {:seon.agent/id agent-id :seon.store/branch branch
                                                                       :seon.task/assignment (mapv first assigned)}))))
 
+(defn- refuted
+  "The `proofs` observed red on `database` (the proposing branch) at a reach
+  no green member of the same test shares, as `[test reach-digest]`: each
+  failed at the program before the change (health plan §5, owner ruling: a
+  task made from a fault is proven only red first)."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:set :symbol]]
+                  [:or [:set [:tuple :symbol [:string {:min 64 :max 64}]]] :seon.db/error-result]]}
+  [database proofs]
+  (let [members (db/q '[:find ?test ?reach ?fail ?error :in $ [?test ...]
+                        :where [?member :seon.test.member/symbol ?test]
+                               [?member :seon.test.member/reach-digest ?reach]
+                               [?member :seon.test.member/fail-count ?fail]
+                               [?member :seon.test.member/error-count ?error]]
+                      database (vec proofs))]
+    (if (map? members)
+      members
+      (let [green (into #{} (keep (fn [[proof reach fail failure]] (when (zero? (+ fail failure)) [proof reach]))) members)]
+        (into #{} (keep (fn [[proof reach fail failure]]
+                          (when (and (pos? (+ fail failure)) (not (green [proof reach]))) [proof reach])))
+              members)))))
+
 (defn propose!
   "Record on the cluster the merge task for the assigned `work` and one proposal
   of the commit `view` names on its branch: its proofs at their definition digests, the run and its tested
-  program. The merge task's aspect is `[ns \"merge <key>\" :merge]`, so a repeat
+  program, and each proof observed red on the branch before the change
+  (`:seon.task/refuted`, read from the branch `connection` holds). The merge task's aspect is `[ns \"merge <key>\" :merge]`, so a repeat
   proposal finds it; the recurrence key `[key commit]` records one proposal per
   commit. Answers the proposal view."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id :seon.task/assigned-work
@@ -167,9 +191,13 @@
   (let [entity (task-entity {:seon.task/ns ns :seon.task/name (str "merge " key) :seon.task/kind :merge
                        :seon.task/intent (str "Merge branch " (name (:seon.task/branch view)) "'s change for " key ".")}
                       agent-id)
-        view (assoc view :seon.task/proposal (id/id [key (:seon.task/commit view)]) :seon.task/merge (:seon.task/id entity))
+        red (refuted (db/db connection) (into #{} (map first) (:seon.task/proved view)))
+        view (cond-> (assoc view :seon.task/proposal (id/id [key (:seon.task/commit view)]) :seon.task/merge (:seon.task/id entity))
+               (seq red) (assoc :seon.task/refuted red))
         report (refusal-data #(written connection (conj (task-call connection entity {}) (assoc view :seon.task/proposes proposes))))]
-    (if (:seon.error/at report) report view)))
+    (cond (map? red) red
+          (:seon.error/at report) report
+          :else view)))
 
 (defn decide!
   "Root records its `outcome` on the merge task `merge-task`, closing it: `proposals`
@@ -182,3 +210,40 @@
   [connection merge-task outcome]
   (let [report (written connection [[:db/add [:seon.task/id merge-task] :seon.task/outcome outcome]])]
     (if (:seon.error/at report) report {:seon.task/id merge-task :seon.task/outcome outcome})))
+
+(defn resolution
+  "Why task `handle` is closed, or nil while it is open: derived from what
+  the task answers, never a stored flag (health plan §5).
+
+  - A task answering faults (`:seon.task/faults`) is closed when every one
+    is resolved (`seon.error/resolution`: its producer changed and, for a
+    fault the task answers, the task's proof holds).
+  - A task made from a warning signal is closed once its subject no longer
+    satisfies the named signal schema (`:seon.task/signal`), validated against
+    the subject's stored attributes.
+  - A merge task is closed by root's outcome.
+
+  An authored task answering none of these is open while a definition names
+  it (`seon.issue/open-tasks`); it has no resolution here.
+
+  ## Examples
+
+  (seon.task/resolution (seon.db/db) \"6cc772cb3f60\")"
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle]
+                  [:or :nil :seon.task/resolution :seon.db/error-result]]}
+  [database handle]
+  (let [task (db/pull database [:seon.task/outcome :seon.task/signal {:seon.task/subject [:db/id]}
+                                {:seon.task/faults [:seon.error/signature]}]
+                      [:seon.task/id handle])
+        signatures (keep :seon.error/signature (:seon.task/faults task))]
+    (cond
+      (:seon.error/at task) task
+      (:seon.task/outcome task) {:seon.task/closed-by :seon.task/outcome}
+      (seq signatures)
+      (let [resolved (mapv #(error/resolution database %) signatures)]
+        (cond (some :seon.error/at resolved) (some #(when (:seon.error/at %) %) resolved)
+              (every? some? resolved) {:seon.task/closed-by :seon.task/faults :seon.task/resolutions resolved}))
+      (and (:seon.task/signal task) (:db/id (:seon.task/subject task)))
+      (let [subject (db/stored-entity database (:db/id (:seon.task/subject task)))
+            satisfied? (schema/projection-validator (db/carried-projection database) (:seon.task/signal task))]
+        (when-not (satisfied? subject) {:seon.task/closed-by :seon.task/signal})))))

@@ -195,7 +195,7 @@
                ;; The faults themselves are the failing value the report prints.
                (is (= [] (mapv #(db/pull (db/db connection)
                                          [:seon.error.occurrence/message
-                                          :seon.error.occurrence/proc-fn
+                                          :seon.error/producer
                                           {:seon.error.occurrence/turn [:seon.turn/id]}
                                           {:seon.error/_occurrences
                                            [:seon.error/layer :seon.error/operation :seon.error/frame]}]

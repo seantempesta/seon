@@ -151,7 +151,8 @@
     [(str/join "$" (remove #{"fn"} (map segment segments))) (str method) (some-> file str)]))
 
 (defn- signature
-  "D13: identity of the observed site, producer-declared schema, violated schema and path.
+  "D13: identity of the observed site, producer-declared schema, violated
+  schema and path, and the producing definition's name (never its digest).
   Incidental time, process, message, offending bytes and the compiler's class
   numbering and line numbers ([[frame-site]]) never enter this tuple."
   {:malli/schema [:=> [:cat :seon.schema/projection :map :seon.error/declared-schema
@@ -176,7 +177,10 @@
             throwable-class (some-> frame frame-site)
             (into (sorted-map)
                   (select-keys observation [:seon.error/expected-key :seon.error/expected-shape]))
-            path]
+            path
+            ;; who produced it (the blame rule): one refusal reached from two
+            ;; callers is two problems with two fixes
+            (:seon.error/producer observation)]
            64)))
 
 (defn- stored-observation
@@ -380,28 +384,6 @@
           projected
           (admit/canonical-edn projected))))))
 
-(defn- stack-failing-function
-  "The first first-party function on the Throwable's stack, as `ns/name`.
-
-  THE ONE SEAM WHERE THE FRAME IS KNOWN. Only
-  `:seon.instrument/contract-violated` faults arrived carrying
-  `:seon.instrument/fn`, so `:seon.error/steward` — which routes
-  fn -> `:seon.fn/ns` -> `:seon.ns/steward` — routed exactly nothing in
-  production: 23 of 23 faults on a live cluster carried no failing
-  function (verify-listened-attributes-2026-09-08 §4b). The Throwable
-  itself knows; every other fault class arrives with a proc name, which
-  is not a function and resolves no steward.
-
-  Which frame names a function, and which frames are the machinery that
-  caught the failure, is `seon.error.refusal/frame-function`'s one rule."
-  {:malli/schema [:=> [:cat [:or :nil :seon.error/throwable]]
-                  [:or :nil :qualified-symbol]]}
-  [^Throwable failure]
-  (when failure
-    (some (fn [^StackTraceElement frame]
-            (error.refusal/frame-function (symbol (.getClassName frame))))
-          (.getStackTrace failure))))
-
 (defn- contract-violation-data
   "The reporter's declared function/arm evidence: the `ex-data` of the source's
   Throwable (bare or flow's `::flow/ex`), else the source itself when it is
@@ -413,13 +395,15 @@
                              [:seon.instrument/arm [:enum :input :output :guard]]]]]}
   [source]
   (let [failure (throwable source)
-        data (cond failure (ex-data failure)
-                   (map? (::flow/ex source)) (:data (::flow/ex source))
-                   :else source)]
-    (when (and (map? data)
-               (qualified-symbol? (:seon.instrument/fn data))
-               (#{:input :output :guard} (:seon.instrument/arm data)))
-      data)))
+        refusal? #(and (map? %)
+                       (qualified-symbol? (:seon.instrument/fn %))
+                       (#{:input :output :guard} (:seon.instrument/arm %)))]
+    (cond
+      ;; any link: an interpreted caller's refusal arrives inside SCI's
+      ;; location copy, whose own data names no function
+      failure (some #(let [data (ex-data %)] (when (refusal? data) data)) (error.refusal/cause-links failure))
+      (map? (::flow/ex source)) (let [data (:data (::flow/ex source))] (when (refusal? data) data))
+      (refusal? source) source)))
 
 (defn- offending-entry
   "The map entry holding the value that actually broke the contract, if any.
@@ -673,13 +657,18 @@
         flow? (map? source)
         error-value (error.refusal/references projection
                                               (if failure (refusal failure) source))
-        operation (:seon.error/operation error-value)
+        ;; THE COMMON PART, SUPPLIED: the blame rule's producer and caller
+        ;; with the digests that ran, and the failing world by reference
+        ;; (`seon.error.refusal/attributed`), each stored on the occurrence
+        ;; as a declared base member.
+        attributed (error.refusal/attributed (if (map? error-value) error-value {}) failure)
+        operation (:seon.error/operation attributed)
         ;; A failure's own declared operation wins; else the observing
         ;; boundary's, which is stable where a thrower's class name is not.
         function (or (when (qualified-symbol? operation) operation)
                      (:seon.instrument/fn instrument-data)
                      boundary-operation
-                     (stack-failing-function failure))
+                     (:seon.error/producer attributed))
         frame (error.refusal/root-frame failure)
         chain (when failure (error.refusal/chain failure projection))
         observation (merge (cond-> (seon.error.refusal/diagnostic at (or boundary-layer :seon.error/normalization)
@@ -688,7 +677,7 @@
                              class-name (assoc :seon.error/exception-class (symbol class-name))
                              frame (assoc :seon.error/frame frame)
                              chain (assoc :seon.error/chain chain))
-                           (when (map? error-value) error-value))
+                           attributed)
         observation (cond-> observation
                       (= :seon.error/normalization-error declared-schema)
                       (assoc :seon.error/data-edn full-edn))
@@ -753,21 +742,19 @@
           (:seon.error/exception-class observation)
           (assoc :seon.error/exception-class (:seon.error/exception-class observation))
           frame (assoc :seon.error/frame frame)
-          function (assoc :seon.instrument/fn function)
+          (:seon.error/producer observation) (assoc :seon.error/producer (:seon.error/producer observation))
           (and flow? (::flow/pid source))
           (assoc :seon.error/proc (::flow/pid source))
           (and flow? (::flow/op source)) (assoc :seon.error/op (::flow/op source))
           (and flow? (::flow/cid source))
           (assoc :seon.error/cid (::flow/cid source))
-          ;; THE FAILING FUNCTION IS RECORDED FOR EVERY CLASS. The
-          ;; contract reporter knows it by name; every other class knows
-          ;; it by the frame that threw, and a fault carrying neither
-          ;; routes to no steward at all.
-          (or (:seon.instrument/fn instrument-data)
-              (stack-failing-function failure))
-          (assoc :seon.instrument/fn
-                 (or (:seon.instrument/fn instrument-data)
-                     (stack-failing-function failure)))
+          ;; `:seon.instrument/fn` NAMES ONLY THE ARMED FUNCTION THAT
+          ;; REFUSED. Who produced the failure is `:seon.error/producer`
+          ;; (the blame rule); writing the frame that threw here named the
+          ;; recorder itself (`seon.turn.world/record-fault`) on 41 of 47
+          ;; faults, and resolution watched it (health plan §3).
+          (:seon.instrument/fn instrument-data)
+          (assoc :seon.instrument/fn (:seon.instrument/fn instrument-data))
           (:seon.instrument/arm instrument-data)
           (assoc :seon.instrument/arm (:seon.instrument/arm instrument-data))
           ;; MEASURE THE OFFENDING VALUE, NOT THE REQUEST IT RODE IN. The
@@ -1142,10 +1129,11 @@
           :else result)))
 
 (defn steward
-  "The steward of the currently defined function named by a historical fault."
+  "The steward of the namespace of the function that produced a fault (its
+  `:seon.error/producer`), else of the function that refused it."
   {:malli/schema [:=> [:cat :seon.db/database-value :map] [:or :nil :seon.agent/id :seon.db/error-result]]}
   [database fact]
-  (when-let [function (:seon.instrument/fn fact)]
+  (when-let [function (or (:seon.error/producer fact) (:seon.instrument/fn fact))]
     (db/q '[:find ?id . :in $ ?symbol
             :where [?function :seon.fn/sym ?symbol]
                    [?function :seon.fn/ns ?namespace]
@@ -1153,15 +1141,53 @@
                    [?agent :seon.agent/id ?id]]
           database function)))
 
+(defn- proof
+  "Whether task `handle`'s proof holds in `database` (health plan §5): every
+  test naming it (`:seon.task/tasks`) was proved green by one accepted
+  proposal of it (`:seon.task/proved`) and observed red first on the
+  proposing branch (`:seon.task/refuted`). A task no test names has no proof.
+  The answer is derived, never stored."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] [:or :boolean :seon.db/error-result]]}
+  [database handle]
+  (let [tests (db/q '[:find [?test ...] :in $ ?handle
+                      :where [?t :seon.task/tasks ?handle] [?t :seon.test/sym ?test]]
+                    database handle)
+        proposals (db/q '[:find [?proposal ...] :in $ ?handle
+                          :where [?assignment :seon.task/assigned ?handle]
+                                 [?proposal :seon.task/proposes ?assignment]
+                                 [?proposal :seon.task/merge ?merge]
+                                 [?merge-task :seon.task/id ?merge]
+                                 [?merge-task :seon.task/outcome :accepted]]
+                        database handle)]
+    (cond
+      (map? tests) tests
+      (map? proposals) proposals
+      (empty? tests) false
+      :else (boolean
+             (some (fn [proposal]
+                     (let [{proved :seon.task/proved refuted :seon.task/refuted}
+                           (db/pull database [:seon.task/proved :seon.task/refuted] proposal)]
+                       (every? (fn [proof-test] (and (some #(= proof-test (first %)) proved)
+                                                     (some #(= proof-test (first %)) refuted)))
+                               tests)))
+                   proposals)))))
+
 (defn resolution
   "Why the fault `signature` names is resolved, or nil while it is open.
-  Resolved by program change when its `:seon.instrument/fn` row's definition
-  digest now differs from the digest current at its latest occurrence's
-  transaction, so a recurrence under the changed code reopens it; otherwise by
-  a `:seon.error/resolved-tx` (`seon.problems/resolve!`) at or after that
-  transaction. No function row or digest leaves the rule unknown: open. The
-  digest then is read from one `history` view, because each `as-of` view
-  derives its own projection (~100 ms per signature on default, 2026-09-24)."
+
+  By its producer (`:seon.error/producer`, the blame rule): when the
+  producer's current definition digest differs from the one its latest
+  occurrence ran (`:seon.error/producer-digest`), and, when a task answers
+  the fault (`:seon.task/faults`), that task's proof holds: a test naming it
+  was observed red before the change and proved green after
+  (`:seon.task/proof`). Otherwise by a `:seon.error/resolved-tx`
+  (`seon.problems/resolve!`) at or after its latest occurrence. A fault with
+  no producer resolves only so. A recurrence reopens it.
+
+  ## Costs
+
+  - Three indexed queries and two pulls, plus one query and one pull per
+    accepted proposal of an answering task; no history view."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.error/signature]
                   [:or :nil :seon.error/resolution :seon.db/error-result]]}
   [database signature]
@@ -1170,33 +1196,34 @@
                               [?error :seon.error/occurrences ?occurrence]
                               [?occurrence :seon.error.occurrence/last-at _ ?tx]]
                      database signature)
-        current (db/q '[:find [?function ?now ?changed] :in $ ?signature
-                        :where [?error :seon.error/signature ?signature]
-                               [?error :seon.instrument/fn ?function]
-                               [?entity :seon.fn/sym ?function]
-                               [?entity :seon.program/definition-digest ?now ?changed]]
-                      database signature)
-        [function now changed] (when (vector? current) current)
-        ;; the latest digest datom at or before `latest`; an assertion wins its tx
-        then (when (and (int? latest) changed (> changed latest))
-               (let [datoms (db/q '[:find ?tx ?digest ?added :in $ ?function ?latest
-                                    :where [?entity :seon.fn/sym ?function]
-                                           [?entity :seon.program/definition-digest ?digest ?tx ?added]
-                                           [(<= ?tx ?latest)]]
-                                  (db/history database) function latest)]
-                 (if (map? datoms) datoms
-                     (let [[_ digest added] (last (sort-by (juxt first #(if (peek %) 1 0)) datoms))]
-                       (when added digest)))))
+        fault (db/pull database [:seon.error/producer
+                                 {:seon.error/occurrences [:seon.error.occurrence/last-at :seon.error/producer-digest]}
+                                 {:seon.task/_faults [:seon.task/id]}]
+                       [:seon.error/signature signature])
+        producer (:seon.error/producer fault)
+        then (:seon.error/producer-digest (last (sort-by #(inst-ms (:seon.error.occurrence/last-at %))
+                                                         (:seon.error/occurrences fault))))
+        now (when producer
+              (db/pull database [:seon.program/definition-digest] [:seon.fn/sym producer]))
+        tasks (keep :seon.task/id (:seon.task/_faults fault))
+        proven (when (and then (not= then (:seon.program/definition-digest now)))
+                 (reduce (fn [_ handle] (let [held (proof database handle)]
+                                          (cond (map? held) (reduced held) held (reduced handle))))
+                         nil tasks))
         resolved (when (int? latest)
                    (db/q '[:find (max ?resolution) . :in $ ?signature
                            :where [?error :seon.error/signature ?signature]
                                   [?error :seon.error/resolved-tx ?resolution]]
-                         database signature))]
+                         database signature))
+        changed (cond-> {:seon.error/producer producer :seon.error/digest-then then}
+                  (:seon.program/definition-digest now)
+                  (assoc :seon.error/digest-now (:seon.program/definition-digest now)))]
     (cond
-      (some map? [latest current then resolved]) (some #(when (map? %) %) [latest current then resolved])
-      (and (string? then) (not= then now))
-      {:seon.error/resolved-by :seon.program/definition-digest :seon.instrument/fn function
-       :seon.error/digest-then then :seon.error/digest-now now}
+      (some #(and (map? %) (:seon.error/at %)) [latest fault now proven resolved])
+      (some #(when (and (map? %) (:seon.error/at %)) %) [latest fault now proven resolved])
+      (string? proven) (assoc changed :seon.error/resolved-by :seon.task/proof :seon.task/id proven)
+      (and then (not= then (:seon.program/definition-digest now)) (empty? tasks))
+      (assoc changed :seon.error/resolved-by :seon.program/definition-digest)
       (and resolved (>= resolved latest))
       {:seon.error/resolved-by :seon.error/resolved-tx :seon.error/resolved-tx resolved})))
 
@@ -1216,7 +1243,8 @@
                          database signature))]
     (cond
       (:seon.error/at resolved) resolved
-      resolved (or (:seon.error/digest-now resolved) (:seon.error/resolved-tx resolved))
+      resolved (or (:seon.error/digest-now resolved) (:seon.error/resolved-tx resolved)
+                   (:seon.error/digest-then resolved))
       (map? recorded) recorded
       (nil? recorded) 0)))
 
@@ -1246,27 +1274,74 @@
    :seon.message/about (:seon.error/signature fact)})
 
 
+(def ^:private auto-task-tempid "seon.error/producer-task")
+
+(defn- producer-task
+  "The runtime task a producer's faults answer: one per producing definition,
+  its handle the aspect `[ns \"faults of <name>\" :function]` minted as
+  `seon.issue/task-handle` mints it, so a second signature of the same producer
+  lands on the same task. It refs each signature it answers
+  (`:seon.task/faults`); it is closed when every one is resolved
+  (`seon.task/resolution`), never by a stored flag."
+  {:malli/schema [:=> [:cat :seon.error/producer :string [:maybe [:tuple [:= :seon.agent/id] :seon.agent/id]]] :map]}
+  [producer signature-tempid created-by]
+  (let [task-ns (symbol (namespace producer))
+        task-name (str "faults of " (name producer))]
+    (cond-> {:db/id auto-task-tempid
+             :seon.task/id (id/id [task-ns task-name :function])
+             :seon.task/ns task-ns :seon.task/name task-name :seon.task/kind :function
+             :seon.task/intent (str "Make " producer " stop producing the failures its faults record: each fault"
+                                    " names the refused schema and path, where it happened and the reproduction."
+                                    " Prove the fix with a deftest naming this task, red before the fix and green"
+                                    " after.")
+             :seon.task/must-read #{producer}
+             :seon.task/faults #{signature-tempid}}
+      created-by (assoc :seon.task/created-by created-by))))
+
+(defn- occurrence-slot
+  "The occurrence a failure lands on: the first of the request's slots
+  (`recording`: at most `:seon.config.error/recurrence-limit` per signature
+  and producer digest) not yet written, else the last, whose noHistory count a
+  repeat bumps. An obligation names its one occurrence."
+  {:malli/schema [:=> [:cat :seon.db/database-value :map] [:or :seon.error.occurrence/id :seon.db/error-result]]}
+  [database {id :seon.error.occurrence/id slots :seon.error.occurrence/slots}]
+  (loop [[slot & more] slots]
+    (if (nil? slot)
+      (or (peek slots) id)
+      (let [held (db/pull database [:db/id] [:seon.error.occurrence/id slot])]
+        (cond (:seon.error/at held) held
+              (nil? held) slot
+              :else (recur more))))))
+
 (defn commit-call
-  "Upsert one error occurrence and its bounded notifications at the writer."
+  "Upsert one error occurrence and its bounded notifications at the writer.
+
+  A repeat landing on an occurrence already written, in the same opening,
+  bumps its noHistory count and last instant and writes nothing else: the
+  first occurrences of each producer digest keep their world, the rest are a
+  count."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        [:and :seon.error/commit-tx-request
                         [:map [:seon.error/fact :seon.error/fact]
-                         [:seon.error.occurrence/id :seon.error.occurrence/id]]]]
+                         [:seon.error.occurrence/id :seon.error.occurrence/id]
+                         [:seon.error.occurrence/slots {:optional true} [:vector :seon.error.occurrence/id]]]]]
                   [:or :seon.store/transaction-data :seon.db/error-result]]}
   [database request]
   (let [fact (:seon.error/fact request)
         signature (:seon.error/signature fact)
-        occurrence-id (:seon.error.occurrence/id request)
+        occurrence-id (occurrence-slot database request)
         occurrence-ref [:seon.error.occurrence/id occurrence-id]
-        old (db/pull database '[*] occurrence-ref)
+        old (if (string? occurrence-id) (db/pull database '[*] occurrence-ref) occurrence-id)
+        world (:seon.error/world (:seon.error/source request))
         ;; the messages the writer selected for the signature's current opening
         notified (db/q '[:find [?message ...] :in $ ?signature
                          :where [?error :seon.error/signature ?signature]
                                 [?error :seon.error/notified ?message]]
                        database signature)
-        agent-id (second (:seon.error/agent fact))
-        turn-id (second (:seon.error/run fact))
+        agent-id (or (second (:seon.error/agent fact)) (:seon.agent/id world))
+        turn-id (or (second (:seon.error/run fact)) (:seon.turn/id world))
         escalate-to (:seon.config.error/escalate-to request)
+        root-present (agent-exists? database "root")
         agent-present (when agent-id (agent-exists? database agent-id))
         turn-present (when turn-id (entity-exists? database :seon.turn/id turn-id))
         escalation-present (when escalate-to (agent-exists? database escalate-to))
@@ -1281,10 +1356,18 @@
                                observation))
                            [(when-not (:seon.error.occurrence/id old) old)
                             (when (map? notified) notified)
-                            agent-present turn-present escalation-present
+                            agent-present turn-present escalation-present root-present
                             steward-id steward-present opened])]
-    (if read-refusal
-      read-refusal
+    (cond
+      read-refusal read-refusal
+      ;; A REPEAT IS A COUNT. Re-asserting the same diagnostics wrote 18
+      ;; history datoms per repeat (2026-09-28); the stored first
+      ;; occurrences already describe it.
+      (and (:seon.error.occurrence/id old) (nil? opened) (not (:seon.error/obligation request)))
+      [{:seon.error.occurrence/id occurrence-id
+        :seon.error.occurrence/count (inc (:seon.error.occurrence/count old))
+        :seon.error.occurrence/last-at (:seon.error/at fact)}]
+      :else
       (let [projection (db/carried-projection database)
         ;; THE FAULT'S OWN SCHEMA, NOT THE POPULATION. The stored diagnostic
         ;; attributes are its declared schema's and the base's own entries,
@@ -1323,6 +1406,12 @@
                                    :seon.instrument/actual
                                    :seon.instrument/actual-size])
         digest (:seon.error/data-blob fact)
+        ;; the version that ran: the armed Var's digest the producer stated,
+        ;; else (an interpreted definition) the recording branch's entity
+        producer-digest (or (:seon.error/producer-digest (:seon.error/source request))
+                            (when-let [producer (:seon.error/producer fact)]
+                              (:seon.program/definition-digest
+                               (db/pull database [:seon.program/definition-digest] [:seon.fn/sym producer]))))
         occurrence (cond-> (merge evidence
                                  (select-keys (:seon.error/source request) diagnostic-attributes)
                                  {:seon.error.occurrence/id occurrence-id
@@ -1338,6 +1427,12 @@
                                       (get-in database [:config :branch]))})
                      agent-id (assoc :seon.error.occurrence/agent [:seon.agent/id agent-id])
                      turn-id (assoc :seon.error.occurrence/turn [:seon.turn/id turn-id])
+                     ;; the evaluation and task by identity, joined at read time:
+                     ;; a failing evaluation settles after its fault
+                     (:seon.cluster.eval/id world)
+                     (assoc :seon.error.occurrence/evaluation (:seon.cluster.eval/id world))
+                     (:seon.task/id world) (assoc :seon.error.occurrence/task (:seon.task/id world))
+                     (string? producer-digest) (assoc :seon.error/producer-digest producer-digest)
                      digest (assoc :seon.error.occurrence/data-blob
                                    [:seon.error.occurrence/blob-digest digest])
                      ;; the world by reference: the failing request's effect and
@@ -1349,8 +1444,13 @@
                             [:seon.error.occurrence/id (:seon.error/related-occurrence request)]))
         error-entity (assoc (select-keys fact [:seon.error/signature :seon.error/id :seon.error/declared-schema
                                           :seon.error/layer :seon.error/operation :seon.instrument/fn :seon.error/frame
-                                          :seon.error/exception-class])
-                         :seon.error/occurrences #{occurrence})
+                                          :seon.error/exception-class :seon.error/producer])
+                            :db/id (fact-tempid (:seon.error/id request))
+                            :seon.error/occurrences #{occurrence})
+        ;; a producer's faults answer its one task, riding this write
+        task (when-let [producer (:seon.error/producer fact)]
+               (producer-task producer (fact-tempid (:seon.error/id request))
+                              (when root-present [:seon.agent/id "root"])))
         ;; WHO ACTS ON A RECORDED FAULT is the writer's reading of held
         ;; relations, never of the evidence's shape (a Throwable's presence
         ;; says how it escaped, not who fixes it): the steward of its function,
@@ -1379,7 +1479,8 @@
                                                   :seon.error/notified %))
                                    notified)
               true (conj (cond-> error-entity
-                           (seq messages) (assoc :seon.error/notified (set (map :db/id messages))))))
+                           (seq messages) (assoc :seon.error/notified (set (map :db/id messages)))))
+              task (conj task))
             messages))))))
 
 (defn evidence-stage
@@ -1468,20 +1569,26 @@
                                 (or (:seon.error/fact request) (:seon.error/fact prepared))))
          signature (:seon.error/signature fact)
          agent-id (second (:seon.error/agent fact))
-         turn-id (second (:seon.error/run fact))
          origin (:seon.error.occurrence/branch request)
          obligation (:seon.error/obligation request)
-         occurrence-id (id/id (into (sorted-map)
-                                   (cond-> {:seon.error/signature signature}
-                                     ;; a copy from another branch never merges with this branch's own
-                                     (and origin (not= origin (get-in database [:config :branch])))
-                                     (assoc :seon.store/branch origin)
-                                     agent-id (assoc :seon.agent/id agent-id)
-                                     ;; an obligation is one identity across turns and processes
-                                     obligation (assoc :seon.error/obligation obligation)
-                                     (and turn-id (not obligation)) (assoc :seon.turn/id turn-id)
-                                     (and (nil? turn-id) (not obligation))
-                                     (assoc :seon.db.process/id (:seon.error/process fact)))))
+         ;; OCCURRENCES ARE BOUNDED: at most `recurrence-limit` per signature
+         ;; and producer digest, each keeping its world; a further repeat is
+         ;; the last one's count (`commit-call`). An obligation is one
+         ;; identity across turns and processes.
+         identity-of (fn [members]
+                       (id/id (into (sorted-map)
+                                    (cond-> (assoc members :seon.error/signature signature)
+                                      ;; a copy from another branch never merges with this branch's own
+                                      (and origin (not= origin (get-in database [:config :branch])))
+                                      (assoc :seon.store/branch origin)))))
+         slots (if obligation
+                 [(identity-of {:seon.agent/id agent-id :seon.error/obligation obligation})]
+                 (mapv #(identity-of (cond-> {:seon.error.occurrence/slot %}
+                                       (:seon.error/producer-digest (:seon.error/source request))
+                                       (assoc :seon.error/producer-digest
+                                              (:seon.error/producer-digest (:seon.error/source request)))))
+                       (range (max 1 (long (:seon.config.error/recurrence-limit request 1))))))
+         occurrence-id (first slots)
          entities [{:db/id (fact-tempid (:seon.error/id request))
                 :seon.error/id signature :seon.error/signature signature
                 :seon.error/declared-schema (:seon.error/declared-schema fact)
@@ -1492,7 +1599,8 @@
          ;; and a refused write copies this call into its refusal
          tx (conj entities [:db.fn/call #'commit-call
                         (-> (dissoc request :seon.schema/projection)
-                            (assoc :seon.error/fact fact :seon.error.occurrence/id occurrence-id))])]
+                            (assoc :seon.error/fact fact :seon.error.occurrence/id occurrence-id
+                                   :seon.error.occurrence/slots slots))])]
      {:seon.error/fact fact
       :seon.error/ref [:seon.error/signature signature]
       :seon.error.occurrence/ref [:seon.error.occurrence/id occurrence-id]
@@ -2018,6 +2126,93 @@
       (empty? reply) "Error evidence is unavailable."
       (= [:seon.error/message] (keys reply)) (:seon.error/message reply)
       :else reply)))
+
+(defn finding
+  "The finding a stored fault is, as data: the one selection both faces of
+  its signature render (health plan §4). What is wrong (the named error it
+  satisfies, the producer at the digest its latest occurrence ran, the
+  refusing function, the failed schema and path), how often and where
+  (occurrence count, first and last instant, the agents and branches), the
+  reproduction (its latest evaluation), whether it is resolved and which
+  task answers it; beyond distance zero the producer's source and contract.
+  Every dig is an operation offered as data, never run here.
+
+  ## Examples
+
+  (seon.error/finding (seon.db/db) \"69ab7a53…\" 1)
+
+  ## Costs
+
+  - One pull of the signature with its bounded occurrences, its resolution
+    (`resolution`), and at distance one a pull of the producer's source."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.error/signature [:int {:min 0}]]
+                  [:or :seon.error/finding :seon.db/error-result]]}
+  [database fault-signature distance]
+  (let [fault (db/pull database
+                       [:seon.error/declared-schema :seon.error/operation :seon.error/producer :seon.instrument/fn
+                        {:seon.task/_faults [:seon.task/id]}
+                        {:seon.error/occurrences
+                         [:seon.error.occurrence/count :seon.error.occurrence/first-at :seon.error.occurrence/last-at
+                          :seon.error.occurrence/message :seon.error.occurrence/branch :seon.error.occurrence/evaluation
+                          :seon.error/producer-digest :seon.error/caller :seon.error/expected-key
+                          {:seon.error.occurrence/agent [:seon.agent/id]}
+                          {:seon.error.occurrence/data-blob [:seon.error.occurrence/blob-digest]}
+                          {:seon.error/location [{:seon.error.location/segments
+                                                  [:seon.error.location.segment/ordinal
+                                                   {:seon.error.location.segment/key [:seon.error.key/scalar]}]}]}]}]
+                       [:seon.error/signature fault-signature])
+        occurrences (sort-by #(- (inst-ms (:seon.error.occurrence/last-at %))) (:seon.error/occurrences fault))
+        latest (first occurrences)
+        producer (:seon.error/producer fault)
+        task (some :seon.task/id (:seon.task/_faults fault))
+        resolved (resolution database fault-signature)
+        path (some->> (get-in latest [:seon.error/location :seon.error.location/segments])
+                      (sort-by :seon.error.location.segment/ordinal)
+                      (mapv #(get-in % [:seon.error.location.segment/key :seon.error.key/scalar])))
+        definition (when (and producer (pos? distance))
+                     (db/pull database [:seon.fn/source :seon.fn/spec] [:seon.fn/sym producer]))
+        blob (get-in latest [:seon.error.occurrence/data-blob :seon.error.occurrence/blob-digest])
+        evaluation (:seon.error.occurrence/evaluation latest)]
+    (cond
+      (some :seon.error/at [fault resolved definition]) (some #(when (:seon.error/at %) %) [fault resolved definition])
+      (nil? latest) {:seon.error/signature fault-signature :seon.error.occurrence/count 0}
+      :else
+      (cond-> {:seon.error/signature fault-signature
+               :seon.error/declared-schema (:seon.error/declared-schema fault)
+               :seon.error/message (:seon.error.occurrence/message latest)
+               :seon.error.occurrence/count (reduce + (map :seon.error.occurrence/count occurrences))
+               :seon.error.occurrence/first-at (:seon.error.occurrence/first-at (last occurrences))
+               :seon.error.occurrence/last-at (:seon.error.occurrence/last-at latest)
+               :seon.error/agents (into (sorted-set) (keep #(get-in % [:seon.error.occurrence/agent :seon.agent/id])) occurrences)
+               :seon.error/branches (into (sorted-set) (keep :seon.error.occurrence/branch) occurrences)
+               :seon.render/operations
+               (cond-> [(list 'seon.error/resolution '(seon.db/db) fault-signature)]
+                 producer (into [(list 'my.program/callers {:seon.program/subject (list 'quote producer)})
+                                 (list 'my.program/tests-reaching {:seon.program/subject (list 'quote producer)})])
+                 evaluation (conj (list 'seon.db/pull ''[*] [:seon.cluster.eval/id evaluation]))
+                 blob (conj (list 'seon.render.value/artifact-value
+                                  (list 'seon.render.value/read-artifact (list 'seon.blob/get blob))))
+                 task (conj (list 'my.task/claim! {:seon.task/assigned task})))}
+        producer (assoc :seon.error/producer producer)
+        (:seon.error/producer-digest latest) (assoc :seon.error/producer-digest (:seon.error/producer-digest latest))
+        (:seon.instrument/fn fault) (assoc :seon.instrument/fn (:seon.instrument/fn fault))
+        (:seon.error/caller latest) (assoc :seon.error/caller (:seon.error/caller latest))
+        (:seon.error/expected-key latest) (assoc :seon.error/expected-key (:seon.error/expected-key latest))
+        (seq path) (assoc :seon.error/path path)
+        evaluation (assoc :seon.error.occurrence/evaluation evaluation)
+        task (assoc :seon.task/id task)
+        resolved (assoc :seon.error/resolution resolved)
+        (:seon.fn/source definition) (assoc :seon.render.ns/source-lines (str/split-lines (:seon.fn/source definition)))
+        (:seon.fn/spec definition) (assoc :seon.fn/spec (:seon.fn/spec definition))))))
+
+(defn finding-ai
+  "A stored fault's AI face: its [[finding]] at the unit's distance, the
+  briefing an agent assigned its task reads."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.error/finding :seon.db/error-result]]}
+  [unit]
+  (let [shown (or (:seon.render/value unit) unit)]
+    (finding (:seon.db/db unit) (:seon.error/signature shown)
+             (max 0 (long (get unit :seon.render/distance 1))))))
 
 (defn- reply-html
   "The reply's keys as hiccup: the same selection `render-ai` returns, laid

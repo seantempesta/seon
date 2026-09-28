@@ -137,9 +137,8 @@
               [:seon.error/occurrences {:optional true} :seon.error/occurrences]
               [:seon.error/frame {:optional true} :seon.error/frame]
               [:seon.error/exception-class {:optional true} :seon.error/exception-class]
-              [:seon.error/regressions {:optional true} :seon.error/regressions]
-              [:seon.error/issue {:optional true} :seon.error/issue]
               [:seon.error/resolved-tx {:optional true} :seon.error/resolved-tx]
+              [:seon.error/producer {:optional true} :seon.error/producer]
               [:seon.error/data-edn :seon.error/data-edn]
               [:seon.error/data-size
                {:optional true}
@@ -205,7 +204,7 @@
               [:seon.error/obligation {:optional true} :seon.error/obligation]],
              :error
              [:map {:seon.db/attributes true
-                    :seon.render/ai seon.error/render-ai
+                    :seon.render/ai seon.error/finding-ai
                     :seon.render/html seon.error/render-html :seon.program/partition :seon.data}
               [:seon.error/layer :seon.error/layer]
               [:seon.error/operation :seon.error/operation]
@@ -217,8 +216,7 @@
               [:seon.error/exception-class {:optional true} :seon.error/exception-class]
               [:seon.error/occurrences {:optional true} :seon.error/occurrences]
               [:seon.error/notified {:optional true} :seon.error/notified]
-              [:seon.error/regressions {:optional true} :seon.error/regressions]
-              [:seon.error/issue {:optional true} :seon.error/issue]
+              [:seon.error/producer {:optional true} :seon.error/producer]
               [:seon.error/resolved-tx {:optional true} :seon.error/resolved-tx]],
              :ref :seon.db/ref,
              :recording
@@ -297,16 +295,15 @@
              :bounded-chain [:and {:description "A live cause chain (seon.error.refusal/chain): every link's data within the evidence bound, each larger value held by a name that is not retrievable."} :seon.error/chain [:fn {:error/message "each link's data must print within the evidence bound, each larger value held by its name and size (seon.error.refusal/link)"} seon.error.refusal/within-evidence-bound-chain?]],
              :chain [:vector {:min 1 :description "The whole cause chain of a recorded Throwable as flat links: the primary chain outermost to root, then suppressed throwables and their causes, each naming its relation by index. Evidence, not an attribute: it rides the observation and its admitted evidence content."} :seon.error/link],
              :exception-class [:symbol {:description "Throwable class as data; throwable-class retains the historical string evidence."}],
-             :regressions [:set :seon.db/ref],
-             :issue :seon.db/ref,
              :resolved-tx :seon.db/ref,
-             :resolved-by [:enum {:description "The fact that resolves a fault: its function's changed definition digest, or the resolve! transaction."} :seon.program/definition-digest :seon.error/resolved-tx],
+             :resolved-by [:enum {:description "The fact that resolves a fault: its producer's changed definition digest proven by its task's red-then-green tests (:seon.task/proof), the changed digest alone when no task answers it, or the resolve! transaction."} :seon.task/proof :seon.program/definition-digest :seon.error/resolved-tx],
              :digest-then :seon.program/definition-digest,
              :digest-now :seon.program/definition-digest,
              :resolution
              [:map {:description "Why a fault is resolved (seon.error/resolution): derived, never stored."}
               [:seon.error/resolved-by :seon.error/resolved-by]
-              [:seon.instrument/fn {:optional true} :seon.instrument/fn]
+              [:seon.error/producer {:optional true} :seon.error/producer]
+              [:seon.task/id {:optional true} :seon.task/id]
               [:seon.error/digest-then {:optional true} :seon.error/digest-then]
               [:seon.error/digest-now {:optional true} :seon.error/digest-now]
               [:seon.error/resolved-tx {:optional true} [:int {:min 0}]]],
@@ -342,7 +339,62 @@
  [:seon.error/cause {:optional true} :seon.error/cause]
  [:seon.error/chain {:optional true} :seon.error/chain]
  [:seon.error/fix {:optional true} :seon.error/fix]
- [:seon.error/basis {:optional true} :seon.error/basis]]
+ [:seon.error/basis {:optional true} :seon.error/basis]
+ [:seon.error/producer {:optional true} :seon.error/producer]
+ [:seon.error/producer-digest {:optional true} :seon.error/producer-digest]
+ [:seon.error/caller {:optional true} :seon.error/caller]
+ [:seon.error/caller-digest {:optional true} :seon.error/caller-digest]
+ [:seon.error/world {:optional true} :seon.error/world]]
+
+ :seon.error/producer
+ [:qualified-symbol
+  {:seon.db/index true :seon.db/reference-to :seon.fn/sym
+   :description "The definition that produced the failure, by the blame rule (seon.error.refusal/producer): an input or arity violation's caller, an output or guard violation's refusing function, a throw's first authored frame, a declared error value's operation. A name joined to its definition at read time, so it outlives the definition and never creates one; absent when the agent's own form produced it. On a stored signature it is part of the identity; on its occurrences with the digest that ran."}]
+
+ :seon.error/producer-digest
+ [:and {:description "The producer's definition digest when the failure happened: the version that ran (its armed Var's profile cell), else the recording branch's entity. A fault is fixed when its producer's current digest differs and the proof passes (seon.error/resolution)."}
+  :seon.program/definition-digest]
+
+ :seon.error/caller
+ [:qualified-symbol
+  {:seon.db/index true :seon.db/reference-to :seon.fn/sym
+   :description "The authored definition that made the refused call, compiled or interpreted: for an input violation it is the producer; for an output violation, whoever received the bad value."}]
+
+ :seon.error/caller-digest
+ [:and {:description "The caller's definition digest when it ran."} :seon.program/definition-digest]
+
+ :seon.error/agents [:set {:description "The agents a fault's occurrences name. Shown, never stored."} :seon.agent/id]
+ :seon.error/branches [:set {:description "The branches a fault's occurrences happened on. Shown, never stored."} :seon.store/branch]
+ :seon.error/finding
+ [:map {:description "A stored fault as a finding (seon.error/finding): what is wrong, how often and where, the reproduction, its resolution and task, the producer's source and contract beyond distance zero, and the digs offered as data."}
+  [:seon.error/signature :seon.error/signature]
+  [:seon.error.occurrence/count [:int {:min 0}]]
+  [:seon.error/declared-schema {:optional true} :seon.error/declared-schema]
+  [:seon.error/message {:optional true} :seon.error/message]
+  [:seon.error.occurrence/first-at {:optional true} :seon.error.occurrence/first-at]
+  [:seon.error.occurrence/last-at {:optional true} :seon.error.occurrence/last-at]
+  [:seon.error/agents {:optional true} :seon.error/agents]
+  [:seon.error/branches {:optional true} :seon.error/branches]
+  [:seon.error/producer {:optional true} :seon.error/producer]
+  [:seon.error/producer-digest {:optional true} :seon.error/producer-digest]
+  [:seon.instrument/fn {:optional true} :seon.instrument/fn]
+  [:seon.error/caller {:optional true} :seon.error/caller]
+  [:seon.error/expected-key {:optional true} :seon.error/expected-key]
+  [:seon.error/path {:optional true} :seon.render.data/path]
+  [:seon.error.occurrence/evaluation {:optional true} :seon.error.occurrence/evaluation]
+  [:seon.task/id {:optional true} :seon.task/id]
+  [:seon.error/resolution {:optional true} :seon.error/resolution]
+  [:seon.render.ns/source-lines {:optional true} [:vector :string]]
+  [:seon.fn/spec {:optional true} :seon.fn/spec]
+  [:seon.render/operations {:optional true} :seon.render/operations]]
+
+ :seon.error/world
+ [:map {:description "The world the failure happened in, by reference (seon.error.refusal/world-reference): its agent, branch, turn, evaluation and task. Evidence, not an attribute: the recorder writes each member as the occurrence's reference."}
+  [:seon.agent/id {:optional true} :seon.agent/id]
+  [:seon.agent/branch {:optional true} :seon.agent/branch]
+  [:seon.turn/id {:optional true} :seon.turn/id]
+  [:seon.cluster.eval/id {:optional true} :seon.cluster.eval/id]
+  [:seon.task/id {:optional true} :seon.task/id]]
 
  :seon.error/basis
  [:and
@@ -363,7 +415,8 @@
  [:string {:min 1}]
 
  :seon.error/expected-key
- [:qualified-keyword {:seon.db/index true}]
+ [:qualified-keyword {:seon.db/index true :seon.db/reference-to :seon.schema/key
+                      :description "The named schema the offending value failed (a contract refusal's first problem), or the schema key an error expected."}]
 
  :seon.error/expected-shape
  [:string {:min 64, :max 64}]

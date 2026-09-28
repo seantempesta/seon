@@ -6,7 +6,15 @@
  :process :seon.db/ref
  :agent :seon.db/ref
  :turn :seon.db/ref
- :proc-fn :seon.db/ref
+ :evaluation [:and {:seon.db/index true :seon.db/reference-to :seon.cluster.eval/id
+                    :description "The evaluation that was running, by its id (seon.id/evaluation of turn and ordinal): a failing evaluation settles after its fault, so the reference joins at read time."}
+              :seon.cluster.eval/id]
+ :task [:and {:seon.db/index true :seon.db/reference-to :seon.task/id
+              :description "The task the failing world was working on, by its handle."}
+        :seon.task/handle]
+ :slot [:int {:min 0 :description "Which of a signature's bounded occurrences per producer digest this is: part of the occurrence identity, never stored."}]
+ :slots [:vector {:min 1 :description "The occurrence identities a recording may land on, in order (seon.error/recording); the writer takes the first not yet written, else bumps the last."}
+         :seon.error.occurrence/id]
  :data-blob :seon.db/ref
  :message :string
  ; the world by reference (lost-error seams §0.4): the failing request's effect, the occurrence it follows
@@ -27,7 +35,8 @@
   [:seon.error.occurrence/process :seon.error.occurrence/process]
   [:seon.error.occurrence/agent {:optional true} :seon.error.occurrence/agent]
   [:seon.error.occurrence/turn {:optional true} :seon.error.occurrence/turn]
-  [:seon.error.occurrence/proc-fn {:optional true} :seon.error.occurrence/proc-fn]
+  [:seon.error.occurrence/evaluation {:optional true} :seon.error.occurrence/evaluation]
+  [:seon.error.occurrence/task {:optional true} :seon.error.occurrence/task]
   [:seon.error.occurrence/data-blob {:optional true} :seon.error.occurrence/data-blob]
   [:seon.error.occurrence/message :seon.error.occurrence/message]
   [:seon.error.occurrence/branch {:optional true} :seon.error.occurrence/branch]
@@ -47,11 +56,4 @@
   [:seon.instrument/args {:optional true} :seon.instrument/args]
   [:seon.instrument/actual {:optional true} :seon.instrument/actual]
   [:seon.instrument/actual-size {:optional true} :seon.instrument/actual-size]]
- ; Additive error declaration manifest, 2026-09-18.
-
- :seon.error.occurrence/cluster
- :seon.db/ref
-
- :seon.error.occurrence/evaluation
- :seon.db/ref
 }

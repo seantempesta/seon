@@ -26,7 +26,12 @@
         [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name] [:seon.task/kind :seon.task/kind]
         [:seon.task/intent :seon.task/intent] [:seon.task/must-read {:optional true} :seon.task/must-read]
         [:seon.task/evidence {:optional true} :seon.task/evidence]
-        [:seon.task/created-by {:optional true} :seon.task/created-by] [:seon.task/outcome {:optional true} :seon.task/outcome]]
+        [:seon.task/created-by {:optional true} :seon.task/created-by] [:seon.task/outcome {:optional true} :seon.task/outcome]
+        [:seon.task/faults {:optional true} :seon.task/faults]
+        [:seon.task/subject {:optional true} :seon.task/subject] [:seon.task/signal {:optional true} :seon.task/signal]]
+ :faults [:set {:seon.db/index true :description "The fault signatures a task answers (seon.error/commit-call writes a producer's own task with each of its faults). The task is closed when every one is resolved (seon.task/resolution)."} :seon.db/ref]
+ :subject [:and {:description "The entity a task made from a warning signal concerns: the task is closed once it no longer satisfies :seon.task/signal."} :seon.db/ref]
+ :signal [:qualified-keyword {:seon.db/reference-to :seon.schema/key :description "The named warning schema, a predicate over its subject's stored attributes, whose satisfaction the task answers."}]
  :created-by [:and {:description "The agent that wrote a runtime task (7.8); file reconciliation never retracts a task carrying it."} :seon.db/ref]
  :outcome [:enum {:description "Root's decision on a merge task; absence means open."} :accepted :declined]
  :revision [:string {:min 64 :max 64 :description "seon.id/digest over a task's declaration: the revision an assignment reviewed (7.16)."}]
@@ -45,12 +50,28 @@
  :commit [:uuid {:description "C: the proposing branch's commit its proofs ran on."}]
  :proved [:set {:min 1 :description "Each proof as [test symbol, definition digest] at C: references that outlive C."}
           [:tuple :symbol [:string {:min 64 :max 64}]]]
+ :refuted [:set {:description "Each proof observed red on the proposing branch before its change, as [test symbol, reach digest]: a proof must have failed at the old program (health plan §5)."}
+           [:tuple :symbol [:string {:min 64 :max 64}]]]
  :run-id [:and {:description "The test run on C that proved them."} :seon.test.run/id]
  :program [:and {:description "The run's tested program identity."} :seon.test.run/program-digest]
  :proposal-answer [:and {:description "A proposal as propose-merge! answers it: the proposal on record, root's prepare offered, and the message failure when root was not told."}
             :seon.task/proposal-view
             [:map [:seon.render/operations :seon.render/operations]
              [:seon.task/undelivered {:optional true} :seon.error/value]]]
+ :closed-by [:enum {:description "What closed a task (seon.task/resolution): every fault it answers resolved, its subject no longer satisfying its signal, or root's merge outcome."} :seon.task/faults :seon.task/signal :seon.task/outcome]
+ :resolutions [:vector :seon.error/resolution]
+ :resolution [:map {:description "Why a task is closed: derived, never stored."}
+              [:seon.task/closed-by :seon.task/closed-by]
+              [:seon.task/resolutions {:optional true} :seon.task/resolutions]]
+ :claim-request [:map [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]
+                 [:seon.task/assigned :seon.task/assigned]]
+ :open-view [:map {:description "An open task as the queue shows it (my.task/open): named, what it answers and how often, and the claim offered."}
+             [:seon.task/id :seon.task/id] [:seon.task/name :seon.task/name] [:seon.task/ns :seon.task/ns]
+             [:seon.task/intent :seon.task/intent]
+             [:seon.task/faults {:optional true} [:vector :seon.error/signature]]
+             [:seon.task/occurrences :seon.task/occurrences]
+             [:seon.render/operations :seon.render/operations]]
+ :occurrences [:int {:min 0 :description "How often the faults a task answers occurred, summed."}]
  :decided [:map {:description "A merge task root closed, with its outcome."} [:seon.task/id :seon.task/id] [:seon.task/outcome :seon.task/outcome]]
  :assignment-view [:map {:description "An assignment as root's assign! answers it: the task, the agent and its branch, and the agent's proposal offered: it runs once a deftest naming the task (^{:seon/tasks #{handle}}) passes on the branch."}
                    [:seon.task/assignment :seon.task/assignment] [:seon.task/assigned :seon.task/assigned]
@@ -62,6 +83,7 @@
  :proposal-row [:map {:seon.db/attributes true :seon.program/partition :seon.data}
                 [:seon.task/proposal :seon.task/proposal] [:seon.task/merge :seon.task/merge] [:seon.task/proposes :seon.task/proposes]
                 [:seon.task/branch :seon.task/branch] [:seon.task/commit :seon.task/commit] [:seon.task/proved :seon.task/proved]
+                [:seon.task/refuted {:optional true} :seon.task/refuted]
                 [:seon.task/run-id :seon.task/run-id] [:seon.task/program :seon.task/program]]
  :assigned-work [:map {:description "What an agent's branch is assigned: the key naming its merge task, the owning namespace, the proofs and what the proposal answers."}
                  [:seon.task/key :seon.task/key] [:seon.task/ns :seon.task/ns] [:seon.task/proofs :seon.task/proofs]
@@ -89,7 +111,7 @@
  :refused [:enum {:description "The ingestion rule one task entry or annotation broke."}
            :malformed-annotation :metadata-after-test-name :unreadable-file :not-one-vector :invalid-entry
            :handle-mismatch :duplicate-id :misplaced-file :revision-conflict :dangling-id
-           :unknown-task :unassigned :revised-since-assignment :no-proofs :unproven]
+           :unknown-task :unassigned :revised-since-assignment :no-proofs :unproven :claimed]
  :holder [:symbol {:description "The definition or namespace whose annotation, or the owning namespace whose task file, was refused."}]
  :explanation :seon.schema/value
  :refused-error [:and :seon.error/base
