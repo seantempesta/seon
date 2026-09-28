@@ -168,7 +168,9 @@
                                    (let [w (window (profile/cells-of k))]
                                      (when (<= min-calls (:seon.profile/calls w))
                                        (assoc w ::key k ::id (measurement-id k)))))))
-                         (distinct executed-keys))
+                         ;; a set, never `distinct`: distinct destructures its collection
+                         ;; (clojure.core 5105) and throws on the set every settle passes
+                         (set executed-keys))
           stored (if (seq measured) (stored-measurements database (mapv ::id measured)) {})
           at (java.util.Date.)]
       (run! advance! measured)

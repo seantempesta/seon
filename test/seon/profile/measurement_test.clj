@@ -77,3 +77,14 @@
                          :seon.profile.measurement/errors])))
     (aset counted profile/buckets 20)
     (is (= :frequent (:seon.profile.measurement/errors (measurement/measure counted 100))))))
+
+(deftest the-settle-writers-executed-keys-are-a-set-of-tuples
+  ;; the shape both settle writers pass (seon.turn/settle-batch!, seon.turn.batch/settle):
+  ;; a set of [sym digest], nil digests included; `distinct` over it threw on every settle
+  (test-support/with-database
+   (fn [connection]
+     (let [held (held-cell "settled" "e")]
+       (record! held 18 30)
+       (is (= [18] (mapv :seon.profile.measurement/p50
+                         (measurement/significant-tx (db/db connection)
+                                                     #{(key-of held) ['seon.profile.measurement-test/unknown nil]}))))))))
