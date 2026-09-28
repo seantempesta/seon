@@ -3302,7 +3302,8 @@
   {digest, unstored, class}}`: what a fresh context binds again under
   `result/eN`."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
-                  [:or [:map-of :string :map] :seon.db/invalid-read-error]]}
+                  ;; pull answers nil for an evaluation holding none of the three
+                  [:or [:map-of :string [:maybe :map]] :seon.db/invalid-read-error]]}
   [db agent-id]
   (let [rows (db/q '[:find ?id (pull ?evaluation [:seon.eval/value-digest :seon.eval/unstored :seon.eval/value-class])
                      :in $ ?agent-id
@@ -3344,7 +3345,7 @@
 (defn- bind-handles!
   "Bind each handle of `handles` (`settled-results`) in `ctx`: a stored cut
   value as itself, anything else as its marker."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/connection [:map-of :string :map]] :nil]}
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/connection [:map-of :string [:maybe :map]]] :nil]}
   [ctx connection handles]
   (doseq [[evaluation-id {digest :seon.eval/value-digest kind :seon.eval/unstored class-name :seon.eval/value-class}]
           handles
