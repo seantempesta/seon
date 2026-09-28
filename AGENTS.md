@@ -281,12 +281,12 @@ root.
   of that same work until exit, while unrelated work proceeds. SCI interrupts interpreted code, not arbitrary host
   calls; keep isolation where termination cannot be guaranteed.
 - **Recover facts, not execution.** Close interrupted runs and mark unfinished evaluations; never resume interrupted
-  execution or serialize private objects or live results. A run's settlement (every form the run parsed and evaluated,
-  in one transaction) returns once applied in order; its durability follows through the database owner's one
-  fire-and-forget write, kept only while measurably faster. A crash may lose the newest such runs; recovery closes
-  them and the agent redoes the work — do not represent the in-between state. Everything with consequences beyond the
-  form (merges, write-back, tasks, config, schema adoption, boot and publication records, faults, branch lifecycle,
-  deliveries) is durable before its caller is answered.
+  execution or serialize private objects or live results. A run is a plain loop: read and evaluate every form, then
+  write its settlement (every form parsed and evaluated) as ONE synchronous transaction, durable before the run
+  answers, under 100 ms; no asynchronous or fire-and-forget write, so the next call always sees it. A crash mid-run
+  loses only that unanswered run; recovery closes it and the agent redoes the work — do not represent the in-between
+  state. Everything with consequences beyond the form (merges, write-back, tasks, config, schema adoption, boot and
+  publication records, faults, branch lifecycle, deliveries) is likewise durable before its caller is answered.
 - **Derive wakes and completion.** Use listened datoms and a qualifying ordinary reply's basis; openings and
   system-only turns answer nothing. Handling is separate, a message subject is literal, `:seon.message/from` marks
   inside wakes. Before a turn, refresh each distinct changed read from the latest evidence and append it; never
