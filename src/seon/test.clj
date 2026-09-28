@@ -1993,16 +1993,11 @@
   [request-handle since test-symbol remaining-ms exited! effect-attempt?]
   (let [elapsed (fn [started] (/ (- (System/nanoTime) started) 1000000.0))
         started (System/nanoTime)
-        ;; Acquisition installs the member's program rows into ITS context: the
-        ;; SCI observers of the evaluation that called `run` are unbound, so a
-        ;; row's definition is never observed as a write of the caller's batch
-        ;; and armed in the caller's context (which holds no such Var).
-        child (binding [sci.lang/*write-observer* nil sci.lang/*expansion-observer* nil]
-                (@acquire-context! request-handle nil
-                                   ;; The request's own store (its overlay) holds that commit; an
-                                   ;; omitted store is supplied from the calling agent's world.
-                                   {:seon.agent/isolate? true :seon.store/store (:seon.store/store request-handle)
-                                    :seon.cluster.registry/from (:seon.source/commit-id request-handle)}))
+        child (@acquire-context! request-handle nil
+                                 ;; The request's own store (its overlay) holds that commit; an
+                                 ;; omitted store is supplied from the calling agent's world.
+                                 {:seon.agent/isolate? true :seon.store/store (:seon.store/store request-handle)
+                                  :seon.cluster.registry/from (:seon.source/commit-id request-handle)})
         acquired (elapsed started)
         release-ms (volatile! 0.0)
         cleanup-failure (volatile! nil)

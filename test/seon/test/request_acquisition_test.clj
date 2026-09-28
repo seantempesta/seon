@@ -65,3 +65,24 @@
                                 :seon.test/identities #{'seon.test.request-acquisition-test/uses-plus-one}}))]
          (is (true? (:seon.test/passed? result)))
          (is (= [] @observed) "no member write reaches the caller's observer"))))))
+
+(deftest acquiring-a-context-installs-its-program-unobserved-by-the-calling-evaluation
+  ;; candidate-gate! acquires the candidate's execution on root's thread, inside
+  ;; root's evaluation: a new namespace's definition is the acquired context's
+  ;; own, never a write of the caller armed where no Var exists.
+  (support/with-database
+   (fn [connection]
+     (let [ns-sym 'seon.test.request-acquisition-test]
+       (support/transacted! connection [(support/namespace-entity (db/db connection) ns-sym)])
+       (support/transacted!
+        connection
+        [(support/program-entity (db/db connection) [:seon.fn/sym 'seon.test.request-acquisition-test/plus-two]
+                                 "(defn plus-two {:malli/schema [:=> [:cat :int] :int]} [x] (+ 2 x))")])
+       (let [observed (atom [])
+             handle (support/execution-handle connection)
+             child (binding [sci.lang/*write-observer* #(swap! observed conj (:op %))]
+                     ((requiring-resolve 'seon.cluster.agent/acquire-context!)
+                      handle nil {:seon.agent/isolate? true :seon.store/store (:seon.store/store handle)}))]
+         (try (is (some? (:seon.db/connection child)))
+              (is (= [] @observed) "no install reaches the caller's observer")
+              (finally ((requiring-resolve 'seon.cluster.agent/release-context!) child))))))))

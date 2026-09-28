@@ -91,6 +91,7 @@
             [seon.flow :as seon.flow]
             [seon.schedule :as schedule]
             [seon.cluster.wake :as wake]
+            [sci.lang]
             [seon.sci.eval :as sci.eval]
             [seon.sci.reader :as reader]
             [seon.schema.edn :as schema.edn])
@@ -1060,6 +1061,11 @@
      :seon.agent/execution-handle]]}
   ([handle agent-id] (acquire-context! handle agent-id {}))
   ([handle agent-id options]
+   ;; Acquisition installs the branch's program rows into ITS context: the SCI
+   ;; observers of an evaluation that called it (root's prepare-merge!) are
+   ;; unbound, so a row's definition is never observed as a write of that
+   ;; caller's batch and armed in a context holding no such Var.
+   (binding [sci.lang/*write-observer* nil sci.lang/*expansion-observer* nil]
    (let [parent-roster (:seon.agent/routing handle)
          parent (:seon.db/connection handle)
          ;; A released execution claims nothing, refused by name before its
@@ -1236,7 +1242,7 @@
               (catch clojure.lang.ExceptionInfo refusal
                 (if (= ::roster-released (::refused (ex-data refusal)))
                   (acquire-in (child-roster! parent-roster branch))
-                  (throw refusal)))))))))
+                  (throw refusal))))))))))
 
 (defn arm!
   "Arm one agent's graph: stamp → start → resume → route → prime.
