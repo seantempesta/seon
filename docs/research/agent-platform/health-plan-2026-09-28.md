@@ -172,6 +172,16 @@ branch, evaluation or test member), the reproduction (the test member, else the 
 - **One value, three views:** `:seon.health/report`, made of units, each reusing its owner's render pair (problems,
   oversight, cluster status, maintenance); it replaces the separate runtime observation, so MCP `runtime_status`,
   `bin/seon status` and the page show one value. AI face = pruned data + dig forms; HTML face = hiccup.
+- **Flow's own monitoring is the proc unit.** `flow/ping` (bounded, `reference-code/core.async/src/main/clojure/
+  clojure/core/async/flow.clj:136`) answers per proc its status, message count, datafied in/out channels (buffer fill:
+  backlog) and `::flow/state` through the proc's `:ping-map-fn`; `:error-chan` already feeds faults (`var-process`).
+  Every proc declares a `:ping-map-fn` projecting its few meaningful counters (the schedule proc does today), and the
+  health view pings on demand only, bounded, never on a timer (the control-mult wedge). `core.async.flow-monitor` is a
+  separate web server and UI: not adopted (a second UI), but its topology view is the model for the HTML render.
+- **Where the data lives:** per-call accumulators in the armed wrapper's cells (in memory, owned by the wrapper, never
+  evicted: ~2,555 cells × ~40 histogram buckets is a few MB, to be measured); derived health values in `seon.cache`
+  (evictable, content-keyed, rebuilt on a miss); significant buckets and findings in the database; bulky detail in
+  blobs by digest; proc state in the procs, read by ping.
 - **Lockup rules kept:** listeners only `offer!`; nothing new on the writer thread; no monitor across commits; no
   timer pings (control-mult wedge); unknown is never green.
 
