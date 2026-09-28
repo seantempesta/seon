@@ -63,6 +63,7 @@
     told `:ok` and the branch was gone (b2-plan §0.3)."
   (:require [clojure.edn :as edn]
             [datahike.api :as d]
+            [datahike.db.interface :as dbi]
             [seon.cluster.branch :as cluster.branch]
             [seon.db :as db]
             [seon.error.refusal :as error.refusal]
@@ -72,7 +73,8 @@
             [datahike.store :as datahike.store]
             [konserve.core :as k]
             [seon.cluster.store :as store]
-            [seon.schema.edn :as schema.edn]))
+            [seon.schema.edn :as schema.edn])
+  (:import [org.replikativ.persistent_sorted_set ANode Branch PersistentSortedSet Slot]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
@@ -469,42 +471,65 @@
                     attribute)))
           forms)))
 
-(defn- branch-blobs
-  [connection branch include-history?]
-  (let [db (d/branch-as-db connection branch)]
-    (try
-      (let [digest-attributes (blob-digest-attributes db)
-            history-view (if include-history? (db/history db) db)
-            history-db (cond
-                         (= :seon.config.db/keep-history?
-                            (:seon.config/error-key history-view)) db
-                         (db/database-value? history-view) history-view
-                         :else (throw (ex-info "Cannot determine retained blob references."
-                                               history-view)))]
-        (into #{}
-              (mapcat
-               (fn [attribute]
-                 (d/q '[:find [?digest ...]
-                        :in $ ?attribute
-                        :where [_ ?attribute ?digest]]
-                      history-db attribute)))
-              digest-attributes))
-      (finally
-        (d/release-materialized-db db)))))
-
 (defn referenced-blobs
   "Derive blob references across the supplied store branches.
 
-  Collection callers hold the store's exclusive reachability permit while
-  deriving branches, calling this function, and deleting objects. Historical
-  collection includes history; byte retention needs only current datoms."
+  Walk the current and (when requested) temporal AEVT trees, visiting each
+  shared subtree once per digest-attribute set. A buffered child is identified
+  by BOTH its stored address and pending diff; Branch.child applies that diff.
+  Attribute ranges prune unrelated subtrees. The fold is local to this call,
+  so neither a moving branch nor a changed schema can reuse stale references.
+  Collection callers hold the store's exclusive reachability permit."
   {:malli/schema
    [:=> [:cat :seon.db/connection [:set :seon.store/branch] :boolean]
     [:set :seon.blob/digest]]}
   [connection branches include-history?]
-  (into #{}
-        (mapcat #(branch-blobs connection % include-history?))
-        branches))
+  (letfn [(walk [^ANode node storage attributes state]
+            (if (instance? Branch node)
+              (let [^Branch node node
+                    bounds (.keys node)
+                    slots (.slots node)]
+                (reduce
+                 (fn [[seen digests :as state] i]
+                   (let [lower (when (pos? i) (:a (nth bounds (dec i))))
+                         upper (:a (nth bounds i))
+                         address (.address node i)
+                         slot (when slots (aget ^objects slots i))
+                         diff (when slot (.-diff ^Slot slot))
+                         node-key [attributes address diff]]
+                     (if (or (and address (contains? seen node-key))
+                             (not-any? #(and (or (nil? lower) (not (neg? (compare % lower))))
+                                             (not (pos? (compare % upper)))) attributes))
+                       state
+                       (walk (.child node storage i) storage attributes
+                             [(cond-> seen address (conj node-key)) digests]))))
+                 state (range (.len node))))
+              (update state 1 into
+                      (comp (filter #(contains? attributes (:a %))) (map :v))
+                      (.keys node))))
+          (index-blobs [state index attributes]
+            (let [^PersistentSortedSet index index
+                  address (.-_address index)
+                  node-key [attributes address nil]]
+              (if (and address (contains? (first state) node-key))
+                state
+                (walk (.root index) (.-_storage index) attributes
+                      (update state 0 #(cond-> % address (conj node-key)))))))]
+    (second
+     (reduce
+      (fn [state branch]
+        (let [database (d/branch-as-db connection branch)]
+          (try
+            (let [attributes (set (blob-digest-attributes database))
+                  attributes (if (get-in database [:config :attribute-refs?])
+                               (into #{} (keep #(dbi/-ref-for database %)) attributes)
+                               attributes)
+                  indices (cond-> [(:aevt database)]
+                            (and include-history? (get-in database [:config :keep-history?]))
+                            (conj (:temporal-aevt database)))]
+              (reduce #(index-blobs %1 %2 attributes) state indices))
+            (finally (d/release-materialized-db database)))))
+      [#{} #{}] branches))))
 
 (defn- branch-heads
   {:malli/schema [:=> [:cat :seon.store/store [:seqable :seon.store/branch]] [:vector [:map [:seon.store/branch :seon.store/branch] [:seon.source/commit-id :seon.source/commit-id]]]]}

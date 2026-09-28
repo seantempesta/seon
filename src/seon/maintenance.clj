@@ -708,13 +708,11 @@
          operation-store
          (registry/retention-cutoff operation-store)
          {:seon.operator.collect/dry-run? true})
-        ;; The inventory carries the candidate keys and the logical key count;
-        ;; file and byte totals come from the same observation the real
-        ;; collection's before/after uses.
-        observed (collection-observation operation-store)
+        ;; Reuse the inventory's logical key count; only physical bytes need
+        ;; another observation.
         candidates (count (:seon.cluster.registry/candidates inventory))
-        files (:seon.operator.collect/objects observed)
-        file-bytes (:seon.operator.collect/bytes observed)
+        files (:seon.cluster.registry/key-count inventory)
+        file-bytes (fs/tree-bytes (:seon.store/dir operation-store))
         mark-duration (:seon.cluster.registry/mark-duration-ms inventory)
         verification
         (root-verification
