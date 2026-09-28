@@ -4460,6 +4460,27 @@
              :seon.sci.admit/record record}
       interrupted? (assoc :seon.cluster.eval/interrupted-at interrupted-at))))
 
+(defn rendered-evaluation
+  "The evaluation value for a data render shown in a context (an opening
+  unit): its value printed by the value printer as data, with no nested
+  render selection, and never evaluated. Its read evidence is the render's
+  own, so the changed-read refresh re-renders it; its source is the read that
+  finds the data again, shown beside it."
+  {:malli/schema [:=> [:cat :seon.sci.eval/rendered-request] :seon.sci.eval/evaluation]}
+  [{value :seon.sci.admit/value namespace-ref :seon.cluster.eval/ns
+    evidence :seon.cluster.eval/read-evidence :as request}]
+  (let [record (assoc (kernel/unarmed-record (System/nanoTime)) :seon.eval/outcome :ok)
+        shown (shown-result value
+                            (assoc (dissoc request :seon.sci.admit/value :seon.cluster.eval/ns
+                                           :seon.cluster.eval/read-evidence)
+                                   :seon.render.value/options {:seon.render.value/structural? true})
+                            record)]
+    (cond-> (merge {:seon.cluster.eval/ns namespace-ref
+                    :seon.sci.eval/ending-ns (second namespace-ref)
+                    :seon.print/options {}}
+                   shown)
+      (seq evidence) (assoc :seon.cluster.eval/read-evidence evidence))))
+
 (defn- trusted-evaluation
   "Answer `evaluate!`'s evaluation, or throw the declared refusal naming both
   loaded identities when the program `identity-atom` names changed while it ran."

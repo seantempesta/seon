@@ -760,19 +760,16 @@
                              (assoc :seon.render.walk/attribute
                                     (scoped-attribute member)))
                            rendered (render/render-call render-request)
-                           ;; AI output is text and HTML is hiccup: a map
-                           ;; is a refusal or a declared error the pair
-                           ;; returned (e.g. a bounded read's
-                           ;; `:seon.db/invalid-read`), never output. Form
-                           ;; output also admits a REPL entry map
-                           ;; (`{:seon.repl/comment .. :seon.repl/form ..}`,
-                           ;; e.g. seon.error/faults-form), which is output.
+                           ;; A failure is what render-call declares as its
+                           ;; error alternative (a refusal, a bounded read's
+                           ;; `:seon.db/invalid-read`): an AI face is data
+                           ;; (renders return data, owner 313e81181), so a map
+                           ;; is output unless it is that error.
                            failure (when (and (map? rendered)
-                                              (not (and (= output :seon.render/form)
-                                                        ((schema/projection-validator
-                                                          (db/carried-projection database)
-                                                          :seon.render/read-form)
-                                                         rendered))))
+                                              ((schema/projection-validator
+                                                (db/carried-projection database)
+                                                :seon.render/error-result)
+                                               rendered))
                                      rendered)
                            failure-outcome
                            (when (and failure owner)

@@ -1,4 +1,7 @@
 #:seon.turn{:write? [:and {:seon.wake/context-inert true} :boolean],
+            :rendered [:map {:description "A data render's opening unit, never evaluated: its AI face (printed by the value printer) and the render's read evidence (seon.turn/declared-sources, seon.sci.eval/rendered-evaluation)."}
+                       [:seon.sci.admit/value :seon.render/ai-data]
+                       [:seon.cluster.eval/read-evidence {:optional true} [:vector :seon.db/read-evidence]]],
             :turn
             [:map
              {:seon.db/attributes true,

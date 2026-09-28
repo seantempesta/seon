@@ -2000,6 +2000,15 @@
        (mapv :seon.sci.reader/form events)
        (:seon.cluster.eval/source source))]))
 
+(defn- unit-read-form
+  "The read that finds a rendered unit's data again: its attribute of the
+  entity, or the entity."
+  {:malli/schema [:=> [:cat :map] :seon.render/read-form]}
+  [{lookup :seon.render.walk/lookup attribute :seon.render.walk/attribute}]
+  (if attribute
+    (list 'get (list 'seon.db/pull (list 'quote [attribute]) lookup) attribute)
+    (list 'seon.db/pull (list 'quote '[*]) lookup)))
+
 (defn- declared-sources
   {:malli/schema [:=> [:cat :seon.turn.loop/cluster :seon.db/database-value
                        :seon.agent/id :seon.ns/name]
@@ -2034,7 +2043,21 @@
                  call (get @calls call-id)
                  blocks (or (:seon.render/source-blocks call)
                             (when-let [text (:seon.render.call/source call)]
-                              [{:seon.render/source text}]))]
+                              [{:seon.render/source text}]))
+                 data (:seon.render/output unit)]
+             (if (and (empty? blocks) (some? data) (not (string? data)) (not (:seon.error/value unit)))
+               ;; A DATA RENDER (renders return data, owner 313e81181): its AI
+               ;; face is the unit's shown value, printed by the value printer
+               ;; and never evaluated; its source is the read that finds the
+               ;; data again, and its read evidence is the render's own.
+               (conj sources
+                     {:seon.cluster.eval/source (id/printed (unit-read-form unit))
+                      :seon.ns/name namespace-name
+                      :seon.render.walk/lookup lookup
+                      :seon.turn/rendered
+                      (cond-> {:seon.sci.admit/value data}
+                        (seq (:seon.render.call/read-evidence call))
+                        (assoc :seon.cluster.eval/read-evidence (:seon.render.call/read-evidence call)))})
              (reduce
               (fn [sources block]
                 (let [parsed (planned-sources
@@ -2048,7 +2071,7 @@
                                   (:seon.eval/origin block)
                                   (assoc :seon.eval/origin (:seon.eval/origin block))))
                           parsed))))
-              sources blocks))))
+              sources blocks)))))
          [] units)]
           (if (:seon.cluster.reply/no-forms sources)
             (assoc sources :seon.turn/refused-system-agent agent-id)
@@ -2146,7 +2169,14 @@
 
 (declare generated-read-fault evaluate-sources preview-sources)
 
-(defn- system-plan [database declared latest]
+(defn- system-plan
+  "The opening's sources and the agent's retained reads, each with its status
+  against its latest evaluation: none, unchanged (its read evidence is
+  current) or changed."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.cluster.reply/sources
+                       [:map-of [:tuple [:maybe :seon.ns/name] :seon.schema/value] :seon.db/pulled-entity]]
+                  [:vector [:map [:seon.turn/status [:enum :none :unchanged :changed]]]]]}
+  [database declared latest]
   (into []
         (comp
          (filter #(let [previous (get latest (source-key %))]
@@ -2164,7 +2194,8 @@
               (cond-> (assoc (select-keys source
                                          [:seon.cluster.eval/source
                                           :seon.cluster.eval/comment
-                                          :seon.ns/name :seon.render.walk/lookup :seon.eval/origin])
+                                          :seon.ns/name :seon.render.walk/lookup :seon.eval/origin
+                                          :seon.turn/rendered])
                              :seon.turn/status status)
                 basis (assoc :seon.cluster.eval/read-basis-transaction basis)
                 (= status :changed)
@@ -2308,7 +2339,23 @@
             previews (second
                       (reduce
                        (fn [[ordinal previews] source]
-                         (let [preview (if turn-id
+                         (let [preview (cond
+                          ;; a data render's shown value, printed, never evaluated
+                          (:seon.turn/rendered source)
+                          {:seon.turn.loop/evaluated-sources
+                           [{:seon.cluster.eval/ordinal ordinal
+                             :seon.turn.loop/admitted-form (dissoc source :seon.turn/rendered)
+                             :seon.sci.eval/evaluation
+                             (sci.eval/rendered-evaluation
+                              (merge (:seon.turn/rendered source)
+                                     {:seon.cluster.eval/ns [:seon.ns/name (:seon.ns/name source)]
+                                      :seon.sci.eval/ctx (or agent-ctx (:seon.sci.eval/ctx handle))
+                                      :seon.sci.admit/caps (:seon.sci.admit/caps handle)
+                                      :seon.db/db database
+                                      :seon.agent/id agent-id}
+                                     (when turn-id
+                                       {:seon.repl/handle (admit/result-handle (receipt-identity turn-id ordinal))})))}]}
+                          turn-id
                           {:seon.turn.loop/evaluated-sources
                            (evaluate-sources
                             {:seon.turn.loop/cluster handle
@@ -2320,6 +2367,7 @@
                              :seon.cluster.eval/ordinal ordinal
                              :seon.ns/name (:seon.ns/name source)
                              :seon.cluster.reply/sources [source]})}
+                          :else
                           (preview-sources
                            {:seon.turn.loop/cluster handle
                             :seon.db/db database
