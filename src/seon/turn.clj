@@ -2716,7 +2716,8 @@
   (spent-runs db agent-id nil))
 
 (defn- max-episode-runs
-  "Read the issue budget, otherwise the agent override or cluster default."
+  "Read the issue budget, otherwise the agent override or its own cluster's
+  dial (`seon.config/agent-cluster-dial`)."
   {:malli/schema [:=> [:cat
                        [:or :seon.db/database-value :seon.error/value]
                        :seon.agent/id]
@@ -2735,10 +2736,7 @@
                          [?agent :seon.agent/settings ?settings]
                          [?settings :seon.config.run/max-episode-runs ?value]]
                 database agent-id)
-          (db/q '[:find ?value .
-                  :where [?config :seon.config/cluster _]
-                         [?config :seon.config.run/max-episode-runs ?value]]
-                database)))))
+          (config/agent-cluster-dial database agent-id :seon.config.run/max-episode-runs)))))
 
 (defn turns-left
   "The remaining turns under the same session bound that admits a turn."

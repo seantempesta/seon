@@ -5,6 +5,7 @@
             [seon.ai :as ai]
             [seon.turn :as turn]
             [seon.db :as db]
+            [seon.config :as config]
             [seon.error.refusal :as error]
             [seon.id :as id]))
 
@@ -104,7 +105,7 @@
   "Derive one agent's live opening seeds from current database facts."
   {:malli/schema
    [:=> [:cat :seon.db/db :seon.agent/id]
-    [:or :seon.agent/situation :my.plan/agent-not-found-error]]}
+    [:or :seon.agent/situation :my.plan/agent-not-found-error :seon.config/error]]}
   [database agent-id]
   (let [agent-entity
         (db/pull database
@@ -128,10 +129,7 @@
                            [:seon.turn/id id]))
             turn-limit
             (or (:seon.config.run/max-episode-runs (ai/agent-overlay database agent-id))
-                (db/q '[:find ?limit .
-                        :where [?config :seon.config/cluster _]
-                               [?config :seon.config.run/max-episode-runs ?limit]]
-                      database))
+                (config/agent-cluster-dial database agent-id :seon.config.run/max-episode-runs))
             turns-used
             (turn/episode-runs
              database agent-id)
@@ -143,6 +141,8 @@
             unread
             (count (turn/unanswered-triggers
                     database agent-id))]
+        (if (:seon.config/error-key turn-limit)
+          turn-limit
         (cond->
          {:seon.agent/id agent-id
           :seon.agent/namespace-ref
@@ -162,7 +162,7 @@
           (assoc :seon.turn/trigger
                  [:seon.message/id
                   (get-in run [:seon.turn/trigger
-                               :seon.message/id])]))))))
+                               :seon.message/id])])))))))
 
 (defmacro dir
   "List the public names in namespace-name through Clojure's REPL macro."

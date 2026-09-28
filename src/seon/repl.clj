@@ -26,6 +26,9 @@
 ;;; `requiring-resolve` on every call (AGENTS §2.1).
 (defonce ^:private turn-episode-runs
   (delay (requiring-resolve 'seon.turn/episode-runs)))
+
+(defonce ^:private config-agent-cluster-dial
+  (delay (requiring-resolve 'seon.config/agent-cluster-dial)))
 (defonce ^:private cluster-agent-armed
   (delay (requiring-resolve 'seon.cluster.agent/armed)))
 
@@ -68,14 +71,11 @@
    (frame database agent-id (ai/agent-overlay database agent-id)))
   ([database agent-id overrides]
    (let [maximum (or (:seon.config.run/max-episode-runs overrides)
-                      (db/q
-                       '[:find ?limit . :where
-                         [?config :seon.config/cluster _]
-                         [?config :seon.config.run/max-episode-runs ?limit]] database))
-         remaining (long (max 0 (- (or maximum 0)
-                                    (@turn-episode-runs
-                                     database agent-id))))]
-     (str "turns left: " remaining " of " maximum))))
+                      (@config-agent-cluster-dial database agent-id :seon.config.run/max-episode-runs))]
+     (if (:seon.config/error-key maximum)
+       (str "turns left: unknown: " (:seon.error/message maximum))
+       (str "turns left: " (long (max 0 (- (or maximum 0) (@turn-episode-runs database agent-id))))
+            " of " maximum)))))
 
 (defn- read-shown
   "The one complete EDN value `shown` holds, else `shown` itself (prose, or

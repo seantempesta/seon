@@ -2,6 +2,7 @@
   (:require [clojure.test :refer [deftest is]]
             [clojure.edn :as edn]
             [datahike.api :as d]
+            [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.cluster.message :as message]
             [seon.turn :as turn]
@@ -459,3 +460,34 @@
            "no component attribute owns a turn")
        (is (not-any? #(= runtime (:e %)) (mapcat (comp :tx-data first) reports))
            "opening a turn writes nothing on the agent's runtime")))))
+
+(deftest each-agent-reads-its-own-clusters-cap-where-two-clusters-share-a-branch
+  ;; A cluster branched from another keeps that cluster's config row beside
+  ;; its own (seon.config/apply-compiled! retains every row a cluster owns),
+  ;; so a dial read from "the" config row met whichever came first: a declared
+  ;; cap of 1 read as the inherited 100 (39 provider calls, turn-test).
+  (support/with-database
+   (fn [connection]
+     (let [inherited (db/q '[:find ?name . :where [_ :seon.cluster/name ?name]] @connection)
+           apply-cap! (fn [cluster-name cap]
+                        (config/apply! {:seon.db/connection connection :seon.boot/cluster-name cluster-name
+                                        :seon.config/manifest {:seon.config.run/max-episode-runs cap}}))]
+       (apply-cap! inherited 5)
+       (apply-cap! "cap-two" 2)
+       (cluster/ensure-cluster-entity! connection "cap-two" cluster/boot-process-identity)
+       (support/transacted! connection
+                            (into (agent/creation-tx {:seon.agent/id "cap-one-agent" :seon.ns/name 'my.agents.cap-one-agent
+                                                      :seon.cluster/name inherited})
+                                  (agent/creation-tx {:seon.agent/id "cap-two-agent" :seon.ns/name 'my.agents.cap-two-agent
+                                                      :seon.cluster/name "cap-two"})))
+       (support/transacted! connection
+                            (into (agent/creation-tx {:seon.agent/id "unnamed-agent" :seon.ns/name 'my.agents.unnamed-agent
+                                                      :seon.cluster/name "cap-two"})
+                                  [[:db/retract [:seon.agent/id "unnamed-agent"] :seon.agent/cluster "cap-two"]]))
+       (let [database @connection]
+         (is (= 2 (count (db/q '[:find [?name ...] :where [_ :seon.config/cluster ?name]] database)))
+             "both clusters' config rows are on the branch")
+         (is (= 5 (turn/turns-left database "cap-one-agent")))
+         (is (= 2 (turn/turns-left database "cap-two-agent")))
+         (is (= :seon.agent/cluster (:seon.config/error-key (turn/turns-left database "unnamed-agent")))
+             "an agent that names no cluster is refused by name"))))))

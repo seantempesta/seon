@@ -133,7 +133,7 @@
    [:=> [:cat :seon.db/database-value :seon.agent/id]
     [:or [:vector [:map-of :qualified-keyword :seon.schema/value]] :seon.error/value]]}
   [database agent-id]
-  (let [cluster-name (db/q '[:find ?name . :where [_ :seon.config/cluster ?name]] database)
+  (let [cluster-name (config/agent-cluster database agent-id)
         defaults (when (string? cluster-name) (config/effective database cluster-name))
         overrides (ai/agent-overlay database agent-id)
         attributes (ai/agent-setting-attributes database)
@@ -197,9 +197,11 @@
                     (or (:seon.render/value unit) unit))
         attributes (if database (ai/agent-setting-attributes database)
                        (set (keys (dissoc component :db/id))))
-        cluster-name (when database
-                       (db/q '[:find ?name . :where [_ :seon.config/cluster ?name]] database))
-        defaults (if cluster-name (config/effective database cluster-name) {})
+        cluster-name (when (and database (:seon.agent/id unit))
+                       (config/agent-cluster database (:seon.agent/id unit)))
+        defaults (cond (string? cluster-name) (config/effective database cluster-name)
+                       cluster-name cluster-name
+                       :else {})
         registry (:seon.schema.projection/registry
                   (or (some-> database db/carried-projection)
                       (:seon.schema/projection unit)))]

@@ -10,6 +10,7 @@
             [seon.cluster.process :as process]
             [seon.cluster.registry :as registry]
             [seon.db :as db]
+            [seon.config :as config]
             [seon.id :as id]
             [seon.fn :as functions]
             [seon.repl :as repl]
@@ -1444,7 +1445,7 @@
         :seon.error/offending request
         :seon.issue/assigned-issue-id issue-id
         :seon.error/expected "an unassigned issue or a larger budget for an open issue"}))
-        (let [cluster-name (db/q '[:find ?name . :where [_ :seon.cluster/name ?name]] database)
+        (let [cluster-name (config/agent-cluster database agent-id)
               turn-id (@turn-next-id database cluster-name agent-id)
               open-turn (db/q '[:find ?turn . :in $ ?id :where
                                 [?agent :seon.agent/id ?id]
@@ -1488,8 +1489,7 @@
     (if (and issue-id (zero? (@turn-turns-left database agent-id)))
       (let [view (status {:seon.db/db database :seon.issue/id issue-id})
             spent (@turn-episode-runs database agent-id)
-            limit (db/q '[:find ?limit . :where [?config :seon.config/cluster _]
-                           [?config :seon.config.message/max-chain ?limit]] database)
+            limit (config/agent-cluster-dial database agent-id :seon.config.message/max-chain)
             delivery (message/delivery
                       database
                       {:seon.agent/id agent-id :seon.config.message/max-chain limit

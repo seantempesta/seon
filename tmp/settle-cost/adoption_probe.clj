@@ -14,6 +14,7 @@
             [seon.schema.edn :as schema.edn]
             [clojure.edn]
             [seon.profile]
+            [seon.config]
             [seon.schema.datahike :as schema.datahike]))
 
 (defn- candidate-projection
@@ -167,3 +168,35 @@
                [:db/retractEntity [:seon.cluster/name "default"]]]]
        (assoc (timed-transact connection tx)
               :configs-after (d/q '[:find [?n ...] :where [_ :seon.config/cluster ?n]] @connection))))))
+
+(defn two-cluster-caps
+  "b2 on a live-store branch: adopt :seon.agent/cluster from the candidate
+  seon.agent.edn, add a second cluster's config row (cap 2) beside the
+  inherited one (cap 5), name two agents' clusters, and read each agent's cap
+  the way seon.config/agent-cluster-dial reads it."
+  [agent-edn]
+  (let [candidate (clojure.edn/read-string (slurp agent-edn))
+        forms (merge (into {} (remove #(= "seon.agent" (namespace (key %)))) (schema.edn/packaged-forms)) candidate)
+        projection (schema/declaration-projection forms)
+        declaration (schema.datahike/malli->datahike-attr-in projection :seon.agent/cluster)]
+    (on-branch
+     (fn [connection]
+       (let [install (timed-transact connection (cluster/attribute-change-tx @connection [:seon.agent/cluster]
+                                                                              {:seon.agent/cluster declaration} projection))
+             agents (vec (take 2 (sort (d/q '[:find [?id ...] :where [_ :seon.agent/id ?id]] @connection))))
+             apply-cap! (fn [cluster-name cap]
+                          (db/call-without-custody
+                           #(seon.config/apply! {:seon.db/connection connection :seon.boot/cluster-name cluster-name
+                                                 :seon.config/manifest {:seon.config.run/max-episode-runs cap}})))
+             applied [(apply-cap! "default" 5) (apply-cap! "cap-two" 2)]
+             write (timed-transact connection
+                                   [[:db/add [:seon.agent/id (first agents)] :seon.agent/cluster "default"]
+                                    [:db/add [:seon.agent/id (second agents)] :seon.agent/cluster "cap-two"]])
+             database @connection
+             dial (fn [agent-id]
+                    (let [c (d/q '[:find ?n . :in $ ?id :where [?a :seon.agent/id ?id] [?a :seon.agent/cluster ?n]] database agent-id)]
+                      [c (get (d/pull database [:seon.config.run/max-episode-runs] [:seon.config/cluster c]) :seon.config.run/max-episode-runs)]))]
+         {:declaration declaration :install (dissoc install :after) :write (dissoc write :after)
+          :configs (d/q '[:find ?n ?v :where [?c :seon.config/cluster ?n] [?c :seon.config.run/max-episode-runs ?v]] database)
+          :first-config-read (d/q '[:find ?v . :where [?c :seon.config/cluster _] [?c :seon.config.run/max-episode-runs ?v]] database)
+          :caps (into {} (map (juxt identity dial)) agents)})))))

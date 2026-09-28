@@ -1172,8 +1172,7 @@
                                   [:seon.agent/id agent-id])
                           [:seon.agent/settings])
           no-provider (get overlay :seon.config.ai/no-provider
-                           (db/q '[:find ?v . :where [?config :seon.config/cluster _]
-                                    [?config :seon.config.ai/no-provider ?v]] opening))]
+                           (config/agent-cluster-dial opening agent-id :seon.config.ai/no-provider))]
       (if no-provider "Virtual" "No provider attempt"))
     (or (:seon.turn/reply entity) (:seon.turn/reply-blob entity)) "System"
     :else "No provider attempt"))

@@ -30,6 +30,7 @@
   [:seon.store/store {:optional true} :seon.store/store]]
  :archived-tx [:and {:description "The transaction that archived this retained agent identity. Archival only filters presentation; it does not stop its graph, detach ownership or disable resumption."} :seon.db/ref]
  :admission-closed-tx [:and {:description "The transaction that closed this agent's admission: the run writer refuses every later run for it by name (seon.turn/system-run-call and plan-call). A hosted agent's retirement is this one assertion; the runs committed before it are the ones retirement awaits."} :seon.db/ref]
+:cluster [:string {:min 1 :description "The name of the cluster this agent was created in: its config row ([:seon.config/cluster name]) is the agent's config (seon.config/agent-cluster). Several clusters' config rows may share a branch. A name, as config rows are keyed, so an agent is created before or without its cluster's entity."}]
 :runtime [:and {:seon.db/component true :seon.db/component-schema :seon.runtime/entity :description "The agent owns its runtime: latest trigger and listens. Its turns name it (:seon.turn/agent)."} :seon.db/ref]
 :agent
                      [:map
@@ -51,6 +52,7 @@
                        seon.cluster.agent/identity-form :seon.program/partition :seon.data}
                       [:seon.agent/id :seon.agent/id]
                       [:seon.agent/branch :seon.agent/branch]
+                      [:seon.agent/cluster {:optional true} :seon.agent/cluster]
                       [:seon.agent/archived-tx {:optional true} :seon.agent/archived-tx]
                       [:seon.agent/admission-closed-tx {:optional true} :seon.agent/admission-closed-tx]
                       [:seon.agent/namespace
@@ -215,8 +217,9 @@
              :archived [:map {:description "An archived agent as archive! answers it: its id and the transaction that archived it."}
                         [:seon.agent/id :seon.agent/id]
                         [:seon.agent/archived-tx :seon.agent/archived-tx]]
-             :identity-view [:map {:description "My identity as the AI face shows it: my id, my namespace and its steward, and the reads offered."}
+             :identity-view [:map {:description "My identity as the AI face shows it: my id, my namespace and its steward, my cluster, and the reads offered."}
                              [:seon.agent/id :seon.agent/id]
+                             [:seon.agent/cluster {:optional true} :seon.agent/cluster]
                              [:seon.agent/namespace {:optional true} [:map [:seon.ns/name :seon.ns/name]
                                                                       [:seon.ns/steward {:optional true} [:map [:seon.agent/id :seon.agent/id]]]]]
                              [:seon.render/operations :seon.render/operations]]

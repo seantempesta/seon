@@ -217,8 +217,9 @@
 
   Transaction data. Without an explicit `:seon.agent/branch` the agent's
   branch is the one the transacting connection holds (`branch-call`).
-  Context is derived from the entity graph, so agent creation stores no
-  blocks or other presentation state. The namespace assignment is not
+  The agent names the cluster it is created in (`:seon.agent/cluster`),
+  whose config is its own. Context is derived from the entity graph, so
+  agent creation stores no blocks or other presentation state. The namespace assignment is not
   unique — several agents may share one namespace — so stewardship is
   decided inside the transaction by `steward-call`: the creating agent
   stewards a namespace that has none yet, and never displaces an existing
@@ -227,11 +228,14 @@
                   :seon.agent/creation-tx]}
   [{agent-id :seon.agent/id
     namespace-name :seon.ns/name
+    cluster-name :seon.cluster/name
     branch :seon.agent/branch}]
   (let [namespace-ref [:seon.ns/name namespace-name]]
     (-> [[:db.fn/call #'namespace-seed-call namespace-name]
          (cond-> {:db/id (str "agent:" agent-id)
                   :seon.agent/id agent-id
+                  ;; the agent's config is its cluster's (seon.config/agent-cluster)
+                  :seon.agent/cluster cluster-name
                   :seon.agent/namespace namespace-ref
                   :seon.agent/plan {:my.plan/agent (str "agent:" agent-id)}
                   :seon.agent/settings {:seon.config/agent (str "agent:" agent-id)}
@@ -251,7 +255,8 @@
 (def ^:private identity-selector
   '[:seon.agent/id
     {:seon.agent/namespace
-     [:seon.ns/name {:seon.ns/steward [:seon.agent/id]}]}])
+     [:seon.ns/name {:seon.ns/steward [:seon.agent/id]}]}
+    :seon.agent/cluster])
 
 (defn identity-form
   "Return the database read that reproduces an agent's identity."
@@ -279,8 +284,7 @@
        (when-let [agent-id (:seon.agent/id agent-data)]
          (let [namespace-name
                (get-in agent-data [:seon.agent/namespace :seon.ns/name])
-               cluster-name
-               (db/q '[:find ?name . :where [_ :seon.cluster/name ?name]] (:seon.db/db request))]
+               cluster-name (:seon.agent/cluster agent-data)]
            (str "Agent     " agent-id
                 (when namespace-name (str "\nNamespace " namespace-name))
                 (when cluster-name (str "\nCluster   " cluster-name))))))))

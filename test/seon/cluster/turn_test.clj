@@ -213,20 +213,6 @@
                    :seon.config.flow.io/queue-depth 2
                    :seon.config.flow.io/concurrency 2)})]
      (try
-      ;; ONE BRANCH, ONE CLUSTER: every reader of cluster config reads the
-      ;; branch's one config row. A world branched from the executing test's
-      ;; database carries that cluster's row, and beside it "turn-test"'s
-      ;; declared cap of 1 lost to the inherited 100 (39 provider calls in
-      ;; generated-opening-preserves-one-provider-turn-budget).
-      (let [inherited (db/q '[:find [?name ...] :where [_ :seon.config/cluster ?name]] @connection)
-            result (when (seq inherited)
-                     (db/transact! connection
-                                   (into [] (mapcat (fn [cluster-name]
-                                                      [[:db/retractEntity [:seon.config/cluster cluster-name]]
-                                                       [:db/retractEntity [:seon.cluster/name cluster-name]]]))
-                                         inherited)))]
-        (when (:seon.db.write.attempt/request-id result)
-          (throw (ex-info "Turn fixture could not retire the inherited cluster." result))))
       ;; Apply the final manifest once; cluster and agent facts need that config.
       (let [result
             (config/apply!

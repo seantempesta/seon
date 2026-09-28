@@ -3022,6 +3022,19 @@
          :tx-meta {:seon.db/process [:seon.db.process/id process]}})
        {:seon.cluster/name cluster-name
         :seon.boot/population :seon.cluster/cluster})))
+  ;; An agent created before agents named their cluster names none, and its
+  ;; config reads refuse (seon.config/agent-cluster): this cluster names
+  ;; them, once, in one transaction.
+  (when-let [unnamed (seq (db/q '[:find [?agent ...] :where [?agent :seon.agent/id]
+                                  (not [?agent :seon.agent/cluster])]
+                                (db/db connection)))]
+    (require-committed!
+     (db/transact!
+      connection
+      {:tx-data (mapv #(vector :db/add % :seon.agent/cluster cluster-name) unnamed)
+       :tx-meta {:seon.db/process [:seon.db.process/id process]}})
+     {:seon.cluster/name cluster-name
+      :seon.boot/population :seon.agent/cluster}))
   nil)
 
 (defn seed-cluster-facts!
@@ -3102,9 +3115,8 @@
                   database bootstrap-run-id)
             namespace-name
             (get-in agent [:seon.agent/namespace :seon.ns/name])
-            cluster-name
-            (db/q '[:find ?name . :where [_ :seon.cluster/name ?name]] database)]
-        (if (and namespace-name cluster-name (= agent-id run-agent-id))
+            cluster-name (config/agent-cluster database agent-id)]
+        (if (and namespace-name (string? cluster-name) (= agent-id run-agent-id))
           {:seon.agent/id agent-id
            :seon.ns/name namespace-name
            :seon.cluster/name cluster-name

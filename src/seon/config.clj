@@ -863,6 +863,39 @@
                         (compile-manifest (select-keys request [:seon.boot/cluster-name])))
        (apply! (assoc request :seon.config/manifest document))))))
 
+(defn agent-cluster
+  "The cluster `agent-id` was created in (`:seon.agent/cluster`), whose
+  config is the agent's config.
+
+  Several clusters' config rows may share one branch (`apply-compiled!`
+  keeps every row another cluster's `:seon.cluster/config` names), so an
+  agent's dial is read through its own cluster, never from whichever row a
+  query meets first. An agent that names no cluster is refused by name."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
+                  [:or :seon.cluster/name :seon.config/error]]}
+  [database agent-id]
+  (or (db/q '[:find ?name . :in $ ?id
+              :where [?agent :seon.agent/id ?id] [?agent :seon.agent/cluster ?name]]
+            database agent-id)
+      (seon.error.refusal/diagnostic
+       (java.util.Date.) :seon.config/read 'seon.config/agent-cluster
+       {:seon.config/error-key :seon.agent/cluster
+        :seon.error/expected-key :seon.agent/cluster
+        :seon.error/offending agent-id
+        :seon.error/message (str "Agent " agent-id " names no cluster (:seon.agent/cluster), so no config is its own.")
+        :seon.error/fix "Create the agent through seon.cluster.agent/creation-tx, which names its cluster; boot names the booting cluster for its agents that name none."})))
+
+(defn agent-cluster-dial
+  "`dial` of `agent-id`'s own cluster config (`agent-cluster`): its value,
+  nil when that config leaves it undecided, or the refusal."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :qualified-keyword]
+                  [:or :nil :seon.schema/value :seon.config/error]]}
+  [database agent-id dial]
+  (let [cluster-name (agent-cluster database agent-id)]
+    (if (string? cluster-name)
+      (get (db/pull database [dial] [:seon.config/cluster cluster-name]) dial)
+      cluster-name)))
+
 (declare effective-in)
 
 (defn effective
