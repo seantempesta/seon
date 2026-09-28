@@ -1,6 +1,6 @@
 (ns seon.db-test
   (:require [clojure.core.async :as async]
-            [clojure.core.cache :as cache]
+            [seon.cache]
             [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
@@ -2060,7 +2060,7 @@
                                     {:seon.fn/call-arities #{['clojure.core/str 1]}})])
      (let [head (db/db connection)
            content-key (@#'db/arity-content-key head)
-           seeded? (cache/has? @@#'db/arity-base-cache content-key)
+           seeded? (contains? (seon.cache/retained ::db/arity-base) content-key)
            ;; The writer's own questions read arities through their cells.
            storage-q (partial @#'db/storage-q-in (db/carried-projection head))
            edges (@#'db/call-edges storage-q head)
