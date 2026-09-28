@@ -2614,7 +2614,7 @@
                             (symbol "sample.call-declarations" "handler")))
                  (db/q '[:find ?caller :in $ % ?target
                          :where (call-edge ?caller ?target)]
-                       declared-only @#'seon.fn/test-reach-rules handler)))
+                       declared-only (#'seon.fn/test-reach-rules declared-only) handler)))
           (is (= [(quote sample.call-declarations/reaches-declarations)]
                  (filterv #(= "sample.call-declarations" (namespace %))
                           (seon.fn/tests-reaching declared-only (symbol "sample.call-declarations" "handler"))))))

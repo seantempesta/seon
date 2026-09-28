@@ -24,7 +24,7 @@
                                   (/ (double (- (System/nanoTime) started)) 1e6))
                          (reduce (fn [by-target [caller target]] (update by-target target (fnil conj #{}) caller))
                                  edges result)))
-                     {} @#'program/declared-reference-rules)]
+                     {} (#'program/declared-reference-rules database))]
        (println "declared callers ms=" elapsed "targets=" (count actual))
        (is (seq expected) "the canonical publication contains declared references")
        (is (= expected actual) "capability, function-owned and data-entity rules retain their identities")
