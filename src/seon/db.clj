@@ -2054,6 +2054,38 @@
     (or (apply merge-with set/union (map query-binding-values (:bindings binding) value)) {})
     :else {}))
 
+(defn- nil-query-binding?
+  "Whether an input binding supplies nil at a scalar position. A scalar's
+  nested data is one value; only tuple and collection bindings destructure it."
+  {:malli/schema [:=> [:cat :seon.schema/value :seon.schema/value] :boolean]}
+  [input-binding value]
+  (boolean
+   (cond
+     (nil? value) true
+     (instance? BindColl input-binding)
+     (some #(nil-query-binding? (:binding input-binding) %) value)
+     (instance? BindTuple input-binding)
+     (some true? (map nil-query-binding? (:bindings input-binding) value))
+     :else false)))
+
+(defn- nil-query-input-error
+  "Refuse nil bindings before attribute lookup or index execution: Datahike
+  can interpret substituted nil as an unbound pattern and read every value."
+  {:malli/schema [:=> [:cat :map :seon.schema/value]
+                  [:maybe :seon.db/invalid-read-error]]}
+  [request parsed-query]
+  (when (some true? (map nil-query-binding? (:qin parsed-query) (:args request)))
+    (vary-meta
+     (diagnostic
+      {:seon.error/message "A query :in binding supplied nil; supply a value or omit the read when its subject is absent."
+       :seon.db/invalid-read true
+       :seon.error/layer :database-read
+       :seon.error/operation 'seon.db/q
+       :seon.error/expected :some
+       :seon.error/offending nil
+       :seon.error/data {::query (:query request) :seon.error/member :in}})
+     assoc :seon.error/declared-schema :seon.db/invalid-read-error)))
+
 (defn- query-input-values
   {:malli/schema [:=> [:cat :seon.schema/value [:sequential :seon.schema/value]] :map]}
   [parsed-query arguments]
@@ -2745,7 +2777,10 @@
                                         (when (and (map? query-input) (:args query-input)) supplied)))))))
 
 (defn q
-  "Run a Datalog query over explicit inputs or the current database value."
+  "Run a Datalog query over explicit inputs or the current database value.
+  Nil scalar inputs, including members of tuple and collection bindings,
+  return an invalid-read error before executing the query. False and empty
+  collections remain ordinary inputs."
   {:malli/schema
    [:=> [:catn [:seon.db/query-or-database [:or :seon.db/database-value :seon.error/value :seon.db/query :seon.db/query-args]] [:seon.db/arguments [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Datahike Datalog bindings carry arbitrary values. The function guard derives input count and database source positions from the parsed query.", :gen/elements [[]]} :seon.schema/value]]] [:or :seon.schema/value :seon.db/invalid-read-error] [:fn #:error{:message "The supplied arguments must match the query's :in (default [$]); every source input must be a database value. Use (seon.db/q query input ...) with $ elided, or (seon.db/q database query input ...) with the database first.", :fn seon.db/query-guard-message} seon.db/query-call-valid?]]}
   [query-or-database & arguments]
@@ -2777,7 +2812,8 @@
           (refused-read aligned 'seon.db/q)
           (let [request (assoc normalized :args aligned)
                 parsed-query (query/memoized-parse-query (:query request))]
-            (or (malformed-query-pattern-error request parsed-query)
+            (or (nil-query-input-error request parsed-query)
+                (malformed-query-pattern-error request parsed-query)
                 (query-attribute-error request parsed-query)
                 (with-declarations
                   (some #(when (db.utils/db? %) %) aligned) 'seon.db/q

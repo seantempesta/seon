@@ -269,6 +269,35 @@
           (is (every? #(<= (::elapsed-nanos %) 5000000) wrapped)
               "seon.db/q stays close to the raw query"))))))))
 
+(deftest nil-query-bindings-refuse-before-reading-the-index
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           scalar '[:find [?e ...] :in $ ?id :where [?e :seon.agent/id ?id]]
+           collection '[:find [?e ...] :in $ [?id ...] :where [?e :seon.agent/id ?id]]]
+       (doseq [[query input] [[scalar nil]
+                             [collection nil]
+                             [collection [nil]]
+                             ['[:find [?sym ...] :in $ ?e :where [?e :seon.fn/sym ?sym]] nil]
+                             ['[:find [?e ...] :in $ [?id] :where [?e :seon.agent/id ?id]] [nil]]
+                             ['[:find [?e ...] :in $ [[?id]] :where [?e :seon.agent/id ?id]] [[nil]]]]]
+         (let [result (db/q query database input)]
+           (is (true? (:seon.db/invalid-read result)))
+           (is (= :in (get-in result [:seon.error/data :seon.error/member])))
+           (is ((schema/projection-validator (db/carried-projection database)
+                                             :seon.db/invalid-read-error) result))))
+       (doseq [n [1 10 100]]
+         (let [[result calls]
+               (test-support/armed-calls
+                '#{seon.db/nil-query-binding? seon.db/vector-query-call}
+                #(db/q '[:find (count ?sym) . :in $ [?e ...] :where [?e :seon.fn/sym ?sym]]
+                       database (conj (vec (repeat (dec n) [:seon.fn/sym 'seon.db/q])) nil)))]
+           (is (true? (:seon.db/invalid-read result)))
+           (is (zero? (get calls 'seon.db/vector-query-call 0)))
+           (is (<= (get calls 'seon.db/nil-query-binding? 0) (+ n 3)))))
+       (is (= [] (db/q collection database [])))
+       (is (= [] (db/q scalar database "not-a-recorded-agent")))))))
+
 (deftest relation-only-queries-need-no-database-schema
   (is (= [:sample/fail]
          (db/q '[:find [?key ...] :in [[?key ?passed]]

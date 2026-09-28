@@ -1,0 +1,3 @@
+(require '[seon.db :as db] '[seon.cluster.boot :as boot] '[seon.test-support :as support])
+(declare q-after)
+(let [database (db/db (boot/connection "default")) q '[:find (count ?sym) . :in $ [?e ...] :where [?e :seon.fn/sym ?sym]]] (mapv (fn [n] (mapv (fn [[label f]] (let [inputs (conj (vec (repeat (dec n) [:seon.fn/sym 'seon.db/q])) nil) start (System/nanoTime) [result calls] (support/armed-calls '#{seon.db/vector-query-call} #(f q database inputs))] {:n n :label label :refused? (:seon.db/invalid-read result) :index-executions (get calls 'seon.db/vector-query-call 0) :ms (/ (- (System/nanoTime) start) 1e6)})) [[:parent db/q] [:candidate q-after]])) [1 10 100]))
