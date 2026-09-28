@@ -330,11 +330,21 @@
       (and (instance? clojure.lang.IDeref value) (not (var? value)))
       (object-name value nil)
       (record? value) value
-      (or (map? value) (vector? value))
+      (map? value)
       (reduce-kv (fn [held k v]
                    (let [r (referenced project v)]
                      (if (identical? r v) held (assoc held k r))))
                  value value)
+      ;; By index, not reduce-kv: a map entry is a vector that reduce-kv
+      ;; walks as a map (Keyword -> Map$Entry), and an explained problem
+      ;; carries entries (`find`), so the refusal of a data value against a
+      ;; union output could not be built (render-call, 2026-09-28).
+      (vector? value)
+      (reduce (fn [held i]
+                (let [v (nth value i)
+                      r (referenced project v)]
+                  (if (identical? r v) held (assoc held i r))))
+              value (range (count value)))
       (set? value)
       (let [members (map (fn [v] [v (referenced project v)]) value)]
         (if (every? (fn [[v r]] (identical? v r)) members)

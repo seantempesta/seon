@@ -1198,6 +1198,19 @@
     {:pass? (and (some? (:seon.sci.eval/ctx r)) (string? (get-in r [:seon.sci.eval/unbound-results :seon.error/message])))
      :unbound (select-keys (:seon.sci.eval/unbound-results r) [:seon.error/message :seon.error/operation])}))
 
+(defproof :refusal-builds-for-data-against-a-union :totality
+  "A refusal always builds: a data value returned against a union output (render-call's shape) is refused with its problems, never the minimal 'could not be built' fallback (a map entry in the evidence broke seon.error.refusal/referenced)"
+  (let [d (wdb (world))
+        proj (db/carried-projection d)
+        caps (:seon.sci.admit/caps (#'eval/instrumentation-config d))
+        schema [:=> [:cat :any] [:or :nil :string :seon.render/hiccup :seon.render/error-result]]
+        w (#'seon.instrument/compiled-wrapper proj 'user/probe-union schema
+            (fn [_] {:seon.agent/id "root" :seon.agent/namespace {:seon.ns/name 'my.agents.root}}) caps)
+        r (try (w 1) nil (catch clojure.lang.ExceptionInfo t (ex-data t)))]
+    {:pass? (and (map? r) (seq (:seon.error/problems r))
+                 (not (str/includes? (str (:seon.error/message r)) "could not be built")))
+     :message (:seon.error/message r) :problems (count (:seon.error/problems r))}))
+
 (def landing-files
   "The six namespaces and the schema resource step S3 copies into the tree."
   ["src/seon/batch.clj" "src/seon/sci/forgive.clj" "src/seon/sci/batch.clj" "src/seon/sci/arm.clj"
