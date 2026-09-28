@@ -60,7 +60,8 @@
             :result
             [:map
              {:seon.render/ai seon.render.test/render-ai
-              :seon.render/html seon.render.test/render-html}
+              :seon.render/html seon.render.test/render-html
+              :seon.render/form seon.render.test/render-form}
              [:seon.test/failures {:optional true} [:vector :seon.test.failure/value]]
              [:seon.test/sym :seon.test/sym]
              [:seon.test/pass-count :seon.test/pass-count]
@@ -81,6 +82,19 @@
               {:optional true}
               :seon.test/failure-message]],
             :results [:vector :seon.test/result],
+            :seon.render.test/view
+            [:map {:description "A test's result as its AI face shows it: state, host, failed assertions and, unless green, the definitions changed since it last passed."}
+             [:seon.test/sym [:maybe :seon.test/sym]]
+             [:seon.render.test/state [:enum "pass" "fail" "error" "unrun or incomplete"]]
+             [:seon.test/unchanged {:optional true} :seon.test/unchanged]
+             [:seon.test/recorded-basis-t {:optional true} :seon.test/recorded-basis-t]
+             [:seon.test/run-basis-t {:optional true} :seon.test/run-basis-t]
+             [:seon.test/failure-message {:optional true} :seon.test/failure-message]
+             [:seon.test/reach-unknown {:optional true} :seon.test/reach-unknown]
+             [:seon.render.test/host {:optional true} [:or [:map [:seon.test/host :seon.test/host]] :seon.error/value]]
+             [:seon.test.failure/reports {:optional true} [:vector :map]]
+             [:seon.render.test/changed-since-green {:optional true}
+              [:or [:vector :seon.fn/sym] :seon.test/unknown-error]]],
             :result-unknown
             [:and {:description "One test whose latest admitted execution recorded no completed outcome: its symbol and run stay visible, it carries no counts, and it never reads as green or reuses an older result."}
              :seon.error/base
@@ -91,7 +105,8 @@
             [:map
              {:seon.db/attributes true
               :seon.render/ai seon.render.test/render-ai
-              :seon.render/html seon.render.test/render-html :seon.program/partition :seon.program}
+              :seon.render/html seon.render.test/render-html
+              :seon.render/form seon.render.test/render-form :seon.program/partition :seon.program}
              [:seon.test/sym :seon.test/sym]
              [:seon.program/definition-digest :seon.program/definition-digest]
              [:seon.program/analyzed-source-digest :seon.program/analyzed-source-digest]

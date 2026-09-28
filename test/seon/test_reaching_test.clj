@@ -439,7 +439,9 @@
                 html (pr-str (render.test/render-html unit))]
             (is (= line (sut/host-text database test-symbol)))
             (is (not (.contains what "\n")) what)
-            (is (.contains ai line) ai)
+            (is (= (dissoc (sut/host database test-symbol) :seon.test/sym) (:seon.render.test/host ai))
+                "the AI face carries where it runs as the host report's data")
+            (is (= :seon.test.host/isolated-snapshot (get-in ai [:seon.render.test/host :seon.test/host])))
             (is (.contains html line) html))
           ;; The cheap test is indexed from its source, digests included.
           (let [namespace-name (symbol (str "render.probe" (id/id)))
@@ -448,7 +450,7 @@
               (fn []
                 (let [ai (render.test/render-ai {:seon.db/db (db/db connection)
                                                  :seon.render/value {:seon.test/sym cheap}})]
-                  (is (.contains ai "runs: in the cluster process") ai))))))))))
+                  (is (= :seon.test.host/in-process (get-in ai [:seon.render.test/host :seon.test/host]))))))))))))
 
 (deftest reused-results-render-the-recording-basis-as-data
   (let [unit {:seon.render/value
@@ -458,9 +460,8 @@
                :seon.test/unchanged true}}
         ai (render.test/render-ai unit)
         html (pr-str (render.test/render-html unit))]
-    (is (.contains ai ":seon.test/unchanged true"))
-    (is (.contains ai ":seon.test/recorded-basis-t 43"))
-    (is (.contains ai ":seon.test/run-basis-t 42"))
+    (is (= {:seon.test/unchanged true :seon.test/recorded-basis-t 43 :seon.test/run-basis-t 42}
+           (select-keys ai [:seon.test/unchanged :seon.test/recorded-basis-t :seon.test/run-basis-t])))
     (is (.contains html "Unchanged; reused the result recorded at :t "))
     (is (.contains html "43"))))
 

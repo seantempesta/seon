@@ -1,9 +1,7 @@
 (ns seon.render.test
   "Entity projections for tests; execution remains in seon.test."
-  (:require [clojure.string :as str]
-            [seon.db :as db]
+  (:require [seon.db :as db]
             [seon.id :as id]
-            [seon.repl :as repl]
             [seon.test :as test]
             [seon.render.block :as block]
             [seon.render.route :as route]))
@@ -37,29 +35,37 @@
                  #(get % :seon.test.failure/line 0) :seon.test.report/id)
            (:seon.test.failure/reports entity)))
 
+(def ^:private failure-keys
+  "What one failed assertion says: its kind, site, contexts and claim."
+  [:seon.test.failure/type :seon.test.failure/reported-file :seon.test.failure/line
+   :seon.test.failure/testing-contexts :seon.test.failure/message
+   :seon.test.failure/expected :seon.test.failure/actual])
+
 (defn render-ai
-  "Read a test's assertion entities and named changed dependencies."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
+  "A test's result as data: its state, where it runs, its failed assertions
+  and, unless green, the definitions changed since it last passed."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render.test/view]}
   [unit]
-  (let [entity (evidence unit) test-name (:seon.test/sym entity)
-        text (str "Test " test-name ": " (state entity)
-                  (when (and (:seon.db/db unit) (qualified-symbol? test-name))
-                    (str "\n" (test/host-text (:seon.db/db unit) test-name)))
-                  (if (seq (:seon.test.failure/reports entity))
-                    (str "\n" (str/join "\n\n" (map test/failure-text (failures entity))))
-                    (when-let [legacy (:seon.test/failure-message entity)] (str "\n" legacy)))
-                  (when-let [unknown (:seon.test/reach-unknown entity)] (str "\n" unknown)))]
-    (str (when (:seon.test/unchanged entity)
-           (str (repl/source-text
-                 (list 'clojure.core/identity
-                       (select-keys entity [:seon.test/unchanged :seon.test/recorded-basis-t
-                                            :seon.test/run-basis-t :seon.test.run/basis-t
-                                            :seon.test.run/program-digest :seon.test.run/input-digest]))) "\n"))
-         (repl/source-text (list 'clojure.core/identity text)) "\n"
-         (repl/source-text (list 'seon.test/recorded-result (list 'seon.db/db)
-                                (list 'quote test-name))) "\n"
-         (repl/source-text (list 'seon.test/changed-since-green (list 'seon.db/db) (list 'quote test-name))) "\n"
-         (repl/source-text (list 'seon.test/host (list 'seon.db/db) (list 'quote test-name))))))
+  (let [entity (evidence unit) test-name (:seon.test/sym entity) database (:seon.db/db unit)
+        read? (and database (qualified-symbol? test-name))
+        shown-state (state entity)]
+    (cond-> (merge {:seon.test/sym test-name :seon.render.test/state shown-state}
+                   (select-keys entity [:seon.test/unchanged :seon.test/recorded-basis-t :seon.test/run-basis-t
+                                        :seon.test/failure-message :seon.test/reach-unknown]))
+      ;; the host report without the symbol the view already names
+      read? (assoc :seon.render.test/host (let [host (test/host database test-name)]
+                                            (cond-> host (map? host) (dissoc :seon.test/sym))))
+      (seq (:seon.test.failure/reports entity))
+      (assoc :seon.test.failure/reports (mapv #(select-keys % failure-keys) (failures entity)))
+      (and read? (not= "pass" shown-state))
+      (assoc :seon.render.test/changed-since-green (test/changed-since-green database test-name)))))
+
+(defn render-form
+  "The read that finds this test's recorded result again. Shown, never executed."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
+  [unit]
+  (list 'seon.test/recorded-result '(seon.db/db)
+        (list 'quote (:seon.test/sym (or (:seon.render/value unit) unit)))))
 
 (defn- function-link [target]
   [:a {:href (str (route/path :seon.render.route/namespace
