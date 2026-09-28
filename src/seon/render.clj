@@ -264,11 +264,12 @@
              selected))
 
 (defn- source-return?
-  "Does one declared output admit REPL entries (`:seon.render/source` or
-  source blocks)? Its other alternatives are the producer's own business."
+  "Does one declared output admit REPL entries (`:seon.render/source`, source
+  blocks, or data forms `:seon.render/entries`)? Its other alternatives are
+  the producer's own business."
   [output]
   (case output
-    (:seon.render/source :seon.render/source-blocks) true
+    (:seon.render/source :seon.render/source-blocks :seon.render/entries) true
     (boolean (when (and (vector? output) (#{:maybe :or} (first output)))
                (some source-return? (rest output))))))
 
@@ -1253,7 +1254,8 @@
   (boolean
    (case output
      :seon.render/ai (or (string? rendered)
-                         ((schema/projection-validator projection :seon.render/source-blocks) rendered))
+                         ((schema/projection-validator projection :seon.render/source-blocks) rendered)
+                         ((schema/projection-validator projection :seon.render/entries) rendered))
      :seon.render/html (hiccup/hiccup? rendered)
      ((schema/projection-validator projection :seon.render/form) rendered))))
 
@@ -1356,8 +1358,10 @@
       ;; fails, the floor prints the value beside that one diagnostic; a form
       ;; is never shown without its result.
       (let [{face :face failure :failure :as answer} (produce request output selected)
-            blocks (:seon.render/source-blocks face)
-            text (if blocks (clojure.string/join "\n\n" (map :seon.render/source blocks)) face)
+            blocks (and (map? face) (:seon.render/source-blocks face))
+            ;; data forms reach the evaluator as they are: no text is read
+            text (cond blocks (clojure.string/join "\n\n" (map :seon.render/source blocks))
+                       :else face)
             source? (and (contains? answer :face) (= output :seon.render/ai)
                          (source-producer? projection selected [(producer-argument request)]))
             evaluated (when source?
