@@ -1,0 +1,106 @@
+--- a/src/seon/batch.clj
++++ b/src/seon/batch.clj
+@@ -85,26 +85,19 @@
+   [^java.util.concurrent.ConcurrentHashMap s]
+   (into {} (map (fn [[k ^java.util.concurrent.atomic.AtomicLongArray a]] [k [(.get a 0) (.get a 1)]])) s))
+ 
+-(defn executed
+-  "A sink's counts as a value: `[sym digest]` -> calls. An entered call that
+-  has not returned is present with 0."
+-  {:malli/schema [:=> [:cat :seon.batch/sink] [:map-of :seon.batch/executed-key nat-int?]]}
+-  [s]
+-  (update-vals (counters s) first))
+-
+ (def repeated-calls
+   "A function called more than this many times in one evaluation is named in
+   its call profile: repetition visible when it happens."
+   100)
+ 
+ (defn call-profile
+-  "One evaluation's call profile from its sink: the armed calls it made, and
++  "One evaluation's call profile from its captured counters: the armed calls it made, and
+   each function it called more than `repeated-calls` times with its calls and
+   milliseconds, most calls first."
+-  {:malli/schema [:=> [:cat :seon.batch/sink] :seon.batch/call-profile]}
+-  [s]
++  {:malli/schema [:=> [:cat [:map-of :seon.batch/executed-key [:tuple nat-int? nat-int?]]] :seon.batch/call-profile]}
++  [counts]
+   (let [by-sym (reduce (fn [m [[sym _] [n t]]] (update m sym (fn [[a b]] [(+ (or a 0) n) (+ (or b 0) t)])))
+-                       {} (counters s))]
++                       {} counts)]
+     (cond-> {:seon.batch/call-count (reduce + 0 (map first (vals by-sym)))}
+       (some (fn [[n _]] (> n repeated-calls)) (vals by-sym))
+       (assoc :seon.batch/repeated
+@@ -116,7 +109,7 @@
+   summed."
+   {:malli/schema [:=> [:cat :seon.batch/sink] [:map-of :qualified-symbol nat-int?]]}
+   [s]
+-  (reduce (fn [m [[sym _] n]] (update m sym (fnil + 0) n)) {} (executed s)))
++  (reduce (fn [m [[sym _] [n _]]] (update m sym (fnil + 0) n)) {} (counters s)))
+ 
+ (def ^:private ^java.util.function.Function new-adder
+   "A sink's `[calls nanos]` counter for a key it has not seen."
+@@ -428,15 +421,15 @@
+   (let [{s :seon.batch/form-sink reads :seon.batch/reads ^java.util.concurrent.atomic.AtomicLong owned :seon.batch/in-flight}
+         (:seon.batch/form-world batch)
+         in-flight (.get owned)
+-        executed-now (executed s)]
++        captured (counters s)]
+     (when-let [^java.util.concurrent.ConcurrentHashMap batch-sink (:seon.batch/sink (:seon.batch/world request))]
+-      (doseq [[k [n t]] (counters s)
++      (doseq [[k [n t]] captured
+               :let [^java.util.concurrent.atomic.AtomicLongArray c (.computeIfAbsent batch-sink k new-adder)]]
+         (.addAndGet c 0 (long n))
+         (.addAndGet c 1 (long t))))
+     (last-entry batch
+-                #(cond-> (assoc % :seon.batch/reads @reads :seon.batch/read-sink reads :seon.batch/executed executed-now
+-                                :seon.batch/call-profile (call-profile s)
++                #(cond-> (assoc % :seon.batch/reads @reads :seon.batch/read-sink reads :seon.batch/executed (update-vals captured first)
++                                :seon.batch/call-profile (call-profile captured)
+                                 :seon.batch/evidence (if (pos? in-flight) :pending :complete)
+                                 :seon.batch/owned owned)
+                    (pos? in-flight) (assoc :seon.batch/in-flight in-flight)))))
+--- /dev/null
++++ b/test/seon/batch_snapshot_test.clj
+@@ -0,0 +1,41 @@
++(ns seon.batch-snapshot-test
++  (:require [clojure.test :refer [deftest is]]
++            [seon.batch :as batch]
++            [seon.db :as db]
++            [seon.sci.eval :as eval]
++            [seon.sci.observe :as observe]
++            [seon.test-support :as support]
++            [seon.turn :as turn]
++            [seon.turn.batch :as turn.batch]
++            [seon.turn.world :as world]))
++
++(deftest one-evidence-snapshot-at-one-ten-and-one-hundred-executed-definitions
++  (support/with-database
++   (fn [connection]
++     (support/seed-cluster! connection "default")
++     (let [w (world/agent-world {:seon.db/connection connection :seon.cluster/name "default"
++                                  :seon.sci.eval/base-ctx (eval/base-ctx (db/db connection))}
++                                {:seon.agent/id "snapshot-probe"})
++           request (dissoc (turn.batch/code-request
++                             {:seon.batch/world w :seon.batch/observe observe/observe
++                              :seon.turn.batch/row-tx @#'turn/row-tx
++                              :seon.batch/start-ns 'snapshot.probe
++                              :seon.batch/text "(defn chosen {:malli/schema [:=> [:cat] :int]} [] 1)"})
++                           :seon.batch/settle)
++           result (batch/evaluate-batch request)
++           observed (:seon.batch/sink w)]
++       (is (empty? (:seon.batch/diagnostics result)))
++       (doseq [n [1 10 100]]
++         (let [s (batch/sink) counted (batch/sink)
++               _ (.putAll ^java.util.concurrent.ConcurrentHashMap s (into {} (take n observed)))
++               b (assoc result :seon.batch/form-world
++                         {:seon.batch/form-sink s :seon.batch/reads (atom [])
++                          :seon.batch/in-flight (java.util.concurrent.atomic.AtomicLong. 0)})
++               frozen (binding [batch/*world* {:seon.batch/sink counted}]
++                        (#'batch/freeze-step (assoc-in request [:seon.batch/world :seon.batch/sink] (batch/sink)) b))
++               entry (peek (:seon.batch/entries frozen))]
++           (is (= n (.size ^java.util.concurrent.ConcurrentHashMap s)))
++           (is (= 1 (get (batch/calls counted) 'seon.batch/counters))
++               "the evidence and call profile share one snapshot")
++           (is (= (reduce + (vals (:seon.batch/executed entry)))
++                  (get-in entry [:seon.batch/call-profile :seon.batch/call-count])))))))))

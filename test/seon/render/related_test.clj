@@ -120,3 +120,14 @@
                                          :seon.render/value {:seon.test/sym 'rd.a/proves}})]
        (is (= #{:seon.test/sym :seon.render.test/state} (set (keys shown)))
            "a test named beside another entity reads no host report")))))
+
+(deftest breadth-first-selection-reads-group-counts-not-every-target
+  (doseq [n [1 10 100]]
+    (let [visited (atom 0)
+          counts (map (fn [_] (swap! visited inc) 1000000) (apply list (range n)))
+          shown (#'walk/shown-counts counts 10)]
+      (is (= n @visited) "selection consumes one compact count per group")
+      (is (= (if (= n 1) {0 10} (zipmap (range 10) (repeat 1))) shown)))))
+
+(deftest breadth-first-selection-skips-empty-and-exhausted-groups
+  (is (= {1 1, 2 3, 3 2} (#'walk/shown-counts [0 1 3 2] 100))))

@@ -1220,15 +1220,17 @@
       :else value)))
 
 (defn- shown-counts
-  "How many of each group's targets show when `width` items are taken
-  breadth first, the value printer's rule: every group's first before any
-  group's second."
-  {:malli/schema [:=> [:cat [:sequential [:sequential :int]] :int] [:map-of :int :int]]}
-  [target-lists width]
-  (frequencies (map first (take width (sort-by (juxt second first)
-                                               (for [[g targets] (map-indexed vector target-lists)
-                                                     position (range (count targets))]
-                                                 [g position]))))))
+  "Allocate `width` items breadth first from each group's target count."
+  {:malli/schema [:=> [:cat [:sequential nat-int?] :int] [:map-of :int :int]]}
+  [counts width]
+  (loop [queue (into clojure.lang.PersistentQueue/EMPTY
+                    (keep-indexed (fn [g n] (when (pos? n) [g n]))) counts)
+         left width shown {}]
+    (if (and (pos? left) (seq queue))
+      (let [[g n] (peek queue)]
+        (recur (cond-> (pop queue) (> n 1) (conj [g (dec n)]))
+               (dec left) (update shown g (fnil inc 0))))
+      shown)))
 
 (defn related
   "`:seon.related/data`: the entity `lookup` names, one hop both ways, forward
@@ -1272,7 +1274,7 @@
             groups (cond->> (sort-by (comp str key) (group-by second (filter #(= root (first %)) (::edges found))))
                      selected (filter #(= selected (key %))))
             targets (mapv (fn [[_ edges]] (drop offset (sort > (distinct (map peek edges))))) groups)
-            shown (shown-counts targets width)]
+            shown (shown-counts (mapv count targets) width)]
         (cond-> (into (sorted-map-by #(compare (str %1) (str %2)))
                       (map-indexed
                        (fn [g [attribute edges]]

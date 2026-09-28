@@ -373,3 +373,59 @@ Report archive `155ebf98c` plus the report/probe files: lint 0 errors, 1,665
 warnings, 7.031 s; contracts 498 files, 4.786 s, the same ten foreign
 script findings. No publication, boot or store configuration changed in this
 measurement-only slice. The foreign MCP/turn/schema work remains outside it.
+
+## Related-data selection and the S4a snapshot shrink
+
+`render.walk/shown-counts` previously enumerated and sorted every target
+position to allocate a small display width: O(T log T) time and O(T) pairs.
+It now takes one count per group and rotates a persistent queue until the
+width is filled: O(G + W) selection time, O(G) space. The caller counts its
+already-derived targets once; including that count, the operation is O(T + G
++ W). The contract validates G counts, not T target identities. No render or
+query policy changes, and no database writes occur.
+
+The real default call graph supplied 1/10/100 groups with 4,960/25,922/71,192
+targets, width 10. Old/new selector-plus-count times were 0.898/0.367,
+11.397/0.798 and 40.483/2.176 ms. Allocations to every group matched exactly.
+These are held call-graph groups, not an end-to-end page benchmark. Both sides
+consume the caller's target sequences; the removed work is materializing and
+sorting all position pairs. The regression supplies 1/10/100 compact counts,
+each representing a million targets, and counts one consumed count per group.
+Source delta is +12/−10; the two added source lines replace the full sort.
+
+Focused tests for root (not run here):
+
+- `seon.render.related-test/breadth-first-selection-reads-group-counts-not-every-target`
+- `seon.render.related-test/breadth-first-selection-skips-empty-and-exhausted-groups`
+- `seon.render.related-test/a-function-relates-its-callers-and-callees-by-their-own-render`
+
+S4a's `freeze-step` reads the same mutable call counters three times: executed
+definitions, batch accumulation, and call profile. The prepared
+`tmp/astra-store-fixes-20260928/patches/batch-one-snapshot.patch` captures them
+once, passes that compact map to `call-profile`, and deletes `executed`,
+converting both of its callers. This also makes the three observations agree
+if owned work is still finishing. Real counters from a disposable SCI
+`defn` supplied 1/10/100 executed definitions. Armed `counters` call counts
+fell from 3 to 1; identical frozen values took 0.00867/0.00589,
+0.01726/0.01124 and 0.10192/0.06199 ms per call (500 warm repetitions).
+Scratch outer candidates were unarmed, with installed armed helpers; this is
+not a whole-evaluation speed claim. The patch removes seven net source lines.
+Its included regression is
+`seon.batch-snapshot-test/one-evidence-snapshot-at-one-ten-and-one-hundred-executed-definitions`.
+
+A different S4a idea was rejected after measurement. `apply-pending` scans all
+entries to mark the last one, but replacing that scan with the armed
+`last-entry` helper doubled cost at 100 entries (0.160 to 0.316 ms): another
+whole-batch contract validation outweighed the saved scan. The real SCI probe
+also proved that ordinals can begin at 17, so an ordinal is not a vector
+index. Fixing this class needs compact stage contracts, not another helper
+receiving the entire history. The rejected measurement is preserved; its
+patch is not offered for installation.
+
+Archive `d90933b17` plus the two related-data files and the S4a patch: lint
+0 errors, 1,664 warnings, 7.228 s; contracts 500 files, 4.797 s, only the same
+ten foreign documentation-script findings. No tests were started. The related
+files were released by their former lane and are changed directly. The S4a
+patch is validated but **not installed**: `batch.clj` remains owned by
+one-path-impl-2, and no held file or session was changed. Root must apply that
+patch and run its focused regression. MCP/turn/schema work remains foreign.
