@@ -21,7 +21,9 @@
             [seon.cluster.store :as store]
             [seon.db :as db]
             [seon.schema]
-            [seon.test-support :as test-support])
+            [seon.test-support :as test-support]
+            [replikativ.logging]
+            [taoensso.trove :as trove])
   (:import [java.io File]
            [java.util.concurrent CompletableFuture TimeUnit]))
 
@@ -683,3 +685,20 @@
             (store/release-store! held))))
       (finally
         (test-support/delete-recursively! (str (io/file dir) "/.."))))))
+
+(deftest datahike-logs-through-seon-bounded-and-expected-refusals-below-error
+  ;; A raise and the writer's write-error reach their caller as the failure;
+  ;; they were printed whole at :error on stdout by trove's console backend.
+  (let [large {:entity (vec (range 5000))}
+        logged (fn [thunk]
+                 (let [w (java.io.StringWriter.)]
+                   (binding [*out* w *err* w trove/*log-fn* #'store/datahike-log!]
+                     (try (thunk) (catch clojure.lang.ExceptionInfo _ nil)))
+                   (str w)))]
+    (is (= "" (logged #(replikativ.logging/raise "Bad entity attribute " :x/y " at " large
+                                                 ", not defined in current schema" {:error :transact/schema}))))
+    (is (= "" (logged #(replikativ.logging/error :datahike/write-error large))))
+    (let [line (logged #(replikativ.logging/error :datahike/listener-error large))]
+      (is (str/includes? line "ERROR"))
+      (is (str/includes? line ":datahike/listener-error"))
+      (is (< (count line) 600) line))))

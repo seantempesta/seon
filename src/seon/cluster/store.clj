@@ -24,9 +24,11 @@
             [seon.fault :as fault]
             [seon.fs :as fs]
             [seon.operator.runtime :refer [held-flocks]]
+            [seon.print.value :as print.value]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [taoensso.timbre :as log])
+            [taoensso.timbre :as log]
+            [taoensso.trove :as trove])
   (:import [java.nio.channels FileChannel FileLock OverlappingFileLockException]
            [java.nio.file OpenOption StandardOpenOption]))
 
@@ -419,6 +421,47 @@
              {::dir store-dir}))
   nil)
 
+(defn- datahike-log-level
+  "Datahike's trove `level` for the call named `id`, lowered to `:trace` when
+  the same failure reaches its caller as a value, so an expected refusal is
+  never logged as an error.
+
+  A `raise` (`replikativ/logging.cljc:82-96`) logs at `:error` WITHOUT an id
+  and throws that message and data to its caller; every other Datahike
+  `log/error` names an id (reference-code/datahike 591c825d). The writer's
+  `:datahike/write-error` puts the failure on the transaction's callback
+  first (`datahike/writer.cljc:159-164`). Timbre's configured minimum is
+  `:debug`, so `:trace` does not print."
+  {:malli/schema [:=> [:cat :keyword [:or :nil :keyword]] :keyword]}
+  [level id]
+  (if (and (= :error level) (or (nil? id) (= :datahike/write-error id)))
+    :trace
+    level))
+
+(defn datahike-log!
+  "Datahike's logging through Seon's logger (timbre), installed with
+  `trove/set-log-fn!` in place of trove's default console (stdout) backend
+  (`taoensso.trove/*log-fn*`: `(fn [ns coords level id lazy_])`). The call's
+  message, data and error print as one value bounded by
+  `seon.print.value/bounded-text`, never whole."
+  {:malli/schema [:=> [:cat :string [:or :nil [:sequential [:maybe :int]]] :keyword [:or :nil :keyword]
+                       [:or :nil :map [:fn clojure.core/delay?]]]
+                  :nil]}
+  [callsite-ns coords level id lazy_]
+  (let [level (datahike-log-level level id)]
+    (when (log/may-log? level callsite-ns)
+      ;; One bounded value: a `replikativ.logging` call whose second argument
+      ;; is not a map literal passes its data as `:msg`, and a raise's message
+      ;; prints the whole offending entity.
+      (let [event (into {} (remove (comp nil? val)) (select-keys (force lazy_) [:msg :data :error]))]
+        (log/log! {:may-log? true
+                   :level level
+                   :msg-type :p
+                   :loc {:ns callsite-ns :line (first coords)}
+                   :vargs (into [] (remove nil?)
+                                [(some-> id str) (print.value/bounded-text event)])})))
+    nil))
+
 (defn open-store!
   "Open the one fenced physical store this process owns.
   Creates it when absent and opens its main branch. B2 revision: one map argument;
@@ -443,6 +486,9 @@
                               :boolean]]]
                   :seon.store/store]}
   [{store-dir :seon.store/dir :as request}]
+  ;; Before Datahike's first call: its logging goes through Seon's logger.
+  ;; The Var, so a call reaches its armed and reloaded root.
+  (trove/set-log-fn! #'datahike-log!)
   ; one physical spelling for the whole lifecycle: the fence, the store
   ; id, the genesis probe, and the returned value all name one directory
   (let [dir (canonical-path store-dir)
