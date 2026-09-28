@@ -84,4 +84,14 @@
              :kind :function
              :intent "seon.cluster/mcp-get-value declares its offset as :int, so -1 passes its contract and fails one call later inside seon.render.walk/continue (\"expected ... an integer at least 0, got -1\"). Found by the install gate's auto-check (seed from the repl-dogfood run, 2026-09-27). The producer's contract should say [:int {:min 0}] so the refusal names mcp-get-value's own argument."
              :must-read #{seon.cluster/mcp-get-value seon.render.walk/continue}
-             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}
+ #:seon.task{:name "schema-convergence-sees-order-the-store-does-not-keep"
+             :kind :function
+             :intent "schema-entity-changes reports :seon.agent/agent, :seon.issue/issue and :seon.config.ai/thinking as unconverged on a fresh member branch, so every open re-transacts them: :seon.render/units is stored as a cardinality-many set (read back sorted) while the desired entity holds the declared vector, and store-comparable-value compares order since dd5dcaff7 (vector storage S9). cluster-test schema-entity-convergence-uses-the-stores-own-semantics is red (probed on default 18:07 local 2026-09-27). Compare a set-stored attribute as a set; order only where storage keeps it (a vector-cell attribute)."
+             :must-read #{seon.cluster/schema-entity-changes seon.cluster/schema-entity-converged?}
+             :evidence #{"test/seon/cluster_test.clj"}}
+ #:seon.task{:name "publication-tests-cost-35-seconds"
+             :kind :function
+             :intent "cluster.source-test flat-scratch-write-refusal-retires-the-candidate (35.6 s), incremental-publication-does-not-change-an-existing-cluster (40.0 s) and publication-hands-its-commit-projection-unstamped (35.7 s) pass but exceed their 5 s bound (r8 at 7533e982d); the long work-on-an-acquired-branch test then had 1.5 s of its request left. reconcile-test apply-then-reapply-converges-over-generated-populations took 35.3 s. Each over ten seconds needs its responsible armed functions named and fixed or owner authorization."
+             :must-read #{seon.cluster.source/publish! seon.reconcile/reconcile!}
+             :evidence #{"test/seon/cluster/source_test.clj" "test/seon/reconcile_test.clj"}}]

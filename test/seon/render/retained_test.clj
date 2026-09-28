@@ -123,6 +123,13 @@
           (fn [other]
             (seed-shown! other namespace-name "other connection")
             (declare-subject! other)
+            ;; The renderer is the program of the database rendered from: the
+            ;; other branch carries the same query renderer as its own entity.
+            (sci/binding [sci/ns (sci/create-ns namespace-name)]
+              (replace-renderer! other ctx '(defn namespace-ai [value]
+                                   (seon.db/q '[:find ?shown .
+                                                :where [?e :seon.cluster.eval/id "retained-shown"]
+                                                       [?e :seon.eval/shown ?shown]]))))
             (is (not (render/same-committed-database? (db/db connection) (db/db other))))
             (is (= "other connection"
                    (render/render-call (assoc (request) :seon.db/db (db/db other))))))))))))

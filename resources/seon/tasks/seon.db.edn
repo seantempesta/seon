@@ -77,4 +77,14 @@
              :kind :function
              :intent "A publication reuses every file entity whose derivation key is unchanged (seon.cluster/derivation-keys), so a storage encoding change without a schema change (seon.schema.datahike's codec, vector cells) leaves reused entities in the old encoding. Storage migration owns it: an encoding change ships its migration transaction (as seon.db/vector-migration-tx did), never a re-derivation."
              :must-read #{seon.db/vector-migration-tx seon.cluster/derivation-keys}
-             :evidence #{"tmp/boot-source-perf/evidence.md"}}]
+             :evidence #{"tmp/boot-source-perf/evidence.md"}}
+ #:seon.task{:name "a-root-pull-past-the-pattern-bound-invalidates-on-any-write-of-its-attributes"
+             :kind :function
+             :intent "Since 9ac21b93f a captured read keeps at most 128 index patterns. The render walk's root pull selects every installed attribute (1,279 on default), so its evidence carries 1,280 entity-bound patterns, drops them all and keeps only the attribute set: any write of any of those attributes on ANY entity invalidates the root. root-pull-test unrelated-entity-change-keeps-root-read-current is red on default at 18:07 local 2026-09-27 (candidate-call-ids non-empty after writing ::value on an unrelated entity; the evidence source has no :seon.db/read-index-patterns). Keep a bounded read precise when its patterns share an entity: collapse them to {:seon.db/pattern-entity eid} per pulled entity before applying the bound."
+             :must-read #{seon.db/read-evidence seon.db/read-evidence-current? seon.render.walk/root-acquisition}
+             :evidence #{"test/seon/render/root_pull_test.clj"}}
+ #:seon.task{:name "the-first-population-regression-still-refuses"
+             :kind :function
+             :intent "cfa78ac98 (r6 E5) landed seon.db-test/a-first-population-is-judged-by-the-declarations-it-installs, and that regression errors on default (r8 at 7533e982d and again at 18:07 local 2026-09-27): the fixture's first program write is refused 'This operation requires a carried schema projection' from seon.db/construction-projection (db.clj:1554) inside the writer, :seon.db/refused-read-operation seon.db/carried-projection. Separately, declaration-population-test reads-require-their-carried-projection-including-transaction-results: seon.db/pull on a raw value with no projection now answers instead of refusing, and no projection-fallback warning is written."
+             :must-read #{seon.db/transact! seon.db/carried-projection seon.db/pull}
+             :evidence #{"test/seon/db_test.clj" "test/seon/db/declaration_population_test.clj"}}]

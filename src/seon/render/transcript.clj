@@ -2418,8 +2418,11 @@
         database (:seon.db/db unit)
         entity (if (:seon.render.transcript/refused-member agent-id) agent-id
                 (db/pull database
+                     ;; :db/id keeps a runtime with no turns, trigger or
+                     ;; listens yet (a new agent's) from pulling as absent.
                      [{:seon.agent/runtime
-                       [{:seon.runtime/turns runtime-turn-selector}
+                       [:db/id
+                        {:seon.runtime/turns runtime-turn-selector}
                         {:seon.runtime/trigger runtime-message-selector}
                         {:seon.runtime/listens [:seon.listen/attribute]}]}]
                      [:seon.agent/id agent-id]))]

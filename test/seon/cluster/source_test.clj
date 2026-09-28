@@ -394,7 +394,10 @@
                    (some->> (:seon.source/candidate p) (vswap! made conj)) p)
         intent #(:seon.task/intent (db/pull (db/db h-conn) [:seon.task/intent] [:seon.task/id handle]))]
     (try
-      (write! c-conn [(entity c-conn :seon.fn/sym "merge-tasked" (str "(defn merge-tasked {:seon/tasks #{\"" handle "\"}} [] 2)"))])
+      ;; A stored identity is replaced exactly (its dropped contract retracted),
+      ;; so the writer's final value carries its definition's digest.
+      (write! c-conn (test-support/replacement-tx (db/db c-conn) [:seon.fn/sym (sym "merge-tasked")]
+                                                  (str "(defn merge-tasked {:seon/tasks #{\"" handle "\"}} [] 2)") {}))
       (let [proposal (prepare)
             before (db/commit-id (db/db h-conn))
             refused (source/accept-merge! target held-store proposal)]

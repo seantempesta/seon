@@ -197,9 +197,11 @@
       (with-test connection '(clojure.test/is true)
         (fn [s v]
           (is (= 1 (:seon.test/pass-count (run-in-fixture v connection))))
+          ;; The declaration changes through its revision, digest included.
           (is (:db-after (db/transact! connection
-                           [[:db/add [:seon.test/sym s] :seon.test/fixture-observation
-                             "External fixture bytes must be observed."]])))
+                           [(support/revision (db/db connection) [:seon.test/sym s]
+                                              {:seon.test/fixture-observation
+                                               "External fixture bytes must be observed."})])))
           (is (some #{s} (sut/stale (db/db connection))))
           ;; An observed external fixture is never verified by recorded evidence
           ;; (`seon.test/verified?` since b0b5eedfe).
@@ -358,11 +360,18 @@
       (let [database (db/db connection)
             owners (sut/destroyers database)
             _ (is (contains? owners destructive-owner) (pr-str owners))
+            ;; Each owner loses its declaration with the digest of its final
+            ;; value, as the writer checks (support/revised-entity).
             removed (db/transact!
                      connection
-                     (vec (for [[owner what] owners]
-                            [:db/retract (:db/id (db/pull database [:db/id] [:seon.fn/sym owner]))
-                             :seon.fn/destroys what])))
+                     (vec (mapcat (fn [[owner what]]
+                                    (let [eid (:db/id (db/pull database [:db/id] [:seon.fn/sym owner]))
+                                          stored (@#'seon.db/declaration-value database (db/identity-attributes database) eid)]
+                                      [[:db/retract eid :seon.fn/destroys what]
+                                       [:db/add eid :seon.program/definition-digest
+                                        (:seon.program/definition-digest
+                                         (support/revised-entity database (dissoc stored :seon.fn/destroys) {}))]]))
+                                  owners)))
             after (db/db connection)
             derived (sut/destroyers after)]
         (is (:db-after removed) (pr-str removed))
@@ -432,14 +441,14 @@
             (is (not (.contains what "\n")) what)
             (is (.contains ai line) ai)
             (is (.contains html line) html))
-          (let [cheap (symbol (str "render.probe" (id/id)) "cheap")]
-            (support/transacted! connection
-                                 [{:seon.test/sym cheap
-                                   :seon.schema.admission/source :core
-                                   :seon.test/source "(deftest cheap (is true))"}])
-            (let [ai (render.test/render-ai {:seon.db/db (db/db connection)
-                                             :seon.render/value {:seon.test/sym cheap}})]
-              (is (.contains ai "runs: in the cluster process") ai))))))))
+          ;; The cheap test is indexed from its source, digests included.
+          (let [namespace-name (symbol (str "render.probe" (id/id)))
+                cheap (symbol (str namespace-name) "cheap")]
+            (with-indexed-tests connection namespace-name ['(clojure.test/deftest cheap (clojure.test/is true))]
+              (fn []
+                (let [ai (render.test/render-ai {:seon.db/db (db/db connection)
+                                                 :seon.render/value {:seon.test/sym cheap}})]
+                  (is (.contains ai "runs: in the cluster process") ai))))))))))
 
 (deftest reused-results-render-the-recording-basis-as-data
   (let [unit {:seon.render/value
@@ -525,11 +534,12 @@
                          :seon.test/command ["bin/test-check" "default" "--test" (str test-symbol)]}]
                        excluded)
                     (pr-str result))
-                (is (.contains tally (str "long " test-symbol)) tally)
+                ;; ec93442ee: "excluded (declared long; include-long runs it) <test>".
+                (is (.contains tally (str "excluded (declared long; include-long runs it) " test-symbol)) tally)
                 (is (.contains tally long-declaration) tally)
                 (is (not (.exists marker)) "the excluded test executed nothing")
-                (is (nil? (:seon.test/run (db/pull (db/db connection) [:seon.test/run]
-                                                   [:seon.test/sym test-symbol]))))))))))))
+                ;; A recorded execution is a run member (runner/latest-results).
+                (is (empty? (runner/latest-results (db/db connection) [test-symbol])))))))))))
 
 (deftest the-declared-opt-in-includes-the-long-test
   (support/with-database
@@ -541,6 +551,5 @@
             (is (true? (:seon.test/passed? result)) (sut/tally result))
             (is (nil? (:seon.test/long-excluded result)) (pr-str result))
             (is (.exists marker) "the opted-in test executed its body")
-            (is (:seon.test/run (db/pull (db/db connection) [:seon.test/run]
-                                         [:seon.test/sym test-symbol])))))))))
+            (is (seq (runner/latest-results (db/db connection) [test-symbol])))))))))
 

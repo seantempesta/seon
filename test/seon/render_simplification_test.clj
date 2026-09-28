@@ -359,24 +359,26 @@
                                   (:seon.ns/name value))
                                 ":"
                                 (cache-helper)))]]
-          (let [requests (mapv
-                           (fn [definition]
-                             (let [source (pr-str definition) name (second definition)]
-                               {:seon.cluster.eval/source source,
-                                :seon.cluster.eval/ns [:seon.ns/name fixture-a],
-                                :seon.program/row
-                                {:seon.fn/sym (symbol (str fixture-a) (str name)),
-                                 :seon.fn/ns [:seon.ns/name fixture-a],
-                                 :seon.fn/source source,
-                                 :seon.fn/arglists (pr-str (list (nth definition 2))),
-                                 :seon.fn/private? (= 'cache-helper name),
-                                 :seon.schema.admission/source :agent}}))
-                           definitions)
-                ;; Analyzed facts, then the digest of each FINAL entity (the writer's).
-                entities (mapv #(support/revised-entity (db/db connection) (second %) {})
-                           (seon.fn/analyze-forms (db/db connection) requests))
-                report (db/transact! connection entities)]
-            (is (:db-after report) (pr-str report))
+          ;; Each definition through the canonical writer, in order (the
+          ;; helper first, so the renderer's call resolves to it): a stored
+          ;; identity is replaced exactly, so the writer's final value carries
+          ;; the digest its definition produces.
+          (let [reports (mapv
+                          (fn [definition]
+                            (let [name (second definition)]
+                              (db/transact! connection
+                                            (support/replacement-tx
+                                              (db/db connection)
+                                              [:seon.fn/sym (symbol (str fixture-a) (str name))]
+                                              ;; The contract is the defn name's metadata.
+                                              (binding [*print-meta* true] (pr-str definition))
+                                              (if (= 'cache-helper name) {:seon.fn/private? true} {})))))
+                          definitions)
+                entities (mapv (fn [definition]
+                                 (db/pull (db/db connection) [:seon.fn/calls]
+                                          [:seon.fn/sym (symbol (str fixture-a) (str (second definition)))]))
+                               definitions)]
+            (is (every? :db-after reports) (pr-str (remove :db-after reports)))
             (is (some #{helper} (:seon.fn/calls (second entities))))
             (sci/binding
               [sci/ns (sci/create-ns fixture-a)]
@@ -586,7 +588,10 @@
                      :seon.sci.admit/caps caps,
                      :seon.sci.eval/time-limit-ms 2000})]
         (is (seq units))
-        (is (empty? (keep :seon.error/value units)) (pr-str (keep :seon.error/value units)))
+        ;; A distance-cap marker is an elision value, not a renderer failure.
+        (let [failures (remove #(= :seon.render/distance (:seon.print/bound-by %))
+                               (keep :seon.error/value units))]
+          (is (empty? failures) (pr-str failures)))
         (is (some #(str/includes? (str (:seon.render/output %)) "\"neighborhood-owner\"") units)
             "the runtime unit names its owner, read through the unit's database")))))
 
@@ -618,18 +623,11 @@
                          (assoc caps :seon.config.eval.result/max-nodes 1))))]
         (is (= #{[:seon.ns/name fixture-a]} (set (map :seon.render.walk/lookup at-zero))))
         (is (contains? (set (map :seon.render.walk/lookup at-one)) [:seon.ns/name fixture-b]))
+        ;; The node cap bounds the acquisition depth before any pull runs
+        ;; (walk/bounded-acquisition-distance), so the cap wins without a
+        ;; query-work refusal: the root alone, rendered.
         (is (= #{[:seon.ns/name fixture-a]} (set (map :seon.render.walk/lookup capped))))
-        (is
-          (true? (get-in (first capped) [:seon.error/value :seon.db/invalid-read])))
-        (is
-          (=
-            {:datahike/budget-exceeded true,
-             :datahike.budget/name :query-work,
-             :datahike.budget/allowed 1,
-             :datahike.budget/observed 2}
-            (get-in
-              (first capped)
-              [:seon.error/value :seon.error/data :seon.db/dependency-data])))))))
+        (is (not-any? :seon.error/value capped))))))
 
 (deftest old-slot-and-ref-markers-are-inert-renderer-output
   (support/with-database
@@ -837,8 +835,8 @@
                           :seon.cluster.eval/source "1"
                           :seon.sci.admit/caps caps
                           :seon.sci.eval/time-limit-ms 2000})]
-         (is (str/includes? (pr-str evaluation)
-                            (str "PROGRAM CHANGE replaced your definition of " renderer))
+         ;; Said as data, not :out text (737fe0a5d): the replaced definitions.
+         (is (contains? (set (:seon.eval/replaced evaluation)) renderer)
              (pr-str evaluation)))
        (is (= (str "program:" fixture-a) (render)) "the changed program entity runs")))))
 

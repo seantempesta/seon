@@ -181,9 +181,10 @@
         _ (db/carried-projection (db/db connection))
         committed (:db-after (support/transacted!
                               connection
-                              [{:seon.message/id "projection-writer-equal-commit"
-                                :seon.message/to [:seon.agent/id "root"]
-                                :seon.message/content "no declaration attribute"}]))
+                              ;; A fact on the transaction entity: the member's
+                              ;; world holds program entities, no root agent.
+                              [{:db/id "datomic.tx"
+                                :db/doc "projection-writer-equal-commit: no declaration attribute"}]))
         held (db/carried-projection committed)
         content-keys (atom 0)
         content-key @#'seon.db/declaration-content-key]

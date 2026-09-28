@@ -72,13 +72,13 @@
                (get-in installed [ordered-marker :db/cardinality]))
             "the synthetic attribute is genuinely installed cardinality-many")
         (is (true?
-             (converged? installed
+             (converged? database
                          {ordered-marker [:a :b :c]}
                          {ordered-marker [:c :a :b]}))
             "a cardinality-many value read back in another order is
              convergence: the store holds a set, not a sequence")
         (is (false?
-             (converged? installed
+             (converged? database
                          {ordered-marker [:a :b :c]}
                          {ordered-marker [:a :b]}))
             "a genuinely different cardinality-many value is still a change")

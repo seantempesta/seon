@@ -44,4 +44,19 @@
              :kind :function
              :intent "Each turn's first prompt renders every stored evaluation of the agent again through seon.render/render-call: 149 evaluations of root took 0.33-0.59 s armed after the plan decode and call-reach fixes (turn-overhead lane, default, 2026-09-27), and the cost grows with history although each evaluation's shown text is stored and unchanged. A render is cached by the value's content digest (AGENTS.md Presentation); reuse across commits, so a turn renders only the evaluations it has not shown."
              :must-read #{seon.render.walk/history seon.render/render-call}
-             :evidence #{"tmp/turn-overhead/proof.clj"}}]
+             :evidence #{"tmp/turn-overhead/proof.clj"}}
+ #:seon.task{:name "a-render-against-another-database-reads-the-context-custody"
+             :kind :function
+             :intent "render-call with an explicit :seon.db/db of another branch runs its renderer's (seon.db/q ...) against the forked context's custody, not the request's database: with the same query renderer written on both branches, retained-test equal-committed-database-skips-read-replay renders \"one\" (the first branch's shown text) for the other database, retained calls or not (probed on default 2026-09-27). A renderer's omitted database must be supplied from the world of the database it renders."
+             :must-read #{seon.render/render-call seon.render/call-cache-evidence}
+             :evidence #{"test/seon/render/retained_test.clj"}}
+ #:seon.task{:name "an-unchanged-retained-call-selects-and-invokes-again"
+             :kind :function
+             :intent "render-simplification-test unchanged-retained-call-skips-discovery-and-invocation: over two identical render-call requests (the second handed the first's retained calls) the armed counters read 2 selections and 2 invocations where 1 and 1 are expected, and every later step is one higher; the renderer calls a private helper (cache-helper). The same pattern without a helper reuses (0 on the second call). A helper written only in the SCI context no longer changes the output (H1 stays), since the database's program is what renders."
+             :must-read #{seon.render/render-call seon.render/call-cache-evidence seon.render/retained-program-current?}
+             :evidence #{"test/seon/render_simplification_test.clj"}}
+ #:seon.task{:name "a-nested-declared-value-prints-as-an-object"
+             :kind :function
+             :intent "render-simplification-test nested-values-render-their-declared-faces: a TxReport nested under an attribute declared :seon.db/transaction-report and a database value nested under :probe/database print as #object[datahike.db.TxReport] and #object[datahike.db.DB] in both AI and HTML, where the reaching attribute's pair should render them (r8 at 7533e982d). Find which selection stage stopped asking nested records (c32b272f9 admitted records at the root)."
+             :must-read #{seon.render/declared-producers seon.render/selection}
+             :evidence #{"test/seon/render_simplification_test.clj"}}]

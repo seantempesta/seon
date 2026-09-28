@@ -679,6 +679,9 @@ handle))}}
            "an undeclared description is absent, never invented")))))
 
 (deftest applicable-render-functions-list-alternatives-and-hide-rejections
+  ;; A preview renders against a database value (a6ec14a8c).
+  (support/with-database
+   (fn [connection]
   (let [candidate (fn [producer status]
                     {:seon.render.selection.candidate/producer producer
                      :seon.render.selection.candidate/status status})
@@ -707,10 +710,10 @@ handle))}}
         previews
         (str (hiccup/->string
               ((web-private 'experiment-preview-html)
-               :seon.render/ai (:seon.render/ai experiments)))
+               :seon.render/ai (:seon.render/ai experiments) (db/db connection)))
              (hiccup/->string
               ((web-private 'experiment-preview-html)
-               :seon.render/html (:seon.render/html experiments))))
+               :seon.render/html (:seon.render/html experiments) (db/db connection))))
         renderers
         (hiccup/->string
          ((web-private 'applicable-renderers-html)
@@ -727,7 +730,7 @@ handle))}}
     (is (not (str/includes? renderers "my.render/rejected"))
         "rejected candidates are absent rather than empty entities")
     (is (not (str/includes? previews "my.render/other-ai"))
-        "an alternative is named but never rendered beside the selected value")))
+        "an alternative is named but never rendered beside the selected value")))))
 
 (deftest selected-ai-experiment-reuses-the-canonical-executed-call
   (support/with-database
@@ -776,12 +779,15 @@ handle))}}
                (get-in experiment [:seon.render/entries selected])))
         (let [html (hiccup/->string
                     ((web-private 'experiment-preview-html)
-                     :seon.render/ai experiment))]
+                     :seon.render/ai experiment (db/db connection)))]
           (is (and (str/includes? html "Agent &quot;juniper&quot;\nNamespace")
                    (not (str/includes? html "&quot;Agent")))
               "the paired AI preview presents multiline terminal text without EDN quotes"))))))))
 
 (deftest debug-selected-renderer-metadata-is-outside-preview
+  ;; A preview renders against a database value (a6ec14a8c).
+  (support/with-database
+   (fn [connection]
   (let [selected 'my.render/ai
         experiment
         {:seon.render/selection
@@ -804,7 +810,7 @@ handle))}}
                  :seon.render.debug/details? true}
         preview (hiccup/->string
                  ((web-private 'experiment-preview-html)
-                  :seon.render/ai experiment))
+                  :seon.render/ai experiment (db/db connection)))
         details (hiccup/->string
                  ((web-private 'debug-selected-renderer-details)
                   request :seon.render/ai experiment))
@@ -828,7 +834,7 @@ handle))}}
         "the separate renderer disclosure retains its evidence")
     (is (< (.indexOf page "exact agent-visible text")
            (.indexOf page "Applicable render functions"))
-        "render-function evidence is a sibling below the paired previews")))
+        "render-function evidence is a sibling below the paired previews")))))
 
 (deftest inspecting-the-page-writes-no-run-evaluation-or-fault-facts
   ;; Ruling 2026-09-06: preview results live in the invocation cache. A person

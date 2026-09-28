@@ -28,26 +28,25 @@
 (defn- seed-agent-and-inbox!
   [connection]
   (support/seed-cluster! connection "render-walk")
+  ;; The agent through its canonical creation writer.
+  (support/transacted! connection (support/agent-tx (db/db connection) agent-id agent-namespace))
   (let [result (db/transact!
    connection
-   [{:seon.ns/name agent-namespace}
-    {:seon.agent/id agent-id
-     :seon.agent/namespace [:seon.ns/name agent-namespace]}
-    {:seon.message/id "render-walk-message"
+   [{:seon.message/id "render-walk-message"
      :seon.message/to [:seon.agent/id agent-id]
      :seon.message/content "42"}])]
     (is (:db-after result) (pr-str result))))
 
 (defn- seed-listeners!
   [connection]
+  ;; The listens join the runtime component the creation writer made.
   (support/transacted!
    connection
-   [{:seon.agent/id agent-id
-     :seon.agent/runtime
-     {:seon.runtime/agent [:seon.agent/id agent-id]
-      :seon.runtime/listens
-      (mapv (fn [attribute] {:seon.listen/attribute attribute})
-            [:seon.message/content :seon.message/about :seon.message/inbound-content])}}]))
+   [{:db/id (:db/id (:seon.agent/runtime (db/pull (db/db connection) [{:seon.agent/runtime [:db/id]}]
+                                                   [:seon.agent/id agent-id])))
+     :seon.runtime/listens
+     (mapv (fn [attribute] {:seon.listen/attribute attribute})
+           [:seon.message/content :seon.message/about :seon.message/inbound-content])}]))
 
 (deftest every-identifiable-neighbour-uses-its-declared-lookup-ref
   (support/with-database

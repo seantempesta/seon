@@ -2,9 +2,9 @@
   "Class regressions for schema-derived root acquisition and membership."
   (:require [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
-            [datahike.pull-api :as pull-api]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.render :as render]
             [seon.render.walk :as walk]
             [seon.render.web :as web]
             [seon.schema :as schema]
@@ -33,6 +33,28 @@
    {:db/ident ::value
     :db/valueType :db.type/string
     :db/cardinality :db.cardinality/one}])
+
+(def ^:private component-forms
+  "The component attribute's declared target: the writer validates a component
+   as its whole owning value, so ::component names the entity schema it owns."
+  [[::root-id [:string {:seon.db/identity true}]]
+   [::node-id [:string {:seon.db/identity true}]]
+   [::value :string]
+   [::node [:map {:seon.db/attributes true :seon.program/partition :seon.data}
+            [::node-id {:optional true} ::node-id]
+            [::root-id {:optional true} ::root-id]
+            [::value {:optional true} ::value]]]
+   [::component [:and {:seon.db/component true :seon.db/component-schema ::node} :seon.db/ref]]])
+
+(defn- with-component-database
+  "An isolated branch with the synthetic attributes installed and the component
+   attribute declared as schema entities, through the canonical writer."
+  [body]
+  (support/with-database
+   {:seon.test-support/extra-schema root-pull-schema}
+   (fn [connection]
+     (support/transacted! connection (support/schema-entities @connection component-forms))
+     (body connection))))
 
 (def ^:private caps (config/result-caps config/defaults))
 
@@ -160,84 +182,33 @@
        (is (every? #(not (contains? % :seon.render.walk/changed-at))
                    units))))))
 
-(deftest compiled-root-plan-rides-its-schema-generation-distance-and-caps
+(deftest compiled-root-plan-is-keyed-by-its-selector-and-keeps-caller-bounds
+  ;; The plan cache is keyed by projection fingerprint, installed schema and
+  ;; selector (e34164b25, seon.schema/projection-cache-value); distance and caps
+  ;; stay the caller's, never the cached plan's.
   (support/with-database
    {:seon.test-support/extra-schema root-pull-schema}
    (fn [connection]
      (support/transacted! connection [{::root-id "root" ::value "one"}])
      (let [initial (walk/root-pull-plan (request connection))
-           compile-count (atom 0)]
-       (with-redefs [pull-api/compile-pull-plan
-                     (fn
-                       ([selector-or-plan]
-                        (if (pull-api/pull-plan? selector-or-plan)
-                          selector-or-plan
-                          (do
-                            (swap! compile-count inc)
-                            (:datahike.pull/plan initial))))
-                       ([_database selector-or-plan]
-                        (if (pull-api/pull-plan? selector-or-plan)
-                          selector-or-plan
-                          (do
-                            (swap! compile-count inc)
-                            (:datahike.pull/plan initial)))))]
-         (let [same (walk/root-pull-plan
-                     (assoc (request connection)
-                            :seon.render.walk/root-acquisition initial))
-               nearer (walk/root-pull-plan
-                       (assoc (request connection)
-                              :seon.render/distance 0
-                              :seon.render.walk/root-acquisition initial))
-               shallower-caps
-               (assoc caps :seon.config.eval.result/max-depth 63)
-               recapped (walk/root-pull-plan
-                         (assoc (request connection)
-                                :seon.sci.admit/caps shallower-caps
-                                :seon.render.walk/root-acquisition initial))]
-           (is (identical? (:datahike.pull/plan initial)
-                           (:datahike.pull/plan same))
-               "an unchanged immutable acquisition key reuses its plan")
-           (is (= 2 @compile-count)
-               "distance and caps changes each compile one replacement")
-           (is (= 0 (:seon.render/distance nearer)))
-           (is (= shallower-caps (:seon.sci.admit/caps recapped)))))))))
-
-(deftest compiled-root-plan-cache-hit-never-compares-the-selector
-  (support/with-database
-   {:seon.test-support/extra-schema root-pull-schema}
-   (fn [connection]
-     (let [equality-visits (atom 0)
-           selector (fn []
-                      [(reify Object
-                         (equals [_ _]
-                           (swap! equality-visits inc)
-                           true)
-                         (hashCode [_] 0))])
-           acquisition-request (request connection)
-           compiled-plan (Object.)]
-       (with-redefs-fn
-         {#'seon.render.walk/root-selector
-          (fn [_database _distance _caps] (selector))
-          #'pull-api/compile-pull-plan
-          (fn [_database _selector] compiled-plan)}
-         (fn []
-           (is (identical? compiled-plan
-                           (:datahike.pull/plan
-                            (walk/root-pull-plan acquisition-request))))
-           (reset! equality-visits 0)
-           (is (identical? compiled-plan
-                           (:datahike.pull/plan
-                            (walk/root-pull-plan acquisition-request))))
-           (is (zero? @equality-visits)
-               "cache lookup compares only the generation, distance, and caps key")))))))
+           same (walk/root-pull-plan (request connection))
+           nearer (walk/root-pull-plan (assoc (request connection) :seon.render/distance 0))
+           shallower-caps (assoc caps :seon.config.eval.result/max-depth 63)
+           recapped (walk/root-pull-plan (assoc (request connection) :seon.sci.admit/caps shallower-caps))]
+       (is (identical? (:datahike.pull/plan initial) (:datahike.pull/plan same))
+           "an equal selector under the same schema reuses its compiled plan")
+       (is (= (:seon.render.walk/selector nearer)
+              (walk/root-selector @connection 0 caps))
+           "a changed distance compiles the plan of its own selector")
+       (is (= 0 (:seon.render/distance nearer)))
+       (is (= shallower-caps (:seon.sci.admit/caps recapped)))))))
 
 (defn- reverse-attribute
   [attribute]
   (keyword (namespace attribute) (str "_" (name attribute))))
 
 (deftest root-selector-is-concrete-and-declared-reverse-evidence-bearing
-  (support/with-database
-   {:seon.test-support/extra-schema root-pull-schema}
+  (with-component-database
    (fn [connection]
      (support/transacted! connection
                           [{::root-id "root"
@@ -245,7 +216,11 @@
                            {:db/id "component"
                             ::node-id "component"
                             ::value "before"}])
-     (let [[acquisition reads] (support/read-operations #(acquire connection))
+     ;; Each entity pull binds its own read-evidence sink (walk's
+     ;; acquire-entity) and returns its evidence in the acquisition, so the
+     ;; acquisition's reads are counted from that evidence.
+     (let [acquisition (acquire connection)
+           evidence (:seon.render.call/read-evidence acquisition)
            selector (:seon.render.walk/selector acquisition)
            selector-values (tree-seq coll? seq selector)
            selector-map-keys (into #{}
@@ -257,10 +232,10 @@
            ;; the PULL's limit is query work; the AI boundary's own width is
            ;; the render profile's, and it is applied to the pulled values
            width (:seon.config.eval.result/max-collection caps)]
-       (is (= 2 (count (filter #{:pull} reads)))
+       (is (= 2 (count evidence))
            "cold acquisition pulls each distinct entity once, without recursively following cycles")
-       (is (every? #{:pull :q} reads)
-           "the identity query and entity pulls are the acquisition reads")
+       (is (every? :datahike.read/dependency-plan evidence)
+           "each acquisition read is an entity pull carrying its dependency plan")
        (is (not-any? #{'* :* "*"} selector-values)
            "the selector never widens its dependency fingerprint")
        (is (contains? selector-map-keys
@@ -277,8 +252,7 @@
            "explicit component nesting keeps every concrete dependency")))))
 
 (deftest root-membership-ignores-undeclared-refs
-  (support/with-database
-   {:seon.test-support/extra-schema root-pull-schema}
+  (with-component-database
    (fn [connection]
      (support/transacted! connection
                           [{::root-id "root"
@@ -313,13 +287,16 @@
                       #(walk/neighborhood
                         (assoc render-request
                                :seon.render/output :seon.render/ai
+                               ;; A fixed render profile: an omitted one is derived
+                               ;; from the cluster's configuration entity (a pull
+                               ;; that is not membership discovery).
+                               :seon.render/profile (render/agent-render-profile config/defaults)
                                :seon.render.walk/root-acquisition acquisition)))]
        (is (empty? (filter #{:pull :pull-many :index} reads))
            "neighborhood consumes the acquisition without discovery")))))
 
 (deftest installed-identity-selects-a-stable-lookup-ref
-  (support/with-database
-   {:seon.test-support/extra-schema root-pull-schema}
+  (with-component-database
    (fn [connection]
      (support/transacted! connection
                           [{::root-id "root" ::component "both"}
@@ -334,14 +311,11 @@
    {:seon.test-support/extra-schema root-pull-schema}
    (fn [connection]
      (support/transacted! connection [{::root-id "root" ::value "one"}])
-     (let [captured (atom [])
-           database @connection
+     (let [database @connection
            fixed (db/as-of database (db/basis-t database))
            render-request (assoc (request connection) :seon.db/db fixed)
-           acquisition (binding [db/*read-evidence-sink* captured]
-                         (walk/root-acquisition render-request))
-           call {:seon.render.call/read-evidence (db/read-evidence @captured)
-                 :seon.render.call/output acquisition}]
+           ;; The retained call entry through its producer, never built by hand.
+           [_ call] (#'web/acquire-root render-request ::root)]
        (is (empty? (#'web/candidate-call-ids
                     {::root call} fixed false))
            "an opening as-of database compares through seon.db revisions")))))

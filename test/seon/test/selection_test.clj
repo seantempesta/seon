@@ -259,24 +259,10 @@
          (is (= expected (set (sut/reaching {:seon.db/db (db/db connection)
                                              :seon.test/changed [(fixture-symbol "leaf")]}))))
          (is (every? #(get-in % [:seon.test.member/reasons]) (:seon.test.run/members changed)))
-         (let [query db/q
-               thread (Thread/currentThread)
-               injected (atom 0)
-               refusal (assoc {:seon.error/at (java.util.Date.)
-                                  :seon.error/layer :seon.db/read
-                                  :seon.error/operation 'seon.db/q
-                                  :seon.error/message "Declared-reference read refused."
-                                  :seon.error/expected :available-read
-                                  :seon.error/offending :refused
-                                  :seon.error/data {:seon.error/layer :database-read :seon.error/member :declared-reference}} :seon.db/invalid-read true)]
-           (with-redefs [db/q (fn [& arguments]
-                               (if (and (identical? thread (Thread/currentThread))
-                                        (some #{'(declared-edge ?caller ?target)}
-                                              (first arguments)))
-                                 (do (swap! injected inc) refusal)
-                                 (apply query arguments)))]
-             (is (= refusal (select!)) "A refused declared-reference read refuses selection.")
-             (is (pos? @injected) "The owning declared-edge query was exercised.")))
+         ;; The declared-edge query this block refused through a redefined
+         ;; seon.db/q is gone: selection reads declared callers from their own
+         ;; datoms (39d94eef0, fn/declared-callers). Its refusal path is the
+         ;; seon.fn task refused-publication-reads-have-no-redefinition-free-regression.
          (let [admission (sut/selection-admission (assoc request :seon.db/db (db/db connection)))]
            (support/transacted! connection [[:db.fn/call sut/admit-run admission]])
            (is (= (symbols changed) (symbols (select!))) "An open admission does not discharge obligations.")
