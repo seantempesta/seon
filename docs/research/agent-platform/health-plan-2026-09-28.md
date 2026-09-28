@@ -91,6 +91,25 @@ cause is the calling definition (or, when the caller is an agent's own form, the
 not counted against the function). An output violation means the function itself is wrong: the cause is the function
 at its digest. This is AGENTS.md "fix the producer" applied to attribution, and it answers "which symbol is the cause".
 
+**One way to catch, translate, link and store an error (owner, 2026-09-28).** "We need a consistent way to catch
+errors, translate them to useful data and link everything up that's responsible in the database" — the common part
+from Seon functions at the moment of the error, the specifics from the producer, never "600 pages of stacktrace".
+The one constructor exists — `seon.error.refusal/diagnostic` (`src/seon/error/refusal.clj:497`), which already derives
+the class, cause chain and root frame and references the worlds it is handed — so it grows, nothing is added beside it:
+- **The ~90% common part is supplied, not authored:** at the moment of the error, `diagnostic` reads the calling
+  evaluation's world (`seon.batch/*world*`: agent, branch, evaluation or test member, task) the way call preparation
+  supplies world members, and the armed wrapper's refusal supplies function, digest, schema key, Malli path and caller.
+  The blame rule picks the producing definition. The producer adds only its specific fields (its named extension of
+  `:seon.error/base`).
+- **Bounded by schema, the bulk by reference:** the stored value is validated against its `:seon.error/base`
+  extension and holds refs and small fields only; the whole cause chain with frames and the offending value go to one
+  blob, referenced by digest (AGENTS.md: "a large value one blob digest"). What is stored is what the health view,
+  resolution and the fixing agent read; the rest is one `get` away.
+- **Linked by ref, stored once:** the error entity refs the producing function entity (+ digest), the schema entity,
+  the agent, evaluation or test member and task, and rides the transaction that already records the failing work
+  (§2.7). Every entrant boundary uses this one path (AGENTS.md "Nothing crashes"), so a thrown failure, a contract
+  refusal and a declared error value all land with the same shape and the same links.
+
 **The finding value** (one per problem): kind (violation, slow, error, missing contract, red test), cause
 `[sym digest]` + ref, schema key + Malli path, offending-value blob, caller chain (from the code graph), world (agent,
 branch, evaluation or test member), the reproduction (the test member, else the evaluation's form), and counts.
