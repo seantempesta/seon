@@ -26,6 +26,16 @@
                           :seon.cluster/name cluster-name})))
       (body connection))))
 
+(defn- described
+  "The identity card's description list as data: each term's shown leaves."
+  {:malli/schema [:=> [:cat :seon.schema/value] [:map-of :string [:vector :seon.schema/value]]]}
+  [html]
+  (into {} (for [[tag & children] (test-support/hiccup-elements html)
+                 :when (= :div tag)
+                 :let [[term description] (filter vector? children)]
+                 :when (= :dt (first term))]
+             [(second term) (vec (test-support/hiccup-leaves description))])))
+
 (deftest identity-renders-from-current-database-facts
   (with-agent
     (fn [connection]
@@ -34,9 +44,9 @@
             html (agent/render-identity-html unit)]
         (is (= "Agent     identity-root\nNamespace my.agents.identity-root\nCluster   identity-cluster"
                (agent/whoami {:seon.db/db @connection :seon.agent/id agent-id})))
-        (is (str/includes? (pr-str html) agent-id))
-        (is (str/includes? (pr-str html) (str namespace-name)))
-        (is (str/includes? (pr-str html) "Steward"))
+        (is (= [agent-id] (get (described html) "Agent")))
+        (is (= [(str namespace-name)] (get (described html) "Namespace")))
+        (is (contains? (described html) "Steward") "the card names the namespace's steward")
         (test-support/transacted! connection
                                   [[:db/add [:seon.cluster/name cluster-name]
                                     :seon.cluster/name "renamed-cluster"]])
@@ -53,10 +63,12 @@
       (test-support/transacted! connection
                                 (vec (agent/creation-tx {:seon.agent/id "root" :seon.ns/name 'my.agents.root
                                                          :seon.cluster/name cluster-name})))
-      (let [html (pr-str (agent/render-identity-html {:seon.db/db @connection :seon.agent/id "root"}))]
-        (is (str/includes? html "\"Tasks\"] [:dd \"None\"]"))
-        (is (re-find #"\"Status\"\] \[:dd \"(Idle|Turn open) · \d+ turns?\"" html))
-        (is (not (str/includes? html "seon-root-agents")) "no fleet table")))))
+      (let [html (agent/render-identity-html {:seon.db/db @connection :seon.agent/id "root"})
+            card (described html)]
+        (is (= ["None"] (get card "Tasks")))
+        (is (re-matches #"(Idle|Turn open) · \d+ turns?" (str (first (get card "Status"))))
+            "the node carries its own status")
+        (is (not (contains? (test-support/hiccup-classes html) "seon-root-agents")) "no fleet table")))))
 
 (deftest identity-rendering-keeps-partial-data-and-read-errors-visible
   (testing "an id remains visible while optional connections are absent"
