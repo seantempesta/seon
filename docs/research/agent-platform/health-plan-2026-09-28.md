@@ -211,7 +211,7 @@ the class, cause chain and root frame and references the worlds it is handed —
   (§2.7). Every entrant boundary uses this one path (AGENTS.md "Nothing crashes"), so a thrown failure, a contract
   refusal and a declared error value all land with the same shape and the same links.
 
-**The finding value** (one per problem): kind (violation, slow, error, missing contract, red test), cause
+**The finding value** (one per problem): the named schema it satisfies (input or output violation, over-bound, missing contract, red test…), cause
 `[sym digest]` + ref, schema key + Malli path, offending-value blob, caller chain (from the code graph), world (agent,
 branch, evaluation or test member), the reproduction (the test member, else the evaluation's form), and counts.
 
@@ -367,7 +367,7 @@ never add one; reading the bound world allocates 32 B):
 - **Process-level warnings** (the same shape, from existing readers): heap after GC trend, the cache near its budget
   (92% today), a store commit's size, a proc that stops answering pings, a listener callback over its bound.
 
-**Warning kinds this gives, each with the clues a fix needs:** a p99 or allocation bucket that moved with a new digest
+**Named warning schemas this gives, each with the clues a fix needs:** a p99 or allocation bucket that moved with a new digest
 (the change that caused it); repeated identical work in one evaluation (the caller and the repeat count); throws used
 as control flow; a function hot in production but reached by no test; contention on one function; blocking on the
 writer thread; memory or cache pressure with the kinds holding it. Every tier's cost is measured on the live JVM before
