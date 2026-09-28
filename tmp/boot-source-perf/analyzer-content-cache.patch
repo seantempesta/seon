@@ -1,0 +1,136 @@
+diff --git a/src/seon/fn/analyzer.clj b/src/seon/fn/analyzer.clj
+index 56776dc5b..5d09aa110 100644
+--- a/src/seon/fn/analyzer.clj
++++ b/src/seon/fn/analyzer.clj
+@@ -291,6 +291,40 @@
+                 (.getCanonicalPath (io/file (.toURI url))))))
+           [".clj" ".cljc"])))
+ 
++(defn- file-digest
++  "The SHA-256 hex digest of `path`'s bytes."
++  {:malli/schema [:=> [:cat :string] :string]}
++  [path]
++  (let [digest (java.security.MessageDigest/getInstance "SHA-256")]
++    (apply str (map #(format "%02x" (bit-and (long %) 0xff))
++                    (.digest digest (java.nio.file.Files/readAllBytes (.toPath (io/file path))))))))
++
++(defn- entry-digest-file
++  "Where the digest of the bytes a cache entry was built from is kept: beside
++  the entry, which clj-kondo reads by namespace name alone
++  (`reference-code/clj-kondo/src/clj_kondo/impl/cache.clj:23-31`) and never
++  lists, so the sidecar is Seon's."
++  {:malli/schema [:=> [:cat :string] :string]}
++  [cache-file]
++  (str cache-file ".sha256"))
++
++(defn- record-entry-digests!
++  "Record, beside each cache entry this run wrote, the digest of the bytes it
++  was built from: the file clj-kondo linted (a mirror carries the captured
++  text). A later analysis judges the entry by content, so a commit that moves
++  the checkout (a new archive path) invalidates no unchanged namespace."
++  {:malli/schema [:=> [:cat :string :map] :nil]}
++  [root result]
++  (kondo.cache/with-thread-lock
++    (kondo.cache/with-cache root 6
++      (doseq [{namespace-name :name filename :filename} (:namespace-definitions (:analysis result))
++              :when (and (symbol? namespace-name) (string? filename) (.isFile (io/file filename)))
++              :let [language (if (str/ends-with? filename ".cljc") :cljc :clj)
++                    cache-file (kondo.cache/cache-file root language namespace-name)]
++              :when (.isFile ^java.io.File cache-file)]
++        (spit (entry-digest-file (.getPath ^java.io.File cache-file)) (file-digest filename)))))
++  nil)
++
+ (defn- stale-cache-entries
+   "The cache entries this analysis could have read that do not answer for the
+   current bytes of their source.
+@@ -353,7 +387,16 @@
+               :let [source (io/file (analyzed-source-path filename))
+                     path (.getCanonicalPath source)
+                     current (get defined namespace-name)
++                    ;; Content decides first: an entry built from the bytes
++                    ;; its namespace's current file holds answers for them,
++                    ;; wherever that file now lives (a new commit archive)
++                    ;; and whatever its modification time.
++                    current-file (or current (classpath-source namespace-name))
++                    recorded (io/file (entry-digest-file (.getPath file)))
++                    same-bytes? (and current-file (.isFile recorded) (.isFile (io/file current-file))
++                                     (= (slurp recorded) (file-digest current-file)))
+                     reason (cond
++                             same-bytes? nil
+                              (= "<stdin>" filename) ::stdin
+                              (not (.isFile source)) ::source-absent
+                              (and current (not= current path)) ::moved
+@@ -414,13 +457,18 @@
+         shared? (and root
+                      (= root (.getCanonicalPath ^java.io.File
+                               (kondo.core/resolve-cache-dir config-directory true cache-directory))))
++        ;; Every run that may write entries records their content digests.
++        kondo-run! (fn [run-options]
++               (let [result (clj-kondo/run! run-options)]
++                 (when root (record-entry-digests! root result))
++                 result))
+         check (fn [result]
+                 (if root
+                   (kondo.cache/with-thread-lock
+                     (kondo.cache/with-cache root 6
+                       (stale-cache-entries root shared? result)))
+                   {::examined 0 ::stale []}))
+-        first-run (clj-kondo/run! options)
++        first-run (kondo-run! options)
+         ;; A namespace kondo holds no entry for (first-party outside the
+         ;; publication roots, or a directory dependency's) is analyzed from
+         ;; the file the classpath loads.
+@@ -428,8 +476,8 @@
+                       (into [] (keep classpath-source)
+                             (unanalyzed-namespaces root (:analysis first-run))))
+         result (if (seq classpath-files)
+-                 (do (clj-kondo/run! (assoc options :lint classpath-files))
+-                     (clj-kondo/run! options))
++                 (do (kondo-run! (assoc options :lint classpath-files))
++                     (kondo-run! options))
+                  first-run)
+         {::keys [examined stale]} (check result)]
+     (if (empty? stale)
+@@ -443,8 +491,8 @@
+         ;; Rebuild each checkout-owned entry from its current bytes; this
+         ;; run's own findings belong to its files' analyses, not to this one.
+         (when (seq sources)
+-          (clj-kondo/run! (assoc options :lint sources)))
+-        (let [rerun (clj-kondo/run! options)
++          (kondo-run! (assoc options :lint sources)))
++        (let [rerun (kondo-run! options)
+               remaining (::stale (check rerun))]
+           ;; An entry still stale after its rebuild was changed by a concurrent
+           ;; source edit: the declared analysis source-change refusal
+diff --git a/test/seon/fn/analyzer_test.clj b/test/seon/fn/analyzer_test.clj
+index 126c913b4..03d2525e6 100644
+--- a/test/seon/fn/analyzer_test.clj
++++ b/test/seon/fn/analyzer_test.clj
+@@ -334,3 +334,27 @@
+         (when (and original (not (.isFile entry)))
+           (java.nio.file.Files/write (.toPath entry) ^bytes original
+                                      (make-array java.nio.file.OpenOption 0)))))))
++
++(deftest a-cache-entry-answers-by-content-not-by-path
++  ;; CLASS: a cache entry invalidated by where its source lived. Each commit
++  ;; runs from its own archive (data/source/<sha>), and the old one is pruned:
++  ;; the first analysis after a move rebuilt every entry it used from the
++  ;; classpath (466 entries named a pruned archive; 41 rebuilt, 5.9 s against
++  ;; 2.8 s for an 18-file analysis, disposable root 2026-09-27).
++  (let [directory (fixture-directory (str (random-uuid)))
++        source (write-fixture! directory "probe_moved.clj" "(ns probe-moved)\n(defn f [x] x)\n")]
++    (try
++      (let [cache-root (::analyzer/cache-root
++                        (#'analyzer/invoke-kondo {:lint [source]
++                                                  :cache-dir (.getCanonicalPath (io/file directory "cache"))}))
++            entry (kondo.cache/cache-file cache-root :clj 'probe-moved)
++            ;; the archive the entry was written from is gone
++            _ (spit entry (.replace ^String (slurp entry) source "/pruned/archive/probe_moved.clj"))
++            result {:analysis {:namespace-definitions [{:name 'probe-moved :filename source}]
++                               :namespace-usages [{:to 'probe-moved}]}}
++            stale #(::analyzer/stale (#'analyzer/stale-cache-entries cache-root false result))]
++        (is (empty? (stale)) "the same bytes answer, wherever they were read from")
++        (spit source "(ns probe-moved)\n(defn f [x y] x)\n")
++        (is (= [::analyzer/source-absent] (mapv ::analyzer/reason (stale)))
++            "other bytes rebuild the entry"))
++      (finally (test-support/delete-recursively! directory)))))
