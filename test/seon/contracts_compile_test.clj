@@ -245,6 +245,15 @@
 ;;; Compilation: the publication path
 ;;; ---------------------------------------------------------------------------
 
+(defn- schema-files
+  "The paths of the checkout's schema resource files at `root`, by name."
+  {:malli/schema [:=> [:cat :string] [:vector :string]]}
+  [root]
+  (->> (.listFiles (io/file root "resources/seon/schemas"))
+       (filter #(.endsWith (.getName ^java.io.File %) ".edn"))
+       (sort-by #(.getName ^java.io.File %))
+       (mapv #(.getPath ^java.io.File %))))
+
 (defn checkout-packaged-forms
   "The packaged schema population of the checkout at `root`, read from disk.
 
@@ -255,12 +264,33 @@
   admission's refusals, not this check's."
   {:malli/schema [:=> [:cat :string] :map]}
   [root]
-  (->> (.listFiles (io/file root "resources/seon/schemas"))
-       (filter #(.endsWith (.getName ^java.io.File %) ".edn"))
-       (sort-by #(.getName ^java.io.File %))
+  (->> (schema-files root)
        (map #(edn/read-string (slurp %)))
        (apply merge)
        (schema.edn/derive-config-forms)))
+
+(defn placement-findings
+  "A finding for a schema key the checkout at `root` declares outside
+  `<its namespace>.edn`: the placement schema admission refuses when a JVM
+  loads the resources (`seon.schema.edn/validate-resource-placement!`, which
+  names the first such key). Empty when every key is in its own file."
+  {:malli/schema [:=> [:cat :string] [:vector :map]]}
+  [root]
+  (let [loaded (mapv (fn [path]
+                       {::schema.edn/file path
+                        ::schema.edn/resource (str "seon/schemas/" (.getName (io/file path)))
+                        ::schema.edn/forms (edn/read-string (slurp path))})
+                     (schema-files root))]
+    (try
+      (#'schema.edn/validate-resource-placement! loaded)
+      []
+      ;; Declared case: the placement refusal, reported as the gate's finding.
+      (catch clojure.lang.ExceptionInfo refusal
+        (if-let [attribute (::schema.edn/misplaced-attribute (ex-data refusal))]
+          [{:filename (::schema.edn/file (ex-data refusal)) :row 1 :col 1 :level :error
+            :type :schema-placement :message (ex-message refusal)
+            ::misplaced-attribute attribute}]
+          (throw refusal))))))
 
 (defn- namespace-source
   "The checkout source text that declares namespace `namespace-name`, or nil."
@@ -387,7 +417,7 @@
         texts (merge (into {} (map (fn [path] [path (slurp path)])) paths)
                      sources)
         contexts (namespace-contexts texts)]
-    (into (into []
+    (into (into (placement-findings root)
                 (mapcat (fn [[path text]]
                           (when-some [[_ baseline] (find baselines path)]
                             (incomplete-changes path text baseline))))
@@ -430,7 +460,25 @@
                        contracts)]
     (is (< 1000 (count contracts))
         "the static reader found the population's contracts")
-    (is (= [] (mapv #(select-keys % [:filename :row :message]) findings)))))
+    (is (= [] (mapv #(select-keys % [:filename :row :message]) findings)))
+    (is (= [] (placement-findings ".")) "every schema key is declared in its own namespace's file")))
+
+(deftest a-schema-key-in-another-namespaces-file-fails-the-gate
+  ;; Class regression (b738dff1b): four view schemas declared in seon.fn.edn,
+  ;; seon.ns.edn and seon.test.edn passed this gate and refused HEAD's boot.
+  (let [root (str (java.nio.file.Files/createTempDirectory "placement" (make-array java.nio.file.attribute.FileAttribute 0)))
+        schemas (io/file root "resources/seon/schemas")]
+    (try
+      (.mkdirs schemas)
+      (spit (io/file schemas "seon.fn.edn") "{:seon.fn/doc :string :seon.render.ns/function-view [:map]}")
+      (let [findings (placement-findings root)]
+        (is (= [:seon.render.ns/function-view] (mapv ::misplaced-attribute findings)))
+        (is (= [:schema-placement] (mapv :type findings))))
+      (spit (io/file schemas "seon.fn.edn") "{:seon.fn/doc :string}")
+      (spit (io/file schemas "seon.render.ns.edn") "{:seon.render.ns/function-view [:map]}")
+      (is (= [] (placement-findings root)) "the same key in its own file passes")
+      (finally
+        (doseq [f (reverse (file-seq (io/file root)))] (io/delete-file f true))))))
 
 (def ^:private historical-sources
   "The three from-zero breaks, reconstructed in their namespaces' shape."
