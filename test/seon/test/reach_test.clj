@@ -3,7 +3,8 @@
             [seon.db :as db]
             [seon.program :as program]
             [seon.test.runner :as runner]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (deftest program-digest-uses-the-databases-program-shapes
   (support/with-database
@@ -17,7 +18,7 @@
                                 #(throw (ex-info "Program digest read authored resources." {}))]
                      (runner/program-digest (db/db connection)))]
          (is (string? before))
-         (is (string? after) (pr-str after))
+         (is (string? after) (seon.print.value/bounded-text after))
          (is (not= before after)))))))
 
 (defn- oracle-closure
@@ -56,7 +57,7 @@
            elsewhere 'seon.db-test/semantic-replay-declines-opaque-and-lazy-values-without-realizing
            symbols [reaching elsewhere]
            before (runner/reach-digests (db/db connection) symbols)]
-       (is (every? string? (map before symbols)) (pr-str before))
+       (is (every? string? (map before symbols)) (seon.print.value/bounded-text before))
        (is (not (contains? (get (runner/reach-memberships (db/db connection) [elsewhere]) elsewhere)
                            'seon.id/id))
            "the other test does not reach the changed definition")

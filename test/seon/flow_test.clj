@@ -12,7 +12,8 @@
             [malli.generator :as mg]
             [seon.flow :as sut]
             [seon.schema :as schema]
-            [seon.test-support :as test-support])
+            [seon.test-support :as test-support]
+            [seon.print.value])
   (:import [java.io File]
            [java.net URI]
            [java.net.http HttpClient HttpRequest HttpResponse$BodyHandlers
@@ -137,7 +138,7 @@
                                    :seon.await/bound (join-bound 200)
                                    :seon.await/diagnostic diagnostic})
             elapsed-ms (/ (- (System/nanoTime) started) 1e6)]
-        (is (number? (:seon.await/elapsed-ms busy)) (pr-str busy))
+        (is (number? (:seon.await/elapsed-ms busy)) (seon.print.value/bounded-text busy))
         (is (= ::join-probe-exited (:seon.error/expected busy))
             "the expiry names the exit that did not arrive")
         (is (<= 190 elapsed-ms 450) (str "the one deadline bounds the join: " elapsed-ms))
@@ -195,11 +196,11 @@
             stored (db/q '[:find [?message ...]
                            :where [?o :seon.error.occurrence/message ?message]]
                          @connection)]
-        (is (nil? exited) (pr-str exited))
+        (is (nil? exited) (seon.print.value/bounded-text exited))
         (is (.isTerminated ^java.util.concurrent.ExecutorService executor)
             "no proc thread of the graph survives the throw")
         (is (= 1 (count (filter #(str/includes? % "gate-2 stop transition throws") stored)))
-            (pr-str stored))))))
+            (seon.print.value/bounded-text stored))))))
 
 ;;; An unstored panic prints bounded text: the class regression for the
 ;;; 3.18 GB stderr lines of pid 68592 (issue
@@ -269,7 +270,7 @@
           (is (ifn? callback))
           (is (m/validate compiled callback))
           (is (m/validate output result)
-              (pr-str {:schema schema-key
+              (seon.print.value/bounded-text {:schema schema-key
                        :args args
                        :result result})))))))
 

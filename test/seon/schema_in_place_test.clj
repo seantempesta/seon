@@ -18,7 +18,8 @@
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (def ^:private fixture-forms
   "The declarations the branch is brought TO."
@@ -213,7 +214,7 @@
                         #(db/transact! connection
                                        {:tx-data (into (@#'seon.cluster/declaration-changes database retired)
                                                        (@#'seon.cluster/schema-entity-changes database retired))}))]
-          (is (some? (:db-after adoption)) (pr-str (:seon.error/message adoption)))
+          (is (some? (:db-after adoption)) (seon.print.value/bounded-text (:seon.error/message adoption)))
           (is (not (contains? (:schema (db/db connection)) :schema.in-place/required))
               "the required key's attribute is retired with its data")
           (is (= #{"r"} (values connection :schema.in-place/id))

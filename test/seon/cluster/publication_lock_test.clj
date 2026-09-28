@@ -8,7 +8,8 @@
             [seon.cluster.source-test :as source-test]
             [seon.db :as db]
             [seon.fn :as fn]
-            [seon.test-support :as test-support])
+            [seon.test-support :as test-support]
+            [seon.print.value])
   (:import [java.util.concurrent CountDownLatch]))
 
 (deftest ^{:seon.test/fixture-observation
@@ -112,8 +113,8 @@
                 winners (filterv :seon.source/built? results)
                 losers (filterv :seon.error/at results)
                 head (:seon.source/commit-id (source/current opened))]
-            (is (= 1 (count winners)) (pr-str results))
-            (is (= 1 (count losers)) (pr-str results))
+            (is (= 1 (count winners)) (seon.print.value/bounded-text results))
+            (is (= 1 (count losers)) (seon.print.value/bounded-text results))
             (let [[winner] winners [loser] losers]
               (is (= head (:seon.source/commit-id winner))
                   "the winner returns the head it installed")
@@ -208,7 +209,7 @@
                 before (db/basis-t (db/db connection))
                 stale (adopt first-source h1)]
             (is (symbol? sym))
-            (is (instance? clojure.lang.ExceptionInfo stale) (pr-str stale))
+            (is (instance? clojure.lang.ExceptionInfo stale) (seon.print.value/bounded-text stale))
             (is (some #(= :stale-branch-head (:type (ex-data %)))
                       (take-while some? (iterate ex-cause stale)))
                 "the refusal is the writer's stale-head refusal")
@@ -217,7 +218,7 @@
             (let [second-source (source/database opened h2)]
               (try
                 (let [current (adopt second-source h2)]
-                  (is (not (instance? Throwable current)) (pr-str current))
+                  (is (not (instance? Throwable current)) (seon.print.value/bounded-text current))
                   (is (= (db/pull second-source '[:seon.fn/sym :seon.program/definition-digest]
                                   [:seon.fn/sym sym])
                          (db/pull (db/db connection) '[:seon.fn/sym :seon.program/definition-digest]
@@ -260,13 +261,13 @@
                 h2 (:seon.source/commit-id moved)
                 before (db/basis-t (db/db connection))
                 stale (adopt h1)]
-            (is (instance? Exception stale) (pr-str stale))
+            (is (instance? Exception stale) (seon.print.value/bounded-text stale))
             (is (some #(= {:type :stale-branch-head :expected-current-commit h1 :current-commit h2}
                           (select-keys (ex-data %) [:type :expected-current-commit :current-commit]))
                       (take-while some? (iterate ex-cause stale))))
             (is (= before (db/basis-t (db/db connection))) "the stale schema change committed nothing")
             (is (nil? (get (:schema (db/db connection)) attribute)))
             (let [current (adopt h2)]
-              (is (some? (:db-after current)) (pr-str current))
+              (is (some? (:db-after current)) (seon.print.value/bounded-text current))
               (is (= :db.type/string (get-in (:schema (db/db connection)) [attribute :db/valueType])))))
           (finally (d/release connection)))))))

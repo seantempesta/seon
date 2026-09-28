@@ -3,7 +3,8 @@
             [clojure.test :refer [deftest is]]
             [seon.cluster :as cluster]
             [seon.fn :as seon.fn]
-            [seon.program :as program]))
+            [seon.program :as program]
+            [seon.print.value]))
 
 (deftest adoption-identities-carry-no-nil-member
   ;; A scalar publication's entities carry the file-digest entity and any analyzer
@@ -27,6 +28,6 @@
                               :seon.test/sym}
                             (first %))
                 identities)
-        (pr-str (into #{} (map first) identities)))
+        (seon.print.value/bounded-text (into #{} (map first) identities)))
     (is (some #(= :seon.ns/name (first %)) identities)
         "declarations are still recorded")))

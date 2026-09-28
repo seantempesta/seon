@@ -23,7 +23,8 @@
             [sci.core :as sci]
             [sci.interrupt :as interrupt]
             [seon.sci.eval :as eval]
-            [seon.sci.kernel :as kernel])
+            [seon.sci.kernel :as kernel]
+            [seon.print.value])
   (:import [java.util.concurrent Callable ExecutorService Executors Future
             TimeUnit]))
 
@@ -171,7 +172,7 @@
       (is (pos? @ticks) "the detached loop really ran")
       (is (true? (::interrupted? settled))
           (str "the detached loop must end by SCI's own interrupt; got "
-               (pr-str settled)))
+               (seon.print.value/bounded-text settled)))
       (is (< elapsed-ms 2000)
           (str "detached work must end at its ~" time-limit-ms
                "ms limit, not run unbounded; elapsed " elapsed-ms "ms"))

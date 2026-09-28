@@ -8,7 +8,8 @@
             [seon.schema.datahike :as schema.datahike]
             [seon.sci.eval :as evaluation]
             [seon.test.accretion :as accretion]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (defn- with-owned-tree [f]
   (let [forms (assoc (schema.edn/packaged-forms)
@@ -47,7 +48,7 @@
   [connection transaction]
   (let [before (db/basis-t (db/db connection))
         result (db/transact! connection transaction)]
-    (is (string? (:seon.db.write.attempt/request-id result)) (pr-str result))
+    (is (string? (:seon.db.write.attempt/request-id result)) (seon.print.value/bounded-text result))
     (is (= before (db/basis-t (db/db connection))))
     result))
 
@@ -125,7 +126,7 @@
       (let [valid (mapv #(hash-map ::key (str "k" %) ::value % ::children [{::value %}]) (range 200))]
         (let [result (refuses-without-change connection
                                              (conj valid {::key "bad" ::children [{::value 1}]}))]
-          (is (= {::key "bad"} (get-in result [:seon.error/data :seon.db/entity])) (pr-str result)))
+          (is (= {::key "bad"} (get-in result [:seon.error/data :seon.db/entity])) (seon.print.value/bounded-text result)))
         (support/transacted! connection valid)
         (is (= 200 (count (db/datoms (db/db connection) :avet ::key))))))))
 
@@ -165,13 +166,13 @@
         (is (some? source-arity))
         (is (every? #(= transaction (:e %))
                     (remove #(or (= :db/txInstant (:a %)) (= cell (:e %))) (:tx-data report)))
-            (pr-str (:tx-data report)))
+            (seon.print.value/bounded-text (:tx-data report)))
         (let [changed (:seon.db/changed-identity-attributes
                        (@#'seon.db/write-owned-values-error
                         projection report
                         (@#'seon.db/write-attribute-plans projection (:db-after report))
                         (@#'seon.db/report-identity-attributes report)))]
-          (is (contains? changed :seon.fn/sym) (pr-str changed)))))))
+          (is (contains? changed :seon.fn/sym) (seon.print.value/bounded-text changed)))))))
 
 (deftest new-entities-find-their-owners-without-an-index-seek
   ;; An entity id beyond :db-before's max-eid was referenced by nothing

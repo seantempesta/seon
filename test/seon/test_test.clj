@@ -10,7 +10,8 @@
             [seon.sci.eval :as sci.eval]
             [seon.test :as sut]
             [seon.test.runner :as runner]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support]
+            [seon.print.value]))
 
 (deftest interpreted-test-bodies-use-the-sci-interrupt-bound
   (test-support/with-database
@@ -28,8 +29,8 @@
                     :seon.test/var (:seon.sci.admit/value evaluation)
                     :seon.sci.eval/time-limit-ms 50
                     :seon.db/connection connection})]
-       (is (= 1 (:seon.test/error-count result)) (pr-str result))
-       (is (pos? (count (:seon.test/failure-message result))) (pr-str result))))))
+       (is (= 1 (:seon.test/error-count result)) (seon.print.value/bounded-text result))
+       (is (pos? (count (:seon.test/failure-message result))) (seon.print.value/bounded-text result))))))
 
 (deftest resolution-follows-admitted-source-and-acquisition
   (test-support/with-database
@@ -52,7 +53,7 @@
                         :seon.sci.admit/caps (config/result-caps config/defaults)
                         :seon.sci.eval/time-limit-ms 10000})
            declaration (program/declaration-row (seon.schema/handed-projection) (:seon.program/row evaluation) :all :agent)]
-       (is (nil? (:seon.cluster.eval/error evaluation)) (pr-str evaluation))
+       (is (nil? (:seon.cluster.eval/error evaluation)) (seon.print.value/bounded-text evaluation))
        (is (string? (:seon.program/analyzed-source-digest declaration)))
        (let [written-on (db/db connection)
              written (test-support/transacted! connection [declaration])
@@ -72,7 +73,7 @@
            :seon.sci.eval/installations
            [{:seon.program/row declaration :seon.sci.eval/evaluation evaluation}]})
          (let [resolved (sut/resolve-test (assoc request :seon.sci.eval/ctx ctx))]
-           (is (runner/var-reference? resolved) (pr-str resolved)))
+           (is (runner/var-reference? resolved) (seon.print.value/bounded-text resolved)))
          (let [core-symbol (first (db/q '[:find [?symbol ...]
                                          :in $ ?namespace
                                          :where [?ns :seon.ns/name ?namespace]
@@ -82,7 +83,7 @@
                resolved (sut/resolve-test
                          (assoc request :seon.sci.eval/ctx ctx
                                         :seon.test/identity (symbol core-symbol)))]
-           (is (var? resolved) (pr-str resolved))
+           (is (var? resolved) (seon.print.value/bounded-text resolved))
            (let [file (get-in (db/pull database [:seon.fn/file]
                                       [:seon.test/sym core-symbol])
                               [:seon.fn/file :db/id])
@@ -139,7 +140,7 @@
                       connection
                       [[:db.fn/retractEntity [:seon.test/sym test-symbol]]
                        [:db.fn/call runner/record-tx completion]])]
-         (is (inst? (:seon.error/at refused)) (pr-str refused))
+         (is (inst? (:seon.error/at refused)) (seon.print.value/bounded-text refused))
          (is (= basis (db/basis-t (db/db connection))))
          (is (= :core (source-of))
              "result recording cannot recreate a deleted definition"))))))
@@ -168,7 +169,7 @@
        (is (not= (:seon.test.run/id first-run) (:seon.test.run/id second-run)))
        (doseq [run [first-run first-run second-run]]
          (let [result (runner/commit-results! connection (completion run))]
-           (is (vector? result) (pr-str result))))
+           (is (vector? result) (seon.print.value/bounded-text result))))
        (is (= #{(:seon.test.run/id first-run) (:seon.test.run/id second-run)}
               (set/difference
                (set (db/q '[:find [?id ...] :where [_ :seon.test.run/id ?id]]
@@ -190,13 +191,13 @@
          (is (= (dissoc read-refusal :seon.error/data)
                 (select-keys refused (keys (dissoc read-refusal :seon.error/data))))
              "a refused read is never evidence of an existing run or an identity collision")
-         (is (true? (:seon.db/transaction-refused refused)) (pr-str refused))
+         (is (true? (:seon.db/transaction-refused refused)) (seon.print.value/bounded-text refused))
          (is (= basis (db/basis-t (db/db connection)))))
        (let [basis (db/basis-t (db/db connection))
              changed (assoc first-run :seon.test.run/basis-t (inc (:seon.test.run/basis-t first-run)))
              refused (test-support/refusal-data
                       #(runner/commit-results! connection (completion changed)))]
-         (is (string? (:seon.test.run/immutable refused)) (pr-str refused))
+         (is (string? (:seon.test.run/immutable refused)) (seon.print.value/bounded-text refused))
          (is (= (:seon.test.run/basis-t first-run)
                 (get-in refused [:seon.error/expected
                                  :seon.test.run/basis-t])))
@@ -259,7 +260,7 @@
              refused (db/transact! connection
                        [[:db.fn/call sut/admit-run
                          (assoc second-request :seon.test.run/members [])]])]
-         (is (= :seon.test.run/immutable (:seon.test/admission-refusal refused)) (pr-str refused))
+         (is (= :seon.test.run/immutable (:seon.test/admission-refusal refused)) (seon.print.value/bounded-text refused))
          (is (= before (db/basis-t (db/db connection)))))))))
 
 (deftest admission-refuses-stale-program-and-records-empty-selection
@@ -287,14 +288,14 @@
                      [[:db.fn/call sut/admit-run
                        ;; A program written after the tested basis is a stale program.
                        (assoc request :seon.test.run/provenance stale)]])]
-       (is (= :seon.test/program-mismatch (:seon.test/admission-refusal refused)) (pr-str refused))
+       (is (= :seon.test/program-mismatch (:seon.test/admission-refusal refused)) (seon.print.value/bounded-text refused))
        (is (= before (db/basis-t (db/db connection))))
        (let [wrong-input (db/transact! connection
                            [[:db.fn/call sut/admit-run
                              (assoc request :seon.test.run/input-digest
                                     (id/digest 64 [:different :inputs]))]])]
          (is (= :seon.test/program-mismatch (:seon.test/admission-refusal wrong-input))
-             (pr-str wrong-input))
+             (seon.print.value/bounded-text wrong-input))
          (is (= before (db/basis-t (db/db connection)))))
        (let [report (test-support/transacted!
                      connection [[:db.fn/call sut/admit-run request]])

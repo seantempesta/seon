@@ -30,7 +30,8 @@
             [seon.config :as config]
             [seon.error :as error]
             [seon.schema]
-            [seon.test-support :as test-support])
+            [seon.test-support :as test-support]
+            [seon.print.value])
   (:import [java.util Date]))
 
 (def ^:private result-caps
@@ -147,7 +148,7 @@
            {:keys [key faults armer render search]} (route-probe! connection mailbox)
            write! (fn [tx]
                     (let [result (db/transact! connection tx)]
-                      (is (some? (:db-after result)) (pr-str result))
+                      (is (some? (:db-after result)) (seon.print.value/bounded-text result))
                       result))]
        (try
          (write! [{:seon.runtime/agent [:seon.agent/id "agent-a"]
@@ -241,8 +242,8 @@
                                           :example/amount))
                  reference (first (db/datoms database :eavt order-b
                                              :seon.message/to))]
-             (is (map? scalar) (pr-str scalar))
-             (is (map? reference) (pr-str reference))
+             (is (map? scalar) (seon.print.value/bounded-text scalar))
+             (is (map? reference) (seon.print.value/bounded-text reference))
              (is (= [recipient] (fires :example/amount scalar))
                  "the same scalar fact read as a map fires the same matcher")
              (is (= [recipient] (fires :seon.message/to reference))
@@ -718,7 +719,7 @@
                       :seon.cluster.wake/key key})))))))
          :seed 2026072826)]
     (is (true? (:result check))
-        (str "routing/render-wake property failed: " (pr-str check))))
+        (str "routing/render-wake property failed: " (seon.print.value/bounded-text check))))
 
   (testing "C2 from the other direction: every attribute that routes to
             a mailbox is one no turn commits"

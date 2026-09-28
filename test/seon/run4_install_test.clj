@@ -12,7 +12,8 @@
             [seon.eval :as evaluation]
             [seon.flow :as flow]
             [seon.sci.admit :as admit]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (deftest refused-run4-definition-never-enters-the-retained-context
   (support/with-database
@@ -66,9 +67,9 @@
                  retained (:seon.sci.eval/ctx (agent/acquire-context! handle "juniper"))
                  result-var (when definition (sci/resolve retained (admit/result-handle (:seon.cluster.eval/id definition))))
                  result (when result-var @result-var)]
-             (is (= 2 (count saved)) (pr-str saved))
+             (is (= 2 (count saved)) (seon.print.value/bounded-text saved))
              (is (= 1 (count (filter :seon.cluster.eval/error saved))))
-             (is (qualified-symbol? (:seon.test.accretion/function-sym result)) (pr-str result))
+             (is (qualified-symbol? (:seon.test.accretion/function-sym result)) (seon.print.value/bounded-text result))
              (is (= [[]] (:seon.test.accretion/arguments result)))
              (is (string? (:seon.test.accretion/expected result)))
              (is (contains? result :seon.test.accretion/actual))
@@ -82,7 +83,7 @@
              (is (nil? (sci/resolve retained function-symbol)))
              (let [directory (first (filter #(= "(dir my.agents.juniper)" (:seon.cluster.eval/source %)) saved))
                    value (some-> (sci/resolve retained (admit/result-handle (:seon.cluster.eval/id directory))) deref)]
-               (is (vector? (:functions value)) (pr-str value))
+               (is (vector? (:functions value)) (seon.print.value/bounded-text value))
                (is (not-any? #(= function-symbol (:sym %)) (:functions value)))))
            ; Acceptance and rejected replacement exercise the same retained context.
            (fixture/submit! handle routing

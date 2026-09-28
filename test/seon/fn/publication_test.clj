@@ -4,7 +4,8 @@
             [seon.fn :as functions]
             [seon.db :as db]
             [seon.fn.analyzer :as analyzer]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (defn- write-source!
   {:malli/schema [:=> [:cat :string :string :string] :nil]}
@@ -50,7 +51,7 @@
                            :seon.fn/previous-manifest empty-manifest
                            :seon.fn/changed-paths #{"src/alpha.clj" "src/stranger.clj"}
                            :seon.source/previous-database (db/db connection)})]
-           (is (boolean? (:seon.reconcile/converged? installed)) (pr-str installed))
+           (is (boolean? (:seon.reconcile/converged? installed)) (seon.print.value/bounded-text installed))
            (is (every? #(some? (:db/id (db/pull (db/db connection) '[:db/id] [:seon.fn/sym %])))
                        '[pub.alpha/f pub.alpha/g pub.stranger/h]))
            (let [prior (db/db connection)
@@ -72,7 +73,7 @@
                               {:seon.db/connection connection :seon.fn/manifest after
                                :seon.fn/previous-manifest before :seon.fn/changed-paths #{"src/alpha.clj"}
                                :seon.source/previous-database prior}))]
-               (is (boolean? (:seon.reconcile/converged? result)) (pr-str result))
+               (is (boolean? (:seon.reconcile/converged? result)) (seon.print.value/bounded-text result))
                (is (= #{'pub.alpha/f} (into #{} (keep :seon.fn/sym) @observed)))
                (let [changed-entities (into #{} (map :e) (mapcat :tx-data @reports))
                      unchanged (db/pull prior '[*] [:seon.fn/sym 'pub.alpha/g])
@@ -116,7 +117,7 @@
                            :seon.fn/previous-manifest (assoc before :seon.fn.manifest/artifacts [])
                            :seon.fn/changed-paths #{path}
                            :seon.source/previous-database (db/db connection)})]
-           (is (boolean? (:seon.reconcile/converged? installed)) (pr-str installed))
+           (is (boolean? (:seon.reconcile/converged? installed)) (seon.print.value/bounded-text installed))
            (let [prior (db/db connection)]
              (write-source! root path (str declaration "{:not x :maybe options :and x :or options})"))
              (let [after (functions/build-manifest
@@ -128,7 +129,7 @@
                             :seon.source/previous-database prior})
                    database (db/db connection)
                    projection (db/carried-projection database)]
-               (is (boolean? (:seon.reconcile/converged? result)) (pr-str result))
+               (is (boolean? (:seon.reconcile/converged? result)) (seon.print.value/bounded-text result))
                (is (.contains ^String (:seon.fn/source
                                        (db/pull database '[:seon.fn/source]
                                                 [:seon.fn/sym 'pub.shapes/f]))

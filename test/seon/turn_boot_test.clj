@@ -9,7 +9,8 @@
             [seon.eval :as evaluation]
             [seon.fn :as function]
             [seon.test-support :as support]
-            [seon.turn :as turn]))
+            [seon.turn :as turn]
+            [seon.print.value]))
 
 (deftest listened-datom-delivers-under-armed-contracts
   (support/with-database
@@ -90,7 +91,7 @@
                 entries (evaluation/of-agent (db/db connection) "root")]
            (is (nil? (:seon.turn.loop/parked state)))
            (is (nil? (:seon.turn.loop/refusal pass))
-               (pr-str (select-keys (:seon.turn.loop/refusal pass)
+               (seon.print.value/bounded-text (select-keys (:seon.turn.loop/refusal pass)
                                    [:seon.error/message :seon.turn/generated-read-attributes])))
            (is (string? (:seon.turn/id pass)))
            (is (seq entries))

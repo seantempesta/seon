@@ -6,7 +6,8 @@
             [seon.db :as db]
             [seon.sci.eval :as eval]
             [seon.sci.kernel :as kernel]
-            [seon.test-support :as support])
+            [seon.test-support :as support]
+            [seon.print.value])
   (:import (java.lang.ref WeakReference)
            (org.replikativ.persistent_sorted_set PersistentSortedSet)))
 
@@ -27,7 +28,7 @@
                          :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
                          :seon.sci.admit/caps (config/result-caps config/defaults)
                          :seon.sci.eval/time-limit-ms 5000})]
-        (is (= 3 (:seon.sci.admit/value evaluation)) (pr-str evaluation)))
+        (is (= 3 (:seon.sci.admit/value evaluation)) (seon.print.value/bounded-text evaluation)))
       (WeakReference. (.-_storage ^PersistentSortedSet (:eavt @connection)))
       (finally (agent/release-context! handle)))))
 

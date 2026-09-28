@@ -3,7 +3,8 @@
             [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
             [seon.plan :as plan]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (def message-query
   '[:find ?message :in $ ?subject
@@ -30,7 +31,7 @@
                              connection "worker")
             failure (plan/complete! "report" connection "worker")]
         (is (= message-query (:my.plan.item/done-query added)))
-        (is (= "report" (:my.plan/unsatisfied-query-item-id failure)) (pr-str failure))
+        (is (= "report" (:my.plan/unsatisfied-query-item-id failure)) (seon.print.value/bounded-text failure))
         (is (= message-query (get-in failure [:seon.error/data :my.plan.item/done-query])))
         (is (= #{} (get-in failure [:seon.error/data :seon.db/result])))
         (is (nil? (:my.plan.item/completed-tx
@@ -51,7 +52,7 @@
                                '[{:my.plan.item/completed-tx [:db/id :db/txInstant]}]
                                [:my.plan.item/id "report"])
             completion (:my.plan.item/completed-tx completed)]
-        (is (:db-after written) (pr-str written))
+        (is (:db-after written) (seon.print.value/bounded-text written))
         (is (= (db/basis-t (:db-after written)) (:db/id completion)))
         (is (inst? (:db/txInstant completion)))
         (is (= {} (plan/current @connection "worker")))
@@ -67,6 +68,6 @@
                     :my.plan.item/done-query '[:find ?unbound :where [?a :seon.agent/id "worker"]]}
                    connection "worker")
         (let [failure (plan/complete! "invalid" connection "worker")]
-          (is (= "invalid" (:my.plan/failed-query-item-id failure)) (pr-str failure))
+          (is (= "invalid" (:my.plan/failed-query-item-id failure)) (seon.print.value/bounded-text failure))
           (is (nil? (:my.plan.item/completed-tx
                      (db/pull @connection '[*] [:my.plan.item/id "invalid"])))))))))

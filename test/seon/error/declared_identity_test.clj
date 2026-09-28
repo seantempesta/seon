@@ -6,7 +6,8 @@
             [seon.db :as db]
             [seon.render :as render]
             [seon.schema :as schema]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (defn- declared-and-valid?
   "The value names its declared schema, and that schema accepts it."
@@ -25,9 +26,9 @@
            ambiguous (#'render/ambiguity 'declared-identity.fixture :seon.render/ai
                                          ['declared-identity.fixture/a 'declared-identity.fixture/b])]
        (is (declared-and-valid? projection :seon.db/invalid-read-error read-refusal)
-           (pr-str [(meta read-refusal) read-refusal]))
+           (seon.print.value/bounded-text [(meta read-refusal) read-refusal]))
        (is (declared-and-valid? projection :seon.render/ambiguous-error ambiguous)
-           (pr-str [(meta ambiguous) ambiguous]))
+           (seon.print.value/bounded-text [(meta ambiguous) ambiguous]))
        (is (= :seon.render/request-error
               (:seon.error/declared-schema
                (meta (render/request-profile {:seon.render/profile read-refusal}))))

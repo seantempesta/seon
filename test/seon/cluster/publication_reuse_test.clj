@@ -12,7 +12,8 @@
             [seon.test :as sut]
             [seon.test.runner :as runner]
             [seon.id-test :as fixture]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (defn populate-input!
   {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection]]] :nil]}
@@ -65,7 +66,7 @@
                                                  :seon.test.run/terminated? true
                                                  :seon.db/db (db/db connection)
                                                  :seon.test.runner/results [result]})]
-                                 (is (vector? recorded) (pr-str recorded)))
+                                 (is (vector? recorded) (seon.print.value/bounded-text recorded)))
                                admission)
                              (finally (d/release connection)))]
               (spit file "(ns publication.unrelated) (defn f {:malli/schema [:=> [:cat] :int]} [] 2)")
@@ -78,7 +79,7 @@
                       "The original selection transaction still authorizes its member.")
                   (is (= 1 (count (runner/run-results database (:seon.test.run/id run)))))
                   (let [reused (sut/select (assoc request :seon.db/db database))]
-                    (is (= [] (:seon.test.run/members reused)) (pr-str reused))
+                    (is (= [] (:seon.test.run/members reused)) (seon.print.value/bounded-text reused))
                     (is (= #{test-symbol} (set (map :seon.test/sym (:seon.test.selection/unchanged reused)))))
                     (is (= (:seon.test.run/basis-t run)
                            (:seon.test.run/basis-t (first (:seon.test.selection/unchanged reused)))))

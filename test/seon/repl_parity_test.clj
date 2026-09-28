@@ -6,7 +6,8 @@
             [seon.config :as config]
             [seon.sci.eval :as sci.eval]
             [seon.sci.reader :as sci.reader]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support]
+            [seon.print.value]))
 
 ;; Upstream corpus pins (2026-08-01):
 ;; clojure@b18d3adc5b5f4d5d0ccea966203fb67a614d5c3d
@@ -101,12 +102,12 @@
     (case expected-state
       :passing
       (is passes?
-          (str entity-id " regressed: " (pr-str outcome)))
+          (str entity-id " regressed: " (seon.print.value/bounded-text outcome)))
 
       :known-divergence
       (is (false? passes?)
           (str entity-id " now matches stock Clojure; promote the entity: "
-               (pr-str outcome))))))
+               (seon.print.value/bounded-text outcome))))))
 
 (defmacro defparity
   [entity-id expected-state check]

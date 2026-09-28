@@ -4,7 +4,8 @@
             [clojure.test :refer [deftest is]]
             [seon.db :as db]
             [seon.test-support :as support]
-            [seon.turn :as turn]))
+            [seon.turn :as turn]
+            [seon.print.value]))
 
 ;; Root turn 62279 on `default` (2026-09-23 16:44Z) replied with a vector
 ;; holding `(my.agent/done)`. The disposition rule refused it, but the
@@ -62,11 +63,11 @@
          (is (= [:resume run-id 0]
                 (mapv work [:seon.turn.work/situation :seon.turn/id
                             :seon.cluster.eval/ordinal]))
-             (pr-str work))
-         (is (= 1 (:seon.turn.loop/forms-run report)) (pr-str report))
+             (seon.print.value/bounded-text work))
+         (is (= 1 (:seon.turn.loop/forms-run report)) (seon.print.value/bounded-text report))
          (is (str/includes? (str (:seon.cluster.eval/error settled))
                             "must be the last form of your reply")
-             (pr-str settled))
+             (seon.print.value/bounded-text settled))
          (is (string? (:seon.eval/shown settled)))
          (is (= namespace-name (get-in settled [:seon.cluster.eval/ns :seon.ns/name])))
          (is (empty? refusals) "settlement accepted the refused disposition"))))))

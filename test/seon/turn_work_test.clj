@@ -15,7 +15,8 @@
             [seon.agent :as my.agent]
             [seon.turn :as turn]
             [seon.schema]
-            [seon.test-support :as support])
+            [seon.test-support :as support]
+            [seon.print.value])
   (:import [java.util Date]))
 
 ;;; ---------------------------------------------------------------------------
@@ -538,7 +539,7 @@
                                               (range 2))))))))))
          :seed 2026072829)]
     (is (true? (:result check))
-        (str "situation totality failed: " (pr-str check)))))))
+        (str "situation totality failed: " (seon.print.value/bounded-text check)))))))
 
 (deftest answeredness-is-the-turns-own-transaction
   ;; THE CLASS: answeredness used to be a stored reference from the run

@@ -11,7 +11,8 @@
             [seon.eval :as evaluation]
             [seon.repl :as repl]
             [seon.test-support :as support]
-            [seon.turn :as turn]))
+            [seon.turn :as turn]
+            [seon.print.value]))
 
 (deftest help-is-first-stored-data-and-tracks-its-code-version
   (support/with-database
@@ -22,7 +23,7 @@
                    (agent/creation-tx {:seon.agent/id "help"
                                        :seon.ns/name 'my.agents.help
                                        :seon.cluster/name "help"}))]
-       (is (:db-after setup) (pr-str setup)))
+       (is (:db-after setup) (seon.print.value/bounded-text setup)))
      (let [ctx (support/fork-cluster-ctx connection "help")
            handle (support/cluster-handle
                    {:seon.db/connection connection
@@ -49,9 +50,9 @@
                lines (some-> (:seon.eval/shown saved) str/split-lines)
                evidence (:seon.cluster.eval/read-evidence saved)
                shown (when saved (repl/render-ai saved))]
-           (is (some? saved) (pr-str {:opening opening :committed @committed}))
+           (is (some? saved) (seon.print.value/bounded-text {:opening opening :committed @committed}))
            (is (empty? (keep :seon.cluster.eval/error (evaluation/of-agent @connection "help"))))
-           (is (vector? (:seon.turn/forms opening)) (pr-str opening))
+           (is (vector? (:seon.turn/forms opening)) (seon.print.value/bounded-text opening))
            (is (nil? (:seon.turn/id opening))
                "a second real system pass committed while this pass evaluated")
            (is (string? (:seon.turn/id @committed)))
@@ -65,7 +66,7 @@
              (is (= ["nil" "[]"] (mapv :seon.eval/shown (mapv empty-reads [1 3]))))
              (is (= {} (edn/read-string (:seon.eval/shown (nth empty-reads 2)))))
              (is (every? #(seq (:seon.cluster.eval/read-evidence %)) empty-reads)))
-           (is (vector? lines) (pr-str lines))
+           (is (vector? lines) (seon.print.value/bounded-text lines))
            (is (= 13 (count lines)))
            (is (every? #(and (string? %) (not (str/includes? % "\n"))) lines))
            (is (= "The prompt shows your namespace my.agents.help and is drawn for you. Send only ;; thinking comments and forms."
@@ -116,7 +117,7 @@
                            {:seon.message/id "new-message" :seon.message/to [:seon.agent/id "help"] :seon.message/content "Observe the new message"}
                            {:my.note/id "first-note" :my.note/agent [:seon.agent/id "help"]
                             :my.note/content "Observe the first note"}])]
-             (is (:db-after written) (pr-str written))
+             (is (:db-after written) (seon.print.value/bounded-text written))
              (is (every? #(false? (db/read-evidence-current?
                                    @connection (:seon.cluster.eval/read-evidence %))) initial))
              (is (vector? (:seon.turn/forms (turn/system-turn request))))

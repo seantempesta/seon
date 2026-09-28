@@ -7,7 +7,8 @@
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.test-support :as test-support]
-            [seon.turn :as turn]))
+            [seon.turn :as turn]
+            [seon.print.value]))
 
 (def ^:private observation-ms
   "One second bounds observing cancellation or the admitted 200 ms fault."
@@ -125,4 +126,4 @@
                              (catch clojure.lang.ExceptionInfo absent (ex-data absent)))]
            (is (= (+ backstop-ms 200) (::test-support/timeout-ms observed))
                (str "No backstop fault follows the thrown step's own fault: "
-                    (pr-str observed)))))))))
+                    (seon.print.value/bounded-text observed)))))))))

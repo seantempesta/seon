@@ -5,7 +5,8 @@
             [seon.db :as db]
             [seon.fn :as seon.fn]
             [seon.id :as id]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support]
+            [seon.print.value]))
 
 ;; Every declaration is analyzed through the production source path
 ;; (`test-support/program-entity`), so it carries the digests the writer
@@ -35,7 +36,7 @@
                                  (test-support/namespace-entity database other)
                                  (test-support/program-entity
                                   database unrelated (source-of other "(defn value [] :agent)"))])
-            _ (is (some? (:db-after setup)) (pr-str setup))
+            _ (is (some? (:db-after setup)) (seon.print.value/bounded-text setup))
             before @connection
             kept-id (:db/id (db/pull before [:db/id] kept))
             _ (is (= "old documentation" (:seon.fn/doc (db/pull before '[*] kept))))
@@ -50,7 +51,7 @@
             reconcile [:db.fn/call seon.fn/reconcile-tx desired [namespace-ref kept removed]]
             report (db/transact! connection {:tx-data [reconcile]})
             after @connection]
-        (is (some? (:db-after report)) (pr-str report))
+        (is (some? (:db-after report)) (seon.print.value/bounded-text report))
         (is (= kept-id (:db/id (db/pull after [:db/id] kept))) "a kept identity keeps its entity")
         (is (nil? (:db/id (db/pull after [:db/id] removed))))
         (is (contains? (set (source/deleted-identities after)) removed)
@@ -62,11 +63,11 @@
         (is (contains? (set (:seon.fn/calls (db/pull after [:seon.fn/calls] new-test)))
                        (in-development "new-value")))
         (let [repeated (db/transact! connection {:tx-data [reconcile]})]
-          (is (some? (:db-after repeated)) (pr-str repeated))
+          (is (some? (:db-after repeated)) (seon.print.value/bounded-text repeated))
           (is (= [:db/txInstant] (mapv :a (:tx-data repeated)))
               "the same admitted source writes no definition datom"))
         (let [result (db/transact! connection
                                    {:tx-data [[:db/add kept :seon.fn/doc "concurrent"] reconcile]})]
-          (is (some? (:db-after result)) (pr-str result))
+          (is (some? (:db-after result)) (seon.print.value/bounded-text result))
           (is (nil? (:seon.fn/doc (db/pull @connection '[*] kept)))
               "the writer removes an earlier same-transaction stale attribute"))))))

@@ -9,7 +9,8 @@
             [seon.flow :as flow]
             [seon.fn.analyzer :as analyzer]
             [seon.sci.admit :as admit]
-            [seon.sci.eval :as sci.eval]))
+            [seon.sci.eval :as sci.eval]
+            [seon.print.value]))
 
 (defn- public-defn?
   [definition]
@@ -68,7 +69,7 @@
     (is (seq subjects) "the production analyzer must find public functions")
     (is (every? identity-bearing? subjects)
         "every analyzed public function must retain source identity")
-    (is (empty? missing) (pr-str missing))))
+    (is (empty? missing) (seon.print.value/bounded-text missing))))
 
 (deftest public-contract-census-refuses-an-absent-source-root
   (let [absent-root (io/file "tmp" "n2-public-contract-absent-source-root")

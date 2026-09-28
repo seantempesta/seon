@@ -37,7 +37,8 @@
             [sci.core :as sci]
             [seon.id :as id]
             [seon.render.web :as web]
-            [seon.test-support :as test-support])
+            [seon.test-support :as test-support]
+            [seon.print.value])
   (:import [com.sun.net.httpserver HttpExchange HttpHandler HttpServer]
            [java.net InetSocketAddress]
            [java.util Date]
@@ -1023,7 +1024,7 @@
                     ;; receipt (0cbf4336f deleted the :panic policy); disarm!
                     ;; throws the declared failure itself
                     failure thrown]
-                (is (nil? (:seon.fault/recorded (ex-data thrown))) (pr-str (ex-data thrown)))
+                (is (nil? (:seon.fault/recorded (ex-data thrown))) (seon.print.value/bounded-text (ex-data thrown)))
                 (is (= :seon.agent/disarm (get-in (ex-data failure) [:seon.error/data :seon.error/operation])))
                 (is (string? (:seon.agent/turn-completion-backstop (ex-data failure))))
                 (is (= turn-completion-backstop-ms
@@ -1436,7 +1437,7 @@
         (try
           (let [first-agent (arm-one! connection ctx routing "core-fault" "fault-a")
                 second-agent (arm-one! connection ctx routing "core-fault" "fault-b")]
-            (is (some? (:seon.flow/started first-agent)) (pr-str (keys first-agent)))
+            (is (some? (:seon.flow/started first-agent)) (seon.print.value/bounded-text (keys first-agent)))
             (is (some? (:seon.flow/started second-agent)) "the next agent arms too")
             (doseq [entry [first-agent second-agent]]
               (is (= subject
@@ -1609,7 +1610,7 @@
                   :seon.turn/sources
                   [{:seon.cluster.eval/source "(identity nil)"
                     :seon.ns/name namespace-name}]}))]
-    (is (some? (:db-after result)) (pr-str result)))
+    (is (some? (:db-after result)) (seon.print.value/bounded-text result)))
   (test-support/transacted! connection
                           (turn/close-tx {:seon.turn/id run-id :seon.db.process/id process :seon.turn/closed-tx "datomic.tx"})))
 
@@ -2278,12 +2279,12 @@
                                                      :in $ ?id
                                                      :where [?r :seon.turn/id ?id] [?e :seon.cluster.eval/run ?r]]
                                                    database run-id)))]
-                     (is (string? run-id) (str text " -> " (pr-str result)))
+                     (is (string? run-id) (str text " -> " (seon.print.value/bounded-text result)))
                      (is (some? (:seon.turn/closed-tx (db/pull database [:seon.turn/closed-tx] [:seon.turn/id run-id])))
                          (str text ": the run is terminal"))
                      (is (every? #(some % [:seon.eval/shown :seon.cluster.eval/error :seon.cluster.eval/interrupted-at])
                                  receipts)
-                         (str text ": every form carries a terminal fact " (pr-str receipts)))
+                         (str text ": every form carries a terminal fact " (seon.print.value/bounded-text receipts)))
                      (mapv :seon.eval/shown receipts)))]
         (swap! routing assoc :seon.agent/fault-channel faults)
         (test-support/transacted! connection (test-support/agent-tx @connection agent-id))
@@ -2294,7 +2295,7 @@
             (is (= ["{\"a\" 1}"] (settle-run "(sorted-map \"a\" 1)"))))
           (testing "an evaluation error settles on its form"
             (let [[shown] (settle-run "(/ 1 0)")]
-              (is (str/includes? (str shown) "Divide by zero") (pr-str shown))))
+              (is (str/includes? (str shown) "Divide by zero") (seon.print.value/bounded-text shown))))
           (testing "an alias required earlier in the batch, then a declaration using it, reaches a terminal"
             (settle-run "(require '[clojure.string :as s])\n(defn shout {:malli/schema [:=> [:cat :string] :string]} [x] (s/upper-case x))"))
           (testing "after all of them, the agent's next run works"

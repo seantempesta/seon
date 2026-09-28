@@ -7,7 +7,8 @@
             [seon.db :as db]
             [seon.id :as id]
             [seon.test.runner :as runner]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (deftest ^{:seon.test/long "Two canonical source publications verify complete admitted membership."
            :seon.test/long-ms 900000}
@@ -50,6 +51,6 @@
                                      [?member :seon.test.member/symbol ?symbol]]
                            rebuilt-database (:seon.test.run/id run))]
           (is (= 1001 (count symbols)) "The canonical population supplies the complete probe set.")
-          (is (= 1001 (count (:seon.test.run/members admitted))) (pr-str admitted))
+          (is (= 1001 (count (:seon.test.run/members admitted))) (seon.print.value/bounded-text admitted))
           (is (= symbols (set actual)) "Publication preserves every selected symbol, beyond pull's default cap.")))
       (finally (support/delete-recursively! root)))))

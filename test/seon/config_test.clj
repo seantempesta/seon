@@ -15,7 +15,8 @@
             [seon.reconcile :as reconcile]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.test-support :as test-support])
+            [seon.test-support :as test-support]
+            [seon.print.value])
   (:import [java.util.concurrent TimeUnit]))
 
 (set! *warn-on-reflection* true)
@@ -313,7 +314,7 @@
                        connection
                        [{:db/id [:seon.config/cluster "default"]
                          :seon.config.flow.io/queue-depth (inc queue-depth)}])]
-           (is (some? (:db-after edited)) (pr-str edited))
+           (is (some? (:db-after edited)) (seon.print.value/bounded-text edited))
            (is (= (inc queue-depth)
                   (:seon.config.flow.io/queue-depth
                    (db/pull (db/db connection)
@@ -391,7 +392,7 @@
            primary (:seon.ai/primary (ai/targets (or (db/carried-projection @connection)
                                                         (schema/handed-projection))
                                                     effective))]
-       (is (boolean? (:seon.reconcile/converged? sparse)) (pr-str sparse))
+       (is (boolean? (:seon.reconcile/converged? sparse)) (seon.print.value/bounded-text sparse))
        (is (= 1 (:seon.config.run/max-episode-runs effective)))
        (is (true? (:seon.config.ai/no-provider effective))
            "the sparse apply keeps the no-provider decision beneath it")
@@ -426,7 +427,7 @@
            removed (test-support/transacted!
                     connection
                     (cluster/attribute-change-tx @connection [:seon.config/overlay-keys] {}))
-           _ (is (nil? (get-in @connection [:schema :seon.config/overlay-keys])) (pr-str removed))
+           _ (is (nil? (get-in @connection [:schema :seon.config/overlay-keys])) (seon.print.value/bounded-text removed))
            applied (db/call-with-custody
                     {:seon.db/connection connection}
                     #(config/apply! (assoc request :seon.config/manifest
@@ -436,8 +437,8 @@
                    #(config/apply! (assoc request :seon.config/manifest
                                           {:seon.config.run/max-episode-runs 3})))
            effective (config/effective @connection "unadopted")]
-       (is (false? (:seon.reconcile/converged? applied)) (pr-str applied))
-       (is (boolean? (:seon.reconcile/converged? sparse)) (pr-str sparse))
+       (is (false? (:seon.reconcile/converged? applied)) (seon.print.value/bounded-text applied))
+       (is (boolean? (:seon.reconcile/converged? sparse)) (seon.print.value/bounded-text sparse))
        (is (= :db.cardinality/many
               (get-in @connection [:schema :seon.config/overlay-keys :db/cardinality])))
        (is (true? (:seon.config.ai/no-provider effective)))
@@ -460,7 +461,7 @@
        (test-support/transacted! connection [{:db/id cluster dial :panic}])
        (let [result (config/apply-compiled!
                      connection (config/compile-manifest {:seon.boot/cluster-name "default"}))]
-         (is (nil? (:seon.error/at result)) (pr-str result))
+         (is (nil? (:seon.error/at result)) (seon.print.value/bounded-text result))
          (is (= :panic (get (db/pull (db/db connection) [dial] cluster) dial))
              "the undeclared dial keeps its value until adoption retires it"))))))
 
@@ -507,7 +508,7 @@
      (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "seeded-proof"
                      :seon.config/manifest {:seon.config.eval/time-limit-ms 4321}})
      (let [effective (config/effective (db/db connection) "seeded-proof")]
-       (is (nil? (:seon.error/at effective)) (pr-str effective))
+       (is (nil? (:seon.error/at effective)) (seon.print.value/bounded-text effective))
        (is (= 4321 (:seon.config.eval/time-limit-ms effective)))))))
 
 (deftest an-entity-written-before-a-dial-existed-reads-its-declared-default
@@ -528,7 +529,7 @@
            effective (config/effective older "older-row")]
        (is (nil? (get (db/pull older [dial] [:seon.config/cluster "older-row"]) dial))
            "the entity genuinely lacks the dial")
-       (is (nil? (:seon.error/at effective)) (pr-str effective))
+       (is (nil? (:seon.error/at effective)) (seon.print.value/bounded-text effective))
        (is (= (:seon.config/default (malli.core/properties (schema/structural-schema declared)))
               (get effective dial)))
        (is (= 4321 (:seon.config.eval/time-limit-ms effective)))))))
@@ -868,7 +869,7 @@
   ;; HEAD 2e0d7c35f), so no namespace requiring seon.config compiled and default
   ;; could not boot. The shipped document and the declarations compile together.
   (let [effective (checkout-effective ".")]
-    (is (not (:seon.error/message effective)) (pr-str (select-keys effective [:seon.config/error-key :seon.config/rule])))
+    (is (not (:seon.error/message effective)) (seon.print.value/bounded-text (select-keys effective [:seon.config/error-key :seon.config/rule])))
     (is (true? (:seon.config.maintenance/collect? effective))
         "whole-store collection ships on")))
 

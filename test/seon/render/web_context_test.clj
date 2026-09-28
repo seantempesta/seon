@@ -12,7 +12,8 @@
             [seon.render.web]
             [seon.render.web-test :as web-test]
             [seon.sci.kernel :as kernel]
-            [seon.test-support :as support])
+            [seon.test-support :as support]
+            [seon.print.value])
   (:import [java.net URI]
            [java.util.concurrent Callable Executors TimeUnit]))
 
@@ -49,7 +50,7 @@
                                                        (finally (.disconnect connection))))))
                [virtual? result] (.get context-result support/event-backstop-seconds TimeUnit/SECONDS)]
            (is virtual?)
-           (is (string? (:seon.cluster.prompt/text result)) (pr-str result))
+           (is (string? (:seon.cluster.prompt/text result)) (seon.print.value/bounded-text result))
            (is (= 200 (.get page-result support/event-backstop-seconds TimeUnit/SECONDS)))
            (let [costs (db/q '[:find ?cost ?tx
                                :in $ ?basis
@@ -109,7 +110,7 @@
              (let [changed (db/transact! connection
                              [(assoc (db/pull @connection '[*] [:seon.cluster.eval/id "retained-history"])
                                      :seon.eval/shown "3")])]
-               (is (:db-after changed) (pr-str changed)))
+               (is (:db-after changed) (seon.print.value/bounded-text changed)))
              (is (= "3" (:seon.eval/shown (db/pull @connection [:seon.eval/shown] [:seon.cluster.eval/id "retained-history"]))))
              (let [[changed changed-counts] (counted #(acquire @connection))]
                (is (pos? (:calls changed-counts)) "changed saved bytes invalidate the retained call")
@@ -136,7 +137,7 @@
                           [[:db/add [:seon.cluster/name "web-test"]
                             :seon.source/commit-id
                             #uuid "f54229d7-54eb-472d-9ae8-917a0f97af71"]])]
-             (is (:db-after report) (pr-str report)))
+             (is (:db-after report) (seon.print.value/bounded-text report)))
            (let [after (#'web-test/fetch server "/agent/root")]
              (is (identical? snapshot @(:seon.sci.kernel/program-snapshot ctx)))
              (is (= 200 (.statusCode after)))

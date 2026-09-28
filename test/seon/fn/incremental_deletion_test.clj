@@ -7,7 +7,8 @@
             [seon.id :as id]
             [seon.program :as program]
             [seon.schema :as schema]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 ;; An invoker's declared targets come from the declaration population, not
 ;; its own file: `<prefix>.caller/run` invokes `:sample.invoke/handler`, and a
@@ -99,7 +100,7 @@
                           :callee (:callee-without-produce source)})]
          (is (contains? (calls-of published (sym "caller" "run")) (sym "callee" "produce"))
              "The declared invocation is a stored edge of the unchanged caller.")
-         (is (= support/committed result) (pr-str result))
+         (is (= support/committed result) (seon.print.value/bounded-text result))
          (is (not (defined? after (sym "callee" "produce"))))
          (is (not (contains? (calls-of after (sym "caller" "run")) (sym "callee" "produce")))
              "The caller's edge names no deleted identity.")))))
@@ -113,7 +114,7 @@
                           :before ["produce"] :after []
                           :callee (:callee-without-produce source)})]
          (is (not= support/committed result))
-         (is (str/includes? (pr-str result) (str (sym "callee" "produce"))) (pr-str result))
+         (is (str/includes? (pr-str result) (str (sym "callee" "produce"))) (seon.print.value/bounded-text result))
          (is (defined? after (sym "callee" "produce"))
              "The refused population leaves the published program in place."))))))
 
@@ -127,7 +128,7 @@
                        {:files {"callee.clj" (:callee source) "caller.clj" (:caller source)}
                         :before ["produce"] :after ["replacement"]
                         :callee (:callee-with-replacement source)})]
-       (is (= support/committed result) (pr-str result))
+       (is (= support/committed result) (seon.print.value/bounded-text result))
        (is (= #{(sym "callee" "replacement")} (calls-of after (sym "caller" "run")))
            "The re-analyzed caller knows the definition its own population introduced.")))))
 
@@ -142,7 +143,7 @@
                         :before ["produce"] :after ["produce" "kept"]
                         :callee (:callee source)})]
        (is (= #{(sym "callee" "produce")} (calls-of published (sym "caller" "run"))))
-       (is (= support/committed result) (pr-str result))
+       (is (= support/committed result) (seon.print.value/bounded-text result))
        (is (= #{(sym "callee" "produce") (sym "callee" "kept")} (calls-of after (sym "caller" "run")))
            "Selection reaches the invoker through its new declared edge.")))))
 
@@ -165,7 +166,7 @@
                                                          (str directory "/other.clj")])
                                                :db/id)])})]
        (is (defined? published (sym "other" "stays")))
-       (is (= support/committed result) (pr-str result))
+       (is (= support/committed result) (seon.print.value/bounded-text result))
        (is (defined? after (sym "other" "stays"))
            "A file entity alone is no analysis of the file's declarations.")))))
 

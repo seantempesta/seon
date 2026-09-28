@@ -15,7 +15,8 @@
             [seon.program :as program]
             [seon.sci.eval :as sci.eval]
             [seon.test :as sut]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (def ^:private probe-ns 'seon.id)
 
@@ -100,13 +101,13 @@
            checkpoints (filterv #(str/starts-with? (name %) (str "checkpoint-" cluster "-"))
                                 (registry/roster store))]
        (try
-         (is (seq handles) (pr-str summary))
-         (is (= 1 (count checkpoints)) (pr-str checkpoints))
+         (is (seq handles) (seon.print.value/bounded-text summary))
+         (is (= 1 (count checkpoints)) (seon.print.value/bounded-text checkpoints))
          (is (some? (checkpoint-head store (first checkpoints) cluster base)) "the one checkpoint is complete")
          (is (every? #(or (:seon.db/connection %)
                           (= :seon.test/prepared-checkpoint (:seon.error/expected (ex-data %))))
                      outcomes)
-             (str "the other caller reuses the complete checkpoint or is pushed back by name: " (pr-str summary)))
+             (str "the other caller reuses the complete checkpoint or is pushed back by name: " (seon.print.value/bounded-text summary)))
          (finally
            (run! agent/release-context! handles)
            (run! #(registry/retire-branch! {:seon.store/store store :seon.store/branch %}) checkpoints)))))))

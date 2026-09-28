@@ -15,7 +15,8 @@
             [seon.schema :as schema]
             [seon.cluster.wake :as wake]
             [seon.turn :as turn]
-            [seon.test-support :as test-support])
+            [seon.test-support :as test-support]
+            [seon.print.value])
   (:import [java.time Instant]
            [java.util Date]))
 
@@ -50,7 +51,7 @@
            expected (into #{} (map (juxt :seon.schedule.task/id :seon.fn/sym
                                           :seon.schedule/expression :seon.schedule/zone-id))
                           declarations)]
-       (is (seq (:tx-data result)) (pr-str result))
+       (is (seq (:tx-data result)) (seon.print.value/bounded-text result))
        (is (seq expected))
        (is (= expected (set entities)))
        (is (every? #(not= "* * * * *" (nth % 2)) entities))
@@ -145,7 +146,7 @@
        :seon.schedule.task/function [:seon.fn/sym handler]
        :seon.schedule.task/schedule
        [:seon.schedule/id (str task-id "/schedule")]}]))]
-    (is (seq (:tx-data result)) (pr-str result))
+    (is (seq (:tx-data result)) (seon.print.value/bounded-text result))
     result))
 
 (defn- count-with

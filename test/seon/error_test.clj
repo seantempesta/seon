@@ -28,7 +28,8 @@
             [seon.test-support :as test-support]
             [seon.db :as db]
             [seon.program :as program]
-            [seon.render.value :as render.value]))
+            [seon.render.value :as render.value]
+            [seon.print.value]))
 
 (defn- blob-value
   "The value a fault's evidence blob holds: a value artifact
@@ -123,7 +124,7 @@
                                  (:seon.error/ref a))]
         (is (= (:seon.error/ref a) (:seon.error/ref b)))
         (is (not= (:seon.error.occurrence/ref a) (:seon.error.occurrence/ref b)))
-        (let [written (db/transact! connection (:seon.db/tx-data a))] (is (:db-after written) (pr-str (dissoc written :db-before :db-after)) ))
+        (let [written (db/transact! connection (:seon.db/tx-data a))] (is (:db-after written) (seon.print.value/bounded-text (dissoc written :db-before :db-after)) ))
         (is (:db-after (db/transact! connection (:seon.db/tx-data b))))
         (let [entity (read-error)]
           (is (= 1 (count (db/q '[:find ?e :where [?e :seon.error/signature]] (db/db connection)))))
@@ -165,7 +166,7 @@
           (is (str/includes? (pr-str (error/render-html {:seon.db/db database :seon.render/value entity})) "Open"))
           (is (= '(seon.error/for-agent (seon.db/db) "error-graph-steward") read-form))
           (let [observed (error/for-agent database "error-graph-steward")]
-            (is (= 1 (count observed)) (pr-str observed)))
+            (is (= 1 (count observed)) (seon.print.value/bounded-text observed)))
           (is (str/includes? (pr-str (error/render-faults-html [:seon.agent/id "error-graph-steward"] database)) "same error"))
           (is (= 1 (:seon.render.transcript/count (first (#'seon.render.transcript/fault-problems database "error-graph-steward" [])))))
           (is (:db-after (db/transact! connection [[:db/add (:seon.error/ref a) :seon.error/resolved-tx "datomic.tx"]])))
@@ -207,7 +208,7 @@
                           database "agent-3"))))
         (is (:seon.error/capped? (error/latest-fact (first errors))))
         (is (str/includes? (pr-str (error/render-ai (first errors))) "capped evidence message")
-            (pr-str (error/render-ai (first errors))))
+            (seon.print.value/bounded-text (error/render-ai (first errors))))
         ;; An unstewarded fault is delivered to its escalation owner: the
         ;; writer notifies root, so root's faults hold exactly this one.
         (is (= #{(second (:seon.error/ref recorded))}
@@ -231,7 +232,7 @@
         (is (= (:max-tx (db/db connection))
                (:max-tx (:seon.db/db (instrument/calling-environment)))))
         (is (str/includes? (pr-str (error/render-html entity)) "Resolved")
-            (pr-str (error/render-html entity)))))))
+            (seon.print.value/bounded-text (error/render-html entity)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Fixtures — the three families, plus arbitrary observed values
@@ -532,7 +533,7 @@
              fact (:seon.error/fact prepared)
              fact-bytes (alength (.getBytes (pr-str fact) "UTF-8"))]
          (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) (ex-data thrown))
-             (pr-str fact))
+             (seon.print.value/bounded-text fact))
          (is (str/includes? (:seon.instrument/actual fact) ":seon.ns/name")
              "the value at the violation path is kept, bounded by what it is")
          (is (not (str/includes? (:seon.instrument/actual fact) "wide evidence"))
@@ -675,7 +676,7 @@
   (doseq [source [42 "a string" {:not-an-error true} nil]]
     (let [fact (error/normalize (request source))]
       (is ((schema/projection-validator (schema/handed-projection) :seon.error/base) fact)
-          (str "source: " (pr-str source)))
+          (str "source: " (seon.print.value/bounded-text source)))
       (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.error/fact) fact)))))
 
 (deftest attribution-is-a-lookup-ref-or-nothing
@@ -1091,7 +1092,7 @@
            validate (schema/projection-validator projection :seon.instrument/arity-error)]
        (is (= :malli.core/invalid-arity (:seon.instrument/malli data)))
        (is (= 0 (:seon.instrument/arity data)))
-       (is (validate value) (pr-str ((schema/projection-explainer projection :seon.instrument/arity-error) value)))
+       (is (validate value) (seon.print.value/bounded-text ((schema/projection-explainer projection :seon.instrument/arity-error) value)))
        (is (false? (validate (assoc value :seon.instrument/arity (:min info)))))
        (is (false? (validate (assoc value :seon.instrument/declared-arity-count 2))))))))
 
@@ -1187,7 +1188,7 @@
              segment (:v (first (db/datoms database :eavt location :seon.error.location/segments)))
              before (db/basis-t database)
              result (db/transact! connection [[:db/add segment :seon.error.location.segment/ordinal 3]])]
-         (is ((schema/projection-validator (schema/handed-projection) :seon.db.write/validation-refusal) result) (pr-str result))
+         (is ((schema/projection-validator (schema/handed-projection) :seon.db.write/validation-refusal) result) (seon.print.value/bounded-text result))
          (is (= [[:db/add segment :seon.error.location.segment/ordinal 3]]
                 (get-in result [:seon.error/data :seon.db.write.attempt/transaction])))
          (is (= before (get-in result [:seon.error/basis :seon.error.basis/t])))
@@ -1199,7 +1200,7 @@
                                (:seon.error/ref recording))
                occurrence (first (:seon.error/occurrences stored))
                attempt (:seon.db.write/attempt occurrence)]
-           (is (seq (:seon.error/occurrences stored)) (pr-str stored))
+           (is (seq (:seon.error/occurrences stored)) (seon.print.value/bounded-text stored))
            (is (= (:seon.db.write.attempt/request-id result)
                   (:seon.db.write.attempt/request-id attempt)))
            (is (= before (get-in occurrence [:seon.error/basis :seon.error.basis/t])))
@@ -1225,7 +1226,7 @@
            root (db/pull (:db-after report) (error/observation-selector projection)
                          (:seon.error/ref recording))
            occurrence (first (:seon.error/occurrences root))]
-       (is ((schema/projection-validator projection :seon.schema/validation-refusal) raw) (pr-str raw))
+       (is ((schema/projection-validator projection :seon.schema/validation-refusal) raw) (seon.print.value/bounded-text raw))
        (is ((schema/projection-validator projection :seon.schema/error) (error/latest-fact root)))
        (is (= unavailable
               (edn/read-string (get-in occurrence [:seon.schema/error-declaration :seon.instrument/actual]))))
@@ -1264,7 +1265,7 @@
        (is (= before (db/basis-t (db/db connection))))
        (prn {::unowned-refusal unowned})
        (is ((schema/projection-validator projection :seon.instrument/arity-error) armed)
-           (pr-str armed))
+           (seon.print.value/bounded-text armed))
        (doseq [[source declared-schema]
                [[observed :seon.turn/error]
                 [armed :seon.instrument/arity-error]
@@ -1302,7 +1303,7 @@
                            (map first (schema.internal/entity-entries (mr/schema registry declared-schema))))]
                (is (true? (malli.core/validate pulled-form occurrence
                                                (:seon.schema.projection/compile-options projection)))
-                   (pr-str {:declared-schema declared-schema :location-length
+                   (seon.print.value/bounded-text {:declared-schema declared-schema :location-length
                             (get-in occurrence [:seon.error/location :seon.error.location/length])}))
                (is (= (select-keys source scalar-attributes)
                       (select-keys occurrence scalar-attributes)))))
@@ -1665,8 +1666,8 @@
                     :seon.sci.eval/stacktrace '[[scratch.fbr 1 1]]}
         names (get-in (error/reply-value (datahike.db/empty-db) unresolved)
                       [:seon.error/in-namespace 'scratch.fbr])]
-    (is (db/read-refusal? names) (pr-str names))
-    (is (str/includes? (:seon.error/message names) ":seon.ns/name") (pr-str names))))
+    (is (db/read-refusal? names) (seon.print.value/bounded-text names))
+    (is (str/includes? (:seon.error/message names) ":seon.ns/name") (seon.print.value/bounded-text names))))
 
 (deftest a-contract-problem-shows-an-example-never-a-synthesized-call
   ;; The reply shows the failing path, its expectation, the offending value

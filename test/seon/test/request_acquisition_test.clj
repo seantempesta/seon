@@ -2,7 +2,8 @@
   (:require [clojure.test :refer [deftest is]]
             [seon.db :as db]
             [seon.test :as sut]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (def ^:private marker :seon.test.request-acquisition-test/marker)
 
@@ -37,7 +38,7 @@
        ;; that program by commit (29-35 ms measured) instead of re-acquiring it
        ;; (325-581 ms before, 2026-09-25).
        (is (every? #(< (+ (:seon.test.timing/acquire-ms %) (:seon.test.timing/resolve-ms %)) 50) timings)
-           (pr-str (map #(select-keys % [:seon.test.timing/acquire-ms :seon.test.timing/resolve-ms]) timings)))
+           (seon.print.value/bounded-text (map #(select-keys % [:seon.test.timing/acquire-ms :seon.test.timing/resolve-ms]) timings)))
        (is (= 3 (count (set (map :seon.agent/branch timings)))) "every member ran on its own branch")
        (is (empty? (support/file-store-markers connection marker))
            "no member write reaches the execution branch")))))

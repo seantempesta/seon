@@ -1,7 +1,8 @@
 (ns seon.dev.docstring-test
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [seon.dev.docstring :as d]))
+            [seon.dev.docstring :as d]
+            [seon.print.value]))
 
 (defn- rules
   "The set of ::rule keywords in a check-source response's findings."
@@ -214,4 +215,4 @@
   (testing "this linter's own namespace passes its own rules"
     (let [r (d/check-file {::d/file-path "src/seon/dev/docstring.clj"})]
       (is (true? (::d/clean? r))
-          (str "self-lint findings: " (pr-str (::d/findings r)))))))
+          (str "self-lint findings: " (seon.print.value/bounded-text (::d/findings r)))))))

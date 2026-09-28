@@ -6,7 +6,8 @@
             [seon.id :as id]
             [seon.instrument :as instrument]
             [seon.schema :as schema]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (def ^:private policy
   {:seon.config.error/max-evidence-bytes 8192})
@@ -34,7 +35,7 @@
            valid? (schema/projection-validator projection :seon.instrument/contract-error)]
        (is (nil? (mr/schema registry operation)) "armed from the evaluated metadata itself")
        (is (not (contains? (set (vals (schema/predicate-functions-in projection))) ifn?)))
-       (is (valid? refusal) (pr-str refusal))
+       (is (valid? refusal) (seon.print.value/bounded-text refusal))
        (is (= :input (:seon.instrument/check refusal)))
        (is (= operation (:seon.error/operation refusal)))
        (is (= 1 (:seon.error/offending (first (:seon.error/problems refusal)))))
@@ -49,10 +50,10 @@
              two (refusal-of projection operation multi (fn ([f] (f)) ([f x] (f x))) [1 2])
              returned (refusal-of projection operation
                                   [:=> [:cat :int] [:fn clojure.core/ifn?]] identity [3])]
-         (is (valid? two) (pr-str two))
+         (is (valid? two) (seon.print.value/bounded-text two))
          (is (= (id/digest 64 [operation 1 :input]) (:seon.error/expected-shape two))
              "the second declared arity is ordinal 1")
-         (is (valid? returned) (pr-str returned))
+         (is (valid? returned) (seon.print.value/bounded-text returned))
          (is (= (id/digest 64 [operation 0 :output]) (:seon.error/expected-shape returned))))))))
 
 (deftest ^{:seon/tasks #{"407264e2b69d"}}
@@ -71,7 +72,7 @@
            refusal (ex-data thrown)]
        (is (= 3 (wrapped inc 2)))
        (is ((schema/projection-validator projection :seon.instrument/contract-error) refusal)
-           (pr-str refusal))
+           (seon.print.value/bounded-text refusal))
        (is (= :seon.instrument/contract-error
               (:seon.error/declared-schema (meta refusal)))
            "the producer's declared identity rides on the thrown value")

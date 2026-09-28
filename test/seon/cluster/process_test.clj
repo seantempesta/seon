@@ -3,7 +3,8 @@
   Every process here is started by the test itself."
   (:require [babashka.process :as bp]
             [clojure.test :refer [deftest is testing]]
-            [seon.cluster.process :as process])
+            [seon.cluster.process :as process]
+            [seon.print.value])
   (:import [java.nio.file Files]
            [java.nio.file.attribute FileAttribute]))
 
@@ -35,7 +36,7 @@
         started (System/nanoTime)
         left (process/terminate-subprocess! record identities 500 2000)
         elapsed-ms (quot (- (System/nanoTime) started) 1000000)]
-    (is (= 3 (count identities)) (pr-str identities))
+    (is (= 3 (count identities)) (seon.print.value/bounded-text identities))
     (testing "the root obeyed TERM, the grandchild needed the force after grace"
       (is (= 143 (.exitValue ^Process (:proc record))))
       (is (<= 500 elapsed-ms 2500) (str elapsed-ms " ms")))
@@ -93,7 +94,7 @@
         [member :as identities] (process/subprocess-tree-identities (.toHandle child))]
     (try
       (testing "a live member carries its generation and matches only it"
-        (is (= 1 (count identities)) (pr-str identities))
+        (is (= 1 (count identities)) (seon.print.value/bounded-text identities))
         (is (inst? (:seon.boot/start-instant member)))
         (is (= (:seon.boot/start-instant member)
                (process/process-start-instant (:seon.boot/pid member))))

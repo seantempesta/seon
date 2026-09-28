@@ -14,7 +14,8 @@
             [seon.id :as id]
             [seon.render.transcript :as transcript]
             [seon.sci.eval :as evaluation]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (defn- tokens
   "The shipped prior of `seon.ai.tokens`: ceil(chars / 3.2)."
@@ -80,7 +81,7 @@
        (testing "the failing form is named, never shown as an answer"
          (is (nil? (:seon.render/source failing)))
          (is (str/includes? (get-in failing [:seon.error/value :seon.error/message]) "Divide by zero")
-             (pr-str failing)))
+             (seon.print.value/bounded-text failing)))
        (testing "with no evaluator the floor prints the value beside one diagnostic"
          (let [error (:seon.sci.admit/value
                       (evaluation/evaluate (request connection ctx "(/ 1 0)" 'result/erendersource5)))

@@ -10,7 +10,8 @@
             [seon.render.walk :as walk]
             [seon.schema :as schema]
             [seon.sci.kernel :as kernel]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (def ^:private caps (config/result-caps config/defaults))
 
@@ -78,7 +79,7 @@
                form (message/inbox-form recipient)]
            (is (= 'my.message/inbox (first form))
                "the unread read, derived from acknowledgements")
-           (is (contains? (second form) :seon.agent/id) (pr-str form))))
+           (is (contains? (second form) :seon.agent/id) (seon.print.value/bounded-text form))))
        (testing "an attribute with no declared pair reaches the generic printer"
          ;; Owner ruling 2026-09-17 (decision 9, option 1): asking about one
          ;; attribute never silently answers about the entity, so every
@@ -160,14 +161,14 @@
            (first (filter #(and (= namespace-lookup (:seon.render.walk/lookup %))
                                 (:seon.render/output %))
                           units))]
-       (is namespace-unit (pr-str (mapv :seon.render.walk/lookup units)))
+       (is namespace-unit (seon.print.value/bounded-text (mapv :seon.render.walk/lookup units)))
        (is (= :seon.agent/namespace
               (:seon.render.walk/attribute namespace-unit))
-           (pr-str namespace-unit))
-       (is (nil? (:seon.error/value namespace-unit)) (pr-str namespace-unit))
+           (seon.print.value/bounded-text namespace-unit))
+       (is (nil? (:seon.error/value namespace-unit)) (seon.print.value/bounded-text namespace-unit))
        (is (= '(dir (quote fixture.neighbour))
               (:seon.render/output namespace-unit))
-           (pr-str namespace-unit))))))
+           (seon.print.value/bounded-text namespace-unit))))))
 
 (deftest form-output-validation-is-the-declared-open-shape
   (support/with-database

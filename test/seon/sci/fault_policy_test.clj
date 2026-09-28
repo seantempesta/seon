@@ -5,7 +5,8 @@
             [seon.instrument :as instrument]
             [seon.schema :as schema]
             [seon.sci.eval :as eval]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (deftest an-unconfigured-cluster-refuses-arming-instead-of-defaulting-its-fault-policy
   ;; The branch's value as of the transaction before its first config entity
@@ -25,7 +26,7 @@
            failure (support/refusal-data
                     #(#'eval/install-function-contract! ctx entity projection unconfigured))]
        (is (:seon.fn/spec entity) "The subject declares a contract to arm.")
-       (is (= :seon.boot/cluster-name (:seon.config/error-key failure)) (pr-str failure))
+       (is (= :seon.boot/cluster-name (:seon.config/error-key failure)) (seon.print.value/bounded-text failure))
        (is (= 'seon.sci.eval/database-effective-config (:seon.error/operation failure)))
        (is (not (:seon.instrument/registration-observation failure))
            "The refusal is the config read's, not a record-mode recorder demand.")

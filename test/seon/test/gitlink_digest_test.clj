@@ -3,7 +3,8 @@
   (:require [clojure.test :refer [deftest is]]
             [seon.schema.edn :as schema.edn]
             [malli.core :as m]
-            [seon.test.cache :as cache]))
+            [seon.test.cache :as cache]
+            [seon.print.value]))
 
 (deftest every-gitlink-input-digest-has-the-declared-file-digest-shape
   (let [pins (cache/gitlink-digests (System/getProperty "user.dir"))
@@ -14,5 +15,5 @@
     (is (every? #(contains? inputs %) (keys pins))
         "each gitlink is a publication input")
     (is (every? valid? (vals pins))
-        (str "each gitlink digest satisfies :seon.fn.file/digest " (pr-str form)))
+        (str "each gitlink digest satisfies :seon.fn.file/digest " (seon.print.value/bounded-text form)))
     (is (every? valid? (map inputs (keys pins))))))

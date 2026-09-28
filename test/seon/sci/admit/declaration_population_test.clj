@@ -22,7 +22,8 @@
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.sci.admit :as admit]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support]
+            [seon.print.value]))
 
 (def ^:private caps
   (assoc (config/result-caps (test-support/effective-config))
@@ -105,7 +106,7 @@
   (testing "scalars never reach the identity question"
     (doseq [value [42 "a string" :a-keyword 'a-symbol nil true 3.5]]
       (is (zero? (reads-of #(admit/admit-value (request value))))
-          (str "admitting " (pr-str value) " must resolve nothing")))))
+          (str "admitting " (seon.print.value/bounded-text value) " must resolve nothing")))))
 
 (deftest a-supplied-projection-is-used-and-resolves-nothing
   (admit/admit-value (request (entities 1)))

@@ -8,7 +8,8 @@
             [seon.id :as id]
             [seon.program :as program]
             [seon.sci.eval :as evaluation]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (deftest ^{:seon.test/long "Acquire the agent's canonical SCI program before two owned requests."
            :seon.test/long-ms 300000}
@@ -44,8 +45,8 @@
                       :seon.sci.eval/time-limit-ms 120000})
            entity (when (:seon.program/row declared)
                  (program/declaration-row (seon.schema/handed-projection) (:seon.program/row declared) :all :agent))]
-       (is (nil? (:seon.cluster.eval/error declared)) (pr-str declared))
-       (is (map? entity) (pr-str declared))
+       (is (nil? (:seon.cluster.eval/error declared)) (seon.print.value/bounded-text declared))
+       (is (map? entity) (seon.print.value/bounded-text declared))
        (let [written-on (db/db connection)
              written (support/transacted! connection [entity])]
          (evaluation/install-evaluated-rows!
@@ -60,10 +61,10 @@
              confidence [:seon.test.run/basis-t :seon.test.run/program-digest
                          :seon.test.run/input-digest]]
          (is (= 'my.agents.owner/my-cluster-is-reachable (:seon.test/sym first-result))
-             (pr-str first-result))
+             (seon.print.value/bounded-text first-result))
          (is (= [1 0 0] (mapv first-result [:seon.test/pass-count
                                            :seon.test/fail-count :seon.test/error-count])))
-         (is (true? (:seon.test/unchanged second-result)) (pr-str second-result))
+         (is (true? (:seon.test/unchanged second-result)) (seon.print.value/bounded-text second-result))
          (is (= 3 (count (select-keys second-result confidence))))
          (is (= (select-keys first-result confidence) (select-keys second-result confidence)))
          (is (= 2 (count (db/q '[:find [?run ...] :where

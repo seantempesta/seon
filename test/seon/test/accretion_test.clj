@@ -10,7 +10,8 @@
             [seon.schema.edn :as schema.edn]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support]
-            [seon.test.accretion :as accretion]))
+            [seon.test.accretion :as accretion]
+            [seon.print.value]))
 
 (defn- admit!
   [connection entities]
@@ -197,12 +198,12 @@
                     (assoc wrapped :seon.test.accretion/evaluation evaluation))
             results (:seon.test.accretion/results result)]
         (testing "a definition inside do is gated like a top-level one"
-          (is (= 2 (:seon.sci.admit/value evaluation)) (pr-str evaluation))
+          (is (= 2 (:seon.sci.admit/value evaluation)) (seon.print.value/bounded-text evaluation))
           (is (= 'fixture.candidate/target
                  (get-in evaluation [:seon.program/row :seon.fn/sym])))
           (is (= ['fixture.candidate/green-test 'fixture.candidate/red-test]
                  (mapv :seon.test/sym results)))
-          (is (= [0 1] (mapv :seon.test/fail-count results)) (pr-str results)))
+          (is (= [0 1] (mapv :seon.test/fail-count results)) (seon.print.value/bounded-text results)))
         (testing "the gate proves the root the evaluating context holds"
           (is (= 2 (sci/eval-string* (:seon.test.accretion/candidate-ctx result)
                                      "(fixture.candidate/target 1)")))
@@ -215,7 +216,7 @@
                                                     :seon.test.accretion/results results})))]
             ;; Shown as data (owner 2026-09-27): the refusal map itself,
             ;; orientation included, never a prose face.
-            (is (nil? (:seon.eval/renderer refused)) (pr-str refused))
+            (is (nil? (:seon.eval/renderer refused)) (seon.print.value/bounded-text refused))
             (is (map? (read-string (:seon.eval/shown refused))) (:seon.eval/shown refused))
             (is (re-find #"install refused" (:seon.eval/shown refused)) (:seon.eval/shown refused)))
           (is (identical? held (sci/resolve parent 'fixture.candidate/target)))
@@ -259,14 +260,14 @@
         ;; and roster atoms, and clojure.test evaluates a message even on pass.
         (is (= 'fixture.custody/reads-its-own-cluster
                (:seon.test/sym gate))
-            (pr-str (mapv :seon.test/sym (:seon.test.accretion/results result))))
+            (seon.print.value/bounded-text (mapv :seon.test/sym (:seon.test.accretion/results result))))
         (is (= 1 (:seon.test/pass-count gate))
             (str "the gate test's elided read reaches its author's cluster "
                  "instead of refusing with no connection bound: "
-                 (pr-str (select-keys gate [:seon.test/sym :seon.test/pass-count :seon.test/fail-count :seon.test/error-count]))))
+                 (seon.print.value/bounded-text (select-keys gate [:seon.test/sym :seon.test/pass-count :seon.test/fail-count :seon.test/error-count]))))
         (is (= 0 (+ (:seon.test/fail-count gate)
                     (:seon.test/error-count gate)))
-            (pr-str (select-keys gate [:seon.test/sym :seon.test/pass-count :seon.test/fail-count :seon.test/error-count])))))))
+            (seon.print.value/bounded-text (select-keys gate [:seon.test/sym :seon.test/pass-count :seon.test/fail-count :seon.test/error-count])))))))
 
 (deftest auto-check-is-seeded-shrunk-and-derived-pure
   (test-support/with-database
@@ -334,7 +335,7 @@
                      #{'fixture.auto-check/capability})))]
         (testing "the same seed reproduces the shrunk failure"
           (is (= :failed (:seon.test.accretion/status first-failure))
-              (pr-str first-failure))
+              (seon.print.value/bounded-text first-failure))
           (is (= 424242 (:seon.test.accretion/seed first-failure)))
           (is (= (:seon.test.accretion/failure first-failure)
                  (:seon.test.accretion/failure reproduced)))
@@ -347,7 +348,7 @@
                         :seon.test.accretion/explanation]))))
         (testing "contract shape does not invent semantic properties"
           (is (= :passed (:seon.test.accretion/status shape-only-check))
-              (pr-str shape-only-check))
+              (seon.print.value/bounded-text shape-only-check))
           (is (= 25
                  (:seon.test.accretion/executed-count shape-only-check))))
         (testing "capability reachability skips auto-check honestly"
@@ -391,15 +392,15 @@
             failure (:seon.test.accretion/failure thrower)]
         (testing "a data-reading function reads the agent's own database, positionally and as a map entry"
           (is (= [:passed 25] ((juxt :seon.test.accretion/status :seon.test.accretion/executed-count) reader))
-              (pr-str reader))
+              (seon.print.value/bounded-text reader))
           (is (= [:passed 25] ((juxt :seon.test.accretion/status :seon.test.accretion/executed-count) entry))
-              (pr-str entry)))
+              (seon.print.value/bounded-text entry)))
         (testing "a throwing call reports its exception, not the callee or an output mismatch"
-          (is (= :failed (:seon.test.accretion/status thrower)) (pr-str thrower))
+          (is (= :failed (:seon.test.accretion/status thrower)) (seon.print.value/bounded-text thrower))
           (is (re-find #"ArithmeticException" (str (get-in failure [:seon.test.accretion/actual :seon.error/message])))
-              (pr-str failure))
+              (seon.print.value/bounded-text failure))
           (is (map? (:seon.test.accretion/actual failure)) "the whole error, never the callee symbol")
-          (is (nil? (:seon.test.accretion/explanation failure)) (pr-str failure))
+          (is (nil? (:seon.test.accretion/explanation failure)) (seon.print.value/bounded-text failure))
           (is (seq (:seon.test.accretion/arguments failure))))))))
 
 (deftest ^{:seon.test/long "Constructs a generator for every packaged schema (3,350): 2.5 s at the REPL, 7.4 s under a request on a scratch cluster at 0e53eb8b1."

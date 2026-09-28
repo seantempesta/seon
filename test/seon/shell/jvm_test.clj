@@ -14,7 +14,8 @@
             [seon.sci.eval :as sci.eval]
             [seon.sci.kernel :as kernel]
             [seon.shell.jvm]
-            [seon.test-support :as support])
+            [seon.test-support :as support]
+            [seon.print.value])
   (:import [java.nio.charset StandardCharsets]
            [java.nio.file Files Path]
            [java.security MessageDigest]
@@ -382,7 +383,7 @@
                            [{:seon.turn/id "shell-time-limit"
                              :seon.turn/agent [:seon.agent/id "shell-author"]
                              :seon.turn/opened-tx "datomic.tx"}]))]
-            (is (:db-after written) (pr-str written)))
+            (is (:db-after written) (seon.print.value/bounded-text written)))
           (let [effective-map
                 (effective root
                            {:seon.config.shell/time-limit-ms 750
@@ -390,7 +391,7 @@
                 configured (config/apply! {:seon.db/connection connection
                                            :seon.boot/cluster-name "shell-test"
                                            :seon.config/manifest effective-map})
-                _ (is (contains? configured :seon.reconcile/operations) (pr-str configured))
+                _ (is (contains? configured :seon.reconcile/operations) (seon.print.value/bounded-text configured))
                 context
                 {:seon.db/connection connection
                  :seon.env/environment (support/environment "shell-test" connection)
@@ -451,7 +452,7 @@
                 child-handle (ProcessHandle/of
                               (parse-long
                                (slurp (.toFile (.resolve ^Path root "child.pid")))))]
-            (is (= 0 (:my.shell/exit result)) (pr-str result))
+            (is (= 0 (:my.shell/exit result)) (seon.print.value/bounded-text result))
             (is (or (.isEmpty child-handle)
                     (not (.isAlive ^ProcessHandle (.get child-handle))))
                 "no descendant outlives a normally exiting root")))))))

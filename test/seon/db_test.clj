@@ -36,7 +36,8 @@
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.test-support :as test-support]
-            [taoensso.trove :as trove])
+            [taoensso.trove :as trove]
+            [seon.print.value])
   (:import [java.util.concurrent CountDownLatch TimeUnit]))
 
 (def ^:private schema-delta (schema/begin-registration-delta))
@@ -184,7 +185,7 @@
                 entities (binding [*err* warnings]
                        (db/pull-many database
                                      @#'sci.eval/program-documentation-selector ids))]
-            (is (= (count ids) (count entities)) (pr-str entities))
+            (is (= (count ids) (count entities)) (seon.print.value/bounded-text entities))
             (is (= "" (str warnings))
                 "a value that declares its program derives its own projection"))))
        (let [configuration {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write}
@@ -202,7 +203,7 @@
                  refusal (binding [*err* warnings]
                            (db/pull @bare '[*] [:sample.bare/id "absent"]))
                  lines (str/split-lines (str warnings))]
-             (is (validate-refusal refusal) (pr-str refusal))
+             (is (validate-refusal refusal) (seon.print.value/bounded-text refusal))
              (is (= :seon.schema/projection (:seon.schema/expected-value refusal)))
              (is (= 'seon.db/pull (:seon.db/refused-read-operation refusal)))
              (is (= 1 (count lines)))
@@ -289,7 +290,7 @@
        (is (every? #(= [:seon.message/message] (::value %)) samples))
        (is (every? #(< (::elapsed-nanos %) 5000000) samples)
            (str "handed query samples in ns: "
-                (pr-str (mapv ::elapsed-nanos samples))))))))
+                (seon.print.value/bounded-text (mapv ::elapsed-nanos samples))))))))
 
 (def ^:private nonzero-source-query
   '[:find (count ?key) .
@@ -338,9 +339,9 @@
                  :seon.db-test/transaction-contract-findings
                  transaction-findings})
        (is (m/validate :seon.db/transaction-report report options)
-           (pr-str (m/explain :seon.db/transaction-report report options)))
+           (seon.print.value/bounded-text (m/explain :seon.db/transaction-report report options)))
        (is (m/validate :seon.db/transaction-result result options)
-           (pr-str (m/explain :seon.db/transaction-result result options)))
+           (seon.print.value/bounded-text (m/explain :seon.db/transaction-result result options)))
        (is (m/validate :seon.error/value refusal options))
        (is (string? (:seon.db.write.attempt/request-id refusal)))
        (is (= [] transaction-findings))
@@ -536,7 +537,7 @@
                       '[:find [?key ...] :where [_ :seon.schema/key ?key]]
                       '[:find ?entity ?key :where (or [?entity :seon.schema/key ?key])]]]
          (is (seq (d/q query database)))
-         (is (identical? (d/q query database) (db/q query database)) (pr-str query)))))))
+         (is (identical? (d/q query database) (db/q query database)) (seon.print.value/bounded-text query)))))))
 
 (deftest explicit-and-current-database-forms-are-equivalent
   (test-support/with-database
@@ -728,7 +729,7 @@
            _ (db/carried-projection database)
            last-value (reduce (fn [value i]
                                 (let [written (db/with value [(row value (keyword "probe.speculative" (str "k" i)))])]
-                                  (is (not (:seon.error/at written)) (pr-str written))
+                                  (is (not (:seon.error/at written)) (seon.print.value/bounded-text written))
                                   (db/carried-projection written)
                                   written))
                               database (range 6))]
@@ -754,7 +755,7 @@
            [digests calls] (test-support/armed-calls
                             '#{seon.db/builder-digest}
                             #(vec (repeatedly reads (fn [] (@#'db/loaded-builder value {} nil)))))]
-       (is (not (:seon.error/at value)) (pr-str value))
+       (is (not (:seon.error/at value)) (seon.print.value/bounded-text value))
        (is (= 1 (count (set digests))))
        (is (< (get calls 'seon.db/builder-digest 0) reads)
            "the identity is derived once per revision set, not per read")))))
@@ -1237,8 +1238,8 @@
            (render.value/artifact-edn (render.value/artifact admitted))
            inline-ceiling
            (:seon.config.eval.result/blob-threshold effective)]
-       (is (= #{:db-name :t :datahike/commit-id} (set (keys before))) (pr-str before))
-       (is (= #{:db-name :t :datahike/commit-id} (set (keys after))) (pr-str after))
+       (is (= #{:db-name :t :datahike/commit-id} (set (keys before))) (seon.print.value/bounded-text before))
+       (is (= #{:db-name :t :datahike/commit-id} (set (keys after))) (seon.print.value/bounded-text after))
        (is (uuid? (:datahike/commit-id before)))
        (is (uuid? (:datahike/commit-id after)))
        (is (not-any? db/database-value?
@@ -1264,7 +1265,7 @@
              (db/transact!
               (test-support/agent-tx @connection "db-shared-second" 'my.agents.db-shared)))]
        (is (some? (:seon.db/tx accepted))
-           (str "a second agent assigned the same namespace commits " (pr-str accepted)))
+           (str "a second agent assigned the same namespace commits " (seon.print.value/bounded-text accepted)))
        (is (nil? (get-in (:schema @connection)
                          [:seon.agent/namespace :db/unique]))
            "because the installed schema declares no uniqueness on it")
@@ -1392,7 +1393,7 @@
                           [:seon.error/data :seon.db/entity])))
            (is (= h (d/commit-id @connection)) "refused merges leave the head and its datoms")
            (let [report (merge-write (:max-tx @connection) {::row-id "merged"})]
-             (is (= #{h c} (set (d/parent-commit-ids @connection))) (pr-str report))
+             (is (= #{h c} (set (d/parent-commit-ids @connection))) (seon.print.value/bounded-text report))
              (is (= (d/commit-id (:db-after report)) (d/commit-id @connection)))
              (is (= c (d/commit-id @candidate-connection)) "the merged parent is unchanged")))
          (finally (d/release candidate-connection) (d/delete-branch! connection candidate)))))))
@@ -1512,7 +1513,7 @@
                   some?)]
              (is (contains? report :db-after)
                  (str "the realized answer is the committed report: "
-                      (pr-str report)))
+                      (seon.print.value/bounded-text report)))
              (is (not (true? (:seon.db/transaction-outcome-unknown report)))
                  "the declared write bound never stands in for the completion event")
              (is (= :error (:seon.test/level logged)))
@@ -1941,7 +1942,7 @@
                              [:db/add -1 :seon.schedule/expression "0 4 * * *"]]]]
          (let [basis (:max-tx (db/db connection))
                refusal (db/transact! connection transaction)]
-           (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
+           (is (string? (:seon.db.write.attempt/request-id refusal)) (seon.print.value/bounded-text refusal))
            (is (= basis (:max-tx (db/db connection))))
            (is (= {:seon.schedule/id "f2-invalid"}
                   (get-in refusal [:seon.error/data :seon.db/entity])))
@@ -2009,7 +2010,7 @@
                {:seon.test/sym (quote seon.source.test/incomplete-test)}]]]
        (let [basis (db/basis-t (db/db connection))
              refusal (db/transact! connection [entity])]
-         (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
+         (is (string? (:seon.db.write.attempt/request-id refusal)) (seon.print.value/bounded-text refusal))
          (is (= :seon.program/definition-digest (:seon.db/attribute refusal))
              "the refusal names the missing required key")
          (is (map? (:seon.db/offending refusal)) "the offending value is the entity missing the key")
@@ -2056,9 +2057,9 @@
            (let [basis (db/basis-t (db/db connection))
                  refusal (db/transact! connection [[:db/retractEntity target]])
                  entity (get-in refusal [:seon.error/data :seon.db/entity])]
-             (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
+             (is (string? (:seon.db.write.attempt/request-id refusal)) (seon.print.value/bounded-text refusal))
              (is (= attribute (:seon.db/attribute refusal)))
-             (is (some #{expected} (vals entity)) (pr-str refusal))
+             (is (some #{expected} (vals entity)) (seon.print.value/bounded-text refusal))
              (is (= basis (db/basis-t (db/db connection)))))))))))
 
 (deftest a-write-seeds-its-final-values-arity-base
@@ -2154,7 +2155,7 @@
                     [:db/add arity :seon.fn.arity/argument-count 2]]
              basis (:max-tx @connection)
              refusal (db/transact! connection edits)]
-         (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
+         (is (string? (:seon.db.write.attempt/request-id refusal)) (seon.print.value/bounded-text refusal))
          (is (= [{:seon.fn/caller caller :seon.fn/callee callee
                   :seon.fn/call-arity 1
                   :seon.fn/declared-arities [{:seon.fn.arity/min 2 :seon.fn.arity/max 2}]
@@ -2182,7 +2183,7 @@
              refusal (db/transact! connection [stale])
              produced (:seon.program/definition-digest
                        (test-support/program-fn-entity (db/db connection) function (:seon.fn/source stale)))]
-         (is (= :seon.program/definition-digest (:seon.error/member refusal)) (pr-str refusal))
+         (is (= :seon.program/definition-digest (:seon.error/member refusal)) (seon.print.value/bounded-text refusal))
          (is (= 'seon.db/transact! (:seon.error/operation refusal)))
          (is (= (:seon.program/definition-digest entity) (:seon.error/offending refusal)))
          (is (= produced (:seon.error/expected refusal)))
@@ -2258,7 +2259,7 @@
          (doseq [tx-data [[[:db/retractEntity lookup]]
                           [[:db/add lookup :seon.issue/created-by [:seon.agent/id "issue-other"]]]]]
            (let [refused (as "issue-other" tx-data)]
-             (is (:seon.db/transaction-refused refused) (pr-str tx-data))
+             (is (:seon.db/transaction-refused refused) (seon.print.value/bounded-text tx-data))
              (is (= :seon.issue/tests (:seon.error/member refused))))))
        (testing "the creator deletes the whole issue"
          (is (:db-after (as "issue-creator" [[:db/retractEntity lookup]])))
@@ -2378,12 +2379,12 @@
            expected [{:seon.schema/key schema-key
                       :seon.render/property :seon.render/ai
                       :seon.render/function renderer}]]
-       (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
+       (is (string? (:seon.db.write.attempt/request-id refusal)) (seon.print.value/bounded-text refusal))
        ;; The final value's projection refuses first (e6b559711 judges a
        ;; report by the declarations it leaves; `render-contract-refusal!`
        ;; names a renderer with no declared contract), before the writer's
        ;; own render-target check.
-       (is (= renderer (get-in refusal [:seon.error/data :seon.render/function])) (pr-str refusal))
+       (is (= renderer (get-in refusal [:seon.error/data :seon.render/function])) (seon.print.value/bounded-text refusal))
        (is (= basis (:max-tx @connection)))
        (test-support/transacted!
         connection
@@ -2393,7 +2394,7 @@
           "(defn ai {:malli/schema [:=> [:cat :seon.schema/value] :string]} [value] (pr-str value))")
          entity])
        (let [refusal (db/transact! connection [[:db/retractEntity [:seon.fn/sym renderer]]])]
-         (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
+         (is (string? (:seon.db.write.attempt/request-id refusal)) (seon.print.value/bounded-text refusal))
          (is (= expected (get-in refusal [:seon.error/data :seon.render/declarations]))))
        (test-support/transacted!
         connection
@@ -2552,7 +2553,7 @@
            result (db/transact! connection [{:seon.error/at #inst "2026-09-19T00:00:00Z"
                                             :seon.error/layer :seon.agent/lifecycle
                                             :seon.error/operation 'seon.agent/by-id}])]
-       (is (= :seon.db/unowned-entity (:seon.db/owned-value-refusal result)) (pr-str result))
+       (is (= :seon.db/unowned-entity (:seon.db/owned-value-refusal result)) (seon.print.value/bounded-text result))
        (is ((schema/projection-validator (schema/handed-projection) :seon.db/error-result) result))
        (is (= before (db/basis-t @connection)))))))
 
@@ -2606,13 +2607,13 @@
                   :seon.turn/write? true}]
      (try
        (let [opening (turn/system-turn request)]
-         (is (string? (:seon.turn/id opening)) (pr-str opening))
+         (is (string? (:seon.turn/id opening)) (seon.print.value/bounded-text opening))
          (test-support/transacted! connection
           [[:db/add [:seon.message/id "a2-read"] :seon.message/content "after"]])
          (let [preview (turn/system-turn (assoc request :seon.turn/write? false))
                changed (filterv #(= :changed (:seon.turn/status %))
                                  (:seon.turn/forms preview))]
-           (is (= 1 (count changed)) (pr-str preview))
+           (is (= 1 (count changed)) (seon.print.value/bounded-text preview))
            (is (str/includes? (:seon.turn/text (first changed) "") "after"))
            (select-keys (first changed) [:seon.cluster.eval/source :seon.turn/text])))
        (finally

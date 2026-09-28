@@ -32,7 +32,8 @@
             [seon.cluster.store :as store]
             [seon.schema]
             [seon.schema.datahike :as schema-datahike]
-            [seon.test-support :as test-support])
+            [seon.test-support :as test-support]
+            [seon.print.value])
   (:import [java.util.concurrent CountDownLatch]))
 
 ;;; ---------------------------------------------------------------------------
@@ -223,7 +224,7 @@
                   (= (= left right) (= branch-left branch-right)))))
          :seed 20260727)]
     (is (true? (:result check))
-        (str "cluster-branch derivation failed: " (pr-str check)))))
+        (str "cluster-branch derivation failed: " (seon.print.value/bounded-text check)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Creation
@@ -552,7 +553,7 @@
         (let [missing (registry/branch-commit-id {:seon.store/store opened
                                                   :seon.store/branch :no-such-branch})]
           ;; The armed output contract validates the declared error's shape.
-          (is (true? (:seon.cluster.registry/branch-missing missing)) (pr-str missing))
+          (is (true? (:seon.cluster.registry/branch-missing missing)) (seon.print.value/bounded-text missing))
           (is (inst? (:seon.error/at missing)))
           (is (= [(:seon.store/dir opened) :no-such-branch]
                  [(:seon.store/dir missing) (:seon.store/branch missing)]))

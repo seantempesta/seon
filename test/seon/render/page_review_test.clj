@@ -4,7 +4,8 @@
             [seon.db :as db]
             [seon.eval :as evaluation]
             [seon.render.transcript :as transcript]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (deftest turn-headers-and-all-evaluations-have-one-place-each
   (support/with-database
@@ -19,7 +20,7 @@
                  :seon.cluster.eval/run [:seon.turn/id "old"]
                  :seon.cluster.eval/ordinal 0
                  :seon.cluster.eval/source "(+ 1 1)" :seon.eval/shown "2"}]))]
-       (is (:db-after written) (pr-str written)))
+       (is (:db-after written) (seon.print.value/bounded-text written)))
      (let [written
            (db/transact! connection
              [{:seon.turn/id "current" :seon.turn/agent [:seon.agent/id "page"] :seon.turn/opened-tx "datomic.tx" :seon.turn/reply "(+ 2 2)\n(+ 3 3)" :seon.turn/reply-size 15}
@@ -35,7 +36,7 @@
                :seon.cluster.eval/ordinal 1
                :seon.cluster.eval/ns [:seon.ns/name 'my.agents.page]
                :seon.cluster.eval/source "(+ 3 3)" :seon.eval/shown "6"}])]
-       (is (:db-after written) (pr-str written)))
+       (is (:db-after written) (seon.print.value/bounded-text written)))
      (is (:db-after (db/transact! connection
                      [{:seon.turn/id "late-old" :seon.turn/agent [:seon.agent/id "page"]
                        :seon.turn/opened-tx

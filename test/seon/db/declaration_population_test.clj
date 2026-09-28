@@ -10,7 +10,8 @@
             [seon.env :as env]
             [seon.schema :as schema]
             [seon.sci.admit :as admit]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support]
+            [seon.print.value]))
 
 (deftest ^{:seon.test/long
            "First canonical fixture acquisition indexes the complete program before testing carried database views and missing-projection refusals."
@@ -70,7 +71,7 @@
                                  (atom {}) #(db/q query database 'seon.db.carriage))]
                     (= supplied carried)))
                 :seed 20260915)]
-           (is (:pass? result) (pr-str result))))
+           (is (:pass? result) (seon.print.value/bounded-text result))))
        ;; Acquire the shipped print grammar before probing running-path work.
        ;; Its first-use validator is independent of the database projection.
        (is (= 0 (:seon.sci.admit/value

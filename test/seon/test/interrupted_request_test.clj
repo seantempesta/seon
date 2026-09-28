@@ -9,7 +9,8 @@
             [seon.problems :as problems]
             [seon.test :as sut]
             [seon.test.runner :as runner]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (def ^:private finished 'seon.id-test/an-evaluation-id-is-stable-short-and-a-symbol)
 (def ^:private interrupted 'seon.id-test/data-shape-and-explicit-length-determine-identity)
@@ -46,7 +47,7 @@
                       :seon.test.run/terminated? true})
         _ (support/transacted! connection [[:db.fn/call sut/admit-run admission]])
         committed (runner/commit-results! connection (completion results))]
-    (is (not (:seon.error/at committed)) (pr-str committed))
+    (is (not (:seon.error/at committed)) (seon.print.value/bounded-text committed))
     {:seon.test.run/id (:seon.test.run/id provenance) ::completion (completion [])})))
 
 (deftest ^{:seon.test/long "admit-run measured 13.7-15.3 s on default pid 90963 (2026-09-23), the rest under 1 s: it derives the program digest from every program entity changed since the source seal (docs/seon/issues/admit-run-derives-the-program-digest-from-every-change-since-the-seal.md)." :seon.test/long-ms 30000}
@@ -60,7 +61,7 @@
            results (runner/run-results (db/db connection) run-id)
            by-symbol (into {} (map (juxt :seon.test/sym identity)) results)
            latest (runner/latest-results (db/db connection) [interrupted])]
-       (is (= [interrupted] (mapv :seon.test/sym recorded)) (pr-str recorded))
+       (is (= [interrupted] (mapv :seon.test/sym recorded)) (seon.print.value/bounded-text recorded))
        (is (not (:seon.error/at results)) "the run's evidence is complete")
        (is (= 0 (:seon.test/error-count (by-symbol finished))) "a recorded member is untouched")
        (is (= 1 (:seon.test/error-count (by-symbol interrupted))) "interrupted is red, never green")
@@ -84,11 +85,11 @@
            unknown (first (by-symbol interrupted))
            found (problems/problems database {})]
        (is (m/validate :seon.test/latest-results latest registry)
-           (pr-str (m/explain :seon.test/latest-results latest registry)))
+           (seon.print.value/bounded-text (m/explain :seon.test/latest-results latest registry)))
        (is (= [finished interrupted red] (sort (keys by-symbol))) "never-run is absent")
        (is (= [1 0 0] (map (first (by-symbol finished)) [:seon.test/pass-count :seon.test/fail-count :seon.test/error-count])))
        (is (= 1 (:seon.test/fail-count (first (by-symbol red)))))
-       (is (m/validate :seon.test/result-unknown unknown registry) (pr-str unknown))
+       (is (m/validate :seon.test/result-unknown unknown registry) (seon.print.value/bounded-text unknown))
        (is (= [:seon.test.run/id run-id] (:seon.test/run unknown)) "the unknown keeps its run")
        (is (not-any? #(contains? unknown %) [:seon.test/pass-count :seon.test/fail-count :seon.test/error-count])
            "an unknown carries no counts")
@@ -130,7 +131,7 @@
            before (.getThreadAllocatedBytes threads thread)
            latest (runner/latest-results database [interrupted])
            allocated (- (.getThreadAllocatedBytes threads thread) before)]
-       (is (not (:seon.error/at committed)) (pr-str (select-keys committed [:seon.error/message])))
+       (is (not (:seon.error/at committed)) (seon.print.value/bounded-text (select-keys committed [:seon.error/message])))
        (is (integer? threshold) "the seeded cluster declares the blob threshold")
        (is (= #{[(count huge) true]}
               ;; This run's reports only: the branch inherits the store's.
@@ -186,7 +187,7 @@
                        :seon.test.run/terminated? true})
            database (db/db connection)
            failed (set (map :seon.test/sym (:seon.problems/failed-tests (problems/problems database {}))))]
-       (is (not (:seon.error/at committed)) (pr-str committed))
+       (is (not (:seon.error/at committed)) (seon.print.value/bounded-text committed))
        (is (nil? (db/q '[:find ?t . :in $ ?s :where [?t :seon.test/sym ?s]] database deleted))
            "the deleted symbol has no test entity")
        (is (= 1 (:seon.test/fail-count (first (runner/latest-results database [deleted]))))

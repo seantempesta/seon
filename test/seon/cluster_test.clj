@@ -11,7 +11,8 @@
             [seon.fault :as fault]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support]
+            [seon.print.value]))
 
 (def ^:private ordered-marker ::ordered)
 
@@ -33,7 +34,7 @@
         (is (and (map? refusal)
                  (contains? refusal :seon.error/at)
                  (contains? refusal :seon.error/layer)
-                 (contains? refusal :seon.error/operation)) (pr-str refusal))
+                 (contains? refusal :seon.error/operation)) (seon.print.value/bounded-text refusal))
         (is (= refusal result)
             "boot recovery returns the failed read instead of recovering zero turns")
         (is (= before (db/basis-t (db/db connection)))
@@ -51,7 +52,7 @@
         (is (and (map? refusal)
                  (contains? refusal :seon.error/at)
                  (contains? refusal :seon.error/layer)
-                 (contains? refusal :seon.error/operation)) (pr-str refusal))
+                 (contains? refusal :seon.error/operation)) (seon.print.value/bounded-text refusal))
         (is (= refusal missing-process-entities)
             "process identities are not rebuilt from error-map entries")))))
 
@@ -342,14 +343,14 @@
                      #(#'cluster/transact-initialization! connection [entity]))
             offense (:seon.boot/offense refusal)]
         (is (= :refused (:seon.cluster.boot/disposition refusal))
-            (pr-str refusal))
+            (seon.print.value/bounded-text refusal))
         (is (not (str/includes? (str (:seon.error/message refusal))
                                 "lookup refs do not resolve"))
             (str "the refusal names the refused read, not absence: "
                  (:seon.error/message refusal)))
         (is (= :seon.ai.model/provider-id
                (:seon.activation/lookup-attribute offense))
-            (pr-str offense))
+            (seon.print.value/bounded-text offense))
         (is (and (map? (:seon.boot/result offense))
                  (contains? (:seon.boot/result offense) :seon.error/at)
                  (contains? (:seon.boot/result offense) :seon.error/layer)
@@ -379,7 +380,7 @@
                               [:seon.ai.model/id "seon.cluster-test/model"])]
           (is (= "seon.cluster-test/provider"
                  (get-in pulled [:seon.ai.model/provider :seon.ai.model/provider-id]))
-              (pr-str pulled)))))))
+              (seon.print.value/bounded-text pulled)))))))
 
 (deftest render-contract-refusals-retain-the-cause-and-name-the-missing-contract
   (doseq [[cause fragment]

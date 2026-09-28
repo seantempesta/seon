@@ -22,7 +22,8 @@
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
-            [seon.test])
+            [seon.test]
+            [seon.print.value])
   (:import [java.util.concurrent CountDownLatch ExecutionException Future TimeUnit
             TimeoutException]))
 
@@ -656,7 +657,7 @@
                         (true? (:result check)))]
        (test/is passed?
               (str message " "
-                   (pr-str (without-duplicate-error check))))))))
+                   (seon.print.value/bounded-text (without-duplicate-error check))))))))
 
 (defn- run-database-body
   "Call `body` with `connection` as its custody, under the projection the

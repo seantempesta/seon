@@ -3,7 +3,8 @@
             [seon.db :as db]
             [seon.test :as seon-test]
             [seon.test.runner :as runner]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (defn completion
   ([database passes] (completion database passes 'provenance.example/check))
@@ -28,8 +29,8 @@
                             "second-provenance-run")
             second-stored (runner/commit-results! connection again)
             runs (db/q '[:find [?id ...] :where [_ :seon.test.run/id ?id]] @connection)]
-        (is (= 1 (:seon.test/pass-count (first stored))) (pr-str stored))
-        (is (= 1 (:seon.test/pass-count (first second-stored))) (pr-str second-stored))
+        (is (= 1 (:seon.test/pass-count (first stored))) (seon.print.value/bounded-text stored))
+        (is (= 1 (:seon.test/pass-count (first second-stored))) (seon.print.value/bounded-text second-stored))
         (is (= #{(:seon.test.run/id first-run) "second-provenance-run"} (set runs)))
         (is (nil? (get-in @connection [:schema :seon.test.run/program-digest :db/unique]))
             "many runs may test the same program")
@@ -69,7 +70,7 @@
             started (System/nanoTime)
             after-results (runner/program-digest @connection)
             held-ms (/ (- (System/nanoTime) started) 1e6)]
-        (is (vector? recorded) (pr-str recorded))
+        (is (vector? recorded) (seon.print.value/bounded-text recorded))
         (is (= before after-results) "result writes are not program identity")
         (is (< held-ms 100) (str "a result commit reads the held digest: " held-ms " ms"))
         (is (= before (:seon.test.run/program-digest (:seon.test.run/provenance captured))))

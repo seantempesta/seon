@@ -6,7 +6,8 @@
             [seon.db :as db]
             [seon.cluster :as cluster]
             [seon.cluster.instruction :as instruction]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support]
+            [seon.print.value]))
 
 (def ^:private reader-options {:eof ::eof})
 
@@ -113,7 +114,7 @@
         (testing "the invariant is computed from every Clojure code span"
           (is (seq calls))
           (is (every? :seon.cluster.instruction/resolved? resolutions)
-              (pr-str resolutions)))))))
+              (seon.print.value/bounded-text resolutions)))))))
 
 (deftest cluster-toolkit-exactly-converges-to-the-computed-rule
   (test-support/with-database

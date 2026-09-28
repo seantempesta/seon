@@ -9,7 +9,8 @@
             [seon.render.web :as web]
             [seon.schema :as schema]
             [seon.test-support :as support]
-            [seon.program :as program]))
+            [seon.program :as program]
+            [seon.print.value]))
 
 (def ^:private root-pull-schema
   [{:db/ident ::root-id
@@ -361,7 +362,7 @@
                               :seon.message/content "Only agents declare the inbox concern."
                               :seon.message/to [::root-id "root"]}])
            after (walk/root-acquisition (assoc render-request :seon.db/db @connection))]
-       (is (:db-after tx) (pr-str tx))
+       (is (:db-after tx) (seon.print.value/bounded-text tx))
        (is (true? (db/read-evidence-current?
                    @connection (:seon.render.call/read-evidence before))))
        (is (= (:seon.render.walk/root before) (:seon.render.walk/root after)))
@@ -393,7 +394,7 @@
              :seon.render.walk/lookup [:seon.ns/name 'root-walk.subject]
              :seon.render/distance 1
              :seon.sci.admit/caps caps})]
-       (is (:db-after tx) (pr-str tx))
+       (is (:db-after tx) (seon.print.value/bounded-text tx))
        (is (= #{[:seon.ns/name 'root-walk.subject]
                 [:seon.ns/name 'root-walk.required]
                 [:seon.ns/name 'root-walk.dependent]}

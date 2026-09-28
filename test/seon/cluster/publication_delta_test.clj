@@ -9,7 +9,8 @@
             [seon.program :as program]
             [seon.instrument :as instrument]
             [seon.schema :as schema]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (deftest ^{:seon.test/long "Two declaration analyses and three canonical writer transactions, including deletion validation and history readback; the former refused deletion run measured 6.22 s."
            :seon.test/long-ms 15000}
@@ -185,7 +186,7 @@
                          #(seon.fn/index! (assoc selected :seon.db/connection connection
                                                        :seon.schema/projection projection
                                                        :seon.program/rows analyzed)))]
-             (is (nil? (:seon.error/at result)) (pr-str result))
+             (is (nil? (:seon.error/at result)) (seon.print.value/bounded-text result))
              (is (= 'sample.rows/retained
                     (:seon.fn/sym (db/pull (db/db connection) [:seon.fn/sym]
                                           [:seon.fn/sym 'sample.rows/retained]))))

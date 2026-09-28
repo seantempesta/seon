@@ -6,7 +6,8 @@
             [seon.schema :as schema]
             [seon.schema.admission :as admission]
             [seon.schema.datahike :as schema.datahike]
-            [seon.schema.edn :as schema.edn]))
+            [seon.schema.edn :as schema.edn]
+            [seon.print.value]))
 
 (defn- findings-of-type
   [finding-type findings]
@@ -42,7 +43,7 @@
     (is (empty? offenders)
         (str "ruling #48 requires open map declarations and authored "
              "contract admission paths; remove " closed-property " from "
-             (pr-str offenders)))))
+             (seon.print.value/bounded-text offenders)))))
 
 (deftest malformed-inputs-name-the-reader-or-malli-finding
   (testing "non-EDN-readable source retains the reader location"
@@ -223,7 +224,7 @@
            (register-verdict projection source schema-key form)
            (hook-verdict projection source schema-key form)])]
     (doseq [[source case-name registered hooked] verdicts]
-      (is (= registered hooked) (pr-str [source case-name])))
+      (is (= registered hooked) (seon.print.value/bounded-text [source case-name])))
     (testing "an undefined slot is admitted from every source"
       (is (= #{:admitted}
              (set (for [[_ case-name registered hooked] verdicts

@@ -12,7 +12,8 @@
             [seon.db :as db]
             [seon.fs :as fs]
             [seon.schema :as schema]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (defn- copy-tree! [from to]
   (io/make-parents to)
@@ -148,12 +149,12 @@
                 (reset! phases [])
                 (with-bindings {progress-var #(swap! phases conj %)}
                   (cluster/refresh-source! root [(.getCanonicalPath file)]))
-                (is (some #(str/starts-with? % "incremental") @phases) (pr-str @phases))
+                (is (some #(str/starts-with? % "incremental") @phases) (seon.print.value/bounded-text @phases))
                 ;; THE DECISION NAMES THE OWNER that installs this kind of
                 ;; input's facts; a publication that cannot name one is the
                 ;; complete-rebuild defect this regression exists to kill.
                 (is (some #(str/includes? % (str "owners=(" owner ")")) @phases)
-                    (pr-str @phases))
+                    (seon.print.value/bounded-text @phases))
                 (is (not-any? #(str/starts-with? % "complete publication") @phases))
                 (when (str/ends-with? path ".md")
                   (is (string? digest-before))

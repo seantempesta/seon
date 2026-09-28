@@ -3,7 +3,8 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.dev.markdown :as md]
-            [seon.cluster.process :as operator.process])
+            [seon.cluster.process :as operator.process]
+            [seon.print.value])
   (:import [java.nio.file Files]
            [java.nio.file.attribute FileAttribute]
            [java.util Comparator]))
@@ -224,7 +225,7 @@
          {::md/repository-root (System/getProperty "user.dir")})]
     (is (true? (::md/valid? result))
         (str "Dependency pin violations: "
-             (pr-str (::md/violations result))))))
+             (seon.print.value/bounded-text (::md/violations result))))))
 
 (deftest repository-pin-subjects-follow-working-tree-renames
   (.mkdirs (io/file "tmp"))
@@ -323,7 +324,7 @@
 (deftest historical-prd-authorities-fail-closed-test
   (let [errors (authority-errors (repository-prd-authorities))]
     (is (empty? errors)
-        (str "Localized PRD authority violations: " (pr-str errors)))))
+        (str "Localized PRD authority violations: " (seon.print.value/bounded-text errors)))))
 
 (deftest validate-heading-increment-test
   (testing "flags h1 to h3 jump"
@@ -554,7 +555,7 @@
           result (md/validate {::md/content content
                                ::md/rules #{:heading-style}})]
       (is (::md/valid? result)
-          (str "False positive: " (pr-str (::md/violations result))))))
+          (str "False positive: " (seon.print.value/bounded-text (::md/violations result))))))
 
   (testing "real setext heading IS flagged"
     (let [content "---\ntype: component\nstatus: active\n---\n\nTitle\n===\n\nBody\n"
@@ -568,7 +569,7 @@
           result (md/validate {::md/content content
                                ::md/rules #{:blanks-around-headings}})]
       (is (::md/valid? result)
-          (str "False positive: " (pr-str (::md/violations result)))))))
+          (str "False positive: " (seon.print.value/bounded-text (::md/violations result)))))))
 
 (deftest full-document-test
   (testing "good document validates cleanly"
@@ -594,4 +595,4 @@
                                             :trailing-whitespace :no-multiple-blanks
                                             :list-style :fenced-code-style}})]
       (is (::md/valid? result)
-          (str "Violations: " (pr-str (::md/violations result)))))))
+          (str "Violations: " (seon.print.value/bounded-text (::md/violations result)))))))

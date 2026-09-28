@@ -7,7 +7,8 @@
             [seon.cluster.registry :as registry]
             [seon.db :as db]
             [seon.id :as id]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (defn- deftest-entity
   "The canonical declaration entity of one synthetic deftest in this namespace."
@@ -121,7 +122,7 @@
                                                                      [[:db/retractEntity [:seon.fn/sym callee]]])
                                                 #{[:seon.fn/sym callee]}))
                          (catch clojure.lang.ExceptionInfo refused refused))]
-        (is (clojure.string/includes? (str (ex-message refusal)) "surviving referrers") (pr-str refusal))
+        (is (clojure.string/includes? (str (ex-message refusal)) "surviving referrers") (seon.print.value/bounded-text refusal))
         (is (some #(= caller (get-in % [:seon.program/referrer :seon.test/sym]))
                   (tree-seq coll? seq (ex-data refusal)))
             "the refusal names the reaching test")

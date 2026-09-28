@@ -10,7 +10,8 @@
             [seon.render.walk :as walk]
             [seon.schema :as schema]
             [seon.test-support :as support]
-            [seon.program :as program]))
+            [seon.program :as program]
+            [seon.print.value]))
 
 (defn- exercise-pair
   [entity-lookup expected-ai expected-html]
@@ -33,7 +34,7 @@
                  :seon.issue/agent [:seon.agent/id "entity-pairs-agent"]
                  :seon.issue/functions [[:seon.fn/sym (quote entity-pairs.fixture/function)]]
                  :seon.issue/tests [[:seon.test/sym (quote entity-pairs.fixture/test)]]}]))]
-       (is (:db-after report) (pr-str report)))
+       (is (:db-after report) (seon.print.value/bounded-text report)))
      (let [database (db/db connection)
            entity (db/pull database '[*] entity-lookup)
            ctx (support/fork-cluster-ctx connection)
@@ -55,12 +56,12 @@
                           (render/render-ai request) (render/render-html request))
                units (walk/neighborhood request)
                unit (first (filter #(= entity-lookup (:seon.render.walk/lookup %)) units))]
-           (is (= expected (:seon.render.selection/selected decision)) (pr-str decision))
+           (is (= expected (:seon.render.selection/selected decision)) (seon.print.value/bounded-text decision))
            (is (if (= output :seon.render/ai) (some? rendered) (hiccup/hiccup? rendered))
-               (pr-str rendered))
-           (is unit (pr-str units))
-           (is (nil? (:seon.error/value unit)) (pr-str unit))
-           (is (= rendered (:seon.render/output unit)) (pr-str unit))))
+               (seon.print.value/bounded-text rendered))
+           (is unit (seon.print.value/bounded-text units))
+           (is (nil? (:seon.error/value unit)) (seon.print.value/bounded-text unit))
+           (is (= rendered (:seon.render/output unit)) (seon.print.value/bounded-text unit))))
        (when (= :seon.fn/sym (first entity-lookup))
          ;; The function node is its authored source with its neighbours by name
          ;; (renderers read the supplied database value: owner ruling 2026-09-25).
@@ -135,7 +136,7 @@
            page (str/join "" html)]
        (is (= #{[:seon.ns/name 'fixture.namespace-page]}
               (into #{} (map :seon.render.walk/lookup) namespace-units))
-           (pr-str (mapv :seon.render.walk/lookup namespace-units)))
+           (seon.print.value/bounded-text (mapv :seon.render.walk/lookup namespace-units)))
        (is (= 1 (count (filter #(str/includes? % "namespace source") html)))
            page)
        (is (str/includes? page "own-marker") page)

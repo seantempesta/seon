@@ -6,7 +6,8 @@
             [seon.cluster.source-test :as source-test]
             [seon.cluster.store :as store]
             [seon.db :as db]
-            [seon.issue :as issue]))
+            [seon.issue :as issue]
+            [seon.print.value]))
 
 (deftest ^{:seon.test/fixture-observation
            "An issue adoption on a cluster branch races a publication of the same physical store."}
@@ -38,7 +39,7 @@
             (is (some #(= {:type :stale-branch-head :expected-current-commit h1 :current-commit h2}
                           (select-keys (ex-data %) [:type :expected-current-commit :current-commit]))
                       (take-while some? (iterate ex-cause stale)))
-                (pr-str stale))
+                (seon.print.value/bounded-text stale))
             (is (= before (db/basis-t (db/db connection))) "the stale issue adoption committed nothing")
             (let [second-source (source/database opened h2)]
               (try

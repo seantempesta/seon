@@ -6,7 +6,8 @@
             [seon.db :as db]
             [seon.render.hiccup :as hiccup]
             [seon.render.transcript :as transcript]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (defn- text-content [node]
   (cond
@@ -44,11 +45,11 @@
                  :seon.cluster.eval/at (java.util.Date. 0)
                  :seon.cluster.eval/run "newer" :seon.cluster.eval/ordinal 0
                  :seon.cluster.eval/source "(+ 1 2)" :seon.eval/shown "3"}]))
-            _ (is (:db-after written) (pr-str written))
+            _ (is (:db-after written) (seon.print.value/bounded-text written))
             opened (db/transact! connection
                                  [[:db/add [:seon.turn/id "private-newer-id"]
                                    :seon.turn/opened-tx "datomic.tx"]])
-            _ (is (:db-after opened) (pr-str opened))
+            _ (is (:db-after opened) (seon.print.value/bounded-text opened))
             database @connection
             unit {:seon.db/db database :seon.db/connection connection :seon.agent/id "runtime-reader"}
             ai-before (transcript/render-runtime-ai unit)
@@ -81,7 +82,7 @@
         (let [closed (db/transact! connection
                                   [[:db/add [:seon.turn/id "private-newer-id"]
                                     :seon.turn/closed-tx "datomic.tx"]])
-              _ (is (:db-after closed) (pr-str closed))
+              _ (is (:db-after closed) (seon.print.value/bounded-text closed))
               idle (text-content (transcript/render-runtime-html (assoc unit :seon.db/db @connection)))]
           (is (str/includes? idle "Idle since "))
           (is (str/includes? idle " ms")))))))

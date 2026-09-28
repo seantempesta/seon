@@ -19,7 +19,8 @@
             [seon.sci.eval :as sci.eval]
             [seon.sci.admit :as admit]
             [seon.test-support :as support]
-            [seon.turn :as turn]))
+            [seon.turn :as turn]
+            [seon.print.value]))
 
 (deftest shown-value-diffs-are-deterministic-readable-snapshot-paths
   (support/assert-check!
@@ -84,7 +85,7 @@
                expected-response (bootstrap/render-help-ai (bootstrap/help-value @connection "juniper"))
                expected (str "my.agents.juniper=> ;; I should understand how this REPL works before I act.\n(help)\n"
                              expected-response)]
-           (is (vector? (:seon.turn/forms opened)) (pr-str opened))
+           (is (vector? (:seon.turn/forms opened)) (seon.print.value/bounded-text opened))
            (is (= "(help)" (:seon.cluster.eval/source saved)))
            (is (= 'seon.bootstrap/render-help-ai (:seon.eval/renderer saved)))
            (is (= expected-response (repl/response (repl/entity-emission saved))))

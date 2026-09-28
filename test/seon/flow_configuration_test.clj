@@ -5,7 +5,8 @@
             [seon.cluster]
             [seon.cluster.agent]
             [seon.flow :as sut]
-            [seon.test-support :as test-support])
+            [seon.test-support :as test-support]
+            [seon.print.value])
   (:import [java.util.concurrent Executors ExecutorService]))
 
 (defn- private-var
@@ -107,6 +108,6 @@
             (is (seq proc-facts))
             (is (every? #(contains? #{:io :compute} (::workload %))
                         proc-facts)
-                (pr-str proc-facts)))
+                (seon.print.value/bounded-text proc-facts)))
           (finally
             (.shutdownNow ^ExecutorService task-executor)))))))

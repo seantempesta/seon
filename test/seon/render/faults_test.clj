@@ -10,7 +10,8 @@
             [seon.eval :as evaluation]
             [seon.render :as render]
             [seon.test-support :as support]
-            [seon.turn :as turn]))
+            [seon.turn :as turn]
+            [seon.print.value]))
 
 (deftest pulled-fault-concern-uses-the-entity-pair
   (support/with-database
@@ -63,7 +64,7 @@
                                     (mapcat #(agent/creation-tx
                                               {:seon.agent/id % :seon.ns/name (symbol (str "my.agents." %))
                                                :seon.cluster/name cluster-name}) agents)))
-           _ (is (:db-after setup) (pr-str (dissoc setup :db-before :db-after)))
+           _ (is (:db-after setup) (seon.print.value/bounded-text (dissoc setup :db-before :db-after)))
            ctx (support/fork-cluster-ctx connection cluster-name)
            handle (support/cluster-handle
                    {:seon.db/connection connection :seon.cluster/name cluster-name
@@ -72,7 +73,7 @@
          (doseq [id agents]
            (let [result (turn/system-turn {:seon.turn.loop/cluster handle
                                           :seon.agent/id id :seon.turn/write? true})]
-             (is (vector? (:seon.turn/forms result)) (pr-str result))
+             (is (vector? (:seon.turn/forms result)) (seon.print.value/bounded-text result))
              (is (vector? (:seon.render.walk/units result)))
              (let [entry (first (filter #(str/includes? (or (:seon.cluster.eval/source %) "") ":seon.error/fn")
                                         (evaluation/of-agent (db/db connection) id)))]

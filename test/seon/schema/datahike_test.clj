@@ -16,7 +16,8 @@
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn]
             [seon.schema.internal :as internal]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (deftest error-members-cannot-carry-another-entitys-upsert-identity
   (support/with-database
@@ -120,7 +121,7 @@
              "Ordered native declarations"))
        (testing "an attribute unchanged since the baseline keeps its native declaration"
          (is (seq unchanged))
-         (is (empty? drifted) (pr-str drifted)))))))
+         (is (empty? drifted) (seon.print.value/bounded-text drifted)))))))
 
 (deftest compiled-entity-composition-keeps-scope-and-entry-boundaries
   (support/with-database
@@ -684,8 +685,8 @@
                reversed-evidence
                (binding [*print-namespace-maps* false]
                  (db/pull (db/db connection) selector reversed-id))]
-           (is (:db-after forward-tx) (pr-str forward-tx))
-           (is (:db-after reversed-tx) (pr-str reversed-tx))
+           (is (:db-after forward-tx) (seon.print.value/bounded-text forward-tx))
+           (is (:db-after reversed-tx) (seon.print.value/bounded-text reversed-tx))
            (testing "the transaction codec emits one canonical representation"
              (is (= (:seon.db/read-request forward-raw-evidence)
                     (:seon.db/read-request reversed-raw-evidence)))

@@ -7,7 +7,8 @@
             [seon.db :as db]
             [seon.repl :as repl]
             [seon.sci.eval :as evaluation]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (deftest returned-refusal-is-a-schema-first-error-with-unchanged-history
   (support/with-database
@@ -17,7 +18,7 @@
      (let [setup (db/transact! connection
                                [[:db/add "cluster" :seon.cluster/name "returned-error"]
                                 {:my.plan.item/id "error/item" :my.plan.item/title "Verify"}])
-           _ (is (:db-after setup) (pr-str setup))
+           _ (is (:db-after setup) (seon.print.value/bounded-text setup))
            ctx (support/fork-cluster-ctx connection "returned-error")
            configuration (support/effective-config)
            source "(seon.db/transact! [[:db/add [:my.plan.item/id \"error/item\"] :my.plan.item/title 42]])"
@@ -34,7 +35,7 @@
        (println "RETURNED-ERROR"
                 (pr-str {:shown shown :bytes (alength (.getBytes shown "UTF-8"))
                          :response response}))
-       (is (string? (:seon.db.write.attempt/request-id diagnostic)) (pr-str result))
+       (is (string? (:seon.db.write.attempt/request-id diagnostic)) (seon.print.value/bounded-text result))
        (is (:seon.schema/form diagnostic))
        (is (= 42 (:seon.db/offending diagnostic)))
        ;; §2.4's refusal grammar: the shown text names the layer and member

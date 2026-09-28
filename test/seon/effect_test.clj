@@ -18,7 +18,8 @@
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
             [seon.sci.kernel :as kernel]
-            [seon.test-support :as test-support])
+            [seon.test-support :as test-support]
+            [seon.print.value])
   (:import [java.util Date]
            [java.util.concurrent CountDownLatch]
            [java.util.concurrent.atomic AtomicBoolean]))
@@ -261,7 +262,7 @@
                     {:seon.effect-test/value 7}
                     {:seon.effect/background? true})))))
         (test-support/await-event! settled ::background-effect-settled)
-        (is (nil? (:failure @observation)) (pr-str @observation))
+        (is (nil? (:failure @observation)) (seon.print.value/bounded-text @observation))
         (is (= [[nil nil] [nil nil]]
                ((juxt :before-work :before-settlement) @observation))
             "the fresh worker has no effect or database binding frame")
@@ -329,7 +330,7 @@
             (is (= :seon.effect-test/interrupted
                    (:seon.effect-test/outcome result))
                 (str "an unbounded handler must end by SCI's own interrupt; "
-                     "got " (pr-str result)))
+                     "got " (seon.print.value/bounded-text result)))
             (is (< elapsed-ms 5000)
                 (str "the handler must end at its ~300ms limit; elapsed "
                      elapsed-ms "ms"))))))))
@@ -526,11 +527,11 @@
       (is (true? (:seon.effect-test/projection? settled))
           (str "a detached handler must carry its schema projection; without "
                "it every declaration it resolves refuses. Got "
-               (pr-str settled)))
+               (seon.print.value/bounded-text settled)))
       (is (= :seon.effect-test/interrupted
              (:seon.effect-test/outcome settled))
           (str "an unbounded detached handler must be cut by the cluster's "
-               "background limit; got " (pr-str settled)))
+               "background limit; got " (seon.print.value/bounded-text settled)))
       (is (< elapsed-ms 15000)
           (str "and cut at ~300ms, not left running; elapsed " elapsed-ms))))
 
@@ -569,7 +570,7 @@
       (is (= :seon.effect-test/completed
              (:seon.effect-test/outcome settled))
           (str "the form's 60s must govern after the cluster's 200ms would "
-               "have latched; got " (pr-str settled)))
+               "have latched; got " (seon.print.value/bounded-text settled)))
       (is (< 30000 (:seon.effect-test/deadline-remaining-ms settled))
           "and the arm the work ran under must carry that 60s deadline")))
 
@@ -679,7 +680,7 @@
       (install-capability! connection)
       (let [refusal (binding [effect/*request-context* (dissoc (request-context connection) :seon.sci.eval/ctx)]
                       (effect/request! #'capability-owner {:seon.effect-test/value 7}))]
-        (is (= :seon.sci.eval/ctx (:seon.effect/missing-context-member refusal)) (pr-str refusal))
+        (is (= :seon.sci.eval/ctx (:seon.effect/missing-context-member refusal)) (seon.print.value/bounded-text refusal))
         (is (empty? @handler-calls) "nothing dispatched")
         (is (nil? (db/pull (db/db connection) [:db/id]
                            [:seon.effect/id (id/digest 12 [:seon.effect/id "effect-run" 3 0])]))
@@ -759,7 +760,7 @@
                      (effect/request! #'capability-owner
                                       {:seon.effect-test/value 41}))]
         (is (= 'seon.effect-test/capability-owner (:seon.effect/unadmitted-owner result))
-            (pr-str result))
+            (seon.print.value/bounded-text result))
         (is (= :over-bound
                (get-in result [:seon.error/data :seon.sci.admit/reason]))
             "the refusal carries WHY the admission kept nothing")
@@ -930,7 +931,7 @@
                              :my.fs/content {:my.fs/text "written\n"}
                              :my.fs/precondition {:my.fs/expected-absence? true}}))
             receipt (effect-receipt connection '[*])]
-        (is (string? (:my.fs/after-digest written)) (pr-str written))
+        (is (string? (:my.fs/after-digest written)) (seon.print.value/bounded-text written))
         (testing "the request's declared keys are datoms on the effect"
           (is (= path (:my.fs/path receipt))
               (str "which path this effect touched must be a query, not a "

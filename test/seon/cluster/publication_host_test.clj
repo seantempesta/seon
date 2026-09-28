@@ -14,7 +14,8 @@
             [seon.operator.runtime :as runtime]
             [seon.cluster.process :as state]
             [seon.schema :as schema]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (deftest ^{:seon.test/long "Publish and boot a real cluster in the test JVM, then send operator requests through its advertised prepl."
            :seon.test/long-ms 1200000}
@@ -117,7 +118,7 @@
                      (is (not-any? #(contains? #{"clojure" "java"}
                                                (.getName (io/file (first (:seon.operator.subprocess/argv %)))))
                                    records)
-                         (pr-str records))))
+                         (seon.print.value/bounded-text records))))
                  (is (= before (operator/selected-processes (str root)))))))
              (is (zero? @projection-reads)
                  "An exact source fork carries the existing projection instead of reading the whole program.")

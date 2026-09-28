@@ -3,7 +3,8 @@
             [seon.cluster.source :as source]
             [seon.db :as db]
             [seon.issue :as issue]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (deftest source-only-publication-does-not-read-issue-notes
   (support/with-database
@@ -27,7 +28,7 @@
            paths (mapv :seon.issue/path notes)
            initial (issue/index! {:seon.db/connection connection :seon.issue/notes notes
                                   :seon.source/changed-paths paths})
-           _ (is (empty? (:seon.issue/refusals initial)) (pr-str initial))
+           _ (is (empty? (:seon.issue/refusals initial)) (seon.print.value/bounded-text initial))
            before (db/db connection)
            other-before (db/pull before '[*] [:seon.issue/id "publication-note-other"])
            changed [(note "publication-note-first" "issue" "First changed")
@@ -40,7 +41,7 @@
            identities (into #{} (keep (fn [datom]
                                         (:seon.issue/id (db/pull after [:seon.issue/id] (:e datom)))))
                             (:tx-data report))]
-       (is report (pr-str result))
+       (is report (seon.print.value/bounded-text result))
        (is (= #{"publication-note-first" "publication-note-class"} identities))
        (is (= other-before (db/pull after '[*] [:seon.issue/id "publication-note-other"])))
        (is (= #{"publication-note-other"}

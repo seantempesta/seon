@@ -23,7 +23,8 @@
             [seon.schema :as schema]
             [seon.sci.admit :as admit]
             [seon.sci.eval :as evaluation]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (def ^:private caps
   (config/result-caps config/defaults))
@@ -86,9 +87,9 @@
                            :seon.render.profile/max-depth 3
                            :seon.render.profile/max-children 256
                            :seon.render.profile/composition :single-line})]
-       (is (seq (:tx-data report)) (pr-str report))
-       (is (map? installed) (pr-str installed))
-       (is (map? completed) (pr-str completed))
+       (is (seq (:tx-data report)) (seon.print.value/bounded-text report))
+       (is (map? installed) (seon.print.value/bounded-text installed))
+       (is (map? completed) (seon.print.value/bounded-text completed))
        (let [shown-plan (plan/format-plan-ai whole-plan)]
          (is (str/includes? (:seon.plan/current-line shown-plan) "Current criterion"))
          (is (= #{"later" "finished"} (set (keys (:seon.plan/step-lines shown-plan)))))
@@ -145,7 +146,7 @@
                           :seon.render.profile/max-children 32
                           :seon.render.profile/max-string-length 128)
            handle 'result/e0123456789ab]
-       (is (:db-after written) (pr-str written))
+       (is (:db-after written) (seon.print.value/bounded-text written))
        (doseq [lookup [[:seon.fn/sym 'seon.db/q]
                        [:seon.config/cluster "render-results"]
                        [:seon.turn/id "render-results-turn"]
@@ -167,8 +168,8 @@
                cuts (tree-cuts tree-projection)
                shown-keys (keep #(when (vector? %) (:seon.print/value (first %)))
                                 (:seon.print/entries (:seon.render.value/tree tree-projection)))]
-           (is (= (second lookup) (get raw (first lookup))) (pr-str lookup raw))
-           (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
+           (is (= (second lookup) (get raw (first lookup))) (seon.print.value/bounded-text [lookup raw]))
+           (is (nil? (:seon.cluster.eval/error result)) (seon.print.value/bounded-text result))
            (is (= raw (:seon.sci.admit/value result)))
            (is (= shown (value/render-ai-data tree-projection)) "one selection, one text")
            (is (str/starts-with? shown "{") shown)
@@ -222,8 +223,8 @@
                      :seon.sci.admit/caps (config/result-caps configuration)
                      :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)})
            shown (:seon.eval/shown result)]
-       (is (= 'seon.db/q (:seon.fn/sym raw)) (pr-str lookup raw))
-       (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
+       (is (= 'seon.db/q (:seon.fn/sym raw)) (seon.print.value/bounded-text [lookup raw]))
+       (is (nil? (:seon.cluster.eval/error result)) (seon.print.value/bounded-text result))
        (is (= raw (:seon.sci.admit/value result)))
        (is (= raw (edn/read-string shown)) shown)
        (is (not (str/includes? shown "Restart the JVM")) shown)
@@ -274,8 +275,8 @@
                               :seon.sci.admit/caps (config/result-caps configuration)
                               :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)})
                     shown (:seon.eval/shown result)]
-                (is (:db-after written) (pr-str written))
-                (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
+                (is (:db-after written) (seon.print.value/bounded-text written))
+                (is (nil? (:seon.cluster.eval/error result)) (seon.print.value/bounded-text result))
                 ;; Clojure's printer lifts the shared namespace (#:seon.effect{...}).
                 (is (str/starts-with? shown "#:seon.effect{") shown)
                 (is (str/includes? shown ":id \"poll-render-effect\"") shown)
@@ -518,7 +519,7 @@
         "at the bound every member shows in held order")
     (is (= (take kept (whole mixed)) (shown mixed))
         "beyond the bound the kept members are the held order's first")
-    (is (= (- (count large) kept) (:seon.print/omitted cut)) (pr-str cut))
+    (is (= (- (count large) kept) (:seon.print/omitted cut)) (seon.print.value/bounded-text cut))
     (is (= :seon.render.profile/max-children (:seon.print/bound-by cut)))
     (is (< elapsed-ms 1000) (str "a million-entry map rendered in " elapsed-ms " ms"))))
 
@@ -616,7 +617,7 @@
                                   (:seon.print/omitted cut)))))
                       @cuts))))
             :seed 20260914)]
-       (is (:pass? result) (pr-str result))
+       (is (:pass? result) (seon.print.value/bounded-text result))
        (is (pos? @observed-cuts) "the generated cases must exercise elision and requery")))))
 
 (deftest documentation-body-is-whole-or-one-executable-elision
@@ -631,7 +632,7 @@
                           :seon.render/profile
                           (assoc probe-profile :seon.render.profile/max-children 64
                                                :seon.render.profile/max-string-length 24))]
-       (is (string? body) (pr-str documentation))
+       (is (string? body) (seon.print.value/bounded-text documentation))
        (is (> (count body) 24) "the real documentation must exceed the string limit")
        (evaluation/bind-result! ctx handle documentation)
        (let [cut (first (filter #(= [:body] (:seon.render.data/path %))
@@ -696,7 +697,7 @@
                                         :seon.cluster/name "shape"}))
            _ (is (= "shape" (:seon.agent/id
                               (db/pull (db/db connection) '[:seon.agent/id]
-                                       [:seon.agent/id "shape"]))) (pr-str written))
+                                       [:seon.agent/id "shape"]))) (seon.print.value/bounded-text written))
            ctx (support/fork-cluster-ctx connection "shape")
            configuration (support/effective-config)
            result (evaluation/evaluate
@@ -707,7 +708,7 @@
                     :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)})
            shown (:seon.eval/shown result)
            parsed (edn/read-string shown)]
-       (is (not (:seon.cluster.eval/error result)) (pr-str result))
+       (is (not (:seon.cluster.eval/error result)) (seon.print.value/bounded-text result))
        (is (= "shape" (get-in parsed [:seon.agent/namespace :seon.ns/steward :seon.agent/id])) shown)
        (is (= (:seon.sci.admit/value result) parsed) shown)))))
 
@@ -794,7 +795,7 @@
                      (:seon.config.eval/time-limit-ms configuration)})
            shown (:seon.eval/shown result)
            cut (elision-in shown (:seon.sci.admit/value result) profile)]
-       (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
+       (is (nil? (:seon.cluster.eval/error result)) (seon.print.value/bounded-text result))
        (is (str/includes? shown "\"…+") shown)
        (is (> (count (:seon.sci.admit/value result))
               (:seon.render.profile/max-string-length profile)))
@@ -835,7 +836,7 @@
         shown (edn/read-string (print/render-elision-ai node))]
     (is (= (tokens/estimate-of-characters characters)
            (:seon.ai.tokens/estimate shown))
-        (pr-str shown))
+        (seon.print.value/bounded-text shown))
     ;; The declared fields stay the value's own units, because `next-offset`
     ;; and `total` are the reader's COORDINATES, not display sizes. Restating
     ;; a coordinate as a floored estimate names a position that does not
@@ -882,7 +883,7 @@
                      (:seon.config.eval/time-limit-ms configuration)})
            shown (:seon.eval/shown result)
            rendered (repl/render-directory-ai (:seon.sci.admit/value result))]
-       (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
+       (is (nil? (:seon.cluster.eval/error result)) (seon.print.value/bounded-text result))
        (is (> (tokens/estimate rendered) (:seon.render.profile/token-budget profile))
            "the directory exceeds the raw budget")
        ;; Owner 2026-09-27: a render follows the value's budget (no separate
@@ -906,7 +907,7 @@
                         (catch Exception failure (ex-data failure)))]
        (is ((seon.schema/projection-validator projection :seon.instrument/contract-error) refusal)
            (str "the reproduction is a genuinely declared base error: "
-                (pr-str refusal)))
+                (seon.print.value/bounded-text refusal)))
        ;; The canonical runner arms both data-conversion arities.
        (doseq [[label returned]
                [["shape-only arity" (value/transacted refusal)]
@@ -1072,11 +1073,11 @@
            empty-result (db/q '[:find ?e :where [?e :seon.agent/id "no-such-agent"]] database)
            rows (db/q '[:find ?name :where [_ :seon.cluster/name ?name]] database)
            text #(:seon.render.value/text (value/prepare (registered-unit connection %)))]
-       (is (instance? datahike.java.QueryResult empty-result) (pr-str (class empty-result)))
+       (is (instance? datahike.java.QueryResult empty-result) (seon.print.value/bounded-text (class empty-result)))
        (is (= "#{}" (text empty-result)))
        ;; Datahike answers a non-empty relation here with a plain set; only
        ;; the empty relation is a QueryResult (measured on default, 2026-09-27)
-       (is (set? rows) (pr-str (class rows)))
+       (is (set? rows) (seon.print.value/bounded-text (class rows)))
        (is (= rows (edn/read-string (text rows))))))))
 
 (deftest a-cut-costs-less-than-it-hides-and-never-lands-in-a-tuple
@@ -1120,7 +1121,7 @@
                                             :seon.schema.projection/compile-options)
                               :h-has false :fc-type nil})))
     (is (empty? (diagnostics [(atom 1) identity (Object.)])))
-    (is (:pass? observed) (pr-str (:shrunk observed)))))
+    (is (:pass? observed) (seon.print.value/bounded-text (:shrunk observed)))))
 
 (deftest vars-and-namespaces-print-by-name
   ;; As clojure.main prints them: #'ns/name and #namespace[name], from their
@@ -1205,10 +1206,10 @@
                        :seon.sci.admit/caps caps :seon.render/profile probe-profile
                        :seon.render.data/cursor {:seon.render.data/path (:seon.render.data/path key-cut)
                                                  :seon.render.data/offset (:seon.render.data/next-offset key-cut)}})]
-       (is (= (vec (range 50)) (print/value-at value (:seon.render.data/path key-cut))) (pr-str cuts))
+       (is (= (vec (range 50)) (print/value-at value (:seon.render.data/path key-cut))) (seon.print.value/bounded-text cuts))
        (is (= 50 (:seon.render.data/total key-cut)))
-       (is (str/starts-with? (value/render-ai-data next-page) "[3 4 5") (pr-str next-page))
-       (is (= 50 (count (print/value-at value (:seon.render.data/path set-cut)))) (pr-str cuts))
+       (is (str/starts-with? (value/render-ai-data next-page) "[3 4 5") (seon.print.value/bounded-text next-page))
+       (is (= 50 (count (print/value-at value (:seon.render.data/path set-cut)))) (seon.print.value/bounded-text cuts))
        (is (= :zero (print/value-at value [0])) "a plain step keeps get-in's meaning")))))
 
 (deftest an-unaffordable-root-or-first-member-is-the-declared-refusal
@@ -1223,9 +1224,9 @@
         ;; 8 tokens (25 chars) holds the root with its cut and continuation
         ;; (25) but not its first member too (31): the member refusal.
         member (at-budget 8 {:a 1 :b 2})]
-    (is (valid? root) (pr-str root))
+    (is (valid? root) (seon.print.value/bounded-text root))
     (is (= [(tokens/estimate-chars 1) 18] ((juxt :seon.render.value/budget :seon.render.value/needed) root)))
-    (is (valid? member) (pr-str member))
+    (is (valid? member) (seon.print.value/bounded-text member))
     (is (< (:seon.render.value/budget member) (:seon.render.value/needed member)))
     (is (= "42" (:seon.render.value/text (at-budget 1 42))) "a root that fits whole prints whole")))
 
@@ -1248,7 +1249,7 @@
            cut (first (filter #(= [:t] (:seon.render.data/path %)) (tree-cuts first-page)))
            next-page ((requiring-resolve 'seon.render.walk/continue) (request [:t] (:seon.render.data/next-offset cut)))
            expected (key (nth (seq (:t backing)) (:seon.render.data/next-offset cut)))]
-       (is (str/starts-with? (value/render-ai-data next-page) (str "{" expected " ")) (pr-str next-page))
+       (is (str/starts-with? (value/render-ai-data next-page) (str "{" expected " ")) (seon.print.value/bounded-text next-page))
        (is (= :unavailable (:seon.render.walk/continuation-reason
                             ((requiring-resolve 'seon.render.walk/continue)
                              (dissoc (request [:t] 0) :seon.db/connection)))))))))
@@ -1315,7 +1316,7 @@
                                                                  :seon.eval/shown-tokens :seon.eval/duration-ms
                                                                  :seon.cluster.eval/diagnostics])
                                        :seon.cluster.eval/source source :seon.repl/handle handle))]
-       (is (not (:seon.cluster.eval/error evaluation)) (pr-str (dissoc evaluation :seon.sci.admit/value)))
+       (is (not (:seon.cluster.eval/error evaluation)) (seon.print.value/bounded-text (dissoc evaluation :seon.sci.admit/value)))
        (is (< 1000 (:seon.eval/value-tokens evaluation)) "the whole value's estimate is recorded")
        (is (<= (:seon.eval/shown-tokens evaluation) 1100) "the print stays within the value budget")
        (is (str/includes? shown "(drop 32 (get-in result/elargerender1 [:rows]))") shown)

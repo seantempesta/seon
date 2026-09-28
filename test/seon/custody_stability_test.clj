@@ -11,7 +11,8 @@
             [seon.db :as db]
             [seon.schema :as schema]
             [seon.sci.eval :as eval]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support]
+            [seon.print.value]))
 
 (def ^:private caps
   (config/result-caps config/defaults))
@@ -180,7 +181,7 @@
         ;; returners disappear silently, while this snapshot makes both a fifth
         ;; function and any removal demand an explicit custody review.
         (is (= expected-custody-returning-functions actual)
-            (pr-str {:seon.custody-stability/actual actual}))))))
+            (seon.print.value/bounded-text {:seon.custody-stability/actual actual}))))))
 
 (deftest acquired-first-party-reachability-is-public-plus-every-indexed-function
   (test-support/with-database
@@ -244,14 +245,14 @@
                       root-var (ns-resolve consumer-namespace referred-name)]]
           (is (= 'seon.operator.runtime
                  (some-> root-var meta :ns ns-name))
-              (pr-str {:seon.custody-stability/consumer consumer-symbol
+              (seon.print.value/bounded-text {:seon.custody-stability/consumer consumer-symbol
                        :seon.custody-stability/root-var root-var})))
         ;; Ruling 47 gives every ctx-resolvable name an entity, including macros
         ;; and injected non-function bindings. Publics cover those bindings;
         ;; the graph side therefore selects source-backed function definitions
         ;; instead of treating every identity entity as an installed function.
         (is (= expected installed)
-            (pr-str {:seon.custody-stability/expected expected
+            (seon.print.value/bounded-text {:seon.custody-stability/expected expected
                      :seon.custody-stability/installed installed}))))))
 
 (deftest non-function-private-custody-roots-and-operator-state-stay-unreachable
@@ -267,7 +268,7 @@
                 :let [namespace-name (symbol (namespace qualified))
                       local-name (symbol (name qualified))]]
           (is (nil? (get-in installed [namespace-name local-name]))
-              (pr-str {:seon.custody-stability/forbidden qualified})))
+              (seon.print.value/bounded-text {:seon.custody-stability/forbidden qualified})))
         (is (nil? (:seon.sci.admit/value
                    (evaluate-in
                     ctx
@@ -296,7 +297,7 @@
                            (= before (context-snapshot ctx-b)))
                          sources))))))))
         check (tc/quick-check 10 property :seed 4303020260802)]
-    (is (:result check) (pr-str check))))
+    (is (:result check) (seon.print.value/bounded-text check))))
 
 (deftest cross-cluster-write-isolation
   (test-support/with-database

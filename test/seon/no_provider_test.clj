@@ -7,7 +7,8 @@
 
             [seon.config :as config]
             [seon.db :as db]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (deftest terminal-provider-refusal-records-one-fault-and-defers-reopening
   (support/with-database
@@ -109,7 +110,7 @@
        ;; `seed-cluster!` returns nil by contract; it throws on a refused write.
        (is (nil? seeded))
        (doseq [result [applied created written opened report]]
-         (is (or (:db-after result) (boolean? (:seon.reconcile/converged? result)) (:seon.turn.loop/outcome result)) (pr-str result)))
+         (is (or (:db-after result) (boolean? (:seon.reconcile/converged? result)) (:seon.turn.loop/outcome result)) (seon.print.value/bounded-text result)))
        (is (true? (:seon.config.ai/no-provider (ai/agent-overlay database agent-id))))
        ;; A virtual turn's reply is empty and evaluates nothing (seon.turn,
        ;; `(freeze! {:seon.ai/text ""})`); the "(+ 1 1)" stand-in retired in e915d2de0.
@@ -121,5 +122,5 @@
                            :where [?attempt :seon.ai.attempt/id]] database)))
        (is (empty? (db/q '[:find [?error ...]
                            :where [?error :seon.error/id]] database))
-           (pr-str (db/q '[:find [(pull ?error [:seon.error/message]) ...]
+           (seon.print.value/bounded-text (db/q '[:find [(pull ?error [:seon.error/message]) ...]
                             :where [?error :seon.error/id]] database)))))))

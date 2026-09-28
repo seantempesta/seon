@@ -3,7 +3,8 @@
             [clojure.test :refer [deftest is testing]]
             [seon.schema :as schema]
             [seon.db :as db]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (deftest relationship-predicates-require-one-declared-arm
   (testing "content is byte-honest and open to unrelated data"
@@ -47,5 +48,5 @@
                 declaration (when handler
                               (db/pull @connection [:seon.fn/private? :seon.fn/spec]
                                        [:seon.fn/sym handler]))]
-            (is (true? (:seon.fn/private? declaration)) (pr-str entry))
-            (is (string? (:seon.fn/spec declaration)) (pr-str entry))))))))
+            (is (true? (:seon.fn/private? declaration)) (seon.print.value/bounded-text entry))
+            (is (string? (:seon.fn/spec declaration)) (seon.print.value/bounded-text entry))))))))

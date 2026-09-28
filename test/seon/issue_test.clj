@@ -14,7 +14,8 @@
             [seon.issue.detect]
             [seon.plan]
             [seon.turn]
-            [seon.test-support]))
+            [seon.test-support]
+            [seon.print.value]))
 
 (clojure.test/deftest indexed-issues-replace-facts-and-retract-removed-notes
  (seon.test-support/with-database
@@ -31,11 +32,11 @@
          class-value (seon.db/pull d '[{:seon.issue/members [:seon.issue/id]}]
                                   [:seon.issue/id "class-classification-is-inferred-from-hand-lists"])]
      (clojure.test/is (= 3 (count selected-real)))
-     (clojure.test/is (= 3 (:seon.issue/count report)) (pr-str report))
+     (clojure.test/is (= 3 (:seon.issue/count report)) (seon.print.value/bounded-text report))
      (clojure.test/is (some #{"5deb40e4e"} (:seon.issue/commits member)))
      (clojure.test/is (some #(= "agent-form-calls-to-core-namespaces-are-not-indexed" (:seon.issue/id %))
                            (:seon.issue/members class-value)))
-     (clojure.test/is (empty? (:seon.issue/refusals report)) (pr-str (:seon.issue/refusals report)))
+     (clojure.test/is (empty? (:seon.issue/refusals report)) (seon.print.value/bounded-text (:seon.issue/refusals report)))
      (clojure.test/is (contains? (set (:seon.issue/unresolved
                                        (seon.db/pull d '[:seon.issue/unresolved]
                                                      [:seon.issue/id "agent-form-calls-to-core-namespaces-are-not-indexed"])))
@@ -48,9 +49,9 @@
                     :seon.issue/text "---\ntype: issue\nstatus: open\nseverity: friction\ntags: [issue, class/n7]\n---\n# Member\n## Problem\nseon.db/pull seon.issue-missing/absent abcdef123"}
                    real]
          report (seon.issue/index! {:seon.db/connection connection :seon.issue/notes selected})]
-     (clojure.test/is (let [observed report] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str report))
+     (clojure.test/is (let [observed report] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (seon.print.value/bounded-text report))
      (clojure.test/is (= 3 (:seon.issue/count report)))
-     (clojure.test/is (empty? (:seon.issue/refusals report)) (pr-str (:seon.issue/refusals report)))
+     (clojure.test/is (empty? (:seon.issue/refusals report)) (seon.print.value/bounded-text (:seon.issue/refusals report)))
      (clojure.test/is (contains? (set (:seon.issue/unresolved
                                        (seon.db/pull (seon.db/db connection) '[:seon.issue/unresolved]
                                                      [:seon.issue/id "probe-member"])))
@@ -91,8 +92,8 @@
               indexed (seon.issue/index! {:seon.db/connection source-connection
                                          :seon.issue/notes notes})
               first-adoption (seon.issue/adopt! connection (seon.db/db source-connection))]
-          (clojure.test/is (let [observed indexed] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str indexed))
-          (clojure.test/is (let [observed first-adoption] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str first-adoption))
+          (clojure.test/is (let [observed indexed] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (seon.print.value/bounded-text indexed))
+          (clojure.test/is (let [observed first-adoption] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (seon.print.value/bounded-text first-adoption))
           (let [entity (seon.db/pull (seon.db/db connection) '[*] [:seon.issue/id "adoption-class"])]
             (doseq [attribute [:seon.issue/functions :seon.issue/namespaces :seon.issue/keys
                                :seon.issue/files :seon.issue/tests :seon.issue/members]]
@@ -102,18 +103,18 @@
                 entities (#'seon.issue/identity-entities source)
                 delta (seon.issue/adopt-tx (seon.db/db connection) entities)
                 report (seon.test-support/transacted! connection [[:db.fn/call #'seon.issue/adopt-tx entities]])]
-            (clojure.test/is (let [observed again] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str again))
-            (clojure.test/is (empty? delta) (pr-str delta))
+            (clojure.test/is (let [observed again] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (seon.print.value/bounded-text again))
+            (clojure.test/is (empty? delta) (seon.print.value/bounded-text delta))
             (clojure.test/is (empty? (remove #(= :db/txInstant (:a %)) (:tx-data report)))
-                            (pr-str (:tx-data report))))
+                            (seon.print.value/bounded-text (:tx-data report))))
           (let [changed (seon.issue/index!
                          {:seon.db/connection source-connection
                           :seon.issue/notes
                           (mapv #(update % :seon.issue/text clojure.string/replace
                                          "# Adoption member" "# Changed member") notes)})
                 adopted (seon.issue/adopt! connection (seon.db/db source-connection))]
-            (clojure.test/is (let [observed changed] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str changed))
-            (clojure.test/is (let [observed adopted] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str adopted))
+            (clojure.test/is (let [observed changed] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (seon.print.value/bounded-text changed))
+            (clojure.test/is (let [observed adopted] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (seon.print.value/bounded-text adopted))
             (clojure.test/is (= "Changed member"
                                (:seon.issue/title
                                 (seon.db/pull (seon.db/db connection) [:seon.issue/title]
@@ -149,27 +150,27 @@
                                                             :seon.issue.citation/end-row
                                                             {:seon.issue.citation/file [:seon.fn.file/relative-path]}]}]
                                     [:seon.issue/id slug]))]
-     (clojure.test/is (= (count converted-notes) (count selected)) (pr-str (map :seon.issue/path selected)))
-     (clojure.test/is (empty? (:seon.issue/refusals report)) (pr-str (:seon.issue/refusals report)))
+     (clojure.test/is (= (count converted-notes) (count selected)) (seon.print.value/bounded-text (map :seon.issue/path selected)))
+     (clojure.test/is (empty? (:seon.issue/refusals report)) (seon.print.value/bounded-text (:seon.issue/refusals report)))
      (doseq [[slug attributes] converted-notes
              :let [entity (pull-issue slug)]]
        (doseq [attribute attributes]
          (clojure.test/is (seq (get entity attribute))
-                          (str slug " has no " attribute " — " (pr-str entity))))
+                          (str slug " has no " attribute " — " (seon.print.value/bounded-text entity))))
        (clojure.test/is (inst? (:seon.issue/opened entity)) (str slug " has no opened instant")))
      (let [adoption (pull-issue "development-adoption-can-mix-host-and-sci-generations")
            spans (filter :seon.issue.citation/row (:seon.issue/files adoption))]
-       (clojure.test/is (seq spans) (pr-str (:seon.issue/files adoption)))
+       (clojure.test/is (seq spans) (seon.print.value/bounded-text (:seon.issue/files adoption)))
        (clojure.test/is (some #(clojure.string/ends-with?
                                 (get-in % [:seon.issue.citation/file :seon.fn.file/relative-path]) "src/seon/cluster.clj")
                               spans)
-                        (pr-str spans))
+                        (seon.print.value/bounded-text spans))
        (clojure.test/is (some :seon.issue.citation/end-row spans)))
      (let [before (pull-issue "anonymous-runtime-contracts-have-recurred")
            citations (count (seon.db/q '[:find [?e ...] :where [?e :seon.issue.citation/id]] d))
            again (seon.issue/index! {:seon.db/connection connection :seon.issue/notes selected})
            after-db (seon.db/db connection)]
-       (clojure.test/is (let [observed again] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str again))
+       (clojure.test/is (let [observed again] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (seon.print.value/bounded-text again))
        (clojure.test/is (= citations (count (seon.db/q '[:find [?e ...] :where [?e :seon.issue.citation/id]] after-db))))
        (clojure.test/is (= before (pull-issue "anonymous-runtime-contracts-have-recurred"))))))))
 
@@ -187,8 +188,8 @@
          report (seon.issue/index! {:seon.db/connection connection :seon.issue/notes selected})
          entity (seon.db/pull (seon.db/db connection) '[:seon.issue/unresolved {:seon.issue/functions [:seon.fn/sym]}]
                            [:seon.issue/id "probe-deleted"])]
-     (clojure.test/is (let [observed report] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str report))
-     (clojure.test/is (empty? (:seon.issue/refusals report)) (pr-str (:seon.issue/refusals report)))
+     (clojure.test/is (let [observed report] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (seon.print.value/bounded-text report))
+     (clojure.test/is (empty? (:seon.issue/refusals report)) (seon.print.value/bounded-text (:seon.issue/refusals report)))
      (clojure.test/is (= #{"com.cognitect/transit-clj" "java.lang.Thread/sleep" "seon.cluster.loop/settle!"}
                         (set (:seon.issue/unresolved entity))))
      (clojure.test/is (some #(= 'seon.db/pull (:seon.fn/sym %)) (:seon.issue/functions entity)))
@@ -215,9 +216,9 @@
                            '[{:seon.issue/functions [:seon.fn/sym]} {:seon.issue/issues [:seon.issue/id]}]
                            [:seon.issue/id "probe-ambiguous"])]
      (clojure.test/is (string? shared))
-     (clojure.test/is (empty? (:seon.issue/refusals report)) (pr-str (:seon.issue/refusals report)))
+     (clojure.test/is (empty? (:seon.issue/refusals report)) (seon.print.value/bounded-text (:seon.issue/refusals report)))
      (clojure.test/is (some #(= shared (:seon.issue/value %)) (:seon.issue/ambiguous report))
-                      (pr-str (:seon.issue/ambiguous report)))
+                      (seon.print.value/bounded-text (:seon.issue/ambiguous report)))
      (clojure.test/is (empty? (:seon.issue/functions entity)))
      (clojure.test/is (empty? (:seon.issue/issues entity)))))))
 
@@ -237,11 +238,11 @@
          indexed (seon.db/db connection)
          basis (seon.db/basis-t indexed)
          entity (:db/id (seon.db/pull indexed '[:db/id] [:seon.issue/id "probe-unchanged-b"]))]
-     (clojure.test/is (let [observed report] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str report))
+     (clojure.test/is (let [observed report] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (seon.print.value/bounded-text report))
      (clojure.test/is (= [] (seon.issue/index-tx indexed selected))
-                      (pr-str (seon.issue/index-tx indexed selected)))
+                      (seon.print.value/bounded-text (seon.issue/index-tx indexed selected)))
      (let [again (seon.issue/index! {:seon.db/connection connection :seon.issue/notes selected})]
-       (clojure.test/is (let [observed again] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str again))
+       (clojure.test/is (let [observed again] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (seon.print.value/bounded-text again))
        (clojure.test/is (= 2 (:seon.issue/count again)))
        (clojure.test/is (= basis (seon.db/basis-t (seon.db/db connection)))
                         "re-indexing an unchanged note set moved the database basis"))
@@ -251,7 +252,7 @@
            delta (seon.issue/index-tx indexed changed)
            touched (into #{} (map #(if (map? %) (:db/id %) (second %))) delta)]
        (clojure.test/is (seq delta))
-       (clojure.test/is (= #{entity} touched) (pr-str delta))
+       (clojure.test/is (= #{entity} touched) (seon.print.value/bounded-text delta))
        (seon.issue/index! {:seon.db/connection connection :seon.issue/notes changed})
        (clojure.test/is (= :resolved (:seon.issue/status
                                       (seon.db/pull (seon.db/db connection) '[:seon.issue/status]
@@ -279,7 +280,7 @@
           routing (seon.test-support/attempt-routing c)
           faults (clojure.core.async/chan (clojure.core.async/sliding-buffer 16))]
      (swap! routing assoc :seon.agent/fault-channel faults)
-     (clojure.test/is (let [observed started] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str started))
+     (clojure.test/is (let [observed started] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (seon.print.value/bounded-text started))
      (with-open [launcher (seon.test-support/closeable
                             (seon.flow/start-work-launcher!
                              {:seon.env/environment environment
@@ -312,7 +313,7 @@
             (clojure.test/is (not (clojure.string/includes?
                                   (clojure.string/join "\n" (concat sources (map :seon.eval/shown entries)))
                                   untaught))))
-          (clojure.test/is (and issue-index (<= 0 plan-index)) (pr-str sources))
+          (clojure.test/is (and issue-index (<= 0 plan-index)) (seon.print.value/bounded-text sources))
           (clojure.test/is (empty? (keep :seon.cluster.eval/error entries)))
           (clojure.test/is (clojure.string/includes? (str (:seon.eval/shown (get entries issue-index)))
                                                      (str test-name))))
@@ -343,7 +344,7 @@
                                 [?issue :seon.issue/id ?id]]
                               (seon.db/db connection) subject detector)]
        (clojure.test/is (string? subject))
-       (clojure.test/is (let [observed generated] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str generated))
+       (clojure.test/is (let [observed generated] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (seon.print.value/bounded-text generated))
        (clojure.test/is (string? issue-id))
        (let [started (seon.issue/start!
                       {:seon.db/connection connection :seon.issue/id issue-id
@@ -353,7 +354,7 @@
                                   [?issue :seon.issue/agent ?agent]
                                   [?agent :seon.agent/id ?id]]
                                 (seon.db/db connection) issue-id)]
-         (clojure.test/is (let [observed started] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str started))
+         (clojure.test/is (let [observed started] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (seon.print.value/bounded-text started))
          (clojure.test/is (string? agent-id))
          (clojure.test/is (empty? (:seon.issue/tests started)))
          (clojure.test/is (false? (seon.issue/done? (seon.db/db connection)
@@ -391,7 +392,7 @@
          issue-id (:seon.issue/id added)
          start {:seon.db/connection c :seon.issue/id issue-id :seon.issue/budget 1
                 :seon.ns/name 'my.agents.issue-worker :seon.config.ai/no-provider true}]
-     (clojure.test/is (string? issue-id) (pr-str added))
+     (clojure.test/is (string? issue-id) (seon.print.value/bounded-text added))
      (clojure.test/is (= :seon.agent/id (:seon.issue/non-test-reference-member (seon.issue/add! (assoc request :seon.issue/title "Invalid success ref" :seon.issue/tests #{[:seon.agent/id "issue-author"]})))))
      (let [refused (seon.issue/start! start)]
        (clojure.test/is (= issue-id (:seon.issue/unverifiable-issue-id refused)))
@@ -404,7 +405,7 @@
            agent-entity (seon.db/pull d '[{:seon.agent/plan [* {:my.plan/steps [*]}]}
                                    {:seon.agent/settings [*]}] [:seon.agent/id agent-id])
            opening (seon.db/pull d '[*] [:seon.turn/id (seon.id/id [:seon.issue/opening issue-id])])]
-       (clojure.test/is (let [observed started] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str started))
+       (clojure.test/is (let [observed started] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (seon.print.value/bounded-text started))
        (clojure.test/is (empty? (get-in agent-entity [:seon.agent/plan :my.plan/steps])))
        (clojure.test/is (= 1 (get-in agent-entity [:seon.agent/settings :seon.config.run/max-episode-runs])))
        (clojure.test/is (true? (get-in agent-entity [:seon.agent/settings :seon.config.ai/no-provider])))
@@ -430,15 +431,15 @@
            tx (seon.issue/index-tx (seon.db/db connection) notes)
            refusals (:seon.issue/refusals (meta tx))]
        (clojure.test/is (not-any? #(= {:seon.issue/id "probe-defect-typed-note"} %) tx)
-                        (pr-str tx))
-       (clojure.test/is (= 1 (count refusals)) (pr-str refusals))
+                        (seon.print.value/bounded-text tx))
+       (clojure.test/is (= 1 (count refusals)) (seon.print.value/bounded-text refusals))
        (clojure.test/is (= :invalid-type (:seon.issue/reason (first refusals)))
-                        (pr-str refusals))
+                        (seon.print.value/bounded-text refusals))
        (clojure.test/is (= "probe-defect-typed-note" (:seon.issue/value (first refusals)))
-                        (pr-str refusals))
+                        (seon.print.value/bounded-text refusals))
        (clojure.test/is (= "docs/seon/issues/probe-defect-typed-note.md"
                            (:seon.issue/path (first refusals)))
-                        (pr-str refusals))
+                        (seon.print.value/bounded-text refusals))
        ;; The whole transaction admits through the real writer: one bad note no
        ;; longer refuses the publication that carries every good one.
        (seon.test-support/transacted! connection tx)
@@ -485,17 +486,17 @@
                                  (seon.db/db connection))
            created (index! {path (apply str (repeat 64 "b"))})
            cited (seon.issue/index! {:seon.db/connection connection :seon.issue/notes notes})]
-       (clojure.test/is (not (:seon.error/at created)) (pr-str created))
-       (clojure.test/is (empty? (:seon.issue/refusals cited)) (pr-str cited))
+       (clojure.test/is (not (:seon.error/at created)) (seon.print.value/bounded-text created))
+       (clojure.test/is (empty? (:seon.issue/refusals cited)) (seon.print.value/bounded-text cited))
        (clojure.test/is (= 1 (count (citations))))
        (let [deleted (index! {})]
-         (clojure.test/is (not (:seon.error/at deleted)) (pr-str deleted))
+         (clojure.test/is (not (:seon.error/at deleted)) (seon.print.value/bounded-text deleted))
          (clojure.test/is (empty? (seon.db/q '[:find [?file ...] :in $ ?path
                                                :where [?file :seon.fn.file/relative-path ?path]]
                                              (seon.db/db connection) path)))
          (clojure.test/is (empty? (citations))))
        (let [again (seon.issue/index! {:seon.db/connection connection :seon.issue/notes notes})]
-         (clojure.test/is (empty? (:seon.issue/refusals again)) (pr-str again))
+         (clojure.test/is (empty? (:seon.issue/refusals again)) (seon.print.value/bounded-text again))
          (clojure.test/is (empty? (citations)))
          (clojure.test/is (= "Cites a deleted file"
                              (:seon.issue/title (seon.db/pull (seon.db/db connection) [:seon.issue/title]
@@ -507,7 +508,7 @@
     (.mkdirs (clojure.java.io/file root "docs/seon/issues"))
     (try
       (let [data (try (seon.issue/notes (.getPath root)) nil (catch clojure.lang.ExceptionInfo e (ex-data e)))]
-        (clojure.test/is (= 'seon.issue/note-opened (:seon.error/operation data)) (pr-str data))
+        (clojure.test/is (= 'seon.issue/note-opened (:seon.error/operation data)) (seon.print.value/bounded-text data))
         (clojure.test/is (= (.getPath root) (:seon.issue/history-root data)))
         (clojure.test/is (pos-int? (:seon.operator.subprocess/exit data))))
       ;; Outside the checkout, so git finds no enclosing repository; only empty directories to remove.

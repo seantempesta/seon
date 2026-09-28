@@ -25,7 +25,8 @@
             [seon.print :as print]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support]
+            [seon.print.value]))
 
 (defn- resource-reads
   "Schema resource reads performed while calling `thunk`, read from the
@@ -99,7 +100,7 @@
     (is ((schema/projection-validator projection
                                       :seon.schema/validation-refusal)
          (ex-data failure))
-        (pr-str (ex-data failure)))
+        (seon.print.value/bounded-text (ex-data failure)))
     (is (= :seon.schema/projection
            (:seon.schema/expected-value (ex-data failure))))
     (is (nil? (:seon.schema/refused-value (ex-data failure))))

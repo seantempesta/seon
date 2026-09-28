@@ -3,7 +3,8 @@
             [clojure.test :refer [deftest is]]
             [seon.db :as db]
             [seon.program :as program]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (deftest schema-retirement-keeps-source-write-obligations
   (support/with-database
@@ -37,12 +38,12 @@
              blockers (:seon.program/referrers refusal)]
          (is (= #{attribute} (set (:seon.fn/writes (db/pull before [:seon.fn/writes] lookup)))))
          (is (true? (:seon.db/transaction-refused refusal))
-             (pr-str refusal))
+             (seon.print.value/bounded-text refusal))
          (is (some #(and (= attribute (:seon.program/subject %))
                          (= :seon.fn/writes (:seon.program/relation %))
                          (= writer (get-in % [:seon.program/referrer :seon.fn/sym])))
                    blockers)
-             (pr-str refusal))
+             (seon.print.value/bounded-text refusal))
          (is (nil? (get-in refusal [:seon.error/data :seon.program/referrers]))
              "referrers have one declared home on the refusal")
          (is (str/includes? (:seon.error/message refusal) (str writer)))

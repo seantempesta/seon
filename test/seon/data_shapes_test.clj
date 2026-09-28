@@ -14,7 +14,8 @@
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.context-blocks-fixture :as fixture]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (defn plan-probe
   "Apply the chart's raw forms to the canonical Juniper plan, without committing."
@@ -213,8 +214,8 @@
                                (turn/open-tx {:seon.turn/id "reasoning-turn"
                                               :seon.turn/agent [:seon.agent/id "reasoning-agent"]
                                               :seon.turn/opened-tx "datomic.tx"}))]
-       (is (some? (:db-after created)) (pr-str created))
-       (is (some? (:db-after opened)) (pr-str opened)))
+       (is (some? (:db-after created)) (seon.print.value/bounded-text created))
+       (is (some? (:db-after opened)) (seon.print.value/bounded-text opened)))
      (doseq [[ordinal retain?] [[0 false] [1 true]]]
        ;; Absence is the off setting: the dial admits only `true`.
        (let [changed (when retain?
@@ -231,9 +232,9 @@
          :seon.ai.attempt/ordinal ordinal
          :seon.ai/reasoning-content "A bounded provider trace."}
         (java.util.Date.))]
-         (when retain? (is (some? (:db-after changed)) (pr-str changed)))
+         (when retain? (is (some? (:db-after changed)) (seon.print.value/bounded-text changed)))
          (is (= retain? (boolean (:seon.config.ai/retain-reasoning settings))))
-         (is (nil? recorded) (pr-str recorded))))
+         (is (nil? recorded) (seon.print.value/bounded-text recorded))))
      (let [entities (db/q '[:find [(pull ?attempt [*]) ...]
                         :in $ [?id ...]
                         :where [?attempt :seon.ai.attempt/id ?id]]
@@ -279,7 +280,7 @@
                         :in $ ?id
                         :where [?a :seon.ai.attempt/id ?id]]
                      (db/db connection) (#'turn/attempt-id "usage-facts-turn" 0))]
-       (is (nil? result) (pr-str result))
+       (is (nil? result) (seon.print.value/bounded-text result))
        (is (= (ai/normalize-usage usage)
               (select-keys entity (keys (ai/normalize-usage usage)))))
        (is (= usage
@@ -318,7 +319,7 @@
                         :in $ ?id
                         :where [?a :seon.ai.attempt/id ?id]]
                      (db/db connection) (#'turn/attempt-id "usage-facts-turn" 0))]
-       (is (nil? result) (pr-str result))
+       (is (nil? result) (seon.print.value/bounded-text result))
        (is (= "deepseek-flash" (:seon.ai/model entity))
            "the attempt keeps the model identity itself, not a descriptor ref")
        (is (= (get-in entity [:seon.ai.attempt/settings :db/id])
@@ -364,8 +365,8 @@
                              {:seon.eval/renderer-fn [:db/id :seon.fn/sym]}]
                             [:seon.cluster.eval/id
                              (turn/receipt-identity "renderer-facts-turn" ordinal)])]
-           (is (nil? (:seon.cluster.eval/error evaluation)) (pr-str evaluation))
-           (is (:db-after result) (pr-str result))
+           (is (nil? (:seon.cluster.eval/error evaluation)) (seon.print.value/bounded-text evaluation))
+           (is (:db-after result) (seon.print.value/bounded-text result))
            (is (= expected (:seon.eval/renderer entity)))
            (if expected
              (do
@@ -393,8 +394,8 @@
                                [:seon.listen/attribute :seon.listen/value
                                 {:seon.listen/entity [:seon.agent/id]}]}]
                             [:seon.runtime/agent [:seon.agent/id "listener"]])]
-       (is (some? (:db-after created)) (pr-str created))
-       (is (some? (:db-after changed)) (pr-str changed))
+       (is (some? (:db-after created)) (seon.print.value/bounded-text created))
+       (is (some? (:db-after changed)) (seon.print.value/bounded-text changed))
        (is (= [{:seon.listen/attribute :seon.message/content
                 :seon.listen/entity {:seon.agent/id "listener"}
                 :seon.listen/value "ready"}]

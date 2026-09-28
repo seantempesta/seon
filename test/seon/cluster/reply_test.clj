@@ -23,7 +23,8 @@
             [sci.core :as sci]
             [seon.cluster.reply :as reply]
             [seon.schema :as schema]
-            [seon.sci.reader :as reader]))
+            [seon.sci.reader :as reader]
+            [seon.print.value]))
 
 (defn- read-back
   "Read one source string with a throwaway sci reader, as the evaluator
@@ -106,7 +107,7 @@
                   (= forms (mapv read-back sources)))))
          :seed 20260727)]
     (is (true? (:result check))
-        (str "round trip failed: " (pr-str check)))))
+        (str "round trip failed: " (seon.print.value/bounded-text check)))))
 
 (deftest fences-are-presentation-and-never-reach-the-plan
   (let [check
@@ -121,7 +122,7 @@
                     (not-any? #(str/includes? % "```") sources)))))
          :seed 20260727)]
     (is (true? (:result check))
-        (str "fenced input differed: " (pr-str check)))))
+        (str "fenced input differed: " (seon.print.value/bounded-text check)))))
 
 (deftest exact-live-fences-and-unfenced-forms-share-the-grammar
   (let [replies (edn/read-string (slurp "test/seon/reader_fences.edn"))]
@@ -129,7 +130,7 @@
             "(my.test/run)" "(dir my.test)"]
            (mapv (fn [reply]
                    (let [parsed (sources (:seon.turn/reply reply))]
-                     (is (= 1 (count parsed)) (pr-str parsed))
+                     (is (= 1 (count parsed)) (seon.print.value/bounded-text parsed))
                      (first parsed)))
                  replies))))
   (is (= ["(inc 1)" "(dec 3)" "(+ 2 3)"]
@@ -311,7 +312,7 @@
              ["#foo/bar [1 2]" 100 :seon.cluster.reply/refused-tag-error]
              ["#=(inc 1)" 100 :seon.cluster.reply/refused-tag-error]]]
       (let [result (checked text 'user bound)]
-        (is (m/validate expected result {:registry registry}) (pr-str result))
+        (is (m/validate expected result {:registry registry}) (seon.print.value/bounded-text result))
         (is (inst? (:seon.error/at result)))
         (if (= :seon.cluster.reply/unreadable-error expected)
           (is (= [text nil 7] [(:seon.cluster.reply/unreadable result) (:seon.cluster.reply/text result)
@@ -351,7 +352,7 @@
            ["Here is the plan:\n```clojure\n(+ 1 2)\n```\nThat is all."
             ["; Here is the plan:"]]]]
     (is (= expected (mapv :seon.cluster.eval/comment (reply/sources text)))
-        (str "a comment must be the prose above its form: " (pr-str text))))
+        (str "a comment must be the prose above its form: " (seon.print.value/bounded-text text))))
   (testing "and the form sources are untouched by the dropped prose"
     (is (= ["(+ 1 2)"]
            (sources "Here is the plan.\n(+ 1 2)\nThat is all."))))
@@ -478,4 +479,4 @@
                      :seon.config.eval.result/max-source (count source)
                      :seon.sci.reader/defer-auto-resolve? true}))
               (str "a plan source with no reader event settles no receipt: "
-                   (pr-str source))))))))
+                   (seon.print.value/bounded-text source))))))))

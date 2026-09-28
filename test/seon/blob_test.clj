@@ -12,7 +12,8 @@
             [seon.cluster.store :as store]
             [seon.db :as db]
             [seon.schema :as schema]
-            [seon.test-support :as support])
+            [seon.test-support :as support]
+            [seon.print.value])
   (:import [java.io ByteArrayInputStream ByteArrayOutputStream
             FileInputStream InputStream RandomAccessFile SequenceInputStream]
            [java.security MessageDigest]
@@ -124,7 +125,7 @@
                      (= (alength payload) (:seon.blob/size result))
                      (Arrays/equals payload reconstructed))))))
          :seed 1785772983)]
-    (is (:result check) (pr-str check))))
+    (is (:result check) (seon.print.value/bounded-text check))))
 
 (deftest interrupted-staging-leaves-the-store-unchanged
   (with-file-blob-store

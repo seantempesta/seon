@@ -12,12 +12,13 @@
             [seon.flow :as flow]
             [seon.id :as id]
             [seon.test-support :as support]
-            [seon.turn :as turn]))
+            [seon.turn :as turn]
+            [seon.print.value]))
 
 (defn- shown
   "Each settled evaluation's shown text; a result with no run is asserted, never read."
   [connection result]
-  (is (:seon.turn/id result) (pr-str result))
+  (is (:seon.turn/id result) (seon.print.value/bounded-text result))
   (when (:seon.turn/id result)
     ;; the run is read on the reply's own value, answered when applied
     (mapv #(or (:seon.eval/shown %) (:seon.cluster.eval/error %))
@@ -60,7 +61,7 @@
         (try
           (testing "every form of the code is one evaluation of the run, in order; nothing is read as prose"
             (let [result (code "1\n#?(:clj 2 :cljs 3)\n(str *ns*)")]
-              (is (:seon.turn/id result) (pr-str result))
+              (is (:seon.turn/id result) (seon.print.value/bounded-text result))
               (is (= ["1" "2" (pr-str (str "my.agents." agent-id))] (shown connection result)))))
           (testing "a run starts where the agent's previous run ended, as *ns* persists at a REPL (85b459845)"
             (is (= "\"seon.id\"" (last (shown connection (code "(in-ns 'seon.id)\n(str *ns*)"))))
@@ -85,7 +86,7 @@
                   settled (fn [sources]
                             (let [result (code sources)
                                   receipts (drive/run-receipts (:seon.db/db result) [(:seon.turn/id result)])]
-                              (is (not-any? :seon.cluster.eval/error receipts) (pr-str receipts))
+                              (is (not-any? :seon.cluster.eval/error receipts) (seon.print.value/bounded-text receipts))
                               (shown connection result)))]
               (is (= [(str "#'" namespace-name "/run-inc") "nil"]
                      (settled (str defn-source "\n(require '[malli.core :as m])"))))
@@ -100,7 +101,7 @@
                   before (runs)
                   refused (agent/evaluate-source! (assoc request :seon.agent/segmenter 'clojure.core/str
                                                          :seon.cluster.reply/text "1"))]
-              (is (= :seon.agent/segmenter (:seon.error/member refused)) (pr-str refused))
+              (is (= :seon.agent/segmenter (:seon.error/member refused)) (seon.print.value/bounded-text refused))
               (is (= before (runs)))))
           (testing "the answer carries the value its settlement left; the MCP observation reads it there"
             ;; eval-path cut 1 (audit M4, task branch-eval-answers-no-events):
@@ -109,7 +110,7 @@
                   shown-of #(mapv (fn [e] (or (:seon.eval/shown e) (:seon.cluster.eval/error e))) (observe %))
                   value (code "(inc 1)")
                   failed (code "(throw (ex-info \"a form's own error\" {}))")]
-              (is (some? (:seon.db/db value)) (pr-str (dissoc value :seon.db/db)))
+              (is (some? (:seon.db/db value)) (seon.print.value/bounded-text (dissoc value :seon.db/db)))
               (is (= ["2"] (shown-of value)) "a successful value, from the settlement's own value")
               (is (= [0] (mapv :seon.cluster.eval/ordinal (observe value))))
               (is (some? (:seon.cluster.eval/error (first (observe failed))))
@@ -124,16 +125,16 @@
             (code "(defn refused-caller \"Call.\" {:malli/schema [:=> [:cat :int] :int]} [x] (refused-helper x))")
             (let [result (code (str "(ns-unmap '" (str "my.agents." agent-id) " 'refused-helper)"))
                   observed (agent/run-observation result agent-id cluster-name)]
-              (is (some? (:seon.db/db result)) (pr-str (dissoc result :seon.db/db)))
+              (is (some? (:seon.db/db result)) (seon.print.value/bounded-text (dissoc result :seon.db/db)))
               (is (re-find #"surviving referrers" (str (:seon.cluster.eval/error (first observed))))
-                  (pr-str (mapv #(select-keys % [:seon.cluster.eval/ordinal :seon.cluster.eval/error]) observed)))))
+                  (seon.print.value/bounded-text (mapv #(select-keys % [:seon.cluster.eval/ordinal :seon.cluster.eval/error]) observed)))))
           (testing "a refused multi-form settlement answers its refusal beside every evaluated value (task a-refused-multi-form-settlement-returns-nothing)"
             ;; WANTED: the direct caller of an opened run keeps the refusal;
             ;; each form's value and the refusal's diagnostic are its receipts.
             (let [result (code (str "(+ 1 2)\n(ns-unmap 'my.agents." agent-id " 'refused-helper)\n(+ 3 4)"))
                   receipts (drive/run-receipts (:seon.db/db result) [(:seon.turn/id result)])]
-              (is (:seon.error/message (:seon.turn.loop/refusal result)) (pr-str (dissoc result :seon.db/db)))
-              (is (= ["3" "nil" "7"] (mapv :seon.eval/shown receipts)) (pr-str receipts))
+              (is (:seon.error/message (:seon.turn.loop/refusal result)) (seon.print.value/bounded-text (dissoc result :seon.db/db)))
+              (is (= ["3" "nil" "7"] (mapv :seon.eval/shown receipts)) (seon.print.value/bounded-text receipts))
               ;; `drive/run-receipts` selects no diagnostics, so the stored
               ;; receipts are read on the settlement's own value
               (is (= #{0 1 2} (set (db/q '[:find [?ordinal ...] :in $ ?id
@@ -147,7 +148,7 @@
             ;; the proc parked and the next ordinary run answered "awaited
             ;; channel closed" until restart (stabfix-a, 2026-09-27).
             (let [refused (code (str "(ns-unmap 'my.agents." agent-id " 'refused-helper)"))]
-              (is (:seon.turn.loop/refusal refused) (pr-str (dissoc refused :seon.db/db))))
+              (is (:seon.turn.loop/refusal refused) (seon.print.value/bounded-text (dissoc refused :seon.db/db))))
             (is (= ["3"] (shown connection (code "(+ 1 2)")))))
           (testing "a nested in-ns settles: both values return and the namespace SCI moved into exists (task a318b2d38)"
             (let [target (symbol (str "my.agents." agent-id ".nested"))
@@ -169,7 +170,7 @@
                       before (old-gen)
                       shown-values (shown connection (code "(range)\n(map inc (range))"))]
                   (is (= 2 (count shown-values)))
-                  (is (every? #(< (count %) 4000) shown-values) (pr-str shown-values))
+                  (is (every? #(< (count %) 4000) shown-values) (seon.print.value/bounded-text shown-values))
                   (is (< (- (old-gen) before) (* 256 1024 1024)) "old gen stays flat")))))
           (testing "an unbound Var's value is a value, as in Clojure: nothing walks the result to classify it"
             (let [result (code "(declare unbound-probe)\n{:u unbound-probe}")]
@@ -185,7 +186,7 @@
                                                          :my.note/agent [:seon.agent/id agent-id]
                                                          :my.note/content "written by a form"}]})))
                   receipts (drive/run-receipts (:seon.db/db result) [(:seon.turn/id result)])]
-              (is (not-any? :seon.cluster.eval/error receipts) (pr-str receipts))
+              (is (not-any? :seon.cluster.eval/error receipts) (seon.print.value/bounded-text receipts))
               (is (= (receipt-id-of result)
                      (db/q '[:find ?receipt-id . :in $ ?note-id
                              :where [?note :my.note/id ?note-id] [?note :my.note/content _ ?tx]
@@ -196,7 +197,7 @@
             ;; A renderer that throws is a later stage's failure: recorded as a
             ;; fault attributed to the run, beside the value, never a panic.
             (let [result (code "{:seon.render/ai (fn [_] (throw (ex-info \"render probe\" {}))) :probe 1}")]
-              (is (:seon.turn/id result) (pr-str result))
+              (is (:seon.turn/id result) (seon.print.value/bounded-text result))
               (is (= 1 (count (drive/run-receipts (:seon.db/db result) [(:seon.turn/id result)]))))))
           (testing "the run is written in the one transaction that settles it; submission commits nothing"
             ;; The reply is answered when its settlement is applied; its
@@ -221,7 +222,7 @@
                                                          :seon.cluster.reply/text "(loop [] (recur))"))
                   reply (:seon.agent/reply submitted)
                   requests (:seon.agent/requests (agent/armed routing agent-id))]
-              (is (:seon.turn/id submitted) (pr-str submitted))
+              (is (:seon.turn/id submitted) (seon.print.value/bounded-text submitted))
               (support/await-event! (async/go-loop []
                                       (if (zero? (count (.buf ^clojure.core.async.impl.channels.ManyToManyChannel requests)))
                                         true

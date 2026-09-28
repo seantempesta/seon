@@ -5,7 +5,8 @@
             [seon.db :as db]
             [seon.sci.eval :as sci.eval]
             [seon.sci.kernel :as kernel]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (defn- created!
   "Create `agent-id` through the canonical writer on `connection`."
@@ -117,7 +118,7 @@
                                       :seon.fn/sym (:good lazy) :seon.sci.eval/args [41]
                                       :seon.sci.eval/time-limit-ms 5000
                                       :seon.sci.admit/caps (config/result-caps config/defaults)})]
-          (is (= 42 (:seon.sci.admit/value invoked)) (pr-str (select-keys invoked [:seon.error/message])))
+          (is (= 42 (:seon.sci.admit/value invoked)) (seon.print.value/bounded-text (select-keys invoked [:seon.error/message])))
           (is (some? (recorded-refusal lazy-connection (:bad lazy)))))
         (is (= before (db/basis-t (db/db parent-connection))) "the caller's branch is unchanged")
         (is (nil? (recorded-refusal parent-connection (:bad entrance)))))

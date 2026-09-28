@@ -8,7 +8,8 @@
             [seon.schema]
             [seon.config]
             [seon.test-support]
-            [clojure.test :refer [deftest is testing]])
+            [clojure.test :refer [deftest is testing]]
+            [seon.print.value])
   (:import [java.io PushbackReader]
            [java.util.concurrent TimeUnit TimeoutException]))
 
@@ -201,7 +202,7 @@
               ((bridge-var 'read-clj-endpoint)
                (.getCanonicalPath fixture-root) "fixture")
               (catch clojure.lang.ExceptionInfo error error))]
-        (is (instance? clojure.lang.ExceptionInfo outcome) (pr-str outcome))
+        (is (instance? clojure.lang.ExceptionInfo outcome) (seon.print.value/bounded-text outcome))
         (is (= :repl-unavailable
                (:seon.dev.mcp/failure (ex-data outcome))))
         (is (= :missing
@@ -400,7 +401,7 @@
                   :mode "jvm"
                   :code "[(ns-name *ns*) (+ 40 2)]"}))
             data (result-data result)]
-        (is (not (:isError result)) (pr-str data))
+        (is (not (:isError result)) (seon.print.value/bounded-text data))
         (is (= root (:seon.dev.mcp/root data)))
         (is (= "mcp.live.chosen" (:seon.dev.mcp/namespace data)))
         (is (= "[mcp.live.chosen 42]"
@@ -622,7 +623,7 @@
                                                                (current-process-start-date))
                                                 :seon.boot/prepl-port (.getLocalPort server)))
       (let [face ((bridge-var 'runtime-observation) root cluster)]
-        (is (= cluster (:seon.dev.mcp/cluster face)) (pr-str face))
+        (is (= cluster (:seon.dev.mcp/cluster face)) (seon.print.value/bounded-text face))
         (is (#{:observed :faulted :unknown} (:seon.dev.mcp/health face)))
         (is (not-any? #(contains? face %) [:seon.dev.mcp/open-fault-count
                                             :seon.dev.mcp/replaced-root-count
@@ -713,7 +714,7 @@
         cluster (first (sort (keys instances)))
         data (result-data ((bridge-var 'execute-branch)
                                   {:root @(bridge-var 'project-root) :cluster cluster :action "list"}))]
-    (is (set? (:my.agent/roster (read-string (:seon.dev.mcp/value data)))) (pr-str data))
+    (is (set? (:my.agent/roster (read-string (:seon.dev.mcp/value data)))) (seon.print.value/bounded-text data))
     (is (not (contains? data :seon.dev.mcp/events)))))
 
 (deftest ^{:seon/tasks #{"18051e0ee3e2"}} a-run-reply-is-the-response-the-agents-context-reads
@@ -750,7 +751,7 @@
            (mapv (juxt :seon.error/message :seon.error/data) (:seon.error/chain data)))
         "each link's ex-data survives as native EDN")
     (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.error/base) data)
-        (pr-str data))
+        (seon.print.value/bounded-text data))
     (is (every? seon.error.refusal/first-party-frame?
                 (mapcat :seon.error/frames (:seon.error/chain data)))
         "no dependency or host frame is carried")))

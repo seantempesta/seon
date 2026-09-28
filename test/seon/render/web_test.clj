@@ -2004,7 +2004,7 @@ handle))}}
              ai (render/render-ai request)
              html (render/render-html request)
              html-string (hiccup/->string html)]
-         (is (string? ai) (pr-str ai))
+         (is (string? ai) (seon.print.value/bounded-text ai))
          (is (< (count ai) (count huge))
              "the AI projection is bounded by the render profile")
          ;; A cut never omits its whole subject: the prefix that fit is
@@ -2028,7 +2028,7 @@ handle))}}
                                    [::ai-bound-wide namespace-name])
                wide-ai (render/render-ai wide-request)
                wide-html (hiccup/->string (render/render-html wide-request))]
-           (is (string? wide-ai) (pr-str wide-ai))
+           (is (string? wide-ai) (seon.print.value/bounded-text wide-ai))
            (is (< (count wide-ai) (count (pr-str wide)))
                "a wide collection is cut for AI under the same profile")
            (let [shown (edn/read-string wide-ai)

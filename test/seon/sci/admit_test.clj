@@ -38,7 +38,8 @@
             [seon.render.value :as render.value]
             [seon.sci.admit :as admit]
             [seon.schema :as schema]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support]
+            [seon.print.value]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The armed boundary, as the suite supplies it
@@ -569,8 +570,8 @@
                                             :admitted admitted}))))
            offending (get-in (:admitted (peek runs)) [:seon.sci.admit/value :seon.error/offending])]
        ;; the owner's bound: 5 ms and 5 MB (measured 2.4 ms / 1.1 MB unarmed on default)
-       (is (< (apply min (map :ms runs)) 5.0) (pr-str (map :ms runs)))
-       (is (< (apply min (map :bytes runs)) 5000000) (pr-str (map :bytes runs)))
+       (is (< (apply min (map :ms runs)) 5.0) (seon.print.value/bounded-text (map :ms runs)))
+       (is (< (apply min (map :bytes runs)) 5000000) (seon.print.value/bounded-text (map :bytes runs)))
        (is (< (count (:seon.sci.admit/edn (:admitted (peek runs)))) 20000))
        (testing "each world object is its typed identity"
          (is (uuid? (get-in offending [:db :datahike/commit-id])))

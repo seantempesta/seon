@@ -3,7 +3,8 @@
             [seon.cluster.agent :as agent]
             [seon.db :as db]
             [seon.issue :as issue]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (deftest removed-notes-retract-entities-and-components-through-both-writers
   (doseq [writer [:index :adopt]]
@@ -86,7 +87,7 @@
                after (db/db connection)]
            (is (seq (:seon.issue/tests entity)) "Retention must protect a real test ref.")
            (is (seq (:seon.issue/files entity)) "Refusal must retain citation components.")
-           (is (string? (:seon.db.write.attempt/request-id result)) (pr-str result))
+           (is (string? (:seon.db.write.attempt/request-id result)) (seon.print.value/bounded-text result))
            (is (= (db/basis-t before) (db/basis-t after)))
            (is (= entity (db/pull after '[*] lookup)))
            (is (= sibling (db/pull after '[*] [:seon.issue/id "deletion-sibling"])))))))))

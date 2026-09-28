@@ -8,7 +8,8 @@
             [seon.render.ns :as sut]
             [seon.render.schema :as render.schema]
             [seon.issue :as issue]
-            [seon.test-support :as support])
+            [seon.test-support :as support]
+            [seon.print.value])
   )
 
 (deftest identity-reads-stewardship-without-an-agent-cluster-attribute
@@ -154,7 +155,7 @@
            unit (fn [lookup distance]
                   (let [value (db/pull database '[*] lookup)]
                     (assoc value :seon.db/db database :seon.render/value value :seon.render/distance distance)))]
-       (is (:seon.task/changed? indexed) (pr-str indexed))
+       (is (:seon.task/changed? indexed) (seon.print.value/bounded-text indexed))
        (testing "a task at distance 0 is its name"
          (is (= {:seon.task/id handle :seon.task/name "render-node" :seon.task/kind :function :seon.task/ns 'tn.a}
                 (sut/task-ai (unit [:seon.task/id handle] 0)))))
@@ -171,8 +172,8 @@
                       (assoc (unit [:seon.schema/key :seon.task/intent] 1)
                              :seon.render/value {:seon.schema/key :seon.task/intent
                                                  :seon.schema/definition [:string {:min 400}]}))]
-           (is (= [:string {:min 1}] (:seon.schema.usage/previous usage)) (pr-str usage))
-           (is (some #{:seon.task/task} (:seon.schema.usage/referenced-by usage)) (pr-str usage))
+           (is (= [:string {:min 1}] (:seon.schema.usage/previous usage)) (seon.print.value/bounded-text usage))
+           (is (some #{:seon.task/task} (:seon.schema.usage/referenced-by usage)) (seon.print.value/bounded-text usage))
            (is (not (contains? usage :seon.schema.usage/check))
                "the render validates nothing: a check is only the registration's record")))
        (testing "listed among others, a schema is its key and doc line as data"
@@ -185,7 +186,7 @@
                 (render.schema/render-form (unit [:seon.schema/key :seon.task/intent] 1)))))
        (testing "a stored-data check judges each entity's reconstructed value, once, at registration"
          (let [check (db/stored-value-check database :seon.task/intent [:string {:min 400}])]
-           (is (pos? (:seon.schema.usage/checked check)) (pr-str check))
+           (is (pos? (:seon.schema.usage/checked check)) (seon.print.value/bounded-text check))
            (is (= (:seon.schema.usage/checked check) (:seon.schema.usage/failing check))
                "every stored intent is shorter than 400 characters"))
          (let [form (clojure.edn/read-string

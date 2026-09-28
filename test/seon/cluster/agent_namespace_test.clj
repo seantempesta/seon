@@ -6,7 +6,8 @@
             [seon.db :as db]
             [seon.cluster.agent :as agent]
             [seon.problems :as problems]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support]
+            [seon.print.value]))
 
 (defn- found [connection]
   (problems/problems @connection
@@ -111,7 +112,7 @@
                               :seon.db/refused-read-operation 'seon.db/db)
             refusal (try (agent/assigned-to unreadable 'my.agents.alice)
                          (catch clojure.lang.ExceptionInfo error (ex-data error)))]
-        (is (true? (:seon.db/invalid-read refusal)) (pr-str refusal))
+        (is (true? (:seon.db/invalid-read refusal)) (seon.print.value/bounded-text refusal))
         (is (string? (:seon.error/message refusal)))
         (testing "steward-of: nil only when no steward, a refusal when unreadable"
           (is (= "alice" (agent/steward-of @connection 'my.agents.alice)))

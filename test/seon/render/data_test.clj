@@ -8,7 +8,8 @@
             [seon.db :as db]
             [seon.test-support :as support]
             [seon.render.data :as data]
-            [seon.schema]))
+            [seon.schema]
+            [seon.print.value]))
 
 (defn- cursor
   ([] (cursor [] 0))
@@ -32,7 +33,7 @@
                  offset (gen/one-of [gen/string-ascii (gen/return nil)])]
                 ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.render.data/cursor) (data/parse-cursor path offset)))
                :seed 202607280401)]
-    (is (true? (:result check)) (pr-str check))))
+    (is (true? (:result check)) (seon.print.value/bounded-text check))))
 
 (def ^:private nested-value
   {:agents [{:id "root" :runs [1 2 3]} {:id "b"}]

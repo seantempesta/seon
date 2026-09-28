@@ -10,7 +10,8 @@
             [seon.fs :as fs]
             [seon.id :as id]
             [seon.program :as program]
-            [seon.test-support :as test-support])
+            [seon.test-support :as test-support]
+            [seon.print.value])
   (:import [java.nio.charset StandardCharsets]
            [java.nio.file Files]
            [java.util Arrays]))
@@ -336,7 +337,7 @@
                               :my.edit/source "(defn subject [] 2)"}))
             receipt (effect-of connection 1)]
         (testing "the edit succeeded and the agent never sees writer keys"
-          (is (string? (:my.edit/after-digest edited)) (pr-str edited))
+          (is (string? (:my.edit/after-digest edited)) (seon.print.value/bounded-text edited))
           (is (nil? (:seon.effect/provenance edited))
               "write-back provenance is the writer's, not the agent's"))
         (testing "the effect refs the indexed file and the declaration it wrote"
@@ -360,7 +361,7 @@
                                    :my.edit/old-string "heading comment"
                                    :my.edit/new-string "heading note"}))
                 comment-receipt (effect-of connection 2)]
-            (is (string? (:my.edit/after-digest comment-edit)) (pr-str comment-edit))
+            (is (string? (:my.edit/after-digest comment-edit)) (seon.print.value/bounded-text comment-edit))
             (is (= (fs/relative-path (fs/source-directory) path) (get-in comment-receipt
                                 [:seon.effect/file :seon.fn.file/relative-path])))
             (is (some? (:seon.effect/form-span comment-receipt)))
@@ -413,7 +414,7 @@
                                     :my.edit/operation :replace
                                     :my.edit/source
                                     (str "(defn " declaration-name " [] 2)")}))]
-              (is (string? (:my.edit/after-digest result)) (pr-str result))
+              (is (string? (:my.edit/after-digest result)) (seon.print.value/bounded-text result))
               (recur (inc ordinal) (:my.edit/after-digest result) (next names)))))
         (is (= #{'fixture-changed/alpha 'fixture-changed/beta}
                (set (db/q '[:find [?symbol ...]
@@ -457,7 +458,7 @@
                               :my.edit/source "(defn subject [] 2)"}))]
         (is (= outside (:my.fs/path-refused refused))
             (str "the refusal must name what was missing, not collapse into "
-                 "a handler failure; got " (pr-str refused)))
+                 "a handler failure; got " (seon.print.value/bounded-text refused)))
         (is (= outside (get-in refused [:seon.error/data :my.fs/path]))
             "and it must carry the exact path it refused")
         (.delete (java.io.File. outside))

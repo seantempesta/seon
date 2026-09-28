@@ -6,7 +6,8 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [seon.repl :as repl]
-            [seon.sci.admit :as admit]))
+            [seon.sci.admit :as admit]
+            [seon.print.value]))
 
 (defn- text-nodes [node]
   (cond
@@ -22,7 +23,7 @@
                                                (gen/vector (gen/choose 0 65535))) ]
                   (= source (apply str (map second (repl/syntax-tokens source)))))
                 :seed 20260914)]
-    (is (:pass? result) (pr-str result)))
+    (is (:pass? result) (seon.print.value/bounded-text result)))
   (doseq [source ["\n```clojure\n;; café <tag>\n(+ 1 2)\n```"
                   "[\"unfinished\\\"" "\\; \\newline ; comment\n{:x -3.2}" ""]
           response [{:seon.eval/shown "[1 :two result/e3]"}
@@ -82,7 +83,7 @@
         blocks (filter vector? (tree-seq vector? seq hiccup))
         thinking (filter #(= "seon-eval-thinking" (:class (second %))) blocks)
         prompts (filter #(= "seon-eval-prompt" (:class (second %))) blocks)]
-    (is (= 1 (count thinking)) (pr-str hiccup))
+    (is (= 1 (count thinking)) (seon.print.value/bounded-text hiccup))
     (is (= ";; I should check the sum." (last (first thinking))))
     (is (= 1 (count prompts)))
     (is (= "my.agents.juniper=> (+ 1 1)" (last (first prompts)))
@@ -422,7 +423,7 @@
                                        :seon.cluster.eval/error "Divide by zero"
                                        :seon.repl/handle (admit/result-handle "e64f")
                                        :seon.eval/duration-ms 0}))]
-    (is (= "Divide by zero" (get-in reply [:seon.repl/error :seon.error/message])) (pr-str reply))
+    (is (= "Divide by zero" (get-in reply [:seon.repl/error :seon.error/message])) (seon.print.value/bounded-text reply))
     (is (not (contains? reply :seon.repl/value)))
     (is (= 0 (:seon.repl/ms reply)))))
 
@@ -439,6 +440,6 @@
                                        :seon.repl/handle (admit/result-handle "e64f")
                                        :seon.eval/duration-ms 1}))]
     (is (= "Divide by zero" (get-in reply [:seon.repl/error :seon.error/message])))
-    (is (= [:not-admitted] (mapv :seon.repl/finding (:seon.repl/findings reply))) (pr-str reply))
+    (is (= [:not-admitted] (mapv :seon.repl/finding (:seon.repl/findings reply))) (seon.print.value/bounded-text reply))
     (is (= #{'user/f} (get-in reply [:seon.repl/findings 0 :seon.eval/unadmitted])))
     (is (not (contains? reply :seon.repl/out)))))

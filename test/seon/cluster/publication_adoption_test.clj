@@ -11,7 +11,8 @@
             [seon.id :as id]
             [seon.instrument :as instrument]
             [seon.operator.runtime :as runtime]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (deftest ^{:seon.test/long "Acquire the canonical fixture before checking loaded-definition restoration; 121.3 s with fixture construction in the slice 1 fast run."
            :seon.test/long-ms 600000}
@@ -74,7 +75,7 @@
                 #(with-bindings {#'cluster/*source-progress!* (fn [phase] (swap! phases conj phase))}
                    (is (= (:seon.source/commit-id published)
                           (:seon.source/commit-id (cluster/refresh-source! root [] name))))))
-              (is (empty? @operations) (pr-str @operations))
+              (is (empty? @operations) (seon.print.value/bounded-text @operations))
               (is (some #{"development cluster converged"} @phases))
               (finally (boot/stop! (get @runtime/running-instances name instance)))))))
       (finally

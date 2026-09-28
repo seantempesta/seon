@@ -2,7 +2,8 @@
   (:require [clojure.test :refer [deftest is]]
             [seon.db :as db]
             [seon.test.runner :as runner]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (def ^:private observed (atom {}))
 
@@ -31,7 +32,7 @@
          [[:db/add [:seon.test/sym 'seon.id-test/data-shape-and-explicit-length-determine-identity]
            :seon.test/pass-count 1]])
         (support/transacted! connection [[:db.fn/call #'observe-program-write ::result-write basis]])
-        (is (string? digest) (pr-str digest))
+        (is (string? digest) (seon.print.value/bounded-text digest))
         (is (false? (::result-write @observed)) "a result write is no program write")
         (support/transacted!
          connection

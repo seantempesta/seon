@@ -138,12 +138,12 @@
            artifact (some->> digest (blob/get connection) value/read-artifact)
            whole (when (:seon.sci.admit/print-node artifact) (value/artifact-value artifact))]
        (is (some? failure) "the fixture write is refused")
-       (is (vector? committed) (pr-str committed))
+       (is (vector? committed) (seon.print.value/bounded-text committed))
        (is (= reported shown) "the stored shown text is the reporter's text")
        (is (<= (count reported) (inc (:throwable-chars @#'print.value/text-limits)))
            "the shown text is bounded by the floor")
        (is (string? digest) "the stored failure references its whole value")
-       (is (nil? (:seon.render.value/unreadable-artifact artifact)) (pr-str artifact))
+       (is (nil? (:seon.render.value/unreadable-artifact artifact)) (seon.print.value/bounded-text artifact))
        (is (= (ex-message failure) (:seon.error/message (first (:seon.error/chain whole))))
            "the whole refusal is retrievable from the stored failure as its error value")))))
 

@@ -6,7 +6,8 @@
             [seon.id :as id]
             [seon.plan :as plan]
             [seon.sci.eval :as sci.eval]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (deftest plan-writes-use-one-request-map-and-return-the-changed-item
   (support/with-database
@@ -36,7 +37,7 @@
                                       :seon.cluster.eval/source source
                                       :seon.sci.admit/caps (config/result-caps (support/effective-config))
                                       :seon.sci.eval/time-limit-ms 5000})]
-                         (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
+                         (is (nil? (:seon.cluster.eval/error result)) (seon.print.value/bounded-text result))
                          (:seon.sci.admit/value result)))
             item-id (id/id "Verify total")
             added (evaluate "(my.plan/add! {:my.plan.item/title \"Verify total\" :my.plan.item/done-when \"The query returns 90.\"})")]
@@ -124,7 +125,7 @@
                                             @connection)))
                      'my.plan/objective!))
       (let [created (evaluate "(my.plan/objective! \"Verify the totals\")")]
-        (is (= "Verify the totals" (:my.plan/objective created)) (pr-str created))
+        (is (= "Verify the totals" (:my.plan/objective created)) (seon.print.value/bounded-text created))
         (is (= [] (:my.plan/steps created))))
       (evaluate "(my.plan/add! {:my.plan.item/id \"kept\" :my.plan.item/title \"Kept\"})")
       (let [replaced (evaluate "(my.plan/objective! \"Verify the new totals\")")]

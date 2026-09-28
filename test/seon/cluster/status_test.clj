@@ -4,7 +4,8 @@
             [seon.blob :as blob]
             [seon.db :as db]
             [seon.schema :as schema]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (deftest accounting-joins-runtime-turns-and-preserves-unknown-cost
   (support/with-database
@@ -31,7 +32,7 @@
                          :seon.ai.attempt/ordinal 0 :seon.ai.attempt/at now
                          :seon.ai.usage/total-tokens 17
                          :seon.ai.attempt/usage-edn "{\"total_tokens\" 17}"}]}]}}])]
-         (is (some? (:db-after result)) (pr-str result)))
+         (is (some? (:db-after result)) (seon.print.value/bounded-text result)))
        (let [result (db/transact! connection
                   [{:db/id "datomic.tx" :db/txInstant now}
                    [:db/add [:seon.turn/id "metrics-turn"] :seon.turn/closed-tx "datomic.tx"]
@@ -39,10 +40,10 @@
                     :seon.cluster.eval/run [:seon.turn/id "metrics-turn"]
                     :seon.cluster.eval/ordinal 0 :seon.cluster.eval/at now
                     :seon.eval/shown "λ" :seon.eval/duration-ms 7}])]
-         (is (some? (:db-after result)) (pr-str result)))
+         (is (some? (:db-after result)) (seon.print.value/bounded-text result)))
        (let [entities (status/agents {:seon.db/db @connection :seon.db/connection connection})
              entity (first (filter #(= "metrics" (:seon.agent/id %)) entities))]
-         (is (vector? entities) (pr-str entities))
+         (is (vector? entities) (seon.print.value/bounded-text entities))
          (is (= 20 (:seon.cluster.status/last-turn-ms entity)))
          (is (= 1 (:seon.cluster.status/evaluations entity)))
          (is (= 7 (:seon.cluster.status/evaluation-ms entity)))
@@ -64,7 +65,7 @@
                          :seon.eval/shown "x" :seon.eval/duration-ms 99}]))
              entities (status/agents {:seon.db/db @connection :seon.db/connection connection})
              entity (first (filter #(= "metrics" (:seon.agent/id %)) entities))]
-         (is (some? (:db-after report)) (pr-str report))
+         (is (some? (:db-after report)) (seon.print.value/bounded-text report))
          (is (= 1 (:seon.cluster.status/evaluations entity)) "prior-session evaluation is excluded")
          (is (= 7 (:seon.cluster.status/evaluation-ms entity)))
          (is (= 0.125 (:seon.cluster.status/provider-cost-usd entity)))
@@ -90,8 +91,8 @@
          (is (contains? (matching {:seon.agent/id "root"}) :seon.cluster.status/root))
          (is (not (contains? (matching {:seon.agent/id "other"}) :seon.cluster.status/root)))
          (let [counts (#'status/thread-counts)]
-           (is (pos-int? (:seon.cluster.status/platform-threads counts)) (pr-str counts))
-           (is (pos-int? (:seon.cluster.status/virtual-threads counts)) (pr-str counts)))
+           (is (pos-int? (:seon.cluster.status/platform-threads counts)) (seon.print.value/bounded-text counts))
+           (is (pos-int? (:seon.cluster.status/virtual-threads counts)) (seon.print.value/bounded-text counts)))
          (finally
            (.countDown release)
            (support/await-event! finished :status-thread-finished)))))))
@@ -102,6 +103,6 @@
      (support/seed-cluster! connection "status-observation")
      (let [observation (status/snapshot {:seon.db/db @connection
                                          :seon.db/connection connection})]
-       (is (= "status-observation" (:seon.cluster/name observation)) (pr-str observation))
+       (is (= "status-observation" (:seon.cluster/name observation)) (seon.print.value/bounded-text observation))
        (is (string? (get-in observation [:seon.cluster.status/store-bytes :seon.cluster.status/unavailable-observation])))
        (is (pos-int? (:seon.cluster.status/platform-threads observation)))))))

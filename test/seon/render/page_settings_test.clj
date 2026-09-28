@@ -8,7 +8,8 @@
             [seon.render :as render]
             [seon.repl :as repl]
             [seon.sci.eval :as evaluation]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (deftest settings-without-overrides-use-the-declared-pair
   (support/with-database
@@ -18,7 +19,7 @@
                     (agent/creation-tx {:seon.agent/id "root"
                                         :seon.ns/name 'my.agents.root
                                         :seon.cluster/name "empty-settings"}))]
-       (is (:db-after created) (pr-str created)))
+       (is (:db-after created) (seon.print.value/bounded-text created)))
      (let [database @connection
            component (:seon.agent/settings
                       (db/pull database '[{:seon.agent/settings [*]}] [:seon.agent/id "root"]))
@@ -32,7 +33,7 @@
                                            :seon.render/value component :seon.render/output output
                                            ;; A component renders as its attribute's value.
                                            :seon.render.walk/attribute :seon.agent/settings})]
-           (is (= expected (:seon.render.selection/selected decision)) (pr-str decision))))))))
+           (is (= expected (:seon.render.selection/selected decision)) (seon.print.value/bounded-text decision))))))))
 
 (defn- example-forms
   "Each top-level form of one authored Example, as agent-facing source.
@@ -117,7 +118,7 @@
        ;; Turn accounting left the settings groups in `0dca8534e`:
        ;; `:my.agent/turns-left` is `:seon.wake/context-inert` and is read at
        ;; its owner on demand, never mirrored into a settings group.
-       (is (not (find values :my.agent/turns-left)) (pr-str values))
+       (is (not (find values :my.agent/turns-left)) (seon.print.value/bounded-text values))
        (is (nat-int? (:seon.sci.admit/value (evaluate "(seon.turn/turns-left)"))))
        (is (not (str/includes? (:seon.eval/shown result) "seon.render/ambiguous")))
        ;; THE CLASS: every Example my.plan authors into an agent's context
@@ -129,7 +130,7 @@
                source (example-forms example)]
          (let [evaluated (evaluate source)]
            (is (not (:seon.cluster.eval/error evaluated))
-               (str function-symbol " example " (pr-str source) ": "
+               (str function-symbol " example " (seon.print.value/bounded-text source) ": "
                     (:seon.eval/shown evaluated)))))
        (let [steps (db/q '[:find [(pull ?step [:my.plan.item/id
                                                :my.plan.item/completed-tx]) ...]
@@ -139,9 +140,9 @@
                              :where [_ :my.plan/current-step ?step]
                                     [?step :my.plan.item/id ?id]]
                            @connection)]
-         (is (< 1 (count steps)) (pr-str steps))
-         (is (some :my.plan.item/completed-tx steps) (pr-str steps))
-         (is (string? current) (pr-str steps)))
+         (is (< 1 (count steps)) (seon.print.value/bounded-text steps))
+         (is (some :my.plan.item/completed-tx steps) (seon.print.value/bounded-text steps))
+         (is (string? current) (seon.print.value/bounded-text steps)))
        (let [documentation (evaluate "(doc my.plan)")
              text (:example (:seon.sci.admit/value documentation))
              source (plan/render-plan-ai {:seon.agent/id "juniper"})]

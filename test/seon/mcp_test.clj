@@ -13,7 +13,8 @@
             [seon.print :as print]
             [seon.render :as render]
             [seon.render.value :as value]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (defn- prepl-events
   [cluster-name effective form]
@@ -61,8 +62,8 @@
                          cluster-name effective
                          (list 'do '(seon.cluster/project-next-prepl-value!) form))
                  terminal (filterv #(= :ret (:tag %)) events)]
-             (is (= 1 (count terminal)) (pr-str events))
-             (is (not (:exception (first terminal))) (pr-str events))
+             (is (= 1 (count terminal)) (seon.print.value/bounded-text events))
+             (is (not (:exception (first terminal))) (seon.print.value/bounded-text events))
              (is (= expected
                     (:seon.dev.mcp/value
                      (edn/read-string (:val (first terminal))))))))
@@ -77,7 +78,7 @@
            ;; The thrown Throwable itself reaches the projection, which keeps
            ;; it in the one error shape: class, message and ex-data per cause
            ;; link, and the root frame (task 8aba59c87b88).
-           (is (= "expected failure" (:seon.error/message result)) (pr-str result))
+           (is (= "expected failure" (:seon.error/message result)) (seon.print.value/bounded-text result))
            (is (= 'clojure.lang.ExceptionInfo (:seon.error/exception-class result)))
            (is (= [{:seon.error/throwable-class "clojure.lang.ExceptionInfo"
                     :seon.error/message "expected failure" :seon.error/data {}}]

@@ -7,7 +7,8 @@
             [malli.registry :as mr]
             [seon.schema :as schema]
             [seon.schema.internal :as internal]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support]
+            [seon.print.value]))
 
 (defn inventory
   "Derive permissive function slots and declared schema positions from a database."
@@ -58,7 +59,7 @@
      (let [findings (inventory (db/db connection))]
        (is (seq findings) "The canonical graph must actually be inspected")
        (doseq [finding (remove :seon.schema/justified? findings)]
-         (is false (pr-str (select-keys finding [:seon.schema/identity
+         (is false (seon.print.value/bounded-text (select-keys finding [:seon.schema/identity
                                                :seon.schema/path
                                                :seon.schema.advisory/kind]))))))))
 

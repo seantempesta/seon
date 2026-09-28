@@ -11,7 +11,8 @@
             [seon.flow :as flow]
             [seon.repl :as repl]
             [seon.test-support :as support]
-            [seon.turn :as turn]))
+            [seon.turn :as turn]
+            [seon.print.value]))
 
 (defn- with-rereads [f]
   (support/with-database
@@ -78,12 +79,12 @@
           (testing "preview emits nothing and changes no facts"
             (let [basis (db/basis-t @connection)
                   preview (turn/system-turn (assoc request :seon.turn/write? false))]
-              (is (vector? (:seon.turn/forms preview)) (pr-str preview))
+              (is (vector? (:seon.turn/forms preview)) (seon.print.value/bounded-text preview))
               (is (not-any? :seon.turn/text (:seon.turn/forms preview)))
               (is (= basis (db/basis-t @connection)))))
           (let [result (turn/system-turn request)
                 refreshed (last (entries connection source))]
-            (is (vector? (:seon.turn/forms result)) (pr-str result))
+            (is (vector? (:seon.turn/forms result)) (seon.print.value/bounded-text result))
             (is (nil? (:seon.turn/id result)))
             (is (not-any? :seon.turn/text (:seon.turn/forms result)))
             (is (= (mapv :seon.cluster.eval/id all-before)
@@ -101,7 +102,7 @@
                   added (last (entries connection source))
                   emission (repl/entity-emission added)
                   ctx (agent/acquire-context! handle "juniper")]
-              (is (string? (:seon.turn/id result)) (pr-str result))
+              (is (string? (:seon.turn/id result)) (seon.print.value/bounded-text result))
               (is (= 1 (count (filter :seon.turn/text (:seon.turn/forms result)))))
               (is (= 2 (count (entries connection source))))
               (is (= {:seon.repl/changes {[] {:seon.db.diff/after 39}}}
@@ -117,7 +118,7 @@
             (support/transacted! connection [[:db/add [:example/order "c1"] :example/amount 38]])
             (let [result (turn/system-turn request)
                   latest (last (entries connection source))]
-              (is (string? (:seon.turn/id result)) (pr-str result))
+              (is (string? (:seon.turn/id result)) (seon.print.value/bounded-text result))
               (is (= 3 (count (entries connection source))))
               (is (= {:seon.repl/changes {[] {:seon.db.diff/after 38}}}
                      (repl/shown-value (:seon.eval/shown latest))))
@@ -145,7 +146,7 @@
               doc-entry (last (entries connection documentation))]
           (doseq [entry failed]
             (is (some? entry))
-            (is (string? (:seon.cluster.eval/error entry)) (pr-str entry))
+            (is (string? (:seon.cluster.eval/error entry)) (seon.print.value/bounded-text entry))
             (is (not (#'turn/read-only-evaluation? @connection entry))))
           (is (seq (:seon.cluster.eval/read-evidence (second failed)))
               "the failed read genuinely observed database facts")
@@ -181,7 +182,7 @@
                              (some #(when (= documentation (:seon.cluster.eval/source %)) %) plan))))
             (is (not-any? #(some #{(:seon.cluster.eval/source %)} failures) plan)))
           (let [result (turn/system-turn request)]
-            (is (vector? (:seon.turn/forms result)) (pr-str result))
+            (is (vector? (:seon.turn/forms result)) (seon.print.value/bounded-text result))
             (is (= 2 (count (entries connection documentation))))
             (is (= (mapv :seon.cluster.eval/id failed)
                    (mapv #(-> (entries connection %) last :seon.cluster.eval/id) failures)))))))))

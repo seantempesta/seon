@@ -10,7 +10,8 @@
             [seon.issue :as issue]
             [seon.render.walk :as walk]
             [seon.schema :as schema]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 ;; The task handle is derived from its identifying aspect, exactly as ingestion derives it.
 (def ^:private handle
@@ -98,7 +99,7 @@
                cut (first (filter #(= :seon.task/_tasks (:seon.render.walk/attribute %)) (:seon.render.walk/cuts g)))]
            (is (valid? g))
            (is (= [:seon.config.eval.result/max-collection 4] [(:seon.render.walk/cut-bound cut) (:seon.render.walk/cut-count cut)])
-               (pr-str (:seon.render.walk/cuts g)))))
+               (seon.print.value/bounded-text (:seon.render.walk/cuts g)))))
        (testing "a missing root is the declared refusal naming its lookup"
          (is (= [:seon.task/id "000000000000"]
                 (:seon.render.walk/missing-lookup

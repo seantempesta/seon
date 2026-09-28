@@ -38,7 +38,8 @@
             [seon.render.web :as web]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
-            [seon.test-support :as test-support])
+            [seon.test-support :as test-support]
+            [seon.print.value])
   (:import [java.util Date]))
 
 (def ^:private test-environment
@@ -234,7 +235,7 @@
             (is (= [:seon.ns/name ending-ns]
                    (:seon.cluster.eval/ns form)))
             (is (nil? (:seon.cluster.eval/error evaluation))
-                (pr-str evaluation))
+                (seon.print.value/bounded-text evaluation))
             ;; Construct the expected name from data: a quoted qualified
             ;; symbol would declare this regression itself as a gate test for
             ;; the function it is evaluating, recursively running the fixture
@@ -484,7 +485,7 @@
        (let [opening (turn/system-turn {:seon.turn.loop/cluster cluster
                                         :seon.agent/id agent-id
                                         :seon.turn/write? true})]
-         (is (vector? (:seon.turn/forms opening)) (pr-str opening)))
+         (is (vector? (:seon.turn/forms opening)) (seon.print.value/bounded-text opening)))
        (prepare-call! cluster agent-id "settings-run-1" "settings-message-1")
        (with-render-context-proc
         cluster
@@ -706,7 +707,7 @@
                    {:seon.error/message "boom" }
                    {:my.turn/disposition :completed}]]
       (is (nil? (turn/disposition (seon.schema/handed-projection) value))
-          (str "must not read as a disposition: " (pr-str value))))))
+          (str "must not read as a disposition: " (seon.print.value/bounded-text value))))))
 
 (deftest a-clean-last-form-without-a-disposition-is-loud-terminal-evidence
   (test-support/with-database
@@ -796,7 +797,7 @@
               ;; nil means not idle or not undisposed: name the work that
               ;; keeps the agent busy, so the red says which one.
               (str "the episode verdict names the missing disposition; next work "
-                   (pr-str (turn/next-agent-work @connection {:seon.agent/id agent-id
+                   (seon.print.value/bounded-text (turn/next-agent-work @connection {:seon.agent/id agent-id
                                                               :seon.db.process/id process}))))
           ;; The undisposed-turn notice is dissolved (decision 8b of
           ;; docs/prds/steward-platform/plan/owner-decisions-2026-09-17.md,
@@ -1184,7 +1185,7 @@
                                 (let [refusal (db/transact! conn
                                                 {:tx-data [{:db/id [:seon.agent/id "agent-a"]
                                                             :seon.agent/id 42}]})]
-                                  (is (inst? (:seon.error/at refusal)) (pr-str refusal))
+                                  (is (inst? (:seon.error/at refusal)) (seon.print.value/bounded-text refusal))
                                   ;; Keep the real writer's diagnostic.
                                   refusal))
                               (publish conn staged-writes commit-roots!)))]

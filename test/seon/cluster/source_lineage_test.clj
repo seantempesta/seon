@@ -13,7 +13,8 @@
   [seon.fs :as fs]
   [seon.test.cache :as cache]
   [seon.cluster.source-test :as source-test]
-  [seon.test-support :as test-support])
+  [seon.test-support :as test-support]
+  [seon.print.value])
  ^{:line 17, :column 17}
  (:import [java.util.concurrent CountDownLatch TimeUnit]))
 
@@ -172,7 +173,7 @@
           #:seon.test-support{:event "stale source publication"})))
        (is
         (= :stale-branch-head (:type stale-result))
-        (pr-str stale-result))
+        (seon.print.value/bounded-text stale-result))
        (is
         (=
          (:seon.source/commit-id c)

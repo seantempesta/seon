@@ -9,7 +9,8 @@
             [seon.render.web-test :as web-test]
             [seon.sci.eval :as sci.eval]
             [seon.sci.kernel :as kernel]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (defn- seed-shown! [connection namespace-name shown]
   (let [report (db/transact! connection
@@ -24,7 +25,7 @@
                    :seon.cluster.eval/run [:seon.turn/id "retained-turn"]
                    :seon.cluster.eval/ordinal 0 :seon.cluster.eval/at (java.util.Date.)
                    :seon.eval/shown shown}])))]
-    (is (:db-after report) (pr-str (select-keys report [:seon.error/operation :seon.error/message])))))
+    (is (:db-after report) (seon.print.value/bounded-text (select-keys report [:seon.error/operation :seon.error/message])))))
 
 (defn- declare-subject!
   "Fixture A's declared subject, whose AI pair names its namespace-ai renderer."
@@ -38,7 +39,7 @@
                  [(support/revision (db/db connection)
                                     [:seon.fn/sym 'seon.render-simplification.fixture-a/namespace-ai]
                                     {:seon.fn/source (pr-str form)})])]
-    (is (:db-after report) (pr-str (select-keys report [:seon.error/operation :seon.error/message]))))
+    (is (:db-after report) (seon.print.value/bounded-text (select-keys report [:seon.error/operation :seon.error/message]))))
   (sci.eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
                      :seon.schema/projection (kernel/context-projection ctx)})
   ;; The indexed fixture is compiled core; install the same authored form in
@@ -95,7 +96,7 @@
          (is (zero? checks) "equal committed wrappers must not replay reads")
          (let [report (db/transact! connection [[:db/add [:seon.cluster.eval/id "retained-shown"]
                                                 :seon.eval/shown "two"]])]
-           (is (:db-after report) (pr-str (select-keys report [:seon.error/operation :seon.error/message]))))
+           (is (:db-after report) (seon.print.value/bounded-text (select-keys report [:seon.error/operation :seon.error/message]))))
          (let [[shown checks] (checked #(render/render-call (request)))]
            (is (= "two" shown))
            (is (pos? checks) "a changed database still validates dependencies"))
@@ -169,7 +170,7 @@
            snapshot @(:seon.sci.kernel/program-snapshot ctx)
            namespace-entity (db/pull (db/db connection) [:seon.ns/source]
                                      [:seon.ns/name 'seon.schedule])]
-       (is (string? (:seon.cluster.prompt/text before)) (pr-str before))
+       (is (string? (:seon.cluster.prompt/text before)) (seon.print.value/bounded-text before))
        (is (= 2 calls) "both saved evaluations use the real SCI render pair")
        (is (string? (:seon.ns/source namespace-entity)))
        (is (:db-after

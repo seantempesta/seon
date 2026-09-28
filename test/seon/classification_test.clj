@@ -12,7 +12,8 @@
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
             [sci.core :as sci]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support]
+            [seon.print.value]))
 
 (deftest dial-membership-and-request-routes-accrete-from-declarations
   (test-support/with-database
@@ -63,7 +64,7 @@
       (let [ctx (sci.eval/build-base-ctx (seon.schema/handed-projection))
             acquired (sci.eval/acquire! {:seon.sci.eval/ctx ctx
                                         :seon.db/db @connection})]
-        (is (map? acquired) (pr-str acquired))
+        (is (map? acquired) (seon.print.value/bounded-text acquired))
         (is (not (contains? (set (program/base-context-injected-symbols (seon.schema/handed-projection)))
                             'my.turn/complete)))
         (is (= {:my.turn/disposition :completed :my.turn/result "done"}
@@ -90,6 +91,6 @@
                         :seon.schema.admission/source :core
                         :seon.fn/ns [:seon.ns/name 'my.impostor]
                         :seon.fn/spec "[:=> [:cat] :int]"}])]
-          (is (some? (:db-after report)) (pr-str report)))
+          (is (some? (:db-after report)) (seon.print.value/bounded-text report)))
         (is (= (conj before 'sample.relevant)
                (set (instruction/toolkit-namespaces @connection))))))))

@@ -22,7 +22,8 @@
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.internal :as schema.internal]
             [seon.test-support :as test-support]
-            [seon.turn :as turn]))
+            [seon.turn :as turn]
+            [seon.print.value]))
 
 (deftest preparation-preserves-loaded-var-schema-references
   (test-support/with-database
@@ -343,7 +344,7 @@
                  structural (m/schema (into [:map] entries)
                                       (:seon.schema.projection/compile-options projection))
                  _ (is (m/validate structural entity)
-                       (pr-str {:schema schema-key
+                       (seon.print.value/bounded-text {:schema schema-key
                                 :errors (mapv :in (:errors (m/explain structural entity)))}))]
              ;; Reference grammar is independent of whole-parent count and domain
              ;; constraints. Complete owning values are proved separately through
@@ -373,7 +374,7 @@
                ids (if many? (map :db/id value) [(:db/id value)])
                expected (set (map :v (seon.db/datoms database :eavt entity attribute)))]
            (is (if many? (vector? value) (map? value))
-               (str attribute " " (pr-str (select-keys pulled [:seon.error/message :seon.error/data]))))
+               (str attribute " " (seon.print.value/bounded-text (select-keys pulled [:seon.error/message :seon.error/data]))))
            (is (and (seq ids) (every? expected ids))
                (str "Pulled ids come from the actual relation: " attribute))))))))
 
@@ -412,13 +413,13 @@
          (testing (name scenario)
            (let [form (schema/pulled-form-in projection schema-key selector)
                  value (seon.db/pull database selector entity)]
-             (is (vector? form) (pr-str form))
+             (is (vector? form) (seon.print.value/bounded-text form))
              (is (m/validate
                   (m/schema form
                             {:registry
                              (:seon.schema.projection/registry projection)})
                   value)
-                 (pr-str {:selector selector :form form :value value})))))
+                 (seon.print.value/bounded-text {:selector selector :form form :value value})))))
        (let [selector (get-in scenarios [:scalar 2])
              form (schema/pulled-form-in projection :seon.test/test selector)
              validator
@@ -523,7 +524,7 @@
        form)
      (schema/registered-schemas))
     (is (empty? @missing)
-        (str "predicate schemas without :error/message: " (pr-str @missing)))))
+        (str "predicate schemas without :error/message: " (seon.print.value/bounded-text @missing)))))
 
 (deftest canonical-definition-keeps-admitted-predicate-symbols
   (let [definition
@@ -556,7 +557,7 @@
   (let [refused (try (schema/canonical-definition [:=> [:cat :int]]) nil
                      (catch clojure.lang.ExceptionInfo e (ex-data e)))]
     (is (= :seon.schema/missing-output-schema
-           (:seon.schema/noncanonical-definition refused)) (pr-str refused))
+           (:seon.schema/noncanonical-definition refused)) (seon.print.value/bounded-text refused))
     (is (= [:=> [:cat :int]] (:seon.schema/value refused)))
     (is (str/includes? (:seon.error/message refused) "declares no output schema")))
   (testing "a complete function schema, properties included, passes"
@@ -654,7 +655,7 @@
                  (future ((side projection-b value-b value-a :b)))])]
     (is (empty? violations)
         (str "a projection answered with another projection's compiled "
-             "validator: " (pr-str (vec (take 5 violations)))))
+             "validator: " (seon.print.value/bounded-text (vec (take 5 violations)))))
     (testing "the compiled state is on the projection, not in a shared slot"
       (is (some? (:seon.schema.projection/compiled projection-a)))
       (is (not (identical? (:seon.schema.projection/compiled projection-a)
@@ -1824,12 +1825,12 @@
              (verdict #(schema/projection-with-schema
                         base ::nilable-candidate form
                         {:seon.schema.admission/source :agent})))
-          (str "admission " (pr-str form)))
+          (str "admission " (seon.print.value/bounded-text form)))
       (is (= :admitted
              (verdict #(schema/build-projection population {}))
              (verdict #(schema/build-projection
                         population {} {:seon.schema/projection base})))
-          (str "an existing population builds " (pr-str form))))))
+          (str "an existing population builds " (seon.print.value/bounded-text form))))))
 
 (deftest equal-inputs-answer-the-built-projection
   ;; A packaged build cost ~390 ms and ~570 MB allocated, and callers asked
@@ -1974,7 +1975,7 @@
                entity (first (schema/canonical-schema-entities built {schema-key definition}))
                basis (:max-tx @connection)
                refusal (seon.db/transact! connection [entity])]
-           (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
+           (is (string? (:seon.db.write.attempt/request-id refusal)) (seon.print.value/bounded-text refusal))
            (is (= renderer (get-in refusal [:seon.error/data :seon.render/function]))
                "the renderer with no declared contract is named by the admission refusal")
            (is (= basis (:max-tx @connection)) "nothing was written")))))))

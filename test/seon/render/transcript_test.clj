@@ -24,7 +24,8 @@
             [seon.render.walk :as walk]
             [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (def ^:private property-seed 2026073104)
 (def ^:private agent-id "transcript-agent")
@@ -325,7 +326,7 @@
     ;; interleaving is derived from; if two fixture transactions landed in
     ;; one millisecond, say so here rather than mis-order silently.
     (is (apply < (map #(.getTime ^java.util.Date %) instants))
-        (str "fixture transactions shared an instant: " (pr-str instants)))
+        (str "fixture transactions shared an instant: " (seon.print.value/bounded-text instants)))
     (let [[_outside peer sent decline self] instants]
       (support/transacted!
        connection
@@ -487,7 +488,7 @@
                             :seon.render/value ai
                             :seon.render/profile tight
                             :seon.render.call/id [::transcript-cut agent-id]))]
-            (is (string? cut) (pr-str cut))
+            (is (string? cut) (seon.print.value/bounded-text cut))
             (is (< (count cut) (count ai))
                 "the AI projection is bounded by the render profile")
             ;; ONE CUT FACE (one-render-path §3e): the characters that fit,
@@ -1238,7 +1239,7 @@
                                           prompt-entries))
                responses (keep :seon.render.history/printed-value stored-entries)]
            (is (:db-after committed)
-               (pr-str (select-keys committed [:seon.error/operation
+               (seon.print.value/bounded-text (select-keys committed [:seon.error/operation
                                                :seon.error/message])))
            (is (= 6 (count outcomes)) "six forms, six evaluations")
 
@@ -1252,8 +1253,8 @@
                (is (= page stored)
                    (str "form " ordinal
                         " renders differently in memory and from the store"
-                        "\n  page:   " (pr-str page)
-                        "\n  stored: " (pr-str stored))))
+                        "\n  page:   " (seon.print.value/bounded-text page)
+                        "\n  stored: " (seon.print.value/bounded-text stored))))
              (doseq [entry-bytes stored-bytes]
                (is (str/includes? prompt-text entry-bytes)
                    (str "the prompt must carry these bytes verbatim:\n"
@@ -1297,7 +1298,7 @@
              (is (seq responses))
              (is (every? #(str/includes? % ":ms ") responses)
                  (str "responses without :ms — "
-                      (pr-str (remove #(str/includes? % ":ms ") responses)))))
+                      (seon.print.value/bounded-text (remove #(str/includes? % ":ms ") responses)))))
 
            (testing "an error carries :error and never a value beside it"
              (let [failure (last stored-bytes)]
@@ -1410,7 +1411,7 @@
                               {:seon.error/layer ::evaluation
                                :seon.error/operation `core-fault!
                                :seon.db.process/id "transcript-test"})]
-    (is (true? (:seon.fault/committed? receipt)) (pr-str receipt))))
+    (is (true? (:seon.fault/committed? receipt)) (seon.print.value/bounded-text receipt))))
 
 (defn- settled-evaluation!
   "Settle one-evaluation run `run-id` of the fixture agent as the settlement
@@ -1499,14 +1500,14 @@
                                             :seon.error/operation `copy-probe
                                             :seon.db.process/id "transcript-test"
                                             :seon.agent/id "worker"}))]
-               (is (true? (:seon.fault/committed? receipt)) (pr-str receipt)))
+               (is (true? (:seon.fault/committed? receipt)) (seon.print.value/bounded-text receipt)))
              (settled-evaluation! cluster "cluster-copy-1" 1)
              ;; each settlement is its own one-evaluation run (ordinal 0,
              ;; 6afc9415e), so entries are keyed by their form
              (let [responses (into {} (map (juxt :seon.render.history/form :seon.render.history/printed-value))
                                    (transcript/history-entries (unit cluster)))]
                (is (= #{"(identity 0)" "(identity 1)"} (set (keys responses))) "each entry names its evaluation")
-               (is (str/includes? (str (get responses "(identity 1)")) "raised on the worker's branch") (pr-str responses))
+               (is (str/includes? (str (get responses "(identity 1)")) "raised on the worker's branch") (seon.print.value/bounded-text responses))
                (is (str/includes? (str (get responses "(identity 1)")) (str origin)) "the copy names its origin branch")
                (is (not (str/includes? (str (get responses "(identity 0)")) "raised on the worker's branch"))))
              (finally

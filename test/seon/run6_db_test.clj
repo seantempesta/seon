@@ -3,7 +3,8 @@
             [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
             [seon.schema :as schema]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 ; Exact stored run-6 source, including whitespace, read from default on 2026-09-15.
 (def run6-forms
@@ -24,7 +25,7 @@
          (let [failure (support/refusal-data call)]
            (is ((schema/projection-validator (schema/handed-projection)
                                              :seon.instrument/contract-error) failure)
-               (pr-str failure))
+               (seon.print.value/bounded-text failure))
            (is (str/includes? (:seon.error/message failure) ":in"))
            (is (str/includes? (:seon.error/message failure) "(seon.db/q query input ...)"))
            (is (str/includes? (:seon.error/message failure) "(seon.db/q database query input ...)"))))
@@ -36,7 +37,7 @@
            (let [failure (support/refusal-data call)]
              (is ((schema/projection-validator (schema/handed-projection)
                                                :seon.instrument/contract-error) failure)
-                 (pr-str failure)))))
+                 (seon.print.value/bounded-text failure)))))
        (is (= #{["root"]}
               (db/q '[:find ?id :in [?id ...]] ["root"])))
        (is (= (db/q '[:find ?id :where [_ :seon.agent/id ?id]])
@@ -73,4 +74,4 @@
              (is ((schema/projection-validator (schema/handed-projection)
                                                (or error-schema :seon.instrument/contract-error))
                   failure)
-                 (pr-str failure)))))))))
+                 (seon.print.value/bounded-text failure)))))))))

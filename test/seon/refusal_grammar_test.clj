@@ -8,7 +8,8 @@
             [seon.error :as error]
             [seon.instrument :as instrument]
             [seon.schema :as schema]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (deftest reference-expectations-describe-the-schema-not-the-failure-category
   (let [check (m/schema :seon.cluster.eval/run
@@ -55,7 +56,7 @@
                        {:seon.error/problem (first (:errors (m/explain schema value)))
                         :seon.error/path []
                         :seon.error/argument "argument 0"})]
-      (is (= expected (:seon.error/expected-description description)) (pr-str schema))
+      (is (= expected (:seon.error/expected-description description)) (seon.print.value/bounded-text schema))
       (is (not (str/includes? (:seon.error/fix description) "Convert the sequence with vec"))
           "a vector over its bound is not told to become a vector"))))
 
@@ -89,13 +90,13 @@
                                     [{:seon.fn/sym "seon.refusal-grammar-test/incomplete"
                                       :seon.fn/doc "incomplete"}])]
           (is (string? (:seon.db.write.attempt/request-id refusal))
-              (pr-str refusal))
+              (seon.print.value/bounded-text refusal))
           ;; The refusal names its first problem as a sentence; concrete enum
           ;; choices are proven below on the enum itself (the fixture's
           ;; admission-source enum is no longer its first problem).
           (is (str/includes? (:seon.error/message refusal)
                              "expected a namespaced symbol, got a string")
-              (pr-str refusal))
+              (seon.print.value/bounded-text refusal))
           (is (= "either :core or :agent"
                  (:seon.error/expected-description
                   (error/explain-problem
@@ -104,7 +105,7 @@
                     :seon.error/argument "transaction data"}))))
           (is (not (str/includes? (:seon.error/message refusal)
                                   "with a value satisfying missing required key"))
-              (pr-str refusal)))
+              (seon.print.value/bounded-text refusal)))
         (let [compiled (m/schema [:=> [:cat [:= 7]] :int]
                                 {::m/function-checker mg/function-checker
                                  ::mg/=>iterations 1})
@@ -119,13 +120,13 @@
           (is (= [7] (:seon.error/input description)))
           (is (= :int (:seon.error/expected description)))
           (is (= "wrong" (:seon.error/offending description)))
-          (is (= [7] (get-in text [:seon.error/problems 0 :seon.error/input])) (pr-str text))
-          (is (not (str/includes? (pr-str text) "AFunction")) (pr-str text)))
+          (is (= [7] (get-in text [:seon.error/problems 0 :seon.error/input])) (seon.print.value/bounded-text text))
+          (is (not (str/includes? (pr-str text) "AFunction")) (seon.print.value/bounded-text text)))
         (let [wrapped (instrument/wrap-interpreted
                        'example/guard
                        "[:=> [:cat :int] :int [:fn {:error/message \"arguments and result must agree\"} clojure.core/map?]]"
                        (schema/handed-projection) (config/result-caps config/defaults) identity)
               refusal (support/refusal-data #(wrapped 7))
               text (error/render-ai (assoc unit :seon.render/value refusal))]
-          (is (= [7] (get-in text [:seon.error/problems 0 :seon.error/input])) (pr-str text))
-          (is (= :int (get-in text [:seon.error/problems 0 :seon.error/result-contract])) (pr-str text)))))))
+          (is (= [7] (get-in text [:seon.error/problems 0 :seon.error/input])) (seon.print.value/bounded-text text))
+          (is (= :int (get-in text [:seon.error/problems 0 :seon.error/result-contract])) (seon.print.value/bounded-text text)))))))

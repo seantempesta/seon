@@ -13,7 +13,8 @@
             [seon.error.refusal :as error.refusal]
             [seon.instrument :as instrument]
             [seon.schema :as schema]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support]
+            [seon.print.value]))
 
 (def ^:private entries [#'error.refusal/refusal #'error/refusal])
 
@@ -60,10 +61,10 @@
             (doseq [[value declared-schema] [[base nil]
                                    [domain :seon.agent/error]]]
               (is ((schema/projection-validator projection :seon.error/base) value)
-                  (pr-str value))
+                  (seon.print.value/bounded-text value))
               (when declared-schema
                 (is ((seon.schema/projection-validator projection declared-schema) value)
-                    (pr-str value)))))
+                    (seon.print.value/bounded-text value)))))
           (doseq [entry entries]
             (testing (str entry " carries no data anywhere in the chain")
               (is (nil? (@entry (RuntimeException. "no data"))))
@@ -198,14 +199,14 @@
       (is (instance? NullPointerException failure))
       (is (= "clojure.string$replace" (.getClassName ^StackTraceElement (first (.getStackTrace ^Throwable failure))))
           "the innermost frame is the dependency's")
-      (is (str/starts-with? (str (first frame)) "user$eval") (pr-str frame))
+      (is (str/starts-with? (str (first frame)) "user$eval") (seon.print.value/bounded-text frame))
       (is (error.refusal/first-party-frame? frame))))
   (testing "a dependency, the host and the fault machinery are not first party"
     (doseq [frame '[[clojure.string$replace invokeStatic "string.clj" 101]
                     [malli.core$_fail_BANG_ invokeStatic "core.cljc" 138]
                     [clojure.lang.Util runtimeException "Util.java" 221]
                     [seon.error.refusal$chain invokeStatic "refusal.clj" 1]]]
-      (is (not (error.refusal/first-party-frame? frame)) (pr-str frame))))
+      (is (not (error.refusal/first-party-frame? frame)) (seon.print.value/bounded-text frame))))
   (testing "the prepared-call closure is contract machinery, not the caller"
     (let [failure (framed (ex-info "refused" {})
                           [["seon.call_preparation$preparing$fn__6652" "doInvoke" "call_preparation.clj" 1033]

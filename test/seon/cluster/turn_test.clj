@@ -37,7 +37,8 @@
             [seon.sci.eval :as sci.eval]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.test-support :as test-support])
+            [seon.test-support :as test-support]
+            [seon.print.value])
   (:import [com.sun.net.httpserver HttpExchange HttpHandler HttpServer]
            [java.net InetSocketAddress]
            [java.util Date]))
@@ -431,7 +432,7 @@
                 reports (drive-agent! cluster "agent-a" 4)
                 elapsed-ms (/ (- (System/nanoTime) started) 1e6)]
             (is (= [:open :call] (mapv :seon.turn.work/situation reports))
-                (pr-str (mapv #(dissoc % :seon.turn.loop/cluster) reports)))
+                (seon.print.value/bounded-text (mapv #(dissoc % :seon.turn.loop/cluster) reports)))
             (is (= :closed (:seon.turn.loop/outcome (last reports))))
             (is (= 1 (count @ledger)) "one provider request, no refused re-open")
             (is (= ["42"] (keep #(when (= "(+ 40 2)" (str/trim (:seon.cluster.eval/source %)))
@@ -457,13 +458,13 @@
                            (test-support/environment "turn-test" connection))
             panic (try (drive-agent! cluster "agent-a" 4) nil
                        (catch clojure.lang.ExceptionInfo failure failure))]
-        (is (= 1 (:seon.config.run/max-episode-runs configured)) (pr-str configured))
+        (is (= 1 (:seon.config.run/max-episode-runs configured)) (seon.print.value/bounded-text configured))
         (is (true? (get-in (ex-data panic) [:seon.fault/recorded :seon.fault/committed?]))
             "the fault is stored before the panic")
         (is (some? panic) "the pass that spends the last run throws under :panic")
         (is (str/includes? (str (ex-message panic)) "seon.run/complete") (ex-message panic))
         (is (= 'seon.turn/turn (get-in (ex-data panic) [:seon.fault/recorded :seon.error/operation]))
-            (pr-str (ex-data panic)))
+            (seon.print.value/bounded-text (ex-data panic)))
         (is (nil? (turn/next-agent-work @connection (request connection)))
             "the bound still defers every later opening")))))
 
@@ -581,7 +582,7 @@
           (is (every? #(and (nil? (:seon.cluster.eval/error %))
                             (nil? (:seon.cluster.eval/interrupted-at %)))
                       evaluations)
-              (pr-str evaluations))
+              (seon.print.value/bounded-text evaluations))
           (is (< (:max-tx before) (:max-tx after)) "the turn committed")
           (is (not-any? :seon.fn/calls evaluations)
               "a settled receipt carries no static call edge")
@@ -1275,7 +1276,7 @@
           (let [admitted (db/pull @connection '[*]
                                  [:seon.fn/sym 'seon.eval.drive/uuid-text])]
             (is (= :agent (:seon.schema.admission/source admitted))
-                (pr-str (mapv #(select-keys % [:seon.cluster.eval/source
+                (seon.print.value/bounded-text (mapv #(select-keys % [:seon.cluster.eval/source
                                                :seon.cluster.eval/error
                                                :seon.eval/shown])
                               (agent-evaluations @connection))))
@@ -1770,7 +1771,7 @@
                       _ (settled! handle state)
                       database (db/db connection)
                       evaluation (first (agent-evaluations database))]
-                  (is (int? (:db/id evaluation)) (pr-str report))
+                  (is (int? (:db/id evaluation)) (seon.print.value/bounded-text report))
                   (is (= reply-text (:seon.cluster.eval/source evaluation)))
                   (is (str/includes? (or (:seon.cluster.eval/error evaluation) "")
                                      "no form"))
@@ -2854,7 +2855,7 @@
     (is (every? (fn [[enum-key member]]
                   (contains? (get declared enum-key) member))
                 used)
-        (pr-str used))))
+        (seon.print.value/bounded-text used))))
 
 (deftest generated-membership-failure-never-advances-the-run-to-call
   (with-cluster
@@ -3321,7 +3322,7 @@
                      "s on a thread carrying no ambient projection"))
             (let [report (deref outcome 0 ::never-delivered)]
               (is (not (instance? Throwable report))
-                  (str "the turn threw on a bare thread: " (pr-str report)))
+                  (str "the turn threw on a bare thread: " (seon.print.value/bounded-text report)))
               (is (= :open (:seon.turn.work/situation report))
                   "the pass ran the situation the work derived"))
             (is (zero? @derivations)
@@ -3346,7 +3347,7 @@
                             :seon.turn/opened-tx "datomic.tx"
                             :seon.turn/starting-ns [:seon.ns/name 'my.agents.agent-a]
                             :seon.turn/trigger [:seon.message/id "m-1"]})))]
-        (is (some? (:db-after seeded)) (pr-str (:seon.db.write.attempt/request-id seeded)))
+        (is (some? (:db-after seeded)) (seon.print.value/bounded-text (:seon.db.write.attempt/request-id seeded)))
         (when (:seon.db.write.attempt/request-id seeded) (throw (ex-info "Budget fixture refused" seeded)))
         (is (= 0 (turn/episode-runs (db/db connection) "agent-a")))
         (is (= 1 (turn/turns-left (db/db connection) "agent-a")))

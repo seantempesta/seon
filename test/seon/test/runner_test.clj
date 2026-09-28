@@ -11,7 +11,8 @@
             [seon.schema :as schema]
             [seon.test.runner :as runner]
             [seon.test-runner-failure-fixture]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support]
+            [seon.print.value]))
 
 (deftest assertion-report-uses-bounded-value-renderer
   (let [ctx (sci/init {:namespaces
@@ -167,7 +168,7 @@
                                        (when-let [s (:seon.test/sym entity)]
                                          [s entity])))
                             entities)]
-        (is (= 2 (count by-symbol)) (pr-str (keys by-symbol)))
+        (is (= 2 (count by-symbol)) (seon.print.value/bounded-text (keys by-symbol)))
         (is (= {:seon.test/long namespace-reason :seon.test/long-ms 600000}
                (select-keys (get by-symbol (symbol (str namespace-name) "inherits"))
                             [:seon.test/long :seon.test/long-ms]))
@@ -264,7 +265,7 @@
           (let [report (runner/restore-live-cluster-schema! before)
                 entity (first report)
                 forms (:seon.schema.projection/forms (:seon.schema/projection @state))]
-            (is (= 1 (count report)) (pr-str report))
+            (is (= 1 (count report)) (seon.print.value/bounded-text report))
             (is (= "restore-probe" (:seon.cluster/name entity)))
             (is (not (contains? forms retracted))
                 "the declaration its own writer retracted STAYS retracted")
@@ -296,7 +297,7 @@
                assoc leaked [:string {:seon.db/identity true}])
         (let [report (runner/restore-live-cluster-schema! before)
               entity (first report)]
-          (is (= 1 (count report)) (pr-str report))
+          (is (= 1 (count report)) (seon.print.value/bounded-text report))
           (is (= [(str leaked)] (:seon.test.runner/drift-added entity))
               "the leaked key is named, not merely counted")
           (is (nil? (:seon.test.runner/committed-removed entity)))

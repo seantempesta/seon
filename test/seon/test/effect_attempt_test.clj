@@ -2,7 +2,8 @@
   "An agent-authored capability stub crosses the real effect path in a test attempt (design §2c)."
   (:require [clojure.test :refer [deftest is]] [seon.config :as config] [seon.db :as db]
             [seon.program :as program] [seon.sci.eval :as sci.eval] [seon.test :as sut]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (defn- admit!
   "Evaluate `source` in `my.catalog` as an agent does and write its declaration entity."
@@ -14,7 +15,7 @@
                                                    :seon.sci.admit/caps (config/result-caps config/defaults)
                                                    :seon.sci.eval/time-limit-ms 5000})))
                     ::admitted)]
-    (is (nil? (:seon.cluster.eval/error evaluation)) (pr-str evaluation))
+    (is (nil? (:seon.cluster.eval/error evaluation)) (seon.print.value/bounded-text evaluation))
     (support/transacted! connection [(program/declaration-row (db/carried-projection (db/db connection))
                                                               (:seon.program/row evaluation) :all :agent)])))
 

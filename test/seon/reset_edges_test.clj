@@ -15,7 +15,8 @@
             [seon.sci.eval :as evaluation]
             [seon.fn :as functions]
             [seon.program :as program]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (deftest named-edges-refuse-deletion-until-the-final-callers-are-repaired
   (support/with-database
@@ -31,7 +32,7 @@
            basis (db/basis-t database)
            refusal (db/transact! connection [[:db/retractEntity [:seon.fn/sym target]]])]
        (is (seq callers) "The real indexed identity must have live referrers.")
-       (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
+       (is (string? (:seon.db.write.attempt/request-id refusal)) (seon.print.value/bounded-text refusal))
        (is (= (count callers)
               (count (:seon.program/referrers refusal))))
        (is (= basis (db/basis-t (db/db connection))))
@@ -53,7 +54,7 @@
                            [[:db/add entity :seon.fn/sym 'seon.turn/renamed-open?]]]]
          (let [refusal (db/transact! connection operations)
                referrers (:seon.program/referrers refusal)]
-           (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
+           (is (string? (:seon.db.write.attempt/request-id refusal)) (seon.print.value/bounded-text refusal))
            (is (seq referrers) "The refusal names the surviving callers, not just the missing identity.")
            (is (every? #(= target (:seon.program/subject %)) referrers))
            (is (= basis (db/basis-t (db/db connection))))))))))
@@ -81,7 +82,7 @@
        (is (= 64 (count (:seon.program/analyzed-source-digest entity))))
        (doseq [attribute [:seon.program/analyzed-source-digest :seon.fn/file]]
          (let [refusal (db/transact! connection [[:db.fn/retractAttribute target attribute]])]
-           (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
+           (is (string? (:seon.db.write.attempt/request-id refusal)) (seon.print.value/bounded-text refusal))
            (is (= basis (db/basis-t (db/db connection))))))))))
 
 (deftest an-agent-definition-with-only-historical-reach-deletes
@@ -127,7 +128,7 @@
                                (get-in installed [attribute :db/cardinality])))]
              [schema-key attribute])]
        (is (seq stored))
-       (is (empty? violations) (pr-str violations))
+       (is (empty? violations) (seon.print.value/bounded-text violations))
        (doseq [attribute [:seon.fn/calls :seon.fn/references :seon.test/reach]]
          (is (= :db.type/symbol (get-in installed [attribute :db/valueType])))
          (is (true? (get-in installed [attribute :db/index]))))
@@ -150,10 +151,10 @@
              refusal (db/transact! connection [[:db/retractEntity [identity-attribute target]]])
              referrers (:seon.program/referrers refusal)]
          (is (seq expected))
-         (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
+         (is (string? (:seon.db.write.attempt/request-id refusal)) (seon.print.value/bounded-text refusal))
          (is (= (set expected)
                 (set (map (juxt :db/id :seon.program/relation) referrers)))
-             (pr-str refusal))
+             (seon.print.value/bounded-text refusal))
          (is (every? (comp seq :seon.program/referrer) referrers))
          (is (= (db/basis-t database) (db/basis-t (db/db connection))))
          (prn {:seon.program/subject target :seon.program/referrer-count (count referrers)}))))))
@@ -173,7 +174,7 @@
                     :seon.sci.admit/caps (config/result-caps decisions)
                     :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms decisions)})
            refusal (:seon.sci.admit/value result)]
-       (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str result))
+       (is (string? (:seon.db.write.attempt/request-id refusal)) (seon.print.value/bounded-text result))
        (is (seq (:seon.program/referrers refusal)))
        (is (= (db/basis-t database) (db/basis-t (db/db connection))))))))
 
@@ -215,7 +216,7 @@
                             {:seon.program/rows changed}))]
              (is (= :full-rebuild (:seon.fn.change/action plan)))
              (is (= :seon.cluster.source/source-deletion-refused (:seon.cluster.source/rule refusal))
-                 (pr-str refusal))
+                 (seon.print.value/bounded-text refusal))
              (is (some #(= 'reset.publication.caller/caller
                            (get-in % [:seon.program/referrer :seon.fn/sym]))
                        (:seon.program/referrers refusal)))
@@ -246,7 +247,7 @@
        (is (= basis (db/basis-t (db/db connection))))
        (is (true? (agent/open? (db/db connection) agent-id)))
        (let [result (agent/archive! connection agent-id)]
-         (is (some? (:db-after result)) (pr-str result)))
+         (is (some? (:db-after result)) (seon.print.value/bounded-text result)))
        (is (true? (agent/archived? (db/db connection) agent-id)))
        (is (false? (agent/open? (db/db connection) agent-id)))
        (is (= before (db/pull (db/db connection) selector lookup)))))))
@@ -366,7 +367,7 @@
      (let [target 'seon.fs.jvm/write
            refusal (db/transact! connection [[:db/retractEntity [:seon.fn/sym target]]])
            referrers (:seon.program/referrers refusal)]
-       (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
+       (is (string? (:seon.db.write.attempt/request-id refusal)) (seon.print.value/bounded-text refusal))
        (is (some #(and (= target (:seon.program/subject %))
                        (= :seon.effect/capability (:seon.program/relation %))
                        (= 'my.fs/write! (get-in % [:seon.program/referrer :seon.fn/sym])))

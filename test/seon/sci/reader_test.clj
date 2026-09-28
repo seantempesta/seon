@@ -11,7 +11,8 @@
             [seon.sci.eval :as eval]
             [seon.sci.reader :as reader]
             [seon.schema :as schema]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (defn- source-files
   []
@@ -479,7 +480,7 @@
            ["(message/user \"hi\")\n]" [:form :error]]
            ["(+ 1 2))" [:form :error]]
            ["(let [x 1]\n(f x)\n}" [:error :form :error]]]]
-    (is (= expected (read-kinds (events source))) (pr-str source))))
+    (is (= expected (read-kinds (events source))) (seon.print.value/bounded-text source))))
 
 (deftest recovered-forms-carry-the-coordinates-of-the-whole-source
   ;; Recovery resumes the same text, so a nested declaration after an error
@@ -494,12 +495,12 @@
           form (some #(when-not (:seon.sci.reader/error %) %) result)]
       (is (= nested (mapv (comp (juxt :line :column) meta)
                           (filter seq? (tree-seq seq? seq (:seon.sci.reader/form form)))))
-          (pr-str source))
+          (seon.print.value/bounded-text source))
       (is (= (:seon.sci.reader/source form)
              (subs source (:seon.sci.reader/source-start form) (:seon.sci.reader/source-end form))))
       (is (= error-line (get-in (last (filter :seon.sci.reader/error result))
                                 [:seon.sci.reader/error :seon.error/data :seon.sci.reader/line]))
-          (pr-str source)))))
+          (seon.print.value/bounded-text source)))))
 
 (deftest recovery-never-anchors-on-inner-maps-or-vectors
   (doseq [[source expected]
@@ -507,7 +508,7 @@
            ["{:a 1}" [:form]]
            ["(good)\n{:a 1}" [:form :form]]
            ["(broken [\n{:a 1}" [:error]]]]
-    (is (= expected (read-kinds (events source))) (pr-str source))))
+    (is (= expected (read-kinds (events source))) (seon.print.value/bounded-text source))))
 
 (deftest recovery-never-hides-a-real-failure
   (let [broken (events "(+ 1 3x)")

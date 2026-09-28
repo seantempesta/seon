@@ -34,7 +34,7 @@
 (defn- value
   [ctx source]
   (let [evaluation (evaluate ctx source 5000)]
-    (is (nil? (:seon.cluster.eval/error evaluation)) (pr-str source evaluation))
+    (is (nil? (:seon.cluster.eval/error evaluation)) (seon.print.value/bounded-text [source evaluation]))
     (:seon.sci.admit/value evaluation)))
 
 (deftest the-interpreter-resolves-the-classpath-and-loaded-namespaces
@@ -60,7 +60,7 @@
       (is (= 1 (value ctx "@(future 1)")))
       (let [started (System/nanoTime)
             evaluation (evaluate ctx "@(future (loop [] (recur)))" 300)]
-        (is (= :time (get-in evaluation [:seon.sci.admit/record :seon.eval/outcome])) (pr-str evaluation))
+        (is (= :time (get-in evaluation [:seon.sci.admit/record :seon.eval/outcome])) (seon.print.value/bounded-text evaluation))
         (is (< (quot (- (System/nanoTime) started) 1000000) 5000))))))
 
 (deftest a-nested-context-inherits-the-outer-arm
@@ -77,7 +77,7 @@
             evaluation (kernel/with-arm
                          outer 300
                          (fn [_] (evaluate nested "(loop [] (recur))" 600000)))]
-        (is (= :time (get-in evaluation [:seon.sci.admit/record :seon.eval/outcome])) (pr-str evaluation))
+        (is (= :time (get-in evaluation [:seon.sci.admit/record :seon.eval/outcome])) (seon.print.value/bounded-text evaluation))
         (is (< (quot (- (System/nanoTime) started) 1000000) 5000))))))
 
 (deftest memory-pressure-holds-until-usage-falls-below-its-resume-bound
@@ -136,10 +136,10 @@
              (:seon.db/connection (test-support/execution-handle nil)))
         refusal (failure ctx "(seon.error.refusal/frame-function \"x\")")
         reply (error/reply-value nil refusal)]
-    (is (= 'seon.error.refusal/frame-function (:seon.error/operation refusal)) (pr-str refusal))
+    (is (= 'seon.error.refusal/frame-function (:seon.error/operation refusal)) (seon.print.value/bounded-text refusal))
     (is (str/starts-with? (:seon.error/message reply)
                           "seon.error.refusal/frame-function refused argument 0")
-        (pr-str reply))
+        (seon.print.value/bounded-text reply))
     (is (= [{:seon.error/path [] :seon.error/expected :symbol :seon.error/offending "x"}]
            (mapv #(dissoc % :seon.error/example) (:seon.error/problems reply))))
     (is (symbol? (get-in reply [:seon.error/problems 0 :seon.error/example]))

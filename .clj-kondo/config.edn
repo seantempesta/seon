@@ -45,6 +45,8 @@
   ;; 2026-09-23 section 2). Warning, not error: the counted residue is
   ;; converted by the slices that touch it, and an error here would block
   ;; every edit of a file that still holds one.
+  :seon/unbounded-assertion-message {:level :error}
+
   :discouraged-var
   {clojure.core.async/<!! {:message "Bare blocking take: await it through seon.await/await! under a carried bound."}
    clojure.core.async/>!! {:message "Bare blocking put: await it through seon.await/await! under a carried bound."}
@@ -85,6 +87,12 @@
   :docstring-blank? {:level :off}
   :docstring-no-summary {:level :off}
   :docstring-leading-trailing-whitespace {:level :off}}
+
+ ;; A clojure.test message is evaluated on every assertion, so a bare printer
+ ;; there prints its value whole on every run (default's OOM at 2026-09-27
+ ;; 21:07, a 2 GB pr-str of a load result holding the schema projection).
+ ;; An error, not a warning: the sweep left none (tmp/heap-retention).
+ :hooks {:analyze-call {clojure.test/is hooks.is-message/is}}
 
  ;; Macros whose binding forms clj-kondo cannot infer. `with-authority`
  ;; binds only the first element of its 3-element vector, so no builtin

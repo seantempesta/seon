@@ -3,7 +3,8 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [rewrite-clj.zip :as z]))
+            [rewrite-clj.zip :as z]
+            [seon.print.value]))
 
 ;; These are ownership roots, not a maintained member roster. Every boundary
 ;; form beneath them is derived from syntax on each run.
@@ -283,9 +284,9 @@
         by-class (group-by :seon.bounded-boundary-census/class subjects)
         found-defects (defects subjects)]
     (testing "the source-derived census has foreign-process subjects"
-      (is (seq (:foreign-subprocess by-class)) (pr-str subjects)))
+      (is (seq (:foreign-subprocess by-class)) (seon.print.value/bounded-text subjects)))
     (testing "new direct acquisitions and waits cannot omit their bound"
-      (is (empty? found-defects) (pr-str found-defects)))))
+      (is (empty? found-defects) (seon.print.value/bounded-text found-defects)))))
 
 (deftest census-refuses-absent-roots-and-absent-subjects
   (let [absent (str (io/file "tmp" (str "absent-boundary-census-"
@@ -324,7 +325,7 @@
             (is (some #(= expected-class
                           (:seon.bounded-boundary-census/class %))
                       found)
-                (pr-str found))))))))
+                (seon.print.value/bounded-text found))))))))
 
 (deftest synthetic-declared-calls-are-bounded
   (with-source

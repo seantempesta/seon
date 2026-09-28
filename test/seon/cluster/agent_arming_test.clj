@@ -27,7 +27,8 @@
             [seon.id :as id]
             [seon.issue :as issue]
             [seon.test-support :as support]
-            [seon.turn :as turn]))
+            [seon.turn :as turn]
+            [seon.print.value]))
 
 (defn- running-cluster
   "Stand up one cluster the way boot does: armer graph plus the ONE route.
@@ -120,7 +121,7 @@
                        {:seon.agent/id "late-worker"
                         :seon.cluster/name "late-arming"
                         :seon.ns/name 'my.agents.late-worker})]
-          (is (string? (:seon.agent/id created)) (pr-str created))
+          (is (string? (:seon.agent/id created)) (seon.print.value/bounded-text created))
           (await-armed! routing "late-worker")
           (is (some? (agent/armed routing "late-worker"))
               "the armer armed an agent created while the cluster ran")
@@ -181,9 +182,9 @@
                                     :seon.issue/budget 3
                                     :seon.ns/name 'my.agents.issue-wake
                                     :seon.config.ai/no-provider true})]
-         (is (string? (get-in started [:seon.issue/agent :seon.agent/id])) (pr-str started))
+         (is (string? (get-in started [:seon.issue/agent :seon.agent/id])) (seon.print.value/bounded-text started))
          (let [wakes (turn/unanswered-wakes (db/db connection) agent-id {})]
-           (is (= 1 (count wakes)) (pr-str wakes))
+           (is (= 1 (count wakes)) (seon.print.value/bounded-text wakes))
            (is (= :seon.issue/agent (:seon.wake/attribute (first wakes)))
                "the assignment datom is the worker's one unanswered wake")
            (is (= (:db/id (db/pull (db/db connection) [:db/id]

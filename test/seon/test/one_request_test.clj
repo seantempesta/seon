@@ -11,7 +11,8 @@
             [seon.sci.eval :as sci.eval]
             [seon.test :as sut]
             [seon.test.runner :as runner]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (deftest a-member-body-runs-on-its-own-listed-branch
   (let [handle (support/execution-handle nil)
@@ -43,7 +44,7 @@
                     ::agent-test-defined)
         entity (program/declaration-row (db/carried-projection (db/db connection))
                                      (:seon.program/row evaluation) :all :agent)]
-    (is (nil? (:seon.cluster.eval/error evaluation)) (pr-str evaluation))
+    (is (nil? (:seon.cluster.eval/error evaluation)) (seon.print.value/bounded-text evaluation))
     ;; A redefinition replaces the stored declaration exactly: an upsert keeps
     ;; the owned attributes the new entity drops, and the writer refuses its digest.
     (support/transacted! connection
@@ -216,18 +217,18 @@
          ;; pending, never a second body beside it (2026-09-27: one stuck
          ;; web-test member refused every later request of the cluster).
          (let [runnable (request other)]
-           (is (nil? (:seon.test/admission-refusal runnable)) (pr-str runnable))
+           (is (nil? (:seon.test/admission-refusal runnable)) (seon.print.value/bounded-text runnable))
            (is (= 1 (:seon.test/executed-count runnable)) (sut/tally runnable))
            (is (true? (:seon.test/passed? runnable)) (sut/tally runnable)))
          (let [held (request test-symbol)]
-           (is (nil? (:seon.test/admission-refusal held)) (pr-str held))
+           (is (nil? (:seon.test/admission-refusal held)) (seon.print.value/bounded-text held))
            (is (= [test-symbol] (:seon.test/pending held)) "the live body's test is reported pending")
            (is (zero? (:seon.test/executed-count held)) "no body started beside a live one")
            (is (false? (:seon.test/passed? held))))
          ;; The watcher's write is the exit only, never a re-sent outcome
          ;; (a changed outcome was refused as immutable and held the test).
          (let [written (exit!)]
-           (is (not (:seon.error/at written)) (pr-str written)))
+           (is (not (:seon.error/at written)) (seon.print.value/bounded-text written)))
          (let [recorded (exit-tx)]
            (is (some? recorded) "the observed exit is recorded")
            (is (not (:seon.error/at (exit!))))
@@ -259,7 +260,7 @@
          (is (= [test-symbol] (map :seon.test/sym (:seon.test/results result))) (sut/tally result))
          (is (pos? (:seon.test/error-count (first (:seon.test/results result)) 0)) (sut/tally result))
          ;; Only this request's own branches: other lanes acquire on the same store.
-         (is (= 1 (count branches)) (pr-str (:seon.test/timings result)))
+         (is (= 1 (count branches)) (seon.print.value/bounded-text (:seon.test/timings result)))
          (is (not-any? (set (registry/roster store)) branches)
              "the member branch is unlinked after its resolution failed"))))))
 
@@ -286,7 +287,7 @@
        (is (true? (:seon.test/passed? result)) (sut/tally result))
        (is (= 3 (:seon.test/executed-count result)))
        (is (= 2 (count runs)) "three members over a limit of two admit as two runs")
-       (is (every? #(<= % 2) sizes) (pr-str sizes))))))
+       (is (every? #(<= % 2) sizes) (seon.print.value/bounded-text sizes))))))
 
 (deftest ^{:seon.test/long "One request recording green, then two selections: about 10 s on a scratch cluster at 0e53eb8b1, dominated by the routed per-request costs."
            :seon.test/long-ms 30000}
@@ -366,7 +367,7 @@
          (is (false? (:seon.test/passed? stopped)) (sut/tally stopped))
          (is (some #{unstarted} (:seon.test/pending stopped)) (sut/tally stopped))
          (is (nil? run-id) "the unstarted member has no captured result")
-         (is (= unstarted (:seon.test/error-test-symbol latest)) (pr-str latest))
+         (is (= unstarted (:seon.test/error-test-symbol latest)) (seon.print.value/bounded-text latest))
          (is (not-any? #(contains? latest %) [:seon.test/pass-count :seon.test/error-count])
              "never started is an unknown, not a red")
          (is (= :member-unfinished stop) "the run names why it stopped")
@@ -427,7 +428,7 @@
                              [?e :seon.error/signature ?signature]]
                            (db/db connection))}]
        (is (= {:error ::writer-refused} (:seon.error/data (peek (:seon.error/chain refusal))))
-           (pr-str (:seon.error/chain refusal)))
+           (seon.print.value/bounded-text (:seon.error/chain refusal)))
        (is (= refusal result) "the request returns the whole refusal, its cause chain included")
        (is (string? (:seon.error/signature recorded)) "the refused admission is a stored core fault")
        ;; The occurrence keeps the evidence inline (`:seon.error/data-edn`);
@@ -439,7 +440,7 @@
              occurrence (first (:seon.error/occurrences entity))
              digest (get-in occurrence [:seon.error.occurrence/data-blob :seon.error.occurrence/blob-digest])
              evidence (if digest (str (blob/get connection digest)) (:seon.error/data-edn occurrence))]
-         (is (string? evidence) (str "the fault is stored with its evidence: " (pr-str entity)))
+         (is (string? evidence) (str "the fault is stored with its evidence: " (seon.print.value/bounded-text entity)))
          (is (str/includes? (str evidence) "writer-refused")
              "the stored evidence keeps the root cause's data"))
        (is (empty? (db/q '[:find [?m ...] :where [?m :seon.test.member/symbol seon.test.one-request-test/refused-recording]]

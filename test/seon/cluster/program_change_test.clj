@@ -17,7 +17,8 @@
             [seon.schema.edn :as schema.edn]
             [seon.sci.eval :as sci.eval]
             [seon.test]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (def ^:private adopted
   {:seon.source/reloaded-namespaces [] :seon.source/arming-identities #{}})
@@ -183,7 +184,7 @@
    (fn [_connection]
      (let [result (my.program/breaks {:seon.program/subject 'seon.id/valid?})]
        (is (map? result))
-       (is (not (:seon.error/at result)) (pr-str (select-keys result [:seon.error/message])))))))
+       (is (not (:seon.error/at result)) (seon.print.value/bounded-text (select-keys result [:seon.error/message])))))))
 
 (deftest a-test-bodys-direct-render-call-gets-its-members-database
   ;; A JVM test body's world is its member's context scoped to the member's
@@ -223,7 +224,7 @@
   (support/with-database
    (fn [connection]
      (let [result (seon.fn/gate-sets {:seon.db/db (db/db connection) :seon.fn/seeds #{'seon.id/valid?}})]
-       (is (vector? result) (pr-str result))))))
+       (is (vector? result) (seon.print.value/bounded-text result))))))
 
 (deftest a-launch-on-analyzer-bytes-with-unchanged-definitions-publishes-selected
   ;; WANTED: a JVM launched on analyzer files whose reached definitions are

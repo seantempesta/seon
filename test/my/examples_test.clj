@@ -14,7 +14,8 @@
             [seon.id :as id]
             [seon.sci.eval :as evaluation]
             [seon.turn :as turn]
-            [seon.test-support :as support])
+            [seon.test-support :as support]
+            [seon.print.value])
   (:import [com.sun.net.httpserver HttpServer HttpHandler]
            [java.io PushbackReader StringReader]
            [java.net InetSocketAddress]
@@ -71,7 +72,7 @@
                                      (turn/open-tx {:seon.turn/id "examples"
                                                     :seon.turn/agent [:seon.agent/id "examples"]
                                                     :seon.turn/opened-tx "datomic.tx"}))]
-            (is (:db-after opened) (pr-str opened)))
+            (is (:db-after opened) (seon.print.value/bounded-text opened)))
           (with-open [launcher-resource
                       (support/closeable
                        (flow/start-work-launcher!
@@ -132,7 +133,7 @@
               (let [failed (run "(my.note/add! {:my.note/id \"bad-note\" :my.note/content 42})")
                     value (:seon.sci.admit/value failed)
                     documented (:seon.sci.admit/value (run "(doc my.note/add!)"))]
-                (is (= :input (:seon.instrument/check value)) (pr-str failed))
+                (is (= :input (:seon.instrument/check value)) (seon.print.value/bounded-text failed))
                 (is (map? documented))
                 (is (not (find value :seon.error/doc)) "printing never enriches the refusal")
                 (is (str/includes? (:seon.error/message value "") "my.note/add!"))
@@ -151,15 +152,15 @@
                     (Files/deleteIfExists (.toPath (io/file root path))))
                   (let [documented (:seon.sci.admit/value (run (str "(doc " function-symbol ")")))
                         example (:example documented)]
-                    (is (not (str/blank? example)) (pr-str documented))
-                    (is (str/ends-with? (:summary documented "") ".") (pr-str documented))
+                    (is (not (str/blank? example)) (seon.print.value/bounded-text documented))
+                    (is (str/ends-with? (:summary documented "") ".") (seon.print.value/bounded-text documented))
                     (when (seq example)
                       (with-open [reader (PushbackReader. (StringReader. example))]
                         (loop []
                           (let [form (read {:eof ::eof} reader)]
                             (when-not (= ::eof form)
                               (let [result (run (pr-str form))]
-                                (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
+                                (is (nil? (:seon.cluster.eval/error result)) (seon.print.value/bounded-text result))
                                 (when (= 'my.test/run function-symbol)
                                   (is (= [{:seon.test/pass-count 1 :seon.test/fail-count 0
                                            :seon.test/error-count 0}]
@@ -168,7 +169,7 @@
                                                                 :seon.test/error-count])
                                                (:seon.sci.admit/value result)))))
                                 (is (nil? (get-in result [:seon.sci.admit/value :seon.error/at]))
-                                    (pr-str result)))
+                                    (seon.print.value/bounded-text result)))
                               (recur)))))))))
               (let [effect-ids (db/q '[:find [?id ...] :where
                                        [?e :seon.effect/id ?id]
@@ -177,7 +178,7 @@
                                        (or [?e :seon.effect/notify ?agent]
                                            [?e :seon.effect/to ?agent])
                                        [?agent :seon.agent/id "examples"]] @connection)]
-                (is (vector? effect-ids) (pr-str effect-ids))
+                (is (vector? effect-ids) (seon.print.value/bounded-text effect-ids))
                 (is (= 3 (count effect-ids)) "All three background examples submitted real work.")
                 (doseq [effect-id effect-ids]
                   (let [settled? (fn [database]

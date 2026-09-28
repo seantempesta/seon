@@ -30,7 +30,8 @@
             [seon.schema]
             [seon.schema.edn :as schema.edn]
             [seon.test]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support]
+            [seon.print.value]))
 
 (def ^:private live "9999-1785191833372")
 (def ^:private now #inst "2026-07-27T21:00:00.000-00:00")
@@ -405,7 +406,7 @@
         (is (= 1 (messages)) "and is not delivered again")
         (define! "(defn target [] 2)")
         (let [resolved (error/resolution @connection (signature))]
-          (is (= :seon.program/definition-digest (:seon.error/resolved-by resolved)) (pr-str resolved))
+          (is (= :seon.program/definition-digest (:seon.error/resolved-by resolved)) (seon.print.value/bounded-text resolved))
           (is (= function (:seon.instrument/fn resolved)))
           (is (not= (:seon.error/digest-then resolved) (:seon.error/digest-now resolved))))
         (is (not (open?)) "a changed definition resolves it without resolve!")
@@ -439,7 +440,7 @@
                                                    :seon.sci.admit/caps caps
                                                    :seon.config.error/max-evidence-bytes 16384
                                                    :seon.config.error/recurrence-limit 100}))]
-          (is (:db-after result) (pr-str (dissoc result :db-before :db-after)))))
+          (is (:db-after result) (seon.print.value/bounded-text (dissoc result :db-before :db-after)))))
       (let [value (found connection)
             facts (mapv :seon.error/fact (:seon.problems/error-signatures value))]
         (is (= 4 (count facts)))

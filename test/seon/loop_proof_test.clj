@@ -23,7 +23,8 @@
             [seon.repl :as repl]
             [seon.schema :as schema]
             [seon.test-support :as support]
-            [seon.turn :as turn]))
+            [seon.turn :as turn]
+            [seon.print.value]))
 
 (defn- bytes-evidence [text]
   (let [encoded (.getBytes ^String text "UTF-8")]
@@ -176,7 +177,7 @@
                          :let [attributes (:datahike.query.source/attributes source)]
                          :when (set? attributes)]
                    (is (empty? (filter inert attributes))
-                       (pr-str {:seon.cluster.eval/source (:seon.cluster.eval/source entry)
+                       (seon.print.value/bounded-text {:seon.cluster.eval/source (:seon.cluster.eval/source entry)
                                 :seon.db/read-request (:seon.db/read-request read)})))))
              (await-settled!)
              (is (some? (agent/armed routing "juniper")))
@@ -194,7 +195,7 @@
                (is (some #(> (:t %) basis) (evaluation/of-agent @connection "juniper"))))
              (let [recorded (set/difference (occurrences) occurrences-before)]
                (is (empty? recorded)
-                   (pr-str {:seon.test/recorded-faults
+                   (seon.print.value/bounded-text {:seon.test/recorded-faults
                             (mapv (fn [occurrence]
                                     (let [entity (db/pull (db/db connection)
                                                        [:seon.error.occurrence/message
@@ -334,7 +335,7 @@
                   cat
                   [(support/agent-tx @connection "other" 'my.agents.other)
                    (support/agent-tx @connection "unobserved" 'my.agents.unobserved)]))
-           _ (is (some? (:db-after configured)) (pr-str configured))
+           _ (is (some? (:db-after configured)) (seon.print.value/bounded-text configured))
            _ (cluster/ensure-cluster-entity! connection "loop-proof" cluster/boot-process-identity)
            ctx (support/fork-cluster-ctx connection)
            environment (support/environment "loop-proof" connection)
@@ -379,7 +380,7 @@
                                      (:seon.turn/closed-tx
                                       (db/pull @connection [:seon.turn/closed-tx]
                                                [:seon.turn/id id])))]
-                   (is (string? id) (pr-str result))
+                   (is (string? id) (seon.print.value/bounded-text result))
                    (when (and id (not (closed?)))
                      (try
                        (support/await-event! events ::closed (fn [_] (closed?)))
@@ -410,7 +411,7 @@
                      bootstrap-id (:seon.turn/id created)
                      root-request {:seon.turn.loop/cluster handle
                                    :seon.agent/routing routing :seon.agent/id "root"}]
-                 (is (string? bootstrap-id) (pr-str created))
+                 (is (string? bootstrap-id) (seon.print.value/bounded-text created))
                  (agent/arm! root-request)
                  (support/await-event!
                   events ::root-opening
@@ -443,7 +444,7 @@
                      closed? #(some? (:seon.turn/closed-tx
                                       (db/pull @connection [:seon.turn/closed-tx]
                                                [:seon.turn/id bootstrap-id])))]
-                 (is (string? bootstrap-id) (pr-str created))
+                 (is (string? bootstrap-id) (seon.print.value/bounded-text created))
                  (agent/arm! {:seon.turn.loop/cluster handle
                               :seon.agent/routing routing :seon.agent/id "juniper"})
                  (support/await-event! events ::seeded-opening (fn [_] (closed?)))
@@ -492,7 +493,7 @@
                      text (stored-text @connection)
                      first-prompt (prompt)
                      second-prompt (prompt)]
-                 (is (string? (:seon.turn/id opening)) (pr-str (keys opening)))
+                 (is (string? (:seon.turn/id opening)) (seon.print.value/bounded-text (keys opening)))
                  (is (= first-id (:seon.turn/id opening)))
                  (is (= "(help)" (:seon.cluster.eval/source (first saved))))
                  (is (= (mapv :seon.cluster.eval/source (:seon.turn/forms opening))
@@ -561,7 +562,7 @@
                          occurrences (frequencies (map :seon.cluster.eval/source after))]
                      (doseq [entry (remove turn-dependent? saved)]
                        (is (= 1 (get occurrences (:seon.cluster.eval/source entry)))
-                           (pr-str occurrences)))
+                           (seon.print.value/bounded-text occurrences)))
                      (is (str/starts-with? (stored-text @connection) text))))
                  (turn/compact! {:seon.db/connection connection
                                  :seon.agent/id "juniper"})
@@ -621,7 +622,7 @@
                ;; The preceding wake consumed the fixture's initial message.
                ;; Show that outside event before measuring turns with no new event.
                (let [settled (turn/system-turn request)
-                     _ (is (vector? (:seon.turn/forms settled)) (pr-str settled))
+                     _ (is (vector? (:seon.turn/forms settled)) (seon.print.value/bounded-text settled))
                      sources #{"(seon.agent/settings)" (repl/source-text runtime-read)}
                      observed #(filter (fn [entry]
                                          (and (= :system (:seon.cluster.eval/author entry))
@@ -637,7 +638,7 @@
                              "(seon.db/q '[:find (pull ?e [*]) :where [?e :my.plan.item/id]])"
                              "(+ 10 20)"))
                    (let [refresh (turn/system-turn request)]
-                     (is (vector? (:seon.turn/forms refresh)) (pr-str refresh))
+                     (is (vector? (:seon.turn/forms refresh)) (seon.print.value/bounded-text refresh))
                      (is (seq (:seon.turn/forms refresh)))
                      (is (every? #(= :unchanged (:seon.turn/status %)) (:seon.turn/forms refresh)))
                      (is (nil? (:seon.turn/id refresh)))))
@@ -676,10 +677,10 @@
                      written (db/transact! connection
                                            [[:db/add plan-eid :my.plan/objective
                                              "Verify one changed plan read."]])
-                     _ (is (some? (:db-after written)) (pr-str written))
+                     _ (is (some? (:db-after written)) (seon.print.value/bounded-text written))
                      system (turn/system-turn request)
                      changed (filter #(= :changed (:seon.turn/status %)) (:seon.turn/forms system))]
-                 (is (string? (:seon.turn/id system)) (pr-str system))
+                 (is (string? (:seon.turn/id system)) (seon.print.value/bounded-text system))
                  (is (= ['(seon.plan/plan {})]
                         (mapv (comp read-string :seon.cluster.eval/source) changed)))
                  (assert-changed-response! @connection handle system)))
@@ -781,9 +782,9 @@
                                    :seon.sci.admit/caps (:seon.sci.admit/caps handle)})
                          result (get-in preview [:seon.turn.loop/evaluated-sources 0
                                                  :seon.sci.eval/evaluation])]
-                     (is (some? result) (pr-str preview))
-                     (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
-                     (is (string? (:seon.eval/shown result)) (pr-str result))))))
+                     (is (some? result) (seon.print.value/bounded-text preview))
+                     (is (nil? (:seon.cluster.eval/error result)) (seon.print.value/bounded-text result))
+                     (is (string? (:seon.eval/shown result)) (seon.print.value/bounded-text result))))))
              (testing "boot closes durable intent and never reexecutes it"
                (let [id (turn/next-id @connection "loop-proof" "other")
                      source "(seon.db/transact! [{:seon.agent/id \"must-not-execute\"}])"
@@ -813,7 +814,7 @@
                      system (turn/system-turn
                              (assoc request :seon.agent/id "unobserved"))]
                  (is (= 1 (count pending)))
-                 (is (string? (:seon.turn/id system)) (pr-str system))
+                 (is (string? (:seon.turn/id system)) (seon.print.value/bounded-text system))
                  (is (= pending (turn/unanswered-wakes @connection "unobserved" {})))))
              (testing "the scenario crosses the real query, write, message, and session boundaries"
                (agent/arm! {:seon.turn.loop/cluster handle
@@ -835,7 +836,7 @@
                    (is (str/starts-with? (:seon.cluster.eval/source (first saved)) "(seon.db/q"))
                    (is (nil? (:seon.cluster.eval/error (first saved))))
                    (is (seq (:seon.eval/shown (first saved)))
-                       (pr-str {:seon.test/evaluations saved
+                       (seon.print.value/bounded-text {:seon.test/evaluations saved
                                 :seon.test/turn (db/pull @connection '[*] [:seon.turn/id id])}))
                    (is (seq (:seon.cluster.eval/read-evidence (first saved))))
                    (is (str/includes? (:seon.cluster.eval/error (second saved))
@@ -899,7 +900,7 @@
                        turn-eid (:db/id (db/pull @connection [:db/id] [:seon.turn/id id]))
                        defined (filterv #(= turn-eid (get-in % [:seon.cluster.eval/run :db/id]))
                                         (evaluation/of-agent @connection "juniper"))]
-                   (is (= [nil] (mapv :seon.cluster.eval/error defined)) (pr-str defined)))
+                   (is (= [nil] (mapv :seon.cluster.eval/error defined)) (seon.print.value/bounded-text defined)))
                  (doseq [{:seon.turn/keys [reply] original-id :seon.turn/id}
                          (edn/read-string (slurp "test/seon/reader_fences.edn"))]
                    (let [id (submit reply)
@@ -907,7 +908,7 @@
                          saved (filterv #(= turn-eid (get-in % [:seon.cluster.eval/run :db/id]))
                                         (evaluation/of-agent @connection "juniper"))]
                      (is (= 1 (count saved)) original-id)
-                     (is (nil? (:seon.cluster.eval/error (first saved))) (pr-str saved))
+                     (is (nil? (:seon.cluster.eval/error (first saved))) (seon.print.value/bounded-text saved))
                      (is (seq (:seon.eval/shown (first saved))))
                      (println "READER-FENCES" original-id
                               (pr-str (select-keys (first saved)

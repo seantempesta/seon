@@ -14,7 +14,8 @@
             [seon.operator.runtime]
             [seon.test :as sut]
             [seon.test.runner :as runner]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support]
+            [seon.print.value]))
 
 (def ^:private at (java.util.Date. 1785283200000))
 (def ^:private project-root
@@ -297,8 +298,8 @@
                   #(testing [:seon.fn/sym 'a/b] (is (= 1 2) "a value label")) [])]
     (try
       (let [result (runner/run-var! test-var {})]
-        (is (= 1 (:seon.test/fail-count result)) (pr-str result))
-        (is (zero? (:seon.test/error-count result)) (pr-str result))
+        (is (= 1 (:seon.test/fail-count result)) (seon.print.value/bounded-text result))
+        (is (zero? (:seon.test/error-count result)) (seon.print.value/bounded-text result))
         (is (= [["[:seon.fn/sym a/b]"]]
                (mapv :seon.test.failure/testing-contexts (:seon.test.failure/reports result)))))
       (finally (remove-ns (ns-name (:ns (meta test-var))))))))
@@ -414,7 +415,7 @@
                                              :seon.program/definition-digest (:seon.program/definition-digest entity)])))
             refusal (runner/reach-digests undigested symbols)]
         (is (every? string? (map digested symbols)) "the digested entities have reuse keys")
-        (is (= :seon.program/definition-digest (:seon.error/member refusal)) (pr-str refusal))
+        (is (= :seon.program/definition-digest (:seon.error/member refusal)) (seon.print.value/bounded-text refusal))
         (is (= symbols (:seon.error/offending refusal)) "the refusal names both tests")
         (is (not-any? #(string? (get refusal %)) symbols) "no reuse key is answered")))))
 

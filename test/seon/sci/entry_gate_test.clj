@@ -6,7 +6,8 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.sci.eval :as sci.eval]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (defn- evaluate-in
   ([ctx source] (evaluate-in ctx source (config/result-caps config/defaults)))
@@ -42,7 +43,7 @@
        (is (= 4 (:seon.sci.admit/value (evaluate-in ctx "(twice 2)"))))
        (let [refused (:seon.sci.admit/value (evaluate-in ctx "(twice \"a\")"))]
          (is (= :input (:seon.instrument/check refused))
-             (pr-str refused)))))))
+             (seon.print.value/bounded-text refused)))))))
 
 (deftest a-definition-without-a-contract-is-refused-and-restored
   (support/with-database
@@ -73,12 +74,12 @@
            printed (evaluate-in ctx "(do (println \"hi\") (binding [*out* *err*] (print \"é\")) 1)" caps)
            runaway (evaluate-in ctx "(do (dotimes [_ 100] (print \"0123456789\")) :done)" caps)
            refusal (:seon.sci.admit/value runaway)]
-       (is (= "hi\né" (:seon.cluster.eval/output printed)) (pr-str printed))
+       (is (= "hi\né" (:seon.cluster.eval/output printed)) (seon.print.value/bounded-text printed))
        (is (= "1" (:seon.eval/shown printed)))
        (is (= (apply str (repeat 6 "0123456789"))
               (:seon.cluster.eval/output runaway))
            "the exact text up to the bound is kept")
-       (is (= :seon.config.eval.result/max-bytes (:seon.error/member refusal)) (pr-str refusal))
+       (is (= :seon.config.eval.result/max-bytes (:seon.error/member refusal)) (seon.print.value/bounded-text refusal))
        (is (= 64 (:seon.sci.admit/bound-bytes refusal)))
        (is (= 70 (:seon.sci.admit/bytes refusal)))))))
 
@@ -134,7 +135,7 @@
                :when changed]
          (is (= #{(symbol "scratch.entry-gate" (str changed))}
                 (:seon.sci.eval/unindexed refusal))
-             (str source " is an unindexed change: " (pr-str refusal)))
+             (str source " is an unindexed change: " (seon.print.value/bounded-text refusal)))
          (is (absent? (str changed)) source))
        (value (str "(defn kept \"D.\" " contract " [x] (inc x))"))
        (doseq [source ["(def kept 42)" "(def kept nil)"]]
@@ -192,7 +193,7 @@
            "every refusal and a later throw leave the stored entity's Var as it was")
        (let [admitted (evaluate-in ctx (str "(defn kept \"D.\" " contract " [x] (* 5 x))"))]
          (is (= 'scratch.entry-gate/kept (get-in admitted [:seon.program/row :seon.fn/sym]))
-             (pr-str (:seon.sci.admit/value admitted)))
+             (seon.print.value/bounded-text (:seon.sci.admit/value admitted)))
          (is (= 5 (value "(kept 1)")))
          ((:seon.sci.eval/restore admitted))
          (is (= 2 (value "(kept 1)"))
@@ -219,7 +220,7 @@
              entity (:seon.program/row admitted)]
          (is (= 'scratch.entry-gate/echoed (:seon.fn/sym entity))
              (str "a comment holding the same bytes is not the declaration: "
-                  (pr-str (:seon.sci.admit/value admitted))))
+                  (seon.print.value/bounded-text (:seon.sci.admit/value admitted))))
          (is (= declaration (:seon.fn/source entity)))
          (is (not (contains? entity :seon.fn/form-span))
              "the span locates the entity within this form only")
@@ -250,9 +251,9 @@
            contract "{:malli/schema [:=> [:cat :int] :int]}"
            called (evaluate-in ctx (str "(do (defn inc1 \"Inc.\" " contract " [x] (inc x)) (inc1 \"a\"))"))]
        (is (= :input (:seon.instrument/check (:seon.sci.admit/value called)))
-           (str "the call inside the do meets the armed contract: " (pr-str (:seon.sci.admit/value called))))
+           (str "the call inside the do meets the armed contract: " (seon.print.value/bounded-text (:seon.sci.admit/value called))))
        (is (re-find #"NOT ADMITTED.*scratch\.entry-gate/inc1" (str (:seon.cluster.eval/output called)))
-           (str "the failed form says its definition is no entity: " (pr-str (:seon.cluster.eval/output called))))
+           (str "the failed form says its definition is no entity: " (seon.print.value/bounded-text (:seon.cluster.eval/output called))))
        (is (= :input (:seon.instrument/check (value "(inc1 \"a\")")))
            "the private definition a failed form left stays armed")
        (let [admitted (evaluate-in ctx (str "(do (do (defn inc2 \"Inc.\" " contract " [x] (inc x))) (inc2 1))"))]

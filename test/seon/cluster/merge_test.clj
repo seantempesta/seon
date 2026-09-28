@@ -7,7 +7,8 @@
             [seon.cluster.source :as source]
             [seon.db :as db]
             [seon.id :as id]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (defn- sym [n] (symbol "seon.cluster.merge-test" n))
 
@@ -51,7 +52,7 @@
               _ (write! c-conn [(fn-entity c-conn "merge-callee" "(defn merge-callee {:malli/schema [:=> [:cat] :int]} [] 2)")])
               red (prepare)
               before (db/commit-id (db/db h-conn))]
-          (is (false? (:seon.test/passed? red)) (pr-str red))
+          (is (false? (:seon.test/passed? red)) (seon.print.value/bounded-text red))
           (is (= :seon.source/merge (:seon.error/layer (source/accept-merge! target store red))))
           (is (= before (db/commit-id (db/db h-conn))))))
       (testing "green: accept merges exactly the tested entities with lineage H C E; another entity's write never stales it"
@@ -82,7 +83,7 @@
           (is (true? (:seon.test/passed? proposal)) (:seon.source/tally proposal))
           (is (= [:seon.source/expected-digests {callee expected} {callee (digest h-conn "merge-callee")}]
                  ((juxt :seon.error/member :seon.error/expected :seon.error/offending) refused))
-              (pr-str refused))
+              (seon.print.value/bounded-text refused))
           (is (= moved (db/commit-id (db/db h-conn))) "the refused merge takes zero datoms"))
         (is (seq (:seon.program/conflict (prepare)))))
       (finally
@@ -112,7 +113,7 @@
             before (db/commit-id (db/db h-conn))
             refusal (source/accept-merge! target store proposal)]
         (is (true? (:seon.test/passed? proposal)) "the test owner selects no test and refuses nothing")
-        (is (= [(sym "merge-alone")] (:seon.error/offending refusal)) (pr-str refusal))
+        (is (= [(sym "merge-alone")] (:seon.error/offending refusal)) (seon.print.value/bounded-text refusal))
         (is (= before (db/commit-id (db/db h-conn))))
         (testing "a program write on S after the run refuses the named run"
           (let [s (cluster.agent/acquire-context! target nil {:seon.agent/branch (:seon.source/candidate proposal)})]

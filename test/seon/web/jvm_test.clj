@@ -11,7 +11,8 @@
             [seon.fs :as filesystem]
             [seon.test-support :as support]
             [seon.web.jvm]
-            [seon.web.search])
+            [seon.web.search]
+            [seon.print.value])
   (:import [com.sun.net.httpserver HttpExchange HttpHandler HttpServer]
            [java.io ByteArrayOutputStream]
            [java.net InetSocketAddress ServerSocket]
@@ -379,7 +380,7 @@
                     :body (json/write-str
                            {"q" "web capability evidence" "num" 2})}
                    observed))
-            (is (= 1 (:my.web/credits result)) (pr-str result))
+            (is (= 1 (:my.web/credits result)) (seon.print.value/bounded-text result))
             (is (= 3 (:my.web/result-count result)))
             (is (= 2 (:my.web/returned result)))
             (is (= [{:my.web.result/title "First"
@@ -428,7 +429,7 @@
                                       edn/read-string)]
             (is (true? accepted)
                 "my.web/search must accept this fixture's own request at the door")
-            (is (= 1 (:my.web/credits result)) (pr-str result))
+            (is (= 1 (:my.web/credits result)) (seon.print.value/bounded-text result))
             (is (= result stored-result))
             (is (= 1 (count receipts)))
             (is (inst? (:seon.effect/opened-at receipt)))

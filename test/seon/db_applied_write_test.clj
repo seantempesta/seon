@@ -9,7 +9,8 @@
             [seon.blob :as blob]
             [seon.db :as db]
             [seon.id :as id]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (deftest an-applied-write-answers-in-order-and-an-ordinary-write-after-its-commit
   (let [connection (:seon.db/connection (support/execution-handle nil))
@@ -17,7 +18,7 @@
         agent-id #(str "applied-write-" (id/id))]
     (testing "an ordinary write (a task, an accept, a config apply) answers after its commit"
       (let [report (db/transact! connection (support/agent-tx @connection (agent-id)))]
-        (is (:db-after report) (pr-str report))
+        (is (:db-after report) (seon.print.value/bounded-text report))
         (is (<= (db/basis-t (:db-after report)) (db/basis-t @connection))
             "the connection already holds the committed value when the caller is answered")))
     (testing "an applied write answers with the writer's value; the next write builds on it"
@@ -26,7 +27,7 @@
             first-report (db/transact-applied! connection (support/agent-tx @connection first-id)
                                                #(deliver failed %))
             second-report (db/transact! connection (support/agent-tx @connection second-id))]
-        (is (:db-after first-report) (pr-str first-report))
+        (is (:db-after first-report) (seon.print.value/bounded-text first-report))
         (is (db/q '[:find ?a . :in $ ?id :where [?a :seon.agent/id ?id]] (:db-after first-report) first-id)
             "the applied value holds the write")
         (is (db/q '[:find ?a . :in $ ?id :where [?a :seon.agent/id ?id]] (:db-after second-report) first-id)

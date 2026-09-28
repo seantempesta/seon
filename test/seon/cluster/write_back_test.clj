@@ -17,7 +17,8 @@
             [seon.id :as id]
             [seon.program :as program]
             [seon.test-support :as support]
-            [seon.turn :as turn]))
+            [seon.turn :as turn]
+            [seon.print.value]))
 
 (defn- fixture-source
   "One small namespace: a callee and its caller. The test reaching both is the
@@ -43,7 +44,7 @@
         submitted (db/call-with-custody {:seon.db/connection connection}
                                         #(turn/virtual-turn! (assoc request :seon.cluster.reply/text text)))
         run-id (:seon.turn/id submitted)]
-    (is run-id (str "the agent accepted the submission: " (pr-str submitted)))
+    (is run-id (str "the agent accepted the submission: " (seon.print.value/bounded-text submitted)))
     (when run-id
       (support/await-event! connection ::turn-closed
                             (fn [_] (:seon.turn/closed-tx (db/pull (db/db connection) [:seon.turn/closed-tx]
@@ -129,9 +130,9 @@
                    (:seon.program/definition-digest (db/pull (db/db h-conn) [:seon.program/definition-digest] callee)))))
           (let [proposal (source/prepare-merge! target store c issue)
                 _ (some->> (:seon.source/candidate proposal) (vswap! made conj))
-                _ (is (true? (:seon.test/passed? proposal)) (pr-str proposal))
+                _ (is (true? (:seon.test/passed? proposal)) (seon.print.value/bounded-text proposal))
                 accepted (source/accept-merge! target store proposal)
-                _ (is (:seon.source/commit-id accepted) (pr-str accepted))]
+                _ (is (:seon.source/commit-id accepted) (seon.print.value/bounded-text accepted))]
            ;; Each stage is asserted before the next reads it: a refused merge is
            ;; shown as the merge's own value, never handed to write-back.
            (when (:seon.source/commit-id accepted)
@@ -141,7 +142,7 @@
                 _ (support/transacted! h-conn [{:seon.issue/id issue :seon.issue/title "Merged"}])
                 written (source/write-back! request)]
             (testing "the exact span is written back and nothing else changes"
-              (is (= [path] (:seon.source/changed-paths written)) (pr-str written))
+              (is (= [path] (:seon.source/changed-paths written)) (seon.print.value/bounded-text written))
               (is (= [callee] (get-in written [:seon.source/written :seon.source/replaced])))
               (is (= (str (subs base-text 0 start) replacement (subs base-text stop)) (slurp file))))
             (testing "the file reindexed from disk declares exactly the merged program"
@@ -208,14 +209,14 @@
                    (:seon.error/offending (source/prepare-merge! target store c issue #{[:seon.fn/sym 'absent/declaration]})))))
           (let [proposal (source/prepare-merge! target store c issue #{added-fn added-test})
                 _ (some->> (:seon.source/candidate proposal) (vswap! made conj))
-                _ (is (true? (:seon.test/passed? proposal)) (pr-str proposal))
+                _ (is (true? (:seon.test/passed? proposal)) (seon.print.value/bounded-text proposal))
                 accepted (when (:seon.test/passed? proposal) (source/accept-merge! target store proposal))
-                _ (is (:seon.source/commit-id accepted) (pr-str accepted))]
+                _ (is (:seon.source/commit-id accepted) (seon.print.value/bounded-text accepted))]
             (when (:seon.source/commit-id accepted)
               (let [written (source/write-back! {:seon.db/connection h-conn :seon.source/accepted accepted :seon.fn/root root})
                     text (slurp file)]
                 (testing "both additions are appended to the namespace's file, the rest untouched"
-                  (is (= #{added-fn added-test} (set (get-in written [:seon.source/written :seon.source/added]))) (pr-str written))
+                  (is (= #{added-fn added-test} (set (get-in written [:seon.source/written :seon.source/added]))) (seon.print.value/bounded-text written))
                   (is (str/starts-with? text base-text))
                   (is (str/includes? text function-source))
                   (is (str/includes? text test-source)))
@@ -280,7 +281,7 @@
                   (let [before (slurp file)
                         refused (source/prepare-merge! target store c issue nil root)]
                     (some->> (:seon.source/candidate refused) (vswap! made conj))
-                    (is (= :not-analyzable (:seon.source/write-back-refused refused)) (pr-str refused))
+                    (is (= :not-analyzable (:seon.source/write-back-refused refused)) (seon.print.value/bounded-text refused))
                     (is (not (:seon.source/candidate refused)) "no intermediate branch, no test run")
                     (is (= before (slurp file)))))))
 
@@ -301,13 +302,13 @@
              namespace-entity [:seon.ns/name fixture-ns]
              proposal (source/prepare-merge! target store c issue #{check} root)
              _ (some->> (:seon.source/candidate proposal) (vswap! made conj))
-             _ (is (true? (:seon.test/passed? proposal)) (pr-str proposal))
+             _ (is (true? (:seon.test/passed? proposal)) (seon.print.value/bounded-text proposal))
              accepted (when (:seon.test/passed? proposal) (source/accept-merge! target store proposal))]
-         (is (= #{check namespace-entity} (:seon.program/identities accepted)) (pr-str accepted))
+         (is (= #{check namespace-entity} (:seon.program/identities accepted)) (seon.print.value/bounded-text accepted))
          (when (:seon.source/commit-id accepted)
            (let [written (source/write-back! {:seon.db/connection h-conn :seon.source/accepted accepted :seon.fn/root root})
                  reindexed (digests (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]}))]
-             (is (= [namespace-entity] (get-in written [:seon.source/written :seon.source/replaced])) (pr-str written))
+             (is (= [namespace-entity] (get-in written [:seon.source/written :seon.source/replaced])) (seon.print.value/bounded-text written))
              (is (str/starts-with? (slurp file) (ns-form fixture-ns)))
              (is (= reindexed
                     (digests (db/pull-many (db/db h-conn) [:seon.fn/sym :seon.test/sym :seon.ns/name :seon.program/definition-digest]

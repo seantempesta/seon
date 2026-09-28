@@ -15,7 +15,8 @@
             [seon.fn]
             [seon.issue.detect]
             [seon.program]
-            [seon.test-support]))
+            [seon.test-support]
+            [seon.print.value]))
 
 (def ^:private source-ns 'seon.detect-fixture)
 (def ^:private helper-ns 'seon.detect-fixture-helpers)
@@ -92,7 +93,7 @@
 (defn- named
   "The fixture symbols one detector call names, as a set."
   [subjects]
-  (clojure.test/is (vector? subjects) (pr-str subjects))
+  (clojure.test/is (vector? subjects) (seon.print.value/bounded-text subjects))
   (into #{} (comp (map :seon.fn/sym) (filter fixture-symbols)) subjects))
 
 (clojure.test/deftest the-contract-standard-names-only-the-declaration-without-a-spec

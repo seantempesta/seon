@@ -3,7 +3,8 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.sci.eval :as eval]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support]
+            [seon.print.value]))
 
 (defn- as-seen-by
   "`evidence` as a later check sees it: from this connection, from a fresh
@@ -55,22 +56,22 @@
                                     evidence))
            juniper (db/q '[:find ?e . :where [?e :seon.agent/id "juniper"]]
                          @connection)]
-       (is (vector? (:seon.sci.admit/value evaluation)) (pr-str evaluation))
+       (is (vector? (:seon.sci.admit/value evaluation)) (seon.print.value/bounded-text evaluation))
        (is (= "Opening message"
               (get-in evaluation [:seon.sci.admit/value 0 :seon.message/content]))
-           (pr-str evaluation))
+           (seon.print.value/bounded-text evaluation))
        (is (some #(= {:seon.db/pattern-attribute :seon.message/to
                       :seon.db/pattern-value juniper} %)
                  patterns)
-           (pr-str evidence))
+           (seon.print.value/bounded-text evidence))
        ;; The form's evidence is what the form read on its own branch: the
        ;; context's acquisition held the pre-write value and the host
        ;; program's entities, and neither is the form's read.
        (is (= #{(:datahike.cache/connection-id (:cache-context @connection))}
               (into #{} (map #(get-in % [:datahike.read/revision :datahike.cache/connection-id])) evidence))
-           (pr-str (mapv :datahike.read/revision evidence)))
+           (seon.print.value/bounded-text (mapv :datahike.read/revision evidence)))
        (is (true? (db/read-evidence-current? @connection evidence))
-           (pr-str (into [] (comp (remove #(db/read-evidence-current? @connection [%]))
+           (seon.print.value/bounded-text (into [] (comp (remove #(db/read-evidence-current? @connection [%]))
                                   (map #(select-keys % [:seon.db/read-request :seon.db/read-result-digest
                                                         :datahike.read/revision])))
                          evidence)))

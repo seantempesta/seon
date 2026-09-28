@@ -11,7 +11,8 @@
             [seon.cluster.process :as operator.process]
             [seon.schema :as schema]
             [seon.sci.eval :as evaluation]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (def ^:private source-path "src/my/adoption_contract_probe.clj")
 (def ^:private schema-path "resources/seon/schemas/my.adoption-contract-probe.edn")
@@ -125,7 +126,7 @@
                             [directory]))
                      :seon.operator.subprocess/deadline-ms 1200000
                      :seon.operator.subprocess/merge-error? true})]
-        (is (= 0 (:seon.operator.subprocess/exit copied)) (pr-str copied))
+        (is (= 0 (:seon.operator.subprocess/exit copied)) (seon.print.value/bounded-text copied))
         (when (= 0 (:seon.operator.subprocess/exit copied))
           (let [result
                 (operator.process/run-process!

@@ -11,7 +11,8 @@
             [seon.render :as render]
             [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (deftest ordered-evaluation-retains-one-explicit-basis-without-publication
   (support/with-database
@@ -164,7 +165,7 @@
                                            :where [?run :seon.turn/id ?run-id]
                                            [?evaluation :seon.cluster.eval/run ?run]]
                                          @connection "saved-preview"))]
-             (is (some? (:db-after committed)) (pr-str (select-keys committed [:seon.error/message :seon.turn/refused])))
+             (is (some? (:db-after committed)) (seon.print.value/bounded-text (select-keys committed [:seon.error/message :seon.turn/refused])))
              (is (= "saved-preview"
                     (:seon.turn/id
                      (db/pull (turn/opening-db @connection "saved-preview")

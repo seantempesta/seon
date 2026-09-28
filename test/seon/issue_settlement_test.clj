@@ -18,7 +18,8 @@
             [seon.sci.eval :as evaluation]
             [seon.test :as tests]
             [seon.turn :as turn]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.print.value]))
 
 (defn- admit! [connection ctx namespace-name source]
   (let [effective (config/effective (db/db connection) "issue-settlement")
@@ -81,7 +82,7 @@
              (let [report (turn/system-turn
                             {:seon.turn.loop/cluster handle
                              :seon.agent/id aid :seon.turn/write? true})]
-               (is (let [observed report] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str report))))
+               (is (let [observed report] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (seon.print.value/bounded-text report))))
            closed? (fn [tid]
                      (some? (:seon.turn/closed-tx
                              (db/pull (db/db connection) [:seon.turn/closed-tx]
@@ -95,7 +96,7 @@
            (fn []
              (let [_ (when-not (turn/open-for-agent (db/db connection) [:seon.agent/id aid])
                        (let [work (turn/next-agent-work (db/db connection) {:seon.agent/id aid})]
-                         (is (= :open (:seon.turn.work/situation work)) (pr-str work))
+                         (is (= :open (:seon.turn.work/situation work)) (seon.print.value/bounded-text work))
                          (turn/turn {:seon.turn.loop/cluster handle :seon.turn.work/next work}
                                     (java.util.Date.))))
                    tid (turn/open-for-agent (db/db connection) [:seon.agent/id aid])
@@ -103,7 +104,7 @@
                                (turn/plan-tx {:seon.turn/id tid
                                               :seon.turn/reply "(+ 20 22)" :seon.turn/reply-size 9
                                               :seon.turn/sources [{:seon.cluster.eval/source "(+ 20 22)"}]}))]
-               (is (string? tid) (pr-str submitted))
+               (is (string? tid) (seon.print.value/bounded-text submitted))
                (loop [pass 0]
                  (cond
                    (closed? tid) tid
@@ -161,12 +162,12 @@
              (println {:seon.test/issue-status :failed :seon.eval/shown shown})
              (is (str/includes? shown (str test-symbol)) shown)
              (is (str/includes? shown (tests/failure-message red)) shown))
-           (is (= 1 (:seon.test/fail-count red)) (pr-str red))
+           (is (= 1 (:seon.test/fail-count red)) (seon.print.value/bounded-text red))
            (is (string? red-run))
            (is (integer? (:seon.test.run/basis-t red)))
            (is (string? (:seon.test.run/program-digest red)))
            (is (string? (:seon.test.run/input-digest red)))
-           (is (= 1 (:seon.test/pass-count steady)) (pr-str steady))
+           (is (= 1 (:seon.test/pass-count steady)) (seon.print.value/bounded-text steady))
            (is (nil? (resolved)))
            ;; Only matching green evidence suppresses execution. The failing
            ;; member gets a fresh result; steady's green evidence is reused.
@@ -189,11 +190,11 @@
                                    [?root :seon.agent/id "root"]
                                    [?message :seon.message/to ?root]
                                    [?message :seon.message/content ?text]] (db/db connection) aid)]
-             (is (= 1 (count messages)) (pr-str messages))
+             (is (= 1 (count messages)) (seon.print.value/bounded-text messages))
              (is (str/includes? (first messages) "after 2 ordinary turns")))
            (let [resumed (seon.issue/start! {:seon.db/connection connection
                                            :seon.issue/id "settlement-fixture" :seon.issue/budget 4})]
-             (is (let [observed resumed] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str resumed))
+             (is (let [observed resumed] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (seon.print.value/bounded-text resumed))
              (is (= aid (get-in resumed [:seon.issue/agent :seon.agent/id])))
              (is (= 2 (turn/turns-left (db/db connection) aid)))
              (let [database (db/db connection)
@@ -209,7 +210,7 @@
                    "(defn answer {:malli/schema [:=> [:cat] :int]} [] (throw (ex-info \"red\" {})))")
            (close-ordinary-turn!)
            (let [errored (evidence test-symbol)]
-             (is (pos? (:seon.test/error-count errored)) (pr-str errored))
+             (is (pos? (:seon.test/error-count errored)) (seon.print.value/bounded-text errored))
              (is (not= red-run (run-id test-symbol)))
              (is (= steady-run (run-id steady-symbol)))
              (is (nil? (resolved))))
@@ -221,7 +222,7 @@
                    [{:seon.agent/id aid :seon.agent/settings {:seon.config.eval/time-limit-ms 100}}])
            (plan/run-issue-tests! handle aid)
            (let [expired (evidence test-symbol)]
-             (is (pos? (:seon.test/error-count expired)) (pr-str expired))
+             (is (pos? (:seon.test/error-count expired)) (seon.print.value/bounded-text expired))
              (is (seq (tests/failure-message expired)))
              (is (= steady-run (run-id steady-symbol)))
              (is (nil? (resolved))))
@@ -232,7 +233,7 @@
            (close-ordinary-turn!)
            (let [green (evidence test-symbol)
                  completed (resolved)]
-             (is (= 1 (:seon.test/pass-count green)) (pr-str green))
+             (is (= 1 (:seon.test/pass-count green)) (seon.print.value/bounded-text green))
              (is (not= red-run (second (:seon.test/run green))))
              (is (true? (tests/verified? (db/db connection) test-symbol)))
              ;; The issue resolves on RECORDED evidence: steady-test has not
@@ -299,7 +300,7 @@
                      [[:db/retract issue :seon.issue/agent worker]]
                      [[:db/add issue :seon.issue/created-by worker]]]]
             (let [result (write worker tx)]
-              (is (string? (:seon.db.write.attempt/request-id result)) (pr-str result))
+              (is (string? (:seon.db.write.attempt/request-id result)) (seon.print.value/bounded-text result))
               (is (= #{"my.agents.retention/a" "my.agents.retention/b"} (tests-now)))))
           (let [refused (write worker [[:db/retract issue :seon.issue/tests a]])]
             (is (.contains (:seon.error/message refused "") "retention-fixture"))
@@ -326,7 +327,7 @@
                 ;; The writer mints the identity once; the title never derives it.
                 authored-id (:seon.issue/id (db/pull (:db-after report) [:seon.issue/id]
                                                      (get (:tempids report) "authored")))]
-            (is (:db-after report) (pr-str report))
+            (is (:db-after report) (seon.print.value/bounded-text report))
             (is (string? authored-id))
             (is (= "retention-creator"
                    (get-in (db/pull (db/db connection)
