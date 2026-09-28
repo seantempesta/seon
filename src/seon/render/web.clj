@@ -450,6 +450,7 @@
   render proc share this derivation. The proc retains fragments for deltas.
 
   Process provenance rides the service request."
+  {:malli/schema [:=> [:cat :map] :map]}
   [{:keys [:seon.db/db :seon.agent/id
            :seon.render.web/root-agent-id
            :seon.db/connection] caps :seon.sci.admit/caps
@@ -1720,6 +1721,11 @@
      ::debug-data-entry entry}))
 
 (defn- debug-page-result
+  "One debug page at `db`: the selected entity's header, its units through the
+  viewer's render functions and its reference graph."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/value :map :seon.sci.admit/caps :map :map
+                       :map :map :seon.schema/value]
+                  :map]}
   [db connection debug-request caps profile handle retained-calls
    retained-invocations captured-invocations]
   (let [projection (sci.kernel/context-projection (:seon.sci.eval/ctx handle))
@@ -2722,6 +2728,22 @@
                (assoc watched registration-key remaining)
                (dissoc watched registration-key))))))
 
+(def ^:private socket-leaf
+  "The socket leaf a page's delivery and binding go through: http-kit's
+  send, write state and server binding, and Datastar's SSE close. A service
+  names another as :seon.render.web/http, member by member; a test hands its
+  own values instead of redefining these Vars."
+  {::send! http/send!
+   ::write-state http/write-state
+   ::close-sse! datastar/close-sse!
+   ::run-server http/run-server})
+
+(defn- socket
+  "The service's socket leaf: its :seon.render.web/http members over the defaults."
+  {:malli/schema [:=> [:cat :map] :seon.render.web/http]}
+  [service]
+  (merge socket-leaf (::http service)))
+
 (defn- write-package!
   "Write one already-framed package event, then park for queue drain.
 
@@ -2737,14 +2759,15 @@
   {:seon.fn/external-sink :html-response
    :seon.fn/projection-boundary :seon.render/html
    :malli/schema
-   [:=> [:cat :seon.schema/value :seon.schema/value :seon.blob/octet-array
+   [:=> [:cat :seon.render.web/http :seon.schema/value :seon.schema/value :seon.blob/octet-array
          :seon.config.eval/time-limit-ms :seon.schema/value]
     [:or :boolean :seon.render.web/request-error]]}
-  [channel generator frame backstop-ms member]
-  (if (http/send! channel frame false)
+  [{send! ::send! write-state ::write-state close-sse! ::close-sse!}
+   channel generator frame backstop-ms member]
+  (if (send! channel frame false)
     (let [{pending-bytes :http-kit.write/pending-bytes
            drained :http-kit.write/drained}
-          (http/write-state channel)]
+          (write-state channel)]
       (if (pos? pending-bytes)
         (let [result
               (await/await!
@@ -2763,7 +2786,7 @@
                 :seon.await/future drained})]
           (if (or (:seon.await/elapsed-ms result) (:seon.await/closed-operation result))
             (do
-              (datastar/close-sse! generator)
+              (close-sse! generator)
               (assoc result
                      :seon.error/at (java.util.Date.)
                      :seon.render.web/refused-member :seon.await/future
@@ -2771,7 +2794,7 @@
             true))
         true))
     (do
-      (datastar/close-sse! generator)
+      (close-sse! generator)
       false)))
 
 (defn- await-feed-package!
@@ -2831,6 +2854,7 @@
         channel (:async-channel request)
         tap (async/chan (async/sliding-buffer 1))
         tab-id (str (random-uuid))
+        leaf (socket service)
         painting (volatile! true)]
     (datastar.http-kit/->sse-response
      request
@@ -2846,7 +2870,7 @@
                    opening-basis (long (db/basis-t database))
                    page (current-page service database registration-key)
                    written (write-package!
-                            channel generator (frame-bytes page) backstop-ms
+                            leaf channel generator (frame-bytes page) backstop-ms
                             {:seon.render.web/tab-id tab-id
                              :seon.render.web/page registration-key})]
                (when (:seon.render.web/refused-member written)
@@ -2875,7 +2899,7 @@
                            (recur delivered-revision)
                            (let [written
                                  (write-package!
-                                  channel generator (package-patches delivered-revision package)
+                                  leaf channel generator (package-patches delivered-revision package)
                                   backstop-ms
                                   {:seon.render.web/tab-id tab-id
                                    :seon.render.web/page registration-key
@@ -2894,7 +2918,7 @@
                                             :seon.render/output :seon.render/html}
                                            failure)
                                   :seon.render.web/feed 'seon.render.web/feed-response)))
-             (finally (datastar/close-sse! generator))))))
+             (finally ((::close-sse! leaf) generator))))))
       datastar.http-kit/on-close
       (fn [_generator _status]
         (vreset! painting false)
@@ -4063,6 +4087,8 @@
   [service]
   (let [connection (:seon.store/connection-object service)
         process (:seon.db.process/id service)
+        write! (or (:seon.db/writer service) db/transact!)
+        run-server (::run-server (socket service))
         ;; Transaction provenance resolves to a durable process entity.
         ;; This is convergent: a running service creates its row once,
         ;; and every later start observes it.
@@ -4072,8 +4098,10 @@
                   :where [?process :seon.db.process/id ?id]]
                 (db/db connection) process)
             (let [result
-                  (db/transact! connection [{:seon.db.process/id process}])]
-              (when (or (:seon.db/invalid-read result) (:seon.schema/expected-value result) (:seon.db.write.attempt/request-id result))
+                  (write! connection [{:seon.db.process/id process}])]
+              ;; The writer answers a report (it has :db-after) or its
+              ;; declared refusal; nothing else is success.
+              (when-not (:db-after result)
                 (throw
                  (ex-info "The web service process transaction was refused."
                           result)))))
@@ -4083,7 +4111,7 @@
                 ;; Keep the listening socket through development adoption.
                 ;; Resolve the handler Var on each request so reload and
                 ;; re-instrumentation take effect without rebinding the server.
-                (http/run-server (fn [request] ((handler service) request))
+                (run-server (fn [request] ((handler service) request))
                                  {:ip "127.0.0.1"
                                   :port port
                                   :worker-pool workers

@@ -18,7 +18,22 @@
                    [:seon.render.web/latest-packages
                     :seon.render.web/latest-packages]
                    [:seon.render.web/render-channel :seon.flow/channel]
-                   [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx]],
+                   [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx]
+                   [:seon.render.web/http {:optional true} :seon.render.web/http]],
+                  :http
+                  [:map {:description "The socket leaf the page goes through, member by member: http-kit's send!, write-state and run-server and Datastar's close-sse! when absent."}
+                   [:seon.render.web/send! {:optional true} :seon.render.web/send!]
+                   [:seon.render.web/write-state {:optional true} :seon.render.web/write-state]
+                   [:seon.render.web/close-sse! {:optional true} :seon.render.web/close-sse!]
+                   [:seon.render.web/run-server {:optional true} :seon.render.web/run-server]],
+                  :send! [:=> {:description "Send one frame on an http-kit channel; false when the channel was already closed."}
+                          [:cat :seon.schema/value :seon.schema/value :boolean] :boolean],
+                  :write-state [:=> {:description "The channel's http-kit write state: its pending bytes and the future that completes when they drain or the channel closes."}
+                                [:cat :seon.schema/value] :map],
+                  :close-sse! [:=> {:description "Close one Datastar SSE generator."}
+                               [:cat :seon.schema/value] :seon.schema/value],
+                  :run-server [:=> {:description "Bind an http-kit server for a handler and its options; answers the server or throws the bind failure."}
+                               [:cat [:fn clojure.core/ifn?] :map] :seon.schema/value],
                   :http-server
                   [:fn
                    {:error/message "must be an http-kit server"
@@ -93,7 +108,8 @@
                     :seon.render.web/wanted-port]],
                   :service
                   [:map
-                   [:seon.db/writer {:optional true :description "Writes an inbound message; seon.db/transact! when absent."} :seon.db/writer]
+                   [:seon.db/writer {:optional true :description "Writes an inbound message and the service's process row; seon.db/transact! when absent."} :seon.db/writer]
+                   [:seon.render.web/http {:optional true} :seon.render.web/http]
                    [:seon.store/connection-object :seon.store/connection-object]
                    [:seon.agent/id :seon.agent/id]
                    [:seon.sci.admit/caps :seon.sci.admit/caps]

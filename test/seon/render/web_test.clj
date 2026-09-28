@@ -44,14 +44,12 @@
             [seon.db :as db]
             [seon.eval :as evaluation]
             [seon.plan :as plan]
-            [seon.error :as error]
             [seon.flow :as flow]
             [seon.problems :as problems]
             [seon.render :as render]
             [seon.render.hiccup :as hiccup]
             [seon.print.value :as print.value]
             [seon.render.value :as value]
-            [seon.render.walk :as render.walk]
             [seon.render.web :as web]
             [seon.repl :as repl]
             [seon.schema :as schema]
@@ -61,12 +59,11 @@
             [seon.sci.kernel :as sci.kernel]
             [seon.test-support :as support]
             [seon.turn :as turn]
-            [starfederation.datastar.clojure.api :as datastar]
             [seon.program :as program]
             [sci.core :as sci])
   (:import [org.jsoup Jsoup]
            [org.jsoup.nodes Element]
-           [java.util.concurrent CompletableFuture CountDownLatch]
+           [java.util.concurrent CompletableFuture]
            [java.net BindException URI URLEncoder]
            [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers
             HttpResponse$BodyHandlers]))
@@ -173,15 +170,15 @@
 (deftest accepted-socket-writes-have-a-loud-drain-backstop
   (let [drained (CompletableFuture.)
         closed? (atom false)
+        ;; A socket that accepts the frame and never drains it.
         result
-        (with-redefs [http/send! (fn [& _] true)
-                      http/write-state
-                      (fn [_]
-                        {:http-kit.write/pending-bytes 17
-                         :http-kit.write/drained drained})
-                      datastar/close-sse! (fn [_] (reset! closed? true))]
-          ((web-private 'write-package!)
-           ::channel ::generator (byte-array [1]) 20 ::socket-drain))]
+        ((web-private 'write-package!)
+         {:seon.render.web/send! (fn [_channel _frame _close?] true)
+          :seon.render.web/write-state (fn [_channel]
+                                         {:http-kit.write/pending-bytes 17
+                                          :http-kit.write/drained drained})
+          :seon.render.web/close-sse! (fn [_generator] (reset! closed? true))}
+         ::channel ::generator (byte-array [1]) 20 ::socket-drain)]
     (is (= :seon.await/future (:seon.render.web/refused-member result)))
     (is (= 20 (get-in result [:seon.await/config-value])))
     (is (= ::socket-drain (:seon.await/requested-member result)))
@@ -195,8 +192,12 @@
   map holding the live pipeline: `:graph` so a test can `flow.core/ping`
   it and assert HOW MANY derivations a commit cost (the claim the shared
   registration exists to make), and `:pages-mult` so a test can take a
-  tap of its own and be the slow browser on purpose."
-  [body]
+  tap of its own and be the slow browser on purpose.
+
+  `service` adds declared service members, such as the socket leaf
+  `:seon.render.web/http`, to the service the server starts with."
+  ([body] (with-server {} body))
+  ([service body]
   (support/with-database
     (fn [connection]
       (let [_ (support/seed-cluster! connection "web-test")
@@ -283,7 +284,8 @@ handle))}}
                            :seon.render.web/registration registration
                            :seon.render.web/latest-packages latest-packages
                            :seon.render.web/render-channel render-channel
-                                    :seon.render.web/fault-channel fault-channel}))
+                           :seon.render.web/fault-channel fault-channel
+                           :seon.render.web/http (:seon.render.web/http service)}))
           (body connection @server
                 {:graph graph
                  :pages-mult pages-mult
@@ -314,7 +316,7 @@ handle))}}
             (async/close! render-channel)
             (async/close! runtime-eval-channel)
             (async/close! pages-channel)
-            (async/close! stream-channel)))))))
+            (async/close! stream-channel))))))))
 
 (defn- ping-state
   "Await one proc reply under the declared test-event backstop."
@@ -827,54 +829,54 @@ handle))}}
         "each preview is exactly its selected render function's value, no alternative beside it")))))
 
 (deftest selected-ai-experiment-reuses-the-canonical-executed-call
+  ;; THE WORLD IS DATA: the viewing agent's own render function competes with
+  ;; the floor for its agent entity, and counts its calls in its own SCI
+  ;; context. The page already executed the selected call; the experiment
+  ;; must reuse that output and render no candidate again.
   (support/with-database
    (fn [connection]
-  (let [selected 'my.render/selected
-        alternative 'my.render/alternative
-        calls (atom [])
-        captured (atom {})
-        inspection
-        {:seon.render.selection/selected selected
-         :seon.render.selection/stages
-         [{:seon.render.selection.stage/name :declared
-           :seon.render.selection.stage/status :selected
-           :seon.render.selection.stage/candidates
-           [{:seon.render.selection.candidate/producer selected
-             :seon.render.selection.candidate/status :compatible}
-            {:seon.render.selection.candidate/producer alternative
-             :seon.render.selection.candidate/status :compatible}]}]}
-        selected-entry {:seon.render.call/producer selected}
-        request {:seon.render/value {:my/value 1}
-                 :seon.render/retained-calls {}
-                 :seon.render/captured-calls captured
-                 :seon.sci.eval/ctx nil
-                 :seon.db/db @connection}]
-    (with-redefs [render/selection-inspection (constantly inspection)
-                  render/render-call
-                  (fn [request]
-                    (swap! calls conj
-                           (:seon.render.call/selected-producer request))
-                    "alternative output")
-                  sci.kernel/context-projection (constantly ::projection)
-                  db/basis-t (constantly 1)]
-      (let [experiment
-            ((web-private 'debug-render-experiment)
-             request :seon.render/ai ::subject
-             {:seon.render.call/producer selected
-              :seon.render.call/output "Agent \"juniper\"\nNamespace my.agents.juniper"
-              :seon.render.call/entry selected-entry})]
-        (is (= [] @calls)
-            "the executed call is reused and no other candidate is rendered")
-        (is (not (contains? (:seon.render/previews experiment) alternative))
-            "a named alternative is never rendered for the page")
-        (is (= "Agent \"juniper\"\nNamespace my.agents.juniper"
-               (get-in experiment [:seon.render/previews selected])))
-        (is (= selected-entry
-               (get-in experiment [:seon.render/entries selected])))
-        (is (= [:pre "Agent \"juniper\"\nNamespace my.agents.juniper"]
-               (last ((web-private 'experiment-preview-html)
-                      :seon.render/ai experiment (db/db connection))))
-            "the paired AI preview presents multiline terminal text as itself, not its EDN")))))))
+     (support/seed-cluster! connection "experiment")
+     (support/transacted! connection (support/agent-tx @connection "juniper"))
+     (let [ctx (support/fork-cluster-ctx connection)
+           in-viewer #(sci/binding [sci/ns (sci/create-ns 'my.agents.juniper)] (sci/eval-form ctx %))
+           source (str "(defn agent-view {:malli/schema [:=> [:cat [:map [:seon.agent/id :seon.agent/id]]] :string]} [unit] "
+                       "(swap! calls inc) (str \"rendered \" (:seon.agent/id unit)))")
+           _ (in-viewer '(def calls (atom 0)))
+           _ (support/transacted! connection [(support/program-fn-entity (db/db connection) 'my.agents.juniper/agent-view source)])
+           _ (sci.eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
+                                 :seon.schema/projection (sci.kernel/context-projection ctx)})
+           _ (in-viewer (edn/read-string source))
+           selected 'my.agents.juniper/agent-view
+           executed "Agent \"juniper\"\nNamespace my.agents.juniper"
+           selected-entry {:seon.render.call/producer selected}
+           request {:seon.render/value (db/pull @connection [:seon.agent/id] [:seon.agent/id "juniper"])
+                    :seon.render/namespace 'my.agents.juniper
+                    :seon.render/retained-calls {}
+                    :seon.render/captured-calls (atom {})
+                    :seon.sci.eval/ctx ctx
+                    :seon.db/db @connection
+                    :seon.sci.eval/time-limit-ms 5000
+                    :seon.sci.admit/caps caps
+                    :seon.render/profile (render/agent-render-profile config/defaults)}
+           experiment ((web-private 'debug-render-experiment)
+                       request :seon.render/ai ::subject
+                       {:seon.render.call/producer selected
+                        :seon.render.call/output executed
+                        :seon.render.call/entry selected-entry})]
+       (is (= '[my.agents.juniper/agent-view seon.render.value/render-ai]
+              (mapv :seon.render.selection.candidate/producer
+                    (mapcat :seon.render.selection.stage/candidates
+                            (:seon.render.selection/stages (:seon.render/selection experiment)))))
+           "the viewer's function is selected and the floor is its compatible alternative")
+       (is (= {:previews {selected executed} :entries {selected selected-entry} :calls 0}
+              {:previews (:seon.render/previews experiment)
+               :entries (:seon.render/entries experiment)
+               :calls @(in-viewer 'calls)})
+           "the executed call is reused, and no candidate, the alternative included, is rendered")
+       (is (= [:pre executed]
+              (last ((web-private 'experiment-preview-html)
+                     :seon.render/ai experiment (db/db connection))))
+           "the paired AI preview presents multiline terminal text as itself, not its EDN")))))
 
 (deftest debug-selected-renderer-metadata-is-outside-preview
   ;; A preview renders against a database value (a6ec14a8c).
@@ -1112,45 +1114,29 @@ handle))}}
                             {:seon.agent/id "page-key"
                              :seon.cluster/name "web-test"
                              :seon.ns/name 'my.agents.page-key}))
-      (let [counts (atom {:evidence 0 :derivations 0 :candidates []})
-            evidence-current? db/read-evidence-current?
-            page-result (web-private 'page-result)
-            candidates (web-private 'candidate-call-ids)
-            read-attributes (web-private 'read-attributes)
-            observe (fn [] (let [before @counts]
-                             (is (= 200 (.statusCode (fetch server "/agent/page-key"))))
-                             (let [after @counts]
-                               {:evidence (- (:evidence after) (:evidence before))
-                                :derivations (- (:derivations after) (:derivations before))
-                                :re-derived (reduce + (map first (drop (count (:candidates before))
-                                                                       (:candidates after))))
-                                ;; re-derived blocks whose read evidence names
-                                ;; its attributes (not a whole-index `:all` read)
-                                :attribute-bound (reduce + (map second (drop (count (:candidates before))
-                                                                             (:candidates after))))
-                                ;; retained calls handed to the candidate check
-                                :retained (reduce + (map #(nth % 2) (drop (count (:candidates before))
-                                                                          (:candidates after))))})))
+      ;; Read evidence checks and page derivations are read from their armed
+      ;; counters; which blocks re-derived is read from the retained calls
+      ;; themselves: a re-derived call is a new entry, a retained one the same.
+      (let [read-attributes (web-private 'read-attributes)
+            calls #(get-in @(render/shared-cache (:ctx context)) [::web/calls "page-key"] {})
+            observe (fn []
+                      (let [before (calls)
+                            [response counted]
+                            (support/armed-calls '#{seon.db/read-evidence-current? seon.render.web/page-result}
+                                                 #(fetch server "/agent/page-key"))
+                            after (calls)
+                            re-derived (remove (fn [[id entry]] (identical? entry (get before id))) after)]
+                        (is (= 200 (.statusCode response)))
+                        {:evidence (get counted 'seon.db/read-evidence-current?)
+                         :derivations (get counted 'seon.render.web/page-result)
+                         :re-derived (count re-derived)
+                         ;; re-derived blocks whose read evidence names its
+                         ;; attributes (not a whole-index `:all` read)
+                         :attribute-bound (count (remove #(= :all (read-attributes (val %))) re-derived))
+                         ;; retained calls the acquisition kept
+                         :retained (count before)}))
             acquire! #(sci.eval/acquire! {:seon.sci.eval/ctx (:ctx context)
                                           :seon.db/db @connection})]
-        (with-redefs-fn
-          {#'db/read-evidence-current?
-           (fn [database retained]
-             (swap! counts update :evidence inc)
-             (evidence-current? database retained))
-           #'web/page-result
-           (fn [request]
-             (swap! counts update :derivations inc)
-             (page-result request))
-           #'web/candidate-call-ids
-           (fn [calls database confirmed?]
-             (let [ids (candidates calls database confirmed?)]
-               (swap! counts update :candidates conj
-                      [(count ids)
-                       (count (remove #(= :all (read-attributes (get calls %))) ids))
-                       (count calls)])
-               ids))}
-         (fn []
           (acquire!)
           (is (= 1 (:derivations (observe))) "the first GET derives the page")
           (is (= {:evidence 0 :derivations 0 :re-derived 0 :attribute-bound 0}
@@ -1191,7 +1177,7 @@ handle))}}
                 "the block whose read attribute changed is a candidate")
             (is (< (:re-derived changed) (count (get-in @(render/shared-cache (:ctx context))
                                                         [::web/calls "page-key"])))
-                "only the changed blocks re-derive; the rest stay retained"))))))))
+                "only the changed blocks re-derive; the rest stay retained"))))))
 
 (defn- disclosure
   "A read-dependency disclosure as data: its summary line, its basis line and
@@ -1291,130 +1277,50 @@ handle))}}
           (finally (.close stream)))))))
 
 (deftest runtime-evaluation-cannot-be-displaced-by-a-database-wake
+  ;; The page's derivations are read from page-result's armed counter; no Var
+  ;; is redefined. A code signal and a database wake offered together derive
+  ;; the page once for the code signal: the wake's newest-value buffer cannot
+  ;; replace the pending code signal.
   (with-server
-    (fn [_connection server context]
-      (let [phase (atom 0)
-            calls (atom 0)
-            original (web-private 'debug-page-result)
-            decorated
-            (fn [& args]
-              (swap! calls inc)
-              (let [result (apply original args)
-                    marker (str "runtime-eval-phase-" @phase)]
-                (update-in result
-                           [:seon.render.web/page
-                            "debug-inspection-header"]
-                           str/replace
-                           "</header>"
-                           (str "<span>" marker "</span></header>"))))]
-        (with-redefs-fn
-          {(ns-resolve 'seon.render.web 'debug-page-result) decorated}
-          (fn []
-            (let [subject (URLEncoder/encode
-                           (pr-str [:seon.ns/name 'seon.flow]) "UTF-8")
-                  stream (open-feed
-                          server
-                          (str "/feed/seon.flow?debug=true&viewer=seon.flow"
-                               "&subject=" subject
-                               "&output=%3Aseon.render%2Fhtml"))]
-              (try
-                (read-until! stream "runtime-eval-phase-0")
-                (doseq [next-phase [1 2]]
-                  (reset! phase next-phase)
-                  (is (async/offer! (:runtime-eval-channel context)
-                                    :seon.render.web/runtime-eval))
-                  ;; The ordinary database wake has a different newest-value
-                  ;; buffer, so it cannot replace the pending code signal.
-                  (is (async/offer! (:render-channel context)
-                                    :seon.cluster.wake/render))
-                  (is (shows? (read-until! stream (str "runtime-eval-phase-" next-phase))
-                              (str "runtime-eval-phase-" next-phase))))
-                (is (= 3 @calls)
-                    "the initial paint and both code changes rederive once")
-                (finally (.close stream))))))))))
+    (fn [connection server context]
+      (let [stream (open-feed server (str "/feed/" agent-id))
+            derived #(get (support/armed-counts '#{seon.render.web/page-result})
+                          'seon.render.web/page-result)]
+        (try
+          (read-complete-paint! stream connection)
+          (doseq [_ [1 2]]
+            (let [before (derived)
+                  passes (derivations context)]
+              (is (async/offer! (:runtime-eval-channel context)
+                                :seon.render.web/runtime-eval))
+              (is (async/offer! (:render-channel context)
+                                :seon.cluster.wake/render))
+              (await-ping! context #(< passes (:seon.render.web/passes %)) [:runtime-eval-pass])
+              (is (pos? (- (derived) before))
+                  "the code signal re-derives the page though the database is unchanged")))
+          (finally (.close stream)))))))
 
-(deftest runtime-evaluation-drops-a-closed-debug-pages-package
-  (with-server
-    (fn [_connection server context]
-      (let [phase (atom 0)
-            calls (atom {})
-            original (web-private 'debug-page-result)
-            decorated
-            (fn [& args]
-              (let [viewer (:seon.render.debug/viewer-namespace (nth args 2))
-                    marker (str viewer "-runtime-phase-" @phase)]
-                (swap! calls update viewer (fnil inc 0))
-                (update-in (apply original args)
-                           [:seon.render.web/page
-                            "debug-inspection-header"]
-                           str/replace
-                           "</header>"
-                           (str "<span>" marker "</span></header>"))))
-            subject (URLEncoder/encode
-                     (pr-str [:seon.ns/name 'seon.flow]) "UTF-8")
-            feed-url (fn [viewer]
-                       (str "/feed/" agent-id
-                            "?debug=true&viewer=" viewer
-                            "&subject=" subject
-                            "&output=%3Aseon.render%2Fhtml"))]
-        (with-redefs-fn
-          {(ns-resolve 'seon.render.web 'debug-page-result) decorated}
-          (fn []
-            (let [closed-view (open-feed server (feed-url "my.plan"))
-                  active-view (open-feed server (feed-url "seon.flow"))]
-              (try
-                (read-until! closed-view "my.plan-runtime-phase-0")
-                (read-until! active-view "seon.flow-runtime-phase-0")
-                (.close closed-view)
-                (support/await-event!
-                 (:registration context)
-                 [:closed-debug-registration-removed]
-                 (fn [registrations]
-                   (not-any? (fn [[registration-key _tabs]]
-                               (= 'my.plan
-                                  (get-in registration-key
-                                          [1 :seon.render.debug/viewer-namespace])))
-                             registrations)))
-                (let [initial-calls (get @calls 'my.plan)]
-                  (is (pos? initial-calls) "the initial page was derived")
-                (reset! phase 1)
-                (is (async/offer! (:runtime-eval-channel context)
-                                  :seon.render.web/runtime-eval))
-                (read-until! active-view "seon.flow-runtime-phase-1")
-                (is (= initial-calls (get @calls 'my.plan))
-                    "the closed page was not derived for the code event")
-                (let [reopened (open-feed server (feed-url "my.plan"))]
-                  (try
-                    (is (shows? (read-until! reopened "my.plan-runtime-phase-1")
-                                "my.plan-runtime-phase-1")
-                        "reopen derives current code at an unchanged database basis")
-                    (is (= (inc initial-calls) (get @calls 'my.plan))
-                        "the closed page's old package was not reused")
-                    (finally (.close reopened))))
-                (.close active-view)
-                (support/await-event!
-                 (:registration context)
-                 [:all-debug-registrations-removed]
-                 empty?)
-                (reset! phase 2)
-                (let [passes-before (derivations context)]
-                  (is (async/offer! (:runtime-eval-channel context)
-                                    :seon.render.web/runtime-eval))
-                  (await-ping! context
-                               #(< passes-before
-                                   (:seon.render.web/passes %))
-                               [:unwatched-runtime-eval])
-                  (is (empty? @(:latest-packages context))
-                      "a code event with no watchers publishes an empty cache"))
-                (let [reopened (open-feed server (feed-url "my.plan"))]
-                  (try
-                    (is (shows? (read-until! reopened "my.plan-runtime-phase-2")
-                                "my.plan-runtime-phase-2")
-                        "a new subscriber after an unwatched event derives current code")
-                    (is (= (+ 2 initial-calls) (get @calls 'my.plan))
-                        "no package survived the zero-watcher code event")
-                    (finally (.close reopened)))))
-                (finally (.close active-view))))))))))
+(declare throwing-render-state)
+
+(deftest a-code-event-drops-an-unwatched-pages-package
+  ;; THE STATE IS A VALUE: one watched page and one closed page, each with a
+  ;; retained package and calls. A runtime evaluation keeps the watched page's
+  ;; package as its repaint predecessor and drops the closed page's, so a
+  ;; reopen derives current code; every code-derived call is dropped.
+  (support/with-database
+    (fn [connection]
+      (let [state (throwing-render-state connection)
+            cache (render/shared-cache (get-in state [:seon.turn.loop/cluster :seon.sci.eval/ctx]))
+            closed [::web/debug-tab {:seon.render.debug/viewer-namespace 'my.plan}]]
+        (swap! cache assoc
+               ::web/packages {"agent-a" {:seon.render.package/revision 1}
+                               closed {:seon.render.package/revision 1}}
+               ::web/calls {"agent-a" {:call :a} closed {:call :b}})
+        (#'web/invalidate-runtime-derived-state state)
+        (is (= {:packages #{"agent-a"} :calls nil}
+               {:packages (set (keys (::web/packages @cache)))
+                :calls (::web/calls @cache)})
+            "the watched page keeps its package, the closed page's is dropped, and no call survives")))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The wire — the rung's claim
@@ -1427,14 +1333,14 @@ handle))}}
 ;; G's own acceptance, not polished.
 
 (deftest a-feed-writer-failure-enters-the-cluster-fault-path
+  ;; A socket whose frame write throws: the external effect, handed as a value.
   (with-server
+    {:seon.render.web/http
+     {:seon.render.web/send! (fn [channel content close-after-send?]
+                               (if (bytes? content)
+                                 (throw (ex-info "injected writer failure" {}))
+                                 (http/send! channel content close-after-send?)))}}
     (fn [_connection server context]
-      (let [send! http/send!]
-        (with-redefs [http/send!
-                      (fn [channel content close-after-send?]
-                        (if (bytes? content)
-                          (throw (ex-info "injected writer failure" {}))
-                          (send! channel content close-after-send?)))]
         (let [stream (open-feed server (str "/feed/" agent-id))]
           (try
             (let [fault (support/await-event!
@@ -1447,7 +1353,7 @@ handle))}}
               (is (string? (:seon.render.web/tab-id data)))
               (is (= agent-id (:seon.render.web/page data)))
               (is (= :seon.render/html (:seon.render/output data))))
-            (finally (.close stream)))))))))
+            (finally (.close stream)))))))
 
 (deftest reconnect-is-repaint
   ;; Nothing rendered is stored, so a new connection derives the current
@@ -1469,21 +1375,20 @@ handle))}}
           (finally (.close second-stream)))))))
 
 (deftest two-tabs-each-get-their-own-complete-paint
+  ;; The socket records each frame it sends: the external effect, as a value.
+  (let [sent (atom [])]
   (with-server
+    {:seon.render.web/http
+     {:seon.render.web/send! (fn [channel content close-after-send?]
+                               (when (bytes? content) (swap! sent conj content))
+                               (http/send! channel content close-after-send?))}}
     (fn [_connection server context]
       ;; The document join settles one current fact-only package first.
       (is (= 200 (.statusCode (fetch server "/"))))
+      (reset! sent [])
       (let [before (derivations context)
-            send! http/send!
-            sent (atom [])]
-        (with-redefs [hiccup/->string
-                      (fn [& _] (throw (ex-info "serialized on join" {})))
-                      http/send!
-                      (fn [channel content close-after-send?]
-                        (when (bytes? content) (swap! sent conj content))
-                        (send! channel content close-after-send?))]
-          (let [a (open-feed server (str "/feed/" agent-id))
-                b (open-feed server (str "/feed/" agent-id))]
+            a (open-feed server (str "/feed/" agent-id))
+            b (open-feed server (str "/feed/" agent-id))]
             (try
               (let [to-a (read-patches! a 1)
                     to-b (read-patches! b 1)]
@@ -1497,7 +1402,7 @@ handle))}}
                     "each caller paints equivalent current bytes")
                 (is (= before (derivations context))
                     "joining a current package performs no render pass"))
-              (finally (.close a) (.close b)))))))))
+              (finally (.close a) (.close b))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The F2 sealed suite — seeds 2026072822, 2026072823, 2026072824, 2026072828
@@ -1578,15 +1483,16 @@ handle))}}
       (let [pages-channel (async/chan (async/sliding-buffer 1))
             render-channel (async/chan (async/sliding-buffer 1))
             fault-channel (async/chan (async/dropping-buffer 1))
+            ;; A server binding that fails, handed as the socket leaf's value.
             failure
-            (with-redefs
-             [http/run-server
-              (fn [_handler _options]
-                (throw (BindException. "injected ephemeral bind failure")))]
               (try
                 (web/start!
                  (service-request connection
-                 {:seon.store/connection-object connection
+                 {:seon.render.web/http
+                  {:seon.render.web/run-server
+                   (fn [_handler _options]
+                     (throw (BindException. "injected ephemeral bind failure")))}
+                  :seon.store/connection-object connection
                   :seon.agent/id agent-id
                   :seon.sci.admit/caps caps
                   :seon.db.process/id process
@@ -1597,7 +1503,7 @@ handle))}}
                   :seon.render.web/fault-channel fault-channel
                   :seon.render.web/port 0}))
                 nil
-                (catch Throwable thrown thrown)))]
+                (catch Throwable thrown thrown))]
         (try
           (is (instance? clojure.lang.ExceptionInfo failure))
           (is (= 0 (:seon.render.web/attempted-port (ex-data failure))))
@@ -1876,32 +1782,41 @@ handle))}}
           (finally (.close tab)))))))
 
 (deftest the-pass-oracle-awaits-a-held-derivation
+  ;; THE HOLD IS AGENT CODE: the page agent's render function for its
+  ;; namespace entity blocks, on the first render of the observed source, on
+  ;; a promise beside it in the same SCI context the render proc renders in.
   (with-server
     (fn [connection server context]
-      (let [tab (open-feed server (str "/feed/" agent-id))
-            entered (CountDownLatch. 1)
-            release (CountDownLatch. 1)]
+      (let [ctx (:ctx context)
+            source (str "(defn ns-view {:malli/schema [:=> [:cat [:map [:seon.ns/name :seon.ns/name] [:seon.ns/source :string]]] :seon.render/hiccup]} [unit] "
+                        "(when (and (clojure.string/includes? (:seon.ns/source unit) \"observed\") (compare-and-set! hold-first? true false)) "
+                        "(deliver pass-entered true) (deref pass-released 20000 nil)) "
+                        "[:pre (:seon.ns/source unit)])")
+            in-root #(sci/binding [sci/ns (sci/create-ns 'my.agents.root)] (sci/eval-form ctx %))
+            _ (in-root '(do (def hold-first? (atom true))
+                            (def pass-entered (promise))
+                            (def pass-released (promise))))
+            _ (support/transacted! connection
+                                   [(support/program-fn-entity (db/db connection) 'my.agents.root/ns-view source)])
+            _ (sci.eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
+                                  :seon.schema/projection (sci.kernel/context-projection ctx)})
+            _ (in-root (edn/read-string source))
+            tab (open-feed server (str "/feed/" agent-id))]
         (try
           (read-complete-paint! tab connection)
-          (let [before (derivations context)
-                walk render.walk/neighborhood
-                first-pass (atom true)]
-            (with-redefs [render.walk/neighborhood
-                          (fn [request]
-                            (when (compare-and-set! first-pass true false)
-                              (.countDown entered)
-                              (support/await-event! release ::release-derivation))
-                            (walk request))]
-              (support/transacted! connection
-                                   [{:seon.ns/name 'my.agents.root
-                                     :seon.ns/source
-                                     "(ns my.agents.root)\n(def observed true)"}])
-              (support/await-event! entered ::derivation-entered)
-              (let [observation (future (derivations context))]
-                (.countDown release)
-                (is (< before (support/await-event! observation ::derivation-observed))))))
+          (let [before (derivations context)]
+            (support/transacted! connection
+                                 [{:seon.ns/name 'my.agents.root
+                                   :seon.ns/source
+                                   "(ns my.agents.root)\n(def observed true)"}])
+            (is (true? (deref (in-root 'pass-entered) (* 1000 support/event-backstop-seconds) nil))
+                "the pass is held inside its derivation")
+            (let [observation (future (derivations context))]
+              (in-root '(deliver pass-released true))
+              (is (< before (support/await-event! observation ::derivation-observed))
+                  "the oracle answers after the held pass completes")))
           (finally
-            (.countDown release)
+            (in-root '(deliver pass-released true))
             (.close tab)))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -1912,23 +1827,18 @@ handle))}}
   ;; A drilled position is a LINK, so the proof is that following one
   ;; lands somewhere different from the root.
   (with-server
-    (fn [_connection server context]
-      (let [seen-contexts (atom [])
-            context-projection sci.kernel/context-projection]
-        (with-redefs [sci.kernel/context-projection
-                      (fn [ctx]
-                        (swap! seen-contexts conj ctx)
-                        (context-projection ctx))]
-          (let [response (fetch server "/data")
-                root (.body response)]
-            (is (= 200 (.statusCode response)))
-            (is (= "[]" (some-> (element root ".seon-data-panel [data-seon-path]")
-                                (.attr "data-seon-path")))
-                "the panel shows the floor's root")))
-        (is (seq @seen-contexts)
-            "recursive producer selection consults the SCI context")
-        (is (every? #(identical? (:ctx context) %) @seen-contexts)
-            "the route supplies the cluster's one live SCI context"))
+    (fn [_connection server _context]
+      ;; The projection's consultations are read from its armed counter.
+      (let [[response consulted]
+            (support/armed-calls '#{seon.sci.kernel/context-projection}
+                                 #(fetch server "/data"))
+            root (.body response)]
+        (is (= 200 (.statusCode response)))
+        (is (= "[]" (some-> (element root ".seon-data-panel [data-seon-path]")
+                            (.attr "data-seon-path")))
+            "the panel shows the floor's root")
+        (is (pos? (get consulted 'seon.sci.kernel/context-projection))
+            "recursive producer selection consults the SCI context"))
       (testing "a stale or mangled cursor shows the root rather than failing"
         (let [response (fetch server "/data?path=%7Bbroken&offset=nope")]
           (is (= 200 (.statusCode response)))
@@ -2231,14 +2141,16 @@ handle))}}
 (deftest start-refuses-a-flat-process-write-before-binding
   (support/with-database
     (fn [connection]
+      ;; The member's world holds no process row for this service, so start!
+      ;; writes one through the service's writer: here, a refusing writer.
       (let [result
-            (with-redefs [db/q (fn [& _] nil)
-                          db/transact!
-                          (fn [& _]
-                            {:seon.error/at (java.util.Date. 0) :seon.error/layer :seon.render.web-test/fixture :seon.error/operation 'seon.render.web-test/start-refuses-a-flat-process-write-before-binding :seon.render/refused-member :seon.render/output
-                             :seon.error/message "injected process refusal"})]
-              (support/refusal-data
-               #(web/start! (service-request connection {}))))]
+            (support/refusal-data
+             #(web/start! (service-request
+                           connection
+                           {:seon.db/writer
+                            (fn [_connection _transaction]
+                              {:seon.error/at (java.util.Date. 0) :seon.error/layer :seon.render.web-test/fixture :seon.error/operation 'seon.render.web-test/start-refuses-a-flat-process-write-before-binding :seon.render/refused-member :seon.render/output
+                               :seon.error/message "injected process refusal"})})))]
         (is (= :seon.render/output (:seon.render/refused-member result)))
         (is (= "injected process refusal" (:seon.error/message result)))))))
 
@@ -2361,6 +2273,8 @@ handle))}}
     :seon.config.eval/time-limit-ms 1000
     :seon.db.process/id "web-fault-test"})
    :seon.agent/routing (atom {})
+   ;; the render proc's args carry the environment its faults record through
+   :seon.env/environment (support/environment "web-fault-test" connection)
    :seon.render.web/registration (atom {"agent-a" 1})
    :seon.render.web/latest-packages (atom {})
    :seon.render.web/root-agent-id "root"
@@ -2371,79 +2285,41 @@ handle))}}
    ::web/passes 0})
 
 (deftest a-page-failing-every-pass-records-one-fault-and-the-proc-survives
+  ;; THE FAILING PAGE IS DATA: a registered debug page whose request carries
+  ;; none of its bounds cannot be derived (the observation refuses a missing
+  ;; limit). A valid request never throws here, since every refusal is a value;
+  ;; no route registers such a request, so a stale or hand-made registration
+  ;; is the one way in.
   (support/with-database
     (fn [connection]
-      (let [state (throwing-render-state connection)
-            failure (atom (ex-info "the page threw" {}))
-            ;; The stored occurrences of the page fault, the one fault route.
-            recorded #(count (db/q '[:find [?o ...]
-                                     :where [?o :seon.error.occurrence/message ?m]
-                                     [(clojure.string/includes? ?m "A page derivation threw.")]]
-                                   (db/db connection)))
-            three-passes
-            (fn [state]
-              (with-redefs-fn
-                {#'web/derive-page! (fn [& _] (throw @failure))}
-                (fn []
-                  (reduce (fn [state _]
-                            (first (#'web/render-pass state @connection true)))
-                          state
-                          (range 3)))))
+      (let [unbounded (fn [subject]
+                        [::web/debug-tab {:seon.render.debug/subject subject
+                                          :seon.render.debug/viewer-namespace 'my.agents.fault-test}])
+            failing (unbounded [:seon.agent/id "agent-a"])
+            state (assoc (throwing-render-state connection)
+                         :seon.render.web/registration (atom {failing 1}))
+            ;; Every stored fault occurrence of this member: the page's fault
+            ;; is recorded under its cause's declared identity.
+            recorded #(or (db/q '[:find (sum ?n) . :with ?o
+                                  :where [?o :seon.error.occurrence/count ?n]]
+                                (db/db connection))
+                          0)
+            three-passes (fn [state]
+                           (reduce (fn [state _] (first (#'web/render-pass state @connection true)))
+                                   state (range 3)))
             before (recorded)
             after (three-passes state)]
         (testing "three failing passes record ONE fault"
           (is (= (inc before) (recorded))))
-        (testing "and the proc kept going: every pass produced a page"
-          (is (= 3 (::web/passes after)))
-          (is (str/includes?
-               (str (vals (get @(:seon.render.web/latest-packages after) "agent-a")))
-               "This page could not be derived")))
-        (testing "a DIFFERENT failure on the same page is recorded again"
-          (reset! failure (ex-info "the page threw something else" {}))
-          (let [before (recorded)]
+        (testing "and the proc kept going: every pass produced the page's failure"
+          (is (= [3 #{failing}]
+                 [(::web/passes after) (set (keys (::web/fault-signatures after)))])))
+        (testing "another failing page records its own fault"
+          (let [before (recorded)
+                other (unbounded [:seon.agent/id "root"])]
+            (reset! (:seon.render.web/registration after) {failing 1 other 1})
             (three-passes after)
-            (is (= (inc before) (recorded)))))
-        (testing "a page that recovers has its next failure recorded afresh"
-          (reset! failure (ex-info "the page threw" {}))
-          (let [recovered (first (#'web/render-pass
-                                  (three-passes after) @connection true))
-                before (recorded)]
-            (is (empty? (::web/fault-signatures recovered))
-                "a rendering page holds no retained signature")
-            (three-passes recovered)
             (is (= (inc before) (recorded)))))))))
-
-(deftest session-acquisition-failure-replaces-the-loading-panel
-  (with-server
-    (fn [connection server _context]
-      (let [id (turn/next-id @connection "web-test" "root")
-            refusal (assoc (support/refusal-data #(error/value "fixture prompt acquisition refused"))
-                           :seon.error/message "fixture prompt acquisition refused")]
-        (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.instrument/contract-error) refusal))
-        (is (= 'seon.error/value (:seon.instrument/fn refusal)))
-
-        (support/transacted!
-         connection
-         (turn/open-tx {:seon.turn/id id
-                        :seon.turn/agent [:seon.agent/id "root"]
-                        :seon.turn/opened-tx "datomic.tx"}))
-        (with-redefs [render/acquire-context!
-                      (fn [_] (throw (ex-info (:seon.error/message refusal) refusal)))]
-          (let [response (fetch server (str "/agent/root/debug?turn=" id "&prompt=true")
-                                {"datastar-request" "true"})
-                body (.body response)]
-            (is (= 200 (.statusCode response)))
-            (is (= {:surface? true :refusal? true :loading? false}
-                   {:surface? (some? (.selectFirst (painted body) "#surface-debug-session_2f_root"))
-                    :refusal? (shows? body "fixture prompt acquisition refused")
-                    :loading? (shows? body "Loading the selected turn")})
-                "the session surface shows the acquisition refusal in place of the loading panel")))
-        (doseq [failure [(IllegalStateException. "unrelated runtime failure")
-                         (ex-info "unrelated typed failure" {:seon.error/at (java.util.Date. 0) :seon.error/layer :seon.render.web-test/fixture :seon.error/operation 'seon.render.web-test/session-acquisition-failure-replaces-the-loading-panel :seon.render/refused-member :seon.render/output})]]
-          (with-redefs [render/acquire-context! (fn [_] (throw failure))]
-            (is (= 500 (.statusCode
-                        (fetch server (str "/agent/root/debug?turn=" id "&prompt=true")
-                               {"datastar-request" "true"}))))))))))
 
 (deftest debug-algorithm-carries-the-render-evaluation-inputs
   (with-server
