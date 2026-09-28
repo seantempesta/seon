@@ -29,7 +29,9 @@ root.
   evaluator (JVM mode, a file, a test body) supplies that stage as a value to the same pipeline. A form is parsed
   once and evaluated once; its results and facts are stored and queryable. Everything before the print is a real
   value under its Malli schema — live in the runtime, a database fact or a blob — never a string built to be
-  clipped. Printing happens only at the edge, by the declared renderer or the floor.
+  clipped. The pipeline is: text in (prose becomes comments and delimiters are repaired where unambiguous) → forms
+  read and evaluated → results and facts stored → at the edge, the value's schema selects its most specific render,
+  if any → the value printer. Every shown value passes through the value printer, render output included.
 - **The path is total.** It always returns the evaluated value. A later stage's failure (gate, renderer, recording,
   classification) is attached beside the value as a diagnostic and recorded as a fault; it never replaces, blocks or
   wedges the value.
@@ -278,14 +280,14 @@ root.
 
 - **Three points, and cost decides between them.** The original value stays whole: many functions use it, so never
   trim it for presentation. A render function is schema-specific by definition, so all specific selection lives
-  there and renders less. The floor printer renders every value without one; it takes only general improvements
-  (budget, shape, laziness, cycles, references), never a schema-specific branch, and plain Clojure printing is its
-  fallback. Pulling unused data is waste, showing an agent irrelevant data costs more on every turn, and re-touching
+  there and renders less. The value printer is the last stage every shown value passes through, with or without a
+  render: it takes only general improvements (budget, shape, laziness, cycles, references), never a schema-specific
+  branch, and shows each value's essence with runnable dig forms (on the result symbol) for what it cuts. Pulling unused data is waste, showing an agent irrelevant data costs more on every turn, and re-touching
   cached data costs more than leaving it: invest in the render function.
 - **Choose the render function per consumer (AI or HTML); the first match wins**: the value's own `:seon.render/ai` or
   `:seon.render/html` key (the master override: a renderer symbol, an inline function or rendered data); a render
-  function whose contract fits the value, defined in the viewing agent's namespace; the schema's declared pair; the
-  floor. Whether a render function serves AI or HTML is its attachment key where attached, else its declared output
+  function whose contract fits the value, defined in the viewing agent's namespace; the schema's declared pair (most
+  specific first, along the schema's ancestry); none, so the value goes to the value printer directly. Whether a render function serves AI or HTML is its attachment key where attached, else its declared output
   schema, never a separate fact; like any function, its omitted declared inputs are supplied by schema name.
 - **Return data, not comments.** What comes back to an agent is data whenever possible: a reply is one map whose keys
   carry the value, its handle, its timing, its errors and its findings; comment lines are confusing next to data and
@@ -295,17 +297,17 @@ root.
   built (every evaluation is shown once, so this is already on demand), cached in the central cache by the value's
   content digest so nothing renders twice; the reply the agent saw is its stored history, and the context an agent
   receives is always fully evaluated. An agent never sees a render form without
-  its result; only a render that genuinely fails falls back to the floor's value with one diagnostic. Curated
+  its result; only a render that genuinely fails falls back to the value itself, printed, with one diagnostic. Curated
   namespaces render as `(require '[ns :as alias])` then their `dir`/`doc` with contracts. An HTML render returns
   hiccup. Components and declared queries render in their own blocks; failed rendering gives a diagnostic; error base
   and satisfied schema renderers compose. An attribute request stays an attribute request.
-- **Apply presentation limits once.** The floor printer holds the one budget and spreads it across the value's shape;
+- **Apply presentation limits once.** The value printer holds the one budget and spreads it across the value's shape;
   nothing else clips, and nothing prints unbounded: a log line, exception message, test report or HTTP error that
-  prints a value outside the floor is a defect. Printing is rendering with two consumers on one pipeline: AI agents
+  prints a value outside the value printer is a defect. Printing is rendering with two consumers on one pipeline: AI agents
   through MCP and humans through the browser share the same selection, node tree and cut retrieval; only the final
   output (text or hiccup) differs. Save exact shown text, select whole prompt units, never clip HTML or historical
-  units again. Keep query-work bounds and deadlines separate; elisions name bound, count, path and requery, with floor
-  hits counted. Derive missing profiles at entry or refuse explicitly. Build minimal infrastructure. Report ugly
+  units again. Keep query-work bounds and deadlines separate; elisions name bound, count, path and requery, with
+  cuts counted. Derive missing profiles at entry or refuse explicitly. Build minimal infrastructure. Report ugly
   output, and state the size of anything an agent sees in estimated tokens, never bytes or characters.
 
 ## Proof and performance
