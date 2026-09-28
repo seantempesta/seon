@@ -1993,7 +1993,9 @@
   (let [elapsed (fn [started] (/ (- (System/nanoTime) started) 1000000.0))
         started (System/nanoTime)
         child (@acquire-context! request-handle nil
-                                 {:seon.agent/isolate? true
+                                 ;; The request's own store (its overlay) holds that commit; an
+                                 ;; omitted store is supplied from the calling agent's world.
+                                 {:seon.agent/isolate? true :seon.store/store (:seon.store/store request-handle)
                                   :seon.cluster.registry/from (:seon.source/commit-id request-handle)})
         acquired (elapsed started)
         release-ms (volatile! 0.0)
