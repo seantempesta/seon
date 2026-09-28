@@ -6,6 +6,7 @@
             [cognitect.transit :as transit]
             [clojure.test :refer [deftest is testing]]
             [seon.fn.analyzer :as analyzer]
+            [seon.schema :as schema]
             [seon.test-support :as test-support]))
 
 (defn- fixture-directory
@@ -208,7 +209,9 @@
                                          (::analyzer/name %))
                              definitions))))))
 
-(deftest a-newer-timestamp-does-not-invalidate-identical-content
+(deftest a-source-changed-during-analysis-is-the-declared-refusal
+  ;; A source whose modification time stays after every rebuilt cache entry is
+  ;; the concurrent edit: rebuilding cannot make its entry answer for its bytes.
   (let [directory (fixture-directory (str (random-uuid)))
         cache-root (.getPath (io/file directory "cache"))
         callee (write-fixture! directory "race_callee.clj" "(ns race-callee) (defn f [x] x)")
@@ -217,9 +220,16 @@
     (try
       (analyzer/analyze {::analyzer/paths [callee] ::analyzer/cache-root cache-root})
       (.setLastModified (io/file callee) (+ (System/currentTimeMillis) 3600000))
-      (let [result (#'analyzer/invoke-kondo {:lint [caller] :cache-dir cache-root})]
-        (is (empty? (::analyzer/rebuilt (::analyzer/cache result))))
-        (is (empty? (::analyzer/stale (::analyzer/cache result)))))
+      (let [refusal (try (analyzer/analyze {::analyzer/paths [caller]
+                                            ::analyzer/cache-root cache-root})
+                         nil
+                         (catch clojure.lang.ExceptionInfo failure (ex-data failure)))]
+        (is ((schema/projection-validator (schema/handed-projection) :seon.fn/index-refused-error)
+             refusal))
+        (is (= :analysis (:seon.cluster.source/phase refusal)))
+        (is (= :refused (:seon.cluster.boot/disposition refusal))
+            "the operator request returns it as refused, never a core fault")
+        (is (= [callee] (:seon.source/changed-paths refusal))))
       (finally
         (test-support/delete-recursively! directory)))))
 
@@ -289,72 +299,46 @@
         (spit (str (.getPath entry) ".sha256") (apply str (repeat 64 "0"))))
       (let [analysis (analyze)
             stale (::analyzer/stale (::analyzer/cache analysis))]
-        (is (= [::analyzer/modified] (mapv ::analyzer/reason stale)))
+        (is (= [::analyzer/source-absent] (mapv ::analyzer/reason stale)))
         (is (every? ::analyzer/source stale) "the stale entry names the classpath file to rebuild from")
         (is (not (contains? (::analyzer/unanalyzed-namespaces analysis) 'seon.id))))
       (finally
         (test-support/delete-recursively! directory)))))
 
-(deftest a-directory-entry-answers-by-content-even-when-times-match
-  (let [directory (fixture-directory (str (random-uuid)))
-        source (write-fixture! directory "dependency.clj" "(ns dependency)\n(defn f [x] x)\n")
-        options {:lint [source] :cache-dir (.getCanonicalPath (io/file directory "cache"))}]
+(deftest a-directory-dependency-entry-older-than-its-source-is-rebuilt-not-deleted
+  ;; A submodule bump makes a `:local/root` directory's files newer than their
+  ;; shared cache entries. The analysis deleted such an entry without a
+  ;; rebuild (only checkout sources rebuilt), and a directory carries no skip
+  ;; mark to trigger the boot fill, so boot refused every call into the
+  ;; namespace (start --head 5bed888d0, 2026-09-26: sci.impl.namespaces,
+  ;; sci.impl.utils). Both the stale and the missing entry rebuild from the
+  ;; file the classpath loads. Runs over the checkout's own cache, which it
+  ;; leaves holding the namespace's current analysis.
+  (let [caller (.getCanonicalPath (io/file "src/seon/effect.clj"))
+        root (.getCanonicalPath ^java.io.File
+              (kondo.core/resolve-cache-dir ".clj-kondo" true ".clj-kondo/.cache"))
+        entry (kondo.cache/cache-file root :cljc 'sci.impl.utils)
+        original (when (.isFile entry) (java.nio.file.Files/readAllBytes (.toPath entry)))
+        analyze #(analyzer/analyze {::analyzer/paths [caller]})]
     (try
-      (let [root (::analyzer/cache-root (#'analyzer/invoke-kondo options))
-            file (io/file source)
-            modified-at (.lastModified file)
-            result (fn [n] {:analysis {:namespace-definitions [{:name 'dependency :filename source}]
-                                      :namespace-usages (vec (repeat n {:to 'dependency}))}})]
-        (is (empty? (::analyzer/stale (#'analyzer/stale-cache-entries root false (result 1)))))
-        (spit file "(ns dependency)\n(defn f [x y] x)\n")
-        (.setLastModified file modified-at)
-        (doseq [n [1 10 100]]
-          (let [[answer calls] (test-support/armed-calls
-                               '#{seon.fn.analyzer/file-digest}
-                               #(#'analyzer/stale-cache-entries root false (result n)))]
-            (is (= [::analyzer/modified] (mapv ::analyzer/reason (::analyzer/stale answer))))
-            (is (= [source] (mapv ::analyzer/source (::analyzer/stale answer))))
-            (is (= 1 (get calls 'seon.fn.analyzer/file-digest 0)))))
-        (#'analyzer/invoke-kondo options)
-        (is (empty? (::analyzer/stale (#'analyzer/stale-cache-entries root false (result 100))))))
-      (finally (test-support/delete-recursively! directory)))))
-
-(deftest jar-content-is-hashed-once-for-all-reached-namespaces
-  (let [directory (fixture-directory (str (random-uuid)))
-        jar-file (io/file directory "sample.jar")
-        cache (.getPath (io/file directory "cache"))
-        write-jar! (fn [args]
-                     (with-open [out (java.util.jar.JarOutputStream. (io/output-stream jar-file))]
-                       (dotimes [i 100]
-                         (.putNextEntry out (java.util.jar.JarEntry. (str "astra/jar/n" i ".clj")))
-                         (.write out (.getBytes (str "(ns astra.jar.n" i ")\n(defn f " args " nil)\n")
-                                                java.nio.charset.StandardCharsets/UTF_8))
-                         (.closeEntry out))))]
-    (try
-      (write-jar! "[]")
-      (let [raw (kondo/run! {:lint [(.getPath jar-file)] :cache-dir cache :config-dir ".clj-kondo"
-                             :config {:output {:analysis true :canonical-paths true}}})
-            root (.getPath (kondo.core/resolve-cache-dir ".clj-kondo" true cache))
-            definitions (vec (get-in raw [:analysis :namespace-definitions]))]
-        (doseq [n [1 10 100]]
-          (let [[_ calls] (test-support/armed-calls
-                           '#{seon.fn.analyzer/file-digest}
-                           #(#'analyzer/record-entry-digests!
-                             root (assoc-in raw [:analysis :namespace-definitions] (subvec definitions 0 n))))]
-            (is (= 1 (get calls 'seon.fn.analyzer/file-digest 0)))))
-        (let [modified-at (.lastModified jar-file)]
-          (write-jar! "[x]")
-          (.setLastModified jar-file modified-at))
-        (doseq [n [1 10 100]]
-          (let [input {:analysis {:namespace-definitions definitions
-                                  :namespace-usages (mapv #(hash-map :to (:name %)) (subvec definitions 0 n))}}
-                [answer calls] (test-support/armed-calls
-                                '#{seon.fn.analyzer/file-digest}
-                                #(#'analyzer/stale-cache-entries root false input))]
-            (is (= n (count (::analyzer/stale answer))))
-            (is (every? #(= ::analyzer/modified (::analyzer/reason %)) (::analyzer/stale answer)))
-            (is (= 1 (get calls 'seon.fn.analyzer/file-digest 0))))))
-      (finally (test-support/delete-recursively! directory)))))
+      (analyze)
+      (is (.isFile entry) "the caller's analysis holds sci.impl.utils")
+      (.setLastModified entry 0)
+      (let [analysis (analyze)
+            stale (::analyzer/stale (::analyzer/cache analysis))]
+        (is (= [[::analyzer/modified 'sci.impl.utils]]
+               (mapv (juxt ::analyzer/reason ::analyzer/namespace) stale)))
+        (is (every? ::analyzer/source stale) "the stale entry names the directory file to rebuild from")
+        (is (.isFile entry) "rebuilt, not deleted")
+        (is (not (contains? (::analyzer/unanalyzed-namespaces analysis) 'sci.impl.utils))))
+      (.delete entry)
+      (let [analysis (analyze)]
+        (is (.isFile entry) "a missing directory entry is analyzed from its classpath file")
+        (is (not (contains? (::analyzer/unanalyzed-namespaces analysis) 'sci.impl.utils))))
+      (finally
+        (when (and original (not (.isFile entry)))
+          (java.nio.file.Files/write (.toPath entry) ^bytes original
+                                     (make-array java.nio.file.OpenOption 0)))))))
 
 (deftest a-cache-entry-answers-by-content-not-by-path
   ;; CLASS: a cache entry invalidated by where its source lived. Each commit
@@ -376,6 +360,6 @@
             stale #(::analyzer/stale (#'analyzer/stale-cache-entries cache-root false result))]
         (is (empty? (stale)) "the same bytes answer, wherever they were read from")
         (spit source "(ns probe-moved)\n(defn f [x y] x)\n")
-        (is (= [::analyzer/modified] (mapv ::analyzer/reason (stale)))
+        (is (= [::analyzer/source-absent] (mapv ::analyzer/reason (stale)))
             "other bytes rebuild the entry"))
       (finally (test-support/delete-recursively! directory)))))

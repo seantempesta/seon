@@ -118,6 +118,3 @@
 	path = reference-code/kindly
 	url = https://github.com/scicloj/kindly.git
 	shallow = true
-[submodule "reference-code/CLM"]
-	path = reference-code/CLM
-	url = https://github.com/Contrastive-LM/CLM.git

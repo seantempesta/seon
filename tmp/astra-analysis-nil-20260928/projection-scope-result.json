@@ -1,9 +1,0 @@
-{
-  "content": [
-    {
-      "type": "text",
-      "text": "#:seon.repl{:value [{:function seon.schema/call-with-projection-state,\n  :calls 1,\n  :inclusive-ms 25.039375,\n  :self-ms 25.039375}], :result result/eabe1df200000, :ms 27}"
-    }
-  ],
-  "isError": false
-}

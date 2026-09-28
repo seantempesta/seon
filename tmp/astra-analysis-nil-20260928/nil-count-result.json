@@ -1,9 +1,0 @@
-{
-  "content": [
-    {
-      "type": "text",
-      "text": "#:seon.repl{:value [[{:n 1,\n   :label :parent,\n   :refused? true,\n   :index-executions 1,\n   :ms 14.325584}\n  {:n 1,\n   :label :candidate,\n   :refused? true,\n   :index-executions 0,\n   :ms 9.685292}]\n [{:n 10,\n   :label :parent,\n   :refused? true,\n   :index-executions 1,\n   :ms 11.962458}\n  {:n 10,\n   :label :candidate,\n   :refused? true,\n   :index-executions 0,\n   :ms 8.393792}]\n [{:n 100,\n   :label :parent,\n   :refused? true,\n   :index-executions 1,\n   :ms 11.393958}\n  {:n 100,\n   :label :candidate,\n   :refused? true,\n   :index-executions 0,\n   :ms 8.461375}]], :result result/ef951c7d9b9ab, :ms 66}"
-    }
-  ],
-  "isError": false
-}
