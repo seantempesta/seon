@@ -3846,9 +3846,15 @@
              ;; (`:seon.turn.loop/basis`), never a later connection read. A
              ;; failed commit stops the writer; `settlement-lost!` names the
              ;; runs it lost and stops this agent loudly.
-             (fn [] (db/transact-applied!
-                     connection {:tx-data (:seon.db/tx-data transaction)}
-                     (partial settlement-lost! cluster requests)))))))
+             ;; the repeats the run's faults folded ride this commit
+             ;; (`seon.fault/folded-tx`, task e33c4c026538); a refused
+             ;; settlement hands them back for the next commit
+             (fn [] (let [folded (seon.fault/folded-tx connection)
+                          outcome (db/transact-applied!
+                                   connection {:tx-data (into (vec (:seon.db/tx-data transaction)) folded)}
+                                   (partial settlement-lost! cluster requests))]
+                      (when-not (:db-after outcome) (seon.fault/unfold! connection folded))
+                      outcome))))))
         first-outcome (commit program prepared)
         ;; A REFUSED SETTLEMENT IS ANSWERED FORM BY FORM (OQ1): the last form's
         ;; facts were never validated before the writer (a form's facts are

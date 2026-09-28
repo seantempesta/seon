@@ -1344,8 +1344,7 @@
                               (fn []
                                 (when-let [armed (get-in @routing [:seon.agent/armed agent-id])]
                                   (interrupt-turn! armed)
-                                  (Thread/startVirtualThread
-                                   ^Runnable (fn [] (flow/stop (:seon.flow/graph armed)))))
+                                  (seon.flow/stop-off-thread! (:seon.flow/graph armed)))
                                 nil)
                               :seon.config.agent/turn-completion-backstop-ms
                               turn-completion-backstop-ms

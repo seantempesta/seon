@@ -138,7 +138,8 @@
   (when-not (and environment process)
     (throw (ex-info "The world has no environment and process to record a fault in."
                     {:seon.batch/diagnostic diagnostic})))
-  (fault/fault! environment (ex-info message diagnostic)
+  (fault/fault! environment (or (:seon.error/throwable diagnostic)
+                                (ex-info message (dissoc diagnostic :seon.error/throwable)))
                 (cond-> {:seon.error/layer (keyword "seon.batch" (name stage))
                          :seon.error/operation `seon.batch/evaluate-batch
                          :seon.db.process/id process}

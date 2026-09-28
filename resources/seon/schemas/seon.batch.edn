@@ -128,7 +128,8 @@
  :diagnostic [:map [:seon.error/message :string] [:seon.batch/stage :seon.batch/stage]
               [:seon.batch/ordinal {:optional true} :seon.cluster.eval/ordinal]
               [:seon.error/throwable-class {:optional true} :string]
-              [:seon.error/data {:optional true} :map]]
+              [:seon.error/data {:optional true} :map]
+              [:seon.error/throwable {:optional true :description "The live failure, recorded by the fault stage with its frames (who produced it); never stored or printed."} :seon.error/throwable]]
  :value [:any {:description "The form's live value, kept whole; never stored."}]
  :outcome [:or {:description "An evaluate stage's answer: the value or the error, with the entrant's own entry keys."}
            [:map [:seon.batch/value :seon.batch/value]

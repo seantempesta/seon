@@ -145,7 +145,10 @@
            :seon.batch/stage stage
            :seon.error/throwable-class (.getName (class t))}
     ordinal (assoc :seon.batch/ordinal ordinal)
-    (ex-data t) (assoc :seon.error/data (ex-data t))))
+    (ex-data t) (assoc :seon.error/data (ex-data t))
+    ;; the live failure, kept until the fault stage records it: its frames
+    ;; name the producer (seon.error.refusal/producer), never the recorder
+    true (assoc :seon.error/throwable t)))
 
 (defn- guard
   "(f batch), or batch with one diagnostic naming `stage` when f throws."
