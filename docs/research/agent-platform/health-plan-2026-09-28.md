@@ -282,6 +282,10 @@ never add one; reading the bound world allocates 32 B):
   and blocking on the wrong thread (a Datahike writer or listener thread, a virtual thread pinned by a monitor).
 - **On demand, for one function:** an agent asks to capture the next N calls of `f` (arguments, results, timings,
   callers) into a blob, like a debugger trace, and the capture stops itself.
+- **Cache discipline as a warning, not a bigger budget:** a cache kind whose share of bytes is high while its hit rate
+  is low is a finding against the function that fills it (`seon.cache/status` already counts hits, misses, evictions and
+  bytes per kind). Measured 2026-09-28: the three arity kinds held 458 of 503 MB at 8–23% hit rates and evicted
+  everything else. The budget stays; the finding names the derivation to make incremental.
 - **Process-level warnings** (the same shape, from existing readers): heap after GC trend, the cache near its budget
   (92% today), a store commit's size, a proc that stops answering pings, a listener callback over its bound.
 
