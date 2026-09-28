@@ -86,6 +86,10 @@
        {:label "schema map" :category "db" :value (:schema database)}
        {:label "pull many fns" :category "query"
         :value (mapv #(db/pull database '[*] %) (sample database :seon.fn/sym 40))}
+       {:label "35 messages" :category "query"
+        :value (mapv #(db/pull database '[*] %) (sample database :seon.message/id 35))}
+       {:label "fn files" :category "query"
+        :value (mapv #(db/pull database '[*] %) (sample database :seon.fn.file/relative-path 20))}
        {:label "fn syms vector" :category "query" :value (mapv fn-sym (sample database :seon.fn/sym 300))}
        {:label "config effective" :category "config" :value cfg}
        {:label "agent render profile" :category "config" :value (render/agent-render-profile cfg)}

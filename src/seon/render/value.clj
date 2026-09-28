@@ -9,16 +9,20 @@
 
   1. One budget. The profile's token budget bounds the laid-out text, render
      output included; nothing else clips.
-  2. Breadth before depth. Every member of one level is admitted before any
-     member of the next, so a map shows all its keys before a value expands.
+  2. Breadth before depth, earlier first. Every member of one level is
+     admitted before any member of the next, so a map shows all its keys
+     before a value expands; a sequence's or set's members sit one level
+     deeper per doubling of their position, so the first ones show whole and
+     the tail is cut with its count rather than every member starved.
   3. Collapsed, then expanded. A collection not yet expanded shows its
      brackets, its count and a dig form; a nested entity shows its identity
      first.
   4. Identity first, short before long. In a keyword-keyed map of at most 64
      keys, installed `:db.unique/identity` attributes lead, then scalars and
      references, then long strings, then collections.
-  5. Long strings show their head. A string grows by doubling chunks, one per
-     level, and a cut shows the characters left and the `subs` form.
+  5. Long strings show their head: 32 characters, then doubling chunks, one
+     per level; a cut shows the characters left and the `subs` form. A
+     keyword or symbol is one name, whole up to 256 characters.
   6. Every cut says what it cut: the count or characters omitted, its path,
      the bound that cut it, and a dig form on the result handle
      (`(drop 32 (get-in result/e… [:k]))`) that reads the rest.
@@ -303,7 +307,9 @@
 ;;; a loop; a refused admission keeps the previous value.
 
 (def ^:private scalar-bound 32)
-(def ^:private chunk-width 16)
+(def ^:private chunk-width 32)
+;; A keyword or symbol is one name: whole up to this length.
+(def ^:private name-bound 256)
 (def ^:private nest-cap 6)
 (def ^:private sorted-bound 64)
 (def ^:private tuple-bound 8)
@@ -809,7 +815,7 @@
                  (case (if tuple :tuple (:kind c))
                    :tuple (assoc base :kind :leaf :node tuple)
                    :scalar (assoc base :kind :leaf :node (:node c))
-                   :name (if (<= (count (:text c)) scalar-bound)
+                   :name (if (<= (count (:text c)) name-bound)
                            (assoc base :kind :leaf :node (assoc (:node c) ::print/text (:text c)))
                            (assoc base :kind :name :node (:node c) :text (:text c) :total (count (:text c))
                                   :shown chunk-width :shown-width chunk-width))
@@ -842,10 +848,11 @@
   [state node context]
   (case (:kind node)
     (:string :name) (cond-> state (more? node)
-                      (push-work (inc (:depth node)) 1 2 {:op :chunk :id (:id node) :k 2}))
+                      (push-work (inc (:level node)) 1 2 {:op :chunk :id (:id node) :k 2}))
     (:map :coll) (cond-> state
                    (and (seq (:pending node)) (< (:depth node) (:max-depth context)))
-                   (push-work (inc (:depth node)) 0 1 {:op :member :parent (:id node) :ord 1}))
+                   (push-work (inc (:level node)) 0 1 {:op :member :parent (:id node) :ord 1
+                                                       :level (inc (:level node))}))
     state))
 
 (defn- grown-to
@@ -880,7 +887,7 @@
                (<= (charge next) (:budget context)))
       (cond-> next
         (< to (:total node))
-        (push-work (+ (:depth node) (:k work)) 1 (inc (:k work)) (update work :k inc))))))
+        (push-work (+ (:level node) (:k work)) 1 (inc (:k work)) (update work :k inc))))))
 
 (defn- referent-identity
   "The referent of entity id `eid` named by its identity: `[attribute value]`
@@ -918,6 +925,16 @@
       (if (or (vector? value) (set? value)) (into (empty value) (map one) value) value)
       :else (one value))))
 
+(defn- sibling-level
+  "The level member `ordinal` of `parent` is admitted at: a map's members all
+  one level below it, so every key shows; a sequence's or set's one more level
+  per doubling of the ordinal, so earlier members are shown more fully and
+  the tail is cut with its count and dig form rather than starving all."
+  {:malli/schema [:=> [:cat :map :int] :int]}
+  [parent ordinal]
+  (+ (inc (:level parent))
+     (if (= :map (:kind parent)) 0 (- 63 (Long/numberOfLeadingZeros (long ordinal))))))
+
 (defn- admit-member
   {:malli/schema [:=> [:cat :map :map :map] [:maybe :map]]}
   [state work context]
@@ -950,6 +967,7 @@
                              (conj (:path parent) (if (:indexed? parent) [:seon.render.data/nth index] index))
                              (:id parent) {:indent indent})]
             [[c] next-id]))
+        added (mapv #(assoc % :level (:level work)) added)
         grown (-> (reduce #(assoc-in %1 [:nodes (:id %2)] %2) state added)
                   (assoc :next-id (+ next-id (count added)))
                   (update-in [:nodes (:id parent)] #(-> % (update :kids conj kid) (update :n inc) (assoc :pending more))))
@@ -958,7 +976,8 @@
       (<= (charge next) (:budget context))
       (cond-> (reduce #(schedule %1 %2 context) next (remove #(= :entry (:kind %)) added))
         (seq more)
-        (push-work depth 0 (inc ordinal) (update work :ord inc)))
+        (push-work (sibling-level parent (inc ordinal)) 0 (inc ordinal)
+                   (assoc work :ord (inc ordinal) :level (sibling-level parent (inc ordinal)))))
       ;; The root's first member is the least any page must show (§3c):
       ;; its charge is what an insufficient budget reports.
       (and (zero? (:id parent)) (zero? (:n parent))) (assoc state :first-refused (charge next))))))
@@ -1041,13 +1060,13 @@
                (and (pos? offset) (#{:map :coll} (:kind root)))
                (-> (assoc :base offset) (update :pending #(seq (drop offset %))))
                true (as-> node (assoc node :flat (flat-width node))))
-        state {:nodes {0 root} :queue (sorted-map) :seq 0 :next-id 1 :extras 0 :reserve 0}
+        state {:nodes {0 (assoc root :level 0)} :queue (sorted-map) :seq 0 :next-id 1 :extras 0 :reserve 0}
         state (settle {:nodes {}} state 0 (:width context))
         ;; The root is mandatory.
         root-charge (charge state)]
     (if (> root-charge (:budget context))
       (insufficient-budget context root-charge)
-      (let [state (loop [state (schedule state root context)]
+      (let [state (loop [state (schedule state (get-in state [:nodes 0]) context)]
                     (let [[key work] (first (:queue state))]
                       ;; The first level the budget refused is the last one
                       ;; tried: nothing deeper fills in around it.
