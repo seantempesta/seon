@@ -1533,12 +1533,25 @@
         true (assoc :seon.plan/step-lines (into {} (remove #(= current-id (first %))) lines)
                     :seon.render/operations (operations view))))))
 
+(defn- plan-agent-id
+  "The agent whose plan a render unit shows: the unit's agent, else the agent
+  holding the rendered plan entity (a plan unit names no agent of its own)."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.agent/id]]}
+  [{database :seon.db/db component :seon.render/value :as unit}]
+  (or (:seon.agent/id unit)
+      (when-let [plan-entity (:db/id component)]
+        (db/q '[:find ?id . :in $ ?plan
+                :where [?agent :seon.agent/plan ?plan] [?agent :seon.agent/id ?id]]
+              database plan-entity))
+      (when-let [owner (:my.plan/agent component)]
+        (:seon.agent/id (db/pull database [:seon.agent/id] (if (map? owner) (:db/id owner) owner))))))
+
 (defn render-plan-ai
   "My plan, my instructions, as data (`format-plan-ai` over `plan`)."
   {:malli/schema [:=> [:cat :seon.render/unit]
                   [:or :seon.plan/view :seon.error/value]]}
-  [{database :seon.db/db agent-id :seon.agent/id}]
-  (format-plan-ai (plan {:seon.db/db database :seon.agent/id agent-id})))
+  [{database :seon.db/db :as unit}]
+  (format-plan-ai (plan {:seon.db/db database :seon.agent/id (plan-agent-id unit)})))
 
 (defn render-plan-form
   "The read that finds my plan again. Shown, never executed."
