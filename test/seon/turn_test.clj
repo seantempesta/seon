@@ -290,8 +290,9 @@
         (is (string? (:seon.cluster.eval/error settled)))
         ;; Errors carry no kind name (9bf22ecd9); the declared message is
         ;; what the shown refusal says.
-        (is (str/includes? (str (:seon.eval/shown settled))
-                           "A generated context read depends on the agent's own turn-taking."))
+        (is (= "A generated context read depends on the agent's own turn-taking."
+               (:seon.error/message (support/reply (:seon.eval/shown settled))))
+            "the shown refusal is the declared error, read back as data")
         (is (some? (:seon.turn/closed-tx
                     (db/pull (db/db connection) [:seon.turn/closed-tx]
                              [:seon.turn/id run-id])))))))))
@@ -784,9 +785,11 @@
                       :seon.cluster.eval/interrupted-at
                       (java.util.Date. 1785500000000)})]
     (is (str/starts-with? interrupted "user=> (side-effect)"))
-    (is (str/includes? interrupted ":interrupted #inst"))
-    (is (not (str/includes? interrupted ":value"))
-        "an interrupted evaluation answers no value"))
+    (let [reply (support/reply (last (str/split-lines interrupted)))]
+      (is (= {:interrupted? true :value? false}
+             {:interrupted? (inst? (:seon.repl/interrupted reply))
+              :value? (contains? reply :seon.repl/value)})
+          "an interrupted evaluation answers its instant and no value")))
   (let [rendered
         (repl/render-ai
          {:seon.cluster.eval/source "(/ 1 0)"
@@ -794,10 +797,10 @@
           :seon.cluster.eval/error "Divide by zero"
           :seon.eval/shown (pr-str {:seon.error/message "Divide by zero"
                                     :seon.error/exception-class 'java.lang.ArithmeticException})})]
-    (is (str/includes? rendered ":error #:seon.error{:message \"Divide by zero\""))
-    (is (str/includes? rendered "java.lang.ArithmeticException"))
-    (is (not (str/includes? rendered "Form ")))
-    (is (not (str/includes? rendered "failed:")))))
+    (is (= {:seon.error/message "Divide by zero"
+            :seon.error/exception-class 'java.lang.ArithmeticException}
+           (:seon.repl/error (support/reply (last (str/split-lines rendered)))))
+        "the failure is the reply's :error, as the data it was shown as")))
 
 ;;; ---------------------------------------------------------------------------
 ;;; In-memory database fixture

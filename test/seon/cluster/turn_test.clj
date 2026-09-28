@@ -525,7 +525,7 @@
                       database evaluation-id)]
             (is (= 3 (count evaluations)))
             (is (str/includes? (:seon.eval/shown definition) "my.agents.agent-a/widgets"))
-            (is (= "(1 2 3)" (:seon.eval/shown read-evaluation))
+            (is (= (quote (1 2 3)) (edn/read-string (:seon.eval/shown read-evaluation)))
                 "a later evaluation sees the private object from the persistent SCI context")
             (is (str/includes? (:seon.eval/shown completion) "counted 6"))
             (is (int? read-basis))
@@ -632,8 +632,7 @@
             (is (= 3
                    (count (agent-evaluations (db/db connection))))))
           (testing "installation derives from db-after before the next form"
-            (is (= "43"
-                   (:seon.eval/shown (nth (agent-evaluations (db/db connection)) 2)))))
+            (is (= 43 (edn/read-string (:seon.eval/shown (nth (agent-evaluations (db/db connection)) 2))))))
           (testing "only the contracted defn enters the program graph"
             (is (=
                  "[:=> [:cat [:map [:my.agents.agent-a/value :int]]] :int]"
@@ -679,7 +678,7 @@
           (drive-agent! cluster "agent-a" 2))
         (let [evaluations (agent-evaluations (db/db connection))]
           (is (= 4 (count evaluations)))
-          (is (= "nil" (:seon.eval/shown (nth evaluations 2))))
+          (is (= nil (edn/read-string (:seon.eval/shown (nth evaluations 2)))))
           (is (every? #(nil? (:seon.cluster.eval/error %)) evaluations)))
         (is (nil? (db/pull (db/db connection) '[*] identity))
             "program-facts section 1f G1 retracts the owned entity")
@@ -724,8 +723,7 @@
              (reset! evaluated-ctx (:seon.sci.eval/ctx request))
              (original-evaluate request))]
           (drive-agent! cluster "agent-a" 2)
-          (is (= "nil"
-               (:seon.eval/shown (nth (agent-evaluations (db/db connection)) 1)))
+          (is (= nil (edn/read-string (:seon.eval/shown (nth (agent-evaluations (db/db connection)) 1))))
               "the next form sees the committed import removal")
           (is (nil?
                (:val
@@ -952,8 +950,7 @@
                "[x] (inc x))\n"
                "(f 1)")})]
           (drive-agent! cluster "agent-a" 2)
-          (is (= "2"
-                 (:seon.eval/shown (nth (agent-evaluations (db/db connection)) 2)))
+          (is (= 2 (edn/read-string (:seon.eval/shown (nth (agent-evaluations (db/db connection)) 2))))
               "in-ns governs the later definition and call")
           (is (some?
                (db/q '[:find ?fn .
@@ -981,8 +978,7 @@
                "[x] (+ x 2))\n"
                "(f 1)")})]
           (drive-agent! cluster "agent-a" 2)
-          (is (= "3"
-                 (:seon.eval/shown (nth (agent-evaluations (db/db connection)) 2))))
+          (is (= 3 (edn/read-string (:seon.eval/shown (nth (agent-evaluations (db/db connection)) 2)))))
           (let [entity (db/pull @connection
                             '[*]
                             [:seon.fn/sym (symbol "my.agents.agent-a" "f")])]
@@ -1170,9 +1166,9 @@
           (drive-agent! cluster "agent-a" 2)
           (let [evaluations (agent-evaluations (db/db connection))]
             (is (= 7 (count evaluations)))
-            (is (= ":v1" (:seon.eval/shown (nth evaluations 2))))
-            (is (= ":v2" (:seon.eval/shown (nth evaluations 4))))
-            (is (= "nil" (:seon.eval/shown (nth evaluations 6))))
+            (is (= :v1 (edn/read-string (:seon.eval/shown (nth evaluations 2)))))
+            (is (= :v2 (edn/read-string (:seon.eval/shown (nth evaluations 4)))))
+            (is (= nil (edn/read-string (:seon.eval/shown (nth evaluations 6)))))
             (is (every? #(nil? (:seon.cluster.eval/error %)) evaluations))
             (is (nil? (db/pull (db/db connection) '[*] [:seon.test/sym test-sym]))
                 "program-facts section 1f G1 retracts deleted tests too")
@@ -1659,7 +1655,7 @@
               "the batch evaluated the sibling after the red form")
           (is (string? (:seon.cluster.eval/error (first receipts)))
               "the red form settles as a flat error on its own eval")
-          (is (= "42" (:seon.eval/shown (second receipts)))
+          (is (= 42 (edn/read-string (:seon.eval/shown (second receipts))))
               "the sibling in the other namespace still ran and settled")
           (is (empty?
                (db/q '[:find ?assignment
@@ -1820,7 +1816,7 @@
                         @installed)]
             (is (= 2 (count evaluations)))
             (is (= declaration (:seon.cluster.eval/source evaluation)))
-            (is (= ":shared.runtime/combined" (:seon.eval/shown evaluation)))
+            (is (= :shared.runtime/combined (edn/read-string (:seon.eval/shown evaluation))))
             (is (str/includes? (:seon.eval/shown (second evaluations)) "combined evaluation"))
             (is (= "combined output" (str/trim (:seon.cluster.eval/output evaluation))))
             (is (nil? (:seon.cluster.eval/error evaluation)))
@@ -2714,7 +2710,7 @@
           (let [evaluations (agent-evaluations @connection)]
             (is (= "(let [x 1]\n  x)"
                    (:seon.cluster.eval/source (first evaluations))))
-            (is (= "1" (:seon.eval/shown (first evaluations)))))))))
+            (is (= 1 (edn/read-string (:seon.eval/shown (first evaluations))))))))))
   (testing "an odd map stays an error and the following form still settles"
     (with-cluster
       (fn [cluster]
@@ -2733,7 +2729,7 @@
                 "the unreadable form keeps the reader's own refusal")
             (is (str/includes? (:seon.cluster.eval/error (first evaluations))
                                "Map literals must contain an even number of forms"))
-            (is (= "42" (:seon.eval/shown (second evaluations))))))))))
+            (is (= 42 (edn/read-string (:seon.eval/shown (second evaluations)))))))))))
 
 (deftest a-batched-turn-commits-only-queryable-definition-facts
   (with-cluster

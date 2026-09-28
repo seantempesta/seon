@@ -211,7 +211,7 @@
          ;; BOTH dials. Every refusal throws; none is returned as the value of
          ;; a function whose output contract does not declare it, and the
          ;; wrapper records nothing: the owning boundary decides that.
-         (doseq [mode [:panic :record]]
+         (doseq [_mode [:panic :record]]
            (arm-with! candidate contract projection caps
                       {:seon.config.error/max-evidence-bytes
                        (:seon.config.error/max-evidence-bytes
@@ -319,8 +319,10 @@
        (is (= :seon.error/fact
               (:seon.error/expected data))
            "a cluster re-arm retains the JVM wrapper's bounded evidence policy")
-       (is (str/includes? (ex-message failure) "refused argument 0 `fact`"))
-       (is (str/includes? (ex-message failure) "expected :seon.error/fact (a map), got a string"))))
+       (is (= {:seon.error/argument "argument 0 `fact`" :seon.error/actual-description "a string"}
+              (select-keys (first (:seon.error/problems data))
+                           [:seon.error/argument :seon.error/actual-description]))
+           "the problem names the refused argument and what arrived")))
 
 (deftest projection-gates-inspect-the-complete-candidate-population
   ;; boot armed the projection builders; the test re-arms nothing
@@ -1494,11 +1496,11 @@
        (is (not (find refusal :seon.instrument/explanations)))
        (is (not (str/includes? printed "#:seon.print")))
        (is (= [[:seon.db/db]] (mapv :seon.error/path (:seon.error/problems refusal))))
-       (is (str/includes? message "at [:seon.db/db]"))
        (is (< (count message) 400))
        (is (< (count printed) 2000))))))
 
-(deftest the-caller-frame-is-part-of-the-refusal-sentence
+(deftest ^{:seon.test/golden "The refusal's sentence is its message producer's output: the caller frame is part of that text."}
+  the-caller-frame-is-part-of-the-refusal-sentence
   (arm-suite! '[seon.instrument-test/prefix-contract])
   (let [refusal (test-support/refusal-data #(prefix-contract "wrong"))
         caller (:seon.instrument/caller refusal)]
@@ -1514,16 +1516,16 @@
   ;; (call_preparation.clj:1033)"), read "expected must be ... Fix: must be"
   ;; and named the argument `_database` (instrumentation-opus, 2026-09-27).
   (let [refusal (test-support/refusal-data #(problems/open-faults nil []))
-        caller (:seon.instrument/caller refusal)
-        message (:seon.error/message refusal)]
+        caller (:seon.instrument/caller refusal)]
     (is (= :seon.fn.arity/input (:seon.error/member refusal)))
-    (is (str/starts-with? caller "seon.instrument-test"))
-    (is (not (str/includes? message "call_preparation")))
-    (is (str/includes? message "argument 0 `database`"))
-    (is (str/includes? message "expected :seon.db/database-value (must be"))
-    (is (not (str/includes? message "Fix: must be")))
-    (is (= :seon.db/database-value
-           (:seon.error/expected (first (:seon.error/problems refusal)))))))
+    (is (str/starts-with? caller "seon.instrument-test")
+        "the caller is the test, never the preparing closure")
+    (is (= {:seon.error/argument "argument 0 `database`"
+            :seon.error/expected :seon.db/database-value
+            :seon.error/fix "Pass :seon.db/database-value as argument 0 `database`."}
+           (select-keys (first (:seon.error/problems refusal))
+                        [:seon.error/argument :seon.error/expected :seon.error/fix]))
+        "the problem names the declared argument and a fix that is not the expectation")))
 
 (deftest an-output-refusal-names-the-function-that-returned-it
   ;; Malli validates the output of every arity it wraps (core.cljc:2229-2240);
@@ -1535,12 +1537,9 @@
                     (:malli/schema (meta #'problems/open-faults))
                     (fn [_ _] :not-a-vector) (config/result-caps config/defaults)
                     {:seon.config.error/max-evidence-bytes 8192})
-           refusal (test-support/refusal-data #(wrapped (db/db connection) []))
-           message (:seon.error/message refusal)]
+           refusal (test-support/refusal-data #(wrapped (db/db connection) []))]
        (is (= :seon.fn.arity/output (:seon.error/member refusal)))
        ;; the fix names the definition; the expectation is already the sentence's
-       (is (str/includes? message "seon.problems/open-faults refused its result"))
-       (is (str/includes? message "Fix: Change seon/problems.clj:"))
        (is (str/starts-with? (:seon.error/fix (first (:seon.error/problems refusal)))
                              "Change seon/problems.clj:")
            "the problem's fix key carries the same location")))))
