@@ -304,8 +304,10 @@
         (is (str/includes? (str (:seon.cluster.eval/diagnostics settled))
                            "A generated context read depends on the agent's own turn-taking.")
             "the fault is the declared error, delivered beside the value")
-        (is (= :released (:seon.turn.loop/outcome report))
-            "the generating turn goes on to its provider call instead of parking"))))))
+        ;; cc77df980: a generated run's settlement closes the run (one run,
+        ;; one transaction), so the turn reports :closed, not :released.
+        (is (= :closed (:seon.turn.loop/outcome report))
+            "the generated run closes in its settlement instead of parking"))))))
 
 (deftest an-untrusted-frame-failure-is-an-error-value-carrying-its-instant
   (testing "a failure after SCI returned a form's value is the kept value's error, built by the one constructor: it carries :seon.error/at, so the settlement's diagnostic contract admits it"
