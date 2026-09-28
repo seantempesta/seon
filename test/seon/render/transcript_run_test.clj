@@ -93,6 +93,5 @@
                       (dissoc unit :seon.turn/id))]
          (is (= :seon.turn/turn
                 (:seon.render.transcript/refused-member missing)))
-         (is (= :seon.turn/turn
-                (get-in missing [:seon.error/data
-                                 :seon.error/member]))))))))
+         (is (= :seon.turn/turn (:seon.error/member missing))
+             "the refusal names its member at the top level, as every refusal does"))))))

@@ -773,6 +773,7 @@
         (vary-meta (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.transcript/render 'seon.render.transcript/missing-selected-run
          {:seon.error/message "The selected run is unavailable because its run, agent, or database identity is missing."
          :seon.error/fix "Supply the expected member and repeat the requested operation."
+         :seon.error/member :seon.turn/turn
          :seon.render.transcript/refused-member :seon.turn/turn
          :seon.error/expected [:seon.db/db :seon.turn/id :seon.agent/id]
          :seon.error/offending unit

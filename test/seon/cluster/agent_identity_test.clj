@@ -1,6 +1,6 @@
 (ns seon.cluster.agent-identity-test
   (:require [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]
+            [clojure.test :refer [deftest is]]
             [seon.cluster.agent :as agent]
             [seon.agent :as my.agent]
             [seon.db :as db]
@@ -69,20 +69,6 @@
         (is (re-matches #"(Idle|Turn open) · \d+ turns?" (str (first (get card "Status"))))
             "the node carries its own status")
         (is (not (contains? (test-support/hiccup-classes html) "seon-root-agents")) "no fleet table")))))
-
-(deftest identity-rendering-keeps-partial-data-and-read-errors-visible
-  (testing "an id remains visible while optional connections are absent"
-    (let [unit {:seon.agent/id agent-id
-                :seon.render/value {:seon.agent/id agent-id}}]
-      (is (str/includes? (pr-str (agent/render-identity-html unit)) agent-id))))
-  (testing "a database refusal remains a typed rendered refusal"
-    (let [database-error
-          (db/pull {:selector [:seon.agent/id]
-                    :eid [:seon.agent/id agent-id]})
-          unit {:seon.db/db database-error
-                :seon.agent/id agent-id}]
-      (is (or (:seon.db/invalid-read database-error) (:seon.schema/expected-value database-error)))
-      (is (= database-error (agent/render-identity-html unit))))))
 
 (deftest identity-map-and-omitted-arguments-use-the-same-function
   (with-agent

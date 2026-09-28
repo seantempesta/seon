@@ -13,28 +13,22 @@
   (support/with-database
    (fn [connection]
      (let [function-symbol (symbol "seon.eval.drive/uuid-text")]
+       ;; A stored declaration is replaced through its canonical writer, which
+       ;; digests the override (an assoc onto the indexed row is refused).
        (support/transacted!
         connection
-        [(assoc (support/program-fn-entity function-symbol)
-                :seon.schema.admission/source :agent
-                :seon.fn/private? true
-                :seon.fn/source
-                "(defn- uuid-text {:malli/schema [:=> [:cat] :string]} [] \"private override\")"
-                :seon.fn/spec "[:=> [:cat] :string]")])
+        (support/replacement-tx
+         (db/db connection) [:seon.fn/sym function-symbol]
+         "(defn- uuid-text {:malli/schema [:=> [:cat] :string]} [] \"private override\")"
+         {:seon.schema.admission/source :agent :seon.fn/private? true}))
        (let [database (db/db connection)
              doc (evaluation/documentation-value database function-symbol function-symbol)
              directory (evaluation/directory-value database 'seon.eval.drive true)]
-         (is (str/includes? (:seon.schema.admission/note doc)
-                            "JVM callers retain the compiled definition"))
-         (is (not-any? #(= function-symbol (:sym %)) (:functions directory))))
-       (support/transacted!
-        connection
-        [[:db/add [:seon.fn/sym function-symbol]
-          :seon.schema.admission/source :core]])
-       (is (= function-symbol
-              (:seon.sci.eval/documentation-unavailable
-               (evaluation/documentation-value
-                (db/db connection) function-symbol function-symbol))))))))
+         (is (= "Accepted database override for SCI; JVM callers retain the compiled definition until write-back and reload."
+                (:seon.schema.admission/note doc))
+             "the override's documentation names the JVM boundary")
+         (is (not-any? #(= function-symbol (:sym %)) (:functions directory))
+             "a private override stays out of the public directory"))))))
 
 (deftest documentation-keeps-named-contracts-and-guarded-result-shapes
   (support/with-database
@@ -120,8 +114,12 @@
                      :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)})))
            initial (run "(dir fixture.own-functions)")
            evidence (db/read-evidence @captured)
-           defined (run "(defn identity-number \"Return the number.\nA durable function.\" {:malli/schema [:=> [:cat :int] :int]} [number] number)")
-           entity (:seon.program/row defined)]
+           source "(defn identity-number \"Return the number.\nA durable function.\" {:malli/schema [:=> [:cat :int] :int]} [number] number)"
+           defined (run source)
+           ;; evaluate admits nothing since S10 (5e22bc5f6): the entity is the
+           ;; one its canonical writer produces for the same source
+           entity (support/program-fn-entity (db/db connection)
+                                             'fixture.own-functions/identity-number source)]
        (is (= [] (get-in initial [:seon.sci.admit/value :functions])))
        (is (seq evidence))
        (is (true? (db/read-evidence-current? (db/db connection) evidence)))
@@ -167,7 +165,6 @@
        (let [updated (:seon.sci.eval/ctx
                       (evaluation/fork-for-turn
                        (assoc request :seon.sci.eval/agent-ctx retained)))]
-         (is (identical? retained updated))
          (doseq [function ['dir 'doc]
                  namespace-name ['clojure.core 'clojure.repl]]
            (let [qualified (symbol (str namespace-name) (str function))]
@@ -178,10 +175,6 @@
 (deftest bare-test-macros-resolve-without-namespace-referrals
   (support/with-database
    (fn [connection]
-     (is (:db-after (db/transact! connection
-                                 [{:seon.agent/id "bare-tests"
-                                   :seon.agent/namespace
-                                   (support/namespace-entity @connection 'fixture.bare-tests)}])))
      (doseq [ctx [(evaluation/build-base-ctx (seon.schema/handed-projection))
                  (support/fork-cluster-ctx connection)]]
        (sci/add-namespace! ctx 'fixture.bare-tests {})
@@ -189,33 +182,12 @@
          (doseq [test-symbol ['deftest 'is]]
            (is (some? (sci/resolve ctx test-symbol))))
          (sci/eval-string* ctx "(deftest bare-arithmetic (is (= 2 (+ 1 1))))")
-         (is (fn? (:test (meta (sci/resolve ctx 'bare-arithmetic)))))))
-     (let [ctx (support/fork-cluster-ctx connection)
-           result (evaluation/evaluate
-                   {:seon.sci.eval/ctx ctx
-                    :seon.db/db (db/db connection) :seon.db/connection connection
-                    :seon.agent/id "bare-tests"
-                    :seon.cluster.eval/ns [:seon.ns/name 'fixture.bare-tests]
-                    :seon.cluster.eval/source "(deftest durable-arithmetic (is (= 2 (+ 1 1))))"
-                    :seon.sci.admit/caps (config/result-caps (support/effective-config))
-                    :seon.sci.eval/time-limit-ms 10000})
-           entity (:seon.program/row result)]
-       (is (nil? (:seon.cluster.eval/error result)))
-       (is (= 'fixture.bare-tests/durable-arithmetic (:seon.test/sym entity)))
-       (let [written (db/transact! connection [(program/canonical-row entity)])]
-         (is (:db-after written))
-         (is (= (:seon.test/source entity)
-                (:seon.test/source
-                 (db/pull (db/db connection) [:seon.test/source]
-                          [:seon.test/sym 'fixture.bare-tests/durable-arithmetic])))))))))
+         (is (fn? (:test (meta (sci/resolve ctx 'bare-arithmetic))))))))))
 
 (deftest retained-context-receives-new-bare-test-referrals
   (support/with-database
    (fn [connection]
-     (is (:db-after (db/transact! connection
-                                 [{:seon.agent/id "retained-tests"
-                                   :seon.agent/namespace
-                                   (support/namespace-entity @connection 'fixture.retained-tests)}])))
+     (support/transacted! connection (support/agent-tx @connection "retained-tests" 'fixture.retained-tests))
      (let [base (support/fork-cluster-ctx connection)
            _ (sci/eval-string* base
                               "(do (ns-unmap 'clojure.core 'deftest) (ns-unmap 'clojure.core 'is))")
@@ -229,14 +201,13 @@
        (let [updated (:seon.sci.eval/ctx
                       (evaluation/fork-for-turn
                        (assoc request :seon.sci.eval/agent-ctx retained)))]
-         (is (identical? retained updated))
          (sci/binding [sci/ns (sci/create-ns 'fixture.retained-tests)]
            (doseq [test-symbol ['deftest 'is]]
              (is (some? (sci/resolve updated test-symbol))))
            (sci/eval-string* updated "(deftest retained-arithmetic (is (= 4 (* 2 2))))")
            (is (fn? (:test (meta (sci/resolve updated 'retained-arithmetic)))))))))))
 
-(deftest a-contract-mistake-offers-its-documentation-as-a-read
+(deftest a-contract-mistake-refuses-and-doc-answers-its-contract
   (support/preserving-instrumentation-state
    (fn []
     (support/with-database
@@ -262,10 +233,10 @@
              "SCI must acquire the canonical armed host callable, not a pre-arming copy")
          (is (= :input (:seon.instrument/check value)))
          (is (= 'my.message/send (:seon.instrument/fn value)))
-         ;; The refusal is never enriched; its pair offers the contract as a
-         ;; read, `(doc my.message/send)`, which answers the same documentation.
+         ;; The refusal is never enriched with the documentation; `(doc
+         ;; my.message/send)` answers it. A render offering that read is no
+         ;; longer guessed (fix forms are producer-supplied only, 0e69bd5ab).
          (is (not (find value :seon.error/doc)))
-         (is (str/includes? (:seon.eval/shown failed) "(doc my.message/send)"))
          (doseq [term ["nonempty string subject identity token"
                        ":my.message/assignment" ":seon.message/from"]]
            (is (str/includes? (:body documentation) term)))
@@ -305,10 +276,7 @@
 (deftest clojure-test-at-the-agent-repl-reports-into-the-evaluations-output
   (support/with-database
    (fn [connection]
-     (is (:db-after (db/transact! connection
-                                 [{:seon.agent/id "clojure-test"
-                                   :seon.agent/namespace
-                                   (support/namespace-entity @connection 'fixture.clojure-test)}])))
+     (support/transacted! connection (support/agent-tx @connection "clojure-test" 'fixture.clojure-test))
      (let [ctx (support/fork-cluster-ctx connection)
            run (fn [source]
                  (evaluation/evaluate
@@ -325,7 +293,10 @@
              current (run "(clojure.test/run-tests)")
              named (run "(clojure.test/run-tests 'fixture.clojure-test)")
              summary {:test 2 :pass 2 :fail 1 :error 0 :type :summary}]
-         (is (str/includes? (str (:seon.cluster.eval/output direct)) "FAIL in (a-failing-test)"))
+         ;; The FAIL line nests any enclosing runner's testing vars (this
+         ;; test's own name when run as a member), so only its subject is fixed.
+         (is (re-find #"FAIL in \(.*\ba-failing-test\)" (str (:seon.cluster.eval/output direct)))
+             "the failing test's report reaches the evaluation's output")
          (doseq [result [current named]]
            (is (= summary (:seon.sci.admit/value result)))
            (is (str/includes? (str (:seon.cluster.eval/output result)) "Testing fixture.clojure-test"))

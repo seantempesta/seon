@@ -1,0 +1,18 @@
+# seon.schema.edn/refusal! refuses its own subject (reds-triage-opus, 2026-09-28)
+# Red: seon.schema.edn-test/an-unregistered-predicate-refusal-names-its-reload-owner
+# (seon.schema.edn/admit {:seon.schema/forms {:k [:fn {:gen/schema :inst} 'no-such/pred?]}})
+#   => "seon.schema.edn/refusal! refused argument 2 `declaration`: expected :seon.schema/definition"
+# The declaration being refused is exactly what fails seon.schema/malli-form?, so it must be
+# :seon.schema/value. The edit hook refuses this one-line change alone because refusal! throws
+# with no error alternative (uncontained-throw) and duplicate-attribute is uncontracted: land it
+# with converting admit's refusals to returned values.
+--- a/src/seon/schema/edn.clj
++++ b/src/seon/schema/edn.clj
+@@ -451,3 +451,6 @@
+ (defn- refusal!
+-  {:malli/schema [:=> [:cat :qualified-keyword :keyword :seon.schema/definition :map] :nil]}
++  ;; The refused declaration is the authored form as given: an unregistered
++  ;; predicate or an unreadable form is exactly what fails
++  ;; :seon.schema/definition, so requiring it refused every such refusal.
++  {:malli/schema [:=> [:cat :qualified-keyword :keyword :seon.schema/value :map] :nil]}
+   [error identity declaration extra]

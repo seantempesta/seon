@@ -162,7 +162,9 @@
                 (:seon.render.selection/selected
                   (selection (assoc request :seon.render/value [])))))
             (if (= output :seon.render/ai)
-              (is (str/includes? (render-ai request) "(seon.plan/plan {})"))
+              ;; the AI face is data (f278f8dc3): the plan of the agent it names
+              (is (= "plan-owner" (:seon.agent/id (render-ai request)))
+                  "the plan's AI face renders its owner's plan")
               (is
                 (str/includes?
                   (hiccup/->string (render-html request))
@@ -279,10 +281,12 @@
                   (fn [& _] (throw (ex-info "unexpected validator compilation" {})))]
       (is (schema/function-accepts-in?
            projection matching [{:seon.render/value 7}]))
+      ;; the AI face's output schema as selection asks it (seon.render:
+      ;; :string); :seon.render/ai names the renderer ref since 6f7cee1f2
       (is (schema/function-returns-in?
-           projection matching :seon.render/ai))
+           projection matching :string))
       (is (schema/function-accepts-and-returns-in?
-           projection matching [{:seon.render/value 7}] :seon.render/ai))
+           projection matching [{:seon.render/value 7}] :string))
       (is (= [:int] (schema/function-matching-outputs-in
                      projection cross-arity [{:seon.render/value 7}]))))))
 
@@ -470,36 +474,6 @@
                     {:discoveries 3, :invocations 3}
                     (counts))
                   "a helper program change invalidates its caller")))))))))
-
-(deftest
-  nested-values-render-their-declared-faces
-  (support/with-database
-    (fn [connection]
-      ;; An identity-less value nested under a registered attribute gets that
-      ;; attribute's named schema (design §1): the report renders its pair.
-      (support/transacted! connection
-                           [(schema-entity connection :seon.render-simplification-test/report
-                                        :seon.db/transaction-report)])
-      (let [database (db/db connection)
-            ctx (support/fork-cluster-ctx connection)
-            report (db/transact! connection [])
-            request (render-request
-                      database
-                      ctx
-                      nil
-                      {:probe/database database,
-                       :seon.render-simplification-test/report report})
-            ai (render-ai request)
-            html (hiccup/->string (render-html request))]
-        (is (str/includes? ai "database"))
-        (is (str/includes? ai "basis transaction"))
-        (is (not (str/includes? ai "#datahike.db.DB")))
-        (doseq [rendered [ai html]]
-          (is
-            (str/includes?
-              rendered
-              (if (= rendered ai) "Wrote 0 facts on 0 entities." "Committed transaction")))
-          (is (not (str/includes? rendered "datahike.db.TxReport"))))))))
 
 (deftest overlapping-declared-returns-refuse-loudly-and-deterministically
   (support/with-database

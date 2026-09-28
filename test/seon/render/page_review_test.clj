@@ -1,6 +1,7 @@
 (ns seon.render.page-review-test
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
+            [seon.config :as config]
             [seon.db :as db]
             [seon.eval :as evaluation]
             [seon.render.transcript :as transcript]
@@ -54,8 +55,10 @@
            turns (get-in (db/pull database '[{:seon.agent/runtime [{:seon.runtime/turns [*]}]}]
                                  [:seon.agent/id "page"])
                          [:seon.agent/runtime :seon.runtime/turns])
+           ;; the render boundary hands a unit its admission caps
            unit (assoc (db/pull database '[*] [:seon.turn/id "current"])
-                       :seon.db/db database :seon.sci.eval/ctx ctx)
+                       :seon.db/db database :seon.sci.eval/ctx ctx
+                       :seon.sci.admit/caps (config/result-caps config/defaults))
            headers (transcript/render-history-html turns database)
            ;; each turn header's definition list as data: term to shown value
            header-fields (->> (support/hiccup-elements headers)
@@ -65,7 +68,10 @@
                                            (partition 2 (remove map? (rest %))))))]
        (is (= ["old-eval" "current-a" "current-b"] (mapv :seon.cluster.eval/id evaluations)))
        (is (= "" (transcript/render-history-ai turns database)))
-       (is (= "" (transcript/render-run-ai unit)))
+       (let [run-face (transcript/render-run-ai unit)]
+         (is (= [1 1] (mapv #(count (re-seq (re-pattern (java.util.regex.Pattern/quote %)) run-face))
+                            ["(+ 2 2)" "(+ 3 3)"]))
+             "the selected run's face is the one place its evaluations are shown"))
        (let [linked (db/transact! connection
                       [{:seon.agent/id "page"
                         :seon.agent/runtime

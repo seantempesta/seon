@@ -95,14 +95,21 @@
              "a lookup ref without a string id asks for one, not for its second element"))
        (is (empty? (db/q '[:find ?m :where [?m :seon.message/id]] @connection)))))))
 
-(deftest missing-runtime-key-is-a-runtime-fault
+(deftest a-missing-agent-is-refused-by-name-before-the-send
+  ;; A test body runs as its member, so the send is prepared from that world:
+  ;; the connection is supplied and the absent agent refuses by name at call
+  ;; preparation (e686980fa), before the contract ever sees a missing key.
   (support/with-database
    (fn [connection]
      (let [environment (env/environment {:seon.boot/cluster-name "supplied-docs"
                                          :seon.db/connection connection})
-           failure (binding [effect/*request-context* {:seon.env/environment environment}]
+           refusal (binding [effect/*request-context* {:seon.env/environment environment}]
                      (try (message/send {:my.message/to "root" :my.message/content "Hello"})
                           (catch Exception cause (ex-data cause))))]
-       (is (some? (:seon.instrument/check failure)))
-       (is (str/includes? (:seon.error/message failure) "Runtime fault:"))
-       (is (str/includes? (:seon.error/message failure) "do not pass it"))))))
+       (is (= {:seon.call-preparation/unavailable-key :seon.agent/id
+               :seon.call-preparation/target-symbol 'my.message/send}
+              (select-keys refusal [:seon.call-preparation/unavailable-key
+                                    :seon.call-preparation/target-symbol]))
+           "the refusal names the send and the agent its world lacks")
+       (is (empty? (db/q '[:find ?m :where [?m :seon.message/id]] @connection))
+           "no message is written")))))

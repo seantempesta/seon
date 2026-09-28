@@ -167,7 +167,9 @@
                      inert (wake/inert-attributes database)
                      entries (evaluation/of-agent database "juniper")]
                  (is (seq entries) "The seeded system turn must store its opening.")
-                 (is (some #(= "(seon.plan/plan {})" (:seon.cluster.eval/source %)) entries))
+                 ;; the plan's form face names its agent and database (f278f8dc3)
+                 (is (some #(= 'seon.plan/plan (first (read-string (:seon.cluster.eval/source %)))) entries)
+                     "the opening stores the agent's plan read")
                  (doseq [entry entries
                          read (:seon.cluster.eval/read-evidence entry)
                          source (get-in read [:datahike.read/dependency-plan

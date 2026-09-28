@@ -11,7 +11,7 @@
   (let [projection {:seon.schema.projection/function-contracts
                     (apply str (repeat 99000 "x"))}
         refusal (#'eval/acquisition-refusal
-                 {:seon.fn/sym "adoption.probe/broken"}
+                 {:seon.fn/sym (quote adoption.probe/broken)}
                  (ex-info "The declared namespace is unavailable."
                           {:seon.fn/namespace-unresolvable true
                            :seon.cluster.eval/source "(ns adoption.probe)"

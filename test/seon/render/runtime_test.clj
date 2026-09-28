@@ -23,7 +23,9 @@
             (db/transact!
              connection
              (into (support/agent-tx @connection "root")
+               ;; an agent names its branch (required since 1ada78050)
                [{:db/id "agent" :seon.agent/id "runtime-reader"
+                 :seon.agent/branch (get-in @connection [:config :branch])
                  :seon.agent/runtime
                  {:seon.runtime/agent "agent"
                   :seon.runtime/trigger "message"

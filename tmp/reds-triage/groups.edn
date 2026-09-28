@@ -1,0 +1,158 @@
+;; reds-triage-opus: pre-existing reds on default 1be0f7448 grouped by cause.
+;; Evidence: REPL reproductions on default (JVM mode in scratch.reds-triage; writes only on
+;; the disposable branch :reds-triage and its hosted agent mcp/reds-triage) and stored member
+;; runs dumped to stored-failures.edn (those runs predate 1be0f7448: diagnostic only).
+;; :action one of :deleted-test-of-deleted-machinery :updated-retired-assumption
+;; :fixed-producer :patch-to-owner :remaining
+[{:group :A/world-supply
+  :cause "A test body runs as its member, so a my.* call is prepared from the member's world: a missing required member refuses by name at call preparation before the contract sees a missing key."
+  :commit "e686980fa one REPL path S3a (+ 52a4aed33, e44ce97ff)"
+  :reproduced "binding seon.batch/*world* {:seon.env/environment env ..}: (my.message/send {..}) returns {:seon.call-preparation/unavailable-key :seon.agent/id :seon.call-preparation/target-symbol my.message/send}"
+  :reds [seon.supplied-documentation-test/missing-runtime-key-is-a-runtime-fault]
+  :action :updated-retired-assumption
+  :done "renamed a-missing-agent-is-refused-by-name-before-the-send"}
+
+ {:group :B/agent-branch-required
+  :cause "An agent entity requires :seon.agent/branch; fixtures writing a bare agent map are refused (:db-after nil)."
+  :commit "1ada78050 (2026-09-22); canonical fixture support/agent-tx since 090601ae1"
+  :reproduced "(seon.db/transact! branch-conn [{:seon.agent/id \"clojure-test\" :seon.agent/namespace ns}]) refused at [e :seon.agent/branch]"
+  :reds [seon.sci.documentation-test/clojure-test-at-the-agent-repl-reports-into-the-evaluations-output
+         seon.sci.documentation-test/retained-context-receives-new-bare-test-referrals
+         seon.sci.documentation-test/bare-test-macros-resolve-without-namespace-referrals
+         seon.render.runtime-test/runtime-html-is-human-readable-and-ai-bytes-stay-unchanged]
+  :action :updated-retired-assumption
+  :done "support/agent-tx through transacted! (sci/documentation); runtime_test's hand agent carries its branch (write + renders proven on :reds-triage)"}
+
+ {:group :C/evaluate-admits-nothing
+  :cause "seon.sci.eval/evaluate returns no :seon.program/row: the fold owns every program fact."
+  :commit "5e22bc5f6 one path S10"
+  :reds [seon.sci.documentation-test/bare-test-macros-resolve-without-namespace-referrals
+         seon.sci.documentation-test/directory-observes-a-function-installed-after-context-acquisition
+         seon.contracts-plan-test/installed-contract-refusal-names-the-run5-failing-coordinate
+         seon.contracts-plan-test/refusal-grammar-survives-real-evaluation]
+  :action "bare-test-macros: durable half deleted (deleted machinery); directory test: entity from support/program-fn-entity. contracts_plan: :remaining - contracts_fixture/submit must become ordinary runs (context_blocks_fixture already submits via turn/virtual-turn!), blocked by :I below; the test also uses a banned with-redefs over fixture fns and text assertions."}
+
+ {:group :D/digest-checked-fixture-writes
+  :cause "The writer checks a declaration's definition digest; assoc'ing a new :seon.fn/source onto the indexed row is refused. :seon.sci.eval/documentation-unavailable is gone and an fn entity refuses admission source :core."
+  :commit "090601ae1 fixture rows through owners; documentation-unavailable last in 9bf22ecd9"
+  :reds [seon.sci.documentation-test/a-named-private-override-documents-the-jvm-boundary]
+  :action "support/replacement-tx for the override (proven: note returned); :core half deleted (deleted machinery); note asserted exactly"}
+
+ {:group :E/refusal-contract-refuses-its-subject
+  :cause "seon.schema.edn/refusal! declares its declaration :seon.schema/definition; a [:fn ..] naming an unregistered predicate is what fails malli-form?, so the refusal refuses itself."
+  :commit "48b1d0f07 (2026-09-21)"
+  :reds [seon.schema.edn-test/an-unregistered-predicate-refusal-names-its-reload-owner
+         seon.schema.edn-test/one-gate-admits-populations-or-names-the-generated-mutation]
+  :action :patch-to-owner
+  :patch "tmp/reds-triage/patches/no-crash/schema-edn-refusal-declaration.patch"
+  :blocked "edit hook refuses the one-line fix: refusal! throws with no error alternative (uncontained-throw) and duplicate-attribute is uncontracted; land with converting admit's refusals to values."}
+
+ {:group :F/by-name-dial-population-retired
+  :cause "The test asserted every seon.config.* key is a dial; :seon.config.eval/bounds is a declared finding schema."
+  :commit "eab18c279 (2026-09-26)"
+  :reds [seon.schema.edn-test/config-dials-are-declared-independent-of-their-names]
+  :action :updated-retired-assumption}
+
+ {:group :G/fork-identity-and-guessed-offer-retired
+  :cause "(a) regenerate-agent-context! returns (merge ctx (sci/fork base)), never the identical ctx; (b) the error pair's guessed (doc op) offer was removed."
+  :commit "(a) 684f185f8; (b) f5fb4466a + 0e69bd5ab (Astra e9e15d610 ruling: fix forms producer-supplied only)"
+  :reds [seon.sci.documentation-test/retained-context-receives-the-current-repl-macro-through-its-core-alias
+         seon.sci.documentation-test/retained-context-receives-new-bare-test-referrals
+         seon.sci.documentation-test/a-contract-mistake-offers-its-documentation-as-a-read]
+  :action "identity assertions dropped (resolutions still asserted); shown-text (doc ..) assertion dropped; renamed a-contract-mistake-refuses-and-doc-answers-its-contract. Question for the instrument owner: should a contract refusal supply (doc fn) as its offered operation?"}
+
+ {:group :H/runner-context-in-report-text
+  :cause "SCI clojure.test's FAIL line nests the enclosing runner's testing vars when the test runs as a member."
+  :reds [seon.sci.documentation-test/clojure-test-at-the-agent-repl-reports-into-the-evaluations-output]
+  :action :updated-retired-assumption}
+
+ {:group :I/stale-projection-after-register
+  :cause "install-evaluated-rows! seeds from (context-projection ctx); a schema register!-ed in an earlier run never advances it, so the next run's defn naming it throws out of seon.turn/step (no value returned; path not total)."
+  :commit "surfaced by S10 (5e22bc5f6) moving installs to the fold; owner one-path-impl-2"
+  :reproduced "branch :reds-triage, 3 runs: register! 4 schemas -> transact! orders -> (defn largest-customer {:malli/schema [:=> [:cat [:vector :example/order-row]] ..]} ..) => escaped exception at seon.turn/step, twice"
+  :reds [seon.contracts-plan-test/* seon.contracts-install-test/* "likely the juniper scenario in seon.loop-proof-test/virtual-loop-end-to-end"]
+  :action :patch-to-owner
+  :patch "tmp/reds-triage/patches/one-path-impl-2/install-projection-after-register.md"}
+
+ {:group :J/union-closest-branch-by-count
+  :cause "closest-alternatives ranks a union's branches by fewest problems: a partial profile misses 4 profile keys vs 3 error-base keys, so the refusal explains the error branch although the value carries a profile key."
+  :commit "52043f542 (2026-09-27)"
+  :reds [seon.render-simplification-test/a-carried-partial-profile-is-refused-at-request-profile]
+  :action :patch-to-owner
+  :owner "one-path-impl-2 (instrument.clj)"
+  :suggestion "rank map branches first by how many of the value's keys the branch declares (explicit-keys intersection), then mismatch, count, index"}
+
+ {:group :K/plan-render-agent
+  :cause "render-plan-ai reads the agent only from the unit; a plan entity's unit names none, so seon.plan/plan refuses [:seon.agent/id] nil."
+  :commit "f278f8dc3 data renders (2026-09-27)"
+  :reds [seon.render-simplification-test/attribute-declared-producers-select-for-every-projection]
+  :action "patch-to-owner (plan.clj has live foreign WIP, the no-crash lane): tmp/reds-triage/patches/plan-holder/render-plan-ai-agent.patch (logic proven at the REPL); test's AI assertion updated to data (:seon.agent/id \"plan-owner\")"}
+
+ {:group :L/render-face-key-retyped
+  :cause ":seon.render/ai names the renderer ref since the retype; selection asks for AI output :string (render.clj:691)."
+  :commit "6f7cee1f2"
+  :reds [seon.render-simplification-test/function-arities-are-matched-without-recompilation]
+  :action "updated to :string; the test still with-redefs m/function-schema and m/validator (JVM-global, banned): :remaining law violation for the test-data-assertions/redefs lane"}
+
+ {:group :M/nested-dispatch-retired
+  :cause "The value printer never re-dispatches nested values to their schema's render (general improvements only)."
+  :commit "c2d9d303a data faces print as data, no re-dispatch"
+  :reds [seon.render-simplification-test/nested-values-render-their-declared-faces]
+  :action :deleted-test-of-deleted-machinery
+  :finding "floor printer prints a nested database as #object[datahike.db.DB 0x..] (seon.render.value/bounded-text {:probe/database db}): no reference/basis - value-printer owner"}
+
+ {:group :N/retained-call-counts
+  :cause "unverified: one extra seon.render/selection + seon.sci.kernel/invoke per step: a lost retained-call reuse (cost regression) or JVM-global armed counters seeing concurrent members"
+  :reds [seon.render-simplification-test/unchanged-retained-call-skips-discovery-and-invocation
+         seon.render-simplification-test/shared-invocation-cache-reuses-identical-entity-inputs-across-call-ids]
+  :action :remaining
+  :owner "render-selection-opus (render.clj)"}
+
+ {:group :O/symbols-stay-symbols
+  :cause "the test hand-wrote the row symbol as a string; acquisition-refusal's output contract (:seon.sci.eval/row-symbol a symbol) refuses it"
+  :reds [seon.adoption-diagnostic-test/entity-refusal-describes-the-cause-without-copying-the-projection]
+  :action :updated-retired-assumption}
+
+ {:group :P/transcript-run
+  :cause "(1) a render unit without admission caps throws required-cap in candidate-history (caps required since 91d7e2bef; production units carry them; the run now resolves its identities since the unit carries its db, 93144cb71); (2) missing-selected-run named its member only under a namespaced key; (3) render-run-ai costs 1,839 ms cold / 1,007 ms warm for a 2-evaluation run (757,620 armed calls: projection-cache-value x171,837, ref-attr-in? x73,484, seon.cache/lookup x48,641)"
+  :reds [seon.render.page-review-test/turn-headers-and-all-evaluations-have-one-place-each
+         seon.render.transcript-run-test/render-run-selects-only-the-requested-run]
+  :action "page_review: unit carries caps; run face asserted to show each evaluation once. transcript.clj: :seon.error/member :seon.turn/turn added at the producer; test asserts it. :remaining the >1 s render cost (likely over the 5 s bound for transcript_run's 4 renders) -> schema.datahike/render owners"}
+
+ {:group :Q/opening-shape-retired
+  :cause "the opening no longer evaluates (help) first: the identity unit offers (help) as data; opening sources are form faces (plan read names its agent and db)"
+  :commit "db908b0c6, f278f8dc3, ca3041f0b, 74426d528"
+  :reds [seon.help-test/help-is-first-stored-data-and-tracks-its-code-version
+         seon.loop-proof-test/running-fixture-settles-its-seeded-wake
+         seon.turn-test:718 "(changed-read set: not edited, turn_test held)"]
+  :action "help_test replaced by two data tests (identity offers (help); help's evidence tracks its code version, proven on :reds-triage) - the old test also used a banned with-redefs; running-fixture asserts the plan read's operator"}
+
+ {:group :R/virtual-loop-scenario
+  :cause "a ~560-line multi-behavior scenario: retired opening shape (Q), fixture plan install producing no steps (likely I), text assertions, 49.6 s against a 5 s bound"
+  :reds [seon.loop-proof-test/virtual-loop-end-to-end]
+  :action :remaining
+  :recommendation "root decision: split into focused behavior tests (opening units, changed-read refresh, compaction, test run) after :I lands; do not raise the bound"}
+
+ {:group :S/packaged-population-by-url
+  :cause "the packaged population is cached per resource URL (a JVM's resources never change); the mtime stamp premise is retired; the test counted parses with with-redefs-fn over the owner's Vars"
+  :commit "92b22cbf1 (2026-09-26)"
+  :reds [seon.schema.edn-test/packaged-population-is-derived-once-per-resource-stamp]
+  :action :deleted-test-of-deleted-machinery}
+
+ {:group :T/identity-unit-requires-db
+  :cause ":seon.render/unit requires :seon.db/db; the test rendered units with no db and with a read refusal as db"
+  :commit "93144cb71 (2026-09-26)"
+  :reds [seon.cluster.agent-identity-test/identity-rendering-keeps-partial-data-and-read-errors-visible]
+  :action :deleted-test-of-deleted-machinery}
+
+ {:group :U/turn-test-classified-only
+  :note "turn_test.clj is one-path-impl-2's; classified, not edited"
+  :reds {"616/636/637 private state of my.agents.a resolves in b/c" "context isolation defect, owner one-path-impl-2 (shared-fork previews 17fd9768e / fork fix ce0aa53b are the candidate commits; not reproduced here)"
+         "718 changed-read set" "retired assumption: opening sources are form faces since ca3041f0b/74426d528, the inbox read is (get (seon.db/pull '[:seon.message/_to] ..) :seon.message/_to)"
+         "virtual-turns-use-the-proc-and-compaction-is-agent-scoped 5,982 ms" "cost finding; profile before raising any bound"}}
+
+ {:group :V/turn-render-passes-read-refusal
+  :cause "in an agent's SCI context seon.turn/run-receipts returned a read refusal (entity id nil in seon.db/q) and seon.turn/render-ai passed it into interrupted-warning, whose contract refused it"
+  :reproduced "branch agent: (seon.render.transcript/render-run-ai unit-for run-a) => interrupted-warning refused argument 0 (turn.clj:1911)"
+  :action :patch-to-owner
+  :owner "one-path-impl-2 (turn.clj): check the read refusal at render-ai and return it"}]
