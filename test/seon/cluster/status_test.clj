@@ -6,7 +6,7 @@
             [seon.schema :as schema]
             [seon.test-support :as support]))
 
-(deftest accounting-joins-runtime-turns-and-preserves-unknown-cost
+(deftest accounting-joins-agent-turns-and-preserves-unknown-cost
   (support/with-database
    (fn [connection]
      ;; The turn's opening and closing are real transactions with chosen
@@ -16,6 +16,8 @@
            now (java.util.Date. (+ (inst-ms opened) 20))]
        (let [result (db/transact! connection
                   [{:db/id "datomic.tx" :db/txInstant opened}
+                   {:seon.agent/id "metrics"
+                    :seon.agent/runtime {:seon.runtime/agent [:seon.agent/id "metrics"]}}
                    {:seon.turn/id "metrics-turn"
                        :seon.turn/agent [:seon.agent/id "metrics"]
                        :seon.turn/opened-tx "datomic.tx"
