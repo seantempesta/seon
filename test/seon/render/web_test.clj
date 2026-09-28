@@ -488,6 +488,24 @@ handle))}}
         (is (str/includes? (.body known)
                            (str "action=\"/agent/" namespace-name "/context\"")))))))
 
+(deftest the-inbox-received-button-acknowledges-its-message
+  ;; Owner ruling 2026-09-27: the inbox's HTML face offers the AI face's
+  ;; (my.message/received! id) as a button; its POST commits the acknowledgement.
+  (with-server
+    (fn [connection server _context]
+      (support/transacted! connection (support/agents-tx @connection ["page-sender" "page-reader"]))
+      (support/transacted! connection [{:seon.message/id "page-inbox-1" :seon.message/content "Read me."
+                                        :seon.message/from [:seon.agent/id "page-sender"]
+                                        :seon.message/to [:seon.agent/id "page-reader"]}])
+      (let [route "/agent/page-reader/context"
+            acknowledged (post-form server route "action=received&message-id=page-inbox-1")]
+        (is (= 204 (.statusCode acknowledged)) (.body acknowledged))
+        (is (some? (:seon.message/received-tx
+                    (db/pull @connection [:seon.message/received-tx] [:seon.message/id "page-inbox-1"])))
+            "the acknowledgement is committed")
+        (is (= 422 (.statusCode (post-form server route "action=received")))
+            "a received action without its message refuses by name")))))
+
 (deftest namespace-routes-admit-by-reader-and-existing-corpus-entity
   (with-server
     (fn [connection server _context]

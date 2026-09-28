@@ -26,7 +26,6 @@
 
             [seon.cluster.wake :as wake]
             [seon.config :as config]
-            [seon.render.route :as route]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.sci.eval :as sci.eval]
@@ -231,19 +230,6 @@
         (is (every? some? (flatten rendered))
             "no absent optional element leaves a nil child behind"))))
 
-  (testing "one message's own recipient reference still renders as a reference"
-    (with-database
-      (fn [connection]
-        (let [database @connection
-              rendered (message/render-inbox-html
-                        [:seon.agent/id "bob"] database)]
-          (is (= [:p [:a {:href (route/path
-                                 ::route/data {}
-                                 {:entity (pr-str
-                                           [:seon.agent/id "bob"])})}
-                      "bob"]]
-                 (nth rendered 3)))))))
-
   (testing "an agent with no messages renders an empty state, not an error"
     (with-database
       (fn [connection]
@@ -276,6 +262,14 @@
             "the unread, oldest first: sender, content and the acknowledgement offered")
         (is (= '(my.message/inbox {:seon.agent/id "bob"}) (message/inbox-form recipient))
             "the form face is the read that finds this data again")
+        (let [html (message/render-inbox-html recipient @connection)
+              forms (filter #(and (vector? %) (= :form (first %))) (tree-seq vector? seq html))]
+          (is (= [:h2 "Unread messages (1)"] (nth html 2))
+              "HTML shows the same unread messages as the AI face (owner ruling: symmetric faces)")
+          (is (= [["received" "inbox/1"]]
+                 (mapv (fn [form] (mapv #(get-in % [1 :value]) (filter #(and (vector? %) (= :input (first %))) form)))
+                       forms))
+              "each unread message offers its received! as a button"))
         (is (true? (db/read-evidence-current? @connection evidence)))
         (test-support/transacted!
          connection

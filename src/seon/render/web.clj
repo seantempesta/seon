@@ -3782,15 +3782,36 @@
        :body (value/bounded-text result)}
       {:status 204 :headers {} :body nil})))
 
+(defn- received-response
+  "Acknowledge one message for the page's agent: the inbox's offered
+  `(my.message/received! id)`, posted by its button. The writer decides;
+  a missing or unknown message answers its refusal as text."
+  {:malli/schema [:=> [:cat :seon.render.web/service :map [:map-of :string :string]] [:map [:status :int] [:headers [:map-of :string :string]] [:body [:or :nil :string]]]]}
+  [service request params]
+  (let [message-id (get params "message-id")
+        result (if (seq message-id)
+                 (message/received! message-id (:seon.store/connection-object service)
+                                    (get-in request [:path-params :id]))
+                 (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.web/render 'seon.render.web/received-response
+                  {:seon.error/message "A received action names the message it acknowledges."
+                   :seon.error/member :seon.message/id :seon.error/expected :seon.message/id
+                   :seon.error/offending params}))]
+    (if (:seon.message/id result)
+      {:status 204 :headers {} :body nil}
+      {:status 422 :headers {"content-type" "text/plain; charset=utf-8"}
+       :body (value/bounded-text result)})))
+
 (defn- context-response
-  "The agent context route: the explicit create-owner action or a turn operation.
+  "The agent context route: the explicit create-owner action, a message
+  acknowledgement, or a turn operation.
 
   The form body is a stream, so it is decoded once here."
   {:malli/schema [:=> [:cat :seon.render.web/service :map] [:map [:status :int] [:headers [:map-of :string :string]] [:body [:or :nil :string]]]]}
   [service request]
   (let [params (decode-form request)]
-    (if (= "create-owner" (get params "action"))
-      (create-owner-response service request)
+    (case (get params "action")
+      "create-owner" (create-owner-response service request)
+      "received" (received-response service request params)
       (context-action-response service request params))))
 
 (defn- feed-response

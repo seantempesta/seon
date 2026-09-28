@@ -260,30 +260,6 @@
             (when-not (db/read-refusal? result)
               result))))))
 
-(defn- identity-reference
-  [database reference]
-  (when (and database reference)
-    (if (and (vector? reference)
-             (= 2 (count reference))
-             (qualified-keyword? (first reference)))
-      reference
-      (let [entity-id (if (map? reference)
-                        (or (:db/id reference)
-                            (some (fn [attribute]
-                                    (when-let [entry (find reference attribute)]
-                                      [attribute (val entry)]))
-                                  (db/identity-attributes database)))
-                        reference)
-            entity (when entity-id
-                     (db/pull database
-                              (into [:db/id]
-                                    (db/identity-attributes database))
-                              entity-id))]
-        (some (fn [attribute]
-                (when-let [entry (find entity attribute)]
-                  [attribute (val entry)]))
-              (db/identity-attributes database))))))
-
 (defn- data-link
   [label identity-ref]
   (when identity-ref
@@ -563,12 +539,30 @@
        [:p {:class "seon-message-inbox-empty"}
         "No message is addressed to this agent yet."]])))
 
+(declare recipient-eid inbox-message-eids)
+
+(defn- received-button
+  "The inbox's offered `(my.message/received! id)` as a button: it posts the
+  acknowledgement to the agent's context route, which commits it."
+  {:malli/schema [:=> [:cat :seon.agent/id :seon.message/id] :seon.render/hiccup]}
+  [agent-id message-id]
+  [:form {:class "seon-message-received"
+          (keyword "data-on:submit")
+          (str "@post('" (route/path :seon.render.route/agent-context {:id agent-id})
+               "', {contentType:'form'})")}
+   [:input {:type "hidden" :name "action" :value "received"}]
+   [:input {:type "hidden" :name "message-id" :value message-id}]
+   [:button {:type "submit"} "received"]])
+
 (defn render-inbox-html
-  "`:seon.render/html` — the same messages as reader-facing entries.
+  "`:seon.render/html` — the same messages the AI face shows, as reader-facing
+  entries.
 
   The reverse unit hands every message it acquired and renders them through
-  [[inbox-html]]; a walk from one message hands that message's single
-  recipient reference and renders it as the reference it is."
+  [[inbox-html]]. A recipient reference (the agent's own
+  `:seon.message/_to` concern) shows that agent's unread messages, oldest
+  first, exactly as [[render-inbox-ai]] reads them, each with its
+  `(my.message/received! id)` as a button."
   {:malli/schema [:=> [:cat [:or :seon.message/to :seon.message/inbox-unit] :seon.db/database-value]
                   :seon.render/hiccup]}
   [recipient-or-inbox database]
@@ -577,13 +571,22 @@
   (if (and (sequential? recipient-or-inbox)
            (every? map? recipient-or-inbox))
     (inbox-html (vec recipient-or-inbox) database)
-    (let [recipient (identity-reference database recipient-or-inbox)]
-      [:section {:class "seon-family-entry seon-message-inbox"}
-       [:p {:class "seon-kicker"} "Addressed to"]
-       (if recipient
-         [:p (data-link (str (second recipient)) recipient)]
+    (let [agent-id (agent-reference-id database recipient-or-inbox)
+          recipient (when agent-id (recipient-eid database agent-id))
+          eids (when (int? recipient) (inbox-message-eids database database recipient))
+          unread (when (sequential? eids)
+                   (sort-by #(message-order database %) (db/pull-many database '[*] (vec eids))))]
+      (if (and agent-id (sequential? eids))
+        (into [:section {:class "seon-family-entry seon-message-inbox"}
+               [:h2 (str "Unread messages (" (count unread) ")")]]
+              (map (fn [message]
+                     [:div {:class "seon-message-unread"}
+                      (render-html (assoc message :seon.db/db database))
+                      (received-button agent-id (:seon.message/id message))]))
+              unread)
+        [:section {:class "seon-family-entry seon-message-inbox"}
          [:p {:class "seon-message-inbox-empty"}
-          "The recipient could not be resolved."])])))
+          "The recipient's inbox could not be read."]]))))
 
 (def ^:private message-selector
   '[:seon.message/id
