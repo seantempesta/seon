@@ -235,6 +235,14 @@
               agent-branch (placed-on db)
               ;; an unreadable agent branch records here: the fault is not lost
               origin (if (keyword? agent-branch) agent-branch here)
+              ;; the producer's version that ran is the origin's: the cluster
+              ;; need not hold the definition (an agent's own, before merge),
+              ;; so its copy carries that digest (seon.error/resolution reads it)
+              producer (:seon.error/producer prepared-fact)
+              origin-digest (when (and producer (nil? (:seon.error/producer-digest source-fault)))
+                              (some-> (if (= origin here) db (some-> (db/branch-connection db origin) db/db))
+                                      (db/pull [:seon.program/definition-digest] [:seon.fn/sym producer])
+                                      :seon.program/definition-digest))
               commit-on
               (fn [branch]
                 (let [target (if (= branch here) connection (db/branch-connection db branch))
@@ -243,7 +251,9 @@
                              target (error/recording
                                      (db/db target)
                                      (cond-> (assoc request :seon.error/fact prepared-fact)
-                                       (not= branch origin) (assoc :seon.error.occurrence/branch origin))))
+                                       (not= branch origin) (assoc :seon.error.occurrence/branch origin)
+                                       (and (not= branch origin) (string? origin-digest))
+                                       (assoc-in [:seon.error/source :seon.error/producer-digest] origin-digest))))
                       ;; a repeat the writer would only count is folded, no commit
                       only-count (when (and target (:seon.db/tx-data data))
                                (error/repeat-of (db/db target) data))

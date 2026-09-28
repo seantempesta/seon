@@ -174,7 +174,26 @@
                                              context)))]
                (is (true? (:seon.fault/committed? receipt)))
                (is (= [[`misuse]] (mapv :seon.task/must-read (:seon.task/_faults (signature-row cluster (:seon.error/signature receipt)))))
-                   "the cluster copy carries the producer's task, where a claim is written"))
+                   "the cluster copy carries the producer's task, where a claim is written")
+               (testing "a definition only the agent's branch holds: the copy keeps the digest that ran"
+                 (test-support/transacted!
+                  attempt [(test-support/program-fn-entity (db/db attempt) 'my.probe/make-row "(defn make-row [] 1)"
+                                                           {:seon.schema.admission/source :agent})])
+                 (let [ran (:seon.program/definition-digest
+                            (db/pull (db/db attempt) [:seon.program/definition-digest] [:seon.fn/sym 'my.probe/make-row]))
+                       interpreted (binding [seon.batch/*world* {:seon.agent/id "worker"}]
+                                     (fault/fault! (env/environment
+                                                    {:seon.boot/cluster-name cluster-name :seon.db/connection attempt
+                                                     :seon.sci.admit/caps (config/result-caps config/defaults)})
+                                                   (ex-info "refused" {:seon.error/at (java.util.Date.) :seon.error/layer ::boundary
+                                                                       :seon.error/operation 'seon.problems/open-faults
+                                                                       :seon.error/producer 'my.probe/make-row})
+                                                   context))
+                       copied (db/pull (db/db cluster) [{:seon.error/occurrences [:seon.error/producer-digest]}]
+                                       [:seon.error/signature (:seon.error/signature interpreted)])]
+                   (is (string? ran))
+                   (is (nil? (db/pull (db/db cluster) [:db/id] [:seon.fn/sym 'my.probe/make-row])) "the cluster has no such definition")
+                   (is (= [ran] (mapv :seon.error/producer-digest (:seon.error/occurrences copied)))))))
              (finally
                (store/release-branch! cluster)
                (registry/retire-branch! {:seon.store/store store :seon.store/branch home})))))))))
