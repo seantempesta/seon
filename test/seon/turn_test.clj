@@ -291,8 +291,7 @@
                                                      :seon.agent/id "reader"
                                                      :seon.cluster.eval/ordinal 0}}
                               (java.util.Date.))
-            ;; the turn answers once its settlement is applied: its basis holds
-            ;; it before the connection's commit lands (seon.db/transact-applied!)
+            ;; the value the turn's settlement left
             settled (db/pull (:seon.turn.loop/basis report)
                              [:seon.eval/shown :seon.cluster.eval/error
                               :seon.cluster.eval/diagnostics :seon.cluster.eval/source]

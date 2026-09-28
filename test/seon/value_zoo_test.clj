@@ -68,7 +68,6 @@
             (testing (name entrant)
               (is (:seon.turn/id result) "the run is answered, never refused or thrown")
               (when (:seon.turn/id result)
-                (some-> (:seon.db/durable result) (deref 10000 nil))
                 (let [evaluations (settled result)]
                   (is (= (count zoo) (count evaluations)) "every zoo form settles as its own evaluation")
                   (is (every? (fn [[shown error]] (or (seq shown) (seq error))) evaluations)

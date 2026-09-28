@@ -83,10 +83,6 @@
         result (as-host hosted
                  #(agent/evaluate-source! (assoc custody :seon.agent/segmenter 'seon.turn/code-sources
                                                  :seon.cluster.reply/text source)))]
-    ;; The reply is answered when the settlement is applied; this fixture's
-    ;; callers read the connection afterwards, so it waits for the commit.
-    (when-let [pending (:seon.db/durable result)]
-      (is (not= ::uncommitted (deref pending 5000 ::uncommitted)) "the settlement commits"))
     (if-let [run-id (:seon.turn/id result)]
       {:seon.turn/id run-id
        ;; the run read on the reply's own value

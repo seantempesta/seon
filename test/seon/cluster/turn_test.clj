@@ -337,17 +337,6 @@
           (turn/next-agent-work @connection (request connection agent-id)))
         (agent-ids @connection)))
 
-(defn- settled!
-  "`report` once its settlement has committed. `seon.turn/turn` answers when
-  the settlement is applied (`seon.db/transact-applied!`); the connection
-  sees it only after the commit, so a driver that derives the next pass or
-  reads the connection first waits as production `step` does
-  (`seon.turn/await-settled!`), never re-running the applied forms."
-  {:malli/schema [:=> [:cat :map :map] :map]}
-  [cluster report]
-  (#'turn/await-settled! cluster report)
-  report)
-
 (defn- drive!
   "Run passes until the loop says idle, or `limit` passes have run."
   [cluster limit]
@@ -359,11 +348,10 @@
           reports
           (recur (inc passes)
                  (conj reports
-                       (settled! cluster
-                                 (turn/turn
+                       (turn/turn
                                   {:seon.turn.loop/cluster cluster
                                    :seon.turn.work/next work}
-                                  (:seon.turn.work/now request))))))))))
+                                  (:seon.turn.work/now request)))))))))
 
 (defn- drive-agent!
   "Run one agent's passes until that agent is idle, or `limit` is reached."
@@ -377,11 +365,10 @@
           reports
           (recur (inc passes)
                  (conj reports
-                       (settled! cluster
-                                 (turn/turn
+                       (turn/turn
                                   {:seon.turn.loop/cluster cluster
                                    :seon.turn.work/next work}
-                                  (:seon.turn.work/now request))))))))))
+                                  (:seon.turn.work/now request)))))))))
 
 (defn- with-provider!
   "Name a local OpenAI-compatible provider answering `text` in the cluster's
@@ -1344,9 +1331,6 @@
                        "(seon.run/complete "
                        "(str (my.agents.agent-a/refused-live 41)))")])
             transact! db/transact!
-            transact-applied! db/transact-applied!
-            ;; Since fcee85161 a form's settlement is written through
-            ;; `transact-applied!`; both writers refuse the definition.
             injected (fn [transaction]
              (let [tx-data (if (map? transaction)
                              (:tx-data transaction)
@@ -1373,10 +1357,7 @@
                 reply)})
            db/transact!
            (fn [target transaction]
-             (or (injected transaction) (transact! target transaction)))
-           db/transact-applied!
-           (fn [target transaction durable-failed!]
-             (or (injected transaction) (transact-applied! target transaction durable-failed!)))]
+             (or (injected transaction) (transact! target transaction)))]
           (drive-agent! cluster "agent-a" 2)
           (is (nil? (:seon.fn/source
                      (db/pull @connection [:seon.fn/source]
@@ -1602,15 +1583,14 @@
                          :seon.cluster.eval/source "42"
                          :seon.cluster.eval/ns [:seon.ns/name 'my.gen.alpha]})]))
         (let [report
-              (settled! cluster
-                        (turn/turn
+              (turn/turn
                          {:seon.turn.loop/cluster cluster
                           :seon.turn.work/next
                           {:seon.turn.work/situation :resume
                            :seon.turn/id route-run
                            :seon.agent/id "agent-a"
                            :seon.cluster.eval/ordinal 0}}
-                         now))
+                         now)
               receipts
               (->> (db/q '[:find [(pull ?receipt [*]) ...]
                           :in $ ?run-id
@@ -1724,7 +1704,7 @@
                       (turn/step {:seon.agent/id "agent-a"
                                   :seon.turn.loop/cluster handle}
                                  :seon.agent/episode :seon.agent/wake)
-                      _ (settled! handle state)
+                      _ state
                       database (db/db connection)
                       evaluation (first (agent-evaluations database))]
                   (is (int? (:db/id evaluation)))
@@ -2491,9 +2471,8 @@
           (let [connection (:seon.db/connection cluster)
                 source "(+ 1 1)\n(+ 2 2)\n(+ 3 3)"
                 open-work (turn/next-agent-work @connection (request connection))
-                _ (settled! cluster
-                            (turn/turn {:seon.turn.loop/cluster cluster
-                                        :seon.turn.work/next open-work} now))
+                _ (turn/turn {:seon.turn.loop/cluster cluster
+                                        :seon.turn.work/next open-work} now)
                 call-work (turn/next-agent-work @connection (request connection))
                 run-id (:seon.turn/id call-work)
                 evaluations (atom 0)
@@ -2608,12 +2587,11 @@
               test-thread (Thread/currentThread)
               reply-arrived (atom nil)
               read-segments forgive/segments]
-          (settled! cluster
-                    (turn/turn
+          (turn/turn
                      {:seon.turn.loop/cluster cluster
                       :seon.turn.work/next
                       (turn/next-agent-work @connection (request connection))}
-                     now))
+                     now)
           (let [call-work (turn/next-agent-work @connection
                                                 (request connection))]
             (with-redefs [ai/complete (fn [_projection _] {:seon.ai/text original})
@@ -2631,11 +2609,10 @@
                                      (when measure?
                                        (swap! write-count inc)
                                        (swap! write-nanos + (- (System/nanoTime) started)))))))]
-              (settled! cluster
-                        (turn/turn
+              (turn/turn
                          {:seon.turn.loop/cluster cluster
                           :seon.turn.work/next call-work}
-                         now)))
+                         now))
             (let [bookkeeping-ms (/ (double @write-nanos) 1000000.0)
                   ;; THE SUBJECT IS THE AGENT'S OWN SIX FORMS. System turn 0
                   ;; stores the generated opening in the same evaluation
@@ -2850,12 +2827,11 @@
                 {:seon.render.walk/lookup [:seon.agent/id "agent-a"]}}
                assoc :seon.error/declared-schema :seon.render.walk/no-such-entity-error)
               report
-              (settled! cluster
-                        (with-redefs-fn {#'turn/declared-sources (constantly failure)}
+              (with-redefs-fn {#'turn/declared-sources (constantly failure)}
                           #(turn/turn
                             {:seon.turn.loop/cluster cluster
                              :seon.turn.work/next generated}
-                            now)))
+                            now))
               run-state
               (db/pull @connection
                        [:seon.turn.work/situation
@@ -3011,7 +2987,7 @@
             requests (atom [])]
         (let [work (turn/next-agent-work @connection (request connection))]
           (is (= :open (:seon.turn.work/situation work)))
-          (settled! cluster (turn/turn {:seon.turn.loop/cluster cluster :seon.turn.work/next work} (Date.))))
+          (turn/turn {:seon.turn.loop/cluster cluster :seon.turn.work/next work} (Date.)))
         (test-support/transacted! connection
                                   [{:seon.message/id "m-2" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "message B"}])
         (with-redefs [ai/complete
@@ -3022,7 +2998,7 @@
           (let [call-a (turn/next-agent-work @connection
                                              (request connection))]
             (is (= :call (:seon.turn.work/situation call-a)))
-            (settled! cluster (turn/turn {:seon.turn.loop/cluster cluster :seon.turn.work/next call-a} (Date.))))
+            (turn/turn {:seon.turn.loop/cluster cluster :seon.turn.work/next call-a} (Date.)))
           (let [prompt-a (:seon.ai/prompt (first @requests))]
             (is (str/includes? prompt-a "count the widgets"))
             (is (str/includes? prompt-a ":seon.message/_to")
@@ -3035,11 +3011,11 @@
             (is (= :open (:seon.turn.work/situation open-b)))
             (is (= "m-2" (:seon.message/id open-b))
                 "the next derived work is the run triggered by B")
-            (settled! cluster (turn/turn {:seon.turn.loop/cluster cluster :seon.turn.work/next open-b} (Date.))))
+            (turn/turn {:seon.turn.loop/cluster cluster :seon.turn.work/next open-b} (Date.)))
           (let [call-b (turn/next-agent-work @connection
                                              (request connection))]
             (is (= :call (:seon.turn.work/situation call-b)))
-            (settled! cluster (turn/turn {:seon.turn.loop/cluster cluster :seon.turn.work/next call-b} (Date.))))
+            (turn/turn {:seon.turn.loop/cluster cluster :seon.turn.work/next call-b} (Date.)))
           (is (= 2 (count @requests)))
           (let [prompt-b (:seon.ai/prompt (second @requests))]
             (is (str/includes? prompt-b "message B")

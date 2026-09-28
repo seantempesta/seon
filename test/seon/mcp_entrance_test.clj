@@ -70,17 +70,6 @@
              database agent-id)
        (sort-by second) last first))
 
-(defn- settled-run
-  "The agent's newest run once one other than `previous` is durable on
-  `connection`. An MCP reply answers when its run's settlement is applied;
-  readers of the connection see the run when its commit lands
-  (`seon.db/transact-applied!`), so the test waits for that, as a reader must."
-  {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id [:maybe :seon.turn/id]] :seon.turn/id]}
-  [connection agent-id previous]
-  (latest-run-in (support/await-event! connection :seon.mcp-entrance-test/run-durable
-                                       #(when-let [run (latest-run-in % agent-id)] (not= run previous)))
-                 agent-id))
-
 (deftest tools-derive-each-input-schema-from-its-argument-schema
   (let [tools (json/read-str (mcp/tools))
         by-name (into {} (map (juxt #(get % "name") identity)) tools)]
@@ -106,7 +95,7 @@
   (with-running-agent
    (fn [running agent-id connection]
      (let [result (answer "eval_clj" {"code" "(+ 1 2) (str \"a\" \"b\")" "agent" agent-id "cluster" running})
-           run (settled-run connection agent-id nil)]
+           run (latest-run-in (db/db connection) agent-id)]
        (is (false? (get result "isError")))
        (is (= (mapv :seon.repl/response
                     (agent/run-observation {:seon.turn/id run :seon.db/db (db/db connection)} agent-id
@@ -118,10 +107,10 @@
   (with-running-agent
    (fn [running agent-id connection]
      (let [jvm (answer "eval_clj" {"code" "(+ 1 2)" "agent" agent-id "cluster" running "mode" "jvm"})
-           jvm-run (settled-run connection agent-id nil)
+           jvm-run (latest-run-in (db/db connection) agent-id)
            handle (admit/result-handle (id/evaluation jvm-run 0))
            dug (answer "eval_clj" {"code" (str "(inc " handle ")") "agent" agent-id "cluster" running})
-           run (settled-run connection agent-id jvm-run)]
+           run (latest-run-in (db/db connection) agent-id)]
        (is (false? (get jvm "isError")))
        (is (false? (get dug "isError")))
        (is (= ["4"] (mapv :seon.eval/shown
