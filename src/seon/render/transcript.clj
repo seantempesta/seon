@@ -1027,24 +1027,40 @@
                :seon.error/offending unit}) assoc :seon.error/declared-schema :seon.render.transcript/request-error)]
           observation))))
 
+(def ^:private runtime-selector
+  '[{:seon.agent/runtime
+     [{:seon.runtime/trigger
+       [:seon.message/id :seon.message/content {:seon.message/from [:seon.agent/id]}]}
+      {:seon.runtime/listens [:seon.listen/attribute :seon.listen/entity :seon.listen/value]}]}])
+
 (defn render-runtime-ai
-  "Read my runtime trigger and listens without observing turn-history churn."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.render/source :seon.render.transcript/error-result]]}
+  "My trigger and listens as data, offering the read of my turns.
+
+  The turns are left out: every run changes them, and the read of this
+  face must not."
+  {:malli/schema [:=> [:cat :seon.render/unit]
+                  [:or :seon.render.transcript/runtime-view :seon.render.transcript/error-result
+                   :seon.db/error-result]]}
+  [unit]
+  (let [agent-id (runtime-owner unit)
+        pulled (when-not (:seon.render.transcript/refused-member agent-id)
+                 (db/pull (:seon.db/db unit) runtime-selector [:seon.agent/id agent-id]))]
+    (cond
+      (:seon.render.transcript/refused-member agent-id) agent-id
+      (db/read-refusal? pulled) pulled
+      :else
+      (assoc (get pulled :seon.agent/runtime {})
+             :seon.render/operations
+             [(list 'seon.db/pull ''[{:seon.agent/runtime [:seon.runtime/turns]}] [:seon.agent/id agent-id])]))))
+
+(defn render-runtime-form
+  "The read that finds my trigger and listens again. Shown, never executed."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.render/form :seon.render.transcript/error-result]]}
   [unit]
   (let [agent-id (runtime-owner unit)]
-    (if (:seon.render.transcript/refused-member agent-id) agent-id
-      (str ";; My trigger and listens; (seon.db/pull '[{:seon.agent/runtime [:seon.runtime/turns]}] [:seon.agent/id "
-           (pr-str agent-id) "]) reads my turns on demand.\n"
-       (repl/source-text
-        (list 'seon.db/pull
-              (list 'quote
-                    '[{:seon.agent/runtime
-                       [{:seon.runtime/trigger
-                         [:seon.message/id :seon.message/content
-                          {:seon.message/from [:seon.agent/id]}]}
-                        {:seon.runtime/listens
-                         [:seon.listen/attribute :seon.listen/entity :seon.listen/value]}]}])
-              [:seon.agent/id agent-id]))))))
+    (if (:seon.render.transcript/refused-member agent-id)
+      agent-id
+      (list 'seon.db/pull (list 'quote runtime-selector) [:seon.agent/id agent-id]))))
 
 (def ^:private runtime-message-selector
   '[:seon.message/id :seon.message/content

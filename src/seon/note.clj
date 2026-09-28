@@ -4,9 +4,7 @@
   Notes are small current facts, not a knowledge system. Updating an identity
   replaces its content, and forgetting retracts the current entity while
   Datahike retains its history."
-  (:require [clojure.string :as str]
-            [seon.db :as db]
-            [seon.repl :as repl]
+  (:require [seon.db :as db]
             [seon.render.route :as route]
             [seon.render.value :as render.value]
             [seon.schema.edn :as schema.edn]))
@@ -42,35 +40,32 @@
   [entity]
   (note-value entity))
 
-(defn- note-line
-  [note]
-  (str (pr-str (:my.note/id note))
-       (when-let [about (:my.note/about note)]
-         (str " about " (pr-str about)))
-       ": " (:my.note/content note)))
+(def ^:private shown-keys
+  "What a note is to its agent: its id, content and subject."
+  [:my.note/id :my.note/content :my.note/about])
 
 (defn render-note-ai
-  "Render one current note as text."
-  {:malli/schema [:=> [:cat :my.note/note] :string]}
+  "One current note as data: its id, content and subject."
+  {:malli/schema [:=> [:cat :my.note/note] :my.note/view]}
   [note]
-  (str "Note " (note-line (note-value note))))
+  (select-keys (note-value note) shown-keys))
 
 (defn render-notes-ai
-  "Read this agent's notes, including the absence that later notes change."
-  {:malli/schema [:=> [:cat [:or :my.note/notes :seon.render/unit]] :seon.render/source]}
+  "This agent's current notes as data, an empty vector when there are none.
+
+  Handed the agent's unit, the one read is its notes' reverse ref, so a
+  first note changes the read."
+  {:malli/schema [:=> [:cat [:or :my.note/notes :seon.render/unit]]
+                  [:or [:vector :my.note/view] :seon.db/error-result]]}
   [notes]
-  (if (map? notes)
-    (str ";; I should read my saved notes; an empty read will observe the first note I add.\n"
-         (repl/source-text
-          (list 'get (list 'seon.db/pull
-                (list 'quote '[{:my.note/_agent
-                               [:my.note/id :my.note/content
-                                {:my.note/about [:my.plan.item/id]}]}])
-                [:seon.agent/id (:seon.agent/id notes)]) :my.note/_agent [])))
-    (if (seq notes)
-    (str "Current notes (" (count notes) "):\n"
-         (str/join "\n" (map #(str "- " (note-line %)) notes)))
-    "No current notes.")))
+  (let [pulled (when (map? notes)
+                 (db/pull (:seon.db/db notes)
+                          '[{:my.note/_agent [:my.note/id :my.note/content {:my.note/about [:my.plan.item/id]}]}]
+                          [:seon.agent/id (:seon.agent/id notes)]))]
+    (if (db/read-refusal? pulled)
+      pulled
+      (mapv #(select-keys (note-value %) shown-keys)
+            (if (map? notes) (get pulled :my.note/_agent []) notes)))))
 
 (defn- note-html
   [note database]

@@ -1,7 +1,6 @@
 (ns my.plan-test
   "The agent-owned plan component tree, its derivation, and its two projections."
-  (:require [clojure.edn :as edn]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.plan :as plan]
             [seon.config :as config]
@@ -34,6 +33,11 @@
   ([connection id title more]
    (plan/add! (merge {:my.plan.item/id id :my.plan.item/title title} more)
               connection "alice")))
+
+(defn- unit-of
+  "The render unit for alice's plan concern."
+  [connection]
+  {:seon.db/db @connection :seon.agent/id "alice"})
 
 (defn- plan-of
   ([connection] (plan-of connection "alice"))
@@ -71,31 +75,27 @@
                  (inst? (:seon.error/at failure))
                  (qualified-keyword? (:seon.error/layer failure))
                  (qualified-symbol? (:seon.error/operation failure))) (pr-str failure))
-        (doseq [[subject line] [["Plan step" (plan/format-item-ai failure)]
-                                ["Ready work" (plan/format-ready-items-ai failure)]
-                                ["Plan" (plan/format-plan-ai failure)]]]
-          (is (string? line)
-              "a refusal reaching a projection is said, never handed on raw")
-          (is (str/starts-with? line
-                                (str subject " unavailable for \"alice\"")))
+        (let [line (plan/format-item-ai failure)]
+          (is (str/starts-with? line "Plan step unavailable for \"alice\""))
           (is (true? (:seon.db/invalid-read failure)))
           (is (str/includes? line (str (:seon.error/operation failure))))
-          (is (str/includes? line "uninstalled attribute")))))))
+          (is (str/includes? line "uninstalled attribute")))
+        (testing "a data face hands its refusal on as the error value the error render shows"
+          (is (= failure (plan/format-ready-items-ai failure)))
+          (is (= failure (plan/format-plan-ai failure))))))))
 
 (deftest a-refused-derivation-renders-a-typed-line-where-instructions-belong
   (with-plan
     (fn [connection]
       (let [refusal (plan/plan {:seon.db/db @connection
                                 :seon.agent/id "nobody"})
-            source (plan/render-plan-ai {:seon.db/db @connection
-                                         :seon.agent/id "nobody"})]
+            shown (plan/render-plan-ai {:seon.db/db @connection
+                                        :seon.agent/id "nobody"})]
         (is (= "nobody" (:my.plan/missing-agent-id refusal))
             "the derivation refuses as a flat value, never by throwing")
         (is (= :seon.agent/id (:my.plan/refused-member refusal)))
-        (is (str/includes? source "(seon.plan/format-plan-ai (seon.plan/plan {}))")
-            "the refusal renders through this plan's own AI pair")
-        (is (str/starts-with? (plan/format-plan-ai refusal)
-                              "Plan unavailable for \"nobody\""))))))
+        (is (= refusal shown)
+            "the refusal is the AI face's declared error value, shown by the error render")))))
 
 (deftest the-derivation-answers-for-a-plan-with-no-steps-and-for-parents
   (with-plan
@@ -127,8 +127,8 @@
         (is (= [] (:my.plan/steps current)))
         (is (= [] (:my.plan/ready current)))
         (is (not (contains? current :my.plan/current-step)))
-        (is (= {} (:seon.plan/step-lines (edn/read-string ai))))
-        (is (nil? (:seon.plan/current-line (edn/read-string ai))))
+        (is (= {} (:seon.plan/step-lines ai)))
+        (is (nil? (:seon.plan/current-line ai)))
         (is (str/includes? (pr-str html) "No steps yet."))))))
 
 (deftest one-step-is-owned-by-the-agent-through-the-component-edge
@@ -190,7 +190,8 @@
   (with-plan
     (fn [connection]
       (is (= {} (plan/current @connection "alice")))
-      (is (str/includes? (plan/render-plan-ai (plan-of connection)) "(seon.plan/plan {})"))
+      (is (= ['my.plan/add!] (map first (:seon.render/operations (plan/render-plan-ai (unit-of connection)))))
+          "an empty plan offers adding its first step")
       (let [prepare (add connection "prepare" "Prepare")
             verify (add connection "verify" "Verify"
                         {:my.plan.item/needs #{"prepare"}})]
@@ -230,8 +231,7 @@
       (let [current (plan-of connection)]
         (is (not (contains? current :my.plan/current-step)))
         (is (= :ready (:my.plan/state (first (:my.plan/steps current)))))
-        (is (nil? (:seon.plan/current-line
-                   (edn/read-string (plan/format-plan-ai current)))))))))
+        (is (nil? (:seon.plan/current-line (plan/format-plan-ai current))))))))
 
 (deftest completing-the-current-step-retracts-the-current-step-ref
   (with-plan
@@ -276,13 +276,11 @@
             ai (plan/format-plan-ai current)
             html (plan/render-plan-html (render-view connection current))
             printed (pr-str html)]
-        (is (= "alice" (:seon.agent/id (edn/read-string ai))))
+        (is (= "alice" (:seon.agent/id ai)))
         (is (= 1 (count (re-seq #"my-plan\"" printed))))
-        (is (str/includes? ai "1. current — Improve the plan"))
-        (is (str/includes? ai "1.1 ready — Inspect the facts"))
-        (is (not (str/includes? ai "Objective: Improve the plan"))
-            "a step title is not the plan objective")
-        (is (str/includes? (:seon.plan/current-line (edn/read-string ai)) "Improve the plan"))
+        (is (str/includes? (:seon.plan/current-line ai) "1. current — Improve the plan"))
+        (is (= "1.1 ready — Inspect the facts" (get-in ai [:seon.plan/step-lines "child"])))
+        (is (nil? (:my.plan/objective ai)) "a step title is not the plan objective")
         (is (str/includes? printed "Inspect the facts"))
         (is (str/includes? printed "0 of 2 steps completed"))))))
 
@@ -290,8 +288,11 @@
   (with-plan
     (fn [connection]
       (add connection "ship" "Ship the plan unit")
-      (is (str/includes? (plan/render-plan-ai (plan-of connection)) "(seon.plan/plan {})")
-          "the AI projection emits source the agent can run itself"))))
+      (is (= '(seon.plan/plan {:seon.db/db (seon.db/db) :seon.agent/id "alice"})
+             (plan/render-plan-form (unit-of connection)))
+          "the form face is the read the agent can run itself")
+      (is (= ["ship"] (keys (:seon.plan/step-lines (plan/render-plan-ai (unit-of connection)))))
+          "the AI face is the plan read from current data"))))
 
 (deftest no-numeric-entity-reference-reaches-either-projection
   ;; The class this kills: a pulled ref normalized to its entity id and then
@@ -314,7 +315,7 @@
             "a dependency travels as its stable identity")
         (is (empty? (filter entity-ids (numbers-in html))))
         (is (empty? (filter entity-ids (numbers-in current))))
-        (is (not (str/includes? ai (str (first entity-ids)))))
+        (is (empty? (filter entity-ids (numbers-in ai))))
         (testing "the contract refuses a bare numeric reference"
           (is ((seon.schema/projection-validator (seon.schema/handed-projection) :my.plan/render-step) step))
           (is (not ((seon.schema/projection-validator (seon.schema/handed-projection) :my.plan/render-step) (assoc step :my.plan/needs [42])))))))))
@@ -514,7 +515,7 @@
         (is (= ["bob-work"] (ids (:my.plan/ready bob))))
         (is (= bob explicit)
             "an explicit map entry wins over the calling agent default")
-        (is (= "bob" (:seon.agent/id (edn/read-string bob-text)))
+        (is (= "bob" (:seon.agent/id bob-text))
             "the rendered source resolves the calling agent")))))
 
 (def ^:private juniper-fixture-steps
@@ -553,7 +554,7 @@
                                 :my.plan/steps juniper-fixture-steps}}]))
       (let [current (plan/plan {:seon.db/db @connection
                                 :seon.agent/id "juniper"})
-            ai (plan/render-plan-ai current)
+            ai (plan/render-plan-ai {:seon.db/db @connection :seon.agent/id "juniper"})
             printed (pr-str (plan/render-plan-html (render-view connection current)))]
         (is (= ["juniper/inspect-identity-messages"
                 "juniper/render-plan"
@@ -569,11 +570,12 @@
         (is (= "Improve Juniper context inspection" (:my.plan/objective current)))
         (is (= "juniper/render-plan"
                (get-in current [:my.plan/current-step :my.plan.item/id])))
-        (is (str/includes? ai "(seon.plan/plan {})"))
-        (is (str/includes? ai "(my.plan/complete! {:my.plan.item/id \"juniper/render-plan\"})"))
-        (is (str/includes? ai "my.plan/current! selects; completing clears the selection"))
-        (is (not (str/includes? (plan/render-plan-ai (dissoc current :my.plan/current-step))
-                               "(my.plan/complete!")))
+        (is (= '(my.plan/complete! {:my.plan.item/id "juniper/render-plan"})
+               (first (:seon.render/operations ai))))
+        (is (= 'my.plan/current! (first (second (:seon.render/operations ai))))
+            "selecting the next step is offered beside completing this one")
+        (is (not-any? #(= 'my.plan/complete! (first %))
+                      (:seon.render/operations (plan/format-plan-ai (dissoc current :my.plan/current-step)))))
         (is (str/includes? printed "1 of 4 steps completed"))
         (is (str/includes? printed "Current step: "))
         (is (not (str/includes? printed ":open nil"))

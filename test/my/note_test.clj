@@ -1,7 +1,6 @@
 (ns my.note-test
   "The minimal durable current-note home and its rebirth property."
-  (:require [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing]]
             [seon.cluster.message :as message]
             [seon.note :as note]
             [seon.db :as db]
@@ -98,11 +97,10 @@
             html (note/render-notes-html current)]
         (testing "the collection is rebuilt from current facts alone"
           (is (= ["kept"] (mapv :my.note/id current)))
-          (is (str/includes? ai "Current content."))
-          (is (not (str/includes? ai "Old content.")))
-          (is (not (str/includes? ai "Must disappear."))))
+          (is (= [{:my.note/id "kept" :my.note/content "Current content."}] ai)
+              "the AI face is the current notes as data, nothing older or forgotten"))
         (testing "all three declared projections accept the collection"
           (is (= '(my.note/notes) (note/render-notes-form current)))
           (is (= :section (first html)))
-          (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.render/ai) ai))
+          (is ((seon.schema/projection-validator (seon.schema/handed-projection) [:vector :my.note/view]) ai))
           (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.render/hiccup) html)))))))

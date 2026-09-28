@@ -1,4 +1,9 @@
-#:seon.render.transcript{:prefix-subject
+#:seon.render.transcript{:runtime-view
+                         [:map {:description "My runtime's trigger and listens as the AI face shows them, with the read of my turns offered."}
+                          [:seon.runtime/trigger {:optional true} :map]
+                          [:seon.runtime/listens {:optional true} [:sequential :map]]
+                          [:seon.render/operations :seon.render/operations]]
+                         :prefix-subject
                          [:map
                           {:description "One turn's captured history prefix, as a debug finding compares it."
                            :seon.render/ai seon.render.transcript/render-captured-prefix}

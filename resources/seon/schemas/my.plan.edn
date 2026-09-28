@@ -5,7 +5,8 @@
           :entity
           [:map {:seon.db/attributes true
                  :seon.render/ai seon.plan/render-plan-ai
-                 :seon.render/html seon.plan/render-plan-html :seon.program/partition :seon.data}
+                 :seon.render/html seon.plan/render-plan-html
+                 :seon.render/form seon.plan/render-plan-form :seon.program/partition :seon.data}
            [:my.plan/agent :my.plan/agent]
            [:my.plan/objective {:optional true} :my.plan/objective]
            [:my.plan/steps {:optional true} :my.plan/steps]
@@ -217,7 +218,10 @@
           :ready-items
           [:vector
            {:description
-            "A ready-work selection carried as its own renderable unit."}
+            "A ready-work selection carried as its own renderable unit."
+            :seon.render/ai seon.plan/render-ready-items-ai
+            :seon.render/html seon.plan/render-ready-items-html
+            :seon.render/form seon.plan/render-ready-items-form}
            :my.plan/render-step],
           :missing-agent-id [:and {:description "Observed missing agent id; a value retained independently of the plan entity."} :string],
           :agent-not-found-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} :my.plan/request-error [:map [:my.plan/missing-agent-id :my.plan/missing-agent-id]]],

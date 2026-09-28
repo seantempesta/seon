@@ -73,7 +73,9 @@
                            :seon.render/value (db/pull @connection '[*] [:seon.runtime/agent [:seon.agent/id "page"]])}
              runtime-html (pr-str (transcript/render-runtime-html runtime-unit))]
          (is (:db-after linked))
-         (is (str/includes? (transcript/render-runtime-ai runtime-unit) "[:seon.agent/id \"page\"]"))
+         (is (= "runtime-trigger"
+                (get-in (transcript/render-runtime-ai runtime-unit) [:seon.runtime/trigger :seon.message/id]))
+             "the AI face is the runtime's trigger as data")
          (let [refusal (transcript/render-runtime-ai {:seon.db/db @connection})]
            (is (= :seon.agent/runtime (:seon.render.transcript/refused-member refusal)))
            (is (= 'seon.render.transcript/runtime-owner (:seon.error/operation refusal))))

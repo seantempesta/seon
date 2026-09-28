@@ -9,8 +9,14 @@
  :seon.cluster.status/concern
  [:and {:seon.render/derived true
         :seon.render/ai seon.cluster.status/render-ai
-        :seon.render/html seon.cluster.status/render-html}
+        :seon.render/html seon.cluster.status/render-html
+        :seon.render/form seon.cluster.status/render-form}
   :seon.db/ref]
+ :seon.cluster.status/view
+ [:map {:description "My cluster and its adopted source as the AI face shows them, with the statistics read offered."}
+  [:seon.cluster/name {:optional true} :seon.cluster/name]
+  [:seon.source/commit-id {:optional true} :seon.source/commit-id]
+  [:seon.render/operations :seon.render/operations]]
  :seon.cluster.status/request
  [:map [:seon.db/db :seon.db/database-value]
   [:seon.db/connection :seon.db/connection]]

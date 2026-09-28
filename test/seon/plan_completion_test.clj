@@ -36,7 +36,8 @@
         (is (nil? (:my.plan.item/completed-tx
                    (db/pull @connection '[*] [:my.plan.item/id "report"])))))
       (plan/start! "report" connection "worker")
-      (is (str/includes? (plan/format-plan-ai (plan/plan {:seon.db/db @connection :seon.agent/id "worker"}))
+      (is (str/includes? (:seon.plan/current-line
+                          (plan/format-plan-ai (plan/plan {:seon.db/db @connection :seon.agent/id "worker"})))
                          "done-query:"))
       (let [written (db/transact!
                      connection

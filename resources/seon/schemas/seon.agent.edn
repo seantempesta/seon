@@ -209,10 +209,15 @@
                      :supervision-not-committed-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark first-agent supervision that did not commit"} [:seon.agent/supervision-not-committed :seon.agent/supervision-not-committed] [:seon.error/message :seon.error/message]]
 :plan [:and {:seon.db/component true :seon.db/component-schema :my.plan/entity
              :seon.render/ai seon.plan/render-plan-ai
-             :seon.render/html seon.plan/render-plan-html} :seon.db/ref]
+             :seon.render/html seon.plan/render-plan-html
+             :seon.render/form seon.plan/render-plan-form} :seon.db/ref]
              :settings [:and {:seon.db/component true :seon.db/component-schema :seon.config/agent-overlay
                               :seon.render/ai seon.agent/render-settings-ai
-                              :seon.render/html seon.agent/render-settings-html} :seon.db/ref]
+                              :seon.render/html seon.agent/render-settings-html
+                              :seon.render/form seon.agent/render-settings-form} :seon.db/ref]
+             :settings-view [:map {:description "My setting overrides as the AI face shows them, with the read of the effective defaults offered."}
+                             [:my.agent/settings :my.agent/settings]
+                             [:seon.render/operations :seon.render/operations]]
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.agent/error

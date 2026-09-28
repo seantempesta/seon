@@ -31,6 +31,10 @@
           :not-found-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the current note that does not exist"} [:my.note/not-found :my.note/not-found] [:seon.error/message :seon.error/message]],
           :not-owned :my.note/id,
           :not-owned-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the note not owned by the caller"} [:my.note/not-owned :my.note/not-owned] [:seon.error/message :seon.error/message]]
+ :my.note/view [:map {:description "One note as its agent reads it: its id, content and subject."}
+                [:my.note/id :my.note/id]
+                [:my.note/content :my.note/content]
+                [:my.note/about {:optional true} [:or :seon.db/ref [:map [:my.plan.item/id :my.plan.item/id]]]]]
  :my.note/existing-about
  [:or {:error/message "an entity id or a lookup ref such as [:my.note/id \"...\"]"}
   :int [:tuple :keyword :seon.db/lookup-ref-value]]

@@ -173,11 +173,25 @@
        (sort-by :seon.agent/id entities)))
     (catch Exception failure (unknown (ex-message failure)))))
 
+(def ^:private cluster-query
+  '[:find (pull ?cluster [:seon.cluster/name :seon.source/commit-id]) . :where [?cluster :seon.cluster/name]])
+
 (defn render-ai
-  "Read cluster identity and adopted source; accounting is available on demand."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
+  "My cluster and its adopted source as data, offering the statistics read.
+
+  `snapshot` reads JVM and turn statistics on demand."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.cluster.status/view :seon.db/error-result]]}
+  [{database :seon.db/db}]
+  (let [cluster (db/q cluster-query database)]
+    (if (db/read-refusal? cluster)
+      cluster
+      (assoc cluster :seon.render/operations ['(seon.cluster.status/snapshot {})]))))
+
+(defn render-form
+  "The read that finds my cluster and adopted source again. Shown, never executed."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
   [_unit]
-  ";; My cluster and adopted source; (seon.cluster.status/snapshot {}) shows JVM and turn statistics on demand.\n(seon.db/q '[:find (pull ?cluster [:seon.cluster/name :seon.source/commit-id]) . :where [?cluster :seon.cluster/name]])")
+  (list 'seon.db/q (list 'quote cluster-query) '(seon.db/db)))
 
 (defn render-html
   "Show the same cluster observation as labeled data."

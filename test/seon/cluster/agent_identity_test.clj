@@ -136,7 +136,7 @@
         ;; the overrides, and remaining turns are read on demand.
         (is (= {:seon.config.eval/time-limit-ms 1234}
                (:seon.sci.admit/value (evaluate "(my.agent/settings)"))))
-        (let [dials (:seon.sci.admit/value (evaluate (str "(do\n" (seon.agent/render-settings-ai {}) "\n)")))]
+        (let [dials (:seon.sci.admit/value (evaluate (str (seon.agent/render-settings-form {:seon.agent/id agent-id}))))]
           (is (map? dials))
           (is (= 1234 (:seon.config.eval/time-limit-ms dials)))
           (is (not (contains? dials :my.agent/turns-left))))

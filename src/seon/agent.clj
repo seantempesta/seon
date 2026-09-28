@@ -159,10 +159,22 @@
                              (group-by (comp namespace key) effective)))))))
 
 (defn render-settings-ai
-  "Read stable setting overrides; effective cluster defaults are available on demand."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
-  [_unit]
-  ";; My setting overrides; (seon.agent/effective-settings) shows inherited cluster defaults on demand.\n(seon.agent/settings)")
+  "My setting overrides as data, offering the effective-defaults read.
+
+  The operation reads the cluster defaults these overrides override."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.agent/settings-view :seon.error/value]]}
+  [{database :seon.db/db agent-id :seon.agent/id}]
+  (let [overrides (settings database agent-id)]
+    (if (:seon.error/at overrides)
+      overrides
+      {:my.agent/settings overrides
+       :seon.render/operations [(list 'seon.agent/effective-settings '(seon.db/db) agent-id)]})))
+
+(defn render-settings-form
+  "The read that finds my setting overrides again. Shown, never executed."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
+  [{agent-id :seon.agent/id}]
+  (list 'seon.agent/settings '(seon.db/db) agent-id))
 
 (defn render-settings-html
   "Show every declared agent dial, its effective value, and where it comes from."

@@ -18,7 +18,6 @@
             [seon.db :as db]
             [seon.id :as id]
             [seon.issue :as issue]
-            [seon.repl :as repl]
             [seon.schema.edn :as schema.edn]
             [seon.test :as seon.test]))
 
@@ -1452,26 +1451,25 @@
                                    (mapv #(vector :my.plan.item/id %) (:my.plan/needs step)))))))
 
 (defn format-ready-items-ai
-  "Format a supplied ready plan frontier as terminal text."
+  "The ready plan frontier as data: each step's id and title, in order."
   {:malli/schema [:=> [:cat [:or :my.plan/ready-items :seon.error/value]]
-                  :string]}
+                  [:or [:vector :seon.plan/ready-item] :seon.error/value]]}
   [plan-steps]
-  (if-not (vector? plan-steps)
-    (refusal-line "Ready work" plan-steps)
-    (if (seq plan-steps)
-      (str "Ready work (" (count plan-steps) "):\n"
-           (str/join "\n" (map #(str "- " (:my.plan.item/title %)
-                                     " [" (:my.plan.item/id %) "]")
-                               plan-steps)))
-      "No plan step is ready.")))
+  (if (vector? plan-steps)
+    (mapv #(select-keys % [:my.plan.item/id :my.plan.item/title]) plan-steps)
+    plan-steps))
 
 (defn render-ready-items-ai
-  "Render source which reads and formats the supplied ready step selection."
-  {:malli/schema [:=> [:cat :my.plan/ready-items] :seon.render/source]}
+  "The supplied ready plan frontier as data (`format-ready-items-ai`)."
+  {:malli/schema [:=> [:cat :my.plan/ready-items] [:vector :seon.plan/ready-item]]}
   [plan-steps]
-  (pr-str
-   (list `format-ready-items-ai
-         (list `items {:my.plan/item-ids (mapv :my.plan.item/id plan-steps)}))))
+  (format-ready-items-ai plan-steps))
+
+(defn render-ready-items-form
+  "The read that finds these ready steps again. Shown, never executed."
+  {:malli/schema [:=> [:cat :my.plan/ready-items] :seon.render/form]}
+  [plan-steps]
+  (list 'seon.plan/items {:seon.db/db '(seon.db/db) :my.plan/item-ids (mapv :my.plan.item/id plan-steps)}))
 
 (defn render-ready-items-html
   "Render the ready plan frontier as Hiccup."
@@ -1482,24 +1480,22 @@
         (map render-item-html)
         plan-steps))
 
-(defn- update-example
-  "One executable form updating this plan, using real stable identities."
+(defn- operations
+  "The plan calls offered with a view, with real stable identities: complete
+  the selected step, select the next one, or add a first step."
+  {:malli/schema [:=> [:cat :my.plan/component-view] :seon.render/operations]}
   [view]
   (let [agent-id (:seon.agent/id view)
         plan-current (get-in view [:my.plan/current-step :my.plan.item/id])
         other? #(not= plan-current (:my.plan.item/id %))
-        next-step (or (some :my.plan.item/id
-                            (filter other? (:my.plan/ready view)))
-                      (some :my.plan.item/id
-                            (filter other? (:my.plan/blocked view)))
-                      (some :my.plan.item/id
-                            (filter other? (:my.plan/steps view)))
-                      (some :my.plan.item/id (:my.plan/steps view)))]
-    (if-not next-step
-      (str "(my.plan/add! {:my.plan.item/id \"" agent-id "/first-step\""
-           " :my.plan.item/title \"My first step\"} )")
-      (pr-str
-       (list 'my.plan/current! {:my.plan.item/id next-step})))))
+        next-step (some #(some :my.plan.item/id (filter other? (get view %)))
+                        [:my.plan/ready :my.plan/blocked :my.plan/steps])]
+    (cond-> []
+      plan-current (conj (list 'my.plan/complete! {:my.plan.item/id plan-current}))
+      next-step (conj (list 'my.plan/current! {:my.plan.item/id next-step}))
+      (empty? (:my.plan/steps view))
+      (conj (list 'my.plan/add! {:my.plan.item/id (str agent-id "/first-step")
+                                 :my.plan.item/title "My first step"})))))
 
 (defn- current-title
   [view]
@@ -1509,62 +1505,37 @@
         plan-current)))
 
 (defn format-plan-ai
-  "Show the current criterion and one line per other step as readable data."
+  "The plan as data: the current criterion, one line per other step, and the
+  plan calls offered with their real identities."
   {:malli/schema [:=> [:cat [:or :my.plan/component-view :seon.error/value]]
-                  :string]}
+                  [:or :seon.plan/view :seon.error/value]]}
   [view]
   (if-not (:my.plan/steps view)
-    (refusal-line "Plan" view)
+    view
     (let [plan-steps (:my.plan/steps view)
           current-id (get-in view [:my.plan/current-step :my.plan.item/id])
           lines (mapv (fn [number step]
                         [(:my.plan.item/id step) (step-line number step)])
                       (outline-numbers plan-steps) plan-steps)
           plan-current (some #(when (= current-id (first %)) (second %)) lines)]
-      (str "{:seon.agent/id " (pr-str (:seon.agent/id view))
-           (when-let [objective (:my.plan/objective view)]
-             (str "\n :my.plan/objective " (pr-str objective)))
-           (when plan-current
-             (str "\n :seon.plan/current-line "
-                  (pr-str (str "[" current-id "] " plan-current))))
-           "\n :seon.plan/step-lines {"
-           (str/join "\n                   "
-                     (map (fn [[id line]] (str (pr-str id) " " (pr-str line)))
-                          (remove #(= current-id (first %)) lines)))
-           "}\n :seon.plan/update-example " (pr-str (update-example view)) "}"))))
+      (cond-> {:seon.agent/id (:seon.agent/id view)}
+        (:my.plan/objective view) (assoc :my.plan/objective (:my.plan/objective view))
+        plan-current (assoc :seon.plan/current-line (str "[" current-id "] " plan-current))
+        true (assoc :seon.plan/step-lines (into {} (remove #(= current-id (first %))) lines)
+                    :seon.render/operations (operations view))))))
 
 (defn render-plan-ai
-  "Read my plan and teach the completing call for its selected step."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
-  [unit]
-  (let [database (:seon.db/db unit)
-        component (or (:seon.render/value unit) unit)
-        selected (:my.plan/current-step component)
-        agent-id (:seon.agent/id unit)
-        derivation (when (and database agent-id)
-                     (plan {:seon.db/db database :seon.agent/id agent-id}))
-        current-id (or (when (map? selected) (:my.plan.item/id selected))
-                       (when (and database selected)
-                         (:my.plan.item/id
-                          (db/pull database [:my.plan.item/id]
-                                   (if (map? selected) (:db/id selected) selected))))
-                       (get-in derivation [:my.plan/current-step
-                                           :my.plan.item/id]))]
-    (if (or (db/read-refusal? derivation) (:my.plan/missing-agent-id derivation))
-      ;; The derivation refused. The agent still reads a typed line through
-      ;; this plan's own AI pair — never a bare exception message where its
-      ;; instructions belong — and the refusal stays a `:seon.error` value.
-      (str ";; My plan could not be derived from current facts, so it is not"
-           " shown; the refusal below names it.\n"
-           (repl/source-text (list 'seon.plan/format-plan-ai
-                                   (list 'seon.plan/plan {}))))
-      (str ";; My plan is my instructions. "
-           (if current-id
-             (str "After seeing the result and verifying the criterion, complete this step with "
-                  "(my.plan/complete! {:my.plan.item/id " (pr-str current-id) "}). ")
-             "No step is selected. ")
-           "my.plan/current! selects; completing clears the selection.\n"
-           (repl/source-text (list 'seon.plan/plan {}))))))
+  "My plan, my instructions, as data (`format-plan-ai` over `plan`)."
+  {:malli/schema [:=> [:cat :seon.render/unit]
+                  [:or :seon.plan/view :seon.error/value]]}
+  [{database :seon.db/db agent-id :seon.agent/id}]
+  (format-plan-ai (plan {:seon.db/db database :seon.agent/id agent-id})))
+
+(defn render-plan-form
+  "The read that finds my plan again. Shown, never executed."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
+  [{agent-id :seon.agent/id}]
+  (list 'seon.plan/plan {:seon.db/db '(seon.db/db) :seon.agent/id agent-id}))
 
 (defn render-plan-html
   "Show the objective, current focus, progress, and every step with its state."
