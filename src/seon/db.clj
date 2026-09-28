@@ -3539,7 +3539,9 @@
                     :seon.db.transaction/ms :seon.db.transaction/calls :seon.db.transaction/hot :seon.db.transaction/repeated]
         missing (filterv #(nil? (get (dbi/-schema database) %)) attributes)
         forms (when (seq missing) (select-keys (schema.edn/packaged-forms) attributes))
-        projection (when forms (schema/declaration-projection forms))
+        ;; The whole packaged population, so the stamp's referenced schemas
+        ;; (e.g. :seon.program/definition-digest) resolve on an empty store too.
+        projection (when forms (schema/declaration-projection (schema.edn/packaged-forms)))
         declarations (when forms
                        (into (schema.datahike/malli->datahike-schema-in projection missing)
                              (when (get (dbi/-schema database) :seon.schema/key)
