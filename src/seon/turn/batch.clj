@@ -473,11 +473,11 @@
 (defn- namespace-facts
   "The namespace fact of `n` as SCI holds it now, on `db`."
   {:malli/schema [:=> [:cat :seon.batch/request :seon.db/database-value :symbol] :seon.store/transaction-data]}
-  [{{ctx :seon.sci.eval/ctx} :seon.batch/world row-tx :seon.turn.batch/row-tx} db n]
+  [{{ctx :seon.sci.eval/ctx} :seon.batch/world} db n]
   (or (when (sci/find-ns ctx n)
         (when-let [row (#'eval/namespace-context-row (db/carried-projection db) db n nil {}
                                                      (#'eval/reader-context ctx n) true)]
-          (row-tx db {:seon.program/row row} row)))
+          (entity-facts db row)))
       []))
 
 (defn- removal-facts

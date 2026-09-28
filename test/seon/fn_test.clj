@@ -13,7 +13,6 @@
             [datahike.api :as d]
             [seon.db :as db]
             [seon.error :as error]
-            [seon.turn :as turn]
             [seon.turn.batch :as turn.batch]
             [seon.turn.world :as world]
             [seon.sci.observe :as observe]
@@ -540,7 +539,6 @@
                 batch (seon.batch/evaluate-batch
                        (dissoc (turn.batch/code-request
                                 {:seon.batch/world world :seon.batch/observe observe/observe
-                                 :seon.turn.batch/row-tx @#'turn/row-tx
                                  :seon.batch/start-ns namespace-name
                                  :seon.batch/text source})
                                :seon.batch/settle))
@@ -1695,7 +1693,6 @@
                 batch (seon.batch/evaluate-batch
                        (dissoc (turn.batch/code-request
                                 {:seon.batch/world world :seon.batch/observe observe/observe
-                                 :seon.turn.batch/row-tx @#'turn/row-tx
                                  :seon.batch/start-ns namespace-name
                                  :seon.batch/text (str "(clojure.test/deftest ^{:seon.test/fixture-observation " (pr-str reason) "}"
                                                        " runtime-observed (clojure.test/is true))\n"

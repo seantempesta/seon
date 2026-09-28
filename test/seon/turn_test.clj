@@ -957,31 +957,6 @@
                  (turn/next-agent-work
                   database {:seon.agent/id "unreadable-budget"}))))))))
 
-(deftest a-history-read-refusal-cannot-suppress-declaration-divergence
-  (support/with-database
-    (fn [connection]
-      (let [database (db/db connection)
-            refusal (db/q '[:find ?entity .
-                            :where [?entity :seon.audit/poison _]]
-                          database)
-            existing {:seon.schema/key :seon.audit/diverged
-                      :seon.schema/form ":string"}
-            result
-            (with-redefs-fn
-              {#'turn/opening-db (fn [_database _run-id] database)
-               #'db/history (fn [_database] refusal)}
-              #(support/refusal-data
-                (fn []
-                  (#'turn/declaration-diverged-since-open?
-                   database {:seon.turn/id "history-refused"}
-                   :seon.schema/key :seon.audit/diverged existing))))]
-        (is (and (map? refusal)
-                 (contains? refusal :seon.error/at)
-                 (contains? refusal :seon.error/layer)
-                 (contains? refusal :seon.error/operation)))
-        (is (= refusal result)
-            "an unreadable history is the divergence refusal, never evidence that the run wrote the declaration")))))
-
 (deftest interrupted-warning-is-one-derived-value
   (testing "clean evaluations derive no warning at all"
     (is (nil? (turn/interrupted-warning
@@ -2287,7 +2262,6 @@
                                                            :seon.sci.eval/base-ctx (sci.eval/base-ctx basis)}
                                                           {:seon.agent/id "stale-writer"})
                      :seon.batch/observe observe/observe
-                     :seon.turn.batch/row-tx @#'turn/row-tx
                      :seon.batch/start-ns 'user
                      :seon.batch/text "(defn stale-f {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))"})
            batch (seon.batch/evaluate-batch (dissoc request :seon.batch/settle))
@@ -2319,7 +2293,6 @@
                     {:seon.batch/world (world/agent-world {:seon.db/connection connection :seon.cluster/name "default"
                                                            :seon.sci.eval/base-ctx (sci.eval/base-ctx basis)}
                                                           {:seon.agent/id "empty-removal"})
-                     :seon.turn.batch/row-tx @#'turn/row-tx
                      :seon.batch/start-ns 'user
                      :seon.batch/text "nil"})
            facts (turn.batch/form-facts request basis {:seon.batch/entities [] :seon.batch/schema-keys #{}
@@ -2367,7 +2340,6 @@
            request (turn.batch/code-request
                     {:seon.batch/world (world/agent-world execution {:seon.agent/id "branch-lister"})
                      :seon.batch/observe observe/observe
-                     :seon.turn.batch/row-tx @#'turn/row-tx
                      :seon.batch/start-ns 'user
                      :seon.batch/text "(my.agent/branches)"})
            entry (first (:seon.batch/entries (seon.batch/evaluate-batch (dissoc request :seon.batch/settle))))]
@@ -2386,7 +2358,6 @@
                                                            :seon.sci.eval/base-ctx (sci.eval/base-ctx (db/db connection))}
                                                           {:seon.agent/id "sees-own-write"})
                      :seon.batch/observe observe/observe
-                     :seon.turn.batch/row-tx @#'turn/row-tx
                      :seon.batch/start-ns 'user
                      :seon.batch/text "(do (my.agent/settings! {:seon.config.eval/time-limit-ms 4321}) (my.agent/settings))"})
            entry (first (:seon.batch/entries (seon.batch/evaluate-batch (dissoc request :seon.batch/settle))))]

@@ -136,4 +136,8 @@
              :intent "On default (pid 85484, 52e163bee, 2026-09-28) a root SCI run submitted through seon.cluster.agent/evaluate-source! answers in 88-114 ms when root is idle, but a second run submitted right after answers in 6.5-7.0 s (four back-to-back runs: 152, 7046, 6551, 6586 ms; after a 10 s pause 114 ms). The settled run wakes root's system turn (seon.turn/system-turn), which runs about 6.8 s and ends in the fault 'A generated context read depends on the agent's own turn-taking.' (signature 86621df3f8c7..., occurrences 9 -> 21 during the probes), and the next submission waits for it on root's request port. Every MCP call as root pays it once root is busy. Done when a run submitted right after another answers within 200 ms of an idle one and a settled run records no generated-read fault."
              :must-read #{seon.turn/system-turn seon.turn/generated-read-fault seon.cluster.agent/evaluate-source!}
              :evidence #{"tmp/mcp-entrance/timings.md"}}
-]
+ #:seon.task{:name "row-tx-is-a-second-declaration-writer"
+             :kind :function
+             :intent "seon.turn/row-tx has no production caller since the fold writes declarations through seon.turn.batch/entity-facts and schema-tx (its concurrency check and schema attribute-change copy went in the writer-duplicates cut). Test fixtures in ten files still write declarations through it (datahike_fork, db, schema, schema_usage_guard, cluster/acquisition, program, sci/branch_execution, sci/eval, schema/datahike, schema/projection_writer). Done when those fixtures write through the fold's writer and row-tx with its declared-* helpers is deleted."
+             :must-read #{seon.turn/row-tx seon.turn.batch/form-facts}
+             :evidence #{"docs/research/agent-platform/one-repl-path-spec-2026-09-27.md"}}]

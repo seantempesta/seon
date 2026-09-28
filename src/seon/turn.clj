@@ -1006,58 +1006,6 @@
   (conj (evaluated-namespaces requests)
         [:db.fn/call #'receipt-settle-batch-call requests]))
 
-(defn- affected-schema-attributes
-  "Database attributes derived by the affected schema forms."
-  {:malli/schema [:=> [:cat :seon.schema/projection [:set :keyword]]
-                  [:set :qualified-keyword]]}
-  [projection affected]
-  (set
-   (schema.datahike/database-attributes-core-in
-    (update projection :seon.schema.projection/forms select-keys affected))))
-
-(defn- schema-attribute-change-tx
-  "Transaction data adopting an agent's schema change IN PLACE.
-
-  The candidate projection's declarations are compared with the current
-  ones, and every attribute whose storage declaration changed or whose form
-  (directly or through a dependent schema) changed goes through THE one
-  mechanism, `seon.cluster/attribute-change-tx`: the data behind a replaced
-  or removed attribute is dropped, and a kept attribute drops the current
-  values its new form refuses. `seon.cluster` requires this namespace, so the
-  mechanism is resolved at the call."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection
-                       [:or :nil :seon.schema/projection] [:set :keyword]]
-                  :seon.store/transaction-data]}
-  [db current-projection candidate-projection schema-keys]
-  (let [declarations-in
-        (fn [projection]
-          (if projection
-            (into {}
-                  (map (juxt :db/ident identity))
-                  (schema.datahike/malli->datahike-schema-in
-                   projection
-                   (schema.datahike/database-attributes-in projection)))
-            {}))
-        current-declarations (declarations-in current-projection)
-        candidate-declarations (declarations-in candidate-projection)
-        changed
-        (into #{}
-              (filter #(not= (get current-declarations %)
-                             (get candidate-declarations %)))
-              (into (set (keys current-declarations))
-                    (keys candidate-declarations)))
-        affected
-        (into #{}
-              (filter #(contains? candidate-declarations %))
-              (affected-schema-attributes
-               current-projection
-               (schema/dependent-schema-keys current-projection schema-keys)))]
-    ((requiring-resolve 'seon.cluster/attribute-change-tx)
-     db
-     (sort (into changed affected))
-     candidate-declarations
-     candidate-projection)))
-
 (defn- cardinality-many?
   [db attribute]
   (= :db.cardinality/many
@@ -1120,86 +1068,15 @@
   (when-some [canonical (program/canonical-row value)]
     (declared-map db (dissoc canonical :seon.fn/arities))))
 
-(defn- declaration-written-by-run?
-  "True when the declaration identified by `identity-attribute`/`identity-value`
-  and one receipt of `run-id` were asserted by the same terminal transaction.
+(defn row-tx
+  "Validate and exact-upsert one reader-produced durable declaration.
 
-  A run's own write is never a concurrent change, whichever declaration family
-  it belongs to. The question is asked of the transaction rather than of one
-  family's content attribute, so there is no per-family attribute to forget."
-  {:malli/schema [:=> [:cat
-                       [:or :seon.db/database-value :seon.error/value]
-                       :qualified-keyword
-                       :seon.schema/value
-                       ::id]
-                  [:or :boolean :seon.error/value]]}
-  [db identity-attribute identity-value run-id]
-  (let [history (db/history db)]
-    (if (and (map? history)
-             (contains? history :seon.error/at)
-             (contains? history :seon.error/layer)
-             (contains? history :seon.error/operation))
-      history
-      (let [receipt
-            (db/q '[:find ?receipt .
-                    :in $ ?identity-attribute ?identity-value ?run-id
-                    :where
-                    [?declaration ?identity-attribute ?identity-value]
-                    [?declaration _ _ ?tx true]
-                    [?receipt :seon.eval/shown _ ?tx]
-                    [?receipt :seon.cluster.eval/run ?run]
-                    [?run :seon.turn/id ?run-id]]
-                  history identity-attribute identity-value run-id)]
-        (if (and (map? receipt)
-                 (contains? receipt :seon.error/at)
-                 (contains? receipt :seon.error/layer)
-                 (contains? receipt :seon.error/operation))
-          receipt
-          (boolean receipt))))))
+  ## Known issues
 
-(defn- declaration-diverged-since-open?
-  "True when the current declaration differs from the one the request's run
-  opened on and was not written by that run.
-
-  Divergence is a claim ABOUT AN OPENING BASIS, so it is only measurable when
-  the request names a run: a derivation with no run — a system-side or fixture
-  caller building transaction data outside any run — opened on nothing and has
-  no divergence to report. A request that DOES name a run whose opening
-  database value cannot be read refuses loudly naming that missing basis,
-  rather than reading the unreadable opening as an absent declaration and
-  reporting a concurrent definition it never measured."
-  [db request identity-attribute identity-value existing]
-  (if-some [run-id (::id request)]
-    (let [opening-database (opening-db db run-id)]
-      (when (and (map? opening-database)
-                 (contains? opening-database :seon.error/at)
-                 (contains? opening-database :seon.error/layer)
-                 (contains? opening-database :seon.error/operation))
-        (throw (ex-info (:seon.error/message opening-database)
-                        opening-database)))
-      (let [opening-existing
-            (db/pull opening-database '[*] [identity-attribute identity-value])]
-        (if (and (map? opening-existing)
-                 (contains? opening-existing :seon.error/at)
-                 (contains? opening-existing :seon.error/layer)
-                 (contains? opening-existing :seon.error/operation))
-          (throw (ex-info (:seon.error/message opening-existing)
-                          opening-existing))
-          (when (not= (declared-content db opening-existing)
-                      (declared-content db existing))
-            (let [written?
-                  (declaration-written-by-run?
-                   db identity-attribute identity-value run-id)]
-              (if (and (map? written?)
-                       (contains? written? :seon.error/at)
-                       (contains? written? :seon.error/layer)
-                       (contains? written? :seon.error/operation))
-                (throw (ex-info (:seon.error/message written?) written?))
-                (not written?)))))))
-    false))
-
-(defn- row-tx
-  "Validate and exact-upsert one reader-produced durable declaration."
+  - No production caller: the fold writes through `seon.turn.batch/entity-facts`
+    and `schema-tx`. Test fixtures still write declarations through this; convert
+    them to the fold's writer and delete it (task
+    row-tx-is-a-second-declaration-writer)."
   {:malli/schema [:=> [:cat :seon.db/database-value :map :map]
                   :seon.store/transaction-data]}
   [db request row]
@@ -1219,7 +1096,7 @@
                   (sort schema-keys))
           schema-tx
           (if (seq schema-keys)
-            (schema-attribute-change-tx
+            (turn.batch/attribute-change-tx
              db current-projection candidate-projection schema-keys)
             [])
           declarations
@@ -1264,22 +1141,6 @@
                  existing
                  (not= (:seon.schema/form existing)
                        (:seon.schema/form row)))
-            ;; ONE decision path owns "may this declaration change". The
-            ;; concurrency question — did the installed row diverge from the
-            ;; basis this run opened on — is measured identically for every
-            ;; declaration family. What differs is only what a legal change
-            ;; then costs, and for a schema key that cost is the data the
-            ;; in-place change drops (`schema-attribute-change-tx`).
-            concurrent-declaration?
-            (and (#{:seon.fn/sym :seon.schema/key} identity)
-                 existing
-                 (not= (declared-content db existing)
-                       (declared-content db row))
-                 (declaration-diverged-since-open?
-                  db request identity identity-value existing))
-            _ (when concurrent-declaration?
-                (refuse! `receipt-settle-call
-                         ::program-row-changed-after-open request))
             candidate-projection
             (case identity
               :seon.schema/key
@@ -1299,7 +1160,7 @@
             schema-declarations
             (if (= identity :seon.schema/key)
               (if schema-redefinition?
-                (schema-attribute-change-tx
+                (turn.batch/attribute-change-tx
                  db current-projection candidate-projection #{identity-value})
                 (let [current-attributes
                       (schema.datahike/database-attributes-in
@@ -5293,7 +5154,6 @@
                       :seon.batch/show show-row
                       :seon.batch/publish publish-row
                       :seon.batch/observe observe/observe
-                      :seon.turn.batch/row-tx row-tx
                       :seon.turn/namespace-cursor (volatile! starting-namespace)
                       :seon.turn/frame-request frame
                       :seon.turn/handles handles

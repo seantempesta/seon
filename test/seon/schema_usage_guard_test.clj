@@ -383,26 +383,7 @@
           (is (nil? (db/q '[:find ?value .
                             :in $ ?attribute
                             :where [_ ?attribute ?value]]
-                          @connection base-key))))
-        (testing "a form another writer changed since the run opened refuses"
-          (test-support/transacted! connection
-                                    [(schema-entity connection unrelated-key
-                                                 [:string {:seon.db/index true}])])
-          (let [refusal
-                (transact-result
-                 connection
-                 (entity-tx request
-                         (schema-entity connection unrelated-key
-                                     [:boolean {:seon.db/index true}])))]
-            (is (= :seon.turn/program-row-changed-after-open
-                   (get-in refusal [:error :seon.turn/rule])))
-            (is (= :seon.turn/program-row-changed-after-open
-                   (get-in refusal [:error :seon.turn/rule]))
-                "divergence from the opening basis is named as divergence")
-            (is (= (printed [:string {:seon.db/index true}])
-                   (:seon.schema/form
-                    (db/pull @connection [:seon.schema/form]
-                             [:seon.schema/key unrelated-key]))))))))))
+                          @connection base-key))))))))
 
 (deftest entity-schema-change-adopts-in-place-with-child-data
   (with-database
