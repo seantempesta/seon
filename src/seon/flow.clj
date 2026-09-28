@@ -18,7 +18,6 @@
             [seon.await :as await]
             [seon.batch]
             [seon.cluster.process :as process]
-            [seon.db :as db]
             [seon.env :as env]
             [seon.error :as error]
             [seon.fault :as fault]
@@ -238,8 +237,11 @@
 (defn- proc-world
   "The world a proc step or an io task runs in (`seon.batch/*world*`),
   derived from the environment its args or submission carry, since Flow
-  conveys no bindings: its cluster, connection and environment, the database
-  read now, its agent, and the submitting evaluation's identities (`origin`).
+  conveys no bindings: its cluster, connection and environment, its agent,
+  and the submitting evaluation's identities (`origin`). It holds no database
+  value: a step is no evaluation with a basis, and a value read at its start
+  would be supplied to every omitted optional database input it makes, stale
+  after its own first write (a test member's body, a turn's settlement).
   Nil for an environment holding no connection. Capture, supply and error
   context then know where the work runs (health plan §0).
 
@@ -252,7 +254,6 @@
     (merge (select-keys origin origin-keys)
            (cond-> {:seon.boot/cluster-name (:seon.boot/cluster-name environment)
                     :seon.db/connection connection
-                    :seon.db/db (db/db connection)
                     :seon.env/environment environment}
              (:seon.agent/id environment) (assoc :seon.agent/id (:seon.agent/id environment))))))
 

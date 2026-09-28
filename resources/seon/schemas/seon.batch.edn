@@ -3,7 +3,7 @@
          [:seon.boot/cluster-name :seon.boot/cluster-name]
          [:seon.agent/branch {:optional true} :seon.agent/branch]
          [:seon.db/connection {:optional true} :seon.db/connection]
-         [:seon.db/db :seon.db/database-value]
+         [:seon.db/db {:optional true :description "The evaluation's basis: the value read at the batch's start. A proc step's or io task's world (seon.flow/proc-world) holds none."} :seon.db/database-value]
          [:seon.db/writer {:optional true} :seon.db/writer]
          [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx]
          [:seon.sci.eval/base-ctx {:optional true :description "The cluster context the agent's fork came from: a reaching test's before-world forks it at the basis."} :seon.sci.eval/ctx]
