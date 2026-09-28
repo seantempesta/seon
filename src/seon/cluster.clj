@@ -177,43 +177,30 @@
   (when (and database (:db/id ref))
     (get (db/pull database [attribute] (:db/id ref)) attribute)))
 
-(defn format-ai
-  "Format the terminal description of one already-read cluster."
-  {:malli/schema [:=> [:cat [:or :seon.render/unit :seon.error/value]]
-                  [:or :nil :string :seon.error/value]]}
-  [unit]
-  (if (or (:seon.db/invalid-read unit) (:seon.schema/expected-value unit))
-    unit
-    (when-let [name (:seon.cluster/name unit)]
-      (let [database (:seon.db/db unit)
-          config-name (or (get-in unit [:seon.cluster/config
-                                        :seon.config/cluster])
-                          (ref-identity database
-                                        (:seon.cluster/config unit)
-                                        :seon.config/cluster))
-          instructions (count (:seon.cluster/instructions unit))
-          toolkit (count (:seon.cluster/toolkit unit))]
-        (str "Cluster " name ".\n"
-             "Configuration " (or config-name "is connected")
-             "; " instructions " shared instruction"
-             (when-not (= 1 instructions) "s")
-             " and " toolkit " toolkit namespace"
-             (when-not (= 1 toolkit) "s") ".")))))
+(def ^:private cluster-selector
+  "What the cluster's AI face reads: its name, configuration, instructions and toolkit."
+  [:seon.cluster/name {:seon.cluster/config [:seon.config/cluster]}
+   :seon.cluster/instructions :seon.cluster/toolkit])
 
 (defn render-ai
-  "`:seon.render/ai` — source reading one exact cluster before formatting it."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.render/source]]}
+  "The cluster as data: its name, configuration, and how many shared
+  instructions and toolkit namespaces it holds."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.cluster/view]]}
   [unit]
   (when-let [name (:seon.cluster/name unit)]
-    (pr-str
-     (list `format-ai
-           (list 'seon.db/pull
-                 (list 'quote
-                       [:seon.cluster/name
-                        {:seon.cluster/config [:seon.config/cluster]}
-                        :seon.cluster/instructions
-                        :seon.cluster/toolkit])
-                 [:seon.cluster/name name])))))
+    (let [config-name (or (get-in unit [:seon.cluster/config :seon.config/cluster])
+                          (ref-identity (:seon.db/db unit) (:seon.cluster/config unit) :seon.config/cluster))]
+      (cond-> {:seon.cluster/name name
+               :seon.cluster/instruction-count (count (:seon.cluster/instructions unit))
+               :seon.cluster/toolkit-count (count (:seon.cluster/toolkit unit))}
+        config-name (assoc :seon.config/cluster config-name)))))
+
+(defn render-form
+  "The read that finds this cluster again. Shown, never executed."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.render/form]]}
+  [unit]
+  (when-let [name (:seon.cluster/name unit)]
+    (list 'seon.db/pull (list 'quote cluster-selector) [:seon.cluster/name name])))
 
 (defn render-html
   "`:seon.render/html` — one readable cluster card."

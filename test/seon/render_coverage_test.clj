@@ -265,9 +265,11 @@
                html (render/render-html request)]
            (is (= (direct-ai (assoc value :seon.db/db database)) ai))
            (is (= (direct-html (assoc value :seon.db/db database)) html))
-           (is (one-to-three-lines? ai))
+           ;; The cluster's AI face is data (data renders 2026-09-27); the
+           ;; configuration's is still text.
+           (is (if (string? ai) (one-to-three-lines? ai) (map? ai)))
            (is (card? class html))
-           (is (not (str/includes? ai ":db/id")))
+           (is (not (if (string? ai) (str/includes? ai ":db/id") (contains? ai :db/id))))
            (is (not (str/includes? (hiccup/->string html) ":db/id")))))
        (let [config-ai (config/render-ai (assoc config-value
                                                  :seon.db/db database))

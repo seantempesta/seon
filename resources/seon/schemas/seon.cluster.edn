@@ -2,7 +2,8 @@
                [:map
                 {:seon.db/attributes true
                  :seon.render/ai seon.cluster/render-ai
-                 :seon.render/html seon.cluster/render-html :seon.program/partition :seon.data}
+                 :seon.render/html seon.cluster/render-html
+                 :seon.render/form seon.cluster/render-form :seon.program/partition :seon.data}
                 [:seon.cluster/name :seon.cluster/name]
                 [:seon.cluster/config :seon.cluster/config]
                 [:seon.cluster/instructions {:optional true} :seon.cluster/instructions]
@@ -15,6 +16,12 @@
                :toolkit-namespaces [:vector :seon.ns/name]
  ; Additive error declaration manifest, 2026-09-18.
 
+ :seon.cluster/view
+ [:map {:description "A cluster as its AI face shows it: its name and configuration, and how many shared instructions and toolkit namespaces it holds."}
+  [:seon.cluster/name :seon.cluster/name]
+  [:seon.config/cluster {:optional true} :seon.config/cluster]
+  [:seon.cluster/instruction-count [:int {:min 0}]]
+  [:seon.cluster/toolkit-count [:int {:min 0}]]]
  :seon.cluster/error
  [:and
  {:seon.db/attributes true}
