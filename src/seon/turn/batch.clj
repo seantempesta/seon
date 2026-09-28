@@ -624,7 +624,9 @@
   [{{agent-id :seon.agent/id turn-id :seon.turn/id} :seon.batch/world basis :seon.batch/basis start-ns :seon.batch/start-ns
     record-call :seon.turn.batch/record-call} batch]
   (let [entries (:seon.batch/entries batch)]
-    (when (and agent-id (seq entries))
+    ;; a batch with no agent or no form records nothing: the empty transaction
+    (if-not (and agent-id (seq entries))
+      []
       [[:db.fn/call record-call
         {:seon.turn/id turn-id :seon.turn/agent [:seon.agent/id agent-id]
          :seon.turn/starting-ns [:seon.ns/name (or start-ns 'user)]
