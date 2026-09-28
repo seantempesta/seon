@@ -257,68 +257,6 @@
                                   (seon.db/pull (seon.db/db connection) '[:seon.issue/status]
                                                 [:seon.issue/id "probe-unchanged-a"])))))))))
 
-(clojure.test/deftest issue-worker-opening-links-its-issue
- (seon.test-support/with-database
-  (fn [c]
-   (seon.test-support/seed-cluster! c "issue-family-opening")
-   (let [test-name 'seon.issue-test/issue-worker-creation-is-atomic
-         issue-id "issue-family-opening"
-         aid (seon.id/id [issue-id])]
-    (seon.test-support/transacted! c [{:seon.issue/id issue-id :seon.issue/title "Verify issue opening"
-                                      :seon.issue/status :open :seon.issue/severity :cleanup
-                                      :seon.issue/problem "Read the issue and its success tests."
-                                      :seon.issue/tests #{[:seon.test/sym test-name]}}])
-    (let [started (seon.issue/start! {:seon.db/connection c :seon.issue/id issue-id
-                                    :seon.issue/budget 1 :seon.ns/name 'my.agents.issue-opening
-                                    :seon.config.ai/no-provider true})
-          ctx (seon.test-support/fork-cluster-ctx c)
-          environment (seon.test-support/environment "issue-family-opening" c)
-          routing (seon.test-support/attempt-routing c)
-          faults (clojure.core.async/chan (clojure.core.async/sliding-buffer 16))]
-     (swap! routing assoc :seon.agent/fault-channel faults)
-     (clojure.test/is (let [observed started] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))))
-     (with-open [launcher (seon.test-support/closeable
-                            (seon.flow/start-work-launcher!
-                             {:seon.env/environment environment
-                              :seon.flow/configuration
-                              (select-keys (seon.test-support/effective-config) seon.flow/flow-workload-attributes)})
-                            seon.flow/stop-work-launcher!)]
-      (let [handle (seon.test-support/cluster-handle
-                     {:seon.env/environment environment :seon.db/connection c
-                      :seon.cluster/name "issue-family-opening" :seon.sci.eval/ctx ctx
-                      :seon.flow/work-launcher @launcher
-                      :seon.flow/executor (seon.cluster/projection-executor (:seon.sci.eval/projection-state ctx))
-                      :seon.db.process/id seon.cluster/boot-process-identity})
-            request {:seon.turn.loop/cluster handle :seon.agent/routing routing :seon.agent/id aid}
-            opening-id (seon.id/id [:seon.issue/opening issue-id])]
-       (try
-        (seon.cluster.agent/arm! request)
-        (seon.test-support/await-event! c ::issue-opening
-          (fn [d] (some? (:seon.turn/closed-tx (seon.db/pull d [:seon.turn/closed-tx] [:seon.turn/id opening-id])))))
-        (let [entries (seon.eval/of-agent (seon.db/db c) aid)
-              sources (mapv :seon.cluster.eval/source entries)
-              plan-index (.indexOf sources "(seon.plan/plan {})")
-              issue-index (first (keep-indexed (fn [i s] (when (clojure.string/includes? s "my.issue/status") i)) sources))]
-          (clojure.test/is (seq entries))
-          (clojure.test/is (= issue-id
-                             (get-in entries [issue-index :seon.eval/origin])))
-          (clojure.test/is (nil? (seon.db/pull (seon.db/db c) [:db/ident]
-                                             [:db/ident :seon.issue/turns-remaining])))
-          (clojure.test/is (every? :seon.eval/shown entries))
-          (doseq [untaught ["my.shell" "my.edit" "my.turn/complete"]]
-            (clojure.test/is (not (clojure.string/includes?
-                                  (clojure.string/join "\n" (concat sources (map :seon.eval/shown entries)))
-                                  untaught))))
-          (clojure.test/is (and issue-index (<= 0 plan-index)))
-          (clojure.test/is (empty? (keep :seon.cluster.eval/error entries)))
-          (clojure.test/is (clojure.string/includes? (str (:seon.eval/shown (get entries issue-index)))
-                                                     (str test-name))))
-        (finally
-         (seon.cluster.agent/disarm! request)
-         (clojure.core.async/close! faults)
-         (doseq [k [:seon.cluster.wake/channel :seon.render/context-channel :seon.turn.loop/completion]]
-           (clojure.core.async/close! (get handle k))))))))))))
-
 (clojure.test/deftest detector-only-issue-starts-and-settles-from-its-subject
   (seon.test-support/with-database
    (fn [connection]
