@@ -177,3 +177,46 @@ rewritten solely to carry the newer file stamp.
 The history count fold took 151 ms; the as-of file join took 4.083 s and
 is an audit of the historical publication, not an ordinary request path.
 The file-hash comparison took 5 ms after obtaining the held results.
+
+## Stable lint identity and analysis observations
+
+Lint identity now hashes the declaration/file owner, finding type, message and
+occurrence among equal claims in source order. Row and column remain facts.
+Sorting costs O(F log F), then one fold assigns identities; duplicate claims
+remain distinct. Reconciliation compares already-analyzed rows without their
+file observation stamp, while a missing first observation still requires a write.
+The contract is retained and the lint producer now declares its finding schema.
+
+MCP JVM pid 75624, loaded `52e163bee`, paired disposable branches from the same
+held commit; actual stored findings and function rows, normal writer validation.
+Both paths commit once and return equal logical answers (excluding the deliberately
+changed identity scheme or retained historical analysis stamp). Bytes are newly
+reachable external index-node files across six indexes; seed writes are excluded.
+
+| Inputs | Lint bytes before / after | Lint datoms before / after | Lint ms before / after | Stamp bytes before / after | Stamp ms before / after |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 2,208,614 / 527,736 | 19 / 3 | 265.298 / 33.309 | 1,086,130 / 543,366 | 157.687 / 32.841 |
+| 10 | 4,769,327 / 533,462 | 181 / 21 | 173.160 / 40.082 | 1,951,615 / 543,366 | 74.971 / 33.111 |
+| 100 | 9,038,988 / 496,935 | 1,777 / 201 | 299.855 / 56.528 | 3,999,945 / 543,366 | 185.931 / 32.682 |
+
+Stamp-only declaration datoms fall from 2N to zero; the file change still writes
+three datoms including txInstant. At 100 inputs, lint node bytes fall 94.5% and
+stamp node bytes 86.4%. These measurements do not estimate heap allocation or
+claim physical reclamation of history. The real lint producer was also evaluated
+in a scratch namespace on `src/seon/error.clj`: all 77 findings retained distinct,
+stable identities after a line shift (176 ms).
+
+Evidence: `tmp/astra-store-fixes-20260928/lint-probe.clj`, `stamp-probe.clj` and
+`analysis-measurements.json`. Root's focused tests (not run by this lane):
+
+- `seon.analysis-identity-test/shifted-findings-update-only-positions-at-one-ten-and-one-hundred-definitions`
+- `seon.analysis-identity-test/a-new-file-stamp-does-not-rewrite-already-analyzed-declarations`
+
+Archive `f80a524b2` plus these two source/test files: lint with cache disabled,
+0 errors and 1,673 existing warnings, 8.111 s. Contracts retain the same ten
+foreign errors in `script/seon/dev/{docstring,markdown}.clj`; no new finding.
+Drill candidate `29070f2a1d7b` passed: base 112.477 s, move 54.166 s,
+from-scratch candidate 161.499 s, total 563.376 s. This proves the indexed
+candidate loads and arms; central focused tests remain root's responsibility.
+Foreign boundaries are the turn/SCI lane, schema lane and cluster MCP removal;
+none of those pending changes is included in this slice.

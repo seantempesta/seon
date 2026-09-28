@@ -1615,12 +1615,13 @@
           (get entities "<stdin>")))))
 
 (defn- lint-entities
-  {:malli/schema [:=> [:cat :string [:fn seon.fn/source-file?] :map [:sequential :map] [:sequential :map]] [:vector :map]]}
+  "Identify findings by owner, claim and duplicate occurrence; positions are values."
+  {:malli/schema [:=> [:cat :string [:fn seon.fn/source-file?] :map [:sequential :map] [:sequential :map]] [:vector :seon.lint/finding]]}
   [directory file context entities findings]
   (let [path (.getCanonicalPath ^java.io.File file)
         declarations (filter :seon.fn/form-span entities)]
-    (mapv
-     (fn [finding]
+    (second (reduce
+     (fn [[occurrences result] finding]
        ;; clj-kondo reports positions as JDK Integers; these facts are longs.
        (let [row (long (::analyzer/row finding))
              col (long (::analyzer/col finding))
@@ -1637,15 +1638,18 @@
              declaration (when-not (:seon.program/declarations-examined found) found)
              program-identity (program/row-identity declaration)
              owner (if program-identity (symbol (second program-identity)) (fs/relative-path directory path))
-             finding-type (::analyzer/type finding)]
-         (cond-> {:seon.lint/id (id/id [owner finding-type row col])
+             finding-type (::analyzer/type finding)
+             signature [owner finding-type (::analyzer/message finding)]
+             occurrence (get occurrences signature 0)]
+         [(assoc occurrences signature (inc occurrence))
+          (conj result (cond-> {:seon.lint/id (id/id [signature occurrence])
                   :seon.lint/file [:seon.fn.file/relative-path path]
                   :seon.lint/type finding-type
                   :seon.lint/level (::analyzer/level finding)
                   :seon.lint/message (::analyzer/message finding)
                   :seon.lint/row row :seon.lint/col col}
-           program-identity (assoc :seon.lint/fn program-identity))))
-     findings)))
+           program-identity (assoc :seon.lint/fn program-identity)))]))
+     [{} []] (sort-by (juxt ::analyzer/row ::analyzer/col) findings)))))
 
 (defn- declaration-forms
   "The declaration population ONE indexing operation owns program rows by.
@@ -3351,6 +3355,17 @@
           (merge (apply dissoc prior-contracts removed) authored-contracts)
           (assoc (schema/population-options prior) :seon.schema/projection prior))))))
 
+(defn- same-indexed-entity?
+  "An already analyzed declaration needs no write for a newer file stamp alone.
+  Missing analysis is not evidence: adding its first digest remains a change."
+  {:malli/schema [:=> [:cat [:maybe :map] [:maybe :map]] :boolean]}
+  [current desired]
+  (or (= current desired)
+      (and (some? (:seon.program/analyzed-source-digest current))
+           (some? (:seon.program/analyzed-source-digest desired))
+           (= (dissoc current :seon.program/analyzed-source-digest)
+              (dissoc desired :seon.program/analyzed-source-digest)))))
+
 (defn- desired-entities
   {:malli/schema [:=> [:cat :seon.fn/index-request [:or :nil [:=> [:cat :string] :seon.schema/value]]] :seon.program/rows]}
   [request progress!]
@@ -3366,9 +3381,7 @@
         (if partial?
           ;; File analysis records provenance on every declaration. A new file
           ;; digest alone does not change an otherwise identical declaration.
-          (filterv #(not= (dissoc % :seon.program/analyzed-source-digest)
-                          (dissoc (get prior-entities (program/row-identity %))
-                                  :seon.program/analyzed-source-digest))
+          (filterv #(not (same-indexed-entity? (get prior-entities (program/row-identity %)) %))
                    source-rows)
           source-rows)
         projection (or (when partial? (incremental-projection request source-rows))
@@ -3681,7 +3694,7 @@
                                 [normalized-current normalized-desired])]
               (cond
                 refusal refusal
-                (= normalized-current normalized-desired)
+                (same-indexed-entity? normalized-current normalized-desired)
                 (recur (next pending) changes)
                 (nil? current)
                 (recur (next pending) (conj changes {:seon.program/row entity-map :seon.fn/retractions []}))
