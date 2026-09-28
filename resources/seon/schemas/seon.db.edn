@@ -192,7 +192,7 @@
           :custody-connection
           [:and {:description "A custody request's connection: its absence means no custody, so it is never supplied from the calling evaluation's world (a world member's schema name would be)."}
            :seon.db/connection],
-          :connection-id [:vector [:or :uuid :keyword]],
+          :connection-id [:vector [:or :uuid :keyword [:tuple [:= :datahike/overlay] :uuid]]],
           :connection-identity
           [:map
            [:datahike/connection-id :seon.db/connection-id]],

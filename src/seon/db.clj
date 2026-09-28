@@ -1419,7 +1419,7 @@
   {:malli/schema
    [:=> [:cat :seon.db/database-value]
     [:map
-     [:datahike.cache/connection-id [:tuple :uuid :keyword]]
+     [:datahike.cache/connection-id :seon.db/connection-id]
      [:datahike.cache/generation :uuid]
      [:datahike.cache/conservative-revision {:optional true} :uuid]
      [:datahike.cache/attribute-revisions [:map-of :qualified-keyword :uuid]]]]}
