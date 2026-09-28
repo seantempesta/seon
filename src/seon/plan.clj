@@ -692,9 +692,16 @@
   that changed nothing a test reaches runs nothing and leaves the recorded
   results standing. Each test runs as an isolated agent on its own branch off
   the agent's current commit; results, including unavailable or expired
-  tests, use the existing test writer."
-  {:malli/schema [:=> [:cat :seon.turn.loop/cluster :seon.agent/id] :nil]}
+  tests, use the existing test writer.
+
+  ## Errors
+
+  A refused read, a non-test entity on the issue, a missing query bound or a
+  refused test request is RETURNED as the plan refusal it is, never thrown
+  into the turn's close; the caller delivers it to the agent."
+  {:malli/schema [:=> [:cat :seon.turn.loop/cluster :seon.agent/id] [:or :nil :seon.plan/refusal]]}
   [cluster agent-id]
+  (try
   (let [connection (:seon.db/connection cluster)
         database (db/db connection)
         pending (stale-issue-tests database agent-id)]
@@ -719,9 +726,11 @@
                      :seon.test/identities (into #{} (map second) pending)
                      :seon.test/check-time-limit-ms (max 1 remaining-ms)})]
         (when (:seon.error/at result)
-          (throw (ex-info (:seon.error/message result)
-                          (assoc result :my.plan/refused-member :seon.issue/tests))))))
-    nil))
+          (assoc result :my.plan/refused-member :seon.issue/tests)))))
+    ;; Declared cases: the plan refusals `refuse!` and `stale-issue-tests`
+    ;; raise; `flat-refusal` resurfaces anything else whole.
+    (catch clojure.lang.ExceptionInfo refusal
+      (flat-refusal refusal))))
 
 (defn- done-query-result
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/pulled-entity :int] :seon.schema/value]}

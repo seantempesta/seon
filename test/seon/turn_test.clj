@@ -715,7 +715,8 @@
                  changed (filterv #(= :changed (:seon.turn/status %))
                                   (:seon.turn/forms preview))]
              (is (= basis (db/basis-t @connection)))
-             (is (= #{'seon.db/pull 'my.message/inbox}
+             ;; the opening's message concern is its reverse-ref read under `get`
+             (is (= #{'get 'my.message/inbox}
                     (set (map (comp first edn/read-string :seon.cluster.eval/source) changed))))
              (is (string? (:seon.turn/text (first changed))))
              (let [stored (turn/system-turn request)]

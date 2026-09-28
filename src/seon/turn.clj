@@ -3665,6 +3665,16 @@
                                 :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms cluster)})
                          nil)))
 
+(defn- with-diagnostic
+  "`receipt` with `error` delivered beside its value: appended to its
+  :seon.cluster.eval/diagnostics as bounded data (a later stage's failure
+  never replaces the value)."
+  {:malli/schema [:=> [:cat :map [:maybe :seon.plan/refusal]] :map]}
+  [receipt error]
+  (cond-> receipt
+    error (update :seon.cluster.eval/diagnostics
+                  #(str/join "\n" (remove nil? [% (print.value/bounded-text [error])])))))
+
 (defn- evaluation-terminal-data
   [{cluster :seon.turn.loop/cluster
     now :seon.turn.loop/now
@@ -3677,8 +3687,8 @@
     trigger :seon.message/trigger
     batch? :seon.turn.loop/batch?}]
   (let [database (db/db (get cluster :seon.db/connection))
-        raw-settled (disposition (db/carried-projection database)
-                                 (:seon.sci.admit/value evaluation))
+        ;; the disposition the fold's publish stage read, as data
+        raw-settled (:my.turn/value evaluation)
         settled
         (cond-> raw-settled
           (= :completed (:my.turn/disposition raw-settled))
@@ -3755,6 +3765,12 @@
            settled (assoc :my.turn/value settled)))
         closing? (closing-settlement? {:seon.turn.loop/undisposed? undisposed?
                                        :seon.turn.loop/settled settled})
+        ;; ONLY THE CLOSE ASKS THE QUESTION. A mid-turn form settles without
+        ;; the agent having replied, so rerunning its issue's tests there
+        ;; cannot change the answer. A batch asks once for all its closes
+        ;; (`settle-batch!`). A refusal is delivered beside the value.
+        receipt (with-diagnostic receipt (when (and closing? (not batch?))
+                                           (plan/run-issue-tests! cluster agent-id)))
         side-tx
         (concat
          (when settled
@@ -3772,13 +3788,8 @@
          (:seon.error/values-tx delivery))
         tx-data (if batch?
                   (vec side-tx)
-                  (do
-                    ;; ONLY THE CLOSE ASKS THE QUESTION. A mid-turn form
-                    ;; settles without the agent having replied, so rerunning
-                    ;; its issue's tests there cannot change the answer.
-                    (when closing? (plan/run-issue-tests! cluster agent-id))
-                    (conj (into (receipt-settle-tx database receipt) side-tx)
-                          [:db.fn/call #'plan/settle-call agent-id])))]
+                  (conj (into (receipt-settle-tx database receipt) side-tx)
+                        [:db.fn/call #'plan/settle-call agent-id]))]
     {:seon.turn.loop/settled settled
      :seon.turn.loop/undisposed? undisposed?
      :seon.turn.loop/evaluation evaluation
@@ -3902,13 +3913,23 @@
         ;; The batch settles every generated opening form as well as the
         ;; agent's own. Only the settlement that CLOSES the turn asks whether
         ;; the issue is done, so an opening pass runs no issue tests at all.
-        _ (doseq [agent-id (into #{}
-                                 (keep identity)
-                                 (map (fn [request entry]
-                                        (when (closing-settlement? entry)
-                                          (:seon.agent/id request)))
-                                      requests prepared))]
-            (plan/run-issue-tests! cluster agent-id))
+        issue-refusals (into {}
+                             (keep (fn [agent-id]
+                                     (when-let [refusal (plan/run-issue-tests! cluster agent-id)]
+                                       [agent-id refusal])))
+                             (into #{}
+                                   (keep identity)
+                                   (map (fn [request entry]
+                                          (when (closing-settlement? entry)
+                                            (:seon.agent/id request)))
+                                        requests prepared)))
+        ;; each refusal is delivered beside the value of its agent's closing form
+        prepared (mapv (fn [request entry]
+                         (if-let [refusal (and (closing-settlement? entry)
+                                               (get issue-refusals (:seon.agent/id request)))]
+                           (update entry :seon.turn.loop/receipt with-diagnostic refusal)
+                           entry))
+                       requests prepared)
         ;; Built inside the committed phase: a refused read of the fault
         ;; window is a refused settlement the arm below closes, never an escape.
         transaction
@@ -5176,9 +5197,7 @@
                                       (render/head-function ctx (or ns-before 'user) form))]
                      (sci.eval/shown-result value (cond-> request head (assoc :seon.render.call/function head))
                                             (or record ((::kernel/record armed) :ok)))))))]
-    (cond-> {:seon.batch/shown (:seon.eval/shown shown "") :seon.batch/shown-map shown}
-      (:seon.cluster.eval/diagnostics shown)
-      (assoc :seon.batch/print-diagnostics (str (:seon.cluster.eval/diagnostics shown))))))
+    {:seon.batch/shown (:seon.eval/shown shown "") :seon.batch/shown-map shown}))
 
 (defn- publish-row
   "The turn's last word on a published form, in its world: the disposition
@@ -5222,12 +5241,15 @@
         final (if (contains? entry :seon.batch/value)
                 value
                 (or (:seon.batch/error-value (ex-data (:seon.batch/error entry)))
-                    (:seon.sci.admit/value (:seon.batch/evaluation entry))))]
+                    (:seon.sci.admit/value (:seon.batch/evaluation entry))))
+        ;; The disposition is read here once, inside the fold's guard, and
+        ;; carried as data: nothing after the fold walks the agent's value.
+        settled (when (and (not refused?) (contains? entry :seon.batch/value))
+                  (disposition projection value))]
     (when-let [handle (get handles ordinal)]
       (sci.eval/bind-result! ctx handle final))
-    {:seon.batch/entry entry
-     :seon.batch/stop? (boolean (and (not refused?) (contains? entry :seon.batch/value)
-                                     (disposition projection value)))}))
+    {:seon.batch/entry (cond-> entry settled (assoc-in [:seon.batch/evaluation :my.turn/value] settled))
+     :seon.batch/stop? (some? settled)}))
 
 (defn- code-evidence
   "What a form executed, as stored evidence: the definitions entered with a
@@ -5640,7 +5662,8 @@
                                :seon.turn.loop/turn-report]]]]]
                   :seon.turn.loop/turn-report]}
   [{cluster :seon.turn.loop/cluster work :seon.turn.loop/work now :seon.turn.loop/now report :seon.turn.loop/report}]
-  (let [_ (plan/run-issue-tests! cluster (:seon.agent/id work))
+  (let [;; a plan refusal is the agent's to act on: the turn still closes
+        issue-refusal (plan/run-issue-tests! cluster (:seon.agent/id work))
         outcome (db/transact!
                  (:seon.db/connection cluster)
                  (conj (close-tx {:seon.turn/id (:seon.turn/id work) :seon.turn/closed-tx "datomic.tx"})
@@ -5650,7 +5673,12 @@
                      :seon.agent/id (:seon.agent/id work)
                      :seon.error/value outcome})
           (report :error 0 outcome))
-      (report :closed 0))))
+      (if issue-refusal
+        (do (settle! {:seon.turn.loop/cluster cluster :seon.turn.loop/now now
+                      :seon.agent/id (:seon.agent/id work)
+                      :seon.error/value issue-refusal})
+            (report :closed 0 issue-refusal))
+        (report :closed 0)))))
 
 (defn- generate-turn
   "Append one opening form from the shared system-turn source generator."

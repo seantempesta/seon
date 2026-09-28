@@ -257,6 +257,11 @@
                 (get entities [0 (local-offset source first-row [r c]) (name sym)])))
         contract (:malli/schema (meta v))]
     (cond
+      ;; A program declaration is a function or a test; a def of any other
+      ;; value (an atom, a map, a result) is the agent's private state, kept
+      ;; in its context and never shared as program.
+      (not (or (fn? @v) (:test (meta v))))
+      {:seon.batch/private {:seon.batch/sym sym :seon.batch/join :value :seon.batch/reason :not-a-function}}
       (seq captured) {:seon.batch/private {:seon.batch/sym sym :seon.batch/join :unanalyzed
                                            :seon.batch/reason :captures-locals
                                            :seon.batch/captured captured}}
@@ -640,11 +645,11 @@
                :seon.batch/first-refusal (:seon.batch/writer-refusal first-try))))))
 
 (defn- printed
-  "The show stage's answer from the one printer's shown value."
+  "The show stage's answer from the one printer's shown value, kept whole:
+  its diagnostics (a renderer that refused) ride it to the reply."
   {:malli/schema [:=> [:cat :seon.sci.eval/shown] :seon.batch/printed]}
-  [{shown :seon.eval/shown diagnostics :seon.cluster.eval/diagnostics}]
-  (cond-> {:seon.batch/shown shown}
-    diagnostics (assoc :seon.batch/print-diagnostics diagnostics)))
+  [{shown :seon.eval/shown :as whole}]
+  {:seon.batch/shown shown :seon.batch/shown-map whole})
 
 (defn show
   "One entry's shown text through the one printer, under the arm, with the

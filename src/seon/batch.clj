@@ -226,19 +226,19 @@
        ">"))
 
 (defn- print-into
-  "`entry` with its shown text from the show stage (its text, or its text and
-  the printer's own diagnostics); a failed print is the minimal text plus the
-  failure."
+  "`entry` with its shown text from the show stage (a render's own failure
+  rides its shown map's diagnostics, the agent's); a failed print is the
+  minimal text plus the failure."
   {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/entry]
-                  [:tuple :seon.batch/entry [:maybe :seon.error/throwable] [:maybe :string]]]}
+                  [:tuple :seon.batch/entry [:maybe :seon.error/throwable]]]}
   [request entry]
   (try (let [p ((:seon.batch/show request) request entry)]
          (if (string? p)
-           [(assoc entry :seon.batch/shown p) nil nil]
+           [(assoc entry :seon.batch/shown p) nil]
            [(cond-> (assoc entry :seon.batch/shown (:seon.batch/shown p))
               (:seon.batch/shown-map p) (assoc :seon.batch/shown-map (:seon.batch/shown-map p)))
-            nil (:seon.batch/print-diagnostics p)]))
-       (catch Throwable t [(assoc entry :seon.batch/shown (unprintable entry)) t nil])))
+            nil]))
+       (catch Throwable t [(assoc entry :seon.batch/shown (unprintable entry)) t])))
 
 (defn- write?
   "Whether an observation is a write the batch records: a map of the declared
@@ -367,8 +367,8 @@
                 (and value? @printed) (first @printed)
                 value? (merge base @returned)
                 :else (assoc base :seon.batch/error failure))
-        [entry print-failure print-notes] (if (or (contains? entry :seon.batch/shown) (not (:seon.batch/show request)))
-                                            [entry (second @printed) (nth @printed 2 nil)]
+        [entry print-failure] (if (or (contains? entry :seon.batch/shown) (not (:seon.batch/show request)))
+                                            [entry (second @printed)]
                                             (within request world #(print-into request entry)))
         ;; published before any observation is normalized: a malformed
         ;; observation is a diagnostic beside the value, never its loss
@@ -377,9 +377,10 @@
                       (update :seon.batch/diagnostics into
                               (cond-> []
                                 (and value? failure) (conj (diagnostic :observe n failure))
-                                print-failure (conj (diagnostic :show n print-failure))
-                                print-notes (conj {:seon.error/message (str "show: " print-notes) :seon.batch/stage :show
-                                                   :seon.batch/ordinal n})))
+                                ;; print notes (a render the agent's value selected
+                                ;; failed) already ride the entry's :diagnostics, delivered
+                                ;; to the agent; they are not core faults
+                                print-failure (conj (diagnostic :show n print-failure))))
                       (assoc :seon.batch/form-writes [] :seon.batch/form-world world)
                       (clock :evaluate t0))]
     (guard published :observe
@@ -596,11 +597,15 @@
   [request]
   (let [t0 (System/nanoTime)
         basis (get-in request [:seon.batch/world :seon.db/db])
-        start {:seon.batch/entries [] :seon.batch/writes [] :seon.batch/diagnostics []
+        ;; a read state the stage cannot build is a diagnostic: reading then
+        ;; ends at once with nothing read
+        [read-state failure] (try [((:seon.batch/read-state request) (:seon.batch/text request))]
+                                  (catch Throwable t [nil (diagnostic :read nil t)]))
+        start {:seon.batch/entries [] :seon.batch/writes [] :seon.batch/diagnostics (if failure [failure] [])
                :seon.batch/ordinal (:seon.batch/first-ordinal request 0) :seon.batch/working basis :seon.batch/basis basis
                :seon.batch/program {}
                :seon.batch/derive-state (:seon.batch/derive-state request {})
-               :seon.batch/read-state ((:seon.batch/read-state request) (:seon.batch/text request))
+               :seon.batch/read-state read-state
                :seon.batch/timings {}}
         folded (let [result (volatile! start)
                      body (fn []
