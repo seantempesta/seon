@@ -2222,10 +2222,7 @@
                                           :seon.ns/name :seon.render.walk/lookup :seon.eval/origin
                                           :seon.turn/rendered])
                              :seon.turn/status status)
-                basis (assoc :seon.cluster.eval/read-basis-transaction basis)
-                (= status :changed)
-                (assoc :seon.turn/changes
-                       (db/read-evidence-changes database evidence basis)))))))
+                basis (assoc :seon.cluster.eval/read-basis-transaction basis))))))
         (second
          (reduce (fn [[seen sources] source]
                    (let [source-identity (source-key source)]

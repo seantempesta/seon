@@ -764,7 +764,6 @@
              (is (= #{'seon.db/pull 'my.message/inbox}
                     (set (map (comp first edn/read-string :seon.cluster.eval/source) changed)))
                  (pr-str preview))
-             (is (seq (:seon.turn/changes (first changed))))
              (is (string? (:seon.turn/text (first changed))))
              (let [stored (turn/system-turn request)]
                (is (string? (:seon.turn/id stored)) (pr-str stored))
