@@ -205,6 +205,11 @@
            [:seon.batch/settled {:optional true} :seon.batch/settled]]
           [:map [:seon.batch/writer-refusal :seon.batch/writer-refusal] [:seon.batch/first-refusal {:optional true} :map]]
           [:map [:seon.batch/storage-error :seon.batch/storage-error]]]
+ :failure-source [:map {:description "What seon.batch/produced-failures reads of a batch: each entry's ordinal, its failure and the definitions its change published. Open: a full :seon.batch/batch satisfies it."}
+                  [:seon.batch/entries [:vector [:map
+                                                 [:seon.batch/ordinal :seon.cluster.eval/ordinal]
+                                                 [:seon.batch/error {:optional true} :seon.batch/error]
+                                                 [:seon.batch/change {:optional true} [:map [:seon.batch/entities {:optional true} [:vector :map]]]]]]]]
  :batch [:map {:description "What the one function answers. Absent keys are stages not run."}
          [:seon.batch/entries [:vector :seon.batch/entry]]
          [:seon.batch/writes [:vector :seon.batch/write]]

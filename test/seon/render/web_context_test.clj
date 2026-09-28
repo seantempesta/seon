@@ -50,12 +50,6 @@
            (is virtual?)
            (is (string? (:seon.cluster.prompt/text result)))
            (is (= 200 (.get page-result support/event-backstop-seconds TimeUnit/SECONDS)))
-           (let [costs (db/q '[:find ?cost ?tx
-                               :in $ ?basis
-                               :where [?cost :seon.render.cost/estimated-tokens _ ?tx]
-                                      [(> ?tx ?basis)]]
-                             @connection (db/basis-t (:seon.db/db request)))]
-             (is (empty? costs) "saved history writes no new render costs"))
            (is (identical? (render/shared-cache ctx) (render/shared-cache ctx)))
            (is (seq (:seon.render.web/calls @(render/shared-cache ctx))))
            (support/transacted! connection

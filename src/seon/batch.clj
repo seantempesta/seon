@@ -590,7 +590,7 @@
   the digest visible at that entry, never a later definition: its settlement may commit
   after the fault. A failure the agent's own form produced names none: it
   returns to the agent and is no fault."
-  {:malli/schema [:=> [:cat :seon.batch/batch] [:vector :seon.batch/diagnostic]]}
+  {:malli/schema [:=> [:cat :seon.batch/failure-source] [:vector :seon.batch/diagnostic]]}
   [batch]
   (second
    (reduce

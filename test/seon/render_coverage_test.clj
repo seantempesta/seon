@@ -5,7 +5,6 @@
             [seon.ai.tokens :as tokens]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
-            [seon.turn :as turn]
             [seon.config :as config]
             [seon.db :as db]
             [seon.effect :as effect]
@@ -154,71 +153,6 @@
       (is (= 'seon.render/request-profile
              (get-in result
                      [:seon.error/operation]))))))
-
-(deftest only-agent-context-renders-prepare-cost-facts-for-the-caller
-  (support/with-database
-   (fn [connection]
-     (seed-entities! connection)
-     (let [database @connection
-           ctx (support/fork-cluster-ctx connection)
-           value (pulled database [:seon.config/cluster cluster-name])
-           profile (render/agent-render-profile config/defaults)
-           web-call-id [:web :config]
-           web-captured (atom {})
-           before-web (db/basis-t database)
-           web-output
-           (render/render-call
-            (assoc (render-request database ctx value)
-                   :seon.db/connection connection
-                   :seon.render/output :seon.render/html
-                   :seon.render/profile profile
-                   :seon.render.call/id web-call-id
-                   :seon.render/captured-calls web-captured))
-           after-web (db/basis-t @connection)
-           web-fact-count
-           (count
-            (db/q '[:find ?cost
-                    :where
-                    [?cost :seon.render.cost/estimated-tokens]]
-                  @connection))
-           agent-call-id [:agent-context :config]
-           agent-captured (atom {})
-           agent-output
-           (render/render-call
-            (assoc (render-request database ctx value)
-                   :seon.db/connection connection
-                   :seon.turn/id run-id
-                   :seon.render/output :seon.render/ai
-                   :seon.render/profile profile
-                   :seon.render.call/id agent-call-id
-                   :seon.render/captured-calls agent-captured))
-           after-agent (db/basis-t @connection)
-           prepared (get-in @agent-captured [agent-call-id :seon.db/tx-data])
-           settled (db/transact! connection prepared)
-           facts (db/q '[:find ?shape ?profile ?tokens ?at
-                         :where
-                         [?cost :seon.render.cost/shape-key ?shape]
-                         [?cost :seon.render.cost/profile ?profile]
-                         [?cost :seon.render.cost/estimated-tokens ?tokens]
-                         [?cost :seon.render.cost/at ?at]]
-                       @connection)]
-       (is (vector? web-output))
-       (is (= #{web-call-id} (set (keys @web-captured))))
-       (is (= before-web after-web)
-           "a web-like HTML render retains its call without writing")
-       (is (zero? web-fact-count))
-       (is (string? agent-output))
-       (is (= #{agent-call-id} (set (keys @agent-captured))))
-       (is (= after-web after-agent)
-           "rendering prepares costs without moving the caller's database basis")
-       (is (= 1 (count prepared)))
-       (is (some? (:db-after settled)))
-       (is (= 1 (count facts)))
-       (let [[shape profile estimated at] (first facts)]
-         (is (= :seon.config/entity shape))
-         (is (= :seon.render.profile/agent profile))
-         (is (= (tokens/estimate agent-output) estimated))
-         (is (inst? at)))))))
 
 (defn- walk-output-by-attribute
   [units attribute]

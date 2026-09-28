@@ -1029,24 +1029,6 @@
                     (:datahike.read/dependency-plan evidence)})
                  (:seon.render.call/read-evidence previous))))))
 
-(defn- cost-shape-key
-  "The entity schema owning the rendered value, else the generic value schema."
-  [projection request]
-  (let [value (render-value request)]
-    (or (when (and projection (render.value/keyword-lookup? value))
-          (entity-owner projection value (:seon.db/db request)))
-        :seon.schema/value)))
-
-(defn- render-cost-fact
-  [request rendered]
-  {:seon.render.cost/shape-key
-   (cost-shape-key (request-projection request) request)
-   :seon.render.cost/profile
-   (get-in request [:seon.render/profile :seon.render.profile/id])
-   :seon.render.cost/estimated-tokens
-   (tokens/estimate (if (string? rendered) rendered (pr-str rendered)))
-   :seon.render.cost/at (Date.)})
-
 ;;; ---------------------------------------------------------------------------
 ;;; The typed unknown one refused producer contributes
 ;;; ---------------------------------------------------------------------------
@@ -1678,24 +1660,7 @@
                            :seon.render.call/invocation-key invocation-key)]
             (when (and call-id captured-calls)
               (swap! captured-calls assoc call-id entry))
-            ;; Carry cost facts with the captured call. Context acquisition
-            ;; commits the complete set once, after deriving from its DB value.
-            ;; Render cost serves the agent-context consumer. A real prompt
-            ;; request structurally carries the held run id through
-            ;; the turn caller; web page, root, and debug renders do not. They
-            ;; still retain call evidence, but a read-only page observation
-            ;; must never transact.
-            (when (and (not reusable?)
-                       (not invocation-reusable?)
-                       (some? rendered)
-                       (not= rendered (:seon.render.call/output previous))
-                       call-id
-                       captured-calls
-                       (:seon.turn/id request)
-                       (:seon.db/connection request))
-              (swap! captured-calls assoc-in [call-id :seon.db/tx-data]
-                     [(render-cost-fact request rendered)]))
-                rendered))))))))
+            rendered))))))))
 
 (def ^:private branch-scope-keys
   [:datahike.cache/connection-id :datahike.cache/generation])
