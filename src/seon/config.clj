@@ -865,25 +865,34 @@
 
 (defn agent-cluster
   "The cluster `agent-id` was created in (`:seon.agent/cluster`), whose
-  config is the agent's config.
+  config is the agent's config; for an agent created before agents named
+  their cluster, the branch's one config row.
 
   Several clusters' config rows may share one branch (`apply-compiled!`
   keeps every row another cluster's `:seon.cluster/config` names), so an
   agent's dial is read through its own cluster, never from whichever row a
-  query meets first. An agent that names no cluster is refused by name."
+  query meets first. An unnamed agent on a branch holding several rows is
+  refused by name."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
-                  [:or :seon.cluster/name :seon.config/error]]}
+                  [:or :seon.cluster/name :seon.config/error :seon.db/invalid-read-error]]}
   [database agent-id]
-  (or (db/q '[:find ?name . :in $ ?id
-              :where [?agent :seon.agent/id ?id] [?agent :seon.agent/cluster ?name]]
-            database agent-id)
+  (let [named (when (get (:schema database) :seon.agent/cluster)
+                (db/q '[:find ?name . :in $ ?id
+                        :where [?agent :seon.agent/id ?id] [?agent :seon.agent/cluster ?name]]
+                      database agent-id))
+        rows (when-not named (db/q '[:find [?name ...] :where [_ :seon.config/cluster ?name]] database))]
+    (cond
+      named named
+      (db/read-refusal? rows) rows
+      (= 1 (count rows)) (first rows)
+      :else
       (seon.error.refusal/diagnostic
        (java.util.Date.) :seon.config/read 'seon.config/agent-cluster
        {:seon.config/error-key :seon.agent/cluster
         :seon.error/expected-key :seon.agent/cluster
         :seon.error/offending agent-id
-        :seon.error/message (str "Agent " agent-id " names no cluster (:seon.agent/cluster), so no config is its own.")
-        :seon.error/fix "Create the agent through seon.cluster.agent/creation-tx, which names its cluster; boot names the booting cluster for its agents that name none."})))
+        :seon.error/message (str "Agent " agent-id " names no cluster (:seon.agent/cluster) and its branch holds " (count rows) " cluster config rows, so none is its own.")
+        :seon.error/fix "Create the agent through seon.cluster.agent/creation-tx, which names its cluster."}))))
 
 (defn agent-cluster-dial
   "`dial` of `agent-id`'s own cluster config (`agent-cluster`): its value,
@@ -893,7 +902,8 @@
   [database agent-id dial]
   (let [cluster-name (agent-cluster database agent-id)]
     (if (string? cluster-name)
-      (get (db/pull database [dial] [:seon.config/cluster cluster-name]) dial)
+      (let [row (db/pull database [dial] [:seon.config/cluster cluster-name])]
+        (if (db/read-refusal? row) row (get row dial)))
       cluster-name)))
 
 (declare effective-in)
