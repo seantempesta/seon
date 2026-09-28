@@ -242,7 +242,7 @@
       connection
       [(support/program-fn-entity
         (db/db connection) 'my.agents.viewer/agent-view
-        "(defn agent-view {:malli/schema [:=> [:cat [:map [:seon.agent/id :seon.agent/id]]] :seon.render/ai]} [unit] \"viewer's view\")")])
+        "(defn agent-view {:malli/schema [:=> [:cat [:map [:seon.agent/id :seon.agent/id]]] :string]} [unit] \"viewer's view\")")])
      (let [database (db/db connection)
            ctx (support/fork-cluster-ctx connection)
            selected (fn [viewer value output]
@@ -279,7 +279,7 @@
         connection
         [(support/program-fn-entity
           (db/db connection) 'my.agents.db-viewer/probe-view
-          "(defn probe-view {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/ai]} [unit] (str \"db:\" (some-> (:seon.db/db unit) :max-tx)))")])
+          "(defn probe-view {:malli/schema [:=> [:cat :seon.render/unit] :string]} [unit] (str \"db:\" (some-> (:seon.db/db unit) :max-tx)))")])
        (let [database (db/db connection)
              ctx (support/fork-cluster-ctx connection)
              rendered (fn [value]

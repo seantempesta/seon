@@ -15,7 +15,7 @@
     [:cat [:or :my.background/invalid-call-error
            :my.background/invalid-result-error
            :my.background/missing-result-error]]
-    :seon.render/ai]}
+    :string]}
   [error]
   (:seon.error/message error))
 

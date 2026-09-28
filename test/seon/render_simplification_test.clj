@@ -243,6 +243,20 @@
                 (:seon.render.selection/selected decision)))
             (is (= (agent/render-identity-ai pulled) (render-ai request)))))))))
 
+(deftest a-stored-render-ref-is-not-the-value's-own-override
+  ;; CLASS: a pulled schema entity carries its schema's render face as a ref
+  ;; (`{:db/id n}`); read as the value's own override it rendered the schema
+  ;; row with the function its schema's VALUES render with. An unexpanded ref
+  ;; is a reference, never rendered data, so it falls through to the declared
+  ;; stage; a symbol, a function or rendered data still override.
+  (let [explicit #'seon.render/explicit-value]
+    (doseq [output [:seon.render/ai :seon.render/html :seon.render/form]]
+      (is (nil? (explicit {:seon.schema/key :seon.error/base output {:db/id 3952}} output)))
+      (is (nil? (explicit {output {:db/id 7 :db/ident :probe/render}} output)))
+      (is (= [output 'probe.render/view] (explicit {output 'probe.render/view} output))))
+    (is (= [:seon.render/html [:p "shown"]] (explicit {:seon.render/html [:p "shown"]} :seon.render/html)))
+    (is (= [:seon.render/ai {:shown 1}] (explicit {:seon.render/ai {:shown 1}} :seon.render/ai)))))
+
 (deftest function-arities-are-matched-without-recompilation
   (let [cross-arity 'probe.render/cross-arity
         matching 'probe.render/matching
@@ -253,8 +267,8 @@
          {cross-arity
           [:function
            [:=> [:cat argument-schema] :int]
-           [:=> [:cat :string :string] :seon.render/ai]]
-          matching [:=> [:cat argument-schema] :seon.render/ai]})]
+           [:=> [:cat :string :string] :string]]
+          matching [:=> [:cat argument-schema] :string]})]
     ;; The first question compiles each arity once into the projection's
     ;; holder; every later question must reuse it.
     (schema/function-matching-outputs-in projection matching [{:seon.render/value 7}])
@@ -340,7 +354,7 @@
                         retained
                         (assoc :seon.render/retained-calls retained)))]
         (let [definitions '[(defn cache-helper [] "H1")
-                            (defn ^{:malli/schema [:=> [:cat :seon.render/unit] :seon.render/ai]}
+                            (defn ^{:malli/schema [:=> [:cat :seon.render/unit] :string]}
                               namespace-ai [value]
                               (str
                                 "A:"

@@ -51,7 +51,7 @@
 
 (defn render-note-ai
   "Render one current note as text."
-  {:malli/schema [:=> [:cat :my.note/note] :seon.render/ai]}
+  {:malli/schema [:=> [:cat :my.note/note] :string]}
   [note]
   (str "Note " (note-line (note-value note))))
 

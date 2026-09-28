@@ -617,12 +617,18 @@
 
 (defn- explicit-value
   "A map's own inline render for OUTPUT's face: a renderer symbol, an inline
-  function (invoked under the same arm as a named producer), or the rendered
-  data itself. Each face is independent; nil when the value names none."
+  function (invoked under the same arm as a named producer), or rendered data.
+  Each face is independent; nil when the value names none. An unexpanded
+  Datahike ref (`{:db/id n}`, with `:db/ident` when the target has one,
+  datahike/pull_api.cljc:298-302) is not rendered data: a pulled schema
+  entity's stored render face is its schema's declaration, never its own
+  render, so it falls through to the declared stage."
   {:malli/schema [:=> [:cat :seon.schema/value :seon.render/output]
                   [:maybe [:tuple :seon.render/output :seon.schema/value]]]}
   [value output]
-  (when (render.value/keyword-lookup? value) (find value output)))
+  (when-let [[_ v :as entry] (when (render.value/keyword-lookup? value) (find value output))]
+    (when-not (and (map? v) (contains? v :db/id) (empty? (dissoc v :db/id :db/ident)))
+      entry)))
 
 (defn- explicit-value-stage
   [request output]
@@ -680,7 +686,9 @@
   [request projection output]
   (let [{namespace-name :seon.render/namespace candidates :seon.render/viewer-functions}
         (if (find request :seon.render/viewer-functions) request (viewer request))
-        output-schema (case output :seon.render/html :seon.render/hiccup output)
+        ;; A face is a render output, never the schema's declaration of its
+        ;; renderer (the face keys name functions).
+        output-schema (case output :seon.render/ai :string :seon.render/html :seon.render/hiccup output)
         argument (delay (producer-argument request))
         evidence (mapv (fn [candidate]
                          (if (or (schema/function-accepts-and-returns-in?
@@ -1238,7 +1246,7 @@
               :seon.error/operation 'seon.render/raw-output
               :seon.render/invalid-output (keyword (name output))
               :seon.error/message (case output
-                                    :seon.render/ai "The selected AI renderer did not return text."
+                                    :seon.render/ai "The selected AI renderer returned nothing or an undeclared error value."
                                     :seon.render/html "The selected HTML renderer did not return Hiccup."
                                     "The selected form renderer did not return a form.")
               :seon.error/data {:seon.render/output rendered}
@@ -1247,13 +1255,14 @@
              assoc :seon.error/declared-schema :seon.render/invalid-output-error))
 
 (defn- face-valid?
-  "Is `rendered` on `output`'s face: AI text or source blocks, Hiccup, a form?"
+  "Is `rendered` on `output`'s face: AI data (any value but an error value,
+  which is the producer's declared refusal), Hiccup, a form?"
   {:malli/schema [:=> [:cat :seon.schema/projection :seon.render/output :seon.schema/value] :boolean]}
   [projection output rendered]
   (boolean
    (case output
-     :seon.render/ai (or (string? rendered)
-                         ((schema/projection-validator projection :seon.render/source-blocks) rendered))
+     :seon.render/ai (and (some? rendered)
+                          (not ((schema/projection-validator projection :seon.error/base) rendered)))
      :seon.render/html (hiccup/hiccup? rendered)
      ((schema/projection-validator projection :seon.render/form) rendered))))
 
@@ -1390,9 +1399,10 @@
       (if (contains? answer :face) face failure))))
 
 (defn render-ai
-  "Render one value as text through the unique selected live SCI Var."
+  "Render one value for an AI agent through the unique selected live SCI Var:
+  its data, which the value printer prints; never evaluated."
   {:malli/schema [:=> [:cat :seon.render/call-request]
-                  [:or :nil :string :seon.render/error-result]]
+                  [:or :nil :seon.render/ai-data :seon.render/error-result]]
    :seon.fn/external-sink :ai-visible-text
   :seon.fn/projection-boundary :seon.render/ai}
   [request]
