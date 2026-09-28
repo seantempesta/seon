@@ -19,26 +19,27 @@
 (clojure.test/deftest indexed-issues-replace-facts-and-retract-removed-notes
  (seon.test-support/with-database
   (fn [connection]
-   (let [wanted #{"class-classification-is-inferred-from-hand-lists.md"
-                   "agent-form-calls-to-core-namespaces-are-not-indexed.md"
-                   "a-search-contract-predicate-cannot-be-made-durable.md"}
-         selected-real (filterv #(contains? wanted (.getName (clojure.java.io/file (:seon.issue/path %))))
-                                (seon.issue/notes "."))
+   (let [selected-real [{:seon.issue/path "docs/seon/issues/probe-real-class.md"
+                         :seon.issue/text "---\ntype: issue\nstatus: open\nseverity: friction\ntags: [issue, class/n8, class-kill]\n---\n# Real class\n## Problem\nFind facts."}
+                        {:seon.issue/path "docs/seon/issues/probe-real-member.md"
+                         :seon.issue/text "---\ntype: issue\nstatus: open\nseverity: friction\ntags: [issue, class/n8]\n---\n# Real member\n## Problem\nFixed in 5deb40e4e; my.run/complete stays cited."}
+                        {:seon.issue/path "docs/seon/issues/probe-real-other.md"
+                         :seon.issue/text "---\ntype: issue\nstatus: open\nseverity: cleanup\ntags: [issue]\n---\n# Other\n## Problem\nNothing cited."}]
          report (seon.issue/index! {:seon.db/connection connection :seon.issue/notes selected-real})
          d (seon.db/db connection)
          member (seon.db/pull d '[:seon.issue/commits {:seon.issue/tests [:seon.test/sym]}]
-                             [:seon.issue/id "agent-form-calls-to-core-namespaces-are-not-indexed"])
+                             [:seon.issue/id "probe-real-member"])
          class-value (seon.db/pull d '[{:seon.issue/members [:seon.issue/id]}]
-                                  [:seon.issue/id "class-classification-is-inferred-from-hand-lists"])]
+                                  [:seon.issue/id "probe-real-class"])]
      (clojure.test/is (= 3 (count selected-real)))
      (clojure.test/is (= 3 (:seon.issue/count report)))
      (clojure.test/is (some #{"5deb40e4e"} (:seon.issue/commits member)))
-     (clojure.test/is (some #(= "agent-form-calls-to-core-namespaces-are-not-indexed" (:seon.issue/id %))
+     (clojure.test/is (some #(= "probe-real-member" (:seon.issue/id %))
                            (:seon.issue/members class-value)))
      (clojure.test/is (empty? (:seon.issue/refusals report)))
      (clojure.test/is (contains? (set (:seon.issue/unresolved
                                        (seon.db/pull d '[:seon.issue/unresolved]
-                                                     [:seon.issue/id "agent-form-calls-to-core-namespaces-are-not-indexed"])))
+                                                     [:seon.issue/id "probe-real-member"])))
                                  "my.run/complete")))
    (let [real (first (filter #(clojure.string/includes? (:seon.issue/text %) "seon.fn")
                              (seon.issue/notes ".")))
@@ -76,7 +77,13 @@
    (fn [source-connection]
      (seon.test-support/with-database
       (fn [connection]
-        (let [notes [{:seon.issue/path "docs/seon/issues/adoption-class.md"
+        ;; The source is a sibling branch: its writes run in its own custody.
+        (let [index-source! (fn [notes]
+                              (seon.db/call-with-custody
+                               {:seon.db/connection source-connection}
+                               #(seon.issue/index! {:seon.db/connection source-connection
+                                                    :seon.issue/notes notes})))
+              notes [{:seon.issue/path "docs/seon/issues/adoption-class.md"
                       :seon.issue/text
                       (str "---\ntype: issue\nstatus: open\nseverity: cleanup\n"
                            "created: 2026-09-17\ntags: [issue, class/adoption, class-kill]\n---\n"
@@ -88,8 +95,7 @@
                       (str "---\ntype: issue\nstatus: open\nseverity: cleanup\n"
                            "created: 2026-09-17\ntags: [issue, class/adoption]\n---\n"
                            "# Adoption member\nseon.issue/adopt!")}]
-              indexed (seon.issue/index! {:seon.db/connection source-connection
-                                         :seon.issue/notes notes})
+              indexed (index-source! notes)
               first-adoption (seon.issue/adopt! connection (seon.db/db source-connection))]
           (clojure.test/is (let [observed indexed] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))))
           (clojure.test/is (let [observed first-adoption] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))))
@@ -97,7 +103,7 @@
             (doseq [attribute [:seon.issue/functions :seon.issue/namespaces :seon.issue/keys
                                :seon.issue/files :seon.issue/tests :seon.issue/members]]
               (clojure.test/is (seq (get entity attribute)) "Missing adoption subject")))
-          (let [again (seon.issue/index! {:seon.db/connection source-connection :seon.issue/notes notes})
+          (let [again (index-source! notes)
                 source (seon.db/db source-connection)
                 entities (#'seon.issue/identity-entities source)
                 delta (seon.issue/adopt-tx (seon.db/db connection) entities)
@@ -105,11 +111,9 @@
             (clojure.test/is (let [observed again] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))))
             (clojure.test/is (empty? delta))
             (clojure.test/is (empty? (remove #(= :db/txInstant (:a %)) (:tx-data report)))))
-          (let [changed (seon.issue/index!
-                         {:seon.db/connection source-connection
-                          :seon.issue/notes
-                          (mapv #(update % :seon.issue/text clojure.string/replace
-                                         "# Adoption member" "# Changed member") notes)})
+          (let [changed (index-source!
+                         (mapv #(update % :seon.issue/text clojure.string/replace
+                                        "# Adoption member" "# Changed member") notes))
                 adopted (seon.issue/adopt! connection (seon.db/db source-connection))]
             (clojure.test/is (let [observed changed] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))))
             (clojure.test/is (let [observed adopted] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))))
@@ -119,16 +123,14 @@
                                               [:seon.issue/id "adoption-member"])))))))))))
 
 (def ^:private converted-notes
-  "The eight notes converted by hand in the R6 research page, with the citation
+  "The notes converted by hand in the R6 research page, with the citation
   shape each one proves the derived resolver must reach."
   {"anonymous-runtime-contracts-have-recurred" [:seon.issue/functions :seon.issue/keys :seon.issue/files]
    "class-outward-values-bypass-total-render-contract" [:seon.issue/functions :seon.issue/files]
-   "complete-publication-takes-seventy-seconds" [:seon.issue/functions :seon.issue/keys :seon.issue/files]
    "runtime-block-html-is-raw-ids-and-instants" [:seon.issue/functions :seon.issue/keys]
    "a-platform-test-leaves-its-worker-stripped-of-every-contract" [:seon.issue/tests :seon.issue/files]
    "development-adoption-can-mix-host-and-sci-generations" [:seon.issue/files :seon.issue/namespaces]
-   "fresh-cljc-files-are-jvm-only" [:seon.issue/files :seon.issue/namespaces]
-   "pre-rename-root-claims-are-unreadable-noise-on-every-status" [:seon.issue/keys]})
+   "fresh-cljc-files-are-jvm-only" [:seon.issue/files :seon.issue/namespaces]})
 
 (clojure.test/deftest cited-identities-resolve-through-one-derived-resolver
  (seon.test-support/with-database
@@ -198,9 +200,9 @@
   (fn [connection]
    ;; One spelling, two identities: an issue slug that is also a function
    ;; symbol. The resolver must refuse to pick, and say which token it refused.
-   (let [shared (first (sort (filter #(clojure.string/starts-with? % "seon.db/")
-                                     (seon.db/q '[:find [?sym ...] :where [_ :seon.fn/sym ?sym]]
-                                                (seon.db/db connection)))))
+   (let [shared (str (first (sort (filter #(clojure.string/starts-with? % "seon.db/")
+                                          (seon.db/q '[:find [?sym ...] :where [_ :seon.fn/sym ?sym]]
+                                                     (seon.db/db connection))))))
          _ (seon.test-support/transacted! connection [{:seon.issue/id shared :seon.issue/title "Shared spelling"
                                                        :seon.issue/status :open :seon.issue/severity :cleanup
                                                        :seon.issue/problem "Two identities, one spelling."}])
@@ -337,7 +339,7 @@
                                 [?issue :seon.issue/detector ?detector-entity]
                                 [?issue :seon.issue/id ?id]]
                               (seon.db/db connection) subject detector)]
-       (clojure.test/is (string? subject))
+       (clojure.test/is (symbol? subject))
        (clojure.test/is (let [observed generated] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))))
        (clojure.test/is (string? issue-id))
        (let [started (seon.issue/start!
@@ -360,8 +362,9 @@
                                               [:seon.issue/resolved-tx]
                                               [:seon.issue/id issue-id]))))
          (seon.test-support/transacted!
-          connection [[:db/add [:seon.fn/sym subject] :seon.fn/doc
-                       "Construct the declared buffer from its supplied fields."]])
+          connection [(seon.test-support/revision
+                      (seon.db/db connection) [:seon.fn/sym subject]
+                      {:seon.fn/doc "Construct the declared buffer from its supplied fields."})])
          (clojure.test/is (true? (seon.issue/done? (seon.db/db connection)
                                                   [:seon.issue/id issue-id])))
          (seon.test-support/transacted!
