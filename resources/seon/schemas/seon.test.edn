@@ -82,27 +82,6 @@
               {:optional true}
               :seon.test/failure-message]],
             :results [:vector :seon.test/result],
-            :seon.render.test/run-view
-            [:map {:description "A test run as its AI face shows it: when, at what basis on which branch, its members' outcomes counted, and the red ones by name."}
-             [:seon.test.run/id {:optional true} :seon.test.run/id]
-             [:seon.test.run/at {:optional true} :seon.test.run/at]
-             [:seon.test.run/basis-t {:optional true} :seon.test.run/basis-t]
-             [:seon.test.run/branch {:optional true} :seon.test.run/branch]
-             [:seon.render.test/outcomes [:map-of [:enum :error :fail :pass :unfinished] [:int {:min 0}]]]
-             [:seon.render.test/red {:optional true} [:vector :seon.test/sym]]]
-            :seon.render.test/view
-            [:map {:description "A test's result as its AI face shows it: state, host, failed assertions and, unless green, the definitions changed since it last passed."}
-             [:seon.test/sym [:maybe :seon.test/sym]]
-             [:seon.render.test/state [:enum "pass" "fail" "error" "unrun or incomplete"]]
-             [:seon.test/unchanged {:optional true} :seon.test/unchanged]
-             [:seon.test/recorded-basis-t {:optional true} :seon.test/recorded-basis-t]
-             [:seon.test/run-basis-t {:optional true} :seon.test/run-basis-t]
-             [:seon.test/failure-message {:optional true} :seon.test/failure-message]
-             [:seon.test/reach-unknown {:optional true} :seon.test/reach-unknown]
-             [:seon.render.test/host {:optional true} [:or [:map [:seon.test/host :seon.test/host]] :seon.error/value]]
-             [:seon.test.failure/reports {:optional true} [:vector :map]]
-             [:seon.render.test/changed-since-green {:optional true}
-              [:or [:vector :seon.fn/sym] :seon.test/unknown-error]]],
             :result-unknown
             [:and {:description "One test whose latest admitted execution recorded no completed outcome: its symbol and run stay visible, it carries no counts, and it never reads as green or reuses an older result."}
              :seon.error/base

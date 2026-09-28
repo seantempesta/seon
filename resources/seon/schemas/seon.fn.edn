@@ -270,14 +270,4 @@
  {:seon.db/component true,
   :seon.db/component-schema :seon.error.projection/entity}
  :seon.db/ref]
- :seon.render.ns/function-view
- [:map {:description "A function node as its AI face shows it: named, and beyond distance zero its source, contract and the program functions it calls and that call it."}
-  [:seon.fn/sym :seon.fn/sym]
-  [:seon.fn/doc {:optional true} :seon.fn/doc]
-  [:seon.fn/source {:optional true} :seon.fn/source]
-  [:seon.fn/spec {:optional true} :seon.fn/spec]
-  [:seon.render.ns/calls {:optional true} [:vector :symbol]]
-  [:seon.render.ns/called-by {:optional true} [:vector :symbol]]
-  [:seon.render.ns/called-by-count {:optional true} [:int {:min 0}]]
-  [:seon.render/operations {:optional true} :seon.render/operations]]
 }
