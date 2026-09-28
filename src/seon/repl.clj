@@ -81,7 +81,7 @@
   "The one complete EDN value `shown` holds, else `shown` itself (prose, or
   text followed by more text). A tag with no reader goes to `unknown-tag`
   (`tagged-literal`), else the text is not read."
-  {:malli/schema [:=> [:cat :string [:maybe clojure.core/ifn?]] :seon.schema/value]}
+  {:malli/schema [:=> [:cat :string [:maybe [:fn clojure.core/ifn?]]] :seon.schema/value]}
   [shown unknown-tag]
   (try
     (with-open [reader (java.io.PushbackReader. (java.io.StringReader. shown))]
