@@ -232,6 +232,11 @@
          (is (= 'user/make-row (:seon.error/producer (first (problems/open-faults (db/db connection) signature))))
              "the open fault names who it counts against")
          (is (= [['user/make-row]] (mapv :seon.task/must-read (:seon.task/_faults (signature-row connection signature)))))
+         (is (= [(get-in batch [:seon.batch/entries 0 :seon.batch/change :seon.batch/entities 0 :seon.program/definition-digest])]
+                (mapv :seon.error/producer-digest
+                      (:seon.error/occurrences (db/pull (db/db connection) [{:seon.error/occurrences [:seon.error/producer-digest]}]
+                                                        [:seon.error/signature signature]))))
+             "the version that ran is the one this batch defined, though it settles after the fault")
          (is (some #(= (:seon.task/id (first (:seon.task/_faults (signature-row connection signature)))) (:seon.task/id %))
                    (my.task/open (db/db connection)))))
        (testing "the agent's own form is its mistake, returned and never recorded"
