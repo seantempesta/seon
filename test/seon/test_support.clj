@@ -379,7 +379,9 @@
                        :seon.batch/sink (seon.batch/sink)}
                 ;; the world an agent's evaluation has: its custody's connection
                 ;; and its identity, from which omitted inputs are supplied
-                connection (assoc :seon.db/connection connection)
+                connection (assoc :seon.db/connection connection
+                                  :seon.env/environment (env/environment {:seon.boot/cluster-name (:seon.boot/cluster-name request "default")
+                                                                          :seon.db/connection connection}))
                 (:seon.agent/id request) (assoc :seon.agent/id (:seon.agent/id request)))
         batch (seon.batch/evaluate-batch
                (-> (turn.batch/code-request

@@ -6,6 +6,7 @@
   (:require [clojure.test.check.generators :as gen]
             [seon.batch]
             [seon.db :as db]
+            [seon.env :as env]
             [seon.fault :as fault]
             [seon.schema :as schema]
             [seon.sci.eval :as eval]))
@@ -27,6 +28,15 @@
 
 ;;; ---------------------------------------------------------------------------
 
+(defn- execution-environment
+  "The environment of an execution handed none (a fixture's): its cluster and
+  connection. Call preparation supplies a world's members only in an
+  evaluation that has an environment (`seon.instrument/calling-environment`),
+  so a world without one silently supplied nothing."
+  {:malli/schema [:=> [:cat :seon.boot/cluster-name :seon.db/connection] :seon.env/environment]}
+  [cluster conn]
+  (env/environment {:seon.boot/cluster-name cluster :seon.db/connection conn}))
+
 (defn agent-world
   "A Seon agent's world from its acquired execution (`agent/acquire-context!`):
   its cluster and branch, its connection, the writer, its SCI context forked
@@ -38,7 +48,8 @@
     environment :seon.env/environment}
    {agent-id :seon.agent/id turn-id :seon.turn/id task :seon.task/id profile :seon.render/profile
     limit :seon.sci.eval/time-limit-ms writer :seon.db/writer process :seon.db.process/id}]
-  (let [db (db/db conn)]
+  (let [db (db/db conn)
+        environment (or environment (execution-environment cluster conn))]
     (cond-> {:seon.boot/cluster-name cluster
              :seon.db/connection conn
              :seon.db/writer (or writer db/transact!)
@@ -70,6 +81,7 @@
   [cluster conn {agent-id :seon.agent/id turn-id :seon.turn/id writer :seon.db/writer ctx :seon.sci.eval/ctx
                  environment :seon.env/environment process :seon.db.process/id profile :seon.render/profile}]
   (cond-> {:seon.boot/cluster-name cluster :seon.db/connection conn
+           :seon.env/environment (or environment (execution-environment cluster conn))
            :seon.db/writer (or writer db/transact!)
            :seon.batch/sink (seon.batch/sink)
            :seon.batch/stamped-ns (java.util.concurrent.atomic.AtomicLong. (System/nanoTime))}
