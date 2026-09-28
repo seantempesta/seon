@@ -1774,3 +1774,19 @@
                    (schema/call-with-projection handed #(candidate {::value "one"})))
           "the loaded declarations still refuse an invalid input")
       (finally (ns-unmap 'seon.instrument-test var-name)))))
+
+(deftest a-bound-worlds-supplied-database-reads-the-connection-at-the-call
+  ;; A world holds a connection, never a database value: the environment the
+  ;; calling evaluation is scoped with carries the database as of the call, so
+  ;; a write made just before it is visible (world-db-leak, 2026-09-28).
+  (test-support/with-database
+   (fn [connection]
+     (let [world {:seon.env/environment @(:seon.sci.eval/projection-state (meta connection))
+                  :seon.db/connection connection
+                  :seon.agent/id "world-db-leak"}
+           supplied #(binding [seon.batch/*world* world]
+                       (:max-tx (:seon.db/db (instrument/calling-environment))))
+           before (supplied)]
+       (test-support/transacted! connection [{:seon.agent/id "world-db-leak"}])
+       (is (= (:max-tx (db/db connection)) (supplied)))
+       (is (< before (supplied)))))))

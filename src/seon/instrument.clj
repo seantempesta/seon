@@ -766,8 +766,7 @@
   that context for suppliers that act on it, or nil when none runs.
 
   An evaluation of the one REPL path binds its world (`seon.batch/*world*`):
-  then the environment is that world's, scoped with its database (the batch's
-  working value), agent and SCI context, and nothing else is read. World
+  then the environment is that world's, scoped with its agent and SCI context, and nothing else is read. World
   members themselves are supplied from the world by
   `seon.call-preparation/supply`. Until every entrant runs through the one
   path, an evaluation without a bound world is answered as before, below
@@ -786,15 +785,19 @@
   {:malli/schema [:=> [:cat] [:or :nil :seon.env/environment]]}
   []
   ;; Called on every prepared call, so it reads the arm and scopes unarmed.
-  (if-let [{environment :seon.env/environment database :seon.db/db agent-id :seon.agent/id
-            ctx :seon.sci.eval/ctx} seon.batch/*world*]
+  (if-let [{environment :seon.env/environment connection :seon.db/connection
+            agent-id :seon.agent/id ctx :seon.sci.eval/ctx} seon.batch/*world*]
     (when environment
-      ((mi/-f->original env/scope)
-       environment
-       (cond-> {}
-         ctx (assoc :my.program/executing-ctx ctx)
-         agent-id (assoc :seon.agent/id agent-id)
-         ((mi/-f->original db/database-value?) database) (assoc :seon.db/db database))))
+      ;; a world holds no database: the custody in force, else the world's
+      ;; connection, read now
+      (let [database (cond (or db/*read-database* db/*conn*) ((mi/-f->original db/db))
+                           connection ((mi/-f->original db/db) connection))]
+        ((mi/-f->original env/scope)
+         environment
+         (cond-> {}
+           ctx (assoc :my.program/executing-ctx ctx)
+           agent-id (assoc :seon.agent/id agent-id)
+           ((mi/-f->original db/database-value?) database) (assoc :seon.db/db database)))))
   (when-let [ctx ((mi/-f->original kernel/world-ctx))]
     (when-let [environment ((mi/-f->original env/of) ctx)]
       (let [database (when (or db/*read-database* db/*conn*)
