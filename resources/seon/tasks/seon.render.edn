@@ -60,3 +60,9 @@
              :intent "render-simplification-test nested-values-render-their-declared-faces: a TxReport nested under an attribute declared :seon.db/transaction-report and a database value nested under :probe/database print as #object[datahike.db.TxReport] and #object[datahike.db.DB] in both AI and HTML, where the reaching attribute's pair should render them (r8 at 7533e982d). Find which selection stage stopped asking nested records (c32b272f9 admitted records at the root)."
              :must-read #{seon.render/declared-producers seon.render/selection}
              :evidence #{"test/seon/render_simplification_test.clj"}}]
+
+#:seon.task{:name "declared-metadata-selects-a-value-that-no-longer-fits"
+            :kind :function
+            :intent "(select-keys (seon.db/pull db '[*] [:seon.fn/name 'x/y]) [:q]) is {} but prints as \"Error evidence is unavailable.\": select-keys keeps the refusal's metadata {:seon.error/declared-schema :seon.db/invalid-read-error}, and render selection (seon.render/declared-producers, render.clj:569) takes that declaration's pair without asking whether the value still satisfies it (the validator answers false). Law tension (root 2026-09-28): AGENTS says the producer declares identity and nothing downstream guesses, and entity_pairs_test asserts a declaration selects even when the value does not fit, so validating at selection was not landed. Fix at the derivation instead (a derived value must not carry its source error declaration), or bring the rule to the owner."
+            :must-read #{seon.render/request-projection}
+            :evidence #{"tmp/mcp-dogfood/patches/render/01-declared-schema-must-fit.patch"}}
