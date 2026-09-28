@@ -111,6 +111,7 @@
             [my.turn]
             [sci.addons.future :as sci.future]
             [sci.core :as sci]
+            [sci.lang]
             [sci.ctx-store]
             [sci.impl.namespaces :as sci.namespaces]
             [sci.impl.vars :as sci.vars]
@@ -3148,6 +3149,11 @@
   {:malli/schema [:=> [:cat :seon.sci.eval/acquire-request] :map]}
   [{ctx :seon.sci.eval/ctx database :seon.db/db
     commit-fault! :seon.flow/commit-fault!}]
+  ;; Acquisition installs the program rows into THIS context: the SCI observers of
+  ;; an evaluation that called it (root's prepare-merge!, `run`'s request world)
+  ;; are unbound, so a row's definition is never observed as a write of that
+  ;; caller's batch and armed in a context holding no such Var.
+  (binding [sci.lang/*write-observer* nil sci.lang/*expansion-observer* nil]
   (let [snapshot @(::kernel/program-snapshot ctx)]
     (if (acquired-database? ctx database)
       (do
@@ -3197,7 +3203,7 @@
                                  ::loaded-basis (loaded-basis source))
                     (::loaded-connection snapshot)
                     (assoc ::loaded-connection (::loaded-connection snapshot))))
-          recorded)))))
+          recorded))))))
 
 (defn- acquire-function-from-database!
   "Acquire the lazy program before its first named invocation."
