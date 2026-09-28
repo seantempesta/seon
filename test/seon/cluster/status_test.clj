@@ -3,6 +3,7 @@
             [seon.cluster.status :as status]
             [seon.blob :as blob]
             [seon.db :as db]
+            [seon.env :as env]
             [seon.schema :as schema]
             [seon.test-support :as support]))
 
@@ -84,8 +85,16 @@
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "status-observation")
-     (let [observation (status/snapshot {:seon.db/db @connection
-                                         :seon.db/connection connection})]
+     ;; The snapshot observes the caller's cluster (f667d9ef4): the fixture
+     ;; branch also holds its parent's cluster entity, so the name is carried
+     ;; by an environment, not inferred from the branch's cluster entities.
+     (let [environment (env/environment
+                        {:seon.boot/cluster-name "status-observation"
+                         :seon.db/connection connection
+                         :seon.schema/projection (schema/projection-from-database @connection)})
+           observation (status/snapshot (env/carry {:seon.db/db @connection
+                                                    :seon.db/connection connection}
+                                                   environment))]
        (is (= "status-observation" (:seon.cluster/name observation)))
        (is (string? (get-in observation [:seon.cluster.status/store-bytes :seon.cluster.status/unavailable-observation])))
        (is (pos-int? (:seon.cluster.status/platform-threads observation)))))))

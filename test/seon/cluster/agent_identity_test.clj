@@ -48,11 +48,11 @@
         (is (= [(str namespace-name)] (get (described html) "Namespace")))
         (is (contains? (described html) "Steward") "the card names the namespace's steward")
         (test-support/transacted! connection
-                                  [[:db/add [:seon.cluster/name cluster-name]
-                                    :seon.cluster/name "renamed-cluster"]])
+                                  [[:db/add [:seon.agent/id agent-id]
+                                    :seon.agent/cluster "renamed-cluster"]])
         (is (str/includes? (agent/whoami {:seon.db/db @connection :seon.agent/id agent-id})
                            "Cluster   renamed-cluster")
-            "the result follows the supplied database, not a captured identity")))))
+            "the result follows the supplied database, not a captured identity (an agent names its cluster, 648369489)")))))
 
 (deftest the-root-agent-renders-as-one-node-without-the-fleet
   ;; Class regression: the agent pair renders its own node (identity, tasks,
@@ -76,7 +76,7 @@
       (test-support/transacted! connection
                                 (filterv :seon.call-preparation/key
                                          (:seon.config/initialization
-                                          (config/compile-manifest {:seon.boot/cluster-name "default"}))))
+                                          (config/compile-manifest {:seon.boot/cluster-name cluster-name}))))
       (test-support/transacted! connection (test-support/agent-tx @connection "supplied"))
       (let [database @connection
             indexed (db/pull database
@@ -139,9 +139,9 @@
         (is (= {:my.turn/disposition :wait :my.turn/note "Session complete."}
                (:seon.sci.admit/value (evaluate "(my.agent/done)"))))
         (is (= expected (:seon.sci.admit/value (evaluate "(seon.cluster.agent/whoami)"))))
-        (is (= "Agent     supplied\nCluster   identity-cluster"
+        (is (= "Agent     supplied\nNamespace my.agents.supplied\nCluster   identity-cluster"
                (:seon.sci.admit/value
                 (evaluate "(seon.cluster.agent/whoami {:seon.agent/id \"supplied\"})")))
             "the supplied map wins over current-agent defaults")
-        (is (= "Agent     supplied\nCluster   identity-cluster"
+        (is (= "Agent     supplied\nNamespace my.agents.supplied\nCluster   identity-cluster"
                (agent/whoami {:seon.db/db database :seon.agent/id "supplied"})))))))
