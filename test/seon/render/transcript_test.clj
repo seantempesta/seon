@@ -1148,14 +1148,15 @@
        (try
          (let [opened-at (java.util.Date.)
                outcomes
-               (turn/evaluate-sources
+               (:seon.turn.loop/evaluated-sources
+                (turn/evaluate-sources
                   {:seon.turn.loop/cluster cluster
                    :seon.db/db database
                    :seon.sci.eval/ctx (:seon.sci.eval/ctx forked)
                    :seon.agent/id "one-grammar-agent"
                    :seon.cluster.eval/ordinal 0
                    :seon.ns/name 'my.agents.one-grammar
-                   :seon.cluster.reply/sources sources})
+                   :seon.cluster.reply/sources sources}))
                prepared (turn/record-evaluated-tx
                          {:seon.turn.loop/cluster cluster :seon.db/db database :seon.turn/id "one-grammar-stored" :seon.turn/agent [:seon.agent/id "one-grammar-agent"] :seon.turn/starting-ns [:seon.ns/name 'my.agents.one-grammar] :seon.turn/reply reply :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx" :seon.turn.loop/evaluated-sources outcomes})
                committed (blob/with-publication!

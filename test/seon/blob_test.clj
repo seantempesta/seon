@@ -35,7 +35,13 @@
       (try
         (support/transacted!
                 (:seon.store/connection-object opened)
-                [{:db/ident :seon.config.eval.result/blob-threshold
+                ;; An identity-less entity must have an owner, so the dial is
+                ;; written under an identity the store also installs.
+                [{:db/ident :blob-test/id
+                  :db/valueType :db.type/string
+                  :db/cardinality :db.cardinality/one
+                  :db/unique :db.unique/identity}
+                 {:db/ident :seon.config.eval.result/blob-threshold
                   :db/valueType :db.type/long
                   :db/cardinality :db.cardinality/one}])
         (registry/branch! {:seon.store/store opened
@@ -45,7 +51,8 @@
           (try
             (support/transacted!
                     connection
-                    [{:seon.config.eval.result/blob-threshold binary-threshold}])
+                    [{:blob-test/id "dial"
+                      :seon.config.eval.result/blob-threshold binary-threshold}])
             (f connection root)
             (finally
               (d/release connection))))
