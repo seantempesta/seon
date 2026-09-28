@@ -36,7 +36,7 @@
   (let [h (handle)
         request (cond-> {:seon.turn.loop/cluster h :seon.agent/routing (:seon.agent/routing h)
                          :seon.agent/id "root" :seon.cluster.reply/text text}
-                  (= :mcp entrant) (assoc :seon.agent/segmenter 'seon.cluster.reply/code-sources))
+                  (= :mcp entrant) (assoc :seon.agent/segmenter 'seon.turn/code-sources))
         result (if (= :agent entrant)
                  (turn/virtual-turn! request)
                  ((requiring-resolve 'seon.cluster.agent/evaluate-source!) request))

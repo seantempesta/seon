@@ -156,9 +156,9 @@ or running unrelated inherited work. Cluster-qualified messages arriving after t
 fork reach the candidate's own message owner. Shared-only forwarding needs a separate
 custody/read-evidence proof; copying message facts is not that interface.
 
-A definition evaluates once, in the agent's retained context; its install gate
-proves it in a fork of that context, and a refused install restores the context
-through the evaluation's own restoration. Candidate-local green is not automatic
+A definition evaluates once, in the agent's retained context, and the REPL always
+admits it: the fold derives its entity and a refused settlement keeps every
+evaluated value, with nothing restored. Candidate-local green is not automatic
 shared merge. D1 validates
 the combined program and B4 runs its exact definitions before explicit acceptance.
 

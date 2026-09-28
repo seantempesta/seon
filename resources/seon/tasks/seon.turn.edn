@@ -2,7 +2,7 @@
              :name "a-refused-settlement-is-stored-as-a-core-fault"
              :kind :function
              :intent "A run whose settlement is refused by a declared writer refusal is stored as a core fault (signature 6e0c6d4e..., seon.db/transact!), shows 'Contract finding: seon.db/transact! returned this error ...' and carries a datahike.writer stack trace into the MCP reply, although it is the agent's mistake. Decide it in evaluate-sources, where the run's working value already settles each form's entity: an entity settled-value refuses becomes that form's refusal through refuse-install, and settle-batch-refusal!'s ordinal search is deleted."
-             :must-read #{seon.sci.eval/refuse-install seon.turn/evaluate-sources seon.turn/settle-batch!}
+             :must-read #{seon.turn/evaluate-sources seon.turn/settle-batch!}
              :evidence #{"docs/research/agent-platform/landing/fix-dogfood-api-2026-09-26.md"
                          "docs/seon/issues/a-refused-run-settlement-replaces-every-forms-shown-result.md"
                          "docs/seon/issues/expected-refusal-logs-raw-datom-error-twice.md"}}

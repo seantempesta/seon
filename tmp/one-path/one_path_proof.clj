@@ -52,7 +52,7 @@
                                             :seon.cluster.registry/from (db/commit-id head)})))
 
 (defn release! [exec]
-  ((:release @@#'eval/agent-entrance) exec))
+  (agent/release-context! exec))
 
 (def ^:dynamic *exec* nil)
 

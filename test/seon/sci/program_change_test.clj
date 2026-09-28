@@ -1,7 +1,7 @@
 (ns seon.sci.program-change-test
   "An agent evaluation reads the loaded program identity when it starts and
-  when it ends; a change by another thread refuses its value by name, and
-  nothing waits for adoption. Each test injects its own identity atom, so the
+  when it ends; a change by another thread marks its kept value untrusted,
+  naming both identities, and nothing waits for adoption. Each test injects its own identity atom, so the
   JVM's `seon.sci.eval/loaded-identity` is never touched."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -32,23 +32,24 @@
     (.join thread)
     nil))
 
-(deftest an-evaluation-refuses-its-value-when-the-loaded-program-changes
+(deftest an-evaluation-keeps-an-untrusted-value-when-the-loaded-program-changes
   (testing "no change: the ordinary value"
     (let [loaded (atom {:seon.source/commit-id (random-uuid)})
           result (evaluation loaded (fn [] nil) "(do (change!) (+ 1 2))")]
       (is (= 3 (:seon.sci.admit/value result)))
       (is (not (contains? result :seon.cluster.eval/error)))))
-  (testing "another thread adopts during the evaluation: a refusal naming both identities"
+  (testing "another thread adopts during the evaluation: the value is kept, untrusted, beside a refusal naming both identities"
     (let [before (random-uuid)
           after (random-uuid)
           loaded (atom {:seon.source/commit-id before})
           result (evaluation loaded #(on-another-thread! loaded {:seon.source/commit-id after})
                              "(do (change!) (+ 1 2))")
-          value (:seon.sci.admit/value result)]
-      (is (= :seon.cluster/adoption (:seon.error/layer value)))
-      (is (= 'seon.sci.eval/evaluate (:seon.error/operation value)))
-      (is (= (str before " -> " after) (:seon.test/not-runnable value)))
-      (is (str/includes? (:seon.cluster.eval/error result) "Rerun"))
+          untrusted (:seon.sci.eval/untrusted result)]
+      (is (= 3 (:seon.sci.admit/value result)) "the path is total: the evaluated value stays")
+      (is (= :seon.cluster/adoption (:seon.error/layer untrusted)))
+      (is (= 'seon.sci.eval/evaluate (:seon.error/operation untrusted)))
+      (is (= (str before " -> " after) (:seon.test/not-runnable untrusted)))
+      (is (str/includes? (:seon.error/message untrusted) "Rerun"))
       (is (= {:seon.source/commit-id after} @loaded) "adoption never waited")))
   (testing "this evaluation's own adoption keeps its value"
     (let [loaded (atom {:seon.source/commit-id (random-uuid)})

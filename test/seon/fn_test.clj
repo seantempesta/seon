@@ -14,6 +14,10 @@
             [seon.db :as db]
             [seon.error :as error]
             [seon.turn :as turn]
+            [seon.turn.batch :as turn.batch]
+            [seon.turn.world :as world]
+            [seon.sci.observe :as observe]
+            [seon.batch]
             [seon.fn :as seon.fn]
             [seon.fn.analyzer :as analyzer]
             [seon.fs :as fs]
@@ -1727,7 +1731,7 @@
         (testing "the page and system turn reuse the same evaluation path"
           (is (= #{(quote seon.render.web/render-source-call) (quote seon.turn/system-turn)} previews)))))))
 
-(deftest fixture-observations-survive-static-and-runtime-admission
+(deftest fixture-observations-survive-static-admission-and-the-fold
   (let [root (fixture-root)
         namespace-name 'sample.observation
         reason "Observe a real external fixture lifecycle."
@@ -1748,27 +1752,27 @@
             (is (nil? (:seon.test/fixture-observation
                         (db/pull @connection [:seon.test/fixture-observation]
                                  [:seon.test/sym (quote sample.observation/ordinary)])))))
-          (let [ctx (test-support/fork-cluster-ctx connection)
-                cluster (test-support/cluster-handle
-                         {:seon.db/connection connection :seon.cluster/name "default"
-                          :seon.db.process/id "observation-probe" :seon.sci.eval/ctx ctx})]
-            (doseq [[name metadata expected] [["runtime-observed" (str "^{:seon.test/fixture-observation " (pr-str reason) "} ") reason]
-                                             ["runtime-ordinary" "" nil]]]
-              (let [evaluation (sci.eval/evaluate
-                                (merge (select-keys cluster [:seon.sci.admit/caps])
-                                       {:seon.cluster.eval/source (str "(clojure.test/deftest " metadata name " (clojure.test/is true))")
-                                        :seon.cluster.eval/ns [:seon.ns/name namespace-name]
-                                        :seon.sci.eval/ctx ctx :seon.sci.eval/time-limit-ms 10000
-                                        :seon.db/db @connection :seon.db/connection connection}))
-                    entity (:seon.program/row evaluation)]
-                (is (:seon.test/sym entity))
-                (is (= expected (:seon.test/fixture-observation entity)))
-                (when entity
-                  (let [admitted (db/transact! connection [(dissoc entity :seon.sci.eval/evaluated?)])]
-                    (is (:db-after admitted))
-                    (is (= expected (:seon.test/fixture-observation
-                                      (db/pull @connection [:seon.test/fixture-observation]
-                                               [:seon.test/sym (symbol (str namespace-name) name)])))))))))))
+          ;; An agent's deftest derives its entity in the fold (the one REPL
+          ;; path's derive stage), with the observation its metadata declares.
+          (let [world (world/agent-world {:seon.db/connection connection :seon.cluster/name "default"
+                                          :seon.sci.eval/base-ctx (sci.eval/base-ctx (db/db connection))}
+                                         {:seon.agent/id "observation-probe"})
+                batch (seon.batch/evaluate-batch
+                       (dissoc (turn.batch/code-request
+                                {:seon.batch/world world :seon.batch/observe observe/observe
+                                 :seon.turn.batch/row-tx @#'turn/row-tx
+                                 :seon.batch/start-ns namespace-name
+                                 :seon.batch/text (str "(clojure.test/deftest ^{:seon.test/fixture-observation " (pr-str reason) "}"
+                                                       " runtime-observed (clojure.test/is true))\n"
+                                                       "(clojure.test/deftest runtime-ordinary (clojure.test/is true))")})
+                               :seon.batch/settle))
+                entities (into {} (comp (mapcat (comp :seon.batch/entities :seon.batch/change))
+                                        (map (juxt (comp name :seon.test/sym) identity)))
+                               (:seon.batch/entries batch))]
+            (is (empty? (:seon.batch/diagnostics batch)))
+            (is (= reason (:seon.test/fixture-observation (get entities "runtime-observed"))))
+            (is (contains? entities "runtime-ordinary"))
+            (is (not (contains? (get entities "runtime-ordinary") :seon.test/fixture-observation))))))
       (finally (test-support/delete-recursively! root)))))
 
 (defn- with-provenance-file [relative-path source body]

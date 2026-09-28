@@ -37,7 +37,6 @@
             [seon.render.walk :as render.walk]
             [seon.render.web :as render.web]
             [seon.schema :as schema]
-            [seon.sci.admit :as admit]
             [seon.sci.eval :as eval]
             [seon.sci.kernel :as kernel]
             [seon.test-support :as test-support]))
@@ -354,7 +353,6 @@
                                 "; generated opening non-declaration\n:opening-probe",
                                 :seon.sci.admit/caps caps,
                                 :seon.sci.eval/time-limit-ms 2000})]
-              (is (nil? (:seon.program/row evaluation)))
               (is (ok? evaluation))
               (is
                 (= :opening-probe (:seon.sci.admit/value evaluation))))))))
@@ -690,20 +688,6 @@
             "contract installation copies the inherited candidate Var")
         (is (= 42 (sci/eval-string* candidate "(contracted 42)")))))))
 
-(deftest require-context-entities-carry-namespace-symbols
-  (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))
-        evaluation (run-in ctx "(require 'clojure.set)" 2000)]
-    (is (ok? evaluation))
-    (is (= #{'clojure.set}
-           (get-in evaluation
-                   [:seon.program/row :seon.ns/requires]))
-        "namespace dependencies observe their symbol values")
-    (let [declared (read-string (get-in evaluation [:seon.program/row :seon.ns/source]))]
-      (is (= 'ns (first declared)) "a REPL require declares its namespace's ns form, never the require form")
-      ;; the namespace's other requires are its own world's (a member branch
-      ;; inherits its cluster's user namespace): this one joins them
-      (is (some #{'clojure.set} (some #(when (and (seq? %) (= :require (first %))) %) declared))))))
-
 (deftest base-context-bindings-resolve-without-dependency-stubs
   ;; The published program is the world's entities (derived from files at
   ;; publication); re-analyzing src and test here cost 10 s and refused on the
@@ -729,63 +713,6 @@
         "copied dependency bindings do not manufacture first-party program entities")
     (is (every? #(sci/resolve ctx %) (program/base-context-injected-symbols (seon.schema/handed-projection)))
         "every declared injection resolves in the constructed context")))))
-
-(deftest
-  runtime-function-entities-carry-parsed-contract-facts
-  (test-support/with-database
-    (fn [connection]
-      (let [ctx (test-support/fork-cluster-ctx connection)
-            evaluation (run-in
-                         ctx
-                         (str
-                           "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
-                           "parsed-at-runtime [x] x)")
-                         2000)
-            entity (:seon.program/row evaluation)]
-        (is (= 'user/parsed-at-runtime (:seon.fn/sym entity)))
-        (is (= 1 (count (:seon.fn/arities entity))))
-        (is (every? :seon.fn.arity/argument-count (:seon.fn/arities entity)))))))
-
-(deftest
-  static-and-runtime-contracted-definitions-publish-identical-facts
-  (test-support/with-database
-    (fn [connection]
-      (let [root (java.nio.file.Files/createTempDirectory
-                   (.toPath (io/file "tmp"))
-                   "p12-runtime-parity"
-                   (make-array java.nio.file.attribute.FileAttribute 0))
-            source (str
-                     "(defn ^{:malli/schema "
-                     "[:=> [:cat [:map [:x :int]] [:* :string]] :int]} "
-                     "same-facts [{:keys [x]} & xs] x)")
-            source-file (.resolve root "parity.clj")]
-        (try
-          (spit (.toFile source-file) (str "(ns parity)\n" source "\n"))
-          ;; Publication's incremental path indexes the one changed file
-          ;; against the world's prior program (0.3 s); a full build of src
-          ;; derives the identical entity in 9.6 s.
-          (let [static-entity (first
-                             (filter
-                               #(= 'parity/same-facts (:seon.fn/sym %))
-                               (#'seon.fn/desired-entities
-                                 {:seon.fn/roots ["src" (str root)]
-                                  :seon.fn/changed-paths #{(str source-file)}
-                                  :seon.source/previous-database (db/db connection)}
-                                 (fn [_phase]))))
-                ctx (test-support/fork-cluster-ctx connection)
-                runtime-entity (:seon.program/row
-                              (eval/evaluate
-                                {:seon.sci.eval/ctx ctx,
-                                 :seon.cluster.eval/ns [:seon.ns/name 'parity],
-                                 :seon.cluster.eval/source source,
-                                 :seon.sci.admit/caps caps,
-                                 :seon.sci.eval/time-limit-ms 2000}))
-                p12-keys [:seon.fn/arities :seon.fn/arglists-override?]]
-            (is (= 'parity/same-facts (:seon.fn/sym runtime-entity)))
-            (is (= (select-keys static-entity p12-keys) (select-keys runtime-entity p12-keys)))
-            (is (= :core (:seon.schema.admission/source static-entity)))
-            (is (= :agent (:seon.schema.admission/source runtime-entity))))
-          (finally (test-support/delete-recursively! (str root))))))))
 
 (deftest contracted-defn-renders-the-var-it-declared
   (let [plain (run "(def plain-declaration 1)")
@@ -1065,8 +992,6 @@
 (deftest success-evaluation-assembles-every-optional-projection
   (let [printed (doto (java.io.StringWriter.) (.write "abcdef"))
         record {:seon.eval/outcome :ok}
-        entity {:seon.fn/sym 'user/f}
-        defs [{:seon.def/id "user/x"}]
         evaluation
         (#'eval/success-evaluation
          {:seon.sci.eval/admitted
@@ -1080,8 +1005,6 @@
           :seon.sci.eval/namespace-name 'user
           :seon.sci.eval/ending-namespace 'next
           :seon.print/options {:seon.print/length 4}
-          :seon.sci.eval/bindings defs
-          :seon.program/row entity
           ;; the evaluation's own clock, supplied by `evaluate` (65d0ca8e0);
           ;; a zero acquisition stays absent
           :seon.eval/duration-ms 5
@@ -1093,8 +1016,6 @@
             :seon.cluster.eval/ns [:seon.ns/name 'user]
             :seon.sci.eval/ending-ns 'next
             :seon.sci.admit/record record
-            :seon.program/row entity
-            :seon.sci.eval/bindings defs
             :seon.cluster.eval/output "restored\nabcdef"}
            evaluation))))
 
@@ -1111,7 +1032,6 @@
                :seon.error/message "Ran out of time."}
         admitted {:seon.sci.admit/value value
                   :seon.eval/shown (pr-str value)}
-        defs [{:seon.def/id "user/x"}]
         evaluation
         (#'eval/failed-evaluation
          {:seon.sci.eval/admitted admitted
@@ -1121,7 +1041,6 @@
           :seon.sci.eval/printed printed
           :seon.sci.eval/namespace-name 'user
           :seon.print/options {:seon.print/level 3}
-          :seon.sci.eval/bindings defs
           :seon.sci.admit/record record
           :seon.sci.admit/value value
           :seon.cluster.eval/interrupted-at interrupted-at})]
@@ -1132,7 +1051,6 @@
             :seon.sci.eval/ending-ns 'user
             :seon.cluster.eval/error "Ran out of time."
             :seon.sci.admit/record record
-            :seon.sci.eval/bindings defs
             :seon.cluster.eval/interrupted-at interrupted-at
             :seon.cluster.eval/output "lost\nbefore failure"}
            evaluation))))
@@ -1166,100 +1084,6 @@
               (is (= {:seon.db/operation 'seon.sci.eval/evaluate}
                      (:seon.schema/refused-value refusal)))
               (is (= ['seon.sci.eval/evaluate] @missing)))))))))
-
-(deftest
- unmap-entity-carries-the-exact-forked-namespace-state
- (let
-  [ctx
-   (eval/build-base-ctx (seon.schema/handed-projection))
-   _
-   (sci/eval-string*
-    ctx
-    (str
-     "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
-     "discarded [x] x)"))
-   source
-   "(ns-unmap 'user 'discarded)"
-   event
-   (#'eval/one-event source 'user ctx (count source))
-   execution-ctx
-   (sci/fork ctx)
-   before-interns
-   (sci/namespace-interns execution-ctx)
-   before-namespace-state
-   (sci/namespace-state execution-ctx)
-   before-reader-context
-   (#'eval/reader-context execution-ctx 'user)
-   _
-   (sci/binding
-    [sci/ns (sci/create-ns 'user)]
-    (sci/eval-form execution-ctx (:seon.sci.reader/form event)))
-   result
-   (#'eval/unmap-row
-    {:seon.cluster.eval/source source,
-     :seon.sci.eval/event event,
-     :seon.sci.eval/namespace-unmap? true,
-     :seon.sci.eval/live-declaration? false,
-     :seon.sci.eval/before-reader-context before-reader-context,
-     :seon.sci.eval/before-interns before-interns,
-     :seon.sci.eval/execution-ctx execution-ctx,
-     :seon.sci.eval/namespace-name 'user,
-     :seon.sci.eval/before-namespace-state before-namespace-state,
-     :seon.sci.eval/base-declared-row nil})
-   entity
-   (:seon.program/row result)]
-  (is (true? (:seon.sci.eval/namespace-changed? result)))
-  (is
-   (=
-    #{[:seon.fn/sym 'user/discarded]
-      [:seon.test/sym 'user/discarded]}
-    (set (:seon.program/delete-identities entity))))
-  (is (= [:seon.ns/name 'user] (:seon.program/ns entity)))
-  (is
-   (=
-    #{['user 'discarded]}
-    (into
-     #{}
-     (keep
-      (fn
-       [[namespace-name binding-name value]]
-       (when
-        (identical? value @#'eval/absent-intern)
-        [namespace-name binding-name])))
-     (:seon.sci.eval/namespace-state entity))))
-  (is
-   (some? (sci/resolve ctx 'discarded))
-   "the forked ns-unmap leaves the parent context unchanged")
-  (is (nil? (sci/resolve execution-ctx 'discarded)))))
-
-(deftest declared-entity-evaluates-a-schema-once-inside-its-delta
-  (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))
-        source "(seon.schema/register! :user/direct-schema [:int {:min 0}])"
-        event (#'eval/one-event source 'user ctx (count source))
-        projection
-        (#'eval/evaluation-projection {:seon.sci.eval/ctx ctx})
-        calls (atom 0)
-        before (seon.schema/registered-schemas)
-        result
-        (#'eval/declared-row
-         {:seon.sci.eval/event event
-          :seon.sci.eval/eval-form!
-          (fn []
-            (swap! calls inc)
-            (seon.schema/register! :user/direct-schema [:int {:min 0}]))
-          :seon.schema/projection projection})]
-    (is (= 1 @calls))
-    (let [entity (:seon.sci.eval/base-declared-row result)]
-      (is (= {:seon.schema/key :user/direct-schema
-              :seon.schema/ns [:seon.ns/name 'user]
-              :seon.schema/form "[:int {:min 0}]"
-              :seon.schema.admission/source :agent
-              :seon.schema/generatable? true}
-             entity)))
-    (is (= :user/direct-schema (:seon.sci.eval/schema-value result)))
-    (is (false? (:seon.sci.eval/live-declaration? result)))
-    (is (= before (seon.schema/registered-schemas))
-        "the evaluated registration remains isolated from global candidates")))
 
 (deftest the-dispositions-are-callable-and-come-back-as-values
   (test-support/with-database
@@ -2605,32 +2429,6 @@
               "neither entity is refused at acquisition")
           (is (= 2 (sci/eval-string* ctx "(seon.sci.eval-test/aa-order-caller 1)"))
               "the caller named first calls its callee")))))))
-
-(deftest an-unavailable-execution-starts-its-next-run-from-the-branch-head
-  ;; Issue a-refused-run-leaves-the-agents-context-unavailable: the refusal
-  ;; belongs to the run that failed. The next run's fork regenerates the same
-  ;; agent context from the acquired base, without the unrestored private layer.
-  (test-support/with-database
-   (fn [connection]
-     ;; The request names its agent: `:seon.agent/id` is a required input, and
-     ;; under the test's arm a missing one is a refusal value, not a context.
-     (let [database (db/db connection)
-           base (test-support/fork-cluster-ctx connection)
-           request {:seon.sci.eval/ctx base :seon.db/db database :seon.agent/id "unavailable"}
-           agent-ctx (:seon.sci.eval/ctx (eval/fork-for-turn request))
-           _ (sci/eval-string* agent-ctx "(def kept 7)")
-           carried (eval/fork-for-turn (assoc request :seon.sci.eval/agent-ctx agent-ctx))]
-       (is (= :preserved-in-memory (:seon.sci.eval/private-state carried)))
-       (is (= 7 (sci/eval-string* agent-ctx "kept")))
-       (swap! (:env agent-ctx) assoc :seon.sci.eval/unavailable-execution
-              {:seon.error/message "unrestored"})
-       (let [next-run (eval/fork-for-turn (assoc request :seon.sci.eval/agent-ctx agent-ctx))]
-         (is (identical? (:env agent-ctx) (:env (:seon.sci.eval/ctx next-run)))
-             "the agent's retained handle is the one regenerated")
-         (is (= :absent (:seon.sci.eval/private-state next-run)))
-         (is (not (contains? @(:env agent-ctx) :seon.sci.eval/unavailable-execution)))
-         (is (nil? (sci/resolve agent-ctx 'user/kept)))
-         (is (= 2 (sci/eval-string* agent-ctx "(+ 1 1)"))))))))
 
 (deftest a-stale-host-bound-entity-refuses-by-name-only-when-called
   ;; Restriction audit #1: a host-bound entity acquired from the database

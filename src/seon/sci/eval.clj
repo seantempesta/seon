@@ -138,7 +138,6 @@
             [seon.schema.edn :as schema.edn]
             [seon.sci.kernel :as kernel]
             [seon.sci.reader :as reader]
-            [seon.test.accretion :as accretion]
             [seon.test.runner :as test.runner]))
 
 ;;; ---------------------------------------------------------------------------
@@ -473,39 +472,6 @@
 
 (declare deleted-schema-key)
 
-(defn- row
-  "Return reader-owned rows; Var definitions are derived after evaluation."
-  [event projection]
-  (or
-   (let [deletion (program/deletion-row event)]
-     (when (deleted-schema-key deletion) deletion))
-   ;; A schema's source form is executable SCI code, not yet a Malli value.
-   ;; Its canonical row is derived from the value evaluated inside the
-   ;; registration delta in `declared-row`; validating this source expression
-   ;; here would execute zero times and reject ordinary `(do ... schema)`.
-   (when (:seon.schema/key event)
-     (assoc (select-keys event [:seon.schema/key :seon.schema/form
-                                :seon.schema/ns])
-            :seon.schema.admission/source :agent))
-   (when (:seon.ns/name event)
-     (program/declaration-row projection event :contracted :agent))))
-
-(defn- removed-program-identities
-  "Function and test identities removed from SCI's own intern tables."
-  [before after]
-  (into []
-        (mapcat
-         (fn [[namespace-name intern-names]]
-           (mapcat (fn [intern-name]
-                     (let [qualified (symbol (str namespace-name)
-                                             (str intern-name))]
-                       [[:seon.fn/sym qualified]
-                        [:seon.test/sym qualified]]))
-                   (sort-by str
-                            (remove (get after namespace-name #{})
-                                    intern-names)))))
-        before))
-
 (def ^:private absent-intern (Object.))
 
 (defn- turn-interns
@@ -548,540 +514,7 @@
                                        @sci-var
                                        absent-intern)}])))))
 
-(defn- turn-intern-values
-  [interns]
-  (into {} (map (fn [[qualified entry]]
-                  [qualified (:seon.sci.eval/value entry)]))
-        interns))
-
-(defn- same-intern-value?
-  [left right]
-  (or (identical? left right)
-      (and (not (identical? absent-intern left))
-           (not (identical? absent-intern right))
-           (= (class left) (class right))
-           (= (meta left) (meta right))
-           (= left right))))
-
-(declare missing-contract install-function-contract! interpretation-error)
-
-(defn- program-value?
-  "Whether a definition's root makes it a program declaration: a function or
-  test. It reads only the root and its metadata, so it takes the binding shape
-  that both an intern and a failed form's surviving definition carry."
-  {:malli/schema [:=> [:cat :seon.sci.eval/binding] :boolean]}
-  [{value :seon.sci.eval/value metadata :seon.sci.eval/metadata}]
-  (and (not (identical? absent-intern value))
-       (boolean (or (fn? value) (:test metadata)))))
-
-(defn- held-intern
-  "The intern `qualified` names in the held namespace maps, as `turn-interns`
-  would report it: an inherited Var is copied before any write, so its root and
-  metadata here are the prior ones."
-  {:malli/schema [:=> [:cat :seon.sci.eval/namespaces :qualified-symbol]
-                  [:maybe :seon.sci.eval/intern]]}
-  [namespaces qualified]
-  (let [sci-var (get-in namespaces [(symbol (namespace qualified)) (symbol (name qualified))])]
-    (when (sci.utils/var? sci-var)
-      {:seon.sci.eval/var sci-var
-       :seon.sci.eval/metadata (meta sci-var)
-       :seon.sci.eval/value (if (sci.vars/hasRoot sci-var) @sci-var absent-intern)})))
-
-(defn- program-definitions
-  "This form's definitions: the Vars whose root or Var metadata changed
-  between the prior intern (`before`, else the held namespace maps) and
-  `after`, when either the prior or the final root is a program value.
-  Replacing a function with data is therefore still a definition, marked
-  `::prior-program?`. Other defs (data, atoms, protocol and multimethod
-  objects) are private state. Roots compare by identity first; only function
-  values reach `=`."
-  {:malli/schema [:=> [:cat :seon.sci.eval/namespaces :seon.sci.eval/interns :seon.sci.eval/interns]
-                  [:sequential [:tuple :qualified-symbol :seon.sci.eval/intern]]]}
-  [before-namespaces before after]
-  (sort-by (comp str first)
-           (keep (fn [[qualified {value :seon.sci.eval/value
-                                  metadata :seon.sci.eval/metadata :as entry}]]
-                   (let [prior (or (get before qualified)
-                                   (held-intern before-namespaces qualified))
-                         prior-program? (boolean (some-> prior program-value?))]
-                     (when (and (or prior-program? (program-value? entry))
-                                (or (not (same-intern-value?
-                                          (get prior :seon.sci.eval/value absent-intern) value))
-                                    (not (identical? (:seon.sci.eval/metadata prior) metadata))))
-                       [qualified (assoc entry ::prior-program? prior-program?)])))
-                 after)))
-
-(defn- source-offset
-  "The UTF-8 byte offset within `source`, read at `start`, of the reader
-  position `[line column]`: the unit of an analyzed row's `:seon.fn/form-span`.
-  Nil when the position is absent or lies outside `source`."
-  {:malli/schema [:=> [:cat :string :seon.sci.eval/position
-                       [:tuple [:maybe :int] [:maybe :int]]]
-                  [:maybe :int]]}
-  [source [start-line start-column] [line column]]
-  (when (and (int? line) (int? column) (<= start-line line))
-    (let [line-start (reduce (fn [offset _]
-                               (if-let [newline (str/index-of source "\n" offset)]
-                                 (inc newline)
-                                 (reduced nil)))
-                             0 (range (- line start-line)))
-          offset (when line-start
-                   (+ line-start (- column (if (= line start-line) start-column 1))))]
-      (when (and offset (<= 0 offset (count source)))
-        (alength (.getBytes (subs source 0 offset) java.nio.charset.StandardCharsets/UTF_8))))))
-
-(defn- program-change
-  "Classify this form's definitions against its analyzed rows by provenance.
-  SCI gives a defined Var the `:line`/`:column` of the declaration that ran
-  and marks a root written after it `:sci/rebound`; a definition is matched
-  only when exactly one analyzed row names it, its root was not rebound, and
-  the analyzer's `:seon.fn/form-span` for that row starts at the Var's
-  position. Otherwise it is unindexed: an `eval` or macro expansion, a
-  second occurrence or root write overwriting the analyzed one, or a
-  function replaced by data. Repeated occurrences of one name are repeated
-  declarations. A Var no row names is a helper of a host-bound declaration
-  (record or type) only when it was defined at that declaration's position.
-  Host-bound rows group by their shared declaration position."
-  {:malli/schema [:=> [:cat [:sequential [:tuple :qualified-symbol :seon.sci.eval/intern]]
-                       [:vector :map] :string :seon.sci.eval/position]
-                  :seon.sci.eval/program-change]}
-  [definitions analyzed source start]
-  (let [position (comp first :seon.fn/form-span)
-        identity-of #(or (:seon.fn/sym %) (:seon.test/sym %))
-        by-name (group-by identity-of analyzed)
-        host-positions (into #{} (comp (filter :seon.fn/host-bound?) (keep position)) analyzed)
-        classify
-        (fn [[qualified {sci-var :seon.sci.eval/var :as entry}]]
-          (let [occurrences (get by-name qualified)
-                defined-at (source-offset source start ((juxt :line :column) (meta sci-var)))]
-            (cond
-              (and (::prior-program? entry) (not (program-value? entry))) {::unmatched qualified}
-              (< 1 (count occurrences)) {::repeated (repeat (count occurrences) qualified)}
-              ;; A root written after the definition (alter-var-root, intern,
-              ;; with-redefs) no longer comes from it: SCI marks it rebound.
-              (:sci/rebound (meta sci-var)) {::unmatched qualified}
-              (and (= 1 (count occurrences)) defined-at
-                   (= defined-at (position (first occurrences))))
-              {::row (first occurrences) ::var sci-var}
-              (and (empty? occurrences) defined-at (contains? host-positions defined-at)) {}
-              :else {::unmatched qualified})))
-        classified (map classify definitions)
-        matched (keep #(when (::row %) %) classified)]
-    {::matched (vec matched)
-     ::unmatched (into [] (keep ::unmatched) classified)
-     ::declared (into (vec (mapcat ::repeated classified))
-                      (concat (keep #(when-not (:seon.fn/host-bound? (::row %))
-                                       (identity-of (::row %)))
-                                    matched)
-                              (->> (filter #(:seon.fn/host-bound? (::row %)) matched)
-                                   (group-by #(position (::row %)))
-                                   vals
-                                   (map #(identity-of (::row (first %)))))))}))
-
-(defn- row-backed?
-  "Whether `qualified` names a stored function or test row in `db`."
-  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol] :boolean]}
-  [db qualified]
-  (boolean
-   (some (fn [attribute]
-           (let [found (db/pull db [:db/id] [attribute qualified])]
-             (when (:seon.error/at found)
-               (throw (ex-info (:seon.error/message found) found)))
-             (some? (:db/id found))))
-         [:seon.fn/sym :seon.test/sym])))
-
-(defn- removed-interns
-  "Vars this form removed: `[namespace-name intern-name prior-var]` for every
-  symbol intern of a held namespace map that differs by identity after it,
-  so only changed namespace maps are walked."
-  {:malli/schema [:=> [:cat :seon.sci.eval/namespaces :seon.sci.eval/namespaces]
-                  [:sequential [:tuple :symbol :symbol :seon.sci.eval/sci-var]]]}
-  [before-namespaces after-namespaces]
-  (for [[namespace-name before-map] before-namespaces
-        :let [after-map (get after-namespaces namespace-name)]
-        :when (not (identical? before-map after-map))
-        [intern-name prior] before-map
-        :when (and (symbol? intern-name) (sci.utils/var? prior)
-                   (not (find after-map intern-name)))]
-    [namespace-name intern-name prior]))
-
-(defn- var-step
-  "The step putting `sci-var` back to its captured root, or unbinding it when
-  it had none, with its captured metadata."
-  {:malli/schema [:=> [:cat :seon.sci.eval/sci-var :seon.sci.eval/held-value :map]
-                  :seon.sci.eval/restoration-step]}
-  [sci-var value metadata]
-  (if (identical? absent-intern value)
-    {::var sci-var ::unbound true ::metadata metadata}
-    {::var sci-var ::root value ::metadata metadata}))
-
-(defn- program-restoration
-  "The steps that put this form's program change back: each changed Var's
-  prior root and metadata (Var identity kept, so interpreted callers stay
-  linked), the held prior Var of a copied inherited one, no Var the form
-  created, and each removed Var or namespace re-interned from the held
-  namespace maps. SCI copies an inherited Var before writing it
-  (`sci/impl/evaluator.cljc:25-49`), so the held map's prior Var is
-  unmodified. `restore?` selects the names. Limits: the form has already
-  run; its IO, atom writes and calls stay done."
-  {:malli/schema [:=> [:cat :seon.sci.eval/namespaces :seon.sci.eval/namespaces
-                       :seon.sci.eval/interns :seon.sci.eval/interns
-                       [:=> [:cat :qualified-symbol] :any]]
-                  [:vector :seon.sci.eval/restoration-step]]}
-  [before-namespaces after-namespaces before after restore?]
-  (into
-   (vec
-    (for [[qualified {sci-var :seon.sci.eval/var
-                      after-value :seon.sci.eval/value
-                      after-metadata :seon.sci.eval/metadata}] after
-          :let [path [(symbol (namespace qualified)) (symbol (name qualified))]
-                prior (get-in before-namespaces path)
-                {value :seon.sci.eval/value metadata :seon.sci.eval/metadata}
-                (get before qualified)]
-          :when (and (not (and (identical? value after-value)
-                               (identical? metadata after-metadata)))
-                     (restore? qualified))]
-      (cond
-        (and (identical? prior sci-var) (find before qualified))
-        (var-step sci-var value metadata)
-        (some? prior) {::path path ::prior prior}
-        :else {::path path})))
-   (mapcat
-    (fn [[namespace-name intern-name prior]]
-      (let [qualified (symbol (str namespace-name) (str intern-name))
-            {owned ::var value ::value metadata ::metadata} (get before qualified)]
-        (when (restore? qualified)
-          (cond-> [(if (get after-namespaces namespace-name)
-                     {::path [namespace-name intern-name] ::prior prior}
-                     {::path [namespace-name] ::prior (get before-namespaces namespace-name)})]
-            ;; A Var this generation owned was redefined in place before its
-            ;; removal: the held Var carries the new root, so put back the
-            ;; captured one as well.
-            (identical? owned prior)
-            (conj (var-step prior value metadata))))))
-    (removed-interns before-namespaces after-namespaces))))
-
-(defn- apply-restoration!
-  "Apply `program-restoration`'s steps to `ctx`."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx [:vector :seon.sci.eval/restoration-step]] :nil]}
-  [ctx steps]
-  (doseq [{sci-var ::var path ::path state ::state :as step} steps]
-    (cond
-      state (reset! state (::held step))
-      sci-var (do (if (::unbound step)
-                    (sci.vars/unbind sci-var)
-                    (sci.vars/bindRoot sci-var (::root step)))
-                  (reset-meta! sci-var (::metadata step)))
-      (find step ::prior) (swap! (:env ctx) assoc-in (into [:namespaces] path) (::prior step))
-      :else (swap! (:env ctx) update-in [:namespaces (first path)] dissoc (second path)))))
-
-(defn- execution-unavailable
-  "The refusal every later form of an execution receives once a refused
-  program change could not be restored, with the whole cause: the
-  restoration's own failure, if it threw, and the `refused` failure it was
-  restoring. When both exist the outer link carries the restoration's chain
-  as its data and is caused by the refusal."
-  {:malli/schema [:=> [:cat :seon.sci.eval/unavailable [:maybe :seon.error/throwable]
-                       [:maybe :seon.error/throwable]]
-                  :seon.sci.eval/execution-unavailable-error]}
-  [kind restoration refused]
-  (seon.error.refusal/diagnostic
-   (cond-> {:seon.error/at (java.util.Date.)
-            :seon.error/layer :seon.sci.eval/program
-            :seon.error/operation 'seon.sci.eval/evaluate
-            :seon.error/message
-            (str "This execution is unavailable: "
-                 (case kind
-                   :restore-failed "restoring a refused program change threw"
-                   :program-reacquired "its program was reacquired before a refused change could be restored")
-                 "; the rest of this run is refused, and your next run starts from the branch head"
-                 " without this run's private definitions.")
-            ::unavailable kind}
-     (or restoration refused)
-     (assoc :seon.error/throwable
-            (if (and restoration refused)
-              (ex-info "Restoring a refused program change threw."
-                       {:seon.error/chain (seon.error.refusal/chain restoration)} refused)
-              (or restoration refused))))))
-
-(defn- restore-or-unavailable!
-  "Plan and apply a restoration through `steps!`, unless the context
-  reacquired its program since `loaded` was captured. Planning or applying
-  that throws, or a reacquisition, leaves the execution unavailable: the
-  refusal is kept on the context (every later form receives it), delivered
-  through the context's fault recorder, and answered, caused by `refused`
-  when a failure is being restored; nil when restored."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx [:maybe :seon.db/database-value]
-                       [:=> [:cat] [:vector :seon.sci.eval/restoration-step]]
-                       [:maybe :seon.error/throwable]]
-                  [:maybe :seon.sci.eval/execution-unavailable-error]]}
-  [ctx loaded steps! refused]
-  (let [unavailable
-        (try
-          (let [steps (steps!)]
-            (cond
-              (empty? steps) nil
-              (not (identical? loaded (::loaded-database @(::kernel/program-snapshot ctx))))
-              (execution-unavailable :program-reacquired nil refused)
-              :else (do (apply-restoration! ctx steps) nil)))
-          (catch Throwable failure
-            (execution-unavailable :restore-failed failure refused)))]
-    (when unavailable
-      (swap! (:env ctx) assoc ::unavailable-execution unavailable)
-      (when-let [commit-fault! (:seon.flow/commit-fault! @(::kernel/program-snapshot ctx))]
-        (commit-fault! {:seon.error/source unavailable
-                        :seon.error/declared-schema :seon.sci.eval/execution-unavailable-error}))
-      unavailable)))
-
-(defn- context-capture
-  "Hold `ctx`'s program state now: its namespace maps, generation-owned
-  interns, and the program snapshot, installed functions and environment
-  state its installs and projection advances replace. One walk of the
-  interns serves both admission and restoration."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx] :seon.sci.eval/capture]}
-  [ctx]
-  {::namespaces (:namespaces @(:env ctx))
-   ::owned (turn-interns ctx)
-   ::states (into [] (keep (fn [state] (when state {::state state ::held @state})))
-                [(::kernel/program-snapshot ctx) (::kernel/installed-functions ctx)
-                 (get ctx env/state-carrier)])})
-
-(defn- context-restoration
-  "The one restoration of `ctx` to its `capture`: the namespace maps and
-  generation-owned interns (`program-restoration`) and, for a whole
-  restoration, the held program state. Called with a selector, only the
-  selected Vars are restored; with the failure being restored, an unavailable
-  refusal keeps it as its cause."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.sci.eval/capture] :seon.sci.eval/restore]}
-  [ctx {namespaces ::namespaces owned ::owned held ::states}]
-  (let [loaded (::loaded-database (::held (first held)))]
-    (fn restore!
-      ([] (restore! nil nil))
-      ([restore?] (restore! restore? nil))
-      ([restore? refused]
-       (restore-or-unavailable!
-        ctx loaded
-        #(cond-> (program-restoration namespaces (:namespaces @(:env ctx)) owned
-                                      (turn-interns ctx) (or restore? (constantly true)))
-           (nil? restore?)
-           (into (remove (fn [step] (identical? @(::state step) (::held step)))) held))
-        refused)))))
-
-(defn- unindexed-change
-  "The refusal of a program change the form's analysis does not declare."
-  {:malli/schema [:=> [:cat [:sequential {:min 1} :qualified-symbol]] :seon.sci.eval/unindexed-change-error]}
-  [members]
-  (seon.error.refusal/diagnostic
-   (java.util.Date.) :seon.sci.eval/program 'seon.sci.eval/evaluate
-   {:seon.error/message
-    (str "This form changed " (str/join ", " (sort-by str members))
-         ", which its analysis declares no definition for at the place it ran: an eval, a "
-         "macro expansion, a second definition of the name, a root written after its "
-         "definition (alter-var-root, intern), a nested unmap, a point-free "
-         "def such as (def f (comp ...)), or a function replaced by a value. Define it with "
-         "its own defn, or remove it first with a top-level ns-unmap.")
-    :seon.error/member :seon.program/row
-    ::unindexed (set members)}))
-
-(defn- multiple-declarations
-  "The refusal of a form making more than one program declaration, or a
-  declaration beside a removal."
-  {:malli/schema [:=> [:cat [:sequential {:min 1} :seon.sci.eval/program-name] [:sequential :qualified-symbol]]
-                  :seon.sci.eval/multiple-declarations-error]}
-  [declared removed]
-  (seon.error.refusal/diagnostic
-   (java.util.Date.) :seon.sci.eval/program 'seon.sci.eval/evaluate
-   (cond-> {:seon.error/message
-            (str "One form may make one program declaration; this one makes "
-                 (str/join ", " (concat (map str (sort-by str declared))
-                                        (map #(str "removal of " %) (sort-by str removed))))
-                 ". Send each declaration as its own top-level form.")
-            :seon.error/member :seon.program/row
-            ::declarations (vec declared)}
-     (seq removed) (assoc ::removals (set removed)))))
-
-(defn- program-identity-name
-  "The name a program row declares."
-  {:malli/schema [:=> [:cat :map] [:maybe :seon.sci.eval/program-name]]}
-  [row]
-  (or (:seon.fn/sym row) (:seon.test/sym row) (:seon.schema/key row)
-      (:seon.ns/name row)
-      (some-> row :seon.program/delete-identities first second)))
-
-(defn- analyzed-rows
-  "Analyze the accepted form source once, answering its declaration rows.
-  The namespace's rootless Vars in `namespaces` (a `declare`, which makes no
-  row) are named to the analyzer, so a call to one is an edge."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection :string
-                       :seon.sci.eval/namespace-row :seon.sci.eval/namespaces]
-                  [:vector :map]]}
-  [database projection source namespace-row namespaces]
-  (let [namespace-name (:seon.ns/name namespace-row)]
-    (vec (seon.fn/source-rows
-          database
-          (program/shapes-in projection)
-          (assoc namespace-row :seon.program/definition-digest
-                 (program/definition-digest namespace-row)) source
-          (set (keys (:seon.schema.projection/forms projection)))
-          (into []
-                (keep (fn [[intern-name sci-var]]
-                        (when (and (sci.utils/var? sci-var) (not (sci.vars/hasRoot sci-var)))
-                          (symbol (str namespace-name) (str intern-name)))))
-                (get namespaces namespace-name))))))
-
-(defn- definition-row
-  "One matched analyzed row made FINAL: runtime contract, workload and test
-  markers from the Var, contract facts, and the digest from
-  `seon.db/definition-digest-of` with the namespace row its transaction
-  leaves stored (the database's, which holds the run's earlier forms, else
-  SCI's for a namespace not yet stored), the digest the writer recomputes."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection :map
-                       :map :seon.sci.eval/sci-var]
-                  :map]}
-  [database projection namespace-row analysed-row sci-var]
-  (let [namespace-name (:seon.ns/name namespace-row)
-        digest-namespace (or (db/pull database '[*] [:seon.ns/name namespace-name])
-                             namespace-row)
-        metadata (meta sci-var)
-        qualified (or (:seon.fn/sym analysed-row) (:seon.test/sym analysed-row))
-        ;; The form-span locates the row in this form's source only.
-        row (cond-> (assoc (dissoc analysed-row :seon.fn/form-span) ::evaluated? true)
-              (:malli/schema metadata)
-              (assoc :seon.fn/spec
-                     (pr-str (accretion/data-contract! (:malli/schema metadata))))
-              (contains? #{:io :compute} (:seon.workload metadata))
-              (assoc :seon.fn/workload (:seon.workload metadata))
-              (:test metadata)
-              (merge (program/test-markers metadata (meta (:ns metadata)))))
-        row (if (:seon.fn/spec row)
-              (let [definition (edn/read-string (:seon.fn/spec row))]
-                (schema/projection-with-function-contract
-                 projection qualified definition
-                 {:seon.schema.admission/source :agent})
-                (seon.fn/contract-facts-row projection namespace-row row))
-              row)]
-    (assoc row :seon.program/definition-digest
-           (db/definition-digest-of projection row digest-namespace))))
-
-(defn- admit-program-change!
-  "The one definition authority for one evaluated form. Every definition
-  (`program-definitions`) matches exactly one analyzed row; a stored row's Var
-  is removed only by the form's own top-level `ns-unmap`. A form carries one
-  declaration: several, or one beside a removal, refuse as
-  `:seon.sci.eval/multiple-declarations-error`; a change its analysis does not
-  declare refuses as `:seon.sci.eval/unindexed-change-error`; an uncontracted
-  function as `:seon.sci.eval/declaration-absent-error`. The names an earlier
-  child of the same top-level `do` declared (`:seon.sci.eval/declared`) count
-  toward the one declaration. `program-change`
-  decides the match by provenance. Contracts are validated and armed inside
-  this boundary, and any refusal or throw restores the whole change before it
-  leaves. Answers the admitted rows."
-  {:malli/schema [:=> [:cat :seon.sci.eval/admission-request] [:vector :map]]}
-  [{ctx :seon.sci.eval/ctx database :seon.db/db current :seon.sci.eval/current-db
-    projection :seon.schema/projection source :seon.cluster.eval/source
-    start :seon.sci.eval/form-start
-    before :seon.sci.eval/before-owned before-namespaces :seon.sci.eval/before-namespaces
-    reader-row :seon.sci.eval/reader-row namespace-row :seon.sci.eval/namespace-row
-    restore! :seon.sci.eval/restore
-    namespace-unmap? :seon.sci.eval/namespace-unmap?
-    earlier :seon.sci.eval/declared}]
-  (try
-    (let [definitions (program-definitions before-namespaces before (turn-interns ctx))
-          {matched ::matched unindexed ::unmatched declared ::declared}
-          (if (seq definitions)
-            (program-change definitions
-                            (analyzed-rows database projection source namespace-row
-                                           before-namespaces)
-                            source start)
-            {})
-          declared (cond-> (into (vec earlier) declared)
-                     reader-row (conj (program-identity-name reader-row)))
-          removed (when-not namespace-unmap?
-                    (into [] (comp (map (fn [[n i _]] (symbol (str n) (str i))))
-                                   (filter #(row-backed? current %)))
-                          (removed-interns before-namespaces (:namespaces @(:env ctx)))))
-          refuse! #(throw (ex-info (:seon.error/message %) %))]
-      (cond
-        (seq unindexed) (refuse! (unindexed-change unindexed))
-        (or (< 1 (count declared)) (and (seq declared) (seq removed)))
-        (refuse! (multiple-declarations declared removed))
-        (seq removed) (refuse! (unindexed-change removed)))
-      (let [rows (mapv #(definition-row database projection namespace-row
-                                        (::row %) (::var %))
-                       matched)]
-      ;; An uncontracted definition is admitted (owner, rev 5): its Var render
-      ;; shows the missing contract; merge acceptance is the one refusal.
-      ;; Arming belongs to the live Var, not to durability: an evaluation that
-      ;; never commits must refuse invalid input all the same. The commit's
-      ;; later install re-wraps the interpreted original idempotently.
-      (doseq [row rows :when (:seon.fn/spec row)]
-        (install-function-contract! ctx row projection database))
-      rows))
-    (catch Throwable failure
-      (if-let [unavailable (restore! nil failure)]
-        (throw (ex-info (:seon.error/message unavailable) unavailable failure))
-        (throw failure)))))
-
-(defn- unadmitted-definitions
-  "The functions and tests a failed form defined: a failed evaluation admits
-  nothing, so each stays a private definition of this context with no program
-  row. Recorded as data (`:seon.eval/unadmitted`); the declared bound
-  (`:seon.config.eval/bounds`) makes it a finding in the reply map."
-  {:malli/schema [:=> [:cat [:maybe [:map-of :qualified-symbol :map]]] [:set :qualified-symbol]]}
-  [definitions]
-  (into (sorted-set) (keep (fn [[qualified entry]] (when (program-value? entry) qualified))) definitions))
-
-(defn- top-level-do?
-  "Whether `form` is a `do`, whose children a top-level evaluation treats as
-  top-level forms: Clojure's `Compiler/eval` (`reference-code/clojure/src/jvm/
-  clojure/lang/Compiler.java:7742-7748`) and SCI's `eval-form*`
-  (`reference-code/sci/src/sci/impl/interpreter.cljc:34-43`) both unroll it."
-  {:malli/schema [:=> [:cat :any] :boolean]}
-  [form]
-  (and (seq? form) (= 'do (first form))))
-
-(defn- top-level-evaluation
-  "Evaluate `form` as a top-level form, in order: a `do`'s children are each
-  top-level; any other form runs through `eval!` and then the one definition
-  authority, `admit!`, over what it changed since its own `capture!`, after
-  the names earlier children declared. A later child therefore calls an
-  earlier child's admitted, armed definition, as two top-level forms would.
-  Folds into `folded` (start with no rows and no names) the last value
-  (`(do)` is nil), the admitted rows and the names declared."
-  {:malli/schema
-   [:=> [:cat
-         [:map [:seon.sci.eval/eval! [:=> [:cat :any] :any]]
-          [:seon.sci.eval/capture! [:=> [:cat] :seon.sci.eval/capture]]
-          [:seon.sci.eval/admit! [:=> [:cat :seon.sci.eval/capture [:vector :seon.sci.eval/program-name]]
-                                  [:maybe [:vector :map]]]]]
-         [:map [:seon.sci.eval/value {:optional true} :any]
-          [:seon.sci.eval/rows [:vector :map]]
-          [:seon.sci.eval/declared [:vector :seon.sci.eval/program-name]]]
-         :any]
-    [:map [:seon.sci.eval/value :any]
-     [:seon.sci.eval/rows [:vector :map]]
-     [:seon.sci.eval/declared [:vector :seon.sci.eval/program-name]]]]}
-  [{eval! ::eval! capture! ::capture! admit! ::admit! :as stages} folded form]
-  (if (top-level-do? form)
-    (reduce #(top-level-evaluation stages %1 %2) (assoc folded ::value nil) (rest form))
-    (let [capture (capture!)
-          value (eval! form)
-          rows (vec (admit! capture (::declared folded)))]
-      (cond-> (assoc folded ::value value ::rows (into (::rows folded) rows))
-        (seq rows) (update ::declared conj (program-identity-name (first rows)))))))
-
-(defn- bindings
-  [ctx before]
-  (into {}
-        (keep (fn [[qualified {sci-var :seon.sci.eval/var
-                              value :seon.sci.eval/value}]]
-                (when-not (or (identical? absent-intern value)
-                              (same-intern-value?
-                               (get before qualified absent-intern) value))
-                  [qualified {:seon.sci.eval/value value
-                              :seon.sci.eval/metadata
-                              (dissoc (meta sci-var) :sci/generation)}])))
-        (turn-interns ctx)))
+(declare install-function-contract! interpretation-error)
 
 (defn- deleted-schema-key
   [row]
@@ -1264,6 +697,8 @@
                     [(str "\n  (:require " (str/join " " (map pr-str libspecs)) ")")])]
         (str (subs text 0 at) (apply str lines) (subs text at))))))
 
+;; Called only through its Var by the fold's namespace facts (`seon.turn.batch`).
+#_{:clj-kondo/ignore [:unused-private-var]}
 (defn- namespace-context-row
   [projection database namespace-name form before after changed?]
   (when (or changed?
@@ -3240,7 +2675,7 @@
   carries nothing: the context is the base acquired at the branch head."
   [ctx base]
   (let [generation (:sci/generation @(:env ctx))
-        layer (if (::unavailable-execution @(:env ctx)) {} (sci/namespace-state ctx))
+        layer (sci/namespace-state ctx)
         previous @(::base-bindings ctx)
         current (base-bindings base)
         changed? #(seq (replaced-definitions @(::kernel/program-snapshot ctx)
@@ -3383,7 +2818,7 @@
     agent-ctx :seon.sci.eval/agent-ctx
     db :seon.db/db
     agent-id :seon.agent/id}]
-  (let [carried? (and agent-ctx (not (::unavailable-execution @(:env agent-ctx))))
+  (let [carried? (some? agent-ctx)
         ctx (if agent-ctx
               (regenerate-agent-context! agent-ctx base-ctx)
               (env/carry-state
@@ -3948,134 +3383,6 @@
                          {::acquisition-recording-error failure}))))
      ctx)))
 
-(defn- declared-row
-  [{event :seon.sci.eval/event
-    eval-form! :seon.sci.eval/eval-form!
-    projection :seon.schema/projection}]
-  (let [raw-row (row event projection)
-        unregister-key (deleted-schema-key raw-row)
-        schema-delta
-        (when (or (:seon.schema/key raw-row) unregister-key)
-          (schema/begin-registration-delta projection))
-        schema-value
-        (when schema-delta
-          (schema/call-with-registration-delta schema-delta eval-form!))
-        live-declaration? (and raw-row (nil? schema-delta))
-        base-declared-row
-        (if schema-delta
-          (if unregister-key
-            (do
-              (when-not (and (= unregister-key schema-value)
-                             (nil? (schema/registration-delta-form
-                                    schema-delta unregister-key)))
-                (throw
-                 (ex-info
-                  "Schema deletion did not unregister its reader identity."
-                  (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.eval/program 'seon.sci.eval/declared-row
-                   {:seon.error/message "Evaluated schema identity differs from its declaration; return the declared identity."
-                    :seon.error/offending schema-value
-                    ::schema-refused unregister-key
-                    :seon.error/expected :seon.sci.eval/registered-reader-identity}))))
-              ;; Dependency validation is pure here. Current database data
-              ;; is fenced by the terminal transaction against db-before.
-              (schema/projection-without-schema projection unregister-key)
-              raw-row)
-            (let [schema-key (:seon.schema/key raw-row)
-                  definition
-                  (schema/registration-delta-form schema-delta schema-key)]
-              ;; register! answers its registration (:seon.schema/registration),
-              ;; whose identity is its key
-              (when-not (and (= schema-key (:seon.schema/key schema-value)) definition)
-                (throw
-                 (ex-info
-                  "Schema declaration did not register its reader identity."
-                  (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.eval/program 'seon.sci.eval/declared-row
-                   {:seon.error/message "Evaluated schema identity differs from its declaration; return the declared identity."
-                    :seon.error/offending schema-value
-                    ::schema-refused schema-key
-                    :seon.error/expected :seon.sci.eval/registered-reader-identity}))))
-              ;; Validate the actual evaluated value while the overlay is
-              ;; isolated. The terminal transaction repeats this pure
-              ;; candidate validation against its mid-transaction db value.
-              (let [candidate-projection
-                    (schema/projection-with-schema
-                     projection schema-key definition
-                     {:seon.schema.admission/source :agent})
-                    forms (:seon.schema.projection/forms candidate-projection)]
-                (program/with-contract-facts
-                 {:seon.program/row
-                  (accretion/schema-row
-                   forms (assoc raw-row :seon.schema/form (pr-str definition)))
-                  :seon.program/compile-options
-                  (:seon.schema.projection/compile-options candidate-projection)
-                  :seon.program/predicate-functions
-                  (schema/predicate-functions-in candidate-projection)
-                  :seon.program/schema-keys (set (keys forms))
-                  :seon.program/schema-forms forms}))))
-          raw-row)]
-    {:seon.sci.eval/base-declared-row base-declared-row
-     :seon.sci.eval/live-declaration? live-declaration?
-     :seon.sci.eval/schema-value schema-value
-     :seon.sci.eval/unregister-key unregister-key}))
-
-(defn- unmap-row
-  [{execution-ctx :seon.sci.eval/execution-ctx
-    before-interns :seon.sci.eval/before-interns
-    before-namespace-state :seon.sci.eval/before-namespace-state
-    before-reader-context :seon.sci.eval/before-reader-context
-    event :seon.sci.eval/event
-    base-declared-row :seon.sci.eval/base-declared-row
-    live-declaration? :seon.sci.eval/live-declaration?
-    namespace-name :seon.sci.eval/namespace-name
-    namespace-unmap? :seon.sci.eval/namespace-unmap?
-    database :seon.db/db}]
-  (let [removed-identities
-        (when namespace-unmap?
-          (removed-program-identities
-           before-interns (sci/namespace-interns execution-ctx)))
-        after-namespace-state
-        (when namespace-unmap?
-          (sci/namespace-state execution-ctx))
-        namespace-changed?
-        (and namespace-unmap?
-             (not= before-namespace-state after-namespace-state))
-        deletion-row
-        (when (seq removed-identities)
-          (program/deletion-row
-           (assoc event :seon.sci.reader/ns-unmap-identities
-                  removed-identities)))
-        selected-row (or deletion-row base-declared-row)
-        ;; Standalone REPL `require` is namespace registration too. Its
-        ;; committed row carries the complete dependency set derived from
-        ;; SCI's namespace table, so fresh acquisition reconstructs the
-        ;; same reader/evaluator context before installing declarations.
-        context-row
-        (when-not selected-row
-          (namespace-context-row
-           (context-projection execution-ctx)
-           database namespace-name (:seon.sci.reader/form event) before-reader-context
-           (reader-context execution-ctx namespace-name)
-           namespace-changed?))
-        row (cond-> (or selected-row context-row)
-              live-declaration? (assoc ::evaluated? true)
-              (and namespace-changed? (or selected-row context-row))
-              (assoc ::namespace-state
-                     (into []
-                           (mapcat
-                            (fn [namespace-name]
-                              (let [before (get before-namespace-state namespace-name)
-                                    after (get after-namespace-state namespace-name)]
-                                (keep (fn [binding-name]
-                                        (let [old (get before binding-name absent-intern)
-                                              new (get after binding-name absent-intern)]
-                                          (when-not (identical? old new)
-                                            [namespace-name binding-name new])))
-                                      (into (set (keys before)) (keys after))))))
-                           (into (set (keys before-namespace-state))
-                                 (keys after-namespace-state)))))]
-    {:seon.program/row row
-     :seon.sci.eval/namespace-changed? namespace-changed?}))
-
 (defn- failure-text
   "The declared string an evaluation names its failure with.
 
@@ -4322,13 +3629,9 @@
     namespace-name :seon.sci.eval/namespace-name
     ending-namespace :seon.sci.eval/ending-namespace
     print-options :seon.print/options
-    definitions :seon.sci.eval/bindings
-    restore! :seon.sci.eval/restore
-    row :seon.program/row
     duration-ms :seon.eval/duration-ms
     acquisition-ms :seon.eval/acquisition-ms
-    replaced :seon.eval/replaced
-    ungeneratable :seon.eval/ungeneratable}]
+    replaced :seon.eval/replaced}]
   (cond-> (cond-> {:seon.print/options print-options
                    :seon.cluster.eval/ns [:seon.ns/name namespace-name]
                    :seon.sci.eval/ending-ns ending-namespace
@@ -4351,14 +3654,10 @@
     :always (assoc :seon.eval/duration-ms duration-ms)
     (pos? acquisition-ms) (assoc :seon.eval/acquisition-ms acquisition-ms)
     (seq replaced) (assoc :seon.eval/replaced replaced)
-    (seq ungeneratable) (assoc :seon.eval/ungeneratable ungeneratable)
     :always (merge (select-keys admitted value-size-keys))
     (pos? (get-in admitted [:seon.sci.admit/record :seon.eval/allocated-bytes] -1))
     (assoc :seon.eval/allocated-bytes
            (get-in admitted [:seon.sci.admit/record :seon.eval/allocated-bytes]))
-    row (assoc :seon.program/row row)
-    (seq definitions) (assoc :seon.sci.eval/bindings definitions)
-    restore! (assoc :seon.sci.eval/restore restore!)
     (or (seq output-prefix) (seq (str printed)))
     (assoc :seon.cluster.eval/output
            (evaluation-output output-prefix printed))))
@@ -4369,11 +3668,9 @@
     printed :seon.sci.eval/printed
     namespace-name :seon.sci.eval/namespace-name
     print-options :seon.print/options
-    definitions :seon.sci.eval/bindings
     record :seon.sci.admit/record
     value :seon.sci.admit/value
     interrupted-at :seon.cluster.eval/interrupted-at
-    unadmitted :seon.eval/unadmitted
     :as request}]
   (cond-> (cond-> {:seon.print/options print-options
                    :seon.cluster.eval/ns [:seon.ns/name namespace-name]
@@ -4393,10 +3690,8 @@
     ;; The same one spelling on the failing path.
     (int? (:seon.eval/duration-ms record))
     (assoc :seon.eval/duration-ms (:seon.eval/duration-ms record))
-    (seq definitions) (assoc :seon.sci.eval/bindings definitions)
     (contains? request :seon.cluster.eval/interrupted-at)
     (assoc :seon.cluster.eval/interrupted-at interrupted-at)
-    (seq unadmitted) (assoc :seon.eval/unadmitted unadmitted)
     (or (seq output-prefix) (seq (str printed)))
     (assoc :seon.cluster.eval/output
            (evaluation-output output-prefix printed))))
@@ -4706,7 +4001,6 @@
         namespace-object (sci/create-ns namespace-name)
         ending-namespace (volatile! namespace-name)
         print-options (volatile! {})
-        session-observation (volatile! nil)
         replaced (volatile! nil)
         projection-state
         (or (::projection-state evaluation-ctx)
@@ -4767,7 +4061,7 @@
                           :seon.effect/counter (atom -1)})}
       (let [failure-result
              (fn [throwable]
-               (if (and held? (not (identical? raw-none @raw)))
+               (if (not (identical? raw-none @raw))
                  (kept-evaluation {:seon.sci.eval/value @raw
                                    :seon.sci.admit/record (record :ok)
                                    :seon.sci.eval/untrusted (failure-refusal throwable)
@@ -4780,27 +4074,6 @@
                                    :seon.eval/acquisition-ms (quot @acquisition-nanos 1000000)})
                (let [record (record (if (kernel/interrupted? throwable)
                                  :time :error))
-                observation @session-observation
-                ;; A refused replacement or removal of a stored program row
-                ;; never survives as a private binding. A restoration that
-                ;; could not run is the evaluation's value, caused by the
-                ;; original failure.
-                unavailable
-                (when-let [current (and observation
-                                        (or (some-> connection db/db) (:seon.db/db request)))]
-                  ((:seon.sci.eval/restore observation) #(row-backed? current %) throwable))
-                throwable (if unavailable
-                            (ex-info (:seon.error/message unavailable) unavailable throwable)
-                            throwable)
-                definitions
-                (when-let [{failed-ctx :seon.sci.eval/ctx
-                            before :seon.sci.eval/before-intern-values}
-                           observation]
-                  ;; A failed evaluation has no durable program row. Any def
-                  ;; it installed before the later throw/cut therefore belongs
-                  ;; to the agent's defs, including a contracted def whose declaration
-                  ;; never reached the terminal transaction.
-                  (bindings failed-ctx before))
                 arity-message (interpreted-arity-message throwable)
                 value (cond->
                           (kernel/failure-value
@@ -4813,15 +4086,15 @@
                 ;; (owner 2026-09-27: "return data, not comments"): the floor
                 ;; prints the error map structurally, message, class, location
                 ;; and cause chain, bounded like any value, never a prose face.
-                admitted (shown-failure value request record)
-                unadmitted (unadmitted-definitions definitions)]
+                admitted (if held?
+                           {:seon.sci.admit/value value :seon.sci.admit/record record}
+                           (shown-failure value request record))]
           (failed-evaluation
            (cond-> {:seon.sci.eval/admitted admitted
                     :seon.sci.admit/caps caps
                     :seon.sci.eval/printed printed
                     :seon.sci.eval/namespace-name namespace-name
                     :seon.print/options @print-options
-                    :seon.sci.eval/bindings definitions
                     :seon.sci.admit/record record
                     :seon.sci.admit/value value}
              ;; the instant the interrupt was OBSERVED — the one
@@ -4829,8 +4102,7 @@
              ;; presence IS the interrupted state; there is no label.
              (= :time (:seon.eval/outcome record))
              (assoc :seon.cluster.eval/interrupted-at
-                    (java.util.Date.))
-             (seq unadmitted) (assoc :seon.eval/unadmitted unadmitted))))))]
+                    (java.util.Date.)))))))]
        (try
         (kernel/with-arm
        evaluation-ctx time-limit-ms
@@ -4840,10 +4112,6 @@
          (trusted-evaluation
           (:seon.sci.eval/loaded-identity request loaded-identity)
           (fn []
-          ;; An unavailable execution refuses before acquisition could replace
-          ;; the environment that names it.
-          (when-let [unavailable (::unavailable-execution @(:env evaluation-ctx))]
-            (throw (ex-info (:seon.error/message unavailable) unavailable)))
           (when (and (not held?) (contains? evaluation-ctx ::custody))
             (when-let [database (:seon.db/db request)]
               (when-not (acquired-database? evaluation-ctx database)
@@ -4868,9 +4136,7 @@
           (when-let [failure (first (:seon.test/acquisition-refusals
                                     (acquired-program evaluation-ctx)))]
             (throw (ex-info "SCI program acquisition refused a declaration." failure)))
-          (let [before-reader-context
-            (reader-context evaluation-ctx namespace-name)
-            event (if held?
+          (let [event (if held?
                     {:seon.sci.reader/form (::form request)}
                     (or (:seon.sci.eval/event request)
                         (one-event
@@ -4880,27 +4146,7 @@
                 (throw (ex-info (:seon.error/message reader-error)
                                 reader-error)))
             form (:seon.sci.reader/form event)
-            namespace-unmap? (:seon.sci.reader/ns-unmap? event)
             execution-ctx evaluation-ctx
-            capture (when-not held? (context-capture execution-ctx))
-            before-namespaces (::namespaces capture)
-            before-owned (::owned capture)
-            before-intern-values (when-not held? (turn-intern-values before-owned))
-            ;; The one restoration of this form's program change, reused at
-            ;; every failure point: admission, arming and settlement refusal
-            ;; restore all of it; a throw inside the form only what replaced
-            ;; or removed a stored row (`failure-result`).
-            restore! (when-not held? (context-restoration execution-ctx capture))
-            _ (when-not held?
-                (vreset! session-observation
-                         {:seon.sci.eval/ctx execution-ctx
-                          :seon.sci.eval/before-intern-values
-                          before-intern-values
-                          :seon.sci.eval/restore restore!
-                          :seon.sci.eval/form form}))
-            before-namespace-state (when namespace-unmap? before-namespaces)
-            before-interns (when namespace-unmap?
-                             (sci/namespace-interns execution-ctx))
             ;; Runs `evaluate!` on this form's ctx inside its REPL frame.
             eval-in-form!
             (fn [evaluate!]
@@ -4952,137 +4198,13 @@
                       (vreset! print-options ending)
                       (reset! print-session ending))))))
             eval-form! #(eval-in-form! (fn [ctx] (sci/eval-form ctx form)))
-            projection
-            (evaluation-projection {:seon.sci.eval/ctx evaluation-ctx})
-            ;; The one definition authority, over the program change made
-            ;; since `capture`, after the names `declared` earlier in this form.
-            admit!
-            (fn [{owned ::owned namespaces ::namespaces} reader-row declared]
-              (when-let [database (:seon.db/db request)]
-                (admit-program-change!
-                 (cond->
-                  {:seon.sci.eval/ctx execution-ctx
-                   :seon.db/db database
-                   :seon.sci.eval/current-db (if connection (db/db connection) database)
-                   :seon.schema/projection projection
-                   ;; Analyze exactly the bytes the reader accepted as this form.
-                   :seon.cluster.eval/source (or (:seon.sci.reader/source event) source)
-                   :seon.sci.eval/form-start [(:seon.sci.reader/line event 1)
-                                              (:seon.sci.reader/column event 1)]
-                   :seon.sci.eval/before-owned owned
-                   :seon.sci.eval/before-namespaces namespaces
-                   :seon.sci.eval/namespace-row
-                   (assoc (binding-rows before-reader-context) :seon.ns/name namespace-name)
-                   :seon.sci.eval/restore restore!
-                   :seon.sci.eval/namespace-unmap? (boolean namespace-unmap?)
-                   :seon.sci.eval/declared declared}
-                   reader-row (assoc :seon.sci.eval/reader-row reader-row)))))
-            {base-declared-row :seon.sci.eval/base-declared-row
-             live-declaration? :seon.sci.eval/live-declaration?
-             schema-value :seon.sci.eval/schema-value
-             unregister-key :seon.sci.eval/unregister-key}
-            ;; Keep this call inside the total evaluation try: declared-row
-            ;; deliberately throws ::schema-refused for an agent mistake.
-            (when-not held?
-              (declared-row
-               {:seon.sci.eval/event event
-                :seon.sci.eval/eval-form! eval-form!
-                :seon.schema/projection projection}))
-            evaluated-value
-            (cond
-              ;; the frame: evaluated once, the value kept at SCI's return
-              held? (let [v (eval-form!)] (vreset! raw v) v)
-
-              ;; A faithful REPL returns the value SCI produced. This is the
-              ;; same path a plain `def` takes, and keeps `defn`/`deftest`
-              ;; declarations as Vars instead of replacing them with identity
-              ;; strings after evaluation. Persistence is still decided later
-              ;; by the terminal transaction; a refusal there restores the
-              ;; change through the evaluation's `:seon.sci.eval/restore`.
-              live-declaration? (eval-form!)
-
-              ;; Schema declarations run once inside their isolated
-              ;; registration delta above. Preserve that evaluated identity
-              ;; without executing the form a second time.
-              base-declared-row
-              (or (:seon.schema/key base-declared-row)
-                  (when unregister-key schema-value))
-
-              ;; Each child of a top-level `do` is a top-level form, admitted
-              ;; before the next runs (`top-level-evaluation`).
-              (top-level-do? form)
-              (eval-in-form! #(top-level-evaluation
-                               {::eval! (partial sci/eval-form %)
-                                ::capture! (fn [] (context-capture execution-ctx))
-                                ;; Admission's reads are not the form's reads.
-                                ::admit! (fn [capture declared]
-                                           (binding [db/*read-evidence-sink* nil]
-                                             (admit! capture nil declared)))}
-                               {::rows [] ::declared []}
-                               form))
-
-              :else (eval-form!))
-            top-level (when (and (not held?) (top-level-do? form)) evaluated-value)
-            evaluated-value (if top-level (::value top-level) evaluated-value)
-            _ (when-let [declared-ns (:seon.ns/name base-declared-row)]
-                (vreset! ending-namespace declared-ns))
-            {reader-row :seon.program/row}
-            (when-not held?
-             (unmap-row
-             {:seon.sci.eval/execution-ctx execution-ctx
-              :seon.sci.eval/before-interns before-interns
-              :seon.sci.eval/before-namespace-state before-namespace-state
-              :seon.sci.eval/before-reader-context before-reader-context
-              :seon.sci.eval/event event
-              :seon.sci.eval/base-declared-row base-declared-row
-              :seon.sci.eval/live-declaration? live-declaration?
-              :seon.sci.eval/namespace-name namespace-name
-              :seon.sci.eval/namespace-unmap? namespace-unmap?
-              :seon.db/db (if connection (db/db connection) (:seon.db/db request))}))
-            ;; A top-level `do` admitted its children's definitions as they
-            ;; ran; what remains is the form's own reader row, counted with them.
-            var-rows
-            (cond
-              held? nil
-              top-level
-              (into (::rows top-level)
-                    (admit! (context-capture execution-ctx) reader-row (::declared top-level)))
-              :else (admit! capture reader-row []))
-            var-row (first var-rows)
-            row (or var-row reader-row)
-            next-projection
-            (cond
-              held? nil
-              (:seon.schema/key reader-row)
-              (schema/projection-with-schema
-               projection
-               (:seon.schema/key reader-row)
-               (edn/read-string (:seon.schema/form reader-row))
-               {:seon.schema.admission/source :agent})
-
-              (deleted-schema-key reader-row)
-              (schema/projection-without-schema
-               projection (deleted-schema-key reader-row))
-
-              :else nil)
-            _ (when next-projection
-                ;; Registration deltas are deliberately isolated per eval.
-                ;; The turn fork, however, is a REPL: later forms must see a
-                ;; schema admitted by an earlier form before the batch commits.
-                (advance-context-projection!
-                 evaluation-ctx (db/db connection) next-projection))
-            ;; Durable declarations are installed only after the row commits.
-            ;; The form's own value, as SCI returned it: `require` answers
-            ;; nil, and `(do (require ...) x)` answers x. A namespace-context
-            ;; row is persistence, never the shown value.
+            ;; evaluated once, the value kept the moment SCI returns
+            evaluated-value (let [v (eval-form!)] (vreset! raw v) v)
             value evaluated-value
               ;; INSIDE the boundary, BEFORE disarm: an infinite lazy
               ;; sequence dies at the time limit here rather than in the
               ;; receipt writer
               evaluation-record (record :ok)
-              ;; Capture exact evaluated roots; settlement installs rows from them.
-              definitions
-              (when-not held? (bindings execution-ctx before-intern-values))
               ;; A top-level call's contracted head names the root value's
               ;; declared returns; any other form supplies no producer.
               head (when-not held?
@@ -5101,15 +4223,9 @@
             :seon.sci.eval/printed printed
             :seon.sci.eval/output-prefix output-prefix
             :seon.eval/replaced @replaced
-            :seon.eval/ungeneratable (when (and row (:seon.schema/key row)
-                                                (false? (:seon.schema/generatable? row)))
-                                       #{(:seon.schema/key row)})
             :seon.sci.eval/namespace-name namespace-name
             :seon.sci.eval/ending-namespace @ending-namespace
             :seon.print/options @print-options
-            :seon.sci.eval/bindings definitions
-            :seon.sci.eval/restore restore!
-            :seon.program/row row
             :seon.eval/duration-ms (elapsed-ms)
             :seon.eval/acquisition-ms (quot @acquisition-nanos 1000000)}))))
         (catch Throwable throwable
@@ -5119,79 +4235,6 @@
           (if @arm-state
             (throw throwable)
             (failure-result throwable))))))))))))))
-
-(defn- install-candidate-function!
-  [ctx database row]
-  (let [function-symbol (:seon.fn/sym row)
-        definition (edn/read-string (:seon.fn/spec row))
-        projection (context-projection ctx)
-        next-projection
-        (schema/projection-with-function-contract
-         projection function-symbol definition
-         {:seon.schema.admission/source :agent})]
-    (kernel/cache-function!
-     ctx function-symbol
-     {::function-source (:seon.fn/source row)
-      ::function-namespace (second (:seon.fn/ns row))
-      ::function-private? (:seon.fn/private? row)
-      ::agent-authored? true})
-    (kernel/mark-installed! ctx function-symbol)
-    (install-function-contract! ctx row next-projection database)
-    (advance-context-projection! ctx database next-projection)
-    ctx))
-
-(defn accept-candidate!
-  "Arm an accepted function in the retained context that evaluated it.
-
-  The form ran once, in this context (`evaluate`), so its root is already
-  here; acceptance installs the contract. A failed install restores the
-  form's change through the evaluation's own `:seon.sci.eval/restore`."
-  {:malli/schema
-   [:=> [:cat [:map [:seon.sci.eval/ctx :seon.sci.eval/ctx]
-               [:seon.db/db :seon.db/database-value]
-               [:seon.sci.eval/evaluation :seon.sci.eval/evaluation]]]
-    :seon.sci.eval/evaluation]}
-  [{ctx :seon.sci.eval/ctx database :seon.db/db
-    evaluation :seon.sci.eval/evaluation}]
-  (try
-    (install-candidate-function! ctx database (:seon.program/row evaluation))
-    (catch Throwable failure
-      (if-let [unavailable ((:seon.sci.eval/restore evaluation) nil failure)]
-        (throw (ex-info (:seon.error/message unavailable) unavailable failure))
-        (throw failure))))
-  evaluation)
-
-(defn refuse-install
-  "Project the flat refusal as the evaluation result. The refused form's
-  change is undone by its evaluation's own `:seon.sci.eval/restore`, the one
-  restoration admission, arming and settlement refusals use. The refusal is
-  the install gate's, or the writer's refusal of this form's row at
-  settlement (`seon.turn/settled-value`)."
-  {:malli/schema
-   [:=> [:cat :seon.sci.eval/request :seon.sci.eval/evaluation
-         [:or :seon.test.accretion/install-refused-error :seon.db/error-result :seon.turn/refused-error]]
-    :seon.sci.eval/evaluation]}
-  [request evaluation refusal]
-  (when-let [unavailable ((:seon.sci.eval/restore evaluation) nil (ex-info (:seon.error/message refusal) refusal))]
-    (throw (ex-info (:seon.error/message unavailable) unavailable)))
-  (merge (dissoc evaluation :seon.program/row :seon.sci.eval/bindings :seon.eval/renderer
-                 :seon.eval/value-tokens :seon.eval/shown-tokens :seon.eval/elisions :seon.eval/full
-                 :seon.eval/value-edn :seon.eval/unstored :seon.eval/value-class
-                 :seon.eval/replaced :seon.eval/ungeneratable)
-         ;; A refusal is its small error map as data, like the agent's own failure.
-         (shown-failure refusal request
-                        (assoc (:seon.sci.admit/record evaluation)
-                               :seon.eval/outcome :error))))
-
-(defn- candidate-test-result
-  [test-symbol evaluation]
-  {:seon.test/sym test-symbol
-   :seon.test/pass-count 0
-   :seon.test/fail-count 0
-   :seon.test/error-count 1
-   :seon.test/failure-message
-   (or (:seon.cluster.eval/error evaluation)
-       (str "Candidate test " test-symbol " could not be evaluated."))})
 
 (defn run-tests
   "Invoke the selected-Var capture owner under this SCI context's bound."
@@ -5222,137 +4265,3 @@
   (let [results (run-tests (assoc request :seon.test/vars [(:seon.test/var request)]))]
     (if (contains? results :seon.test/not-runnable) results (first results))))
 
-(defn- run-candidate-test!
-  [ctx database request test-symbol]
-  (let [row (db/pull database
-                     '[:seon.test/source {:seon.test/ns [:seon.ns/name]}]
-                     [:seon.test/sym test-symbol])
-        evaluation
-        (evaluate
-         (assoc request
-                :seon.sci.eval/ctx ctx
-                :seon.cluster.eval/source (:seon.test/source row)
-                :seon.cluster.eval/ns
-                [:seon.ns/name (get-in row [:seon.test/ns :seon.ns/name])]))]
-    (if (:seon.cluster.eval/error evaluation)
-      (candidate-test-result test-symbol evaluation)
-      (let [test-var (sci/resolve ctx (symbol test-symbol))]
-          (binding [clojure.test/report (constantly nil)]
-            ;; A gate test runs in the disposable copy: the candidate request
-            ;; carries the copy's connection, so the test's elided `seon.db`
-            ;; arities reach the copy's branch, never the agent's. Same seam,
-            ;; same value, as a `seon.test/run` member.
-            (run-test
-             (assoc (select-keys request [:seon.db/connection :seon.sci.eval/time-limit-ms])
-                    :seon.sci.eval/ctx ctx :seon.test/var test-var)))))))
-
-(def ^:private agent-entrance
-  ;; The agent entrance sits above this namespace; realized at first use.
-  (delay {:acquire (requiring-resolve 'seon.cluster.agent/acquire-context!)
-          :release (requiring-resolve 'seon.cluster.agent/release-context!)}))
-
-(defn- disposable-copy
-  "The evaluating context copied onto a fresh branch of the agent's commit.
-
-  An isolated execution off `database`'s commit (the agent entrance a test
-  member uses), and the evaluating context forked onto its connection, so the
-  candidate root and the agent's private definitions are present while every
-  write, generated or tested, lands on the copy. The world keeps the agent's
-  id. The caller releases `:seon.sci.eval/execution`."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :seon.db/connection
-                       [:maybe :seon.agent/id]]
-                  [:map [:seon.sci.eval/ctx :seon.sci.eval/ctx]
-                   [:seon.db/db :seon.db/database-value]
-                   [:seon.db/connection :seon.db/connection]
-                   [:seon.sci.eval/execution :seon.agent/execution-handle]]]}
-  [ctx database connection agent-id]
-  (let [environment (env/of ctx)
-        execution ((:acquire @agent-entrance)
-                   (cond-> {:seon.db/connection connection
-                            :seon.sci.eval/ctx ctx
-                            :seon.cluster/name (:seon.boot/cluster-name environment)
-                            :seon.agent/routing (:seon.agent/routing environment)}
-                     (:seon.store/store environment)
-                     (assoc :seon.store/store (:seon.store/store environment))
-                     (::base-ctx ctx) (assoc :seon.sci.eval/base-ctx (::base-ctx ctx)))
-                   nil
-                   {:seon.agent/isolate? true
-                    :seon.cluster.registry/from (db/commit-id database)})]
-    (try
-      (let [copy-connection (:seon.db/connection execution)
-            copy-database (db/db copy-connection)
-            ;; The copy is its own base: it never names the agent's.
-            copy (dissoc (fork-cluster-ctx
-                          ctx copy-database copy-connection
-                          (projection-state copy-database (context-projection ctx)
-                                            (:seon.boot/cluster-name environment))
-                          {:seon.env/environment environment})
-                         ::base-ctx)]
-        (when agent-id
-          (env/replace-environment! (get copy env/state-carrier)
-                                    (env/scope (env/of copy) {:seon.agent/id agent-id})))
-        {:seon.sci.eval/ctx copy
-         :seon.db/db copy-database
-         :seon.db/connection copy-connection
-         :seon.sci.eval/execution execution})
-      (catch Throwable failure
-        ((:release @agent-entrance) execution)
-        (throw failure)))))
-
-(defn evaluate-candidate
-  "Prove one evaluated durable function: its seeded contract check, then every
-  gate test, in a disposable copy of the retained context that evaluated it.
-
-  The form ran once (`evaluate`); the copy holds that evaluated root, so the
-  proof runs the value acceptance keeps. The copy is its own branch of the
-  agent's commit (`disposable-copy`): generated calls and gate test bodies
-  write there, never on the agent's branch, and it is released afterwards.
-  The returned test values are exactly `seon.test.runner/run-var!` reports.
-  All tests run even after a red result. Nothing in the copy is transferred."
-  {:malli/schema [:=> [:cat :seon.test.accretion/candidate-request]
-                  :seon.test.accretion/candidate-result]}
-  [{base-ctx :seon.sci.eval/ctx
-    database :seon.db/db
-    connection :seon.db/connection
-    agent-id :seon.agent/id
-    test-symbols :seon.test.accretion/gate-set
-    evaluation :seon.test.accretion/evaluation
-    :as request}]
-  (let [{ctx :seon.sci.eval/ctx copy-database :seon.db/db copy-connection :seon.db/connection
-         execution :seon.sci.eval/execution}
-        (disposable-copy base-ctx database connection agent-id)
-        request (assoc request :seon.db/db copy-database :seon.db/connection copy-connection)
-        row (or (:seon.program/row request) (:seon.program/row evaluation))]
-    (try
-      (install-candidate-function! ctx copy-database row)
-      (let [check
-            (when (and (:seon.config.test/auto-check-cases request)
-                       (:seon.test.accretion/seed request))
-              (accretion/auto-check
-               (assoc request
-                      :seon.sci.eval/ctx ctx
-                      :seon.program/row row
-                      :seon.schema/projection (context-projection ctx))))]
-        (cond->
-         {:seon.test.accretion/candidate-ctx ctx
-          :seon.test.accretion/evaluation (assoc evaluation :seon.program/row row)
-          ;; Auto-check is deliberately realized above this expression:
-          ;; the seeded contract probe precedes every example test.
-          :seon.test.accretion/results
-          ;; A gate test's declaration is read from the run's working value
-          ;; (`database`), where a test an earlier form of this run defined
-          ;; exists before its settlement; it runs in the copy.
-          (mapv (partial run-candidate-test! ctx database request)
-                test-symbols)}
-          check (assoc :seon.test.accretion/auto-check check)))
-      (finally
-        ((:release @agent-entrance) execution)))))
-
-(defn auto-check-candidate
-  "Run the seeded contract check against an already evaluated candidate."
-  {:malli/schema
-   [:=> [:cat :seon.test.accretion/candidate-auto-check-request]
-    :seon.test.accretion/auto-check-result]}
-  [{ctx :seon.sci.eval/ctx :as request}]
-  (accretion/auto-check
-   (assoc request :seon.schema/projection (context-projection ctx))))

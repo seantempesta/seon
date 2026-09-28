@@ -62,17 +62,11 @@
                  [:seon.sci.eval/bindings
                   {:optional true}
                   :seon.sci.eval/bindings]
-                 [:seon.sci.eval/restore {:optional true} :seon.sci.eval/restore]
                  [:seon.print/options :seon.print/options]
                  [:seon.sci.admit/record :seon.sci.admit/record]
                  [:seon.sci.eval/untrusted {:optional true} :seon.sci.eval/untrusted]],
-                ,
-                ,
-                ,
                 :missing-function-row :qualified-symbol,
-                ,
                 :referenced-vars [:set :symbol],
-                ,
                 :binding
                 [:map
                  [:seon.sci.eval/metadata :map]
@@ -83,7 +77,6 @@
                     :seon.schema.admission/reason
                     "The evaluator accepts and returns arbitrary Clojure values; admission owns their bounded representation.",
                     :gen/elements [nil true 0 "" :k [] {} #{}]}]]],
-                ,
                 :missing-function-row-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
  :seon.error/base
  [:map [:seon.sci.eval/missing-function-row :seon.sci.eval/missing-function-row]]],
@@ -107,7 +100,6 @@
                  [:seon.db/connection
                   {:optional true}
                   :seon.db/connection]],
-                ,
                 :shown-request
                 [:map {:description "The world one final value is printed in: the form's database and connection, its agent and cluster (from which the render profile derives, unless carried), its admission caps, its source and, optionally, its SCI context."}
                  [:seon.db/db {:optional true} :seon.db/database-value]
@@ -170,7 +162,6 @@
                     "The evaluator accepts and returns arbitrary Clojure values; admission owns their bounded representation.",
                     :gen/elements [nil true 0 "" :k [] {} #{}]}]]
                  [:seon.sci.admit/record :seon.sci.admit/record]],
-                ,
                 :install-request
                 [:map
                  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
@@ -206,7 +197,6 @@
  :seon.error/base
  [:map [:seon.sci.eval/schema-refused :seon.sci.eval/schema-refused]]],
                 :reader-event-count :int,
-                ,
                 :time-limit :seon.eval/fn-entries,
                 :ctx
                 [:fn
@@ -368,101 +358,11 @@
 
 ; The one definition authority (S1, one-repl-language-2026-09-25.md §2.2).
 :sci-var [:fn {:error/message "must be an SCI Var" :gen/gen seon.sci.eval/sci-var-generator} seon.sci.eval/sci-var?]
-:intern
-[:map
- [:seon.sci.eval/var :seon.sci.eval/sci-var]
- [:seon.sci.eval/metadata :map]
- [:seon.sci.eval/prior-program? {:optional true} :boolean]
- [:seon.sci.eval/value
-  [:any
-   {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary,
-    :seon.schema.admission/reason "A Var root is any Clojure value; it is compared by identity, never traversed.",
-    :gen/elements [nil true 0 "" :k [] {} #{}]}]]]
-:interns [:map-of :qualified-symbol :seon.sci.eval/intern]
 :namespaces [:map-of :symbol :map]
-:held-value
-[:any
- {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary,
-  :seon.schema.admission/reason "A held Var root, Var, namespace map or context state is restored by identity, never traversed.",
-  :gen/elements [nil true 0 "" :k [] {} #{}]}]
-:capture
-[:map {:description "One held observation of a context's program state, shared by admission and restoration."}
- [:seon.sci.eval/namespaces :seon.sci.eval/namespaces]
- [:seon.sci.eval/owned :seon.sci.eval/interns]
- [:seon.sci.eval/states [:vector [:map [:seon.sci.eval/state :seon.sci.eval/context-state]
-                                [:seon.sci.eval/held :seon.sci.eval/held-value]]]]]
-:context-state [:fn {:error/message "must be the atom holding one piece of context state"} seon.sci.eval/context-state?]
-:restoration-step
-[:or {:description "One step restoring a refused program change: a Var's root and metadata; a namespace-map path set to its held value or removed; or a piece of context state reset to its held value."}
- [:map {:closed true}
-  [:seon.sci.eval/var :seon.sci.eval/sci-var]
-  [:seon.sci.eval/root :seon.sci.eval/held-value]
-  [:seon.sci.eval/metadata :map]]
- [:map {:closed true :description "A Var that had no root before the form: unbound again, its metadata restored."}
-  [:seon.sci.eval/var :seon.sci.eval/sci-var]
-  [:seon.sci.eval/unbound [:= true]]
-  [:seon.sci.eval/metadata :map]]
- [:map {:closed true :description "An intern put back to its held Var."}
-  [:seon.sci.eval/path [:tuple :symbol :symbol]]
-  [:seon.sci.eval/prior :seon.sci.eval/sci-var]]
- [:map {:closed true :description "An intern the form created, removed."}
-  [:seon.sci.eval/path [:tuple :symbol :symbol]]]
- [:map {:closed true :description "A namespace the form removed, put back to its held map."}
-  [:seon.sci.eval/path [:tuple :symbol]]
-  [:seon.sci.eval/prior :map]]
- [:map {:closed true}
-  [:seon.sci.eval/state :seon.sci.eval/context-state]
-  [:seon.sci.eval/held :seon.sci.eval/held-value]]]
-:restore
-[:function {:description "Restore this form's program change in its execution; with a selector, only the named Vars; with the failure being restored, that failure is the unavailable refusal's cause. Answers nil, or the unavailable refusal when the restoration could not run."}
- [:=> [:cat] [:maybe :seon.sci.eval/execution-unavailable-error]]
- [:=> [:cat [:=> [:cat :qualified-symbol] :any]] [:maybe :seon.sci.eval/execution-unavailable-error]]
- [:=> [:cat [:maybe [:=> [:cat :qualified-symbol] :any]] [:maybe :seon.error/throwable]]
-  [:maybe :seon.sci.eval/execution-unavailable-error]]]
-:current-db :seon.db/database-value
 :untrusted [:map {:description "Why a frame's kept value is not trusted: a failure after SCI returned it (the loaded program changed while it ran). The value stays; its program facts are not proposed."}
             [:seon.error/message :string]]
 :database
 [:and {:description "The database an evaluation reads when its caller hands one. Absent, the evaluation reads its context's custody, so this is not a world member (seon.batch/world-members): a bound world never supplies it."}
  :seon.db/database-value]
-:reader-row :map
-:namespace-row :map
-:admission-request
-[:map
- [:seon.sci.eval/ctx :seon.sci.eval/ctx]
- [:seon.db/db :seon.db/database-value]
- [:seon.sci.eval/current-db :seon.sci.eval/current-db]
- [:seon.schema/projection :seon.schema/projection]
- [:seon.cluster.eval/source :seon.cluster.eval/source]
- [:seon.sci.eval/before-owned :seon.sci.eval/interns]
- [:seon.sci.eval/before-namespaces :seon.sci.eval/namespaces]
- [:seon.sci.eval/reader-row {:optional true} :seon.sci.eval/reader-row]
- [:seon.sci.eval/namespace-row :seon.sci.eval/namespace-row]
- [:seon.sci.eval/settled-namespaces {:optional true} :seon.sci.eval/settled-namespaces]
- [:seon.sci.eval/restore :seon.sci.eval/restore]
- [:seon.sci.eval/namespace-unmap? :boolean]
- [:seon.sci.eval/form-start :seon.sci.eval/position]]
 :stacktrace [:vector {:min 1 :description "An interpreted failure's source location: the author's SCI frames, innermost first, as [function-or-namespace line column] (sci.core/stacktrace). SCI's live callstack is read once and never stored."} [:tuple :symbol :int :int]]
-:position [:tuple {:description "The line and column (1-based) where a form or a declaration inside it starts."} [:int {:min 1}] [:int {:min 1}]]
-:program-change
-[:map {:description "One form's definitions classified by provenance: entities matched to the Var that ran them, unindexed changes, and every declaration made, repeats kept."}
- [:seon.sci.eval/matched [:vector [:map [:seon.sci.eval/row :map] [:seon.sci.eval/var :seon.sci.eval/sci-var]]]]
- [:seon.sci.eval/unmatched [:vector :qualified-symbol]]
- [:seon.sci.eval/declared [:vector :seon.sci.eval/program-name]]]
-:program-name [:or :symbol :qualified-keyword]
-:unindexed [:set {:min 1 :description "Function or test Vars a form changed, or stored entities' Vars it removed, that its analysis declares no definition for."} :qualified-symbol]
-:unindexed-change-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
- :seon.error/base
- [:map [:seon.sci.eval/unindexed :seon.sci.eval/unindexed]]]
-:declarations [:vector {:min 1 :description "The program declarations one form made, in order and with repeated occurrences of one name kept: definitions, schema, namespace or deletion identities."} :seon.sci.eval/program-name]
-:removals [:set {:min 1 :description "Stored entities' Vars the same form removed beside its declarations."} :qualified-symbol]
-:multiple-declarations-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
- :seon.error/base
- [:map
-  [:seon.sci.eval/declarations :seon.sci.eval/declarations]
-  [:seon.sci.eval/removals {:optional true} :seon.sci.eval/removals]]]
-:unavailable [:enum {:description "Why an execution became unavailable: its restoration threw, or its program was reacquired before a refused change could be restored."} :restore-failed :program-reacquired]
-:execution-unavailable-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
- :seon.error/base
- [:map [:seon.sci.eval/unavailable :seon.sci.eval/unavailable]]]
 }
